@@ -299,10 +299,10 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
           background: "var(--bg-secondary)"
         }}
       >
-        <TabButton active={tab === "chat"} onClick={() => setTab("chat")}>
+        <TabButton active={tab === "chat"} onClick={() => setTab("chat")} testId="ai-tab-chat">
           Chat
         </TabButton>
-        <TabButton active={tab === "agent"} onClick={() => setTab("agent")}>
+        <TabButton active={tab === "agent"} onClick={() => setTab("agent")} testId="ai-tab-agent">
           Agent
         </TabButton>
       </div>
@@ -349,6 +349,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
                 checked={agentContinueOnDenied}
                 onChange={(e) => setAgentContinueOnDenied(e.target.checked)}
                 disabled={agentRunning}
+                data-testid="agent-continue-on-denied"
               />
               Continue running if I deny an approval (agent will re-plan)
             </label>
@@ -401,11 +402,12 @@ function stripSystemPrompt(messages: LLMMessage[]): LLMMessage[] {
   return messages;
 }
 
-function TabButton(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function TabButton(props: { active: boolean; onClick: () => void; children: React.ReactNode; testId?: string }) {
   return (
     <button
       type="button"
       onClick={props.onClick}
+      data-testid={props.testId}
       style={{
         padding: "6px 10px",
         borderRadius: 8,

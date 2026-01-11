@@ -98,7 +98,7 @@ describe("AI chat panel", () => {
     expect(getDocumentController).toHaveBeenCalled();
     expect(body.textContent).toContain("Chat");
 
-    const agentTab = Array.from(body.querySelectorAll("button")).find((b) => b.textContent === "Agent");
+    const agentTab = body.querySelector('[data-testid="ai-tab-agent"]');
     expect(agentTab).toBeInstanceOf(HTMLButtonElement);
 
     await act(async () => {
