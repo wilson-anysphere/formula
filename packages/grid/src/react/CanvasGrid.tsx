@@ -1510,6 +1510,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     const viewport = renderer.scroll.getViewportState();
     const pageRows = Math.max(1, viewport.main.rows.end - viewport.main.rows.start);
+    const pageCols = Math.max(1, viewport.main.cols.end - viewport.main.cols.start);
 
     switch (event.key) {
       case "ArrowUp":
@@ -1525,10 +1526,18 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         nextCol = ctrlOrMeta ? colCount - 1 : active.col + 1;
         break;
       case "PageUp":
-        nextRow = active.row - pageRows;
+        if (event.altKey) {
+          nextCol = active.col - pageCols;
+        } else {
+          nextRow = active.row - pageRows;
+        }
         break;
       case "PageDown":
-        nextRow = active.row + pageRows;
+        if (event.altKey) {
+          nextCol = active.col + pageCols;
+        } else {
+          nextRow = active.row + pageRows;
+        }
         break;
       case "Home":
         if (ctrlOrMeta) {

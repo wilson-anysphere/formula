@@ -208,4 +208,72 @@ describe("CanvasGrid keyboard navigation", () => {
     });
     host.remove();
   });
+
+  it("moves horizontally with Alt+PageDown/PageUp", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onSelectionChange = vi.fn();
+    const onSelectionRangeChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={10}
+          colCount={10}
+          apiRef={apiRef}
+          onSelectionChange={onSelectionChange}
+          onSelectionRangeChange={onSelectionRangeChange}
+        />
+      );
+    });
+
+    await act(async () => {
+      apiRef.current?.setSelection(0, 0);
+    });
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    const viewport = apiRef.current?.getViewportState();
+    expect(viewport).not.toBeNull();
+    const pageCols = Math.max(1, (viewport?.main.cols.end ?? 0) - (viewport?.main.cols.start ?? 0));
+    const expectedCol = Math.min(9, pageCols);
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    container.focus();
+
+    await act(async () => {
+      container.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "PageDown", altKey: true, bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ row: 0, col: expectedCol });
+    expect(onSelectionRangeChange).toHaveBeenCalledWith({
+      startRow: 0,
+      endRow: 1,
+      startCol: expectedCol,
+      endCol: expectedCol + 1
+    });
+
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "PageUp", altKey: true, bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ row: 0, col: 0 });
+    expect(onSelectionRangeChange).toHaveBeenCalledWith({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });
