@@ -78,14 +78,21 @@ describe("ai chat orchestrator", () => {
       previewOptions: { approval_cell_threshold: 0 },
     });
 
+    const onToolCall = vi.fn();
+    const onToolResult = vi.fn();
+
     await expect(
       orchestrator.sendMessage({
         text: "Set A1 to 99",
         history: [],
+        onToolCall,
+        onToolResult,
       }),
     ).rejects.toThrow(/denied/i);
 
     expect(controller.getCell("Sheet1", "A1").value).toBe(1);
+    expect(onToolCall).toHaveBeenCalledTimes(1);
+    expect(onToolResult).toHaveBeenCalledTimes(0);
 
     expect(buildContextSpy).toHaveBeenCalledTimes(1);
 
@@ -131,9 +138,14 @@ describe("ai chat orchestrator", () => {
       previewOptions: { approval_cell_threshold: 0 },
     });
 
+    const onToolCall = vi.fn();
+    const onToolResult = vi.fn();
+
     const result = await orchestrator.sendMessage({
       text: "Set A1 to 99",
       history: [],
+      onToolCall,
+      onToolResult,
     });
 
     expect(result.finalText).toBe("ok");
@@ -143,6 +155,11 @@ describe("ai chat orchestrator", () => {
     expect(controller.getCell("Sheet1", "A1").value).toBe(99);
 
     expect(onApprovalRequired).toHaveBeenCalledTimes(1);
+    expect(onToolCall).toHaveBeenCalledTimes(1);
+    expect(onToolCall.mock.calls[0]?.[0]).toMatchObject({ name: "write_cell" });
+    expect(onToolResult).toHaveBeenCalledTimes(1);
+    expect(onToolResult.mock.calls[0]?.[0]).toMatchObject({ name: "write_cell" });
+    expect(onToolResult.mock.calls[0]?.[1]).toMatchObject({ ok: true });
 
     const entries = await auditStore.listEntries({ session_id: "session_approved" });
     expect(entries.length).toBe(1);
