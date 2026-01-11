@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
-import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
 import type { AIAuditEntry } from "@formula/ai-audit/browser";
+
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 
 class MemoryLocalStorage implements Storage {
   #data = new Map<string, string>();
@@ -33,14 +35,29 @@ class MemoryLocalStorage implements Storage {
   }
 }
 
+const require = createRequire(import.meta.url);
+const wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
+const wasmDataUrl = `data:application/wasm;base64,${readFileSync(wasmPath).toString("base64")}`;
+
 describe("SqliteAIAuditStore (jsdom + LocalStorageBinaryStorage)", () => {
   it("round-trips persisted audit entries", async () => {
+    vi.resetModules();
+
+    const originalNodeVersion = Object.getOwnPropertyDescriptor(process.versions, "node");
     const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
     Object.defineProperty(globalThis, "localStorage", { value: new MemoryLocalStorage(), configurable: true });
 
     try {
+      if (originalNodeVersion) {
+        Object.defineProperty(process.versions, "node", { value: undefined, configurable: true });
+      }
+
+      const { SqliteAIAuditStore } = await import("@formula/ai-audit/sqlite");
       const storage = new LocalStorageBinaryStorage("ai_audit_db_test");
-      const store = await SqliteAIAuditStore.create({ storage });
+      const store = await SqliteAIAuditStore.create({
+        storage,
+        locateFile: (file: string) => (file.endsWith(".wasm") ? wasmDataUrl : file)
+      });
 
       const entry: AIAuditEntry = {
         id: `entry_${Date.now()}`,
@@ -54,7 +71,10 @@ describe("SqliteAIAuditStore (jsdom + LocalStorageBinaryStorage)", () => {
 
       await store.logEntry(entry);
 
-      const roundTrip = await SqliteAIAuditStore.create({ storage });
+      const roundTrip = await SqliteAIAuditStore.create({
+        storage,
+        locateFile: (file: string) => (file.endsWith(".wasm") ? wasmDataUrl : file)
+      });
       const entries = await roundTrip.listEntries({ session_id: "session-1" });
 
       expect(entries.length).toBe(1);
@@ -62,6 +82,8 @@ describe("SqliteAIAuditStore (jsdom + LocalStorageBinaryStorage)", () => {
       expect(entries[0]!.model).toBe("unit-test-model");
     } finally {
       if (original) Object.defineProperty(globalThis, "localStorage", original);
+      if (originalNodeVersion) Object.defineProperty(process.versions, "node", originalNodeVersion);
+      vi.resetModules();
     }
   });
 });
