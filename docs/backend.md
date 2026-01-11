@@ -132,7 +132,8 @@ curl -i http://localhost:3000/docs/<doc-id>/invite \
 ```bash
 curl -s -X POST http://localhost:3000/docs/<doc-id>/sync-token \
   -H 'content-type: application/json' \
-  -H 'cookie: formula_session=...'
+  -H 'cookie: formula_session=...' \
+  -d '{}'
 ```
 
 5) Connect to the sync server with the token using a Yjs client (`y-websocket`):
