@@ -31,13 +31,14 @@ export function validateKeyRingJson(input: unknown): {
 function usage(): string {
   return [
     "Usage:",
-    "  keyring generate",
-    "  keyring rotate --in <path> [--out <path>]",
-    "  keyring validate --in <path>",
+    "  keyring generate [--out <path>|-]",
+    "  keyring rotate --in <path>|- [--out <path>|-]",
+    "  keyring validate --in <path>|-",
     "",
     "Notes:",
     "  - rotate keeps existing key versions so historical data remains decryptable.",
     "  - Output is KeyRing JSON ({ currentVersion, keys }).",
+    "  - Use '-' to read from stdin or write to stdout.",
   ].join("\n");
 }
 
@@ -45,10 +46,19 @@ function takeFlag(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
   if (idx === -1) return undefined;
   const value = args[idx + 1];
-  if (!value || value.startsWith("-")) {
+  if (!value || value.startsWith("--")) {
     throw new Error(`Missing value for ${flag}`);
   }
   return value;
+}
+
+async function readStdinUtf8(): Promise<string> {
+  process.stdin.setEncoding("utf8");
+  let data = "";
+  for await (const chunk of process.stdin) {
+    data += chunk;
+  }
+  return data;
 }
 
 async function atomicWriteFile(filePath: string, contents: string): Promise<void> {
@@ -70,9 +80,18 @@ async function atomicWriteFile(filePath: string, contents: string): Promise<void
   }
 }
 
-async function readJsonFile(filePath: string): Promise<unknown> {
-  const raw = await fs.readFile(filePath, "utf8");
+async function readJsonInput(pathOrDash: string): Promise<unknown> {
+  const raw =
+    pathOrDash === "-" ? await readStdinUtf8() : await fs.readFile(pathOrDash, "utf8");
   return JSON.parse(raw);
+}
+
+async function writeOutput(pathOrDash: string | undefined, output: string): Promise<void> {
+  if (!pathOrDash || pathOrDash === "-") {
+    process.stdout.write(output);
+    return;
+  }
+  await atomicWriteFile(pathOrDash, output);
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -91,7 +110,10 @@ async function main(argv: string[]): Promise<void> {
   }
 
   if (cmd === "generate") {
-    process.stdout.write(`${JSON.stringify(generateKeyRingJson(), null, 2)}\n`);
+    const outPath = takeFlag(args, "--out");
+    const json = generateKeyRingJson();
+    const output = `${JSON.stringify(json, null, 2)}\n`;
+    await writeOutput(outPath, output);
     return;
   }
 
@@ -102,15 +124,11 @@ async function main(argv: string[]): Promise<void> {
       throw new Error("rotate requires --in <path>");
     }
 
-    const input = await readJsonFile(inPath);
+    const input = await readJsonInput(inPath);
     const rotated = rotateKeyRingJson(input);
     const output = `${JSON.stringify(rotated, null, 2)}\n`;
 
-    if (outPath) {
-      await atomicWriteFile(outPath, output);
-    } else {
-      process.stdout.write(output);
-    }
+    await writeOutput(outPath, output);
     return;
   }
 
@@ -120,7 +138,7 @@ async function main(argv: string[]): Promise<void> {
       throw new Error("validate requires --in <path>");
     }
 
-    const input = await readJsonFile(inPath);
+    const input = await readJsonInput(inPath);
     const summary = validateKeyRingJson(input);
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return;

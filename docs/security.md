@@ -64,7 +64,7 @@ Enable:
 Generate / rotate / validate KeyRing material:
 
 ```bash
-pnpm -C services/sync-server -s keyring:generate > keyring.json
+pnpm -C services/sync-server -s keyring:generate --out keyring.json
 pnpm -C services/sync-server -s keyring:validate --in keyring.json
 pnpm -C services/sync-server -s keyring:rotate --in keyring.json --out keyring.json
 ```
@@ -72,7 +72,7 @@ pnpm -C services/sync-server -s keyring:rotate --in keyring.json --out keyring.j
 For production images / built output, you can run the compiled entrypoint:
 
 ```bash
-node services/sync-server/dist/keyring-cli.js generate > keyring.json
+node services/sync-server/dist/keyring-cli.js generate --out keyring.json
 ```
 
 When enabled, plaintext `.yjs` files in `SYNC_SERVER_DATA_DIR` are migrated to the encrypted format on startup (write temp + rename, idempotent).
