@@ -1,13 +1,18 @@
 import { defineConfig } from "@playwright/test";
 
-function withEnv(overrides: Record<string, string>): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string") {
-      env[key] = value;
-    }
-  }
-  return { ...env, ...overrides };
+// Playwright sets `FORCE_COLOR` for its reporters, which causes some tooling
+// (eg `supports-color`) to warn when `NO_COLOR` is also present. Ensure `NO_COLOR`
+// is unset for the test runner + any spawned webServer processes so e2e output
+// stays warning-free.
+delete process.env.NO_COLOR;
+
+function withEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
+  // Playwright sets `FORCE_COLOR` for its reporters, which causes some tooling
+  // (eg `supports-color`) to warn when `NO_COLOR` is also present. Explicitly
+  // unset `NO_COLOR` for the webServer environment to keep e2e output clean.
+  const env: NodeJS.ProcessEnv = { ...process.env, ...overrides };
+  env.NO_COLOR = undefined;
+  return env;
 }
 
 const parsedBasePort = Number.parseInt(process.env.FORMULA_E2E_PORT ?? "4174", 10);
