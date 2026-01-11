@@ -3,8 +3,8 @@ export type CellValue = string | number | boolean | null;
 export interface CellFormat {
   bold?: boolean;
   italic?: boolean;
-  numberFormat?: string;
-  backgroundColor?: string;
+  numberFormat?: string | null;
+  backgroundColor?: string | null;
 }
 
 export type RangeCoords = {
