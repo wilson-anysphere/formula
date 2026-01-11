@@ -16,6 +16,19 @@ import {
 } from "../services/sync-server/test/test-helpers.ts";
 
 /**
+ * @param {unknown} value
+ */
+function getYMap(value) {
+  if (!value || typeof value !== "object") return null;
+  const maybe = value;
+  if (maybe.constructor?.name !== "YMap") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return maybe;
+}
+
+/**
  * @param {import("../packages/collab/session/src/index.ts").CollabSession} session
  */
 function makeDestroySession(session) {
@@ -102,27 +115,54 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   await branchService.createBranch(owner, { name: "feature" });
   await workflow.checkoutBranch(owner, { name: "feature" });
   sessionA.setCellValue("Sheet1:0:0", "feature");
+  sessionA.doc.transact(() => {
+    const cell = getYMap(sessionA.cells.get("Sheet1:0:1"));
+    if (cell) cell.set("format", { numberFormat: "percent" });
+  }, sessionA.origin);
   await workflow.commitCurrentState(owner, "feature edit");
 
   await workflow.checkoutBranch(owner, { name: "main" });
   sessionA.setCellValue("Sheet1:0:0", "main");
+  sessionA.doc.transact(() => {
+    const cell = getYMap(sessionA.cells.get("Sheet1:0:1"));
+    if (cell) cell.set("format", { numberFormat: "accounting" });
+  }, sessionA.origin);
   await workflow.commitCurrentState(owner, "main edit");
 
   const preview = await workflow.previewMerge(owner, { sourceBranch: "feature" });
-  assert.equal(preview.conflicts.length, 1);
-  assert.equal(preview.conflicts[0].type, "cell");
-  assert.equal(preview.conflicts[0].sheetId, "Sheet1");
-  assert.equal(preview.conflicts[0].cell, "A1");
+  assert.equal(preview.conflicts.length, 2);
+  const a1Idx = preview.conflicts.findIndex(
+    (c) => c.type === "cell" && c.sheetId === "Sheet1" && c.cell === "A1"
+  );
+  const b1Idx = preview.conflicts.findIndex(
+    (c) => c.type === "cell" && c.sheetId === "Sheet1" && c.cell === "B1"
+  );
+  assert.ok(a1Idx >= 0);
+  assert.ok(b1Idx >= 0);
+  assert.equal(preview.conflicts[a1Idx]?.reason, "content");
+  assert.equal(preview.conflicts[b1Idx]?.reason, "format");
 
   await workflow.merge(owner, {
     sourceBranch: "feature",
-    resolutions: [{ conflictIndex: 0, choice: "theirs" }],
+    resolutions: [
+      { conflictIndex: a1Idx, choice: "theirs" },
+      { conflictIndex: b1Idx, choice: "theirs" },
+    ],
     message: "merge feature into main",
   });
 
   // --- Workbook state propagates to other collaborators ---
   await waitForCondition(() => sessionB.getCell("Sheet1:0:0")?.value === "feature", 10_000);
   assert.equal(sessionB.getCell("Sheet1:0:0")?.value, "feature");
+  await waitForCondition(() => sessionB.getCell("Sheet1:0:1")?.formula === "=1+1", 10_000);
+  assert.equal(sessionB.getCell("Sheet1:0:1")?.formula, "=1+1");
+  await waitForCondition(() => {
+    const cell = getYMap(sessionB.cells.get("Sheet1:0:1"));
+    return cell?.get("format")?.numberFormat === "percent";
+  }, 10_000);
+  assert.deepEqual(getYMap(sessionB.cells.get("Sheet1:0:1"))?.get("format"), {
+    numberFormat: "percent",
+  });
 
   // --- Branch metadata propagates too (stored in the same Y.Doc) ---
   await waitForCondition(() => {
@@ -130,6 +170,25 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     const commits = sessionB.doc.getMap("branching:commits");
     return branches.has("main") && branches.has("feature") && commits.size >= 5;
   }, 10_000);
+
+  // Validate metadata via BranchService on another client.
+  const storeB = new YjsBranchStore({ ydoc: sessionB.doc });
+  const branchServiceB = new BranchService({ docId, store: storeB });
+  const branchesB = await branchServiceB.listBranches();
+  assert.deepEqual(
+    branchesB.map((b) => b.name).sort(),
+    ["feature", "main"]
+  );
+  await waitForCondition(async () => {
+    const main = await storeB.getBranch(docId, "main");
+    if (!main) return false;
+    const head = await storeB.getCommit(main.headCommitId);
+    return head?.message === "merge feature into main";
+  }, 10_000);
+  const mainB = await storeB.getBranch(docId, "main");
+  assert.ok(mainB);
+  const headCommitB = await storeB.getCommit(mainB.headCommitId);
+  assert.equal(headCommitB?.message, "merge feature into main");
 
   // Tear down sessions and restart sync-server with the same data dir.
   destroyA();
@@ -165,6 +224,9 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   // --- Workbook state persisted ---
   assert.equal(sessionC.getCell("Sheet1:0:0")?.value, "feature");
   assert.equal(sessionC.getCell("Sheet1:0:1")?.formula, "=1+1");
+  assert.deepEqual(getYMap(sessionC.cells.get("Sheet1:0:1"))?.get("format"), {
+    numberFormat: "percent",
+  });
 
   // --- Branch metadata persisted inside the Y.Doc ---
   const branches = sessionC.doc.getMap("branching:branches");
@@ -175,4 +237,13 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   assert.ok(branches.has("feature"));
   assert.ok(typeof meta.get("rootCommitId") === "string");
   assert.ok(commits.size >= 5);
+
+  // Validate persisted metadata via store API too.
+  const storeC = new YjsBranchStore({ ydoc: sessionC.doc });
+  const branchServiceC = new BranchService({ docId, store: storeC });
+  const branchesC = await branchServiceC.listBranches();
+  assert.deepEqual(
+    branchesC.map((b) => b.name).sort(),
+    ["feature", "main"]
+  );
 });
