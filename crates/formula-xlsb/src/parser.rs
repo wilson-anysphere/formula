@@ -1923,7 +1923,14 @@ fn materialize_rgce(
                 };
 
                 if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
-                    return None;
+                    // Excel represents invalid references using `PtgRefErr`. When shared formulas
+                    // are filled across a range near the sheet edges, relative references can
+                    // overflow the valid row/col bounds. Materialize those as `#REF!` tokens
+                    // instead of aborting materialization entirely.
+                    out.push(ptg.saturating_add(0x06)); // PtgRef* -> PtgRefErr* (class-preserving)
+                    out.extend_from_slice(base.get(i..i + 6)?);
+                    i += 6;
+                    continue;
                 }
 
                 out.push(ptg);
@@ -1960,7 +1967,11 @@ fn materialize_rgce(
                     || new_c2 < 0
                     || new_c2 > MAX_COL
                 {
-                    return None;
+                    // Emit an error-range token when the adjusted area exceeds sheet bounds.
+                    out.push(ptg.saturating_add(0x06)); // PtgArea* -> PtgAreaErr* (class-preserving)
+                    out.extend_from_slice(base.get(i..i + 12)?);
+                    i += 12;
+                    continue;
                 }
 
                 out.push(ptg);
@@ -1981,7 +1992,10 @@ fn materialize_rgce(
                 let abs_row = row as i64 + row_off;
                 let abs_col = col as i64 + col_off;
                 if abs_row < 0 || abs_row > MAX_ROW || abs_col < 0 || abs_col > MAX_COL {
-                    return None;
+                    out.push(ptg.saturating_sub(0x02)); // PtgRefN* -> PtgRefErr* (class-preserving)
+                    out.extend_from_slice(base.get(i..i + 6)?);
+                    i += 6;
+                    continue;
                 }
                 // Convert to a normal PtgRef token.
                 out.push(ptg - 0x08);
@@ -2013,7 +2027,10 @@ fn materialize_rgce(
                     || abs_c2 < 0
                     || abs_c2 > MAX_COL
                 {
-                    return None;
+                    out.push(ptg.saturating_sub(0x02)); // PtgAreaN* -> PtgAreaErr* (class-preserving)
+                    out.extend_from_slice(base.get(i..i + 12)?);
+                    i += 12;
+                    continue;
                 }
 
                 out.push(ptg - 0x08);
