@@ -127,6 +127,35 @@ To wipe local sync persistence, run `docker compose down -v`.
 
 Roles: `owner | admin | editor | commenter | viewer`
 
+### Range restrictions (optional)
+
+The API can optionally include a `rangeRestrictions` claim in sync JWTs. When enabled, the sync
+server enforces these restrictions **server-side** so a malicious client cannot bypass UI checks
+by sending crafted Yjs updates.
+
+Enable enforcement:
+
+- `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS=1` (default: `true` in `NODE_ENV=production`, `false` otherwise)
+
+If a client attempts to write to a protected cell, the sync server closes the connection with
+policy violation (`1008`) and logs `permission_violation`.
+
+Opaque token auth (`SYNC_SERVER_AUTH_TOKEN`) does not apply range restrictions.
+
+The claim shape matches `packages/collab/permissions.normalizeRestriction`:
+
+```json
+{
+  "rangeRestrictions": [
+    {
+      "range": { "sheetId": "Sheet1", "startRow": 0, "endRow": 0, "startCol": 0, "endCol": 0 },
+      "editAllowlist": ["user-id"],
+      "readAllowlist": ["user-id"]
+    }
+  ]
+}
+```
+
 ### Audit logging
 
 - `GET /orgs/:orgId/audit` (org admin) → query audit events

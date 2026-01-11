@@ -105,6 +105,46 @@ Migration strictness:
   - Strict (`1`): rejects legacy plaintext values.
   - Non-strict (`0`): allows reading legacy plaintext values for migration/backcompat; new writes are encrypted.
 
+### Sync server (range restriction enforcement)
+
+The collaboration client enforces document roles + range restrictions locally, but a malicious client can bypass
+UI checks by crafting raw Yjs updates. `services/sync-server` can enforce spreadsheet **cell/range edit
+restrictions server-side** when they are present in JWT sync tokens.
+
+Enable enforcement:
+
+- `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS=1` (default: `true` in `NODE_ENV=production`, `false` otherwise)
+
+When enabled and the client is authenticated via JWT, the server reads:
+
+- `role` (document role)
+- optional `rangeRestrictions` claim (compatible with `packages/collab/permissions.normalizeRestriction`)
+
+If an incoming Yjs update attempts to modify a cell where `canEdit` is false, the server:
+
+- closes the WebSocket with policy violation (`1008`)
+- logs `permission_violation` (includes `docName`, `userId`, `role`)
+- does not apply the update
+
+The validator is best-effort and intentionally **fails closed** if it cannot confidently determine which cell keys
+were affected.
+
+Audit hardening: for touched cells, the server rewrites `modifiedBy` to the authenticated `userId` so clients cannot
+spoof edit attribution.
+
+Example JWT claim:
+
+```json
+{
+  "rangeRestrictions": [
+    {
+      "range": { "sheetId": "Sheet1", "startRow": 0, "endRow": 0, "startCol": 0, "endCol": 0 },
+      "editAllowlist": ["user-id"]
+    }
+  ]
+}
+```
+
 ## Encryption in Transit
 
 Cloud services should enforce **TLS 1.3 minimum**.
