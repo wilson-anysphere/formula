@@ -137,3 +137,22 @@ fn name_definitions_do_not_implicitly_create_missing_sheets() {
         .unwrap_err();
     assert_eq!(err, EditError::SheetNotFound("NoSuchSheet".to_string()));
 }
+
+#[test]
+fn name_defined_as_array_literal_spills_when_used_as_formula_result() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "MyArr",
+            NameScope::Workbook,
+            NameDefinition::Formula("={1,2;3,4}".to_string()),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=MyArr").unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(4.0));
+}

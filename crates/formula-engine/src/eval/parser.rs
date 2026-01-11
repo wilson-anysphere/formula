@@ -76,10 +76,7 @@ fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
 
         crate::Expr::StructuredRef(r) => lower_structured_ref(r),
 
-        // Array literals are supported by the canonical parser, but are not yet represented in the
-        // eval AST. Lower to an error instead of failing to parse so tooling like the oracle test
-        // can still traverse the remaining expression tree.
-        crate::Expr::Array(_) => Expr::Error(ErrorKind::Value),
+        crate::Expr::Array(arr) => lower_array_literal(arr),
 
         crate::Expr::FunctionCall(call) => Expr::FunctionCall {
             name: call.name.name_upper.clone(),
@@ -110,6 +107,31 @@ fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
         },
 
         crate::Expr::Binary(b) => lower_binary(b),
+    }
+}
+
+fn lower_array_literal(arr: &crate::ArrayLiteral) -> ParsedExpr {
+    let rows = arr.rows.len();
+    let cols = arr.rows.first().map(|r| r.len()).unwrap_or(0);
+
+    if rows == 0 || cols == 0 {
+        return Expr::Error(ErrorKind::Value);
+    }
+    if arr.rows.iter().any(|r| r.len() != cols) {
+        return Expr::Error(ErrorKind::Value);
+    }
+
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    for row in &arr.rows {
+        for el in row {
+            values.push(lower_expr(el));
+        }
+    }
+
+    Expr::ArrayLiteral {
+        rows,
+        cols,
+        values: values.into(),
     }
 }
 
