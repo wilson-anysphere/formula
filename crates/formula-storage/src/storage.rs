@@ -844,9 +844,13 @@ impl Storage {
         let mut next_generated_sheet_id: u32 = (max_model_sheet_id.max(0) as u32).wrapping_add(1);
 
         while let Some(row) = sheet_rows.next()? {
-            let storage_sheet_id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let visibility_raw: String = row.get(3)?;
+            let Ok(storage_sheet_id) = row.get::<_, String>(0) else {
+                continue;
+            };
+            let Ok(name) = row.get::<_, String>(1) else {
+                continue;
+            };
+            let visibility_raw: String = row.get(3).unwrap_or_else(|_| "visible".to_string());
             let tab_color_fast: Option<String> = row.get(4).ok().flatten();
             let tab_color_json: Option<String> = row.get(5).ok().flatten();
             let xlsx_sheet_id: Option<i64> = row.get::<_, Option<i64>>(6).ok().flatten();
@@ -1079,15 +1083,31 @@ impl Storage {
         )?;
 
         let rows = stmt.query_map(params![workbook_id.to_string()], |r| {
-            let id: String = r.get(0)?;
-            let workbook_id: String = r.get(1)?;
-            let visibility: String = r.get(4)?;
+            let Some(id) = r.get::<_, Option<String>>(0).ok().flatten() else {
+                return Ok(None);
+            };
+            let Ok(id) = Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery) else {
+                return Ok(None);
+            };
+
+            let Some(workbook_id) = r.get::<_, Option<String>>(1).ok().flatten() else {
+                return Ok(None);
+            };
+            let Ok(workbook_id) =
+                Uuid::parse_str(&workbook_id).map_err(|_| rusqlite::Error::InvalidQuery)
+            else {
+                return Ok(None);
+            };
+
+            let Some(name) = r.get::<_, Option<String>>(2).ok().flatten() else {
+                return Ok(None);
+            };
+            let visibility: String = r.get(4).unwrap_or_else(|_| "visible".to_string());
             let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
-            Ok(SheetMeta {
-                id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                workbook_id: Uuid::parse_str(&workbook_id)
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                name: r.get(2)?,
+            Ok(Some(SheetMeta {
+                id,
+                workbook_id,
+                name,
                 position: r.get(3).unwrap_or(0),
                 visibility: SheetVisibility::parse(&visibility),
                 tab_color: r.get::<_, Option<String>>(5).ok().flatten(),
@@ -1097,12 +1117,15 @@ impl Storage {
                 frozen_cols: r.get(9).unwrap_or(0),
                 zoom: r.get(10).unwrap_or(1.0),
                 metadata: parse_optional_json_value(metadata_raw),
-            })
+            }))
         })?;
 
         let mut sheets = Vec::new();
         for sheet in rows {
-            sheets.push(sheet?);
+            let Some(sheet) = sheet? else {
+                continue;
+            };
+            sheets.push(sheet);
         }
         Ok(sheets)
     }
@@ -1173,7 +1196,9 @@ impl Storage {
             let mut rows =
                 stmt.query(params![meta.workbook_id.to_string(), sheet_id.to_string()])?;
             while let Some(row) = rows.next()? {
-                let existing: String = row.get(0)?;
+                let Ok(existing) = row.get::<_, String>(0) else {
+                    continue;
+                };
                 if sheet_name_eq_case_insensitive(&existing, name) {
                     return Err(StorageError::DuplicateSheetName(name.to_string()));
                 }
@@ -1313,7 +1338,9 @@ impl Storage {
             )?;
             let mut rows = stmt.query(params![meta.workbook_id.to_string()])?;
             while let Some(row) = rows.next()? {
-                let name: String = row.get(0)?;
+                let Ok(name) = row.get::<_, String>(0) else {
+                    continue;
+                };
                 let model_sheet_id: Option<i64> = row.get::<_, Option<i64>>(1).ok().flatten();
                 let parsed = model_sheet_id.and_then(|id| u32::try_from(id).ok());
                 sheet_order.push(name.clone());
@@ -1670,15 +1697,31 @@ impl Storage {
         )?;
 
         let rows = stmt.query_map(params![workbook_id.to_string()], |r| {
-            let id: String = r.get(0)?;
-            let workbook_id: String = r.get(1)?;
-            let visibility: String = r.get(4)?;
+            let Some(id) = r.get::<_, Option<String>>(0).ok().flatten() else {
+                return Ok(None);
+            };
+            let Ok(id) = Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery) else {
+                return Ok(None);
+            };
+
+            let Some(workbook_id) = r.get::<_, Option<String>>(1).ok().flatten() else {
+                return Ok(None);
+            };
+            let Ok(workbook_id) =
+                Uuid::parse_str(&workbook_id).map_err(|_| rusqlite::Error::InvalidQuery)
+            else {
+                return Ok(None);
+            };
+
+            let Some(name) = r.get::<_, Option<String>>(2).ok().flatten() else {
+                return Ok(None);
+            };
+            let visibility: String = r.get(4).unwrap_or_else(|_| "visible".to_string());
             let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
-            Ok(SheetMeta {
-                id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                workbook_id: Uuid::parse_str(&workbook_id)
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                name: r.get(2)?,
+            Ok(Some(SheetMeta {
+                id,
+                workbook_id,
+                name,
                 position: r.get(3).unwrap_or(0),
                 visibility: SheetVisibility::parse(&visibility),
                 tab_color: r.get::<_, Option<String>>(5).ok().flatten(),
@@ -1688,12 +1731,15 @@ impl Storage {
                 frozen_cols: r.get(9).unwrap_or(0),
                 zoom: r.get(10).unwrap_or(1.0),
                 metadata: parse_optional_json_value(metadata_raw),
-            })
+            }))
         })?;
 
         let mut sheets = Vec::new();
         for sheet in rows {
-            sheets.push(sheet?);
+            let Some(sheet) = sheet? else {
+                continue;
+            };
+            sheets.push(sheet);
         }
         Ok(sheets)
     }
@@ -2319,7 +2365,9 @@ fn sync_named_range_into_defined_names_tx(tx: &Transaction<'_>, range: &NamedRan
         let mut rows = stmt.query(params![&workbook_id_str])?;
         let mut sheet_id: Option<u32> = None;
         while let Some(row) = rows.next()? {
-            let name: String = row.get(0)?;
+            let Ok(name) = row.get::<_, String>(0) else {
+                continue;
+            };
             let model_sheet_id: Option<i64> = row.get::<_, Option<i64>>(1).ok().flatten();
             if canonical_sheet_name_key(&name) == sheet_key {
                 sheet_id = model_sheet_id.and_then(|id| u32::try_from(id).ok());
