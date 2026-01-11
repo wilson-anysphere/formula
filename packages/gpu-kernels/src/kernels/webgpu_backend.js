@@ -648,6 +648,9 @@ export class WebGpuBackend {
     if (b.length !== aCols * bCols) {
       throw new Error(`MMULT B shape mismatch: b.length=${b.length} vs ${aCols}x${bCols}`);
     }
+    if (aRows === 0 || bCols === 0) {
+      return new Float64Array();
+    }
 
     const aDtype = dtypeOf(a);
     const bDtype = dtypeOf(b);
