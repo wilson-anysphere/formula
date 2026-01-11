@@ -310,6 +310,12 @@ fn patch_worksheet_xml(
         )
     });
 
+    // Track the bounds of "non-empty" patches (cells that will contain a formula or value) so we
+    // can expand the worksheet `<dimension ref="..."/>` if needed.
+    //
+    // We don't shrink dimensions (clears), mirroring Excel's typical behavior.
+    let patch_bounds = patch_bounds(patches);
+
     let row_patches = patches.by_row();
     let mut remaining_patch_rows: Vec<u32> = row_patches.keys().copied().collect();
     let mut patch_row_idx = 0usize;
@@ -324,6 +330,20 @@ fn patch_worksheet_xml(
     let mut saw_sheet_data = false;
     loop {
         match reader.read_event_into(&mut buf)? {
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"dimension" => {
+                if let Some(bounds) = patch_bounds {
+                    writer.write_event(Event::Empty(rewrite_dimension(&e, bounds)?))?;
+                } else {
+                    writer.write_event(Event::Empty(e.into_owned()))?;
+                }
+            }
+            Event::Start(e) if local_name(e.name().as_ref()) == b"dimension" => {
+                if let Some(bounds) = patch_bounds {
+                    writer.write_event(Event::Start(rewrite_dimension(&e, bounds)?))?;
+                } else {
+                    writer.write_event(Event::Start(e.into_owned()))?;
+                }
+            }
             Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 saw_sheet_data = true;
                 writer.write_event(Event::Start(e.into_owned()))?;
@@ -1023,4 +1043,169 @@ fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+fn patch_bounds(patches: &WorksheetCellPatches) -> Option<(u32, u32, u32, u32)> {
+    let mut min_row = u32::MAX;
+    let mut min_col = u32::MAX;
+    let mut max_row = 0u32;
+    let mut max_col = 0u32;
+
+    for (cell_ref, patch) in patches.iter() {
+        let is_non_empty = match patch {
+            CellPatch::Clear { .. } => false,
+            CellPatch::Set { value, formula, .. } => {
+                formula.as_ref().is_some() || !matches!(value, CellValue::Empty)
+            }
+        };
+
+        if !is_non_empty {
+            continue;
+        }
+
+        // Convert to 1-based coordinates for A1 formatting.
+        let row_1 = cell_ref.row.saturating_add(1);
+        let col_1 = cell_ref.col.saturating_add(1);
+
+        min_row = min_row.min(row_1);
+        min_col = min_col.min(col_1);
+        max_row = max_row.max(row_1);
+        max_col = max_col.max(col_1);
+    }
+
+    if min_row == u32::MAX {
+        None
+    } else {
+        Some((min_row, min_col, max_row, max_col))
+    }
+}
+
+fn rewrite_dimension(
+    e: &BytesStart<'_>,
+    patch_bounds: (u32, u32, u32, u32),
+) -> Result<BytesStart<'static>, XlsxError> {
+    let (p_min_r, p_min_c, p_max_r, p_max_c) = patch_bounds;
+
+    // `<dimension>` is typically unprefixed in real-world worksheet XML.
+    let mut start = BytesStart::new("dimension");
+
+    let mut existing_ref: Option<String> = None;
+    let mut other_attrs: Vec<(Vec<u8>, String)> = Vec::new();
+    for attr in e.attributes() {
+        let attr = attr?;
+        if local_name(attr.key.as_ref()) == b"ref" {
+            existing_ref = Some(attr.unescape_value()?.into_owned());
+            continue;
+        }
+        other_attrs.push((attr.key.as_ref().to_vec(), attr.unescape_value()?.into_owned()));
+    }
+
+    for (k, v) in other_attrs {
+        start.push_attribute((k.as_slice(), v.as_bytes()));
+    }
+
+    let new_ref = existing_ref
+        .as_deref()
+        .and_then(parse_dimension_ref)
+        .map(|(min_r, min_c, max_r, max_c)| {
+            let min_r = min_r.min(p_min_r);
+            let min_c = min_c.min(p_min_c);
+            let max_r = max_r.max(p_max_r);
+            let max_c = max_c.max(p_max_c);
+            format_dimension(min_r, min_c, max_r, max_c)
+        })
+        .unwrap_or_else(|| format_dimension(p_min_r, p_min_c, p_max_r, p_max_c));
+
+    start.push_attribute(("ref", new_ref.as_str()));
+    Ok(start.into_owned())
+}
+
+fn parse_dimension_ref(ref_str: &str) -> Option<(u32, u32, u32, u32)> {
+    let s = ref_str.trim();
+    let (a, b) = s.split_once(':').unwrap_or((s, s));
+    let start = CellRef::from_a1(a).ok()?;
+    let end = CellRef::from_a1(b).ok()?;
+    Some((
+        start.row + 1,
+        start.col + 1,
+        end.row + 1,
+        end.col + 1,
+    ))
+}
+
+fn format_dimension(min_r: u32, min_c: u32, max_r: u32, max_c: u32) -> String {
+    let start = CellRef::new(min_r.saturating_sub(1), min_c.saturating_sub(1)).to_a1();
+    let end = CellRef::new(max_r.saturating_sub(1), max_c.saturating_sub(1)).to_a1();
+    if start == end {
+        start
+    } else {
+        format!("{start}:{end}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::XlsxPackage;
+    use std::io::{Cursor, Write};
+
+    fn build_dimension_fixture() -> Vec<u8> {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn expands_dimension_when_patching_outside_existing_bounds() {
+        let bytes = build_dimension_fixture();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let mut patches = WorkbookCellPatches::default();
+        patches.set_cell(
+            "Sheet1",
+            CellRef::new(2, 2), // C3
+            CellPatch::set_value(CellValue::Number(42.0)),
+        );
+
+        pkg.apply_cell_patches(&patches).expect("apply patches");
+
+        let xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+        assert!(
+            xml.contains(r#"<dimension ref="A1:C3""#) || xml.contains(r#"ref="A1:C3""#),
+            "expected dimension to expand, got: {xml}"
+        );
+    }
 }
