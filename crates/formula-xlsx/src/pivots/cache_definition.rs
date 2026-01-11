@@ -246,4 +246,26 @@ mod tests {
             PivotCacheSourceType::Unknown("WeIrD".to_string())
         );
     }
+
+    #[test]
+    fn tolerates_namespaced_elements_and_unknown_tags() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:pivotCacheDefinition xmlns:p="http://schemas.openxmlformats.org/spreadsheetml/2006/main" p:recordCount="4">
+  <p:cacheSource p:type="worksheet">
+    <p:worksheetSource p:sheet="Sheet1" p:ref="A1:B2"/>
+  </p:cacheSource>
+  <p:cacheFields p:count="1">
+    <p:cacheField p:name="Field1" p:numFmtId="0"/>
+  </p:cacheFields>
+  <p:unknownTag foo="bar"/>
+</p:pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.record_count, Some(4));
+        assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
+        assert_eq!(def.worksheet_source_sheet.as_deref(), Some("Sheet1"));
+        assert_eq!(def.worksheet_source_ref.as_deref(), Some("A1:B2"));
+        assert_eq!(def.cache_fields.len(), 1);
+        assert_eq!(def.cache_fields[0].name, "Field1");
+    }
 }
