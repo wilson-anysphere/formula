@@ -726,7 +726,17 @@ test("supports KeyRing rotation for encrypted file persistence", async (t) => {
     doc.destroy();
 
     const persistedPath = yjsFilePathForDoc(dataDir, docName);
-    await waitForFile(persistedPath);
+    await waitForCondition(async () => {
+      try {
+        const bytes = await readFile(persistedPath);
+        return parseEncryptedYjsKeyVersions(bytes).includes(1);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return false;
+        throw err;
+      }
+    }, 10_000);
+
     const bytesV1 = await readFile(persistedPath);
     assert.equal(bytesV1.subarray(0, 8).toString("ascii"), "FMLYJS01");
     assert.equal(bytesV1.readUInt8(8) & 0b1, 0b1);
