@@ -2902,7 +2902,17 @@ export class QueryEngine {
       const hasHeaders = source.range.hasHeaders ?? true;
       const values = Array.isArray(source.range.values) ? source.range.values : [];
       const headerRow = hasHeaders ? values[0] ?? [] : null;
-      const colCount = hasHeaders && Array.isArray(headerRow) ? headerRow.length : Math.max(...values.map((r) => (Array.isArray(r) ? r.length : 0)), 0);
+      // Avoid `Math.max(...values.map(...))` because spreading large arrays can exceed the
+      // VM argument limit / call stack on big ranges.
+      let colCount = 0;
+      if (hasHeaders && Array.isArray(headerRow)) {
+        colCount = headerRow.length;
+      } else {
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          if (row.length > colCount) colCount = row.length;
+        }
+      }
 
       const rawNames = hasHeaders ? (Array.isArray(headerRow) ? headerRow : []) : Array.from({ length: colCount }, (_v, i) => `Column${i + 1}`);
       const names = makeUniqueColumnNames(rawNames);

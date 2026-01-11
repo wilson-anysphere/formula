@@ -986,7 +986,12 @@ function replaceValues(table, op) {
 function splitColumn(table, op) {
   const idx = table.getColumnIndex(op.column);
   const partsByRow = table.rows.map((row) => valueToString(row[idx]).split(op.delimiter));
-  const maxParts = Math.max(...partsByRow.map((parts) => parts.length));
+  // Avoid `Math.max(...partsByRow.map(...))` because spreading large arrays can exceed the
+  // VM argument limit / call stack on big datasets.
+  let maxParts = 0;
+  for (const parts of partsByRow) {
+    if (parts.length > maxParts) maxParts = parts.length;
+  }
 
   const requestedNames = Array.isArray(op.newColumns) && op.newColumns.length > 0 ? op.newColumns.slice() : null;
   if (requestedNames && maxParts > requestedNames.length) {
