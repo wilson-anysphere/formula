@@ -129,3 +129,55 @@ fn apply_cell_patches_preserves_non_formula_children_when_updating_formula() {
         .expect("expected <v>");
     assert_eq!(v.text().unwrap_or_default(), "4");
 }
+
+#[test]
+fn apply_cell_patches_preserves_formula_attrs_when_formula_follows_value() {
+    let extlst =
+        r#"<extLst><ext uri="{123}"><test xmlns="http://example.com">ok</test></ext></extLst>"#;
+    // Some generators emit `<v>` before `<f>`. Ensure we still preserve `<f>` attributes while
+    // inserting the patched formula before the value.
+    let worksheet_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"><c r="A1" s="5" cm="7" customAttr="x"><v>2</v><f aca="1">1+1</f>{extlst}</c></row>
+  </sheetData>
+</worksheet>"#
+    );
+
+    let bytes = build_minimal_xlsx(&worksheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1").unwrap(),
+        CellPatch::set_value_with_formula(CellValue::Number(4.0), "=2+2"),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    assert!(
+        out_xml.contains(extlst),
+        "expected extLst subtree to be preserved, got: {out_xml}"
+    );
+
+    let doc = roxmltree::Document::parse(out_xml).expect("parse worksheet xml");
+    let cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("expected A1 cell");
+    let f = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "f")
+        .expect("expected <f>");
+    assert_eq!(f.attribute("aca"), Some("1"));
+    assert_eq!(f.text().unwrap_or_default(), "2+2");
+
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")
+        .expect("expected <v>");
+    assert_eq!(v.text().unwrap_or_default(), "4");
+}

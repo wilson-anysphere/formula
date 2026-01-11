@@ -1640,6 +1640,25 @@ fn write_patched_cell_children(
     is_tag: &str,
     t_tag: &str,
 ) -> Result<(), XlsxError> {
+    // If we need to write a new/updated `<f>` element before we've encountered the original `<f>`
+    // node, preserve the original formula attributes when possible.
+    //
+    // This matters for worksheets where the `<f>` element appears *after* `<v>/<is>` (unusual, but
+    // legal) since the patcher inserts `<f>` before the value for stability.
+    let formula_template = if update_formula && patch_formula.is_some() {
+        inner_events.iter().find_map(|ev| match ev {
+            Event::Start(e) if is_element_named(e.name().as_ref(), cell_prefix, b"f") => {
+                Some(e.clone())
+            }
+            Event::Empty(e) if is_element_named(e.name().as_ref(), cell_prefix, b"f") => {
+                Some(e.clone())
+            }
+            _ => None,
+        })
+    } else {
+        None
+    };
+
     let mut formula_written = !update_formula || patch_formula.is_none();
     let mut value_written = !update_value || matches!(body_kind, CellBodyKind::None);
     let mut saw_formula = false;
@@ -1701,7 +1720,16 @@ fn write_patched_cell_children(
 
                 if update_formula && !formula_written {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, None, formula, false, formula_tag)?;
+                        let detach_shared = formula_template
+                            .as_ref()
+                            .is_some_and(|f| should_detach_shared_formula(f, formula));
+                        write_formula_element(
+                            writer,
+                            formula_template.as_ref(),
+                            formula,
+                            detach_shared,
+                            formula_tag,
+                        )?;
                         formula_written = true;
                     }
                 }
@@ -1725,7 +1753,16 @@ fn write_patched_cell_children(
 
                 if update_formula && !formula_written {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, None, formula, false, formula_tag)?;
+                        let detach_shared = formula_template
+                            .as_ref()
+                            .is_some_and(|f| should_detach_shared_formula(f, formula));
+                        write_formula_element(
+                            writer,
+                            formula_template.as_ref(),
+                            formula,
+                            detach_shared,
+                            formula_tag,
+                        )?;
                         formula_written = true;
                     }
                 }
@@ -1744,7 +1781,16 @@ fn write_patched_cell_children(
             ev => {
                 if update_formula && !formula_written && !saw_formula {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, None, formula, false, formula_tag)?;
+                        let detach_shared = formula_template
+                            .as_ref()
+                            .is_some_and(|f| should_detach_shared_formula(f, formula));
+                        write_formula_element(
+                            writer,
+                            formula_template.as_ref(),
+                            formula,
+                            detach_shared,
+                            formula_tag,
+                        )?;
                         formula_written = true;
                     }
                 }
@@ -1761,7 +1807,16 @@ fn write_patched_cell_children(
 
     if update_formula && !formula_written {
         if let Some(formula) = patch_formula {
-            write_formula_element(writer, None, formula, false, formula_tag)?;
+            let detach_shared = formula_template
+                .as_ref()
+                .is_some_and(|f| should_detach_shared_formula(f, formula));
+            write_formula_element(
+                writer,
+                formula_template.as_ref(),
+                formula,
+                detach_shared,
+                formula_tag,
+            )?;
         }
     }
     if update_value && !value_written {
