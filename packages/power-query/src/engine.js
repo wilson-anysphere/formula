@@ -1,11 +1,19 @@
-import { DataTable } from "./table.js";
 import { applyOperation } from "./steps.js";
+import { DataTable } from "./table.js";
+
+import { hashValue } from "./cache/key.js";
+import { deserializeTable, serializeTable } from "./cache/serialize.js";
+import { FileConnector } from "./connectors/file.js";
+import { HttpConnector } from "./connectors/http.js";
+import { SqlConnector } from "./connectors/sql.js";
 
 /**
  * @typedef {import("./model.js").Query} Query
  * @typedef {import("./model.js").QuerySource} QuerySource
  * @typedef {import("./model.js").QueryStep} QueryStep
  * @typedef {import("./model.js").QueryOperation} QueryOperation
+ * @typedef {import("./connectors/types.js").ConnectorMeta} ConnectorMeta
+ * @typedef {import("./connectors/types.js").SchemaInfo} SchemaInfo
  */
 
 /**
@@ -17,187 +25,182 @@ import { applyOperation } from "./steps.js";
 
 /**
  * @typedef {{
+ *   type: "cache:hit" | "cache:miss" | "cache:set";
+ *   queryId: string;
+ *   cacheKey: string;
+ * } | {
+ *   type: "source:start" | "source:complete";
+ *   queryId: string;
+ *   sourceType: QuerySource["type"];
+ * } | {
+ *   type: "step:start" | "step:complete";
+ *   queryId: string;
+ *   stepIndex: number;
+ *   stepId: string;
+ *   operation: QueryOperation["type"];
+ * }} EngineProgressEvent
+ */
+
+/**
+ * @typedef {{
  *   limit?: number;
  *   // Execute up to and including this step index.
  *   maxStepIndex?: number;
+ *   signal?: AbortSignal;
+ *   onProgress?: (event: EngineProgressEvent) => void;
+ *   cache?: { mode?: "use" | "refresh" | "bypass"; ttlMs?: number };
  * }} ExecuteOptions
  */
 
 /**
- * Minimal CSV parser (RFC4180-ish) with support for quoted values.
- * @param {string} text
- * @param {{ delimiter?: string }} [options]
- * @returns {string[][]}
- */
-export function parseCsv(text, options = {}) {
-  const delimiter = options.delimiter ?? ",";
-
-  /** @type {string[][]} */
-  const rows = [];
-  /** @type {string[]} */
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let i = 0; i <= text.length; i++) {
-    const char = i === text.length ? "\n" : text[i];
-
-    if (inQuotes) {
-      if (char === '"') {
-        const next = text[i + 1];
-        if (next === '"') {
-          field += '"';
-          i += 1;
-        } else {
-          inQuotes = false;
-        }
-        continue;
-      }
-      field += char;
-      continue;
-    }
-
-    if (char === '"') {
-      inQuotes = true;
-      continue;
-    }
-
-    if (char === delimiter) {
-      row.push(field);
-      field = "";
-      continue;
-    }
-
-    if (char === "\r") {
-      // Ignore CR; LF will handle row endings.
-      continue;
-    }
-
-    if (char === "\n") {
-      row.push(field);
-      field = "";
-      // Ignore empty trailing row when the file ends with a newline.
-      if (!(row.length === 1 && row[0] === "" && i === text.length)) {
-        rows.push(row);
-      }
-      row = [];
-      continue;
-    }
-
-    field += char;
-  }
-
-  return rows;
-}
-
-/**
- * Convert a CSV cell to a primitive.
- * @param {string} value
- * @returns {unknown}
- */
-export function parseCsvCell(value) {
-  const trimmed = value.trim();
-  if (trimmed === "") return null;
-  if (/^(?:true|false)$/i.test(trimmed)) return trimmed.toLowerCase() === "true";
-  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
-  return trimmed;
-}
-
-/**
- * @param {unknown} input
- * @param {string} path
- * @returns {unknown}
- */
-function jsonPathSelect(input, path) {
-  if (!path) return input;
-  const parts = path.split(".").filter(Boolean);
-  let current = input;
-  for (const part of parts) {
-    if (current == null) return undefined;
-    const bracketMatch = part.match(/^(.+)\[(\d+)\]$/);
-    if (bracketMatch) {
-      const prop = bracketMatch[1];
-      const index = Number(bracketMatch[2]);
-      // @ts-ignore - runtime traversal
-      current = current[prop];
-      if (!Array.isArray(current)) return undefined;
-      current = current[index];
-    } else {
-      // @ts-ignore - runtime traversal
-      current = current[part];
-    }
-  }
-  return current;
-}
-
-/**
- * @param {unknown} json
- * @returns {DataTable}
- */
-function tableFromJson(json) {
-  if (Array.isArray(json)) {
-    if (json.length === 0) return new DataTable([], []);
-    if (Array.isArray(json[0])) {
-      // Treat as grid: [[header...], [row...]]
-      return DataTable.fromGrid(/** @type {unknown[][]} */ (json), { hasHeaders: true, inferTypes: true });
-    }
-
-    // Array of objects.
-    /** @type {Set<string>} */
-    const keySet = new Set();
-    for (const row of json) {
-      if (row && typeof row === "object" && !Array.isArray(row)) {
-        Object.keys(row).forEach((k) => keySet.add(k));
-      }
-    }
-    const keys = Array.from(keySet);
-    const columns = keys.map((name) => ({ name, type: "any" }));
-    const rows = json.map((row) => {
-      if (!row || typeof row !== "object" || Array.isArray(row)) {
-        return keys.map(() => null);
-      }
-      // @ts-ignore - runtime access
-      return keys.map((k) => row[k] ?? null);
-    });
-    return new DataTable(columns, rows);
-  }
-
-  if (json && typeof json === "object") {
-    // Single object -> one row.
-    const keys = Object.keys(json);
-    const columns = keys.map((name) => ({ name, type: "any" }));
-    // @ts-ignore - runtime access
-    const row = keys.map((k) => json[k] ?? null);
-    return new DataTable(columns, [row]);
-  }
-
-  return new DataTable([{ name: "Value", type: "any" }], [[json]]);
-}
-
-/**
- * @typedef {{
- *   querySql: (connection: unknown, sql: string) => Promise<DataTable>;
- * }} DatabaseAdapter
+ * @typedef {Object} QueryExecutionMeta
+ * @property {string} queryId
+ * @property {Date} startedAt
+ * @property {Date} completedAt
+ * @property {Date} refreshedAt
+ *   When the underlying data was last refreshed (i.e. the cache entry was
+ *   created, or the refresh just completed).
+ * @property {ConnectorMeta[]} sources Metadata for every source the query touched (including referenced queries).
+ * @property {SchemaInfo} outputSchema
+ * @property {number} outputRowCount
+ * @property {{ key: string; hit: boolean } | undefined} [cache]
  */
 
 /**
  * @typedef {{
- *   fetchTable: (url: string, options: { method: string; headers?: Record<string, string> }) => Promise<DataTable>;
- * }} ApiAdapter
+ *   table: DataTable;
+ *   meta: QueryExecutionMeta;
+ * }} QueryExecutionResult
  */
+
+/**
+ * @typedef {{
+ *   onPermissionRequest?: (kind: string, details: unknown) => boolean | Promise<boolean>;
+ *   onCredentialRequest?: (connectorId: string, details: unknown) => unknown | Promise<unknown>;
+ * }} QueryEngineHooks
+ */
+
+/**
+ * @typedef {Object} QueryEngineOptions
+ * @property {{ querySql: (connection: unknown, sql: string, options?: any) => Promise<DataTable> } | undefined} [databaseAdapter]
+ *   Backwards-compatible adapter from the prototype. Prefer supplying a `SqlConnector`.
+ * @property {{ fetchTable: (url: string, options: { method: string; headers?: Record<string, string> }) => Promise<DataTable> } | undefined} [apiAdapter]
+ *   Backwards-compatible adapter from the prototype. Prefer supplying a `HttpConnector`.
+ * @property {{ readText?: (path: string) => Promise<string>; readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable> } | undefined} [fileAdapter]
+ *   Backwards-compatible adapter from the prototype. Prefer supplying a `FileConnector`.
+ * @property {Partial<{ file: FileConnector; http: HttpConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
+ * @property {import("./cache/cache.js").CacheManager | undefined} [cache]
+ * @property {number | undefined} [defaultCacheTtlMs]
+ * @property {QueryEngineHooks["onPermissionRequest"] | undefined} [onPermissionRequest]
+ * @property {QueryEngineHooks["onCredentialRequest"] | undefined} [onCredentialRequest]
+ */
+
+/**
+ * @param {AbortSignal | undefined} signal
+ */
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const err = new Error("Aborted");
+  err.name = "AbortError";
+  throw err;
+}
+
+/**
+ * @param {ConnectorMeta} meta
+ * @returns {{ refreshedAtMs: number, sourceTimestampMs?: number, schema: any, rowCount: number, rowCountEstimate?: number, provenance: any }}
+ */
+function serializeConnectorMeta(meta) {
+  return {
+    refreshedAtMs: meta.refreshedAt.getTime(),
+    sourceTimestampMs: meta.sourceTimestamp ? meta.sourceTimestamp.getTime() : undefined,
+    schema: meta.schema,
+    rowCount: meta.rowCount,
+    rowCountEstimate: meta.rowCountEstimate,
+    provenance: meta.provenance,
+  };
+}
+
+/**
+ * @param {any} data
+ * @returns {ConnectorMeta}
+ */
+function deserializeConnectorMeta(data) {
+  return {
+    refreshedAt: new Date(data.refreshedAtMs),
+    sourceTimestamp: data.sourceTimestampMs != null ? new Date(data.sourceTimestampMs) : undefined,
+    schema: data.schema,
+    rowCount: data.rowCount,
+    rowCountEstimate: data.rowCountEstimate,
+    provenance: data.provenance,
+  };
+}
+
+/**
+ * @param {QueryExecutionMeta} meta
+ * @returns {any}
+ */
+function serializeQueryMeta(meta) {
+  return {
+    queryId: meta.queryId,
+    refreshedAtMs: meta.refreshedAt.getTime(),
+    sources: meta.sources.map(serializeConnectorMeta),
+    outputSchema: meta.outputSchema,
+    outputRowCount: meta.outputRowCount,
+  };
+}
+
+/**
+ * @param {any} data
+ * @param {Date} startedAt
+ * @param {Date} completedAt
+ * @param {{ key: string; hit: boolean } | undefined} cache
+ * @returns {QueryExecutionMeta}
+ */
+function deserializeQueryMeta(data, startedAt, completedAt, cache) {
+  return {
+    queryId: data.queryId,
+    startedAt,
+    completedAt,
+    refreshedAt: new Date(data.refreshedAtMs),
+    sources: Array.isArray(data.sources) ? data.sources.map(deserializeConnectorMeta) : [],
+    outputSchema: data.outputSchema,
+    outputRowCount: data.outputRowCount,
+    cache,
+  };
+}
 
 export class QueryEngine {
   /**
-   * @param {{
-   *   databaseAdapter?: DatabaseAdapter,
-   *   apiAdapter?: ApiAdapter,
-   *   fileAdapter?: { readText: (path: string) => Promise<string> }
-   * }} [options]
+   * @param {QueryEngineOptions} [options]
    */
   constructor(options = {}) {
-    this.databaseAdapter = options.databaseAdapter ?? null;
-    this.apiAdapter = options.apiAdapter ?? null;
-    this.fileAdapter = options.fileAdapter ?? null;
+    this.onPermissionRequest = options.onPermissionRequest ?? null;
+    this.onCredentialRequest = options.onCredentialRequest ?? null;
+
+    /** @type {Map<string, any>} */
+    this.connectors = new Map();
+
+    const fileConnector =
+      options.connectors?.file ??
+      new FileConnector({ readText: options.fileAdapter?.readText, readParquetTable: options.fileAdapter?.readParquetTable });
+    const httpConnector = options.connectors?.http ?? new HttpConnector({ fetchTable: options.apiAdapter?.fetchTable });
+    const sqlConnector = options.connectors?.sql ?? new SqlConnector({ querySql: options.databaseAdapter?.querySql });
+
+    this.connectors.set(fileConnector.id, fileConnector);
+    this.connectors.set(httpConnector.id, httpConnector);
+    this.connectors.set(sqlConnector.id, sqlConnector);
+
+    if (options.connectors) {
+      for (const connector of Object.values(options.connectors)) {
+        if (!connector || typeof connector !== "object") continue;
+        if (typeof connector.id === "string") {
+          this.connectors.set(connector.id, connector);
+        }
+      }
+    }
+
+    this.cache = options.cache ?? null;
+    this.defaultCacheTtlMs = options.defaultCacheTtlMs ?? null;
   }
 
   /**
@@ -208,12 +211,285 @@ export class QueryEngine {
    * @returns {Promise<DataTable>}
    */
   async executeQuery(query, context = {}, options = {}) {
-    const sourceTable = await this.loadSource(query.source, context, new Set([query.id]));
+    const { table } = await this.executeQueryWithMeta(query, context, options);
+    return table;
+  }
+
+  /**
+   * Execute a query and return refresh/caching metadata.
+   * @param {Query} query
+   * @param {QueryExecutionContext} [context]
+   * @param {ExecuteOptions} [options]
+   * @returns {Promise<QueryExecutionResult>}
+   */
+  async executeQueryWithMeta(query, context = {}, options = {}) {
+    /** @type {Map<string, Promise<unknown>>} */
+    const credentialCache = new Map();
+    /** @type {Map<string, Promise<boolean>>} */
+    const permissionCache = new Map();
+
+    const now = () => Date.now();
+    const result = await this.executeQueryInternal(
+      query,
+      context,
+      options,
+      { credentialCache, permissionCache, now },
+      new Set([query.id]),
+    );
+
+    return result;
+  }
+
+  /**
+   * Compute a deterministic cache key for a query execution.
+   *
+   * @param {Query} query
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} options
+   * @returns {Promise<string | null>}
+   */
+  async getCacheKey(query, context = {}, options = {}) {
+    if (!this.cache) return null;
+    /** @type {Map<string, Promise<unknown>>} */
+    const credentialCache = new Map();
+    /** @type {Map<string, Promise<boolean>>} */
+    const permissionCache = new Map();
+    const now = () => Date.now();
+    const state = { credentialCache, permissionCache, now };
+    return this.computeCacheKey(query, context, options, state, new Set([query.id]));
+  }
+
+  /**
+   * Manual invalidation helper.
+   * @param {Query} query
+   * @param {QueryExecutionContext} [context]
+   * @param {ExecuteOptions} [options]
+   */
+  async invalidateQueryCache(query, context = {}, options = {}) {
+    if (!this.cache) return;
+    const key = await this.getCacheKey(query, context, options);
+    if (key) await this.cache.delete(key);
+  }
+
+  /**
+   * @private
+   * @param {Query} query
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @param {Set<string>} callStack
+   * @returns {Promise<QueryExecutionResult>}
+   */
+  async executeQueryInternal(query, context, options, state, callStack) {
+    throwIfAborted(options.signal);
+
+    const startedAt = new Date(state.now());
+    const cacheMode = options.cache?.mode ?? "use";
+    const cacheTtlMs = options.cache?.ttlMs ?? this.defaultCacheTtlMs ?? undefined;
+
+    /** @type {string | null} */
+    let cacheKey = null;
+    if (this.cache && cacheMode !== "bypass") {
+      cacheKey = await this.computeCacheKey(query, context, options, state, callStack);
+      if (cacheKey && cacheMode === "use") {
+        const cached = await this.cache.getEntry(cacheKey);
+        if (cached) {
+          options.onProgress?.({ type: "cache:hit", queryId: query.id, cacheKey });
+          const completedAt = new Date(state.now());
+          const payload = /** @type {any} */ (cached.value);
+          const table = deserializeTable(payload.table);
+          const meta = deserializeQueryMeta(
+            payload.meta,
+            startedAt,
+            completedAt,
+            { key: cacheKey, hit: true },
+          );
+          return { table, meta };
+        }
+        options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
+      }
+    }
+
+    /** @type {ConnectorMeta[]} */
+    const sources = [];
+
+    const sourceResult = await this.loadSourceWithMeta(query.source, context, callStack, options, state);
+    sources.push(...sourceResult.sources);
+    let table = sourceResult.table;
+
     const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
     const steps = query.steps.slice(0, maxStepIndex + 1);
-    const table = await this.executeSteps(sourceTable, steps, context);
-    const limited = options.limit != null ? table.head(options.limit) : table;
-    return limited;
+    table = await this.executeSteps(table, steps, context, options, state, callStack, sources);
+
+    if (options.limit != null) {
+      table = table.head(options.limit);
+    }
+
+    const completedAt = new Date(state.now());
+
+    /** @type {SchemaInfo} */
+    const outputSchema = { columns: table.columns, inferred: true };
+
+    /** @type {QueryExecutionMeta} */
+    const meta = {
+      queryId: query.id,
+      startedAt,
+      completedAt,
+      refreshedAt: completedAt,
+      sources,
+      outputSchema,
+      outputRowCount: table.rows.length,
+      cache: cacheKey ? { key: cacheKey, hit: false } : undefined,
+    };
+
+    if (this.cache && cacheKey && cacheMode !== "bypass") {
+      await this.cache.set(
+        cacheKey,
+        { version: 1, table: serializeTable(table), meta: serializeQueryMeta(meta) },
+        { ttlMs: cacheTtlMs },
+      );
+      options.onProgress?.({ type: "cache:set", queryId: query.id, cacheKey });
+    }
+
+    return { table, meta };
+  }
+
+  /**
+   * @private
+   * @param {Query} query
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @param {Set<string>} callStack
+   * @returns {Promise<string | null>}
+   */
+  async computeCacheKey(query, context, options, state, callStack) {
+    if (!this.cache) return null;
+
+    const signature = await this.buildQuerySignature(query, context, options, state, callStack);
+    return `pq:v1:${hashValue(signature)}`;
+  }
+
+  /**
+   * @private
+   * @param {Query} query
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @param {Set<string>} callStack
+   * @returns {Promise<unknown>}
+   */
+  async buildQuerySignature(query, context, options, state, callStack) {
+    const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
+    const steps = query.steps.slice(0, maxStepIndex + 1);
+
+    /** @type {Record<string, unknown>} */
+    const signature = {
+      source: await this.buildSourceSignature(query.source, context, state, callStack),
+      steps: steps.map((s) => s.operation),
+      options: { limit: options.limit ?? null, maxStepIndex: options.maxStepIndex ?? null },
+    };
+
+    // Merge/append steps refer to other queries; include their signatures so the cache key changes when dependencies change.
+    for (const step of steps) {
+      if (step.operation.type === "merge") {
+        const dep = context.queries?.[step.operation.rightQuery];
+        if (dep) {
+          if (callStack.has(dep.id)) {
+            signature[`merge:${step.operation.rightQuery}`] = { queryId: dep.id, cycle: true };
+            continue;
+          }
+          const nextStack = new Set(callStack);
+          nextStack.add(dep.id);
+          signature[`merge:${step.operation.rightQuery}`] = await this.buildQuerySignature(dep, context, {}, state, nextStack);
+        }
+      } else if (step.operation.type === "append") {
+        for (const id of step.operation.queries) {
+          const dep = context.queries?.[id];
+          if (dep) {
+            if (callStack.has(dep.id)) {
+              signature[`append:${id}`] = { queryId: dep.id, cycle: true };
+              continue;
+            }
+            const nextStack = new Set(callStack);
+            nextStack.add(dep.id);
+            signature[`append:${id}`] = await this.buildQuerySignature(dep, context, {}, state, nextStack);
+          }
+        }
+      }
+    }
+
+    return signature;
+  }
+
+  /**
+   * @private
+   * @param {QuerySource} source
+   * @param {QueryExecutionContext} context
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @param {Set<string>} callStack
+   * @returns {Promise<unknown>}
+   */
+  async buildSourceSignature(source, context, state, callStack) {
+    if (source.type === "query") {
+      const target = context.queries?.[source.queryId];
+      if (!target) return { type: "query", queryId: source.queryId, missing: true };
+      if (callStack.has(target.id)) {
+        return { type: "query", queryId: source.queryId, cycle: true };
+      }
+      const nextStack = new Set(callStack);
+      nextStack.add(target.id);
+      return { type: "query", queryId: source.queryId, query: await this.buildQuerySignature(target, context, {}, state, nextStack) };
+    }
+
+    if (source.type === "range") {
+      return { type: "range", hasHeaders: source.range.hasHeaders ?? true, values: source.range.values };
+    }
+    if (source.type === "table") {
+      return { type: "table", table: source.table };
+    }
+
+    if (source.type === "csv" || source.type === "json" || source.type === "parquet") {
+      const connector = this.connectors.get("file");
+      if (!connector) return { type: source.type, missingConnector: "file" };
+      const request =
+        source.type === "csv"
+          ? { format: "csv", path: source.path, csv: source.options ?? {} }
+          : source.type === "json"
+            ? { format: "json", path: source.path, json: { jsonPath: source.jsonPath ?? "" } }
+            : { format: "parquet", path: source.path };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("file", request, state);
+      return { type: source.type, request: connector.getCacheKey(request), credentialsHash: hashValue(credentials ?? null) };
+    }
+
+    if (source.type === "api") {
+      const connector = this.connectors.get("http");
+      if (!connector) return { type: "api", missingConnector: "http" };
+      const request = {
+        url: source.url,
+        method: source.method,
+        headers: source.headers ?? {},
+        responseType: "auto",
+      };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("http", request, state);
+      return { type: "api", request: connector.getCacheKey(request), credentialsHash: hashValue(credentials ?? null) };
+    }
+
+    if (source.type === "database") {
+      const connector = this.connectors.get("sql");
+      if (!connector) return { type: "database", missingConnector: "sql" };
+      const request = { connection: source.connection, sql: source.query };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("sql", request, state);
+      return { type: "database", request: connector.getCacheKey(request), credentialsHash: hashValue(credentials ?? null) };
+    }
+
+    /** @type {never} */
+    const exhausted = source;
+    throw new Error(`Unsupported source type '${exhausted.type}'`);
   }
 
   /**
@@ -221,12 +497,21 @@ export class QueryEngine {
    * @param {DataTable} table
    * @param {QueryStep[]} steps
    * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} [options]
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} [state]
+   * @param {Set<string>} [callStack]
+   * @param {ConnectorMeta[]} [sources]
    * @returns {Promise<DataTable>}
    */
-  async executeSteps(table, steps, context) {
+  async executeSteps(table, steps, context, options = {}, state, callStack, sources) {
     let current = table;
-    for (const step of steps) {
-      current = await this.applyStep(current, step.operation, context);
+    const queryId = callStack ? Array.from(callStack).at(-1) ?? "<unknown>" : "<unknown>";
+    for (let i = 0; i < steps.length; i++) {
+      throwIfAborted(options.signal);
+      const step = steps[i];
+      options.onProgress?.({ type: "step:start", queryId, stepIndex: i, stepId: step.id, operation: step.operation.type });
+      current = await this.applyStep(current, step.operation, context, options, state, callStack, sources);
+      options.onProgress?.({ type: "step:complete", queryId, stepIndex: i, stepId: step.id, operation: step.operation.type });
     }
     return current;
   }
@@ -235,84 +520,194 @@ export class QueryEngine {
    * @param {DataTable} table
    * @param {QueryOperation} operation
    * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} [options]
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} [state]
+   * @param {Set<string>} [callStack]
+   * @param {ConnectorMeta[]} [sources]
    * @returns {Promise<DataTable>}
    */
-  async applyStep(table, operation, context) {
+  async applyStep(table, operation, context, options = {}, state, callStack, sources) {
+    throwIfAborted(options.signal);
     switch (operation.type) {
       case "merge":
-        return this.mergeTables(table, operation, context);
+        return this.mergeTables(table, operation, context, options, state, callStack, sources);
       case "append":
-        return this.appendTables(table, operation, context);
+        return this.appendTables(table, operation, context, options, state, callStack, sources);
       default:
         return applyOperation(table, operation);
     }
   }
 
   /**
+   * Load a query source into a materialized `DataTable`.
+   *
+   * This is exposed for advanced callers, but most hosts should use
+   * `executeQuery` / `executeQueryWithMeta`.
+   *
    * @param {QuerySource} source
    * @param {QueryExecutionContext} context
    * @param {Set<string>} callStack
+   * @param {ExecuteOptions} [options]
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} [state]
    * @returns {Promise<DataTable>}
    */
-  async loadSource(source, context, callStack) {
-    switch (source.type) {
-      case "range": {
-        const hasHeaders = source.range.hasHeaders ?? true;
-        return DataTable.fromGrid(source.range.values, { hasHeaders, inferTypes: true });
-      }
-      case "table": {
-        if (!context.tables?.[source.table]) {
-          throw new Error(`Unknown table '${source.table}'`);
-        }
-        return context.tables[source.table];
-      }
-      case "csv": {
-        if (!this.fileAdapter) {
-          throw new Error("CSV source requires a QueryEngine fileAdapter");
-        }
-        const text = await this.fileAdapter.readText(source.path);
-        const rows = parseCsv(text, { delimiter: source.options?.delimiter });
-        const grid = rows.map((r) => r.map(parseCsvCell));
-        const hasHeaders = source.options?.hasHeaders ?? true;
-        return DataTable.fromGrid(grid, { hasHeaders, inferTypes: true });
-      }
-      case "json": {
-        if (!this.fileAdapter) {
-          throw new Error("JSON source requires a QueryEngine fileAdapter");
-        }
-        const text = await this.fileAdapter.readText(source.path);
-        const parsed = JSON.parse(text);
-        const selected = jsonPathSelect(parsed, source.jsonPath ?? "");
-        return tableFromJson(selected);
-      }
-      case "query": {
-        const target = context.queries?.[source.queryId];
-        if (!target) throw new Error(`Unknown query '${source.queryId}'`);
-        if (callStack.has(target.id)) {
-          throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${target.id}`);
-        }
-        const nextStack = new Set(callStack);
-        nextStack.add(target.id);
-        return this.executeQuery(target, context, {});
-      }
-      case "database": {
-        if (!this.databaseAdapter) {
-          throw new Error("Database source requires a QueryEngine databaseAdapter");
-        }
-        return this.databaseAdapter.querySql(source.connection, source.query);
-      }
-      case "api": {
-        if (!this.apiAdapter) {
-          throw new Error("API source requires a QueryEngine apiAdapter");
-        }
-        return this.apiAdapter.fetchTable(source.url, { method: source.method, headers: source.headers });
-      }
-      default: {
-        /** @type {never} */
-        const exhausted = source;
-        throw new Error(`Unsupported source type '${exhausted.type}'`);
-      }
+  async loadSource(
+    source,
+    context,
+    callStack,
+    options = {},
+    state = { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() },
+  ) {
+    const result = await this.loadSourceWithMeta(source, context, callStack, options, state);
+    return result.table;
+  }
+
+  /**
+   * @private
+   * @param {QuerySource} source
+   * @param {QueryExecutionContext} context
+   * @param {Set<string>} callStack
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @returns {Promise<{ table: DataTable, meta: ConnectorMeta, sources: ConnectorMeta[] }>}
+   */
+  async loadSourceWithMeta(source, context, callStack, options, state) {
+    throwIfAborted(options.signal);
+
+    options.onProgress?.({ type: "source:start", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+
+    if (source.type === "range") {
+      const hasHeaders = source.range.hasHeaders ?? true;
+      const table = DataTable.fromGrid(source.range.values, { hasHeaders, inferTypes: true });
+      const meta = {
+        refreshedAt: new Date(state.now()),
+        schema: { columns: table.columns, inferred: true },
+        rowCount: table.rows.length,
+        rowCountEstimate: table.rows.length,
+        provenance: { kind: "range" },
+      };
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { table, meta, sources: [meta] };
     }
+
+    if (source.type === "table") {
+      const table = context.tables?.[source.table];
+      if (!table) {
+        throw new Error(`Unknown table '${source.table}'`);
+      }
+      const meta = {
+        refreshedAt: new Date(state.now()),
+        schema: { columns: table.columns, inferred: true },
+        rowCount: table.rows.length,
+        rowCountEstimate: table.rows.length,
+        provenance: { kind: "table", table: source.table },
+      };
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { table, meta, sources: [meta] };
+    }
+
+    if (source.type === "query") {
+      const target = context.queries?.[source.queryId];
+      if (!target) throw new Error(`Unknown query '${source.queryId}'`);
+      if (callStack.has(target.id)) {
+        throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${target.id}`);
+      }
+      const nextStack = new Set(callStack);
+      nextStack.add(target.id);
+      const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+      const { table, meta: queryMeta } = await this.executeQueryInternal(target, context, depOptions, state, nextStack);
+      const meta = {
+        refreshedAt: queryMeta.refreshedAt,
+        schema: queryMeta.outputSchema,
+        rowCount: queryMeta.outputRowCount,
+        rowCountEstimate: queryMeta.outputRowCount,
+        provenance: { kind: "query", queryId: source.queryId },
+      };
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { table, meta, sources: [meta, ...queryMeta.sources] };
+    }
+
+    if (source.type === "csv" || source.type === "json" || source.type === "parquet") {
+      const connector = this.connectors.get("file");
+      if (!connector) throw new Error("File source requires a FileConnector");
+      const request =
+        source.type === "csv"
+          ? { format: "csv", path: source.path, csv: source.options ?? {} }
+          : source.type === "json"
+            ? { format: "json", path: source.path, json: { jsonPath: source.jsonPath ?? "" } }
+            : { format: "parquet", path: source.path };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("file", request, state);
+      const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { ...result, sources: [result.meta] };
+    }
+
+    if (source.type === "api") {
+      const connector = this.connectors.get("http");
+      if (!connector) throw new Error("API source requires an HttpConnector");
+      const request = { url: source.url, method: source.method, headers: source.headers ?? {}, responseType: "auto" };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("http", request, state);
+      const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { ...result, sources: [result.meta] };
+    }
+
+    if (source.type === "database") {
+      const connector = this.connectors.get("sql");
+      if (!connector) throw new Error("Database source requires a SqlConnector");
+      const request = { connection: source.connection, sql: source.query };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("sql", request, state);
+      const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { ...result, sources: [result.meta] };
+    }
+
+    /** @type {never} */
+    const exhausted = source;
+    throw new Error(`Unsupported source type '${exhausted.type}'`);
+  }
+
+  /**
+   * @private
+   * @param {string} kind
+   * @param {unknown} details
+   * @param {{ permissionCache?: Map<string, Promise<boolean>> }} [state]
+   */
+  async assertPermission(kind, details, state) {
+    if (!this.onPermissionRequest) return;
+    const cache = state?.permissionCache;
+    const key = cache ? `${kind}:${hashValue(details)}` : null;
+    const allowedPromise = key
+      ? cache.get(key) ?? Promise.resolve(this.onPermissionRequest(kind, details))
+      : Promise.resolve(this.onPermissionRequest(kind, details));
+    if (key && cache && !cache.has(key)) cache.set(key, allowedPromise);
+    const allowed = await allowedPromise;
+    if (allowed === false) {
+      throw new Error(`Permission denied: ${kind}`);
+    }
+  }
+
+  /**
+   * @private
+   * @param {string} connectorId
+   * @param {unknown} request
+   * @param {{ credentialCache: Map<string, Promise<unknown>> }} state
+   * @returns {Promise<unknown>}
+   */
+  async getCredentials(connectorId, request, state) {
+    if (!this.onCredentialRequest) return undefined;
+    const key = `${connectorId}:${hashValue(request)}`;
+    const existing = state.credentialCache.get(key);
+    if (existing) return existing;
+    const promise = Promise.resolve(this.onCredentialRequest(connectorId, { request }));
+    state.credentialCache.set(key, promise);
+    return promise;
   }
 
   /**
@@ -321,10 +716,19 @@ export class QueryEngine {
    * @param {QueryExecutionContext} context
    * @returns {Promise<DataTable>}
    */
-  async mergeTables(left, op, context) {
+  async mergeTables(left, op, context, options = {}, state, callStack, sources = []) {
     const query = context.queries?.[op.rightQuery];
     if (!query) throw new Error(`Unknown query '${op.rightQuery}'`);
-    const right = await this.executeQuery(query, context, {});
+    if (callStack?.has(query.id)) {
+      throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${query.id}`);
+    }
+    const nextStack = callStack ? new Set(callStack) : new Set();
+    nextStack.add(query.id);
+
+    const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+    const depState = state ?? { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
+    const { table: right, meta: rightMeta } = await this.executeQueryInternal(query, context, depOptions, depState, nextStack);
+    sources.push(...rightMeta.sources);
 
     const leftKeyIdx = left.getColumnIndex(op.leftKey);
     const rightKeyIdx = right.getColumnIndex(op.rightKey);
@@ -420,12 +824,21 @@ export class QueryEngine {
    * @param {QueryExecutionContext} context
    * @returns {Promise<DataTable>}
    */
-  async appendTables(current, op, context) {
+  async appendTables(current, op, context, options = {}, state, callStack, sources = []) {
     const tables = [current];
     for (const id of op.queries) {
       const query = context.queries?.[id];
       if (!query) throw new Error(`Unknown query '${id}'`);
-      tables.push(await this.executeQuery(query, context, {}));
+      if (callStack?.has(query.id)) {
+        throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${query.id}`);
+      }
+      const nextStack = callStack ? new Set(callStack) : new Set();
+      nextStack.add(query.id);
+      const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+      const depState = state ?? { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
+      const { table, meta } = await this.executeQueryInternal(query, context, depOptions, depState, nextStack);
+      sources.push(...meta.sources);
+      tables.push(table);
     }
 
     /** @type {string[]} */
@@ -454,3 +867,6 @@ export class QueryEngine {
     return new DataTable(outColumns, outRows);
   }
 }
+
+// Backwards-compatible exports for consumers that relied on the original engine helpers.
+export { parseCsv, parseCsvCell } from "./connectors/file.js";

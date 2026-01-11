@@ -42,6 +42,13 @@
 
 /**
  * @typedef {{
+ *   type: "parquet";
+ *   path: string;
+ * }} ParquetQuerySource
+ */
+
+/**
+ * @typedef {{
  *   type: "database";
  *   connection: unknown;
  *   query: string;
@@ -73,7 +80,7 @@
  */
 
 /**
- * @typedef {RangeQuerySource | TableQuerySource | CSVQuerySource | JSONQuerySource | DatabaseQuerySource | APIQuerySource | QueryRefSource} QuerySource
+ * @typedef {RangeQuerySource | TableQuerySource | CSVQuerySource | JSONQuerySource | ParquetQuerySource | DatabaseQuerySource | APIQuerySource | QueryRefSource} QuerySource
  */
 
 /**
@@ -165,6 +172,8 @@
  * } | {
  *   type: "interval",
  *   intervalMs: number
+ * } | {
+ *   type: "on-open"
  * } | {
  *   type: "cron",
  *   cron: string
