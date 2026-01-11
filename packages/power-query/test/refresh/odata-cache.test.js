@@ -57,7 +57,10 @@ test("QueryEngine: folded OData queries reuse cache entries with source-state va
         return makeResponse({ status: 304 });
       }
       headStatuses.push(200);
-      return makeResponse({ headers: { etag, "last-modified": lastModified } });
+      // Simulate a service that supports conditional requests but omits ETag from
+      // HEAD responses. The engine should still cache-validate via If-None-Match
+      // using the ETag captured from GET responses.
+      return makeResponse({ headers: { "last-modified": lastModified } });
     }
     getCount += 1;
     return makeResponse({
@@ -84,6 +87,7 @@ test("QueryEngine: folded OData queries reuse cache entries with source-state va
   assert.equal(first.meta.cache?.hit, false);
   assert.equal(getCount, 1);
   assert.deepEqual(headStatuses, [200]);
+  assert.equal(first.meta.sources[0]?.etag, initialEtag);
 
   const second = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(second.meta.cache?.hit, true);
