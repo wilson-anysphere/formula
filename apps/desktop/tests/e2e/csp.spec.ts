@@ -188,7 +188,11 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         const host = new BrowserExtensionHost({
           engineVersion: "1.0.0",
           spreadsheetApi,
-          permissionPrompt: async () => true
+          permissionPrompt: async () => true,
+          // Vite rewrites `@formula/extension-api` into `/@fs/...` URLs, which fail the
+          // strict import preflight. The import sandbox is exercised in unit tests; for
+          // this e2e suite we disable preflight so we can validate CSP behavior.
+          sandbox: { strictImports: false },
         });
 
         await host.loadExtensionFromUrl(manifestUrl);
