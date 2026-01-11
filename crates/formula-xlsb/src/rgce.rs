@@ -21,8 +21,10 @@ pub enum DecodeError {
     StackUnderflow { offset: usize, ptg: u8 },
     /// A ptg referenced a constant we don't know how to display.
     InvalidConstant { offset: usize, ptg: u8, value: u8 },
+    /// Decoding exceeded the maximum output size derived from the input length.
+    OutputTooLarge { offset: usize, ptg: u8, max_len: usize },
     /// After decoding, the expression stack didn't contain exactly one item.
-    StackNotSingular { offset: usize, stack_len: usize },
+    StackNotSingular { offset: usize, ptg: u8, stack_len: usize },
 }
 
 impl DecodeError {
@@ -32,6 +34,7 @@ impl DecodeError {
             DecodeError::UnexpectedEof { offset, .. } => offset,
             DecodeError::StackUnderflow { offset, .. } => offset,
             DecodeError::InvalidConstant { offset, .. } => offset,
+            DecodeError::OutputTooLarge { offset, .. } => offset,
             DecodeError::StackNotSingular { offset, .. } => offset,
         }
     }
@@ -42,7 +45,8 @@ impl DecodeError {
             DecodeError::UnexpectedEof { ptg, .. } => Some(ptg),
             DecodeError::StackUnderflow { ptg, .. } => Some(ptg),
             DecodeError::InvalidConstant { ptg, .. } => Some(ptg),
-            DecodeError::StackNotSingular { .. } => None,
+            DecodeError::OutputTooLarge { ptg, .. } => Some(ptg),
+            DecodeError::StackNotSingular { ptg, .. } => Some(ptg),
         }
     }
 }
@@ -69,9 +73,17 @@ impl std::fmt::Display for DecodeError {
                 f,
                 "invalid constant 0x{value:02X} decoding ptg=0x{ptg:02X} at rgce offset {offset}"
             ),
-            DecodeError::StackNotSingular { offset, stack_len } => write!(
+            DecodeError::OutputTooLarge { offset, ptg, max_len } => write!(
                 f,
-                "formula decoded with stack_len={stack_len} at rgce offset {offset} (expected 1)"
+                "formula decode exceeded max_len={max_len} decoding ptg=0x{ptg:02X} at rgce offset {offset}"
+            ),
+            DecodeError::StackNotSingular {
+                offset,
+                ptg,
+                stack_len,
+            } => write!(
+                f,
+                "formula decoded with stack_len={stack_len} at rgce offset {offset} (ptg=0x{ptg:02X}, expected 1)"
             ),
         }
     }
@@ -85,7 +97,14 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
         return Ok(String::new());
     }
 
+    // Prevent pathological expansion (e.g. from future token support).
+    const MAX_OUTPUT_FACTOR: usize = 10;
+    let max_len = rgce.len().saturating_mul(MAX_OUTPUT_FACTOR);
+
     let mut i = 0usize;
+    let mut last_ptg_offset = 0usize;
+    let mut last_ptg = rgce[0];
+
     let mut stack: Vec<usize> = Vec::new();
     let mut formula = String::with_capacity(rgce.len());
 
@@ -94,11 +113,22 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
         let ptg = rgce[i];
         i += 1;
 
+        last_ptg_offset = ptg_offset;
+        last_ptg = ptg;
+
         match ptg {
             0x03..=0x11 => {
+                // Binary operators need two operands on the stack.
+                if stack.len() < 2 {
+                    return Err(DecodeError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    });
+                }
+
                 let e2_start = stack
                     .pop()
-                    .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
+                    .expect("stack len checked to be >= 2");
                 let e2 = formula.split_off(e2_start);
                 let op = match ptg {
                     0x03 => "+",
@@ -116,7 +146,7 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
                     0x0F => " ",
                     0x10 => ",",
                     0x11 => ":",
-                    _ => unreachable!(),
+                    _ => unreachable!("ptg was matched by range"),
                 };
                 formula.push_str(op);
                 formula.push_str(&e2);
@@ -134,6 +164,13 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
                 formula.insert(e, '-');
             }
             0x14 => {
+                // Percent applies to the top of stack.
+                if stack.is_empty() {
+                    return Err(DecodeError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    });
+                }
                 formula.push('%');
             }
             0x15 => {
@@ -276,7 +313,8 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
                     });
                 }
 
-                let row = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) + 1;
+                let row0 = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
+                let row = (row0 as u64).saturating_add(1);
                 let flags = rgce[i + 5];
                 let col = u16::from_le_bytes([rgce[i + 4], flags & 0x3F]);
                 i += 6;
@@ -293,13 +331,22 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
             }
             _ => return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg }),
         }
+
+        if formula.len() > max_len {
+            return Err(DecodeError::OutputTooLarge {
+                offset: ptg_offset,
+                ptg,
+                max_len,
+            });
+        }
     }
 
     if stack.len() == 1 {
         Ok(formula)
     } else {
         Err(DecodeError::StackNotSingular {
-            offset: rgce.len(),
+            offset: last_ptg_offset,
+            ptg: last_ptg,
             stack_len: stack.len(),
         })
     }
