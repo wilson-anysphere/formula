@@ -151,7 +151,7 @@ describe("EngineGridProvider", () => {
     await Promise.all([p1, p2]);
     await flushMicrotasks();
 
-    expect(engine.calls.map((c) => c.range).sort()).toEqual(["A1", "A101"]);
+    expect(engine.calls.map((c: { range: string }) => c.range).sort()).toEqual(["A1", "A101"]);
 
     expect(provider.getCell(0, 0)?.value).toBe(1);
     expect(provider.getCell(100, 0)?.value).toBe(2);

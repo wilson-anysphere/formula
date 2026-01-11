@@ -1,13 +1,18 @@
 import { createEngineClient, type CellChange, type CellScalar } from "@formula/engine";
 import type { CellRange } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
-import { range0ToA1, toA1 } from "@formula/spreadsheet-frontend";
+import {
+  parseHtmlTableToGrid,
+  parseTsvToGrid,
+  range0ToA1,
+  serializeGridToHtmlTable,
+  serializeGridToTsv,
+  toA1
+} from "@formula/spreadsheet-frontend";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 
 import { CellEditorOverlay } from "./CellEditorOverlay";
 import { EngineCellProvider } from "./EngineCellProvider";
-import { parseHtmlTableToGrid, serializeGridToHtmlTable } from "./clipboard/html";
-import { parseTsvToGrid, serializeGridToTsv } from "./clipboard/tsv";
 import { isFormulaInput, parseCellScalarInput, scalarToDisplayString } from "./cellScalar";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
 
