@@ -5,6 +5,7 @@ use crate::functions::array_lift;
 use crate::functions::{ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
+use std::cmp::Ordering;
 
 const VAR_ARGS: usize = 255;
 
@@ -291,4 +292,201 @@ fn ifs_pairs(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
         }
     }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "SWITCH",
+        min_args: 3,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: switch_fn,
+    }
+}
+
+fn switch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let expr_val = array_lift::eval_arg(ctx, &args[0]);
+    let (pairs, default) = if (args.len() - 1) % 2 == 0 {
+        (&args[1..], None)
+    } else {
+        (&args[1..args.len() - 1], Some(&args[args.len() - 1]))
+    };
+
+    if pairs.len() < 2 || pairs.len() % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    switch_pairs(ctx, expr_val, pairs, default)
+}
+
+fn switch_pairs(
+    ctx: &dyn FunctionContext,
+    expr_val: Value,
+    pairs: &[CompiledExpr],
+    default: Option<&CompiledExpr>,
+) -> Value {
+    if pairs.is_empty() {
+        return default
+            .map(|expr| array_lift::eval_arg(ctx, expr))
+            .unwrap_or(Value::Error(ErrorKind::NA));
+    }
+    if pairs.len() < 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let case_expr = &pairs[0];
+    let result_expr = &pairs[1];
+    let remaining = &pairs[2..];
+
+    let case_val = array_lift::eval_arg(ctx, case_expr);
+    let cond_val = array_lift::lift2(expr_val.clone(), case_val, |expr, case| {
+        Ok(Value::Bool(excel_eq(expr, case)?))
+    });
+
+    match cond_val {
+        Value::Array(ref arr) => {
+            let mut needs_true = false;
+            let mut needs_false = false;
+            for el in arr.iter() {
+                match el.coerce_to_bool() {
+                    Ok(true) => needs_true = true,
+                    Ok(false) => needs_false = true,
+                    Err(_) => {}
+                }
+                if needs_true && needs_false {
+                    break;
+                }
+            }
+
+            if needs_true && needs_false {
+                let true_val = array_lift::eval_arg(ctx, result_expr);
+                let false_val = switch_pairs(ctx, expr_val, remaining, default);
+                return array_lift::lift3(cond_val, true_val, false_val, |cond, t, f| {
+                    if cond.coerce_to_bool()? {
+                        Ok(t.clone())
+                    } else {
+                        Ok(f.clone())
+                    }
+                });
+            }
+
+            if needs_true {
+                let true_val = array_lift::eval_arg(ctx, result_expr);
+                return array_lift::lift2(cond_val, true_val, |cond, t| {
+                    if cond.coerce_to_bool()? {
+                        Ok(t.clone())
+                    } else {
+                        Ok(Value::Error(ErrorKind::NA))
+                    }
+                });
+            }
+
+            if needs_false {
+                let false_val = switch_pairs(ctx, expr_val, remaining, default);
+                return array_lift::lift2(cond_val, false_val, |cond, f| {
+                    if cond.coerce_to_bool()? {
+                        Ok(Value::Error(ErrorKind::NA))
+                    } else {
+                        Ok(f.clone())
+                    }
+                });
+            }
+
+            // Only errors/invalid comparisons; map the coercion errors without forcing any branch evaluation.
+            array_lift::lift1(cond_val, |cond| {
+                let _ = cond.coerce_to_bool()?;
+                Ok(Value::Error(ErrorKind::NA))
+            })
+        }
+        other => {
+            if let Value::Error(e) = other {
+                return Value::Error(e);
+            }
+            let matched = match other.coerce_to_bool() {
+                Ok(b) => b,
+                Err(e) => return Value::Error(e),
+            };
+
+            if matched {
+                array_lift::eval_arg(ctx, result_expr)
+            } else {
+                switch_pairs(ctx, expr_val, remaining, default)
+            }
+        }
+    }
+}
+
+fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
+    if let Value::Error(e) = left {
+        return Err(*e);
+    }
+    if let Value::Error(e) = right {
+        return Err(*e);
+    }
+    if matches!(
+        left,
+        Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. }
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
+    ) || matches!(
+        right,
+        Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. }
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
+    ) {
+        return Err(ErrorKind::Value);
+    }
+
+    // Blank coerces to the other type for comparisons.
+    let (l, r) = match (left, right) {
+        (Value::Blank, Value::Number(_)) => (Value::Number(0.0), right.clone()),
+        (Value::Number(_), Value::Blank) => (left.clone(), Value::Number(0.0)),
+        (Value::Blank, Value::Bool(_)) => (Value::Bool(false), right.clone()),
+        (Value::Bool(_), Value::Blank) => (left.clone(), Value::Bool(false)),
+        (Value::Blank, Value::Text(_)) => (Value::Text(String::new()), right.clone()),
+        (Value::Text(_), Value::Blank) => (left.clone(), Value::Text(String::new())),
+        _ => (left.clone(), right.clone()),
+    };
+
+    let ord = match (&l, &r) {
+        (Value::Number(a), Value::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (Value::Text(a), Value::Text(b)) => a.to_ascii_uppercase().cmp(&b.to_ascii_uppercase()),
+        (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+        // Type precedence (approximate Excel): numbers < text < booleans.
+        (Value::Number(_), Value::Text(_) | Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_), Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_), Value::Number(_)) => Ordering::Greater,
+        (Value::Bool(_), Value::Number(_) | Value::Text(_)) => Ordering::Greater,
+        // Blank should have been coerced above.
+        (Value::Blank, Value::Blank) => Ordering::Equal,
+        (Value::Blank, _) => Ordering::Less,
+        (_, Value::Blank) => Ordering::Greater,
+        // Errors are handled above.
+        (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
+        // Arrays/spill markers/lambdas/references are rejected above.
+        (Value::Array(_), _)
+        | (_, Value::Array(_))
+        | (Value::Lambda(_), _)
+        | (_, Value::Lambda(_))
+        | (Value::Spill { .. }, _)
+        | (_, Value::Spill { .. })
+        | (Value::Reference(_), _)
+        | (_, Value::Reference(_))
+        | (Value::ReferenceUnion(_), _)
+        | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
+    };
+
+    Ok(ord == Ordering::Equal)
 }

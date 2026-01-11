@@ -1518,6 +1518,16 @@ export default {
       ]
     },
     {
+      "name": "SWITCH",
+      "min_args": 3,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "SYD",
       "min_args": 4,
       "max_args": 4,

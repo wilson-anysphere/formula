@@ -105,6 +105,63 @@ fn ifs_accepts_xlfn_prefix_and_spills_arrays() {
 }
 
 #[test]
+fn switch_selects_first_matching_case_and_is_lazy() {
+    let mut sheet = TestSheet::new();
+
+    assert_eq!(
+        sheet.eval("=SWITCH(2, 1, \"a\", 2, \"b\", 3, \"c\")"),
+        Value::Text("b".to_string())
+    );
+
+    assert_eq!(
+        sheet.eval("=SWITCH(4, 1, \"a\", 2, \"b\")"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        sheet.eval("=SWITCH(4, 1, \"a\", 2, \"b\", \"none\")"),
+        Value::Text("none".to_string())
+    );
+
+    // Short-circuit: unselected case/result expressions are not evaluated.
+    assert_eq!(
+        sheet.eval("=SWITCH(1, 1, 10, 2, 1/0)"),
+        Value::Number(10.0)
+    );
+    assert_eq!(
+        sheet.eval("=SWITCH(2, 1, 1/0, 2, 20)"),
+        Value::Number(20.0)
+    );
+    assert_eq!(
+        sheet.eval("=SWITCH(1, 1, \"ok\", 1/0, \"bad\")"),
+        Value::Text("ok".to_string())
+    );
+
+    // Spill over array expressions.
+    sheet.set_formula("A1", "=SWITCH({1,2,3}, 1, \"a\", 2, \"b\", 3, \"c\")");
+    sheet.recalculate();
+    assert_eq!(sheet.get("A1"), Value::Text("a".to_string()));
+    assert_eq!(sheet.get("B1"), Value::Text("b".to_string()));
+    assert_eq!(sheet.get("C1"), Value::Text("c".to_string()));
+
+    // Accepts `_xlfn.` prefix.
+    assert_eq!(
+        sheet.eval("=_xlfn.SWITCH(2, 1, \"a\", 2, \"b\")"),
+        Value::Text("b".to_string())
+    );
+
+    // Argument pairs are required; default can be supplied as a trailing arg.
+    assert_eq!(
+        sheet.eval("=SWITCH(1, 1)"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=SWITCH(1, 1, \"a\", 2)"),
+        Value::Text("a".to_string())
+    );
+    assert_number(&sheet.eval("=SWITCH(2, 1, 10, 99)"), 99.0);
+}
+
+#[test]
 fn na_function_returns_na_error() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=NA()"), Value::Error(ErrorKind::NA));
