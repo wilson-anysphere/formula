@@ -125,6 +125,16 @@ export default {
       ]
     },
     {
+      "name": "ERROR.TYPE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "FIND",
       "min_args": 2,
       "max_args": 3,
@@ -247,7 +257,67 @@ export default {
       ]
     },
     {
+      "name": "ISBLANK",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "ISERR",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "ISERROR",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "ISLOGICAL",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "ISNA",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "ISNUMBER",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "ISTEXT",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
@@ -362,6 +432,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "N",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
       ]
     },
     {
@@ -614,6 +694,16 @@ export default {
       ]
     },
     {
+      "name": "T",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "TODAY",
       "min_args": 0,
       "max_args": 0,
@@ -639,6 +729,16 @@ export default {
       "return_type": "text",
       "arg_types": [
         "text"
+      ]
+    },
+    {
+      "name": "TYPE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
       ]
     },
     {

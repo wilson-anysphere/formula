@@ -1,7 +1,7 @@
 use crate::eval::CompiledExpr;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{ErrorKind, Value};
+use crate::value::{Array, ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
 
@@ -350,7 +350,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Bool,
         arg_types: &[ValueType::Any],
         implementation: iserror_fn,
@@ -358,8 +358,37 @@ inventory::submit! {
 }
 
 fn iserror_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let v = ctx.eval_scalar(&args[0]);
-    Value::Bool(matches!(v, Value::Error(_)))
+    match ctx.eval_arg(&args[0]) {
+        ArgValue::Scalar(v) => match v {
+            Value::Array(arr) => Value::Array(Array::new(
+                arr.rows,
+                arr.cols,
+                arr.iter()
+                    .map(|v| Value::Bool(matches!(v, Value::Error(_))))
+                    .collect(),
+            )),
+            other => Value::Bool(matches!(other, Value::Error(_))),
+        },
+        ArgValue::Reference(r) => {
+            if r.is_single_cell() {
+                let v = ctx.get_cell_value(r.sheet_id, r.start);
+                Value::Bool(matches!(v, Value::Error(_)))
+            } else {
+                let r = r.normalized();
+                let rows = (r.end.row - r.start.row + 1) as usize;
+                let cols = (r.end.col - r.start.col + 1) as usize;
+                let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+                for row in r.start.row..=r.end.row {
+                    for col in r.start.col..=r.end.col {
+                        let v = ctx.get_cell_value(r.sheet_id, crate::eval::CellAddr { row, col });
+                        values.push(Value::Bool(matches!(v, Value::Error(_))));
+                    }
+                }
+                Value::Array(Array::new(rows, cols, values))
+            }
+        }
+        ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
+    }
 }
 
 inventory::submit! {

@@ -15,6 +15,7 @@ pub mod date_time;
 // Built-in Excel-compatible functions registered with the inventory-backed
 // registry live in dedicated modules to avoid merge conflicts.
 mod builtins_date_time;
+mod builtins_information;
 mod builtins_logical;
 mod builtins_lookup;
 mod builtins_math;

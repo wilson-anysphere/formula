@@ -3,6 +3,7 @@ mod financial_dates;
 mod financial_depreciation;
 mod financial_time_value;
 mod information;
+mod information_worksheet;
 mod lookup;
 mod math_aggregates;
 mod math_basic;
