@@ -269,4 +269,80 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await page.mouse.click(g11Center.x, g11Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("G11");
   await expect(page.getByTestId("formula-bar-value")).toHaveText("Item 7");
+
+  // Fill left: F2=1, G2=2 -> fill left to D2.
+  const f2Center = await cellCenter(1, 5);
+  await page.mouse.click(f2Center.x, f2Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("F2");
+  await expect(input).toHaveValue("");
+  await input.fill("1");
+  await input.press("Enter");
+
+  const g2Center = await cellCenter(1, 6);
+  await page.mouse.click(g2Center.x, g2Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("G2");
+  await expect(input).toHaveValue("");
+  await input.fill("2");
+  await input.press("Enter");
+
+  await page.mouse.move(f2Center.x, f2Center.y);
+  await page.mouse.down();
+  await page.mouse.move(g2Center.x, g2Center.y);
+  await page.mouse.up();
+
+  const g2Handle = await fillHandleCenter();
+  const d2Center = await cellCenter(1, 3);
+  await page.mouse.move(g2Handle.x, g2Handle.y);
+  await page.mouse.down();
+  await page.mouse.move(d2Center.x, g2Handle.y);
+  await page.mouse.up();
+
+  await page.mouse.click(d2Center.x, d2Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("D2");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("-1");
+
+  const e2Center = await cellCenter(1, 4);
+  await page.mouse.click(e2Center.x, e2Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("E2");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("0");
+
+  // Formula fill right: set A10=1, B10 =A10+1, then fill right to D10.
+  const a10Center = await cellCenter(9, 0);
+  await page.mouse.click(a10Center.x, a10Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("A10");
+  await expect(input).toHaveValue("");
+  await input.fill("1");
+  await input.press("Enter");
+
+  const b10Center = await cellCenter(9, 1);
+  await page.mouse.click(b10Center.x, b10Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("B10");
+  await expect(input).toHaveValue("");
+  await input.fill("=A10+1");
+  await input.press("Enter");
+  await expect(input).toHaveValue("=A10+1");
+
+  await page.getByTestId("engine-status").click();
+  await expect(input).not.toBeFocused();
+
+  await page.mouse.click(b10Center.x, b10Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("B10");
+
+  const b10Handle = await fillHandleCenter();
+  const d10Center = await cellCenter(9, 3);
+  await page.mouse.move(b10Handle.x, b10Handle.y);
+  await page.mouse.down();
+  await page.mouse.move(d10Center.x, b10Handle.y);
+  await page.mouse.up();
+
+  const c10Center = await cellCenter(9, 2);
+  await page.mouse.click(c10Center.x, c10Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("C10");
+  await expect(input).toHaveValue("=B10+1");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("3");
+
+  await page.mouse.click(d10Center.x, d10Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("D10");
+  await expect(input).toHaveValue("=C10+1");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("4");
 });
