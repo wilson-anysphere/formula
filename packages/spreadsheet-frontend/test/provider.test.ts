@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CellChange, CellData as EngineCellData, CellScalar } from "@formula/engine";
+import type { CellChange, CellData as EngineCellData, CellScalar, EngineClient } from "@formula/engine";
 import type { CellProviderUpdate } from "@formula/grid";
 import { EngineCellCache, EngineGridProvider, fromA1, toA1 } from "../src/index.js";
 
@@ -55,8 +55,8 @@ describe("EngineGridProvider", () => {
     values.set("Sheet1!A1", true);
     values.set("Sheet1!B1", 42);
 
-    const engine = new FakeEngine(values) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
 
     const updates: CellProviderUpdate[] = [];
@@ -77,8 +77,8 @@ describe("EngineGridProvider", () => {
     const values = new Map<string, CellScalar>();
     values.set("Sheet2!A1", 99);
 
-    const engine = new FakeEngine(values) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10, sheet: "Sheet2" });
 
     await provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
@@ -92,8 +92,8 @@ describe("EngineGridProvider", () => {
     values.set("Sheet1!A1", 1);
     values.set("Sheet1!B1", 2);
 
-    const engine = new FakeEngine(values) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
 
     const updates: CellProviderUpdate[] = [];
@@ -116,8 +116,8 @@ describe("EngineGridProvider", () => {
     values.set("Sheet1!A1", 1);
     values.set("Sheet1!B1", 2);
 
-    const engine = new FakeEngine(values) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
 
     const updates: CellProviderUpdate[] = [];
@@ -139,8 +139,8 @@ describe("EngineGridProvider", () => {
     values.set("Sheet1!A1", 1);
     values.set("Sheet1!B1", 3);
 
-    const engine = new FakeEngine(values) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 100, colCount: 100, headers: true });
 
     expect(provider.getCell(0, 0)?.value).toBeNull();
@@ -166,8 +166,8 @@ describe("EngineGridProvider", () => {
     values.set("Sheet1!A1", 1);
     values.set("Sheet2!A1", 2);
 
-    const engine = new FakeEngine(values) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10, sheet: "Sheet1" });
 
     const updates: CellProviderUpdate[] = [];
@@ -191,8 +191,8 @@ describe("EngineGridProvider", () => {
   });
 
   it("coalesces adjacent invalidations when applying recalc changes", async () => {
-    const engine = new FakeEngine(new Map()) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(new Map());
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
 
     const updates: CellProviderUpdate[] = [];
@@ -209,8 +209,8 @@ describe("EngineGridProvider", () => {
   });
 
   it("does not coalesce disjoint invalidations", async () => {
-    const engine = new FakeEngine(new Map()) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(new Map());
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
 
     const updates: CellProviderUpdate[] = [];
@@ -230,8 +230,8 @@ describe("EngineGridProvider", () => {
   });
 
   it("falls back to a bounding-box invalidation for large change sets", async () => {
-    const engine = new FakeEngine(new Map()) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(new Map());
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10_000, colCount: 10_000 });
 
     const updates: CellProviderUpdate[] = [];
@@ -260,8 +260,8 @@ describe("EngineGridProvider", () => {
       { sheet: "Sheet1", address: "B1", value: 2 }
     ];
 
-    const engine = new FakeEngine(new Map(), changes) as any;
-    const cache = new EngineCellCache(engine);
+    const engine = new FakeEngine(new Map(), changes);
+    const cache = new EngineCellCache(engine as unknown as EngineClient);
     const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
 
     const updates: CellProviderUpdate[] = [];
