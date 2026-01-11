@@ -83,6 +83,9 @@ test("sandbox: blocks disallowed Node builtin modules (including subpaths)", asy
     { request: "node:fs/promises", normalized: "fs/promises" },
     { request: "process", normalized: "process" },
     { request: "node:process", normalized: "process" },
+    // node:-only builtins (still should be blocked)
+    { request: "node:test", normalized: "test" },
+    { request: "node:test/reporters", normalized: "test/reporters" },
     { request: "http", normalized: "http" },
     { request: "node:http", normalized: "http" },
     { request: "https", normalized: "https" },
