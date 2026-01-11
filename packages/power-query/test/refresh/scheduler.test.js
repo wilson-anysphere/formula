@@ -371,3 +371,64 @@ test("RefreshManager: state store restores interval schedules across instances",
 
   manager2.dispose();
 });
+
+test("RefreshManager: state store restores schedules for '__proto__' query ids", async () => {
+  const store = new InMemoryRefreshStateStore();
+  const timers = new FakeTimers();
+
+  const engine1 = new ControlledEngine();
+  const manager1 = new RefreshManager({
+    engine: engine1,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    stateStore: store,
+  });
+
+  manager1.registerQuery(makeQuery("__proto__", { type: "interval", intervalMs: 10 }));
+  await manager1.ready;
+
+  const completed1 = new Promise((resolve) => {
+    manager1.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "__proto__") resolve(undefined);
+    });
+  });
+
+  timers.advance(10);
+  assert.equal(engine1.calls.length, 1);
+  engine1.calls[0].deferred.resolve(makeResult("__proto__"));
+  await completed1;
+  await Promise.resolve(); // allow persistence save
+
+  timers.advance(5); // now = 15
+  manager1.dispose();
+
+  const engine2 = new ControlledEngine();
+  const manager2 = new RefreshManager({
+    engine: engine2,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    stateStore: store,
+  });
+
+  const query2 = makeQuery("__proto__");
+  delete query2.refreshPolicy;
+  manager2.registerQuery(query2);
+  await manager2.ready;
+
+  const completed2 = new Promise((resolve) => {
+    manager2.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "__proto__") resolve(undefined);
+    });
+  });
+
+  timers.advance(4);
+  assert.equal(engine2.calls.length, 0);
+  timers.advance(1);
+  assert.equal(engine2.calls.length, 1);
+  engine2.calls[0].deferred.resolve(makeResult("__proto__"));
+  await completed2;
+
+  manager2.dispose();
+});
