@@ -276,7 +276,7 @@ function redact() {
   return REDACTION_PLACEHOLDER;
 }
 
-module.exports = {
+export {
   CLASSIFICATION_LEVEL,
   CLASSIFICATION_LEVELS,
   DEFAULT_CLASSIFICATION,
@@ -298,4 +298,3 @@ module.exports = {
   selectorKey,
   validateDlpPolicy,
 };
-
