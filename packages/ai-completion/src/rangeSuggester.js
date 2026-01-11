@@ -41,15 +41,17 @@ export function suggestRanges(params) {
   if (arg.length === 0) return [];
 
   // Only handle simple column/cell prefixes for now (A, A1, $A$1, etc).
-  const match = /^\$?([A-Za-z]{1,3})(?:\$?(\d+))?$/.exec(arg);
+  const match = /^(\$?)([A-Za-z]{1,3})(?:(\$?)(\d+))?$/.exec(arg);
   if (!match) return [];
 
-  const colToken = match[1];
+  const colPrefix = match[1] === "$" ? "$" : "";
+  const colToken = match[2];
   const colLetters = colToken.toUpperCase();
   const colIndex = safeColumnLetterToIndex(colLetters);
   if (colIndex === null) return [];
 
-  const explicitRow = match[2] ? Number(match[2]) : null;
+  const rowPrefix = match[3] === "$" ? "$" : "";
+  const explicitRow = match[4] ? Number(match[4]) : null;
   if (explicitRow !== null && (!Number.isInteger(explicitRow) || explicitRow <= 0)) return [];
 
   /** @type {RangeSuggestion[]} */
@@ -61,8 +63,8 @@ export function suggestRanges(params) {
 
   if (contiguous) {
     const { startRow, endRow, numericRatio } = contiguous;
-    const startA1 = `${colToken}${startRow + 1}`;
-    const endA1 = `${colToken}${endRow + 1}`;
+    const startA1 = `${colPrefix}${colToken}${rowPrefix}${startRow + 1}`;
+    const endA1 = `${colPrefix}${colToken}${rowPrefix}${endRow + 1}`;
     const range = `${startA1}:${endA1}`;
 
     // Confidence heuristic:
@@ -79,7 +81,7 @@ export function suggestRanges(params) {
   }
 
   suggestions.push({
-    range: `${colToken}:${colToken}`,
+    range: `${colPrefix}${colToken}:${colPrefix}${colToken}`,
     confidence: 0.3,
     reason: "entire_column",
   });

@@ -98,6 +98,28 @@ test("Typing =SUM(A suggests a contiguous range above the current cell", async (
   );
 });
 
+test("Typing =SUM($A suggests an absolute-column contiguous range above the current cell", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=SUM($A",
+    cursorPosition: 7,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM($A1:$A10)"),
+    `Expected an absolute-column SUM range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions do not auto-close parens when the function needs more args (VLOOKUP)", async () => {
   const engine = new TabCompletionEngine();
 
@@ -540,6 +562,40 @@ test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   assert.ok(
     suggestions.some((s) => s.text === "=SUM(Sheet2!A1:A10)"),
     `Expected a sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Sheet-qualified ranges preserve absolute column prefixes (Sheet2!$A → Sheet2!$A1:$A10)", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Sheet2!$A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Sheet2!$A1:$A10)"),
+    `Expected an absolute-column sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
