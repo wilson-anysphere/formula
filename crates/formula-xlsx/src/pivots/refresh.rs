@@ -63,7 +63,8 @@ impl XlsxPackage {
             .ok_or_else(|| XlsxError::MissingPart(cache_definition_part.to_string()))?
             .to_vec();
 
-        let worksheet_source = parse_worksheet_source_from_cache_definition(&cache_definition_bytes)?;
+        let worksheet_source =
+            parse_worksheet_source_from_cache_definition(&cache_definition_bytes)?;
         let range = Range::from_a1(&worksheet_source.reference).map_err(|e| {
             XlsxError::Invalid(format!(
                 "invalid worksheetSource ref {ref_:?}: {e}",
@@ -88,11 +89,8 @@ impl XlsxPackage {
             .ok_or_else(|| XlsxError::MissingPart(cache_records_part.clone()))?
             .to_vec();
 
-        let updated_cache_definition = refresh_cache_definition_xml(
-            &cache_definition_bytes,
-            &field_names,
-            record_count,
-        )?;
+        let updated_cache_definition =
+            refresh_cache_definition_xml(&cache_definition_bytes, &field_names, record_count)?;
         let updated_cache_records =
             refresh_cache_records_xml(&cache_records_bytes, &records, record_count)?;
 
@@ -181,8 +179,11 @@ fn resolve_cache_records_part(
 }
 
 fn load_shared_strings(package: &XlsxPackage) -> Result<Vec<String>, XlsxError> {
-    let shared_strings_part = resolve_shared_strings_part_name(package)?
-        .or_else(|| package.part("xl/sharedStrings.xml").map(|_| "xl/sharedStrings.xml".to_string()));
+    let shared_strings_part = resolve_shared_strings_part_name(package)?.or_else(|| {
+        package
+            .part("xl/sharedStrings.xml")
+            .map(|_| "xl/sharedStrings.xml".to_string())
+    });
     let Some(shared_strings_part) = shared_strings_part else {
         return Ok(Vec::new());
     };
@@ -228,13 +229,14 @@ fn parse_worksheet_cells_in_range(
     let mut current_value_text: Option<String> = None;
     let mut current_inline_text: Option<String> = None;
     let mut in_v = false;
-    let mut in_inline_t = false;
 
     let mut cells = HashMap::new();
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => in_sheet_data = true,
+            Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                in_sheet_data = true
+            }
             Event::End(e) if local_name(e.name().as_ref()) == b"sheetData" => in_sheet_data = false,
             Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 in_sheet_data = false;
@@ -247,7 +249,6 @@ fn parse_worksheet_cells_in_range(
                 current_value_text = None;
                 current_inline_text = None;
                 in_v = false;
-                in_inline_t = false;
 
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
@@ -288,10 +289,13 @@ fn parse_worksheet_cells_in_range(
                 current_value_text = None;
                 current_inline_text = None;
                 in_v = false;
-                in_inline_t = false;
             }
 
-            Event::Start(e) if in_sheet_data && current_ref.is_some() && local_name(e.name().as_ref()) == b"v" => {
+            Event::Start(e)
+                if in_sheet_data
+                    && current_ref.is_some()
+                    && local_name(e.name().as_ref()) == b"v" =>
+            {
                 in_v = true;
             }
             Event::End(e) if in_sheet_data && local_name(e.name().as_ref()) == b"v" => in_v = false,
@@ -303,23 +307,17 @@ fn parse_worksheet_cells_in_range(
                 if in_sheet_data
                     && current_ref.is_some()
                     && current_t.as_deref() == Some("inlineStr")
-                    && local_name(e.name().as_ref()) == b"t" =>
+                    && local_name(e.name().as_ref()) == b"is" =>
             {
-                in_inline_t = true;
+                current_inline_text = Some(parse_inline_is_text(&mut reader)?);
             }
-            Event::End(e)
+            Event::Empty(e)
                 if in_sheet_data
+                    && current_ref.is_some()
                     && current_t.as_deref() == Some("inlineStr")
-                    && local_name(e.name().as_ref()) == b"t" =>
+                    && local_name(e.name().as_ref()) == b"is" =>
             {
-                in_inline_t = false;
-            }
-            Event::Text(e) if in_sheet_data && in_inline_t => {
-                let t = e.unescape()?.into_owned();
-                match current_inline_text.as_mut() {
-                    Some(existing) => existing.push_str(&t),
-                    None => current_inline_text = Some(t),
-                }
+                current_inline_text = Some(String::new());
             }
 
             Event::Eof => break,
@@ -329,6 +327,82 @@ fn parse_worksheet_cells_in_range(
     }
 
     Ok(cells)
+}
+
+fn parse_inline_is_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, XlsxError> {
+    let mut buf = Vec::new();
+    let mut out = String::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"t" => {
+                out.push_str(&read_text(reader, b"t")?);
+            }
+            Event::Start(e) if local_name(e.name().as_ref()) == b"r" => {
+                out.push_str(&parse_inline_r_text(reader)?);
+            }
+            Event::Start(e) => {
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::End(e) if local_name(e.name().as_ref()) == b"is" => break,
+            Event::Eof => {
+                return Err(XlsxError::Invalid(
+                    "unexpected EOF while parsing inline string <is>".to_string(),
+                ))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+fn parse_inline_r_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, XlsxError> {
+    let mut buf = Vec::new();
+    let mut out = String::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"t" => {
+                out.push_str(&read_text(reader, b"t")?);
+            }
+            Event::Start(e) => {
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::End(e) if local_name(e.name().as_ref()) == b"r" => break,
+            Event::Eof => {
+                return Err(XlsxError::Invalid(
+                    "unexpected EOF while parsing inline string <r>".to_string(),
+                ))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+fn read_text<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    end_local: &[u8],
+) -> Result<String, XlsxError> {
+    let mut buf = Vec::new();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Text(e) => text.push_str(&e.unescape()?.into_owned()),
+            Event::CData(e) => text.push_str(std::str::from_utf8(e.as_ref()).map_err(|err| {
+                XlsxError::Invalid(format!("inline string <t> contains invalid utf-8: {err}"))
+            })?),
+            Event::End(e) if local_name(e.name().as_ref()) == end_local => break,
+            Event::Eof => {
+                return Err(XlsxError::Invalid(
+                    "unexpected EOF while parsing inline string <t>".to_string(),
+                ))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(text)
 }
 
 fn interpret_worksheet_cell_value(
@@ -408,8 +482,9 @@ fn refresh_cache_definition_xml(
     field_names: &[String],
     record_count: u64,
 ) -> Result<Vec<u8>, XlsxError> {
-    let mut root = XmlElement::parse(existing)
-        .map_err(|e| XlsxError::Invalid(format!("failed to parse pivot cache definition xml: {e}")))?;
+    let mut root = XmlElement::parse(existing).map_err(|e| {
+        XlsxError::Invalid(format!("failed to parse pivot cache definition xml: {e}"))
+    })?;
 
     root.set_attr("recordCount", record_count.to_string());
 
@@ -443,10 +518,11 @@ fn refresh_cache_definition_xml(
 
         cache_fields.children = new_children;
     } else {
-        root.children.push(XmlNode::Element(build_cache_fields_element(
-            root.name.ns.clone(),
-            field_names,
-        )));
+        root.children
+            .push(XmlNode::Element(build_cache_fields_element(
+                root.name.ns.clone(),
+                field_names,
+            )));
     }
 
     Ok(root.to_xml_string().into_bytes())
@@ -464,7 +540,10 @@ fn build_cache_fields_element(ns: Option<String>, field_names: &[String]) -> Xml
 
     let mut children = Vec::new();
     for name in field_names {
-        children.push(XmlNode::Element(build_cache_field_element(ns.clone(), name)));
+        children.push(XmlNode::Element(build_cache_field_element(
+            ns.clone(),
+            name,
+        )));
     }
 
     XmlElement {
@@ -509,9 +588,8 @@ fn refresh_cache_records_xml(
     records: &[Vec<PivotCacheValue>],
     record_count: u64,
 ) -> Result<Vec<u8>, XlsxError> {
-    let mut root = XmlElement::parse(existing).map_err(|e| {
-        XlsxError::Invalid(format!("failed to parse pivot cache records xml: {e}"))
-    })?;
+    let mut root = XmlElement::parse(existing)
+        .map_err(|e| XlsxError::Invalid(format!("failed to parse pivot cache records xml: {e}")))?;
     root.set_attr("count", record_count.to_string());
 
     let ns = root.name.ns.clone();
@@ -587,5 +665,36 @@ fn build_value_element(ns: Option<String>, tag: &str, value: Option<&str>) -> Xm
         },
         attrs,
         children: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_inline_string_ignores_phonetic_text() {
+        let worksheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr">
+        <is>
+          <t>Base</t>
+          <phoneticPr fontId="0" type="noConversion"/>
+          <rPh sb="0" eb="4"><t>PHO</t></rPh>
+        </is>
+      </c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let range = Range::from_a1("A1:A1").expect("range");
+        let cells = parse_worksheet_cells_in_range(worksheet_xml, range, &[]).expect("parse cells");
+        let cell_ref = CellRef::from_a1("A1").expect("A1");
+        assert_eq!(
+            cells.get(&cell_ref),
+            Some(&PivotCacheValue::String("Base".to_string()))
+        );
     }
 }

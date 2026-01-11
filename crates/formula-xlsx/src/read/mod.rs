@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Cursor, Read};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
+use std::io::{Cursor, Read};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
@@ -11,19 +11,21 @@ use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DefinedNameScope, ErrorValue, Range,
     SheetVisibility, Workbook,
 };
-use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
+use quick_xml::events::Event;
 use quick_xml::Reader;
 use thiserror::Error;
 use zip::ZipArchive;
 
+use crate::autofilter::{parse_worksheet_autofilter, AutoFilterParseError};
 use crate::path::{rels_for_part, resolve_target};
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
 use crate::styles::StylesPart;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
-use crate::autofilter::{parse_worksheet_autofilter, AutoFilterParseError};
-use crate::{CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta};
+use crate::{
+    CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta,
+};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
@@ -90,7 +92,8 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
         DateSystem::V1900 => formula_model::DateSystem::Excel1900,
         DateSystem::V1904 => formula_model::DateSystem::Excel1904,
     };
-    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::with_capacity(sheets.len());
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
+        Vec::with_capacity(sheets.len());
 
     let styles_part_name = rels_info
         .styles_target
@@ -98,8 +101,7 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
         .map(|target| resolve_target(WORKBOOK_PART, target))
         .unwrap_or_else(|| "xl/styles.xml".to_string());
     let styles_bytes = read_zip_part_optional(&mut archive, &styles_part_name)?;
-    let styles_part =
-        StylesPart::parse_or_default(styles_bytes.as_deref(), &mut workbook.styles)?;
+    let styles_part = StylesPart::parse_or_default(styles_bytes.as_deref(), &mut workbook.styles)?;
 
     let shared_strings_part_name = rels_info
         .shared_strings_target
@@ -125,8 +127,9 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
             _ => SheetVisibility::Visible,
         };
 
-        let sheet_xml = read_zip_part_optional(&mut archive, &sheet.path)?
-            .ok_or(ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"))?;
+        let sheet_xml = read_zip_part_optional(&mut archive, &sheet.path)?.ok_or(
+            ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"),
+        )?;
 
         // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
         let sheet_xml_str = std::str::from_utf8(&sheet_xml)?;
@@ -135,19 +138,15 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
 
         // Merged cells (must be parsed before cell content so we don't treat interior
         // cells as value-bearing).
-        let merges =
-            crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str).map_err(
-                |err| match err {
-                    crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
-                    crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
-                    crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
-                    crate::merge_cells::MergeCellsError::InvalidRef(r) => {
-                        ReadError::InvalidRangeRef(r)
-                    }
-                    crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
-                    crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
-                },
-            )?;
+        let merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str)
+            .map_err(|err| match err {
+                crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
+                crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
+                crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
+                crate::merge_cells::MergeCellsError::InvalidRef(r) => ReadError::InvalidRangeRef(r),
+                crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
+                crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
+            })?;
         for range in merges {
             ws.merged_regions
                 .add(range)
@@ -163,14 +162,7 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
             .transpose()?;
         ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
 
-        parse_worksheet_into_model(
-            ws,
-            ws_id,
-            &sheet_xml,
-            &shared_strings,
-            &styles_part,
-            None,
-        )?;
+        parse_worksheet_into_model(ws, ws_id, &sheet_xml, &shared_strings, &styles_part, None)?;
     }
 
     for defined in defined_names {
@@ -290,9 +282,9 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             _ => SheetVisibility::Visible,
         };
 
-        let sheet_xml = parts
-            .get(&sheet.path)
-            .ok_or(ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"))?;
+        let sheet_xml = parts.get(&sheet.path).ok_or(ReadError::MissingPart(
+            "worksheet part referenced from workbook.xml.rels",
+        ))?;
 
         // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
         let sheet_xml_str = std::str::from_utf8(sheet_xml)?;
@@ -301,19 +293,15 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
 
         // Merged cells (must be parsed before cell content so we don't treat interior
         // cells as value-bearing).
-        let merges =
-            crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str).map_err(
-                |err| match err {
-                    crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
-                    crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
-                    crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
-                    crate::merge_cells::MergeCellsError::InvalidRef(r) => {
-                        ReadError::InvalidRangeRef(r)
-                    }
-                    crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
-                    crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
-                },
-            )?;
+        let merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str)
+            .map_err(|err| match err {
+                crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
+                crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
+                crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
+                crate::merge_cells::MergeCellsError::InvalidRef(r) => ReadError::InvalidRangeRef(r),
+                crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
+                crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
+            })?;
         for range in merges {
             ws.merged_regions
                 .add(range)
@@ -359,7 +347,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     }
 
     for defined in defined_names {
-        let scope = match defined.local_sheet_id.and_then(|idx| worksheet_ids_by_index.get(idx as usize).copied()) {
+        let scope = match defined
+            .local_sheet_id
+            .and_then(|idx| worksheet_ids_by_index.get(idx as usize).copied())
+        {
             Some(sheet_id) => DefinedNameScope::Sheet(sheet_id),
             None => DefinedNameScope::Workbook,
         };
@@ -500,7 +491,9 @@ fn parse_workbook_metadata(
                     let attr = attr?;
                     match attr.key.as_ref() {
                         b"calcId" => calc_pr.calc_id = Some(attr.unescape_value()?.into_owned()),
-                        b"calcMode" => calc_pr.calc_mode = Some(attr.unescape_value()?.into_owned()),
+                        b"calcMode" => {
+                            calc_pr.calc_mode = Some(attr.unescape_value()?.into_owned())
+                        }
                         b"fullCalcOnLoad" => {
                             let v = attr.unescape_value()?.into_owned();
                             calc_pr.full_calc_on_load =
@@ -554,11 +547,8 @@ fn parse_workbook_metadata(
                     match attr.key.as_ref() {
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
-                            local_sheet_id = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<u32>()
-                                .ok();
+                            local_sheet_id =
+                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
                         b"comment" => comment = Some(attr.unescape_value()?.into_owned()),
                         b"hidden" => {
@@ -590,11 +580,8 @@ fn parse_workbook_metadata(
                     match attr.key.as_ref() {
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
-                            local_sheet_id = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<u32>()
-                                .ok();
+                            local_sheet_id =
+                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
                         b"comment" => comment = Some(attr.unescape_value()?.into_owned()),
                         b"hidden" => {
@@ -671,7 +658,6 @@ fn parse_worksheet_into_model(
     let mut current_inline_text: Option<String> = None;
     let mut in_v = false;
     let mut in_f = false;
-    let mut in_inline_t = false;
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -692,27 +678,13 @@ fn parse_worksheet_into_model(
                     let attr = attr?;
                     match attr.key.as_ref() {
                         b"min" => {
-                            min = Some(
-                                attr.unescape_value()?
-                                    .into_owned()
-                                    .parse()
-                                    .unwrap_or(0),
-                            )
+                            min = Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
                         }
                         b"max" => {
-                            max = Some(
-                                attr.unescape_value()?
-                                    .into_owned()
-                                    .parse()
-                                    .unwrap_or(0),
-                            )
+                            max = Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
                         }
                         b"width" => {
-                            width = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<f32>()
-                                .ok();
+                            width = attr.unescape_value()?.into_owned().parse::<f32>().ok();
                         }
                         b"customWidth" => {
                             let v = attr.unescape_value()?.into_owned();
@@ -822,19 +794,11 @@ fn parse_worksheet_into_model(
                     let attr = attr?;
                     match attr.key.as_ref() {
                         b"r" => {
-                            row_1_based = Some(
-                                attr.unescape_value()?
-                                    .into_owned()
-                                    .parse()
-                                    .unwrap_or(0),
-                            );
+                            row_1_based =
+                                Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0));
                         }
                         b"ht" => {
-                            height = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<f32>()
-                                .ok();
+                            height = attr.unescape_value()?.into_owned().parse::<f32>().ok();
                         }
                         b"customHeight" => {
                             let v = attr.unescape_value()?.into_owned();
@@ -872,7 +836,6 @@ fn parse_worksheet_into_model(
                 current_inline_text = None;
                 in_v = false;
                 in_f = false;
-                in_inline_t = false;
 
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -880,8 +843,7 @@ fn parse_worksheet_into_model(
                         b"r" => {
                             let a1 = attr.unescape_value()?.into_owned();
                             current_ref = Some(
-                                CellRef::from_a1(&a1)
-                                    .map_err(|_| ReadError::InvalidCellRef(a1))?,
+                                CellRef::from_a1(&a1).map_err(|_| ReadError::InvalidCellRef(a1))?,
                             );
                         }
                         b"t" => current_t = Some(attr.unescape_value()?.into_owned()),
@@ -902,8 +864,7 @@ fn parse_worksheet_into_model(
                         b"r" => {
                             let a1 = attr.unescape_value()?.into_owned();
                             cell_ref = Some(
-                                CellRef::from_a1(&a1)
-                                    .map_err(|_| ReadError::InvalidCellRef(a1))?,
+                                CellRef::from_a1(&a1).map_err(|_| ReadError::InvalidCellRef(a1))?,
                             );
                         }
                         b"s" => {
@@ -916,7 +877,8 @@ fn parse_worksheet_into_model(
                 if let Some(cell_ref) = cell_ref {
                     // Skip non-anchor cells inside merged regions. Excel stores the value
                     // (and typically formatting) on the top-left cell only.
-                    if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref && style_id != 0 {
+                    if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref && style_id != 0
+                    {
                         let mut cell = Cell::default();
                         cell.style_id = style_id;
                         worksheet.set_cell(cell_ref, cell);
@@ -953,12 +915,13 @@ fn parse_worksheet_into_model(
                         });
 
                         if let Some(groups) = shared_formula_groups.as_mut() {
-                            let is_shared_master = current_formula.as_ref().is_some_and(|formula| {
-                                formula.t.as_deref() == Some("shared")
-                                    && formula.reference.is_some()
-                                    && formula.shared_index.is_some()
-                                    && !formula.file_text.is_empty()
-                            });
+                            let is_shared_master =
+                                current_formula.as_ref().is_some_and(|formula| {
+                                    formula.t.as_deref() == Some("shared")
+                                        && formula.reference.is_some()
+                                        && formula.shared_index.is_some()
+                                        && !formula.file_text.is_empty()
+                                });
 
                             if is_shared_master {
                                 if let Some(formula) = current_formula.as_ref() {
@@ -1020,10 +983,11 @@ fn parse_worksheet_into_model(
                 current_inline_text = None;
                 in_v = false;
                 in_f = false;
-                in_inline_t = false;
             }
 
-            Event::Start(e) if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"v" => {
+            Event::Start(e)
+                if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"v" =>
+            {
                 in_v = true;
             }
             Event::End(e) if in_sheet_data && e.name().as_ref() == b"v" => in_v = false,
@@ -1031,7 +995,9 @@ fn parse_worksheet_into_model(
                 current_value_text = Some(e.unescape()?.into_owned());
             }
 
-            Event::Start(e) if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"f" => {
+            Event::Start(e)
+                if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"f" =>
+            {
                 in_f = true;
                 let mut formula = FormulaMeta::default();
                 for attr in e.attributes() {
@@ -1039,8 +1005,10 @@ fn parse_worksheet_into_model(
                     match attr.key.as_ref() {
                         b"t" => formula.t = Some(attr.unescape_value()?.into_owned()),
                         b"ref" => formula.reference = Some(attr.unescape_value()?.into_owned()),
-                        b"si" => formula.shared_index =
-                            Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0)),
+                        b"si" => {
+                            formula.shared_index =
+                                Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                        }
                         b"aca" => {
                             let v = attr.unescape_value()?.into_owned();
                             formula.always_calc = Some(v == "1" || v.eq_ignore_ascii_case("true"))
@@ -1050,15 +1018,19 @@ fn parse_worksheet_into_model(
                 }
                 current_formula = Some(formula);
             }
-            Event::Empty(e) if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"f" => {
+            Event::Empty(e)
+                if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"f" =>
+            {
                 let mut formula = FormulaMeta::default();
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
                         b"t" => formula.t = Some(attr.unescape_value()?.into_owned()),
                         b"ref" => formula.reference = Some(attr.unescape_value()?.into_owned()),
-                        b"si" => formula.shared_index =
-                            Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0)),
+                        b"si" => {
+                            formula.shared_index =
+                                Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                        }
                         b"aca" => {
                             let v = attr.unescape_value()?.into_owned();
                             formula.always_calc = Some(v == "1" || v.eq_ignore_ascii_case("true"))
@@ -1079,23 +1051,17 @@ fn parse_worksheet_into_model(
                 if in_sheet_data
                     && current_ref.is_some()
                     && current_t.as_deref() == Some("inlineStr")
-                    && e.name().as_ref() == b"t" =>
+                    && e.local_name().as_ref() == b"is" =>
             {
-                in_inline_t = true;
+                current_inline_text = Some(parse_inline_is_text(&mut reader)?);
             }
-            Event::End(e)
+            Event::Empty(e)
                 if in_sheet_data
+                    && current_ref.is_some()
                     && current_t.as_deref() == Some("inlineStr")
-                    && e.name().as_ref() == b"t" =>
+                    && e.local_name().as_ref() == b"is" =>
             {
-                in_inline_t = false;
-            }
-            Event::Text(e) if in_sheet_data && in_inline_t => {
-                let t = e.unescape()?.into_owned();
-                match current_inline_text.as_mut() {
-                    Some(existing) => existing.push_str(&t),
-                    None => current_inline_text = Some(t),
-                }
+                current_inline_text = Some(String::new());
             }
 
             Event::Eof => break,
@@ -1209,6 +1175,80 @@ fn parse_xml_bool(val: &str) -> bool {
     val == "1" || val.eq_ignore_ascii_case("true")
 }
 
+fn parse_inline_is_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {
+    let mut buf = Vec::new();
+    let mut out = String::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.local_name().as_ref() == b"t" => {
+                out.push_str(&read_text(reader, b"t")?);
+            }
+            Event::Start(e) if e.local_name().as_ref() == b"r" => {
+                out.push_str(&parse_inline_r_text(reader)?);
+            }
+            Event::Start(e) => {
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"is" => break,
+            Event::Eof => {
+                return Err(ReadError::Xlsx(XlsxError::Invalid(
+                    "unexpected EOF while parsing inline string <is>".to_string(),
+                )))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+fn parse_inline_r_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {
+    let mut buf = Vec::new();
+    let mut out = String::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.local_name().as_ref() == b"t" => {
+                out.push_str(&read_text(reader, b"t")?);
+            }
+            Event::Start(e) => {
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"r" => break,
+            Event::Eof => {
+                return Err(ReadError::Xlsx(XlsxError::Invalid(
+                    "unexpected EOF while parsing inline string <r>".to_string(),
+                )))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+fn read_text<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    end_local: &[u8],
+) -> Result<String, ReadError> {
+    let mut buf = Vec::new();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Text(e) => text.push_str(&e.unescape()?.into_owned()),
+            Event::CData(e) => text.push_str(std::str::from_utf8(e.as_ref())?),
+            Event::End(e) if e.local_name().as_ref() == end_local => break,
+            Event::Eof => {
+                return Err(ReadError::Xlsx(XlsxError::Invalid(
+                    "unexpected EOF while parsing inline string <t>".to_string(),
+                )))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(text)
+}
+
 fn interpret_cell_value(
     t: Option<&str>,
     v_text: &Option<String>,
@@ -1231,7 +1271,11 @@ fn interpret_cell_value(
         }
         Some("b") => {
             let raw = v_text.clone().unwrap_or_default();
-            (CellValue::Boolean(raw == "1"), Some(CellValueKind::Bool), Some(raw))
+            (
+                CellValue::Boolean(raw == "1"),
+                Some(CellValueKind::Bool),
+                Some(raw),
+            )
         }
         Some("e") => {
             let raw = v_text.clone().unwrap_or_default();
@@ -1240,7 +1284,11 @@ fn interpret_cell_value(
         }
         Some("str") => {
             let raw = v_text.clone().unwrap_or_default();
-            (CellValue::String(raw.clone()), Some(CellValueKind::Str), Some(raw))
+            (
+                CellValue::String(raw.clone()),
+                Some(CellValueKind::Str),
+                Some(raw),
+            )
         }
         Some("inlineStr") => {
             let raw = inline_text.clone().unwrap_or_default();
@@ -1272,13 +1320,17 @@ fn interpret_cell_value(
             if let Some(raw) = v_text.clone() {
                 (
                     CellValue::String(raw.clone()),
-                    Some(CellValueKind::Other { t: other.to_string() }),
+                    Some(CellValueKind::Other {
+                        t: other.to_string(),
+                    }),
                     Some(raw),
                 )
             } else {
                 (
                     CellValue::Empty,
-                    Some(CellValueKind::Other { t: other.to_string() }),
+                    Some(CellValueKind::Other {
+                        t: other.to_string(),
+                    }),
                     None,
                 )
             }
