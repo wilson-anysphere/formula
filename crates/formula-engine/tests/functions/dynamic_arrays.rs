@@ -523,6 +523,23 @@ fn map_applies_lambda_elementwise_across_arrays() {
 }
 
 #[test]
+fn map_preserves_lambda_name_for_recursive_let_bindings() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=LET(FACT,LAMBDA(n,IF(n<=1,1,n*FACT(n-1))),MAP({1;2;3},FACT))",
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(6.0));
+}
+
+#[test]
 fn makearray_generates_values_from_indices() {
     let mut engine = Engine::new();
     engine

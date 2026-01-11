@@ -1140,7 +1140,9 @@ fn map_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let lambda = match eval_lambda_arg(ctx, args.last().expect("checked args is non-empty")) {
+    let lambda_expr = args.last().expect("checked args is non-empty");
+    let call_name = lambda_call_name(lambda_expr, "__MAP_LAMBDA_CALL");
+    let lambda = match eval_lambda_arg(ctx, lambda_expr) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1162,7 +1164,7 @@ fn map_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => return Value::Error(ErrorKind::Value),
     };
 
-    let call = prepare_lambda_call("__MAP_LAMBDA_CALL", arrays.len());
+    let call = prepare_lambda_call(&call_name, arrays.len());
 
     let mut out = Vec::with_capacity(out_rows.saturating_mul(out_cols));
     for row in 0..out_rows {
@@ -1205,6 +1207,7 @@ fn byrow_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    let call_name = lambda_call_name(&args[1], "__BYROW_LAMBDA_CALL");
     let lambda = match eval_lambda_arg(ctx, &args[1]) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -1214,7 +1217,7 @@ fn byrow_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let call = prepare_lambda_call("__BYROW_LAMBDA_CALL", 1);
+    let call = prepare_lambda_call(&call_name, 1);
     let mut values = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let mut row_values = Vec::with_capacity(array.cols);
@@ -1248,6 +1251,7 @@ fn bycol_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    let call_name = lambda_call_name(&args[1], "__BYCOL_LAMBDA_CALL");
     let lambda = match eval_lambda_arg(ctx, &args[1]) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -1257,7 +1261,7 @@ fn bycol_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let call = prepare_lambda_call("__BYCOL_LAMBDA_CALL", 1);
+    let call = prepare_lambda_call(&call_name, 1);
     let mut values = Vec::with_capacity(array.cols);
     for col in 0..array.cols {
         let mut col_values = Vec::with_capacity(array.rows);
@@ -1295,6 +1299,7 @@ fn makearray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    let call_name = lambda_call_name(&args[2], "__MAKEARRAY_LAMBDA_CALL");
     let lambda = match eval_lambda_arg(ctx, &args[2]) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -1320,7 +1325,7 @@ fn makearray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => return Value::Error(ErrorKind::Num),
     };
 
-    let call = prepare_lambda_call("__MAKEARRAY_LAMBDA_CALL", 2);
+    let call = prepare_lambda_call(&call_name, 2);
     let mut values = Vec::with_capacity(total);
     for row in 0..rows_usize {
         for col in 0..cols_usize {
@@ -1369,6 +1374,7 @@ fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    let call_name = lambda_call_name(lambda_expr, "__REDUCE_LAMBDA_CALL");
     let lambda = match eval_lambda_arg(ctx, lambda_expr) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -1377,7 +1383,7 @@ fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let call = prepare_lambda_call("__REDUCE_LAMBDA_CALL", 2);
+    let call = prepare_lambda_call(&call_name, 2);
     for cell in &array.values {
         let args = [acc.clone(), cell.clone()];
         acc = invoke_lambda(ctx, &lambda, &call, &args);
@@ -1423,6 +1429,7 @@ fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    let call_name = lambda_call_name(lambda_expr, "__SCAN_LAMBDA_CALL");
     let lambda = match eval_lambda_arg(ctx, lambda_expr) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -1431,7 +1438,7 @@ fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let call = prepare_lambda_call("__SCAN_LAMBDA_CALL", 2);
+    let call = prepare_lambda_call(&call_name, 2);
     let mut values = Vec::with_capacity(array.values.len());
     for cell in &array.values {
         let args = [acc.clone(), cell.clone()];
@@ -1549,6 +1556,13 @@ fn prepare_lambda_call(call_name: &str, arg_count: usize) -> LambdaCall {
             original_name: call_name.to_string(),
             args,
         },
+    }
+}
+
+fn lambda_call_name(expr: &CompiledExpr, fallback: &str) -> String {
+    match expr {
+        Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => nref.name.clone(),
+        _ => fallback.to_string(),
     }
 }
 
