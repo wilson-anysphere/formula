@@ -1912,11 +1912,13 @@ export class CanvasGridRenderer {
         const rotationRad = (rotationDeg * Math.PI) / 180;
 
         if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
-          const baseDirection = direction === "auto" ? detectBaseDirection(text) : direction;
           const resolvedAlign =
             layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
               ? layoutAlign
-              : resolveAlign(layoutAlign, baseDirection);
+              : resolveAlign(
+                  layoutAlign,
+                  direction === "auto" ? (typeof cell.value === "string" ? detectBaseDirection(text) : "ltr") : direction
+                );
 
           const measurement = layoutEngine?.measure(text, fontSpec);
           const textWidth = measurement?.width ?? contentCtx.measureText(text).width;
