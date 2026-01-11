@@ -311,6 +311,50 @@ fn delete_cells_shift_up_rewrites_moved_references_and_invalidates_deleted_targe
 }
 
 #[test]
+fn insert_row_updates_spill_operator_references() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "D1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "E1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "D2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "E2", 4.0).unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=D1:E2").unwrap();
+    engine.set_cell_formula("Sheet1", "G1", "=A1#").unwrap();
+
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "Sheet1".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    // Both the spill origin and the referencing formula should move down and update.
+    assert_eq!(engine.get_cell_formula("Sheet1", "A2"), Some("=D2:E3"));
+    assert_eq!(engine.get_cell_formula("Sheet1", "G2"), Some("=A2#"));
+
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H3"), Value::Number(4.0));
+}
+
+#[test]
+fn delete_column_converts_spill_operator_reference_to_ref_error() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "B1", "=A1#").unwrap();
+
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".to_string(),
+            col: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    // B1 shifted left to A1, and the referenced A column was deleted.
+    assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=#REF!"));
+}
+
+#[test]
 fn structural_edits_update_named_range_definitions() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
