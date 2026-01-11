@@ -317,6 +317,23 @@ describe("API keys", () => {
     });
     expect(sessionDocB.statusCode).toBe(200);
 
+    const shareLink = await app.inject({
+      method: "POST",
+      url: `/docs/${docBId}/share-links`,
+      headers: { cookie },
+      payload: { visibility: "private", role: "viewer" }
+    });
+    expect(shareLink.statusCode).toBe(200);
+    const shareToken = (shareLink.json() as any).shareLink.token as string;
+
+    const blockedRedeem = await app.inject({
+      method: "POST",
+      url: `/share-links/${shareToken}/redeem`,
+      headers: { authorization: `Bearer ${rawKey}` }
+    });
+    expect(blockedRedeem.statusCode).toBe(404);
+    expect((blockedRedeem.json() as any).error).toBe("share_link_not_found");
+
     const blockedDocB = await app.inject({
       method: "GET",
       url: `/docs/${docBId}`,

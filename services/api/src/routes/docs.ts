@@ -974,6 +974,10 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const visibility = linkRow.visibility as ShareLinkVisibility;
     const linkRole = linkRow.role as ShareLinkRole;
 
+    if (request.authOrgId && request.authOrgId !== orgId) {
+      return reply.code(404).send({ error: "share_link_not_found" });
+    }
+
     if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
