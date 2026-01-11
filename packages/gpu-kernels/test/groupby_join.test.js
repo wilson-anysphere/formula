@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { KernelEngine } from "../src/index.js";
 import { CpuBackend } from "../src/index.js";
+import { KernelEngine } from "../src/index.js";
 
 test("group-by: empty inputs", async () => {
   const engine = new KernelEngine({ precision: "excel", gpu: { enabled: false } });
@@ -134,6 +134,25 @@ test("hashJoin: rejects mixed Int32Array/Uint32Array inputs (non-empty)", async 
   const out = await cpu.hashJoin(new Int32Array(), new Uint32Array([1]));
   assert.equal(out.leftIndex.length, 0);
   assert.equal(out.rightIndex.length, 0);
+});
+
+test("hashJoin: left join includes unmatched rows with rightIndex=0xFFFF_FFFF", async () => {
+  const cpu = new CpuBackend();
+  const leftKeys = new Uint32Array([1, 2, 3]);
+  const rightKeys = new Uint32Array([2]);
+
+  const out = await cpu.hashJoin(leftKeys, rightKeys, { joinType: "left" });
+  assert.deepEqual(Array.from(out.leftIndex), [0, 1, 2]);
+  assert.deepEqual(Array.from(out.rightIndex), [0xffff_ffff, 0, 0xffff_ffff]);
+});
+
+test("KernelEngine: hashJoin left join passes options through (CPU backend)", async () => {
+  const engine = new KernelEngine({ precision: "excel", gpu: { enabled: false } });
+  const leftKeys = new Uint32Array([1, 2]);
+  const rightKeys = new Uint32Array([2]);
+  const out = await engine.hashJoin(leftKeys, rightKeys, { joinType: "left" });
+  assert.deepEqual(Array.from(out.leftIndex), [0, 1]);
+  assert.deepEqual(Array.from(out.rightIndex), [0xffff_ffff, 0]);
 });
 
 test("group-by/hashJoin: supports key 0xFFFF_FFFF (u32 max) in unsigned mode", async () => {

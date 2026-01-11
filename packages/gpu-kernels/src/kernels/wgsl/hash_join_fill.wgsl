@@ -4,7 +4,7 @@ const EMPTY_U32: u32 = 0xffff_ffffu;
 struct Params {
   n_left: u32,
   table_size: u32,
-  _pad0: u32,
+  join_type: u32,
   _pad1: u32,
 }
 
@@ -57,6 +57,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
   let key = left_keys[i];
   let slot = find_slot(key);
   if (slot == EMPTY_U32) {
+    // Left join: counts[i] is expected to be 1 for missing keys.
+    let base = offsets[i];
+    out_left_index[base] = i;
+    out_right_index[base] = EMPTY_U32;
     return;
   }
 
@@ -72,5 +76,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
     ptr = next_ptr[ptr];
     t = t + 1u;
   }
-}
 
+  // If no matches were found but we are doing a left join, emit a single
+  // unmatched row marker (rightIndex=EMPTY_U32).
+  if (params.join_type == 1u && t == 0u) {
+    out_left_index[base] = i;
+    out_right_index[base] = EMPTY_U32;
+  }
+}

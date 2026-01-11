@@ -334,9 +334,10 @@ export class CpuBackend {
    *
    * @param {Uint32Array | Int32Array} leftKeys
    * @param {Uint32Array | Int32Array} rightKeys
+   * @param {{ joinType?: "inner" | "left" }} [opts]
    * @returns {Promise<{ leftIndex: Uint32Array, rightIndex: Uint32Array }>}
    */
-  async hashJoin(leftKeys, rightKeys) {
+  async hashJoin(leftKeys, rightKeys, opts = {}) {
     if (leftKeys.length === 0 || rightKeys.length === 0) {
       return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
     }
@@ -346,6 +347,10 @@ export class CpuBackend {
       throw new Error(
         `hashJoin key type mismatch: left=${leftSigned ? "i32" : "u32"} right=${rightSigned ? "i32" : "u32"} (pass matching Int32Array/Uint32Array types)`
       );
+    }
+    const joinType = opts.joinType ?? "inner";
+    if (joinType !== "inner" && joinType !== "left") {
+      throw new Error(`hashJoin joinType must be "inner" | "left", got ${String(joinType)}`);
     }
 
     /** @type {Map<number, number[]>} */
@@ -361,6 +366,7 @@ export class CpuBackend {
     for (let i = 0; i < leftKeys.length; i++) {
       const arr = rightMap.get(leftKeys[i]);
       if (arr) total += arr.length;
+      else if (joinType === "left") total += 1;
     }
 
     const leftIndex = new Uint32Array(total);
@@ -369,10 +375,15 @@ export class CpuBackend {
     let p = 0;
     for (let i = 0; i < leftKeys.length; i++) {
       const arr = rightMap.get(leftKeys[i]);
-      if (!arr) continue;
-      for (let k = 0; k < arr.length; k++) {
+      if (arr) {
+        for (let k = 0; k < arr.length; k++) {
+          leftIndex[p] = i;
+          rightIndex[p] = arr[k];
+          p += 1;
+        }
+      } else if (joinType === "left") {
         leftIndex[p] = i;
-        rightIndex[p] = arr[k];
+        rightIndex[p] = 0xffff_ffff;
         p += 1;
       }
     }

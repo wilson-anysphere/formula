@@ -4,7 +4,7 @@ const EMPTY_U32: u32 = 0xffff_ffffu;
 struct Params {
   n_left: u32,
   table_size: u32,
-  _pad0: u32,
+  join_type: u32,
   _pad1: u32,
 }
 
@@ -49,7 +49,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
   let key = left_keys[i];
   let slot = find_slot(key);
   if (slot == EMPTY_U32) {
-    out_counts[i] = 0u;
+    out_counts[i] = select(0u, 1u, params.join_type == 1u);
     return;
   }
 
@@ -62,6 +62,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
     count = count + 1u;
     ptr = next_ptr[ptr];
   }
-  out_counts[i] = count;
+  out_counts[i] = select(count, 1u, params.join_type == 1u && count == 0u);
 }
-

@@ -793,8 +793,9 @@ export class KernelEngine {
   /**
    * @param {Uint32Array | Int32Array} leftKeys
    * @param {Uint32Array | Int32Array} rightKeys
+   * @param {{ joinType?: "inner" | "left" }} [opts]
    */
-  async hashJoin(leftKeys, rightKeys) {
+  async hashJoin(leftKeys, rightKeys, opts = {}) {
     if (leftKeys.length > 0 && rightKeys.length > 0) {
       const leftSigned = leftKeys instanceof Int32Array;
       const rightSigned = rightKeys instanceof Int32Array;
@@ -810,9 +811,9 @@ export class KernelEngine {
 
     if (backend === "webgpu") {
       try {
-        const gpu = await this._gpu.hashJoin(leftKeys, rightKeys);
+        const gpu = await this._gpu.hashJoin(leftKeys, rightKeys, opts);
         if (this._shouldValidate("hashJoin", workloadSize)) {
-          const cpu = await this._cpu.hashJoin(leftKeys, rightKeys);
+          const cpu = await this._cpu.hashJoin(leftKeys, rightKeys, opts);
           let ok = cpu.leftIndex.length === gpu.leftIndex.length && cpu.rightIndex.length === gpu.rightIndex.length;
           if (ok) {
             for (let i = 0; i < cpu.leftIndex.length; i++) {
@@ -837,13 +838,13 @@ export class KernelEngine {
         this._recordGpuError("hashJoin", "u32", err);
         this._lastKernelBackend.hashJoin = "cpu";
         this._lastKernelPrecision.hashJoin = "u32";
-        return this._cpu.hashJoin(leftKeys, rightKeys);
+        return this._cpu.hashJoin(leftKeys, rightKeys, opts);
       }
     }
 
     this._lastKernelBackend.hashJoin = "cpu";
     this._lastKernelPrecision.hashJoin = "u32";
-    return this._cpu.hashJoin(leftKeys, rightKeys);
+    return this._cpu.hashJoin(leftKeys, rightKeys, opts);
   }
 }
 

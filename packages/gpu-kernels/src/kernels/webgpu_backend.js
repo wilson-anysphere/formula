@@ -1640,9 +1640,10 @@ export class WebGpuBackend {
   /**
    * @param {Uint32Array | Int32Array} leftKeys
    * @param {Uint32Array | Int32Array} rightKeys
+   * @param {{ joinType?: "inner" | "left" }} [opts]
    * @returns {Promise<{ leftIndex: Uint32Array, rightIndex: Uint32Array }>}
    */
-  async hashJoin(leftKeys, rightKeys) {
+  async hashJoin(leftKeys, rightKeys, opts = {}) {
     this._ensureNotDisposed();
 
     if (leftKeys.length > 0 && rightKeys.length > 0) {
@@ -1654,6 +1655,12 @@ export class WebGpuBackend {
         );
       }
     }
+
+    const joinType = opts.joinType ?? "inner";
+    if (joinType !== "inner" && joinType !== "left") {
+      throw new Error(`hashJoin joinType must be "inner" | "left", got ${String(joinType)}`);
+    }
+    const joinTypeU32 = joinType === "left" ? 1 : 0;
 
     const leftU32 = toUint32Keys(leftKeys);
     const rightU32 = toUint32Keys(rightKeys);
@@ -1746,7 +1753,7 @@ export class WebGpuBackend {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
     });
 
-    const countParams = new Uint32Array([leftLen, tableSize, 0, 0]);
+    const countParams = new Uint32Array([leftLen, tableSize, joinTypeU32, 0]);
     const countParamBuf = this.device.createBuffer({
       size: 16,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
@@ -1811,7 +1818,7 @@ export class WebGpuBackend {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
     });
 
-    const fillParams = new Uint32Array([leftLen, tableSize, 0, 0]);
+    const fillParams = new Uint32Array([leftLen, tableSize, joinTypeU32, 0]);
     const fillParamBuf = this.device.createBuffer({
       size: 16,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST

@@ -8,7 +8,7 @@ Optional WebGPU compute acceleration for heavy spreadsheet/analytics kernels wit
   - `COUNT`, `SUM`, `MIN`, `MAX`
   - Keys: `Uint32Array` (dictionary ids) or `Int32Array` (signed 32-bit keys)
   - Outputs are returned sorted by `uniqueKeys`
-- **Hash join** (inner join) on two key arrays producing matching `(leftIndex, rightIndex)` pairs
+- **Hash join** on two key arrays producing matching `(leftIndex, rightIndex)` pairs (inner and left join)
 - **MMULT** (matrix multiplication)
 - **Sort** (bitonic sort for numeric vectors)
 - **Histogram/binning** (atomic bin counts)
@@ -61,7 +61,10 @@ await engine.dispose();
   - **Sort** matches `TypedArray#sort` semantics for special values: `NaN` sorts to the end, and `±Infinity` sorts normally.
   - **Histogram** ignores `NaN` values and clamps `±Infinity` into the first/last bin.
   - **Group-by SUM/MIN/MAX** follow JS numeric semantics (`NaN` propagates, `±Infinity` behaves per IEEE-754). `MIN/MAX` preserve signed zero like `Math.min/Math.max`.
-  - **Hash join** returns *all* matching pairs (duplicates produce multiple output rows). Outputs are sorted by `(leftIndex, rightIndex)` ascending.
+  - **Hash join** supports:
+    - `joinType: "inner"` (default): returns *all* matching pairs (duplicates produce multiple output rows)
+    - `joinType: "left"`: also includes unmatched left rows with `rightIndex=0xFFFF_FFFF`
+    - Outputs are sorted by `(leftIndex, rightIndex)` ascending
   - **Hash join** requires both key arrays to use the same numeric domain (`Int32Array` with `Int32Array`, or `Uint32Array` with `Uint32Array`).
 
 ## Benchmarks
