@@ -599,7 +599,10 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
   const cache = options.cache ?? createDefaultCacheManager();
   const fileAdapter = options.fileAdapter ?? createDefaultFileAdapter();
 
-  const tauriInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+  // Prefer a host-provided queued invoke (set by the desktop entrypoint) so reads
+  // like `list_tables`/`get_range` cannot race ahead of pending workbook writes.
+  const tauriInvoke = ((globalThis as any).__FORMULA_WORKBOOK_INVOKE__ ??
+    (globalThis as any).__TAURI__?.core?.invoke) as TauriInvoke | undefined;
   const tableAdapter =
     typeof tauriInvoke === "function"
       ? {

@@ -1472,6 +1472,9 @@ try {
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
   if (invoke) {
     queuedInvoke = (cmd, args) => queueBackendOp(() => invoke(cmd, args));
+    // Expose the queued invoke so other subsystems (e.g. Power Query table reads)
+    // can sequence behind pending workbook writes from `startWorkbookSync`.
+    (globalThis as any).__FORMULA_WORKBOOK_INVOKE__ = queuedInvoke;
   }
   window.addEventListener("unload", () => workbookSync?.stop());
 
