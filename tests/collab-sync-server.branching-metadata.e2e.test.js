@@ -87,7 +87,7 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
     sheet1.set("id", "Sheet1");
     sheet1.set("name", "Sheet1");
     sheets.push([sheet1]);
-  });
+  }, clientA.session.origin);
 
   await waitForCondition(() => {
     const stateB = branchStateFromYjsDoc(clientB.ydoc);
@@ -136,7 +136,7 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
   });
 
   // Apply merge result back into the shared Yjs document.
-  applyBranchStateToYjsDoc(clientA.ydoc, merge.state);
+  applyBranchStateToYjsDoc(clientA.ydoc, merge.state, { origin: clientA.session.origin });
 
   await waitForCondition(() => {
     const stateB = branchStateFromYjsDoc(clientB.ydoc);
