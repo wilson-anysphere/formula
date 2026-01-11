@@ -216,8 +216,8 @@ impl MemoryManager {
         let mut missing = Vec::new();
 
         let add_cells_in_viewport = |key: PageKey,
-                                    page_cells: &HashMap<(i64, i64), CellSnapshot>,
-                                    cells: &mut HashMap<(i64, i64), CellSnapshot>| {
+                                     page_cells: &HashMap<(i64, i64), CellSnapshot>,
+                                     cells: &mut HashMap<(i64, i64), CellSnapshot>| {
             let page_range = self.page_range(key);
             let row_start = viewport.row_start.max(page_range.row_start);
             let row_end = viewport.row_end.min(page_range.row_end);
@@ -228,9 +228,25 @@ impl MemoryManager {
                 return;
             }
 
-            for row in row_start..=row_end {
-                for col in col_start..=col_end {
-                    if let Some(snapshot) = page_cells.get(&(row, col)) {
+            let area = (row_end - row_start + 1)
+                .saturating_mul(col_end - col_start + 1)
+                .max(0) as usize;
+
+            // Heuristic: for dense pages and large intersections, iterating the
+            // `HashMap` and filtering is cheaper than hashing every coord. For
+            // small intersections relative to the number of stored cells,
+            // probing each coord wins.
+            if area.saturating_mul(4) <= page_cells.len() {
+                for row in row_start..=row_end {
+                    for col in col_start..=col_end {
+                        if let Some(snapshot) = page_cells.get(&(row, col)) {
+                            cells.insert((row, col), snapshot.clone());
+                        }
+                    }
+                }
+            } else {
+                for (&(row, col), snapshot) in page_cells {
+                    if row >= row_start && row <= row_end && col >= col_start && col <= col_end {
                         cells.insert((row, col), snapshot.clone());
                     }
                 }
@@ -470,34 +486,11 @@ impl MemoryManager {
         key: PageKey,
         page: PageData,
     ) -> StorageResult<()> {
-        if let Some(existing) = inner.pages.get_mut(&key) {
-            let before_page_bytes = existing.bytes;
-            let dirty_cells: HashSet<(i64, i64)> = existing
-                .pending_changes
-                .iter()
-                .map(|sc| (sc.change.row, sc.change.col))
-                .collect();
-
-            // Merge without overwriting locally modified cells (including deletes).
-            for (coord, snapshot) in page.cells {
-                if dirty_cells.contains(&coord) {
-                    continue;
-                }
-                existing.cells.entry(coord).or_insert(snapshot);
-            }
-            existing.bytes = PAGE_BASE_OVERHEAD_BYTES;
-            for snapshot in existing.cells.values() {
-                existing.bytes = existing.bytes.saturating_add(estimate_cell_snapshot_bytes(snapshot));
-            }
-            for sc in &existing.pending_changes {
-                existing.bytes = existing
-                    .bytes
-                    .saturating_add(estimate_cell_change_bytes(&sc.change));
-            }
-            inner.bytes = inner
-                .bytes
-                .saturating_sub(before_page_bytes)
-                .saturating_add(existing.bytes);
+        // If another thread already inserted this page, do not merge the newly
+        // loaded copy. We always load *full* pages, so the existing page already
+        // contains a complete view plus any in-memory edits. Merging can also
+        // resurrect stale data if the load raced with a flush.
+        if inner.pages.contains(&key) {
             return Ok(());
         }
 
@@ -769,7 +762,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn insert_merge_respects_pending_deletions() {
+    fn insert_page_skips_stale_reload_after_flush() {
         let storage = Storage::open_in_memory().expect("open storage");
         let workbook = storage
             .create_workbook("Book", None)
@@ -807,6 +800,9 @@ mod tests {
         memory
             .load_viewport(sheet.id, CellRange::new(0, 0, 0, 0))
             .expect("load viewport");
+        let stale_snapshot = memory
+            .get_cached_cell(sheet.id, 0, 0)
+            .expect("cached snapshot exists");
         memory
             .record_change(CellChange {
                 sheet_id: sheet.id,
@@ -817,37 +813,26 @@ mod tests {
             })
             .expect("record deletion");
 
-        // Simulate a concurrent load that read the old value from SQLite (which
-        // still contains the cell because we haven't flushed yet).
+        // Flush the deletion, then simulate a concurrent/stale page load that
+        // still contained the old value.
+        memory.flush_dirty_pages().expect("flush");
         let key = memory.page_key_for_cell(sheet.id, 0, 0);
-        let loaded_cells = storage
-            .load_cells_in_range(sheet.id, memory.page_range(key))
-            .expect("load cells");
         let mut cells = HashMap::new();
-        for (coord, snapshot) in loaded_cells {
-            cells.insert(coord, snapshot);
-        }
+        cells.insert((0, 0), stale_snapshot);
         let page = PageData::new_loaded(cells);
 
         {
             let mut inner = memory.inner.lock().expect("memory manager mutex poisoned");
             memory
                 .insert_page_locked(&mut inner, key, page)
-                .expect("merge insert");
+                .expect("insert");
 
             let page = inner.pages.get(&key).expect("page cached");
             assert!(
                 !page.cells.contains_key(&(0, 0)),
-                "merge should not resurrect deleted cells"
+                "stale reload should not resurrect deleted cells"
             );
-            assert!(
-                page.pending_changes
-                    .iter()
-                    .any(|sc| sc.change.row == 0
-                        && sc.change.col == 0
-                        && sc.change.data.is_truly_empty()),
-                "expected pending deletion to remain"
-            );
+            assert!(page.pending_changes.is_empty(), "page should be clean after flush");
         }
     }
 }
