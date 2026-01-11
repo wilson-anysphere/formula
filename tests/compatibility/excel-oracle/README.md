@@ -31,6 +31,10 @@ and exits non-zero if mismatches exceed the configured threshold.
   - `engine-results.json` — generated locally/CI by the engine runner.
 - `reports/` — mismatch reports produced by `compare.py`.
 
+Note: the repo may include a **small pinned dataset** to keep CI fast. For the
+true Excel oracle, regenerate the dataset with the Windows + Excel runner and
+pin it (see below).
+
 ## Tags and filtering
 
 Each case has `tags` that can be used to include/exclude subsets when evaluating
