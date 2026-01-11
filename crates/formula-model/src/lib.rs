@@ -22,6 +22,7 @@ mod formula_text;
 mod hyperlinks;
 pub mod import;
 mod merge;
+mod names;
 mod outline;
 pub mod pivots;
 pub mod rich_text;
@@ -48,6 +49,11 @@ pub use formula_rewrite::rewrite_sheet_names_in_formula;
 pub use formula_text::{display_formula_text, normalize_formula_text};
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};
 pub use merge::{MergeError, MergedRegion, MergedRegions};
+pub use names::{
+    validate_defined_name, DefinedName, DefinedNameError, DefinedNameId, DefinedNameScope,
+    DefinedNameValidationError, EXCEL_DEFINED_NAME_MAX_LEN, XLNM_FILTER_DATABASE, XLNM_PRINT_AREA,
+    XLNM_PRINT_TITLES,
+};
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use protection::{
     hash_legacy_password, verify_legacy_password, SheetProtection, SheetProtectionAction,
