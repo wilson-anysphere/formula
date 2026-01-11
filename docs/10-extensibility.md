@@ -199,11 +199,11 @@ unknown commands/panels/custom functions/data connectors).
 Entrypoint fields:
 
 - `main` (**required**) — CommonJS entrypoint used by the Node/desktop extension host. The file must
-  exist in the published package.
+  exist in the published package. (Must end in `.js` or `.cjs`.)
 - `browser` (optional) — browser-first entrypoint (ESM). If present, the file must exist in the
-  published package.
+  published package. (Must end in `.js` or `.mjs`.)
 - `module` (optional) — module entrypoint (ESM). If present, the file must exist in the published
-  package.
+  package. (Must end in `.js` or `.mjs`.)
 
 The browser extension host loads `browser` → `module` → `main` (first defined wins). The Node
 extension host always uses `main`.
