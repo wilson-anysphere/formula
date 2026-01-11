@@ -1018,13 +1018,16 @@ export function createSyncServer(
       "ws_connection_open"
     );
 
-    void retentionManager?.markSeen(persistedName);
-
-    if (retentionManager?.isPurging(persistedName)) {
+    const purging =
+      retentionManager?.isPurging(persistedName) ||
+      (leveldbDocNameHashingEnabled && retentionManager?.isPurging(docName));
+    if (purging) {
       logger.warn({ ip, docName }, "ws_connection_rejected_doc_purging");
       ws.close(1013, "Document is being purged");
       return;
     }
+
+    void retentionManager?.markSeen(persistedName);
 
     installYwsSecurity(ws, { docName, auth: authCtx, logger });
     setupWSConnection(ws, req, { gc: config.gc });
@@ -1053,7 +1056,10 @@ export function createSyncServer(
 
       const persistedName = persistedDocNameForLeveldb(docName);
 
-      if (retentionManager?.isPurging(persistedName)) {
+      const purging =
+        retentionManager?.isPurging(persistedName) ||
+        (leveldbDocNameHashingEnabled && retentionManager?.isPurging(docName));
+      if (purging) {
         sendUpgradeRejection(socket, 503, "Document is being purged");
         return;
       }
