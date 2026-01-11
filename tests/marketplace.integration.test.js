@@ -159,6 +159,8 @@ test("desktop runtime: auto-load installed extensions + hot reload on update", a
       privateKeyPemOrPath: privateKeyPath,
     });
 
+    // Unload first so the update doesn't rewrite files under a live extension worker.
+    await runtime.unloadExtension(extensionId);
     await manager.update(extensionId);
     await runtime.reloadExtension(extensionId);
 

@@ -68,6 +68,11 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
               return;
             }
             actions.textContent = `Updating to ${update.latestVersion}…`;
+            // Terminate the running extension before mutating its install directory.
+            // This avoids worker threads reading partially-updated files.
+            if (extensionHostManager) {
+              await extensionHostManager.unloadExtension(item.id);
+            }
             await extensionManager.update(item.id);
             if (extensionHostManager) {
               await extensionHostManager.reloadExtension(item.id);
