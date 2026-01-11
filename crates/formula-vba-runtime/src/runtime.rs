@@ -999,6 +999,59 @@ impl<'a> Executor<'a> {
         }
     }
 
+    fn coerce_cells_index(
+        &mut self,
+        frame: &mut Frame,
+        value: VbaValue,
+        is_row: bool,
+    ) -> Result<u32, VbaError> {
+        let value = self.coerce_default_member(frame, value)?;
+        let raw = match value {
+            VbaValue::Empty => return Ok(1),
+            VbaValue::Null => return Err(VbaError::Runtime("Invalid use of Null".to_string())),
+            VbaValue::String(s) => {
+                let s = s.trim();
+                if let Ok(n) = s.parse::<f64>() {
+                    n
+                } else if !is_row {
+                    // VBA allows `Cells(1, "B")` where the column is given as letters.
+                    let mut col: u32 = 0;
+                    for ch in s.chars() {
+                        if !ch.is_ascii_alphabetic() {
+                            return Err(VbaError::Runtime(format!(
+                                "Invalid column index `{s}` (expected number or letters)"
+                            )));
+                        }
+                        col = col
+                            .checked_mul(26)
+                            .and_then(|v| {
+                                v.checked_add((ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32)
+                            })
+                            .ok_or_else(|| {
+                                VbaError::Runtime(format!(
+                                    "Invalid column index `{s}` (overflow)"
+                                ))
+                            })?;
+                    }
+                    return Ok(col.max(1));
+                } else {
+                    return Err(VbaError::Runtime(format!(
+                        "Invalid row index `{s}` (expected a number)"
+                    )));
+                }
+            }
+            other => other.to_f64().unwrap_or(0.0),
+        };
+
+        let idx = raw as i64;
+        if idx <= 0 {
+            return Err(VbaError::Runtime(format!(
+                "Cells index must be >= 1 (got {raw})"
+            )));
+        }
+        Ok(idx as u32)
+    }
+
     fn coerce_to_bool(&mut self, frame: &mut Frame, value: VbaValue) -> Result<bool, VbaError> {
         let value = self.coerce_default_member(frame, value)?;
         match value {
@@ -1267,6 +1320,11 @@ impl<'a> Executor<'a> {
             });
             return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(sel))));
         }
+        if name_lc == "cells" {
+            return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                sheet_entire_range(self.sheet.active_sheet()),
+            ))));
+        }
         if name_lc == "rows" {
             return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
                 range: sheet_entire_range(self.sheet.active_sheet()),
@@ -1276,6 +1334,9 @@ impl<'a> Executor<'a> {
             return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
                 range: sheet_entire_range(self.sheet.active_sheet()),
             })));
+        }
+        if name_lc == "activeworkbook" {
+            return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Workbook)));
         }
 
         // VBA allows calling some 0-argument functions without parentheses (e.g. `Now`, `Date`).
@@ -1448,29 +1509,22 @@ impl<'a> Executor<'a> {
                 Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
             }
             "cells" => {
-                let row = self
-                    .eval_expr(
-                        frame,
-                        &args
-                            .get(0)
-                            .ok_or_else(|| VbaError::Runtime("Cells() missing row".to_string()))?
-                            .expr,
-                    )?
-                    .to_f64()
-                    .unwrap_or(1.0) as u32;
-                let col = self
-                    .eval_expr(
-                        frame,
-                        &args
-                            .get(1)
-                            .ok_or_else(|| VbaError::Runtime("Cells() missing col".to_string()))?
-                            .expr,
-                    )?
-                    .to_f64()
-                    .unwrap_or(1.0) as u32;
+                let sheet = self.sheet.active_sheet();
+                if args.is_empty() {
+                    return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                        sheet_entire_range(sheet),
+                    ))));
+                }
+                if args.len() < 2 {
+                    return Err(VbaError::Runtime("Cells() missing arguments".to_string()));
+                }
+                let row = self.eval_expr(frame, &args[0].expr)?;
+                let col = self.eval_expr(frame, &args[1].expr)?;
+                let row = self.coerce_cells_index(frame, row, true)?;
+                let col = self.coerce_cells_index(frame, col, false)?;
                 Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
                     VbaRangeRef {
-                        sheet: self.sheet.active_sheet(),
+                        sheet,
                         start_row: row,
                         start_col: col,
                         end_row: row,
@@ -1772,14 +1826,18 @@ impl<'a> Executor<'a> {
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range_ref))))
                 }
                 "cells" => {
-                    let row = self
-                        .eval_required_arg(frame, args, 0, "Cells")?
-                        .to_f64()
-                        .unwrap_or(1.0) as u32;
-                    let col = self
-                        .eval_required_arg(frame, args, 1, "Cells")?
-                        .to_f64()
-                        .unwrap_or(1.0) as u32;
+                    if args.is_empty() {
+                        return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                            sheet_entire_range(sheet),
+                        ))));
+                    }
+                    if args.len() < 2 {
+                        return Err(VbaError::Runtime("Cells() missing arguments".to_string()));
+                    }
+                    let row = self.eval_required_arg(frame, args, 0, "Cells")?;
+                    let col = self.eval_required_arg(frame, args, 1, "Cells")?;
+                    let row = self.coerce_cells_index(frame, row, true)?;
+                    let col = self.coerce_cells_index(frame, col, false)?;
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
                         VbaRangeRef {
                             sheet,
@@ -1790,7 +1848,7 @@ impl<'a> Executor<'a> {
                         },
                     ))))
                 }
-                "activate" => {
+                "activate" | "select" => {
                     self.sheet.set_active_sheet(sheet)?;
                     self.selection = None;
                     Ok(VbaValue::Empty)
@@ -2191,6 +2249,7 @@ impl<'a> Executor<'a> {
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(sel))))
                 }
                 "cutcopymode" => Ok(VbaValue::Boolean(self.clipboard.is_some())),
+                "activeworkbook" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Workbook))),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Application member `{member}`"
                 ))),
@@ -2207,6 +2266,9 @@ impl<'a> Executor<'a> {
                 "name" => Ok(VbaValue::String(
                     self.sheet.sheet_name(*sheet).unwrap_or("").to_string(),
                 )),
+                "cells" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                    sheet_entire_range(*sheet),
+                )))),
                 "rows" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
                     range: sheet_entire_range(*sheet),
                 }))),

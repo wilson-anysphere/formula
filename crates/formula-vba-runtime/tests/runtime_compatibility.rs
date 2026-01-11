@@ -226,6 +226,50 @@ End Sub
 }
 
 #[test]
+fn cells_property_select_and_column_letters_work_under_option_explicit() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Cells(1, "B") = 5
+    Cells(2, "AA") = 7
+
+    ' `Cells` can be used as a property (no args) for recorded macros like `Cells.Select`.
+    Cells.Select
+    Range("A10") = Selection.Row
+    Range("A11") = Selection.Column
+
+    ' Worksheet.Cells is also commonly used.
+    ActiveSheet.Cells.Select
+    Range("A12") = ActiveWorkbook.ActiveSheet.Name
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(wb.get_value_a1("Sheet1", "B1").unwrap(), VbaValue::Double(5.0));
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "AA2").unwrap(),
+        VbaValue::Double(7.0)
+    );
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "A10").unwrap(),
+        VbaValue::Double(1.0)
+    );
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "A11").unwrap(),
+        VbaValue::Double(1.0)
+    );
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "A12").unwrap(),
+        VbaValue::from("Sheet1")
+    );
+}
+
+#[test]
 fn rows_and_columns_count_match_excel_limits() {
     let code = r#"
 Option Explicit
