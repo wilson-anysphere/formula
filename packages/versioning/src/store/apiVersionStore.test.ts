@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../../../../services/api/src/app";
 import { runMigrations } from "../../../../services/api/src/db/migrations";
+import { deriveSecretStoreKey } from "../../../../services/api/src/secrets/secretStore";
 import { ApiVersionStore } from "./apiVersionStore.js";
 import { VersionManager } from "../versioning/versionManager.js";
 import { EventEmitter } from "node:events";
@@ -66,9 +67,13 @@ describe("ApiVersionStore (integration): persists VersionManager history via ser
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
+      corsAllowedOrigins: [],
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
-      secretStoreKey: "test-secret-store-key",
+      secretStoreKeys: {
+        currentKeyId: "legacy",
+        keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
+      },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null

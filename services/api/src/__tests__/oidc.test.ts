@@ -404,7 +404,7 @@ describe("OIDC SSO", () => {
         [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
       );
 
-      await putSecret(db, config.secretStoreKey, `oidc:${orgId}:mock`, provider.clientSecret);
+      await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, provider.clientSecret);
 
       publicApp = buildApp({
         db,
