@@ -21,6 +21,7 @@ Formula extensions are distributed as a single binary “package” blob downloa
 
 - No absolute paths
 - No `.` or `..` path segments
+- No `:` in path segments (portable paths; avoids Windows drive/alternate stream semantics)
 - No symlinks (tar entries with non-file typeflags are rejected)
 
 **Signature:**
