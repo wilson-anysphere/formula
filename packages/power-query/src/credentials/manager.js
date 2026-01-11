@@ -59,6 +59,12 @@ function parseSqlConnectionScope(connection) {
  *
  * This is intended to be used as the host application's implementation of
  * `QueryEngine({ onCredentialRequest })`.
+ *
+ * Credential secrets are connector-specific. For example, the built-in HTTP
+ * connector understands:
+ * - `{ headers: Record<string,string> }` for legacy header injection
+ * - `{ oauth2: { providerId: string, scopes?: string[] } }` for OAuth2 bearer
+ *   token handling when an `OAuth2Manager` is configured on `HttpConnector`.
  */
 export class CredentialManager {
   /**
