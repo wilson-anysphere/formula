@@ -45,6 +45,16 @@ fn r1c1_supports_sheet_prefixes_and_quoted_names() {
 }
 
 #[test]
+fn r1c1_roundtrip_with_external_workbook_prefixes() {
+    let mut opts = ParseOptions::default();
+    opts.reference_style = ReferenceStyle::R1C1;
+    let mut ser = SerializeOptions::default();
+    ser.reference_style = ReferenceStyle::R1C1;
+    roundtrip("=[Book.xlsx]Sheet1!R1C1+1", opts.clone(), ser.clone());
+    roundtrip("='[Book Name.xlsx]Sheet 1'!R1C1+1", opts, ser);
+}
+
+#[test]
 fn converts_r1c1_relative_to_a1_using_origin() {
     let mut opts = ParseOptions::default();
     opts.reference_style = ReferenceStyle::R1C1;
