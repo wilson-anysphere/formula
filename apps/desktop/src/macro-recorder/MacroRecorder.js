@@ -17,7 +17,8 @@ export class MacroRecorder {
       if (typeof value !== "string") return false;
       if (value.startsWith("'")) return false;
       const trimmed = value.trimStart();
-      return trimmed.startsWith("=") && trimmed.length > 1;
+      if (!trimmed.startsWith("=")) return false;
+      return trimmed.slice(1).trim() !== "";
     };
 
     this.unsubscribes.push(
