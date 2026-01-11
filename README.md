@@ -129,7 +129,7 @@ Migration notes:
 - Recommended: use a fresh `SYNC_SERVER_DATA_DIR` when enabling encryption.
 - With `STRICT=false`, mixed plaintext/ciphertext DBs can be read; documents are re-written encrypted over time (as updates are stored/compacted).
 
-Note: LevelDB *keys* are not encrypted (document IDs remain visible in keys).
+Note: LevelDB *keys* are not encrypted. Document IDs remain visible in keys unless you enable LevelDB docName hashing (see below).
 
 #### Retention / purge (LevelDB only)
 
