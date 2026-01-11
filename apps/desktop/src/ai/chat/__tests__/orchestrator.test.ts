@@ -122,7 +122,11 @@ describe("ai chat orchestrator", () => {
 
     expect(controller.getCell("Sheet1", "A1").value).toBe(1);
     expect(onToolCall).toHaveBeenCalledTimes(1);
-    expect(onToolResult).toHaveBeenCalledTimes(0);
+    expect(onToolResult).toHaveBeenCalledTimes(1);
+    expect(onToolResult.mock.calls[0]?.[1]).toMatchObject({
+      ok: false,
+      error: expect.objectContaining({ code: "approval_denied" }),
+    });
 
     expect(buildContextSpy).toHaveBeenCalledTimes(1);
 

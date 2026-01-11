@@ -23,6 +23,11 @@ export interface AuditedRunParams {
   max_iterations?: number;
   require_approval?: (call: LLMToolCall) => Promise<boolean>;
   /**
+   * When true, approval denials are surfaced to the model as tool results (ok:false)
+   * and the loop continues, allowing the model to re-plan. Default behavior is to throw.
+   */
+  continue_on_approval_denied?: boolean;
+  /**
    * Optional hooks for UI surfaces (e.g. chat panels) that still want to surface
    * tool call + result events while relying on this helper for audit logging.
    */
@@ -91,6 +96,7 @@ export async function runChatWithToolsAuditedVerified(
         toolExecutor: params.tool_executor as any,
         messages: messages as any,
         maxIterations: params.max_iterations,
+        continueOnApprovalDenied: params.continue_on_approval_denied,
         model: params.model ?? params.audit.model,
         temperature: params.temperature,
         maxTokens: params.max_tokens,

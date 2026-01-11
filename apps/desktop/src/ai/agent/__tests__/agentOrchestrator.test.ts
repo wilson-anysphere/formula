@@ -121,7 +121,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     expect(result.status).toBe("needs_approval");
     expect(result.denied_call?.name).toBe("write_cell");
     expect(documentController.getCell("Sheet1", { row: 0, col: 0 }).value).toBe(1);
-    expect(events).toEqual(["planning", "tool_call", "cancelled"]);
+    expect(events).toEqual(["planning", "tool_call", "tool_result", "cancelled"]);
 
     expect(onApprovalRequired).toHaveBeenCalledTimes(1);
     const preview = onApprovalRequired.mock.calls[0]![0].preview;

@@ -93,6 +93,13 @@ export interface RunAgentTaskParams {
    * requires explicit user approval.
    */
   previewOptions?: PreviewEngineOptions;
+  /**
+   * When true, approval denials are returned to the model as tool results and
+   * the agent continues running, allowing the model to re-plan.
+   *
+   * Default is false (stop safely on denial).
+   */
+  continueOnApprovalDenied?: boolean;
 
   onProgress?: (event: AgentProgressEvent) => void;
   onApprovalRequired?: (request: AgentApprovalRequest) => Promise<boolean>;
@@ -306,7 +313,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       }
 
       const approved = await guard(params.onApprovalRequired({ call, preview }));
-      if (!approved) deniedCall = call;
+      if (!approved && !params.continueOnApprovalDenied) deniedCall = call;
       return approved;
     };
 
@@ -324,6 +331,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
         },
         max_iterations: maxIterations,
         require_approval: requireApproval,
+        continue_on_approval_denied: params.continueOnApprovalDenied,
         on_tool_call: (call: ToolCall, meta: { requiresApproval: boolean }) => {
           emit({ type: "tool_call", iteration, call, requiresApproval: meta.requiresApproval });
         },

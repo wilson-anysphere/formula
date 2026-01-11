@@ -48,6 +48,7 @@ function toolRequiresApproval(tools, name) {
  *   onToolCall?: (call: ToolCall, meta: { requiresApproval: boolean }) => void,
  *   onToolResult?: (call: ToolCall, result: unknown) => void,
  *   requireApproval?: (call: ToolCall) => Promise<boolean>,
+ *   continueOnApprovalDenied?: boolean,
  *   model?: string,
  *   temperature?: number,
  *   maxTokens?: number
@@ -56,6 +57,7 @@ function toolRequiresApproval(tools, name) {
 export async function runChatWithTools(params) {
   const maxIterations = params.maxIterations ?? 8;
   const requireApproval = params.requireApproval ?? (async () => true);
+  const continueOnApprovalDenied = params.continueOnApprovalDenied ?? false;
   const toolDefs = params.toolExecutor.tools ?? [];
 
   /** @type {LLMMessage[]} */
@@ -81,14 +83,53 @@ export async function runChatWithTools(params) {
       };
     }
 
+    let denied = false;
+    let deniedToolName = null;
     for (const call of toolCalls) {
       const requiresApproval = toolRequiresApproval(toolDefs, call.name);
       params.onToolCall?.(call, { requiresApproval });
 
+      if (denied) {
+        const skippedResult = {
+          tool: call.name,
+          ok: false,
+          error: {
+            code: "skipped_due_to_approval_denied",
+            message: `Skipped tool call (${call.name}) because a prior tool call was denied (${deniedToolName ?? "unknown"}).`,
+          },
+        };
+        params.onToolResult?.(call, skippedResult);
+        messages.push({
+          role: "tool",
+          toolCallId: call.id,
+          content: safeStringify(skippedResult),
+        });
+        continue;
+      }
+
       if (requiresApproval) {
         const approved = await requireApproval(call);
         if (!approved) {
-          throw new Error(`Tool call requires approval and was denied: ${call.name}`);
+          const deniedResult = {
+            tool: call.name,
+            ok: false,
+            error: {
+              code: "approval_denied",
+              message: `Tool call requires approval and was denied: ${call.name}`,
+            },
+          };
+          params.onToolResult?.(call, deniedResult);
+          messages.push({
+            role: "tool",
+            toolCallId: call.id,
+            content: safeStringify(deniedResult),
+          });
+          if (!continueOnApprovalDenied) {
+            throw new Error(deniedResult.error.message);
+          }
+          denied = true;
+          deniedToolName = call.name;
+          continue;
         }
       }
 
