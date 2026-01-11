@@ -127,6 +127,27 @@ test("group-by: two-key groupByCount2 supports signed keys and ordering", async 
   assert.deepEqual(Array.from(out.counts), [1, 1, 2]);
 });
 
+test("group-by: two-key groupByMin2/groupByMax2 propagate NaN and preserve signed zero", async () => {
+  const cpu = new CpuBackend();
+  const keysA = new Uint32Array([1, 1, 1, 1]);
+  const keysB = new Uint32Array([1, 1, 2, 2]);
+  const values = new Float64Array([0, -0, Number.NaN, 5]);
+
+  const minOut = await cpu.groupByMin2(keysA, keysB, values);
+  assert.deepEqual(Array.from(minOut.uniqueKeysA), [1, 1]);
+  assert.deepEqual(Array.from(minOut.uniqueKeysB), [1, 2]);
+  assert.deepEqual(Array.from(minOut.counts), [2, 2]);
+  assert.ok(Object.is(minOut.mins[0], -0), `expected -0, got ${minOut.mins[0]}`);
+  assert.ok(Number.isNaN(minOut.mins[1]));
+
+  const maxOut = await cpu.groupByMax2(keysA, keysB, values);
+  assert.deepEqual(Array.from(maxOut.uniqueKeysA), [1, 1]);
+  assert.deepEqual(Array.from(maxOut.uniqueKeysB), [1, 2]);
+  assert.deepEqual(Array.from(maxOut.counts), [2, 2]);
+  assert.ok(Object.is(maxOut.maxs[0], 0) && !Object.is(maxOut.maxs[0], -0), `expected +0, got ${maxOut.maxs[0]}`);
+  assert.ok(Number.isNaN(maxOut.maxs[1]));
+});
+
 test("hashJoin: inner join correctness with duplicates", async () => {
   const cpu = new CpuBackend();
   const leftKeys = new Uint32Array([1, 2, 2, 3]);
