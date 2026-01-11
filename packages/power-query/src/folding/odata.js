@@ -6,8 +6,10 @@
  *
  * Supported operations (prefix-only):
  *  - selectColumns -> $select
+ *  - removeColumns -> $select (requires an existing explicit projection)
  *  - filterRows (simple comparisons) -> $filter
  *  - sortRows -> $orderby
+ *  - skip -> $skip
  *  - take -> $top
  */
 
@@ -71,7 +73,7 @@
  */
 
 /**
- * @param {string} input
+ * @param {string[]} input
  * @returns {boolean}
  */
 function hasDuplicateStrings(input) {
