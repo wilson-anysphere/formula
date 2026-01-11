@@ -1,12 +1,9 @@
 use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
 use crate::eval::address::CellAddr;
-use crate::eval::ast::{
-    BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp,
-};
-use crate::functions::{
-    ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId,
-};
+use crate::eval::ast::{BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp};
+use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId};
+use crate::locale::ValueLocaleConfig;
 use crate::value::{Array, ErrorKind, NumberLocale, Value};
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -164,6 +161,7 @@ pub struct Evaluator<'a, R: ValueResolver> {
     lexical_scopes: Rc<RefCell<Vec<HashMap<String, Value>>>>,
     lambda_depth: Rc<Cell<u32>>,
     date_system: ExcelDateSystem,
+    value_locale: ValueLocaleConfig,
     rng_counter: Rc<Cell<u64>>,
 }
 
@@ -189,6 +187,16 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         recalc_ctx: &'a RecalcContext,
         date_system: ExcelDateSystem,
     ) -> Self {
+        Self::new_with_date_system_and_locale(resolver, ctx, recalc_ctx, date_system, ValueLocaleConfig::default())
+    }
+
+    pub fn new_with_date_system_and_locale(
+        resolver: &'a R,
+        ctx: EvalContext,
+        recalc_ctx: &'a RecalcContext,
+        date_system: ExcelDateSystem,
+        value_locale: ValueLocaleConfig,
+    ) -> Self {
         Self {
             resolver,
             ctx,
@@ -198,6 +206,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             lexical_scopes: Rc::new(RefCell::new(Vec::new())),
             lambda_depth: Rc::new(Cell::new(0)),
             date_system,
+            value_locale,
             rng_counter: Rc::new(Cell::new(0)),
         }
     }
@@ -212,6 +221,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             lexical_scopes: Rc::clone(&self.lexical_scopes),
             lambda_depth: Rc::clone(&self.lambda_depth),
             date_system: self.date_system,
+            value_locale: self.value_locale,
             rng_counter: Rc::clone(&self.rng_counter),
         }
     }
@@ -226,6 +236,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             lexical_scopes: Rc::new(RefCell::new(scopes)),
             lambda_depth: Rc::clone(&self.lambda_depth),
             date_system: self.date_system,
+            value_locale: self.value_locale,
             rng_counter: Rc::clone(&self.rng_counter),
         }
     }
@@ -1076,6 +1087,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn number_locale(&self) -> NumberLocale {
         self.recalc_ctx.number_locale
+    }
+
+    fn value_locale(&self) -> ValueLocaleConfig {
+        self.value_locale
     }
 }
 

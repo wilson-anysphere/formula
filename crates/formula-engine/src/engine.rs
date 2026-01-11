@@ -14,7 +14,7 @@ use crate::eval::{
 };
 use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
 use crate::iterative;
-use crate::locale::{canonicalize_formula, canonicalize_formula_with_style, FormulaLocale};
+use crate::locale::{canonicalize_formula, canonicalize_formula_with_style, FormulaLocale, ValueLocaleConfig};
 use crate::value::{Array, ErrorKind, Value};
 use formula_model::{CellId, CellRef, Range, Table};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -262,6 +262,7 @@ pub struct Engine {
     dirty_reasons: HashMap<CellKey, DirtyReason>,
     calc_settings: CalcSettings,
     date_system: ExcelDateSystem,
+    value_locale: ValueLocaleConfig,
     circular_references: HashSet<CellKey>,
     spills: SpillState,
     next_recalc_id: u64,
@@ -331,6 +332,7 @@ impl Engine {
                 ..CalcSettings::default()
             },
             date_system: ExcelDateSystem::EXCEL_1900,
+            value_locale: ValueLocaleConfig::default(),
             circular_references: HashSet::new(),
             spills: SpillState::default(),
             next_recalc_id: 0,
@@ -370,7 +372,40 @@ impl Engine {
             return;
         }
         self.date_system = system;
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
 
+    pub fn date_system(&self) -> ExcelDateSystem {
+        self.date_system
+    }
+
+    pub fn set_value_locale(&mut self, value_locale: ValueLocaleConfig) {
+        if self.value_locale == value_locale {
+            return;
+        }
+        self.value_locale = value_locale;
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    pub fn set_value_locale_id(&mut self, locale_id: &str) -> bool {
+        let Some(config) = ValueLocaleConfig::for_locale_id(locale_id) else {
+            return false;
+        };
+        self.set_value_locale(config);
+        true
+    }
+
+    pub fn value_locale(&self) -> ValueLocaleConfig {
+        self.value_locale
+    }
+
+    fn mark_all_compiled_cells_dirty(&mut self) {
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
                 if cell.compiled.is_some() {
@@ -386,13 +421,6 @@ impl Engine {
         }
 
         self.sync_dirty_from_calc_graph();
-        if self.calc_settings.calculation_mode != CalculationMode::Manual {
-            self.recalculate();
-        }
-    }
-
-    pub fn date_system(&self) -> ExcelDateSystem {
-        self.date_system
     }
 
     pub fn has_dirty_cells(&self) -> bool {
@@ -1349,6 +1377,7 @@ impl Engine {
         mut value_changes: Option<&mut RecalcValueChangeCollector>,
     ) -> (Vec<CellId>, Vec<CellId>) {
         self.circular_references.clear();
+        let value_locale = self.value_locale;
 
         let mut snapshot = Snapshot::from_workbook(
             &self.workbook,
@@ -1404,11 +1433,12 @@ impl Engine {
                     };
                     let value = match compiled {
                         CompiledFormula::Ast(expr) => {
-                            let evaluator = crate::eval::Evaluator::new_with_date_system(
+                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locale(
                                 &snapshot,
                                 ctx,
                                 recalc_ctx,
                                 date_system,
+                                value_locale,
                             );
                             evaluator.eval_formula(expr)
                         }
@@ -1425,7 +1455,7 @@ impl Engine {
                                 row: k.addr.row as i32,
                                 col: k.addr.col as i32,
                             };
-                            let v = vm.eval(&bc.program, &grid, base);
+                            let v = vm.eval_with_value_locale(&bc.program, &grid, base, value_locale);
                             bytecode_value_to_engine(v)
                         }
                     };
@@ -1449,11 +1479,12 @@ impl Engine {
                                     match compiled {
                                         CompiledFormula::Ast(expr) => {
                                             let evaluator =
-                                                crate::eval::Evaluator::new_with_date_system(
+                                                crate::eval::Evaluator::new_with_date_system_and_locale(
                                                     &snapshot,
                                                     ctx,
                                                     recalc_ctx,
                                                     date_system,
+                                                    value_locale,
                                                 );
                                             (*k, evaluator.eval_formula(expr))
                                         }
@@ -1473,7 +1504,7 @@ impl Engine {
                                                 row: k.addr.row as i32,
                                                 col: k.addr.col as i32,
                                             };
-                                            let v = vm.eval(&bc.program, &grid, base);
+                                            let v = vm.eval_with_value_locale(&bc.program, &grid, base, value_locale);
                                             (*k, bytecode_value_to_engine(v))
                                         }
                                     }
@@ -1500,11 +1531,12 @@ impl Engine {
                 };
                 let value = match compiled {
                     CompiledFormula::Ast(expr) => {
-                        let evaluator = crate::eval::Evaluator::new_with_date_system(
+                        let evaluator = crate::eval::Evaluator::new_with_date_system_and_locale(
                             &snapshot,
                             ctx,
                             recalc_ctx,
                             date_system,
+                            value_locale,
                         );
                         evaluator.eval_formula(expr)
                     }
@@ -1521,7 +1553,7 @@ impl Engine {
                             row: k.addr.row as i32,
                             col: k.addr.col as i32,
                         };
-                        let v = vm.eval(&bc.program, &grid, base);
+                        let v = vm.eval_with_value_locale(&bc.program, &grid, base, value_locale);
                         bytecode_value_to_engine(v)
                     }
                 };
@@ -1552,11 +1584,12 @@ impl Engine {
 
                 let value = match compiled {
                     CompiledFormula::Ast(expr) => {
-                        let evaluator = crate::eval::Evaluator::new_with_date_system(
+                        let evaluator = crate::eval::Evaluator::new_with_date_system_and_locale(
                             &snapshot,
                             ctx,
                             recalc_ctx,
                             date_system,
+                            value_locale,
                         )
                         .with_dependency_trace(&trace);
                         evaluator.eval_formula(expr)
@@ -1576,7 +1609,7 @@ impl Engine {
                             row: k.addr.row as i32,
                             col: k.addr.col as i32,
                         };
-                        let v = vm.eval(&bc.program, &grid, base);
+                        let v = vm.eval_with_value_locale(&bc.program, &grid, base, value_locale);
                         bytecode_value_to_engine(v)
                     }
                 };
@@ -1708,6 +1741,7 @@ impl Engine {
         );
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let date_system = self.date_system;
+        let value_locale = self.value_locale;
 
         for scc_idx in order {
             let mut scc = sccs[scc_idx].clone();
@@ -1735,11 +1769,12 @@ impl Engine {
                     current_sheet: k.sheet,
                     current_cell: k.addr,
                 };
-                let evaluator = crate::eval::Evaluator::new_with_date_system(
+                let evaluator = crate::eval::Evaluator::new_with_date_system_and_locale(
                     &snapshot,
                     ctx,
                     &recalc_ctx,
                     date_system,
+                    value_locale,
                 );
                 let v = evaluator.eval_formula(&expr);
                 self.apply_eval_result(
@@ -1788,11 +1823,12 @@ impl Engine {
                         current_sheet: k.sheet,
                         current_cell: k.addr,
                     };
-                    let evaluator = crate::eval::Evaluator::new_with_date_system(
+                    let evaluator = crate::eval::Evaluator::new_with_date_system_and_locale(
                         &snapshot,
                         ctx,
                         &recalc_ctx,
                         date_system,
+                        value_locale,
                     );
                     let new_val = evaluator.eval_formula(&expr);
                     max_delta = max_delta.max(value_delta(&old, &new_val));
@@ -2258,7 +2294,13 @@ impl Engine {
     fn begin_recalc_context(&mut self) -> crate::eval::RecalcContext {
         let id = self.next_recalc_id;
         self.next_recalc_id = self.next_recalc_id.wrapping_add(1);
-        crate::eval::RecalcContext::new(id)
+        let mut ctx = crate::eval::RecalcContext::new(id);
+        let separators = self.value_locale.separators;
+        ctx.number_locale = crate::value::NumberLocale::new(
+            separators.decimal_sep,
+            Some(separators.thousands_sep),
+        );
+        ctx
     }
 
     fn compile_name_expr(&self, expr: &Expr<String>) -> CompiledExpr {

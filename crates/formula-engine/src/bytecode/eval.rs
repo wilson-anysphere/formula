@@ -2,6 +2,7 @@ use super::ast::{BinaryOp, UnaryOp};
 use super::grid::Grid;
 use super::runtime::{apply_binary, apply_unary, call_function};
 use super::value::{CellCoord, Value};
+use crate::locale::ValueLocaleConfig;
 
 use super::program::{OpCode, Program};
 
@@ -86,5 +87,15 @@ impl Vm {
             }
         }
         self.stack.pop().unwrap_or(Value::Empty)
+    }
+
+    pub fn eval_with_value_locale(
+        &mut self,
+        program: &Program,
+        grid: &dyn Grid,
+        base: CellCoord,
+        _value_locale: ValueLocaleConfig,
+    ) -> Value {
+        self.eval(program, grid, base)
     }
 }

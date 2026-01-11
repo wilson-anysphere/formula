@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use crate::date::ExcelDateSystem;
 use crate::eval::{CellAddr, CompiledExpr};
+use crate::locale::ValueLocaleConfig;
 use crate::value::{ErrorKind, Value};
 
 pub mod date_time;
@@ -162,7 +163,12 @@ pub trait FunctionContext {
     /// This is plumbed through evaluation so we can eventually respect workbook locale for
     /// implicit coercions and for VALUE/NUMBERVALUE.
     fn number_locale(&self) -> crate::value::NumberLocale {
-        crate::value::NumberLocale::en_us()
+        let separators = self.value_locale().separators;
+        crate::value::NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep))
+    }
+
+    fn value_locale(&self) -> ValueLocaleConfig {
+        ValueLocaleConfig::default()
     }
 
     /// Deterministic per-recalc random bits, scoped to the current cell evaluation.
