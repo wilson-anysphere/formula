@@ -2,6 +2,9 @@
 //!
 //! Focus: fast-ish streaming reads of large worksheets, with preservation hooks.
 
+pub mod format;
+pub mod rgce;
+
 mod opc;
 mod patch;
 mod parser;

@@ -399,7 +399,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         let v = rr.read_utf16_chars(cch)?;
                         let cce = rr.read_u32()? as usize;
                         let rgce = rr.read_slice(cce)?.to_vec();
-                        let text = decode_formula_rgce(&rgce);
+                        let text = crate::rgce::decode_rgce(&rgce).ok();
                         (
                             CellValue::Text(v),
                             Some(Formula {
@@ -414,7 +414,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         let _flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let rgce = rr.read_slice(cce)?.to_vec();
-                        let text = decode_formula_rgce(&rgce);
+                        let text = crate::rgce::decode_rgce(&rgce).ok();
                         (
                             CellValue::Number(v),
                             Some(Formula {
@@ -429,7 +429,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         let _flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let rgce = rr.read_slice(cce)?.to_vec();
-                        let text = decode_formula_rgce(&rgce);
+                        let text = crate::rgce::decode_rgce(&rgce).ok();
                         (
                             CellValue::Bool(v),
                             Some(Formula {
@@ -444,7 +444,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         let _flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let rgce = rr.read_slice(cce)?.to_vec();
-                        let text = decode_formula_rgce(&rgce);
+                        let text = crate::rgce::decode_rgce(&rgce).ok();
                         (
                             CellValue::Error(v),
                             Some(Formula {
@@ -469,177 +469,6 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
     }
 
     Ok(dimension)
-}
-
-fn decode_formula_rgce(rgce: &[u8]) -> Option<String> {
-    if rgce.is_empty() {
-        return Some(String::new());
-    }
-
-    let mut rgce = rgce;
-    let mut stack: Vec<usize> = Vec::new();
-    let mut formula = String::with_capacity(rgce.len());
-
-    while !rgce.is_empty() {
-        let ptg = rgce[0];
-        rgce = &rgce[1..];
-
-        match ptg {
-            0x03..=0x11 => {
-                let e2_start = stack.pop()?;
-                let e2 = formula.split_off(e2_start);
-                let op = match ptg {
-                    0x03 => "+",
-                    0x04 => "-",
-                    0x05 => "*",
-                    0x06 => "/",
-                    0x07 => "^",
-                    0x08 => "&",
-                    0x09 => "<",
-                    0x0A => "<=",
-                    0x0B => "=",
-                    0x0C => ">",
-                    0x0D => ">=",
-                    0x0E => "<>",
-                    0x0F => " ",
-                    0x10 => ",",
-                    0x11 => ":",
-                    _ => unreachable!(),
-                };
-                formula.push_str(op);
-                formula.push_str(&e2);
-            }
-            0x12 => {
-                let &e = stack.last()?;
-                formula.insert(e, '+');
-            }
-            0x13 => {
-                let &e = stack.last()?;
-                formula.insert(e, '-');
-            }
-            0x14 => {
-                formula.push('%');
-            }
-            0x15 => {
-                let &e = stack.last()?;
-                formula.insert(e, '(');
-                formula.push(')');
-            }
-            0x16 => {
-                stack.push(formula.len());
-            }
-            0x17 => {
-                // PtgStr
-                if rgce.len() < 2 {
-                    return None;
-                }
-                let cch = u16::from_le_bytes([rgce[0], rgce[1]]) as usize;
-                rgce = &rgce[2..];
-                if rgce.len() < cch * 2 {
-                    return None;
-                }
-                let raw = &rgce[..cch * 2];
-                rgce = &rgce[cch * 2..];
-
-                let mut units = Vec::with_capacity(cch);
-                for chunk in raw.chunks_exact(2) {
-                    units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-                }
-
-                stack.push(formula.len());
-                formula.push('"');
-                formula.push_str(&String::from_utf16_lossy(&units));
-                formula.push('"');
-            }
-            0x1C => {
-                // PtgErr
-                let err = *rgce.first()?;
-                rgce = &rgce[1..];
-                stack.push(formula.len());
-                formula.push_str(match err {
-                    0x00 => "#NULL!",
-                    0x07 => "#DIV/0!",
-                    0x0F => "#VALUE!",
-                    0x17 => "#REF!",
-                    0x1D => "#NAME?",
-                    0x24 => "#NUM!",
-                    0x2A => "#N/A",
-                    0x2B => "#GETTING_DATA",
-                    _ => return None,
-                });
-            }
-            0x1D => {
-                // PtgBool
-                let b = *rgce.first()?;
-                rgce = &rgce[1..];
-                stack.push(formula.len());
-                formula.push_str(if b == 0 { "FALSE" } else { "TRUE" });
-            }
-            0x1E => {
-                // PtgInt
-                if rgce.len() < 2 {
-                    return None;
-                }
-                let n = u16::from_le_bytes([rgce[0], rgce[1]]);
-                rgce = &rgce[2..];
-                stack.push(formula.len());
-                formula.push_str(&n.to_string());
-            }
-            0x1F => {
-                // PtgNum
-                if rgce.len() < 8 {
-                    return None;
-                }
-                let mut bytes = [0u8; 8];
-                bytes.copy_from_slice(&rgce[..8]);
-                rgce = &rgce[8..];
-                stack.push(formula.len());
-                formula.push_str(&f64::from_le_bytes(bytes).to_string());
-            }
-            0x24 | 0x44 | 0x64 => {
-                // PtgRef
-                if rgce.len() < 6 {
-                    return None;
-                }
-                let row = u32::from_le_bytes([rgce[0], rgce[1], rgce[2], rgce[3]]) + 1;
-                let col = u16::from_le_bytes([rgce[4], rgce[5] & 0x3F]);
-
-                stack.push(formula.len());
-                if rgce[5] & 0x80 != 0x80 {
-                    formula.push('$');
-                }
-                push_column(col as u32, &mut formula);
-                if rgce[5] & 0x40 != 0x40 {
-                    formula.push('$');
-                }
-                formula.push_str(&row.to_string());
-                rgce = &rgce[6..];
-            }
-            _ => return None,
-        }
-    }
-
-    if stack.len() == 1 {
-        Some(formula)
-    } else {
-        None
-    }
-}
-
-fn push_column(mut col: u32, out: &mut String) {
-    // Excel column labels are 1-based.
-    col += 1;
-    let mut buf = [0u8; 10];
-    let mut i = 0usize;
-    while col > 0 {
-        let rem = ((col - 1) % 26) as u8;
-        buf[i] = b'A' + rem;
-        i += 1;
-        col = (col - 1) / 26;
-    }
-    for ch in buf[..i].iter().rev() {
-        out.push(*ch as char);
-    }
 }
 
 fn normalize_sheet_target(target: &str) -> String {
