@@ -429,33 +429,53 @@ def _main():
 
         def guarded_writev(fd, buffers):
             if fd in stdout_fds:
+                if not all(isinstance(b, (bytes, bytearray, memoryview)) for b in buffers):
+                    return original_writev(fd, buffers)
                 total = 0
                 for buf in buffers:
                     if isinstance(buf, memoryview):
                         buf = buf.tobytes()
-                    if isinstance(buf, (bytes, bytearray)):
-                        user_stdout.write(bytes(buf).decode("utf-8", errors="replace"))
-                        total += len(buf)
-                    else:
-                        # Delegate to original for type checking/error behavior.
-                        return original_writev(fd, buffers)
+                    user_stdout.write(bytes(buf).decode("utf-8", errors="replace"))
+                    total += len(buf)
                 return total
             if fd in stderr_fds:
+                if not all(isinstance(b, (bytes, bytearray, memoryview)) for b in buffers):
+                    return original_writev(fd, buffers)
                 total = 0
                 for buf in buffers:
                     if isinstance(buf, memoryview):
                         buf = buf.tobytes()
-                    if isinstance(buf, (bytes, bytearray)):
-                        user_stderr.write(bytes(buf).decode("utf-8", errors="replace"))
-                        total += len(buf)
-                    else:
-                        return original_writev(fd, buffers)
+                    user_stderr.write(bytes(buf).decode("utf-8", errors="replace"))
+                    total += len(buf)
                 return total
             return original_writev(fd, buffers)
 
         os.writev = guarded_writev
         if _posix is not None and hasattr(_posix, "writev"):
             _posix.writev = guarded_writev  # type: ignore[attr-defined]
+
+    # Track additional dup() escape hatches (fcntl F_DUPFD) so writes to duplicated stdout/stderr
+    # file descriptors do not corrupt the JSON output channel.
+    try:
+        import fcntl as _fcntl  # type: ignore
+
+        original_fcntl = _fcntl.fcntl
+        dupfd_cmds = {_fcntl.F_DUPFD}
+        if hasattr(_fcntl, "F_DUPFD_CLOEXEC"):
+            dupfd_cmds.add(_fcntl.F_DUPFD_CLOEXEC)
+
+        def guarded_fcntl(fd, cmd, arg=0):
+            result = original_fcntl(fd, cmd, arg)
+            if cmd in dupfd_cmds and isinstance(result, int):
+                if fd in stdout_fds:
+                    stdout_fds.add(result)
+                if fd in stderr_fds:
+                    stderr_fds.add(result)
+            return result
+
+        _fcntl.fcntl = guarded_fcntl
+    except Exception:
+        pass
 
     def guard_read_path(fn, path_arg_index=0):
         original = fn

@@ -30,10 +30,16 @@ os.write(1, b"B\\\\n")
 fd = os.dup(1)
 os.write(fd, b"C\\\\n")
 
+try:
+    import fcntl
+    fd2 = fcntl.fcntl(1, fcntl.F_DUPFD, 0)
+    os.write(fd2, b"D\\\\n")
+except Exception:
+    pass
+
 __result__ = 7
 `.trim()
       })
     ).resolves.toBe(7);
   });
 });
-
