@@ -20,15 +20,18 @@ test("CollabBranchingWorkflow: keeps global currentBranchName consistent for ren
   const meta = session.doc.getMap("branching:meta");
   assert.equal(meta.get("currentBranchName"), "main");
   assert.equal(workflow.getCurrentBranchName(), "main");
+  assert.equal(await workflow.getCurrentBranchNameAsync(), "main");
 
   await workflow.createBranch(owner, { name: "feature" });
   await workflow.checkoutBranch(owner, { name: "feature" });
   assert.equal(meta.get("currentBranchName"), "feature");
   assert.equal(workflow.getCurrentBranchName(), "feature");
+  assert.equal(await workflow.getCurrentBranchNameAsync(), "feature");
 
   await workflow.renameBranch(owner, { oldName: "feature", newName: "feat2" });
   assert.equal(meta.get("currentBranchName"), "feat2");
   assert.equal(workflow.getCurrentBranchName(), "feat2");
+  assert.equal(await workflow.getCurrentBranchNameAsync(), "feat2");
 
   await assert.rejects(workflow.deleteBranch(owner, { name: "feat2" }), {
     message: "Cannot delete the currently checked-out branch",
@@ -37,6 +40,7 @@ test("CollabBranchingWorkflow: keeps global currentBranchName consistent for ren
   await workflow.checkoutBranch(owner, { name: "main" });
   assert.equal(meta.get("currentBranchName"), "main");
   assert.equal(workflow.getCurrentBranchName(), "main");
+  assert.equal(await workflow.getCurrentBranchNameAsync(), "main");
 
   await workflow.deleteBranch(owner, { name: "feat2" });
 
@@ -50,4 +54,5 @@ test("CollabBranchingWorkflow: keeps global currentBranchName consistent for ren
   // workflow should fall back to main.
   session.doc.getMap("branching:meta").set("currentBranchName", "ghost");
   assert.equal(workflow.getCurrentBranchName(), "main");
+  assert.equal(await workflow.getCurrentBranchNameAsync(), "main");
 });

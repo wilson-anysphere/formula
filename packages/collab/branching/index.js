@@ -39,6 +39,18 @@ export class CollabBranchingWorkflow {
   }
 
   /**
+   * Async variant backed by the underlying BranchService/store.
+   *
+   * Prefer this when you want store-level validation/self-healing (e.g.
+   * YjsBranchStore will normalize dangling pointers).
+   *
+   * @returns {Promise<string>}
+   */
+  async getCurrentBranchNameAsync() {
+    return this.#branchService.getCurrentBranchName();
+  }
+
+  /**
    * @returns {Promise<ReturnType<BranchService["listBranches"]>>}
    */
   async listBranches() {
