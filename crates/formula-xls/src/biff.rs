@@ -1050,6 +1050,43 @@ mod tests {
     }
 
     #[test]
+    fn sheet_row_col_scan_stops_at_next_bof_without_eof() {
+        let sheet_bof = record(0x0809, &[0u8; 16]);
+
+        // ROW 1 with explicit height = 20.0 points (400 twips).
+        let mut row_payload = [0u8; 16];
+        row_payload[0..2].copy_from_slice(&1u16.to_le_bytes());
+        row_payload[6..8].copy_from_slice(&400u16.to_le_bytes());
+        let row_record = record(0x0208, &row_payload);
+
+        // BOF for the next substream; no EOF record for the worksheet.
+        let next_bof = record(0x0809, &[0u8; 16]);
+
+        let stream = [sheet_bof, row_record, next_bof].concat();
+        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        assert_eq!(props.rows.get(&1).and_then(|p| p.height), Some(20.0));
+    }
+
+    #[test]
+    fn sheet_cell_xf_scan_stops_at_next_bof_without_eof() {
+        let sheet_bof = record(0x0809, &[0u8; 16]);
+
+        // NUMBER cell at (0,0) with xf=7.
+        let mut number_payload = vec![0u8; 14];
+        number_payload[0..2].copy_from_slice(&0u16.to_le_bytes());
+        number_payload[2..4].copy_from_slice(&0u16.to_le_bytes());
+        number_payload[4..6].copy_from_slice(&7u16.to_le_bytes());
+        let number_record = record(0x0203, &number_payload);
+
+        // BOF for the next substream; no EOF record for the worksheet.
+        let next_bof = record(0x0809, &[0u8; 16]);
+
+        let stream = [sheet_bof, number_record, next_bof].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(7));
+    }
+
+    #[test]
     fn parses_globals_date_system_formats_and_xfs_biff8() {
         // 1904 record payload: f1904 = 1.
         let r_1904 = record(0x0022, &[1, 0]);
