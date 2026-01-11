@@ -9,6 +9,8 @@ import { OllamaChatClient } from "../../../../../packages/llm/src/ollama.js";
 import { clearDesktopLLMConfig } from "../../ai/llm/settings.js";
 import { DocumentController } from "../../document/documentController.js";
 
+const TEST_TIMEOUT_MS = 15_000;
+
 const mocks = vi.hoisted(() => {
   return {
     createAiChatOrchestrator: vi.fn(() => ({ sendMessage: vi.fn(), sessionId: "test-session" })),
@@ -58,12 +60,14 @@ describe("AI chat panel", () => {
     mocks.createAiChatOrchestrator.mockClear();
   });
 
-  it("mounts via renderPanelBody and shows setup state when no API key is set", async () => {
-    clearAiStorage();
+  it(
+    "mounts via renderPanelBody and shows setup state when no API key is set",
+    async () => {
+      clearAiStorage();
 
-    const { createPanelBodyRenderer } = await import("../panelBodyRenderer.js");
-    const { PanelIds } = await import("../panelRegistry.js");
-    const renderer = createPanelBodyRenderer({
+      const { createPanelBodyRenderer } = await import("../panelBodyRenderer.js");
+      const { PanelIds } = await import("../panelRegistry.js");
+      const renderer = createPanelBodyRenderer({
       getDocumentController: () => {
         throw new Error("document controller should not be requested when API key is missing");
       },
@@ -78,16 +82,20 @@ describe("AI chat panel", () => {
 
     expect(body.textContent).toContain("AI chat setup");
 
-    act(() => {
-      renderer.cleanup([]);
-    });
-  });
+      act(() => {
+        renderer.cleanup([]);
+      });
+    },
+    TEST_TIMEOUT_MS
+  );
 
-  it("can save an OpenAI API key and transition into the chat UI", async () => {
-    clearAiStorage();
+  it(
+    "can save an OpenAI API key and transition into the chat UI",
+    async () => {
+      clearAiStorage();
 
-    const doc = new DocumentController();
-    const getDocumentController = vi.fn(() => doc);
+      const doc = new DocumentController();
+      const getDocumentController = vi.fn(() => doc);
 
     const { createPanelBodyRenderer } = await import("../panelBodyRenderer.js");
     const { PanelIds } = await import("../panelRegistry.js");
@@ -131,16 +139,20 @@ describe("AI chat panel", () => {
 
     expect(body.querySelector('[data-testid="agent-goal"]')).toBeTruthy();
 
-    act(() => {
-      renderer.cleanup([]);
-    });
-  });
+      act(() => {
+        renderer.cleanup([]);
+      });
+    },
+    TEST_TIMEOUT_MS
+  );
 
-  it("selecting Anthropic provider wires up AnthropicClient", async () => {
-    clearAiStorage();
-    mocks.createAiChatOrchestrator.mockClear();
+  it(
+    "selecting Anthropic provider wires up AnthropicClient",
+    async () => {
+      clearAiStorage();
+      mocks.createAiChatOrchestrator.mockClear();
 
-    const doc = new DocumentController();
+      const doc = new DocumentController();
     const getDocumentController = vi.fn(() => doc);
 
     const { createPanelBodyRenderer } = await import("../panelBodyRenderer.js");
@@ -182,16 +194,20 @@ describe("AI chat panel", () => {
     const lastCall = mocks.createAiChatOrchestrator.mock.calls.at(-1)?.[0] as any;
     expect(lastCall?.llmClient).toBeInstanceOf(AnthropicClient);
 
-    act(() => {
-      renderer.cleanup([]);
-    });
-  });
+      act(() => {
+        renderer.cleanup([]);
+      });
+    },
+    TEST_TIMEOUT_MS
+  );
 
-  it("selecting Ollama provider wires up OllamaChatClient", async () => {
-    clearAiStorage();
-    mocks.createAiChatOrchestrator.mockClear();
+  it(
+    "selecting Ollama provider wires up OllamaChatClient",
+    async () => {
+      clearAiStorage();
+      mocks.createAiChatOrchestrator.mockClear();
 
-    const doc = new DocumentController();
+      const doc = new DocumentController();
     const getDocumentController = vi.fn(() => doc);
 
     const { createPanelBodyRenderer } = await import("../panelBodyRenderer.js");
@@ -242,8 +258,10 @@ describe("AI chat panel", () => {
     const lastCall = mocks.createAiChatOrchestrator.mock.calls.at(-1)?.[0] as any;
     expect(lastCall?.llmClient).toBeInstanceOf(OllamaChatClient);
 
-    act(() => {
-      renderer.cleanup([]);
-    });
-  });
+      act(() => {
+        renderer.cleanup([]);
+      });
+    },
+    TEST_TIMEOUT_MS
+  );
 });

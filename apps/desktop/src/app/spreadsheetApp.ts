@@ -434,6 +434,7 @@ export class SpreadsheetApp {
     // Minimal scrollbars (drawn as DOM overlays, like the React CanvasGrid).
     this.vScrollbarTrack = document.createElement("div");
     this.vScrollbarTrack.setAttribute("aria-hidden", "true");
+    this.vScrollbarTrack.setAttribute("data-testid", "scrollbar-track-y");
     this.vScrollbarTrack.style.position = "absolute";
     this.vScrollbarTrack.style.background = "var(--bg-tertiary)";
     this.vScrollbarTrack.style.borderRadius = "6px";
@@ -442,6 +443,7 @@ export class SpreadsheetApp {
 
     this.vScrollbarThumb = document.createElement("div");
     this.vScrollbarThumb.setAttribute("aria-hidden", "true");
+    this.vScrollbarThumb.setAttribute("data-testid", "scrollbar-thumb-y");
     this.vScrollbarThumb.style.position = "absolute";
     this.vScrollbarThumb.style.left = "1px";
     this.vScrollbarThumb.style.right = "1px";
@@ -455,6 +457,7 @@ export class SpreadsheetApp {
 
     this.hScrollbarTrack = document.createElement("div");
     this.hScrollbarTrack.setAttribute("aria-hidden", "true");
+    this.hScrollbarTrack.setAttribute("data-testid", "scrollbar-track-x");
     this.hScrollbarTrack.style.position = "absolute";
     this.hScrollbarTrack.style.background = "var(--bg-tertiary)";
     this.hScrollbarTrack.style.borderRadius = "6px";
@@ -463,6 +466,7 @@ export class SpreadsheetApp {
 
     this.hScrollbarThumb = document.createElement("div");
     this.hScrollbarThumb.setAttribute("aria-hidden", "true");
+    this.hScrollbarThumb.setAttribute("data-testid", "scrollbar-thumb-x");
     this.hScrollbarThumb.style.position = "absolute";
     this.hScrollbarThumb.style.top = "1px";
     this.hScrollbarThumb.style.bottom = "1px";

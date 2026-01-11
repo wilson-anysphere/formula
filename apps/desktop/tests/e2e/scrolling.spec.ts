@@ -111,6 +111,28 @@ test.describe("grid scrolling + virtualization", () => {
     await expect(page.getByTestId("active-value")).toHaveText("FarX");
   });
 
+  test("scrollbar track click scrolls without changing the selection", async ({ page }) => {
+    await page.goto("/");
+    const grid = page.locator("#grid");
+
+    // Focus A1.
+    await grid.click({ position: { x: 60, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(scrollBefore).toBe(0);
+
+    const track = page.getByTestId("scrollbar-track-y");
+    const box = await track.boundingBox();
+    expect(box).toBeTruthy();
+    // Click near the bottom of the track (page down).
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height - 4);
+
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(scrollAfter).toBeGreaterThan(scrollBefore);
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+  });
+
   test("charts remain anchored to sheet coordinates while scrolling", async ({ page }) => {
     await page.goto("/");
 
