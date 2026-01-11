@@ -44,6 +44,12 @@ pub enum Error {
         #[source]
         source: xlsx::XlsxError,
     },
+    #[error("failed to save workbook as `.xlsb` package to `{path}`: {source}")]
+    SaveXlsbPackage {
+        path: PathBuf,
+        #[source]
+        source: xlsb::Error,
+    },
     #[error("failed to export workbook as `.xlsx` to `{path}`: {source}")]
     SaveXlsxExport {
         path: PathBuf,
@@ -120,12 +126,19 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
 /// - [`Workbook::Xlsx`] is saved by writing the underlying OPC package back out,
 ///   preserving unknown parts.
 /// - [`Workbook::Xls`] is exported as `.xlsx` (writing `.xls` is out of scope).
-/// - [`Workbook::Xlsb`] is exported as a best-effort `.xlsx` (writing `.xlsb` is
-///   out of scope).
+/// - [`Workbook::Xlsb`] can be saved losslessly back to `.xlsb` (package copy),
+///   or exported to `.xlsx` depending on the output extension.
 pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
     match workbook {
-        Workbook::Xlsx(package) => {
+        Workbook::Xlsx(package) => match ext.as_str() {
+            "xlsx" | "xlsm" => {
             let file = std::fs::File::create(path).map_err(|source| Error::SaveIo {
                 path: path.to_path_buf(),
                 source,
@@ -137,23 +150,44 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                     source,
                 })?;
             Ok(())
-        }
-        Workbook::Xls(result) => xlsx::write_workbook(&result.workbook, path).map_err(|source| {
+            }
+            other => Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: other.to_string(),
+            }),
+        },
+        Workbook::Xls(result) => match ext.as_str() {
+            "xlsx" => xlsx::write_workbook(&result.workbook, path).map_err(|source| {
             Error::SaveXlsxExport {
                 path: path.to_path_buf(),
                 source,
             }
-        }),
-        Workbook::Xlsb(wb) => {
-            let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
+            }),
+            other => Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: other.to_string(),
+            }),
+        },
+        Workbook::Xlsb(wb) => match ext.as_str() {
+            "xlsb" => wb.save_as(path).map_err(|source| Error::SaveXlsbPackage {
                 path: path.to_path_buf(),
                 source,
-            })?;
-            xlsx::write_workbook(&model, path).map_err(|source| Error::SaveXlsxExport {
+            }),
+            "xlsx" => {
+                let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                xlsx::write_workbook(&model, path).map_err(|source| Error::SaveXlsxExport {
+                    path: path.to_path_buf(),
+                    source,
+                })
+            }
+            other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
-                source,
-            })
-        }
+                extension: other.to_string(),
+            }),
+        },
     }
 }
 
