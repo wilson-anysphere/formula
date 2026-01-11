@@ -192,6 +192,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     const sheets = sessionA.doc.getArray("sheets");
     if (sheets.length > 0) sheets.delete(0, sheets.length);
     sheets.push([{ id: "Sheet1", name: "MainName" }]);
+    sessionA.doc.getMap("metadata").set("scenario", "main");
     sessionA.doc.getMap("namedRanges").set("NR1", {
       sheetId: "Sheet1",
       rect: { r0: 0, c0: 1, r1: 0, c1: 1 },
@@ -207,7 +208,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   await workflow.commitCurrentState(owner, "main edit");
 
   const preview = await workflow.previewMerge(owner, { sourceBranch: "feature" });
-  assert.equal(preview.conflicts.length, 5);
+  assert.equal(preview.conflicts.length, 6);
   const a1Idx = preview.conflicts.findIndex(
     (c) => c.type === "cell" && c.sheetId === "Sheet1" && c.cell === "A1"
   );
@@ -217,11 +218,13 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   const sheetIdx = preview.conflicts.findIndex(
     (c) => c.type === "sheet" && c.reason === "rename" && c.sheetId === "Sheet1"
   );
+  const metadataIdx = preview.conflicts.findIndex((c) => c.type === "metadata" && c.key === "scenario");
   const namedRangeIdx = preview.conflicts.findIndex((c) => c.type === "namedRange" && c.key === "NR1");
   const commentIdx = preview.conflicts.findIndex((c) => c.type === "comment" && c.id === "c1");
   assert.ok(a1Idx >= 0);
   assert.ok(b1Idx >= 0);
   assert.ok(sheetIdx >= 0);
+  assert.ok(metadataIdx >= 0);
   assert.ok(namedRangeIdx >= 0);
   assert.ok(commentIdx >= 0);
   assert.equal(preview.conflicts[a1Idx]?.reason, "content");
@@ -234,6 +237,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
       { conflictIndex: a1Idx, choice: "theirs" },
       { conflictIndex: b1Idx, choice: "theirs" },
       { conflictIndex: sheetIdx, choice: "theirs" },
+      { conflictIndex: metadataIdx, choice: "theirs" },
       { conflictIndex: namedRangeIdx, choice: "theirs" },
       { conflictIndex: commentIdx, choice: "theirs" },
     ],
