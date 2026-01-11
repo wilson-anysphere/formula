@@ -33,6 +33,7 @@ const SUPPORTED_OPS = new Set([
   "skip",
   "removeRows",
   "unpivot",
+  "demoteHeaders",
   "reorderColumns",
   "addIndexColumn",
   "combineColumns",
@@ -192,6 +193,11 @@ export function computeParquetProjectionColumns(steps) {
       case "unpivot":
         op.columns.forEach(requireColumn);
         break;
+      case "demoteHeaders":
+        // `demoteHeaders` renames columns based on their current ordering. This is only safe to
+        // plan through once we have an explicit schema from a prior projection.
+        if (!schema) return null;
+        break;
       case "addIndexColumn":
         break;
       case "combineColumns":
@@ -347,6 +353,19 @@ export function computeParquetProjectionColumns(steps) {
         if (schema) {
           schema.add(op.nameColumn);
           schema.add(op.valueColumn);
+        }
+        break;
+      }
+      case "demoteHeaders": {
+        if (!schema) return null;
+        const previous = Array.from(schema);
+        const sources = previous.map((name) => getSourceName(name));
+        mapping.clear();
+        schema = new Set();
+        for (let i = 0; i < previous.length; i++) {
+          const name = `Column${i + 1}`;
+          mapping.set(name, sources[i] ?? null);
+          schema.add(name);
         }
         break;
       }

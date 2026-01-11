@@ -223,6 +223,27 @@ test("computeParquetProjectionColumns supports unpivot", () => {
   assert.deepEqual(new Set(cols), new Set(["q1", "q2"]));
 });
 
+test("computeParquetProjectionColumns supports demoteHeaders once schema is known", () => {
+  const steps = [
+    { id: "s_select1", name: "Select", operation: { type: "selectColumns", columns: ["a", "b"] } },
+    { id: "s_demote", name: "Demote", operation: { type: "demoteHeaders" } },
+    { id: "s_select2", name: "Select2", operation: { type: "selectColumns", columns: ["Column2"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a", "b"]));
+});
+
+test("computeParquetProjectionColumns refuses demoteHeaders before schema is known", () => {
+  const steps = [
+    { id: "s_demote", name: "Demote", operation: { type: "demoteHeaders" } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["Column1"] } },
+  ];
+
+  assert.equal(computeParquetProjectionColumns(steps), null);
+});
+
 test("computeParquetProjectionColumns maps renamed columns through replaceValues", () => {
   const steps = [
     { id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "a", newName: "A" } },
