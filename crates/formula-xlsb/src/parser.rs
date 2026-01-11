@@ -7,6 +7,7 @@ use formula_model::rich_text::{RichText, RichTextRunStyle};
 use crate::shared_strings::SharedString;
 use thiserror::Error;
 
+use crate::strings::{read_xl_wide_string, read_xl_wide_string_impl, FlagsWidth, ParsedXlsbString};
 use crate::rgce::{
     decode_formula_rgce, decode_formula_rgce_with_base, decode_formula_rgce_with_context,
     decode_formula_rgce_with_context_and_base, DecodeWarning,
@@ -182,6 +183,7 @@ pub struct Cell {
     pub style: u32,
     pub value: CellValue,
     pub formula: Option<Formula>,
+    pub preserved_string: Option<ParsedXlsbString>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -233,17 +235,17 @@ impl<R: Read> Biff12Reader<R> {
     }
 }
 
-struct RecordReader<'a> {
+pub(crate) struct RecordReader<'a> {
     data: &'a [u8],
     offset: usize,
 }
 
 impl<'a> RecordReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
+    pub(crate) fn new(data: &'a [u8]) -> Self {
         Self { data, offset: 0 }
     }
 
-    fn skip(&mut self, n: usize) -> Result<(), Error> {
+    pub(crate) fn skip(&mut self, n: usize) -> Result<(), Error> {
         self.offset = self
             .offset
             .checked_add(n)
@@ -252,13 +254,13 @@ impl<'a> RecordReader<'a> {
         Ok(())
     }
 
-    fn read_u8(&mut self) -> Result<u8, Error> {
+    pub(crate) fn read_u8(&mut self) -> Result<u8, Error> {
         let b = *self.data.get(self.offset).ok_or(Error::UnexpectedEof)?;
         self.offset += 1;
         Ok(b)
     }
 
-    fn read_u16(&mut self) -> Result<u16, Error> {
+    pub(crate) fn read_u16(&mut self) -> Result<u16, Error> {
         let bytes: [u8; 2] = self
             .data
             .get(self.offset..self.offset + 2)
@@ -269,7 +271,7 @@ impl<'a> RecordReader<'a> {
         Ok(u16::from_le_bytes(bytes))
     }
 
-    fn read_u32(&mut self) -> Result<u32, Error> {
+    pub(crate) fn read_u32(&mut self) -> Result<u32, Error> {
         let bytes: [u8; 4] = self
             .data
             .get(self.offset..self.offset + 4)
@@ -314,7 +316,7 @@ impl<'a> RecordReader<'a> {
         self.read_utf16_chars(len_chars)
     }
 
-    fn read_utf16_chars(&mut self, len_chars: usize) -> Result<String, Error> {
+    pub(crate) fn read_utf16_chars(&mut self, len_chars: usize) -> Result<String, Error> {
         let byte_len = len_chars.checked_mul(2).ok_or(Error::UnexpectedEof)?;
         let raw = self
             .data
@@ -329,7 +331,7 @@ impl<'a> RecordReader<'a> {
         Ok(String::from_utf16_lossy(&units))
     }
 
-    fn read_slice(&mut self, len: usize) -> Result<&'a [u8], Error> {
+    pub(crate) fn read_slice(&mut self, len: usize) -> Result<&'a [u8], Error> {
         let raw = self
             .data
             .get(self.offset..self.offset + len)
@@ -907,9 +909,12 @@ pub(crate) fn parse_sheet<R: Read>(
     sheet_bin: &mut R,
     shared_strings: &[String],
     ctx: &WorkbookContext,
+    preserve_parsed_parts: bool,
 ) -> Result<SheetData, Error> {
     let mut cells = Vec::new();
-    let dimension = parse_sheet_stream(sheet_bin, shared_strings, ctx, |cell| cells.push(cell))?;
+    let dimension = parse_sheet_stream(sheet_bin, shared_strings, ctx, preserve_parsed_parts, |cell| {
+        cells.push(cell)
+    })?;
     Ok(SheetData { dimension, cells })
 }
 
@@ -917,6 +922,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
     sheet_bin: &mut R,
     shared_strings: &[String],
     ctx: &WorkbookContext,
+    preserve_parsed_parts: bool,
     mut on_cell: F,
 ) -> Result<Option<Dimension>, Error> {
     let mut reader = Biff12Reader::new(sheet_bin);
@@ -977,23 +983,82 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                 let col = rr.read_u32()?;
                 let style = rr.read_u32()?;
 
-                let (value, formula) = match rec.id {
-                    biff12::BLANK => (CellValue::Blank, None),
-                    biff12::NUM => (CellValue::Number(rr.read_rk_number()?), None),
-                    biff12::BOOLERR => (CellValue::Error(rr.read_u8()?), None),
-                    biff12::BOOL => (CellValue::Bool(rr.read_u8()? != 0), None),
-                    biff12::FLOAT => (CellValue::Number(rr.read_f64()?), None),
-                    biff12::CELL_ST => (CellValue::Text(rr.read_utf16_string()?), None),
+                let (value, formula, preserved_string) = match rec.id {
+                    biff12::BLANK => (CellValue::Blank, None, None),
+                    biff12::NUM => (CellValue::Number(rr.read_rk_number()?), None, None),
+                    biff12::BOOLERR => (CellValue::Error(rr.read_u8()?), None, None),
+                    biff12::BOOL => (CellValue::Bool(rr.read_u8()? != 0), None, None),
+                    biff12::FLOAT => (CellValue::Number(rr.read_f64()?), None, None),
+                    biff12::CELL_ST => {
+                        // BrtCellSt inline strings appear in the wild in at least two layouts:
+                        // - simple wide string: [cch: u32][utf16 chars...]
+                        // - rich/phonetic wide string: [cch: u32][flags: u8][utf16 chars...][extras...]
+                        //
+                        // When patch-writing we currently emit the simple layout, so the reader
+                        // must accept both.
+                        let start_offset = rr.offset;
+                        let parsed = if preserve_parsed_parts {
+                            match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
+                                Ok(parsed) => parsed,
+                                Err(Error::UnexpectedEof) => {
+                                    rr.offset = start_offset;
+                                    ParsedXlsbString {
+                                        text: rr.read_utf16_string()?,
+                                        rich: None,
+                                        phonetic: None,
+                                    }
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        } else {
+                            match read_xl_wide_string_impl(&mut rr, FlagsWidth::U8, false) {
+                                Ok(parsed) => parsed,
+                                Err(Error::UnexpectedEof) => {
+                                    rr.offset = start_offset;
+                                    ParsedXlsbString {
+                                        text: rr.read_utf16_string()?,
+                                        rich: None,
+                                        phonetic: None,
+                                    }
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        };
+
+                        if preserve_parsed_parts && (parsed.rich.is_some() || parsed.phonetic.is_some()) {
+                            (CellValue::Text(parsed.text.clone()), None, Some(parsed))
+                        } else {
+                            (CellValue::Text(parsed.text), None, None)
+                        }
+                    }
                     biff12::STRING => {
                         let idx = rr.read_u32()? as usize;
                         let s = shared_strings.get(idx).cloned().unwrap_or_default();
-                        (CellValue::Text(s), None)
+                        (CellValue::Text(s), None, None)
                     }
                     biff12::FORMULA_STRING => {
-                        // BrtFmlaString: [cch: u32][flags: u16][utf16 chars][cce: u32][rgce bytes...]
-                        let cch = rr.read_u32()? as usize;
-                        let flags = rr.read_u16()?;
-                        let v = rr.read_utf16_chars(cch)?;
+                        let (flags, parsed) = if preserve_parsed_parts {
+                            crate::strings::read_xl_wide_string_with_flags(
+                                &mut rr,
+                                FlagsWidth::U16,
+                                true,
+                            )?
+                        } else {
+                            crate::strings::read_xl_wide_string_with_flags(
+                                &mut rr,
+                                FlagsWidth::U16,
+                                false,
+                            )?
+                        };
+
+                        let (v, preserved) = if preserve_parsed_parts
+                            && (parsed.rich.is_some() || parsed.phonetic.is_some())
+                        {
+                            (parsed.text.clone(), Some(parsed))
+                        } else {
+                            (parsed.text, None)
+                        };
+
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
                         if let Some(materialized) =
@@ -1060,6 +1125,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 extra,
                                 warnings,
                             }),
+                            preserved,
                         )
                     }
                     biff12::FORMULA_FLOAT => {
@@ -1132,6 +1198,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 extra,
                                 warnings,
                             }),
+                            None,
                         )
                     }
                     biff12::FORMULA_BOOL => {
@@ -1204,6 +1271,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 extra,
                                 warnings,
                             }),
+                            None,
                         )
                     }
                     biff12::FORMULA_BOOLERR => {
@@ -1276,6 +1344,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 extra,
                                 warnings,
                             }),
+                            None,
                         )
                     }
                     _ => unreachable!(),
@@ -1287,6 +1356,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                     style,
                     value,
                     formula,
+                    preserved_string,
                 });
             }
             _ => {}

@@ -13,6 +13,7 @@ mod opc;
 mod patch;
 mod parser;
 mod shared_strings;
+mod strings;
 mod writer;
 
 pub use opc::{OpenOptions, XlsbWorkbook};
@@ -22,6 +23,7 @@ pub use parser::{
     WorkbookProperties,
 };
 pub use shared_strings::SharedString;
+pub use strings::{OpaqueRichText, ParsedXlsbString};
 
 #[cfg(feature = "write")]
 pub use formula_biff::{encode_rgce as encode_formula_rgce, EncodeRgceError};
@@ -35,7 +37,7 @@ pub fn parse_sheet_bin<R: std::io::Read>(
     shared_strings: &[String],
 ) -> Result<SheetData, Error> {
     let ctx = workbook_context::WorkbookContext::default();
-    parser::parse_sheet(sheet_bin, shared_strings, &ctx)
+    parser::parse_sheet(sheet_bin, shared_strings, &ctx, true)
 }
 
 /// Parse a worksheet `.bin` stream (BIFF12) using the provided workbook context.
@@ -47,5 +49,5 @@ pub fn parse_sheet_bin_with_context<R: std::io::Read>(
     shared_strings: &[String],
     ctx: &workbook_context::WorkbookContext,
 ) -> Result<SheetData, Error> {
-    parser::parse_sheet(sheet_bin, shared_strings, ctx)
+    parser::parse_sheet(sheet_bin, shared_strings, ctx, true)
 }

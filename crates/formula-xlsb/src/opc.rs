@@ -58,6 +58,7 @@ pub struct XlsbWorkbook {
     workbook_context: WorkbookContext,
     workbook_properties: WorkbookProperties,
     preserved_parts: HashMap<String, Vec<u8>>,
+    preserve_parsed_parts: bool,
 }
 
 impl XlsbWorkbook {
@@ -167,6 +168,7 @@ impl XlsbWorkbook {
             workbook_context,
             workbook_properties,
             preserved_parts,
+            preserve_parsed_parts: options.preserve_parsed_parts,
         })
     }
 
@@ -221,7 +223,12 @@ impl XlsbWorkbook {
         let mut zip = ZipArchive::new(file)?;
         let mut sheet = zip.by_name(&meta.part_path)?;
 
-        parse_sheet(&mut sheet, &self.shared_strings, &self.workbook_context)
+        parse_sheet(
+            &mut sheet,
+            &self.shared_strings,
+            &self.workbook_context,
+            self.preserve_parsed_parts,
+        )
     }
 
     /// Stream cells from a worksheet without materializing the whole sheet.
@@ -238,7 +245,13 @@ impl XlsbWorkbook {
         let mut zip = ZipArchive::new(file)?;
         let mut sheet = zip.by_name(&meta.part_path)?;
 
-        parse_sheet_stream(&mut sheet, &self.shared_strings, &self.workbook_context, |cell| f(cell))?;
+        parse_sheet_stream(
+            &mut sheet,
+            &self.shared_strings,
+            &self.workbook_context,
+            self.preserve_parsed_parts,
+            |cell| f(cell),
+        )?;
         Ok(())
     }
 
