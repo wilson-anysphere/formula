@@ -27,17 +27,32 @@ fn formulas_match_calamine_for_all_fixtures() {
 }
 
 fn discover_xlsb_fixtures(fixtures_dir: &Path) -> Vec<PathBuf> {
-    fs::read_dir(fixtures_dir)
-        .unwrap_or_else(|err| panic!("read fixtures dir {}: {err}", fixtures_dir.display()))
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext.eq_ignore_ascii_case("xlsb"))
-                .unwrap_or(false)
-        })
-        .collect()
+    let mut out = Vec::new();
+    discover_xlsb_fixtures_inner(fixtures_dir, &mut out);
+    out
+}
+
+fn discover_xlsb_fixtures_inner(dir: &Path, out: &mut Vec<PathBuf>) {
+    let entries = fs::read_dir(dir)
+        .unwrap_or_else(|err| panic!("read fixtures dir {}: {err}", dir.display()));
+
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|err| panic!("read fixtures dir entry in {}: {err}", dir.display()));
+        let path = entry.path();
+        if path.is_dir() {
+            discover_xlsb_fixtures_inner(&path, out);
+            continue;
+        }
+
+        let is_xlsb = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("xlsb"))
+            .unwrap_or(false);
+        if is_xlsb {
+            out.push(path);
+        }
+    }
 }
 
 fn compare_fixture(path: &Path) {
@@ -90,12 +105,19 @@ fn read_calamine_formulas(path: &Path) -> SheetFormulas<String> {
     let mut out: SheetFormulas<String> = HashMap::new();
 
     for sheet_name in sheet_names {
-        let formula_range = workbook.worksheet_formula(&sheet_name).unwrap_or_else(|err| {
-            panic!(
-                "fixture {}: calamine failed to read formulas for sheet {sheet_name:?}: {err}",
-                path.display()
-            )
-        });
+        let formula_range = match workbook.worksheet_formula(&sheet_name) {
+            Ok(range) => range,
+            Err(err) => {
+                // Some workbooks/sheets may have no formula records. Treat that as an empty map so
+                // fixtures without formulas can still be included.
+                eprintln!(
+                    "fixture {}: calamine failed to read formulas for sheet {sheet_name:?}: {err}; treating as no formulas",
+                    path.display()
+                );
+                out.insert(sheet_name, HashMap::new());
+                continue;
+            }
+        };
 
         let start = formula_range.start().unwrap_or((0, 0));
         let mut formulas = HashMap::new();
@@ -163,10 +185,11 @@ fn normalize_formula_for_compare(formula: &str) -> String {
 
     let mut out = String::with_capacity(trimmed.len() + 1);
     let mut in_string = false;
+    let mut in_quoted_ident = false;
     let mut chars = trimmed.chars().peekable();
 
     while let Some(ch) = chars.next() {
-        if ch == '"' {
+        if ch == '"' && !in_quoted_ident {
             out.push(ch);
             if in_string {
                 if chars.peek() == Some(&'"') {
@@ -182,11 +205,27 @@ fn normalize_formula_for_compare(formula: &str) -> String {
             continue;
         }
 
-        if !in_string && ch.is_whitespace() {
+        if ch == '\'' && !in_string {
+            out.push(ch);
+            if in_quoted_ident {
+                if chars.peek() == Some(&'\'') {
+                    // Escaped quote inside a quoted sheet/workbook identifier.
+                    out.push('\'');
+                    chars.next();
+                } else {
+                    in_quoted_ident = false;
+                }
+            } else {
+                in_quoted_ident = true;
+            }
             continue;
         }
 
-        if in_string {
+        if !in_string && !in_quoted_ident && ch.is_whitespace() {
+            continue;
+        }
+
+        if in_string || in_quoted_ident {
             out.push(ch);
         } else {
             out.push(ch.to_ascii_uppercase());
@@ -211,4 +250,3 @@ fn col_label(mut col: u32) -> String {
     }
     buf.iter().rev().collect()
 }
-
