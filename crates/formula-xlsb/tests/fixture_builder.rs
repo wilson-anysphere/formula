@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::io::{Cursor, Write};
 
+use formula_xlsb::biff12_varint;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
@@ -343,41 +344,9 @@ fn compute_dimension(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> (u32, u3
 }
 
 fn write_record(out: &mut Vec<u8>, id: u32, data: &[u8]) {
-    write_record_id(out, id);
-    write_var_u32(out, data.len() as u32);
+    biff12_varint::write_record_id(out, id).expect("write record id");
+    biff12_varint::write_record_len(out, data.len() as u32).expect("write record len");
     out.extend_from_slice(data);
-}
-
-fn write_record_id(out: &mut Vec<u8>, mut id: u32) {
-    // Mirrors the decoder in `crate::parser::Biff12Reader::read_id`.
-    //
-    // Note: this "continue bit is MSB of each byte" scheme only works for record
-    // IDs where every byte except the last already has the MSB set. That's true
-    // for the subset of BIFF12 record IDs we emit here (copied from `simple.xlsb`).
-    loop {
-        let b = (id & 0xFF) as u8;
-        out.push(b);
-        id >>= 8;
-        if b & 0x80 == 0 {
-            assert_eq!(id, 0, "cannot encode record id with low-byte MSB cleared");
-            break;
-        }
-    }
-}
-
-fn write_var_u32(out: &mut Vec<u8>, mut v: u32) {
-    // Mirrors the decoder in `crate::parser::Biff12Reader::read_len`.
-    loop {
-        let mut byte = (v & 0x7F) as u8;
-        v >>= 7;
-        if v != 0 {
-            byte |= 0x80;
-        }
-        out.push(byte);
-        if v == 0 {
-            break;
-        }
-    }
 }
 
 fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
@@ -387,4 +356,3 @@ fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
         out.extend_from_slice(&u.to_le_bytes());
     }
 }
-

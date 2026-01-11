@@ -150,3 +150,35 @@ fn generated_fixture_supports_shared_strings_and_absolute_refs() {
 
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn generated_fixture_preserves_formula_extra_bytes_for_array_constants() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("Arrayy");
+
+    // `PtgArray` (0x20) is a placeholder token that typically requires extra bytes
+    // after `rgce` (the `rgcb` stream) to describe the constant array. Our decoder
+    // doesn't understand it yet, but the reader should still preserve `rgce` and
+    // successfully load the sheet.
+    let rgce = vec![0x20, 0, 0, 0, 0, 0, 0, 0];
+    let extra = vec![0xDE, 0xAD, 0xBE, 0xEF];
+
+    builder.set_cell_formula_num(0, 0, 1.0, rgce.clone(), extra);
+
+    let bytes = builder.build_bytes();
+    let path = write_temp_xlsb(&bytes);
+    let wb = XlsbWorkbook::open(&path).expect("open generated xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet1");
+
+    let formula_cell = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("formula cell");
+    assert_eq!(formula_cell.value, CellValue::Number(1.0));
+    let formula = formula_cell.formula.as_ref().expect("formula payload preserved");
+    assert_eq!(formula.text.as_deref(), None);
+    assert_eq!(formula.rgce, rgce);
+
+    let _ = std::fs::remove_file(&path);
+}
