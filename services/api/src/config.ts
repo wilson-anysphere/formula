@@ -145,12 +145,21 @@ function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): Secr
     if (typeof currentKeyId !== "string" || currentKeyId.trim().length === 0) {
       throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must be a non-empty string");
     }
+    if (currentKeyId.includes(":")) {
+      throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must not contain ':'");
+    }
     if (!keysValue || typeof keysValue !== "object" || Array.isArray(keysValue)) {
       throw new Error("SECRET_STORE_KEYS_JSON.keys must be an object mapping keyId -> base64 key");
     }
 
     const keys: Record<string, Buffer> = {};
     for (const [keyId, value] of Object.entries(keysValue as Record<string, unknown>)) {
+      if (keyId.length === 0) {
+        throw new Error("SECRET_STORE_KEYS_JSON.keys must not contain empty key ids");
+      }
+      if (keyId.includes(":")) {
+        throw new Error(`SECRET_STORE_KEYS_JSON.keys.${keyId} must not contain ':'`);
+      }
       if (typeof value !== "string" || value.trim().length === 0) {
         throw new Error(`SECRET_STORE_KEYS_JSON.keys.${keyId} must be a base64 string`);
       }

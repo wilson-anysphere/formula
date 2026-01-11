@@ -81,6 +81,8 @@ export function getSecretEncodingInfo(value: string): SecretEncodingInfo {
 
 export function encryptSecretValue(keyring: SecretStoreKeyring, name: string, plaintext: string): string {
   const keyId = keyring.currentKeyId;
+  if (!keyId) throw new Error("Secret store currentKeyId must be set");
+  if (keyId.includes(":")) throw new Error("Secret store currentKeyId must not contain ':'");
   const key = keyring.keys[keyId];
   if (!key) throw new Error(`Secret store key not found for currentKeyId=${keyId}`);
   if (key.byteLength !== 32) throw new Error(`Secret store key ${keyId} must be 32 bytes (got ${key.byteLength})`);

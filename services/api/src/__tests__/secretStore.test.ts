@@ -40,6 +40,12 @@ describe("secretStore", () => {
     expect(decrypted).toBe("hello");
   });
 
+  it("rejects key ids containing ':' (would make encoding ambiguous)", () => {
+    const key = crypto.randomBytes(32);
+    const keyring: SecretStoreKeyring = { currentKeyId: "bad:key", keys: { "bad:key": key } };
+    expect(() => encryptSecretValue(keyring, "my-secret", "hello")).toThrow();
+  });
+
   it("decrypts legacy v1 secrets", () => {
     const currentKey = crypto.randomBytes(32);
     const oldKey = crypto.randomBytes(32);
@@ -98,4 +104,3 @@ describe("secrets rotation (integration)", () => {
     }
   });
 });
-
