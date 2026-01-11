@@ -3,7 +3,7 @@ import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTa
 import { FormulaBarView } from "../formula-bar/FormulaBarView";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
-import { anchorToRectPx } from "../charts/overlay.js";
+import { emuToPx } from "../charts/overlay.js";
 import { renderChartSvg } from "../charts/renderSvg.js";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
@@ -253,15 +253,39 @@ export class SpreadsheetApp {
   private width = 0;
   private height = 0;
 
+  // Scroll offsets in CSS pixels relative to the sheet data origin (A1 at 0,0).
+  private scrollX = 0;
+  private scrollY = 0;
+
   private readonly cellWidth = 100;
   private readonly cellHeight = 24;
   private readonly rowHeaderWidth = 48;
   private readonly colHeaderHeight = 24;
 
+  // Precomputed "visual" (i.e. not hidden) row/col indices.
+  // Rebuilt only when outline visibility changes.
+  private rowIndexByVisual: number[] = [];
+  private colIndexByVisual: number[] = [];
+
+  // Current viewport window (virtualized render range).
   private visibleRows: number[] = [];
   private visibleCols: number[] = [];
+  private visibleRowStart = 0;
+  private visibleColStart = 0;
+
+  // Maps from sheet row/col -> visual index (excluding hidden rows/cols).
+  // These allow O(1) cell->pixel conversions for any in-bounds cell.
   private rowToVisual = new Map<number, number>();
   private colToVisual = new Map<number, number>();
+
+  private readonly scrollbarThickness = 10;
+  private vScrollbarTrack: HTMLDivElement;
+  private vScrollbarThumb: HTMLDivElement;
+  private hScrollbarTrack: HTMLDivElement;
+  private hScrollbarThumb: HTMLDivElement;
+  private scrollbarDrag:
+    | { axis: "x" | "y"; pointerId: number; grabOffset: number; thumbTravel: number; trackStart: number; maxScroll: number }
+    | null = null;
 
   private selection: SelectionState;
   private selectionRenderer = new SelectionRenderer();
@@ -297,7 +321,10 @@ export class SpreadsheetApp {
   private commentTooltip!: HTMLDivElement;
 
   private renderScheduled = false;
+  private pendingRenderMode: "full" | "scroll" = "full";
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
+
+  private readonly chartElements = new Map<string, HTMLDivElement>();
 
   constructor(
     private root: HTMLElement,
@@ -316,6 +343,10 @@ export class SpreadsheetApp {
     this.limits = opts.limits ?? { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 };
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
     this.currentUser = { id: "local", name: t("chat.role.user") };
+
+    // Prevent DOM overlays (charts, scrollbars, outline buttons) from spilling
+    // outside the grid viewport while we virtualize with negative coordinates.
+    this.root.style.overflow = "hidden";
 
     // Seed a simple outline group: rows 2-4 with a summary row at 5 (Excel 1-based indices).
     this.outline.groupRows(2, 4);
@@ -380,12 +411,55 @@ export class SpreadsheetApp {
         const value = state?.value ?? null;
         return isRichTextValue(value) ? value.text : value;
       },
-      onChange: () => this.renderCharts()
+      onChange: () => this.renderCharts(true)
     });
 
     this.outlineLayer = document.createElement("div");
     this.outlineLayer.className = "outline-layer";
     this.root.appendChild(this.outlineLayer);
+
+    // Minimal scrollbars (drawn as DOM overlays, like the React CanvasGrid).
+    this.vScrollbarTrack = document.createElement("div");
+    this.vScrollbarTrack.setAttribute("aria-hidden", "true");
+    this.vScrollbarTrack.style.position = "absolute";
+    this.vScrollbarTrack.style.background = "var(--bg-tertiary)";
+    this.vScrollbarTrack.style.borderRadius = "6px";
+    this.vScrollbarTrack.style.zIndex = "5";
+    this.vScrollbarTrack.style.opacity = "0.9";
+
+    this.vScrollbarThumb = document.createElement("div");
+    this.vScrollbarThumb.setAttribute("aria-hidden", "true");
+    this.vScrollbarThumb.style.position = "absolute";
+    this.vScrollbarThumb.style.left = "1px";
+    this.vScrollbarThumb.style.right = "1px";
+    this.vScrollbarThumb.style.top = "0";
+    this.vScrollbarThumb.style.height = "40px";
+    this.vScrollbarThumb.style.background = "var(--text-secondary)";
+    this.vScrollbarThumb.style.borderRadius = "6px";
+    this.vScrollbarThumb.style.cursor = "pointer";
+    this.vScrollbarTrack.appendChild(this.vScrollbarThumb);
+    this.root.appendChild(this.vScrollbarTrack);
+
+    this.hScrollbarTrack = document.createElement("div");
+    this.hScrollbarTrack.setAttribute("aria-hidden", "true");
+    this.hScrollbarTrack.style.position = "absolute";
+    this.hScrollbarTrack.style.background = "var(--bg-tertiary)";
+    this.hScrollbarTrack.style.borderRadius = "6px";
+    this.hScrollbarTrack.style.zIndex = "5";
+    this.hScrollbarTrack.style.opacity = "0.9";
+
+    this.hScrollbarThumb = document.createElement("div");
+    this.hScrollbarThumb.setAttribute("aria-hidden", "true");
+    this.hScrollbarThumb.style.position = "absolute";
+    this.hScrollbarThumb.style.top = "1px";
+    this.hScrollbarThumb.style.bottom = "1px";
+    this.hScrollbarThumb.style.left = "0";
+    this.hScrollbarThumb.style.width = "40px";
+    this.hScrollbarThumb.style.background = "var(--text-secondary)";
+    this.hScrollbarThumb.style.borderRadius = "6px";
+    this.hScrollbarThumb.style.cursor = "pointer";
+    this.hScrollbarTrack.appendChild(this.hScrollbarThumb);
+    this.root.appendChild(this.hScrollbarTrack);
 
     this.commentsPanel = this.createCommentsPanel();
     this.root.appendChild(this.commentsPanel);
@@ -416,6 +490,8 @@ export class SpreadsheetApp {
         );
 
         if (next) this.selection = next;
+        this.ensureActiveCellVisible();
+        this.scrollCellIntoView(this.selection.active);
         this.refresh();
         this.focus();
       },
@@ -434,7 +510,7 @@ export class SpreadsheetApp {
       getSelectionRange: () => this.getInlineEditSelectionRange(),
       onApplied: () => {
         this.renderGrid();
-        this.renderCharts();
+        this.renderCharts(true);
         this.renderSelection();
         this.updateStatus();
         this.focus();
@@ -453,6 +529,14 @@ export class SpreadsheetApp {
     this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e));
     this.root.addEventListener("pointerleave", () => this.hideCommentTooltip());
     this.root.addEventListener("keydown", (e) => this.onKeyDown(e));
+    this.root.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
+
+    this.vScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "y"), {
+      passive: false
+    });
+    this.hScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "x"), {
+      passive: false
+    });
 
     if (typeof window !== "undefined") {
       this.windowKeyDownListener = (e) => this.onWindowKeyDown(e);
@@ -513,6 +597,9 @@ export class SpreadsheetApp {
       });
     }
 
+    // Precompute row/col visibility + mappings before any initial render work.
+    this.rebuildAxisVisibilityCache();
+
     // Seed a demo chart using the chart store helpers so it matches the logic
     // used by AI chart creation.
     this.chartStore.createChart({
@@ -553,9 +640,15 @@ export class SpreadsheetApp {
    * This is intentionally public so external callers (e.g. AI tool execution)
    * can update the UI after mutating the DocumentController.
    */
-  refresh(): void {
-    if (this.renderScheduled) return;
+  refresh(mode: "full" | "scroll" = "full"): void {
+    if (this.renderScheduled) {
+      // Upgrade a pending scroll-only render to a full render if needed.
+      if (mode === "full") this.pendingRenderMode = "full";
+      return;
+    }
+
     this.renderScheduled = true;
+    this.pendingRenderMode = mode;
 
     const schedule =
       typeof requestAnimationFrame === "function"
@@ -565,11 +658,13 @@ export class SpreadsheetApp {
 
     schedule(() => {
       this.renderScheduled = false;
+      const renderMode = this.pendingRenderMode;
+      this.pendingRenderMode = "full";
       this.renderGrid();
-      this.renderCharts();
+      this.renderCharts(renderMode === "full");
       this.renderReferencePreview();
       this.renderSelection();
-      this.updateStatus();
+      if (renderMode === "full") this.updateStatus();
     });
   }
 
@@ -594,13 +689,17 @@ export class SpreadsheetApp {
     return this.sheetId;
   }
 
+  getScroll(): { x: number; y: number } {
+    return { x: this.scrollX, y: this.scrollY };
+  }
+
   addChart(spec: CreateChartSpec): CreateChartResult {
     return this.chartStore.createChart(spec);
   }
 
   setChartTheme(theme: ChartTheme): void {
     this.chartTheme = theme;
-    this.renderCharts();
+    this.renderCharts(true);
   }
 
   listCharts(): readonly ChartRecord[] {
@@ -724,7 +823,7 @@ export class SpreadsheetApp {
     this.sheetId = sheetId;
     this.chartStore.setDefaultSheet(sheetId);
     this.renderGrid();
-    this.renderCharts();
+    this.renderCharts(true);
     this.renderSelection();
     this.updateStatus();
   }
@@ -733,15 +832,25 @@ export class SpreadsheetApp {
    * Programmatically set the active cell (and optionally change sheets).
    */
   activateCell(target: { sheetId?: string; row: number; col: number }): void {
+    let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
       this.chartStore.setDefaultSheet(target.sheetId);
       this.renderGrid();
-      this.renderCharts();
+      this.renderCharts(true);
+      sheetChanged = true;
     }
     this.selection = setActiveCell(this.selection, { row: target.row, col: target.col }, this.limits);
+    this.ensureActiveCellVisible();
+    const didScroll = this.scrollCellIntoView(this.selection.active);
     this.renderSelection();
     this.updateStatus();
+    if (sheetChanged) {
+      // Sheet changes always require a full redraw (grid + charts may differ).
+      this.refresh();
+    } else if (didScroll) {
+      this.refresh("scroll");
+    }
     this.focus();
   }
 
@@ -749,19 +858,28 @@ export class SpreadsheetApp {
    * Programmatically set the selection range (and optionally change sheets).
    */
   selectRange(target: { sheetId?: string; range: Range }): void {
+    let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
       this.chartStore.setDefaultSheet(target.sheetId);
       this.renderGrid();
-      this.renderCharts();
+      this.renderCharts(true);
+      sheetChanged = true;
     }
     const active = { row: target.range.startRow, col: target.range.startCol };
     this.selection = buildSelection(
       { ranges: [target.range], active, anchor: active, activeRangeIndex: 0 },
       this.limits
     );
+    this.ensureActiveCellVisible();
+    const didScroll = this.scrollCellIntoView(this.selection.active);
     this.renderSelection();
     this.updateStatus();
+    if (sheetChanged) {
+      this.refresh();
+    } else if (didScroll) {
+      this.refresh("scroll");
+    }
     this.focus();
   }
 
@@ -1099,8 +1217,11 @@ export class SpreadsheetApp {
       ctx.scale(this.dpr, this.dpr);
     }
 
+    this.clampScroll();
+    this.syncScrollbars();
+
     this.renderGrid();
-    this.renderCharts();
+    this.renderCharts(true);
     this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
@@ -1119,11 +1240,18 @@ export class SpreadsheetApp {
     ctx.fillStyle = resolveCssVar("--bg-primary", { fallback: "Canvas" });
     ctx.fillRect(0, 0, this.width, this.height);
 
+    const originX = this.rowHeaderWidth;
+    const originY = this.colHeaderHeight;
+    const viewportWidth = this.viewportWidth();
+    const viewportHeight = this.viewportHeight();
+
     const cols = this.visibleCols.length;
     const rows = this.visibleRows.length;
 
-    const originX = this.rowHeaderWidth;
-    const originY = this.colHeaderHeight;
+    const startX = originX + this.visibleColStart * this.cellWidth - this.scrollX;
+    const startY = originY + this.visibleRowStart * this.cellHeight - this.scrollY;
+    const endX = startX + cols * this.cellWidth;
+    const endY = startY + rows * this.cellHeight;
 
     ctx.strokeStyle = resolveCssVar("--grid-line", { fallback: "CanvasText" });
     ctx.lineWidth = 1;
@@ -1136,23 +1264,6 @@ export class SpreadsheetApp {
     // Corner cell.
     ctx.fillStyle = resolveCssVar("--bg-tertiary", { fallback: "Canvas" });
     ctx.fillRect(0, 0, this.rowHeaderWidth, this.colHeaderHeight);
-
-    // Grid lines for the data region.
-    for (let r = 0; r <= rows; r++) {
-      const y = originY + r * this.cellHeight + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(originX, y);
-      ctx.lineTo(originX + cols * this.cellWidth, y);
-      ctx.stroke();
-    }
-
-    for (let c = 0; c <= cols; c++) {
-      const x = originX + c * this.cellWidth + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x, originY);
-      ctx.lineTo(x, originY + rows * this.cellHeight);
-      ctx.stroke();
-    }
 
     // Header separator lines.
     ctx.beginPath();
@@ -1168,6 +1279,29 @@ export class SpreadsheetApp {
     const fontSizePx = 14;
     const defaultTextColor = resolveCssVar("--text-primary", { fallback: "CanvasText" });
     const errorTextColor = resolveCssVar("--error", { fallback: defaultTextColor });
+
+    // Data region (cells) are clipped so we never paint into header chrome.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(originX, originY, viewportWidth, viewportHeight);
+    ctx.clip();
+
+    // Grid lines for the data region.
+    for (let r = 0; r <= rows; r++) {
+      const y = startY + r * this.cellHeight + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(startX, y);
+      ctx.lineTo(endX, y);
+      ctx.stroke();
+    }
+
+    for (let c = 0; c <= cols; c++) {
+      const x = startX + c * this.cellWidth + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x, startY);
+      ctx.lineTo(x, endY);
+      ctx.stroke();
+    }
 
     for (let visualRow = 0; visualRow < rows; visualRow++) {
       const row = this.visibleRows[visualRow]!;
@@ -1207,8 +1341,8 @@ export class SpreadsheetApp {
           ctx,
           rich,
           {
-            x: originX + visualCol * this.cellWidth,
-            y: originY + visualRow * this.cellHeight,
+            x: startX + visualCol * this.cellWidth,
+            y: startY + visualRow * this.cellHeight,
             width: this.cellWidth,
             height: this.cellHeight
           },
@@ -1232,13 +1366,15 @@ export class SpreadsheetApp {
         const cellRef = cellToA1({ row, col });
         if (!this.commentCells.has(cellRef)) continue;
         drawCommentIndicator(ctx, {
-          x: originX + visualCol * this.cellWidth,
-          y: originY + visualRow * this.cellHeight,
+          x: startX + visualCol * this.cellWidth,
+          y: startY + visualRow * this.cellHeight,
           width: this.cellWidth,
           height: this.cellHeight,
         });
       }
     }
+
+    ctx.restore();
 
     // Header labels.
     ctx.fillStyle = resolveCssVar("--text-primary", { fallback: "CanvasText" });
@@ -1246,35 +1382,108 @@ export class SpreadsheetApp {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
+    // Column header labels (horizontally scroll with the grid).
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(originX, 0, viewportWidth, originY);
+    ctx.clip();
     for (let visualCol = 0; visualCol < cols; visualCol++) {
       const colIndex = this.visibleCols[visualCol]!;
       ctx.fillText(
         colToName(colIndex),
-        originX + visualCol * this.cellWidth + this.cellWidth / 2,
+        startX + visualCol * this.cellWidth + this.cellWidth / 2,
         this.colHeaderHeight / 2
       );
     }
+    ctx.restore();
 
+    // Row header labels (vertically scroll with the grid).
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, originY, originX, viewportHeight);
+    ctx.clip();
     for (let visualRow = 0; visualRow < rows; visualRow++) {
       const rowIndex = this.visibleRows[visualRow]!;
       ctx.fillText(
         String(rowIndex + 1),
         this.rowHeaderWidth / 2,
-        originY + visualRow * this.cellHeight + this.cellHeight / 2
+        startY + visualRow * this.cellHeight + this.cellHeight / 2
       );
     }
+    ctx.restore();
 
     ctx.restore();
 
     this.renderOutlineControls();
   }
 
-  private renderCharts(): void {
-    this.chartLayer.replaceChildren();
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
-    if (charts.length === 0) return;
+  private lowerBound(values: number[], target: number): number {
+    let lo = 0;
+    let hi = values.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((values[mid] ?? 0) < target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
 
-    const provider = {
+  private visualIndexForRow(row: number): number {
+    const direct = this.rowToVisual.get(row);
+    if (direct !== undefined) return direct;
+    return this.lowerBound(this.rowIndexByVisual, row);
+  }
+
+  private visualIndexForCol(col: number): number {
+    const direct = this.colToVisual.get(col);
+    if (direct !== undefined) return direct;
+    return this.lowerBound(this.colIndexByVisual, col);
+  }
+
+  private chartAnchorToViewportRect(anchor: ChartRecord["anchor"]): { left: number; top: number; width: number; height: number } | null {
+    if (!anchor || !("kind" in anchor)) return null;
+
+    let left = 0;
+    let top = 0;
+    let width = 0;
+    let height = 0;
+
+    if (anchor.kind === "absolute") {
+      left = emuToPx(anchor.xEmu);
+      top = emuToPx(anchor.yEmu);
+      width = emuToPx(anchor.cxEmu);
+      height = emuToPx(anchor.cyEmu);
+    } else if (anchor.kind === "oneCell") {
+      left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu);
+      top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu);
+      width = emuToPx(anchor.cxEmu);
+      height = emuToPx(anchor.cyEmu);
+    } else if (anchor.kind === "twoCell") {
+      left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu);
+      top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu);
+      const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToPx(anchor.toColOffEmu);
+      const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToPx(anchor.toRowOffEmu);
+      width = Math.max(0, right - left);
+      height = Math.max(0, bottom - top);
+    } else {
+      return null;
+    }
+
+    if (width <= 0 || height <= 0) return null;
+
+    return {
+      left: this.rowHeaderWidth + left - this.scrollX,
+      top: this.colHeaderHeight + top - this.scrollY,
+      width,
+      height
+    };
+  }
+
+  private renderCharts(renderContent: boolean): void {
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    const keep = new Set<string>();
+
+    const createProvider = () => ({
       getRange: (rangeRef: string) => {
         const parsed = parseA1Range(rangeRef);
         if (!parsed) return [];
@@ -1295,40 +1504,66 @@ export class SpreadsheetApp {
         }
         return out;
       }
-    };
+    });
+
+    const provider = renderContent ? createProvider() : null;
 
     for (const chart of charts) {
-      const rect = anchorToRectPx(chart.anchor, {
-        defaultColWidthPx: this.cellWidth,
-        defaultRowHeightPx: this.cellHeight
-      });
+      keep.add(chart.id);
+      const rect = this.chartAnchorToViewportRect(chart.anchor);
       if (!rect) continue;
 
-      const host = document.createElement("div");
-      host.setAttribute("data-testid", "chart-object");
-      host.style.position = "absolute";
+      let host = this.chartElements.get(chart.id);
+      const shouldRenderContent = renderContent || !host;
+      if (!host) {
+        host = document.createElement("div");
+        host.setAttribute("data-testid", "chart-object");
+        host.style.position = "absolute";
+        host.style.pointerEvents = "none";
+        host.style.overflow = "hidden";
+        this.chartElements.set(chart.id, host);
+        this.chartLayer.appendChild(host);
+      }
+
       host.style.left = `${rect.left}px`;
       host.style.top = `${rect.top}px`;
       host.style.width = `${rect.width}px`;
       host.style.height = `${rect.height}px`;
-      host.style.pointerEvents = "none";
-      host.style.overflow = "hidden";
 
-      host.innerHTML = renderChartSvg(chart, provider, {
-        width: rect.width,
-        height: rect.height,
-        theme: this.chartTheme,
-      });
-      this.chartLayer.appendChild(host);
+      if (shouldRenderContent) {
+        host.innerHTML = renderChartSvg(chart, provider ?? createProvider(), {
+          width: rect.width,
+          height: rect.height,
+          theme: this.chartTheme,
+        });
+      }
+    }
+
+    for (const [id, el] of this.chartElements) {
+      if (keep.has(id)) continue;
+      el.remove();
+      this.chartElements.delete(id);
     }
   }
 
   private renderSelection(): void {
-    this.selectionRenderer.render(this.selectionCtx, this.selection, {
-      getCellRect: (cell) => this.getCellRect(cell),
-      visibleRows: this.visibleRows,
-      visibleCols: this.visibleCols,
-    });
+    this.selectionRenderer.render(
+      this.selectionCtx,
+      this.selection,
+      {
+        getCellRect: (cell) => this.getCellRect(cell),
+        visibleRows: this.visibleRows,
+        visibleCols: this.visibleCols,
+      },
+      {
+        clipRect: {
+          x: this.rowHeaderWidth,
+          y: this.colHeaderHeight,
+          width: this.viewportWidth(),
+          height: this.viewportHeight(),
+        },
+      }
+    );
 
     // If scrolling/resizing happened during editing, keep the editor aligned.
     if (this.editor.isOpen()) {
@@ -1423,29 +1658,282 @@ export class SpreadsheetApp {
     return isHidden(entry.hidden);
   }
 
-  private updateViewportMapping(): void {
-    const availableWidth = Math.max(0, this.width - this.rowHeaderWidth);
-    const availableHeight = Math.max(0, this.height - this.colHeaderHeight);
-
-    const cols = Math.max(1, Math.floor(availableWidth / this.cellWidth));
-    const rows = Math.max(1, Math.floor(availableHeight / this.cellHeight));
-
-    this.visibleRows = [];
-    this.visibleCols = [];
+  private rebuildAxisVisibilityCache(): void {
+    this.rowIndexByVisual = [];
+    this.colIndexByVisual = [];
     this.rowToVisual.clear();
     this.colToVisual.clear();
 
-    for (let r = 0; r < this.limits.maxRows && this.visibleRows.length < rows; r++) {
+    for (let r = 0; r < this.limits.maxRows; r += 1) {
       if (this.isRowHidden(r)) continue;
-      this.rowToVisual.set(r, this.visibleRows.length);
-      this.visibleRows.push(r);
+      this.rowToVisual.set(r, this.rowIndexByVisual.length);
+      this.rowIndexByVisual.push(r);
     }
 
-    for (let c = 0; c < this.limits.maxCols && this.visibleCols.length < cols; c++) {
+    for (let c = 0; c < this.limits.maxCols; c += 1) {
       if (this.isColHidden(c)) continue;
-      this.colToVisual.set(c, this.visibleCols.length);
-      this.visibleCols.push(c);
+      this.colToVisual.set(c, this.colIndexByVisual.length);
+      this.colIndexByVisual.push(c);
     }
+
+    // Outline changes can affect scrollable content size.
+    this.clampScroll();
+    this.syncScrollbars();
+  }
+
+  private viewportWidth(): number {
+    return Math.max(0, this.width - this.rowHeaderWidth);
+  }
+
+  private viewportHeight(): number {
+    return Math.max(0, this.height - this.colHeaderHeight);
+  }
+
+  private contentWidth(): number {
+    return this.colIndexByVisual.length * this.cellWidth;
+  }
+
+  private contentHeight(): number {
+    return this.rowIndexByVisual.length * this.cellHeight;
+  }
+
+  private maxScrollX(): number {
+    return Math.max(0, this.contentWidth() - this.viewportWidth());
+  }
+
+  private maxScrollY(): number {
+    return Math.max(0, this.contentHeight() - this.viewportHeight());
+  }
+
+  private clampScroll(): void {
+    const maxX = this.maxScrollX();
+    const maxY = this.maxScrollY();
+    this.scrollX = Math.min(Math.max(0, this.scrollX), maxX);
+    this.scrollY = Math.min(Math.max(0, this.scrollY), maxY);
+  }
+
+  private setScroll(nextX: number, nextY: number): boolean {
+    const prevX = this.scrollX;
+    const prevY = this.scrollY;
+    this.scrollX = nextX;
+    this.scrollY = nextY;
+    this.clampScroll();
+
+    const changed = this.scrollX !== prevX || this.scrollY !== prevY;
+    if (changed) this.syncScrollbars();
+    return changed;
+  }
+
+  private scrollBy(deltaX: number, deltaY: number): void {
+    const changed = this.setScroll(this.scrollX + deltaX, this.scrollY + deltaY);
+    if (changed) this.refresh("scroll");
+  }
+
+  private updateViewportMapping(): void {
+    const availableWidth = this.viewportWidth();
+    const availableHeight = this.viewportHeight();
+
+    const totalRows = this.rowIndexByVisual.length;
+    const totalCols = this.colIndexByVisual.length;
+
+    const overscan = 1;
+    const firstRow = Math.max(0, Math.floor(this.scrollY / this.cellHeight) - overscan);
+    const lastRow = Math.min(totalRows, Math.ceil((this.scrollY + availableHeight) / this.cellHeight) + overscan);
+
+    const firstCol = Math.max(0, Math.floor(this.scrollX / this.cellWidth) - overscan);
+    const lastCol = Math.min(totalCols, Math.ceil((this.scrollX + availableWidth) / this.cellWidth) + overscan);
+
+    this.visibleRowStart = firstRow;
+    this.visibleColStart = firstCol;
+    this.visibleRows = this.rowIndexByVisual.slice(firstRow, lastRow);
+    this.visibleCols = this.colIndexByVisual.slice(firstCol, lastCol);
+  }
+
+  private computeScrollbarThumb(options: {
+    scrollPos: number;
+    viewportSize: number;
+    contentSize: number;
+    trackSize: number;
+    minThumbSize?: number;
+  }): { size: number; offset: number } {
+    const minThumbSize = options.minThumbSize ?? 24;
+    const trackSize = Math.max(0, options.trackSize);
+    const viewportSize = Math.max(0, options.viewportSize);
+    const contentSize = Math.max(0, options.contentSize);
+    const maxScroll = Math.max(0, contentSize - viewportSize);
+    const scrollPos = Math.min(Math.max(0, options.scrollPos), maxScroll);
+
+    if (trackSize === 0) return { size: 0, offset: 0 };
+    if (contentSize === 0 || maxScroll === 0) return { size: trackSize, offset: 0 };
+
+    const rawThumbSize = (viewportSize / contentSize) * trackSize;
+    const thumbSize = Math.min(trackSize, Math.max(minThumbSize, rawThumbSize));
+    const thumbTravel = Math.max(0, trackSize - thumbSize);
+    const offset = thumbTravel === 0 ? 0 : (scrollPos / maxScroll) * thumbTravel;
+
+    return { size: thumbSize, offset };
+  }
+
+  private syncScrollbars(): void {
+    const maxX = this.maxScrollX();
+    const maxY = this.maxScrollY();
+    const showH = maxX > 0;
+    const showV = maxY > 0;
+
+    const padding = 2;
+    const thickness = this.scrollbarThickness;
+
+    this.vScrollbarTrack.style.display = showV ? "block" : "none";
+    this.hScrollbarTrack.style.display = showH ? "block" : "none";
+
+    if (showV) {
+      this.vScrollbarTrack.style.right = `${padding}px`;
+      this.vScrollbarTrack.style.top = `${this.colHeaderHeight + padding}px`;
+      this.vScrollbarTrack.style.bottom = `${(showH ? thickness : 0) + padding}px`;
+      this.vScrollbarTrack.style.width = `${thickness}px`;
+
+      const trackSize = Math.max(0, this.height - (this.colHeaderHeight + padding) - ((showH ? thickness : 0) + padding));
+      const { size, offset } = this.computeScrollbarThumb({
+        scrollPos: this.scrollY,
+        viewportSize: this.viewportHeight(),
+        contentSize: this.contentHeight(),
+        trackSize
+      });
+
+      this.vScrollbarThumb.style.height = `${size}px`;
+      this.vScrollbarThumb.style.transform = `translateY(${offset}px)`;
+    }
+
+    if (showH) {
+      this.hScrollbarTrack.style.left = `${this.rowHeaderWidth + padding}px`;
+      this.hScrollbarTrack.style.right = `${(showV ? thickness : 0) + padding}px`;
+      this.hScrollbarTrack.style.bottom = `${padding}px`;
+      this.hScrollbarTrack.style.height = `${thickness}px`;
+
+      const trackSize = Math.max(0, this.width - (this.rowHeaderWidth + padding) - ((showV ? thickness : 0) + padding));
+      const { size, offset } = this.computeScrollbarThumb({
+        scrollPos: this.scrollX,
+        viewportSize: this.viewportWidth(),
+        contentSize: this.contentWidth(),
+        trackSize
+      });
+
+      this.hScrollbarThumb.style.width = `${size}px`;
+      this.hScrollbarThumb.style.transform = `translateX(${offset}px)`;
+    }
+  }
+
+  private onWheel(e: WheelEvent): void {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('[data-testid="comments-panel"]')) return;
+    if (e.ctrlKey) return;
+
+    let deltaX = e.deltaX;
+    let deltaY = e.deltaY;
+
+    if (e.deltaMode === 1) {
+      // DOM_DELTA_LINE: browsers use a "line" abstraction; normalize to CSS pixels.
+      const line = 16;
+      deltaX *= line;
+      deltaY *= line;
+    } else if (e.deltaMode === 2) {
+      // DOM_DELTA_PAGE.
+      deltaX *= this.viewportWidth();
+      deltaY *= this.viewportHeight();
+    }
+
+    // Common UX: shift+wheel scrolls horizontally.
+    if (e.shiftKey && deltaX === 0) {
+      deltaX = deltaY;
+      deltaY = 0;
+    }
+
+    if (deltaX === 0 && deltaY === 0) return;
+    e.preventDefault();
+    this.scrollBy(deltaX, deltaY);
+  }
+
+  private onScrollbarThumbPointerDown(e: PointerEvent, axis: "x" | "y"): void {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const thumb = axis === "y" ? this.vScrollbarThumb : this.hScrollbarThumb;
+    const track = axis === "y" ? this.vScrollbarTrack : this.hScrollbarTrack;
+
+    const trackRect = track.getBoundingClientRect();
+    const thumbRect = thumb.getBoundingClientRect();
+
+    const pointerPos = axis === "y" ? e.clientY : e.clientX;
+    const thumbStart = axis === "y" ? thumbRect.top : thumbRect.left;
+    const trackStart = axis === "y" ? trackRect.top : trackRect.left;
+    const trackSize = axis === "y" ? trackRect.height : trackRect.width;
+    const thumbSize = axis === "y" ? thumbRect.height : thumbRect.width;
+
+    const grabOffset = pointerPos - thumbStart;
+    const thumbTravel = Math.max(0, trackSize - thumbSize);
+    const maxScroll = axis === "y" ? this.maxScrollY() : this.maxScrollX();
+
+    this.scrollbarDrag = { axis, pointerId: e.pointerId, grabOffset, thumbTravel, trackStart, maxScroll };
+
+    (thumb as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  private onScrollbarThumbPointerMove(e: PointerEvent): void {
+    const drag = this.scrollbarDrag;
+    if (!drag) return;
+    if (e.pointerId !== drag.pointerId) return;
+
+    e.preventDefault();
+
+    const pointerPos = drag.axis === "y" ? e.clientY : e.clientX;
+    const thumbOffset = pointerPos - drag.trackStart - drag.grabOffset;
+    const clamped = Math.min(Math.max(0, thumbOffset), drag.thumbTravel);
+    const nextScroll = drag.thumbTravel === 0 ? 0 : (clamped / drag.thumbTravel) * drag.maxScroll;
+
+    const changed =
+      drag.axis === "y" ? this.setScroll(this.scrollX, nextScroll) : this.setScroll(nextScroll, this.scrollY);
+
+    if (changed) this.refresh("scroll");
+  }
+
+  private onScrollbarThumbPointerUp(e: PointerEvent): void {
+    const drag = this.scrollbarDrag;
+    if (!drag) return;
+    if (e.pointerId !== drag.pointerId) return;
+    this.scrollbarDrag = null;
+  }
+
+  private scrollCellIntoView(cell: CellCoord, paddingPx = 8): boolean {
+    const visualRow = this.rowToVisual.get(cell.row);
+    const visualCol = this.colToVisual.get(cell.col);
+    if (visualRow === undefined || visualCol === undefined) return false;
+
+    const viewportWidth = this.viewportWidth();
+    const viewportHeight = this.viewportHeight();
+    if (viewportWidth <= 0 || viewportHeight <= 0) return false;
+
+    const left = visualCol * this.cellWidth;
+    const top = visualRow * this.cellHeight;
+    const right = left + this.cellWidth;
+    const bottom = top + this.cellHeight;
+
+    const pad = Math.max(0, paddingPx);
+    let nextX = this.scrollX;
+    let nextY = this.scrollY;
+
+    if (left < nextX + pad) {
+      nextX = left - pad;
+    } else if (right > nextX + viewportWidth - pad) {
+      nextX = right - viewportWidth + pad;
+    }
+
+    if (top < nextY + pad) {
+      nextY = top - pad;
+    } else if (bottom > nextY + viewportHeight - pad) {
+      nextY = bottom - viewportHeight + pad;
+    }
+
+    return this.setScroll(nextX, nextY);
   }
 
   private renderOutlineControls(): void {
@@ -1454,6 +1942,8 @@ export class SpreadsheetApp {
 
     const size = 14;
     const padding = 4;
+    const originX = this.rowHeaderWidth;
+    const originY = this.colHeaderHeight;
 
     // Row group toggles live in the row header.
     for (let visualRow = 0; visualRow < this.visibleRows.length; visualRow++) {
@@ -1469,7 +1959,9 @@ export class SpreadsheetApp {
       button.textContent = entry.collapsed ? "+" : "-";
       button.setAttribute("data-testid", `outline-toggle-row-${summaryIndex}`);
       button.style.left = `${padding}px`;
-      button.style.top = `${this.colHeaderHeight + visualRow * this.cellHeight + (this.cellHeight - size) / 2}px`;
+      const visualIndex = this.visibleRowStart + visualRow;
+      const rowTop = originY + visualIndex * this.cellHeight - this.scrollY;
+      button.style.top = `${rowTop + (this.cellHeight - size) / 2}px`;
       button.style.width = `${size}px`;
       button.style.height = `${size}px`;
 
@@ -1499,7 +1991,9 @@ export class SpreadsheetApp {
       button.type = "button";
       button.textContent = entry.collapsed ? "+" : "-";
       button.setAttribute("data-testid", `outline-toggle-col-${summaryIndex}`);
-      button.style.left = `${this.rowHeaderWidth + visualCol * this.cellWidth + (this.cellWidth - size) / 2}px`;
+      const visualIndex = this.visibleColStart + visualCol;
+      const colLeft = originX + visualIndex * this.cellWidth - this.scrollX;
+      button.style.left = `${colLeft + (this.cellWidth - size) / 2}px`;
       button.style.top = `${padding}px`;
       button.style.width = `${size}px`;
       button.style.height = `${size}px`;
@@ -1519,10 +2013,10 @@ export class SpreadsheetApp {
   }
 
   private onOutlineUpdated(): void {
+    this.rebuildAxisVisibilityCache();
     this.ensureActiveCellVisible();
-    this.renderGrid();
-    this.renderSelection();
-    this.updateStatus();
+    this.scrollCellIntoView(this.selection.active);
+    this.refresh();
     this.focus();
   }
 
@@ -1565,22 +2059,26 @@ export class SpreadsheetApp {
     if (visualRow === undefined || visualCol === undefined) return null;
 
     return {
-      x: this.rowHeaderWidth + visualCol * this.cellWidth,
-      y: this.colHeaderHeight + visualRow * this.cellHeight,
+      x: this.rowHeaderWidth + visualCol * this.cellWidth - this.scrollX,
+      y: this.colHeaderHeight + visualRow * this.cellHeight - this.scrollY,
       width: this.cellWidth,
       height: this.cellHeight
     };
   }
 
   private cellFromPoint(pointX: number, pointY: number): CellCoord {
-    const colVisual = Math.floor((pointX - this.rowHeaderWidth) / this.cellWidth);
-    const rowVisual = Math.floor((pointY - this.colHeaderHeight) / this.cellHeight);
-    const col = this.visibleCols[Math.max(0, Math.min(this.visibleCols.length - 1, colVisual))] ?? 0;
-    const row = this.visibleRows[Math.max(0, Math.min(this.visibleRows.length - 1, rowVisual))] ?? 0;
-    return {
-      row: Math.max(0, Math.min(this.limits.maxRows - 1, row)),
-      col: Math.max(0, Math.min(this.limits.maxCols - 1, col))
-    };
+    const sheetX = this.scrollX + (pointX - this.rowHeaderWidth);
+    const sheetY = this.scrollY + (pointY - this.colHeaderHeight);
+
+    const colVisual = Math.floor(sheetX / this.cellWidth);
+    const rowVisual = Math.floor(sheetY / this.cellHeight);
+
+    const safeColVisual = Math.max(0, Math.min(this.colIndexByVisual.length - 1, colVisual));
+    const safeRowVisual = Math.max(0, Math.min(this.rowIndexByVisual.length - 1, rowVisual));
+
+    const col = this.colIndexByVisual[safeColVisual] ?? 0;
+    const row = this.rowIndexByVisual[safeRowVisual] ?? 0;
+    return { row, col };
   }
 
   private onPointerDown(e: PointerEvent): void {
@@ -1603,8 +2101,10 @@ export class SpreadsheetApp {
 
     // Column header selects entire column.
     if (y < this.colHeaderHeight && x >= this.rowHeaderWidth) {
-      const visualCol = Math.floor((x - this.rowHeaderWidth) / this.cellWidth);
-      const col = this.visibleCols[Math.max(0, Math.min(this.visibleCols.length - 1, visualCol))] ?? 0;
+      const sheetX = this.scrollX + (x - this.rowHeaderWidth);
+      const visualCol = Math.floor(sheetX / this.cellWidth);
+      const safeVisualCol = Math.max(0, Math.min(this.colIndexByVisual.length - 1, visualCol));
+      const col = this.colIndexByVisual[safeVisualCol] ?? 0;
       this.selection = selectColumns(this.selection, col, col, { additive: primary }, this.limits);
       this.renderSelection();
       this.updateStatus();
@@ -1614,8 +2114,10 @@ export class SpreadsheetApp {
 
     // Row header selects entire row.
     if (x < this.rowHeaderWidth && y >= this.colHeaderHeight) {
-      const visualRow = Math.floor((y - this.colHeaderHeight) / this.cellHeight);
-      const row = this.visibleRows[Math.max(0, Math.min(this.visibleRows.length - 1, visualRow))] ?? 0;
+      const sheetY = this.scrollY + (y - this.colHeaderHeight);
+      const visualRow = Math.floor(sheetY / this.cellHeight);
+      const safeVisualRow = Math.max(0, Math.min(this.rowIndexByVisual.length - 1, visualRow));
+      const row = this.rowIndexByVisual[safeVisualRow] ?? 0;
       this.selection = selectRows(this.selection, row, row, { additive: primary }, this.limits);
       this.renderSelection();
       this.updateStatus();
@@ -1655,6 +2157,11 @@ export class SpreadsheetApp {
   }
 
   private onPointerMove(e: PointerEvent): void {
+    if (this.scrollbarDrag) {
+      this.onScrollbarThumbPointerMove(e);
+      return;
+    }
+
     const rect = this.root.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -1710,6 +2217,11 @@ export class SpreadsheetApp {
   }
 
   private onPointerUp(e: PointerEvent): void {
+    if (this.scrollbarDrag) {
+      this.onScrollbarThumbPointerUp(e);
+      return;
+    }
+
     if (!this.dragState) return;
     if (e.pointerId !== this.dragState.pointerId) return;
     const mode = this.dragState.mode;
@@ -1847,8 +2359,10 @@ export class SpreadsheetApp {
 
     e.preventDefault();
     this.selection = next;
+    const didScroll = this.scrollCellIntoView(this.selection.active);
     this.renderSelection();
     this.updateStatus();
+    if (didScroll) this.refresh("scroll");
   }
 
   private getCellDisplayValue(cell: CellCoord): string {
@@ -2002,6 +2516,8 @@ export class SpreadsheetApp {
     this.applyEdit(target, text);
 
     this.selection = setActiveCell(this.selection, target, this.limits);
+    this.ensureActiveCellVisible();
+    this.scrollCellIntoView(this.selection.active);
     this.formulaEditCell = null;
     this.referencePreview = null;
     this.refresh();
@@ -2014,9 +2530,12 @@ export class SpreadsheetApp {
     }
     this.formulaEditCell = null;
     this.referencePreview = null;
+    this.ensureActiveCellVisible();
+    const didScroll = this.scrollCellIntoView(this.selection.active);
     this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
+    if (didScroll) this.refresh("scroll");
     this.focus();
   }
 
@@ -2065,6 +2584,9 @@ export class SpreadsheetApp {
     if (width <= 0 || height <= 0) return;
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.rowHeaderWidth, this.colHeaderHeight, this.viewportWidth(), this.viewportHeight());
+    ctx.clip();
     ctx.strokeStyle = resolveCssVar("--warning", { fallback: "CanvasText" });
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 3]);

@@ -21,6 +21,14 @@ export interface GridMetrics {
   visibleCols: readonly number[];
 }
 
+export interface SelectionRenderOptions {
+  /**
+   * Optional clip rect (in CSS pixels) applied while drawing selection fills/borders.
+   * The canvas is still fully cleared before applying the clip.
+   */
+  clipRect?: Rect;
+}
+
 export interface SelectionRenderStyle {
   fillColor: string;
   borderColor: string;
@@ -61,7 +69,12 @@ export class SelectionRenderer {
     return this.lastDebug;
   }
 
-  render(ctx: CanvasRenderingContext2D, selection: SelectionState, metrics: GridMetrics): void {
+  render(
+    ctx: CanvasRenderingContext2D,
+    selection: SelectionState,
+    metrics: GridMetrics,
+    options: SelectionRenderOptions = {}
+  ): void {
     const style = this.style ?? defaultStyleFromTheme();
 
     // `clearRect` is affected by the current transform. Reset to identity to
@@ -79,9 +92,20 @@ export class SelectionRenderer {
     };
 
     // We draw in CSS pixels; the caller should already have adjusted for DPR.
+    if (options.clipRect) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(options.clipRect.x, options.clipRect.y, options.clipRect.width, options.clipRect.height);
+      ctx.clip();
+    }
+
     this.renderFill(ctx, visibleRanges, style);
     this.renderBorders(ctx, visibleRanges, style);
     this.renderActiveCell(ctx, selection.active, metrics, selection.type, style);
+
+    if (options.clipRect) {
+      ctx.restore();
+    }
   }
 
   private renderFill(ctx: CanvasRenderingContext2D, ranges: SelectionRangeRenderInfo[], style: SelectionRenderStyle) {

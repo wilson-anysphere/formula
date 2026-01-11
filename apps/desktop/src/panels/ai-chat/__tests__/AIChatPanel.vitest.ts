@@ -145,7 +145,7 @@ describe("AIChatPanel tool-calling history", () => {
     expect(sawInvalidToolMessage).toBe(false);
     expect(toolMessages).toHaveLength(1);
     expect(toolMessages[0].toolCallId).toBe("call-1");
-    expect(toolMessages[0].content).toContain("\"value\": 42");
+    expect(toolMessages[0].content).toContain("\"value\":42");
     // The UI-only tool "call display" message should never be part of the LLM history.
     expect(toolMessages[0].content).not.toContain("getData(");
 
