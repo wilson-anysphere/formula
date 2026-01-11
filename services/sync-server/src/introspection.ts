@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 import type { SyncRole } from "./auth.js";
 
 export type SyncTokenIntrospectionResult = {
@@ -19,6 +21,10 @@ function parseRole(value: unknown): SyncRole | undefined {
     default:
       return undefined;
   }
+}
+
+function sha256Hex(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
 }
 
 function parseIntrospectionResult(value: unknown): SyncTokenIntrospectionResult {
@@ -82,7 +88,9 @@ export function createSyncTokenIntrospectionClient(config: {
   const cacheTtlMs = Math.max(0, Math.floor(config.cacheTtlMs));
 
   const cacheKey = (params: { token: string; docId: string; clientIp?: string }) =>
-    `${params.token}\n${params.docId}\n${params.clientIp ?? ""}`;
+    // Hash the key so we don't retain raw JWTs/opaque tokens (which could be large
+    // and sensitive) in the cache map keys.
+    sha256Hex(`${params.token}\n${params.docId}\n${params.clientIp ?? ""}`);
 
   const introspect: SyncTokenIntrospectionClient["introspect"] = async (params) => {
     const key = cacheKey(params);
