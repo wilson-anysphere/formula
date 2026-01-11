@@ -230,6 +230,121 @@ function throwIfAborted(signal) {
 }
 
 /**
+ * Detect a top-level SQL Server `OFFSET`/`FETCH` clause.
+ *
+ * We only care about the top-level query because `applySqlServerLimit` may
+ * receive a folded SQL string containing derived tables with their own `OFFSET`
+ * (e.g. after folding `Table.Skip`). SQL Server requires `ORDER BY` when using
+ * `OFFSET`/`FETCH`, so when we detect a top-level `OFFSET` we push down the row
+ * limit using `FETCH NEXT ? ROWS ONLY` instead of injecting `TOP (?)`.
+ *
+ * @param {string} sql
+ * @returns {{ hasOffset: boolean, hasFetch: boolean }}
+ */
+function scanSqlServerTopLevelOffsetFetch(sql) {
+  let inSingle = false;
+  let inDouble = false;
+  let inBracket = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let parenDepth = 0;
+  let hasOffset = false;
+  let hasFetch = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const next = sql[i + 1] ?? "";
+
+    if (inLineComment) {
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        i += 1;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (inSingle) {
+      if (ch === "'") {
+        if (next === "'") i += 1;
+        else inSingle = false;
+      }
+      continue;
+    }
+
+    if (inDouble) {
+      if (ch === '"') {
+        if (next === '"') i += 1;
+        else inDouble = false;
+      }
+      continue;
+    }
+
+    if (inBracket) {
+      if (ch === "]") {
+        if (next === "]") i += 1;
+        else inBracket = false;
+      }
+      continue;
+    }
+
+    if (ch === "-" && next === "-") {
+      i += 1;
+      inLineComment = true;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      i += 1;
+      inBlockComment = true;
+      continue;
+    }
+
+    if (ch === "'") {
+      inSingle = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inDouble = true;
+      continue;
+    }
+
+    if (ch === "[") {
+      inBracket = true;
+      continue;
+    }
+
+    if (ch === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (ch === ")") {
+      if (parenDepth > 0) parenDepth -= 1;
+      continue;
+    }
+
+    if (parenDepth !== 0) continue;
+
+    if (/[A-Za-z_]/.test(ch)) {
+      let end = i + 1;
+      while (end < sql.length && /[A-Za-z0-9_]/.test(sql[end])) end += 1;
+      const token = sql.slice(i, end).toUpperCase();
+      if (token === "OFFSET") hasOffset = true;
+      if (token === "FETCH") hasFetch = true;
+      i = end - 1;
+    }
+  }
+
+  return { hasOffset, hasFetch };
+}
+
+/**
  * Push a top-level row limit into a SQL Server query.
  *
  * The folding engine emits `?` placeholders; this helper rewrites the SQL (and
@@ -259,6 +374,19 @@ function applySqlServerLimit(sql, params, limit) {
       return { sql, params: nextParams };
     }
     return { sql, params: inputParams };
+  }
+
+  const { hasOffset, hasFetch } = scanSqlServerTopLevelOffsetFetch(trimmed);
+  if (hasOffset) {
+    // Prefer `FETCH NEXT` over injecting `TOP` so we don't rely on dialect/driver
+    // support for combining `TOP` and `OFFSET`.
+    if (hasFetch) return { sql, params: inputParams };
+    const body = trimmed.replace(/;\s*$/, "");
+    const suffix = /;\s*$/.test(trimmed) ? ";" : "";
+    return {
+      sql: `${prefix}${body} FETCH NEXT ? ROWS ONLY${suffix}`,
+      params: [...inputParams, normalizedLimit],
+    };
   }
 
   // Common folding shape for sorted SQL Server queries (see `finalizeSqlForDialect`):

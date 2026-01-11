@@ -136,6 +136,44 @@ test("QueryEngine: pushes ExecuteOptions.limit down for SQL Server via TOP", asy
   assert.deepEqual(observed.params, [10, "East"]);
 });
 
+test("QueryEngine: pushes ExecuteOptions.limit down for SQL Server skip via FETCH NEXT", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined } | null} */
+  let observed = null;
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async (_connection, sql, options) => {
+          observed = { sql, params: options?.params };
+          // Pretend the database applied the skip + limit already.
+          return DataTable.fromGrid(
+            [
+              ["Region", "Sales"],
+              ["East", 100],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const query = {
+    id: "q_fold_skip_limit_sqlserver",
+    name: "Skip + Limit (sqlserver)",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM sales", dialect: "sqlserver" },
+    steps: [{ id: "s1", name: "Skip", operation: { type: "skip", count: 5 } }],
+  };
+
+  await engine.executeQuery(query, { queries: {} }, { limit: 10 });
+  assert.ok(observed, "expected SQL connector to be invoked");
+  assert.match(observed.sql, /\bOFFSET\b/i);
+  assert.match(observed.sql, /\bFETCH\b/i);
+  assert.match(observed.sql, /@p1/);
+  assert.match(observed.sql, /@p2/);
+  assert.deepEqual(observed.params, [5, 10]);
+});
+
 test("QueryEngine: SQL Server sources with ORDER BY do not fold (derived table restriction)", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined } | null} */
   let observed = null;

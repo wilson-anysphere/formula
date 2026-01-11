@@ -65,6 +65,23 @@ test("sqlserver: sort followed by take folds to TOP with ORDER BY (no nested ORD
   });
 });
 
+test("sqlserver: skip folds to OFFSET ... ROWS (requires ORDER BY)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_sqlserver_skip",
+    name: "SQL Server Skip",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [{ id: "s1", name: "Skip", operation: { type: "skip", count: 5 } }],
+  };
+
+  const plan = folding.compile(query, { dialect: "sqlserver" });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: "SELECT * FROM (SELECT * FROM sales) AS t ORDER BY (SELECT NULL) OFFSET ? ROWS",
+    params: [5],
+  });
+});
+
 test("sqlserver: sort followed by renameColumn keeps valid ORDER BY", () => {
   const folding = new QueryFoldingEngine();
   const query = {

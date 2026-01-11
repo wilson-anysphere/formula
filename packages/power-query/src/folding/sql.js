@@ -778,11 +778,35 @@ export class QueryFoldingEngine {
       }
       case "skip": {
         if (!Number.isFinite(operation.count) || operation.count < 0) return null;
+        if (dialect.name === "sqlserver") {
+          // SQL Server requires an ORDER BY for OFFSET. When no ordering has been
+          // specified we use a constant ordering expression to preserve the same
+          // nondeterministic semantics as `OFFSET` without `ORDER BY` in other
+          // dialects.
+          const orderBy = sortBy && sortBy.length > 0 ? sortSpecsToSql(dialect, sortBy) : "(SELECT NULL)";
+          params.push(operation.count);
+          return {
+            fragment: { sql: `SELECT * FROM ${from} ORDER BY ${orderBy} OFFSET ? ROWS`, params },
+            columns: state.columns,
+            sortBy,
+            sortInFragment: Boolean(sortBy && sortBy.length > 0),
+            connectionId: state.connectionId,
+            connection: state.connection,
+          };
+        }
+
         params.push(operation.count);
-        const offsetSql = ctx.dialect.name === "postgres" ? "OFFSET ?" : ctx.dialect.name === "mysql" ? "LIMIT 18446744073709551615 OFFSET ?" : "LIMIT -1 OFFSET ?";
+        const offsetSql =
+          ctx.dialect.name === "postgres"
+            ? "OFFSET ?"
+            : ctx.dialect.name === "mysql"
+              ? "LIMIT 18446744073709551615 OFFSET ?"
+              : "LIMIT -1 OFFSET ?";
         return {
           fragment: { sql: `SELECT * FROM ${from} ${offsetSql}`, params },
           columns: state.columns,
+          sortBy: null,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
