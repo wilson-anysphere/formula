@@ -154,12 +154,13 @@ export class FormulaBarModel {
     return this.#coloredReferences;
   }
 
-  referenceHighlights(): Array<{ range: FormulaReferenceRange; color: string; text: string; index: number }> {
+  referenceHighlights(): Array<{ range: FormulaReferenceRange; color: string; text: string; index: number; active: boolean }> {
     return this.#coloredReferences.map((ref) => ({
       range: ref.range,
       color: ref.color,
       text: ref.text,
       index: ref.index,
+      active: this.#activeReferenceIndex === ref.index,
     }));
   }
 

@@ -320,7 +320,7 @@ export class SpreadsheetApp {
   private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
   private formulaEditCell: CellCoord | null = null;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
-  private referenceHighlights: Array<{ start: CellCoord; end: CellCoord; color: string }> = [];
+  private referenceHighlights: Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> = [];
   private fillPreviewRange: Range | null = null;
   private showFormulas = false;
 
@@ -676,7 +676,8 @@ export class SpreadsheetApp {
             .map((h) => ({
               start: { row: h.range.startRow, col: h.range.startCol },
               end: { row: h.range.endRow, col: h.range.endCol },
-              color: h.color
+              color: h.color,
+              active: Boolean(h.active),
             }));
           this.renderReferencePreview();
         }
@@ -3704,64 +3705,38 @@ export class SpreadsheetApp {
       ctx.restore();
     };
 
-    const normalizedPreview = this.referencePreview
-      ? {
-          startRow: Math.min(this.referencePreview.start.row, this.referencePreview.end.row),
-          endRow: Math.max(this.referencePreview.start.row, this.referencePreview.end.row),
-          startCol: Math.min(this.referencePreview.start.col, this.referencePreview.end.col),
-          endCol: Math.max(this.referencePreview.start.col, this.referencePreview.end.col)
-        }
-      : null;
-
-    const activePreviewColor = (() => {
-      if (!normalizedPreview) return null;
-      for (const highlight of this.referenceHighlights) {
-        const startRow = Math.min(highlight.start.row, highlight.end.row);
-        const endRow = Math.max(highlight.start.row, highlight.end.row);
-        const startCol = Math.min(highlight.start.col, highlight.end.col);
-        const endCol = Math.max(highlight.start.col, highlight.end.col);
-        if (
-          startRow === normalizedPreview.startRow &&
-          endRow === normalizedPreview.endRow &&
-          startCol === normalizedPreview.startCol &&
-          endCol === normalizedPreview.endCol
-        ) {
-          return highlight.color;
-        }
-      }
-      return null;
-    })();
-
+    // In formula-editing mode, the formula bar provides `referenceHighlights` with
+    // per-reference colors and an `active` flag. Render all non-active refs as
+    // dashed outlines, and the active one (if any) as a thicker solid outline.
+    //
+    // When not editing, only the single `referencePreview` (hover) is shown.
     for (const highlight of this.referenceHighlights) {
+      if (highlight.active) continue;
       const startRow = Math.min(highlight.start.row, highlight.end.row);
       const endRow = Math.max(highlight.start.row, highlight.end.row);
       const startCol = Math.min(highlight.start.col, highlight.end.col);
       const endCol = Math.max(highlight.start.col, highlight.end.col);
-      if (
-        activePreviewColor &&
-        normalizedPreview &&
-        startRow === normalizedPreview.startRow &&
-        endRow === normalizedPreview.endRow &&
-        startCol === normalizedPreview.startCol &&
-        endCol === normalizedPreview.endCol
-      ) {
-        continue;
-      }
       drawRangeOutline(startRow, endRow, startCol, endCol, { color: highlight.color, dash: [4, 3] });
     }
 
-    if (normalizedPreview) {
-      if (activePreviewColor) {
-        drawRangeOutline(normalizedPreview.startRow, normalizedPreview.endRow, normalizedPreview.startCol, normalizedPreview.endCol, {
-          color: activePreviewColor,
-          lineWidth: 3,
-        });
-      } else {
-        drawRangeOutline(normalizedPreview.startRow, normalizedPreview.endRow, normalizedPreview.startCol, normalizedPreview.endCol, {
-          color: resolveCssVar("--warning", { fallback: "CanvasText" }),
-          dash: [4, 3],
-        });
-      }
+    for (const highlight of this.referenceHighlights) {
+      if (!highlight.active) continue;
+      const startRow = Math.min(highlight.start.row, highlight.end.row);
+      const endRow = Math.max(highlight.start.row, highlight.end.row);
+      const startCol = Math.min(highlight.start.col, highlight.end.col);
+      const endCol = Math.max(highlight.start.col, highlight.end.col);
+      drawRangeOutline(startRow, endRow, startCol, endCol, { color: highlight.color, lineWidth: 3 });
+    }
+
+    if (this.referenceHighlights.length === 0 && this.referencePreview) {
+      const startRow = Math.min(this.referencePreview.start.row, this.referencePreview.end.row);
+      const endRow = Math.max(this.referencePreview.start.row, this.referencePreview.end.row);
+      const startCol = Math.min(this.referencePreview.start.col, this.referencePreview.end.col);
+      const endCol = Math.max(this.referencePreview.start.col, this.referencePreview.end.col);
+      drawRangeOutline(startRow, endRow, startCol, endCol, {
+        color: resolveCssVar("--warning", { fallback: "CanvasText" }),
+        dash: [4, 3],
+      });
     }
   }
 

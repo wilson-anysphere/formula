@@ -9,7 +9,7 @@ export interface FormulaBarViewCallbacks {
   onGoTo?: (reference: string) => void;
   onHoverRange?: (range: RangeAddress | null) => void;
   onReferenceHighlights?: (
-    highlights: Array<{ range: FormulaReferenceRange; color: string; text: string; index: number }>
+    highlights: Array<{ range: FormulaReferenceRange; color: string; text: string; index: number; active?: boolean }>
   ) => void;
 }
 
