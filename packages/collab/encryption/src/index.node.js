@@ -5,12 +5,47 @@ export const AES_256_KEY_BYTES = 32;
 export const AES_GCM_IV_BYTES = 12;
 export const AES_GCM_TAG_BYTES = 16;
 
-function requireCrypto() {
+let webCryptoPromise = null;
+let webCryptoCached = null;
+
+async function getWebCrypto() {
+  if (webCryptoCached) return webCryptoCached;
+  if (webCryptoPromise) return webCryptoPromise;
+
   const cryptoObj = globalThis.crypto;
-  if (!cryptoObj?.subtle || typeof cryptoObj.getRandomValues !== "function") {
-    throw new Error("WebCrypto is required for cell encryption (globalThis.crypto.subtle missing)");
+  if (cryptoObj?.subtle && typeof cryptoObj.getRandomValues === "function") {
+    webCryptoCached = cryptoObj;
+    return webCryptoCached;
   }
-  return cryptoObj;
+
+  webCryptoPromise = (async () => {
+    try {
+      // Node.js: fall back to `crypto.webcrypto` on runtimes that don't expose
+      // WebCrypto on `globalThis.crypto` (e.g. Node 18).
+      //
+      // This uses a dynamic import with a computed specifier so browser bundlers
+      // don't try to resolve `node:crypto` for the desktop binder code path.
+      const specifier = ["node", "crypto"].join(":");
+      // eslint-disable-next-line no-undef
+      const mod = await import(
+        // eslint-disable-next-line no-undef
+        /* @vite-ignore */ specifier
+      );
+      const webcrypto = mod?.webcrypto ?? mod?.default?.webcrypto ?? null;
+      if (webcrypto?.subtle && typeof webcrypto.getRandomValues === "function") {
+        webCryptoCached = webcrypto;
+        return webCryptoCached;
+      }
+    } catch {
+      // ignore and throw below
+    }
+
+    throw new Error(
+      "WebCrypto is required for cell encryption (globalThis.crypto.subtle missing and Node crypto.webcrypto unavailable)"
+    );
+  })();
+
+  return webCryptoPromise;
 }
 
 /**
@@ -145,7 +180,7 @@ async function importAesGcmKey(key) {
   if (cached) return cached;
 
   assertKeyBytes(key.keyBytes);
-  const subtle = requireCrypto().subtle;
+  const subtle = (await getWebCrypto()).subtle;
   const cryptoKey = await subtle.importKey(
     "raw",
     key.keyBytes,
@@ -168,7 +203,7 @@ export async function encryptCellPlaintext(opts) {
   const { plaintext, key, context } = opts;
   assertKeyBytes(key.keyBytes);
 
-  const cryptoObj = requireCrypto();
+  const cryptoObj = await getWebCrypto();
   const iv = cryptoObj.getRandomValues(new Uint8Array(AES_GCM_IV_BYTES));
   const aad = aadBytesFromContext(context);
   const bytes = utf8Encode(JSON.stringify(plaintext));
@@ -210,7 +245,7 @@ export async function decryptCellPlaintext(opts) {
     throw new Error(`Key id mismatch (payload=${encrypted.keyId}, resolver=${key.keyId})`);
   }
 
-  const cryptoObj = requireCrypto();
+  const cryptoObj = await getWebCrypto();
 
   const iv = base64ToBytes(encrypted.ivBase64);
   const tag = base64ToBytes(encrypted.tagBase64);
