@@ -91,6 +91,14 @@ function clampIndex(value: number, min: number, max: number): number {
   return clamp(Math.trunc(value), min, max);
 }
 
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3.0;
+
+function clampZoom(zoom: number): number {
+  if (!Number.isFinite(zoom)) return 1;
+  return clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+}
+
 function padRect(rect: Rect, padding: number): Rect {
   return { x: rect.x - padding, y: rect.y - padding, width: rect.width + padding * 2, height: rect.height + padding * 2 };
 }
@@ -164,11 +172,17 @@ export function resolveCellTextColorWithTheme(
 
 export class CanvasGridRenderer {
   private readonly provider: CellProvider;
-  readonly scroll: VirtualScrollManager;
+  scroll: VirtualScrollManager;
 
   private readonly prefetchOverscanRows: number;
   private readonly prefetchOverscanCols: number;
   private lastPrefetchRanges: CellRange[] | null = null;
+
+  private zoom = 1;
+  private readonly baseDefaultRowHeight: number;
+  private readonly baseDefaultColWidth: number;
+  private readonly rowHeightOverridesBase = new Map<number, number>();
+  private readonly colWidthOverridesBase = new Map<number, number>();
 
   private gridCanvas?: HTMLCanvasElement;
   private gridCtx?: CanvasRenderingContext2D;
@@ -218,7 +232,7 @@ export class CanvasGridRenderer {
   private readonly textWidthCache = new LruCache<string, number>(10_000);
   private textLayoutEngine?: TextLayoutEngine;
 
-  private readonly presenceFont = "12px system-ui, sans-serif";
+  private presenceFont = "12px system-ui, sans-serif";
   private theme: GridTheme;
 
   private readonly perfStats: GridPerfStats = {
@@ -294,11 +308,13 @@ export class CanvasGridRenderer {
     this.prefetchOverscanRows = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanRows);
     this.prefetchOverscanCols = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanCols);
     this.theme = resolveGridTheme(options.theme);
+    this.baseDefaultRowHeight = options.defaultRowHeight ?? 21;
+    this.baseDefaultColWidth = options.defaultColWidth ?? 100;
     this.scroll = new VirtualScrollManager({
       rowCount: options.rowCount,
       colCount: options.colCount,
-      defaultRowHeight: options.defaultRowHeight,
-      defaultColWidth: options.defaultColWidth
+      defaultRowHeight: this.baseDefaultRowHeight,
+      defaultColWidth: this.baseDefaultColWidth
     });
 
     // Enable stats by default in dev builds where `import.meta.env.PROD` (Vite) is false.
@@ -326,6 +342,72 @@ export class CanvasGridRenderer {
 
   getTheme(): GridTheme {
     return this.theme;
+  }
+
+  getZoom(): number {
+    return this.zoom;
+  }
+
+  setZoom(nextZoom: number, options?: { anchorX?: number; anchorY?: number }): void {
+    const clamped = clampZoom(nextZoom);
+    if (clamped === this.zoom) return;
+
+    const prevZoom = this.zoom;
+    const prevScroll = this.scroll.getScroll();
+    const prevViewport = this.scroll.getViewportState();
+    const { rowCount, colCount } = this.scroll.getCounts();
+
+    const baseScrollX = prevScroll.x / prevZoom;
+    const baseScrollY = prevScroll.y / prevZoom;
+
+    const nextScroll = new VirtualScrollManager({
+      rowCount,
+      colCount,
+      defaultRowHeight: this.baseDefaultRowHeight * clamped,
+      defaultColWidth: this.baseDefaultColWidth * clamped
+    });
+    nextScroll.setViewportSize(prevViewport.width, prevViewport.height);
+    nextScroll.setFrozen(prevViewport.frozenRows, prevViewport.frozenCols);
+
+    for (const [row, baseHeight] of this.rowHeightOverridesBase) {
+      nextScroll.rows.setSize(row, baseHeight * clamped);
+    }
+    for (const [col, baseWidth] of this.colWidthOverridesBase) {
+      nextScroll.cols.setSize(col, baseWidth * clamped);
+    }
+
+    const viewportAfter = nextScroll.getViewportState();
+
+    let targetScrollX = baseScrollX * clamped;
+    let targetScrollY = baseScrollY * clamped;
+
+    const anchorX = options?.anchorX;
+    if (anchorX !== undefined && Number.isFinite(anchorX) && anchorX >= viewportAfter.frozenWidth) {
+      const beforeSheetX = anchorX < prevViewport.frozenWidth ? anchorX : anchorX + prevScroll.x;
+      const baseX = beforeSheetX / prevZoom;
+      targetScrollX = baseX * clamped - anchorX;
+    }
+
+    const anchorY = options?.anchorY;
+    if (anchorY !== undefined && Number.isFinite(anchorY) && anchorY >= viewportAfter.frozenHeight) {
+      const beforeSheetY = anchorY < prevViewport.frozenHeight ? anchorY : anchorY + prevScroll.y;
+      const baseY = beforeSheetY / prevZoom;
+      targetScrollY = baseY * clamped - anchorY;
+    }
+
+    this.scroll = nextScroll;
+    this.zoom = clamped;
+    this.presenceFont = `${12 * this.zoom}px system-ui, sans-serif`;
+
+    this.scroll.setScroll(targetScrollX, targetScrollY);
+    const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
+    this.scroll.setScroll(aligned.x, aligned.y);
+
+    if (this.selectionCtx) {
+      this.remotePresenceDirtyPadding = this.getRemotePresenceDirtyPadding(this.selectionCtx);
+    }
+
+    this.markAllDirty();
   }
 
   attach(canvases: {
@@ -754,24 +836,36 @@ export class CanvasGridRenderer {
 
   setRowHeight(row: number, height: number): void {
     this.assertRowIndex(row);
+    if (Math.abs(height - this.scroll.rows.defaultSize) < 1e-6) {
+      this.rowHeightOverridesBase.delete(row);
+    } else {
+      this.rowHeightOverridesBase.set(row, height / this.zoom);
+    }
     this.scroll.rows.setSize(row, height);
     this.onAxisSizeChanged();
   }
 
   setColWidth(col: number, width: number): void {
     this.assertColIndex(col);
+    if (Math.abs(width - this.scroll.cols.defaultSize) < 1e-6) {
+      this.colWidthOverridesBase.delete(col);
+    } else {
+      this.colWidthOverridesBase.set(col, width / this.zoom);
+    }
     this.scroll.cols.setSize(col, width);
     this.onAxisSizeChanged();
   }
 
   resetRowHeight(row: number): void {
     this.assertRowIndex(row);
+    this.rowHeightOverridesBase.delete(row);
     this.scroll.rows.deleteSize(row);
     this.onAxisSizeChanged();
   }
 
   resetColWidth(col: number): void {
     this.assertColIndex(col);
+    this.colWidthOverridesBase.delete(col);
     this.scroll.cols.deleteSize(col);
     this.onAxisSizeChanged();
   }
@@ -787,8 +881,9 @@ export class CanvasGridRenderer {
 
     const maxWidth = options?.maxWidth ?? 500;
     const minWidth = 24;
-    const paddingX = 4;
-    const extraPadding = 8;
+    const zoom = this.zoom;
+    const paddingX = 4 * zoom;
+    const extraPadding = 8 * zoom;
 
     const rowCount = this.getRowCount();
     const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
@@ -809,7 +904,7 @@ export class CanvasGridRenderer {
       if (!cell || cell.value === null) return;
 
       const style = cell.style;
-      const fontSize = style?.fontSize ?? 12;
+      const fontSize = (style?.fontSize ?? 12) * zoom;
       const fontFamily = style?.fontFamily ?? "system-ui";
       const fontWeight = style?.fontWeight ?? "400";
       const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
@@ -840,8 +935,9 @@ export class CanvasGridRenderer {
     const viewport = this.scroll.getViewportState();
 
     const maxHeight = options?.maxHeight ?? 500;
-    const paddingX = 4;
-    const paddingY = 2;
+    const zoom = this.zoom;
+    const paddingX = 4 * zoom;
+    const paddingY = 2 * zoom;
 
     const colCount = this.getColCount();
     const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
@@ -874,7 +970,7 @@ export class CanvasGridRenderer {
 
       hasWrapped = true;
 
-      const fontSize = style?.fontSize ?? 12;
+      const fontSize = (style?.fontSize ?? 12) * zoom;
       const fontFamily = style?.fontFamily ?? "system-ui";
       const fontWeight = style?.fontWeight ?? "400";
       const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
@@ -1892,12 +1988,13 @@ export class CanvasGridRenderer {
     let currentTextFill = "";
     let currentGridFill = "";
 
-    const paddingX = 4;
-    const paddingY = 2;
+    const zoom = this.zoom;
+    const paddingX = 4 * zoom;
+    const paddingY = 2 * zoom;
 
     // Font specs are part of the text-layout cache key and are returned in layout runs.
     // Avoid mutating a shared object after passing it to the layout engine.
-    let fontSpec = { family: "system-ui", sizePx: 12, weight: "400" };
+    let fontSpec = { family: "system-ui", sizePx: 12 * zoom, weight: "400" };
     let currentFontFamily = "";
     let currentFontSize = -1;
     let currentFontWeight = "";
@@ -1965,7 +2062,7 @@ export class CanvasGridRenderer {
       const style = cell.style;
 
       if (cell.value !== null) {
-        const fontSize = style?.fontSize ?? 12;
+        const fontSize = (style?.fontSize ?? 12) * zoom;
         const fontFamily = style?.fontFamily ?? "system-ui";
         const fontWeight = style?.fontWeight ?? "400";
 
@@ -2611,8 +2708,9 @@ export class CanvasGridRenderer {
 
     let currentFont = "";
     let currentFillStyle = "";
-    const paddingX = 4;
-    const paddingY = 2;
+    const zoom = this.zoom;
+    const paddingX = 4 * zoom;
+    const paddingY = 2 * zoom;
 
     let rowYSheet = this.scroll.rows.positionOf(startRow);
     for (let row = startRow; row < endRow; row++) {
@@ -2627,7 +2725,7 @@ export class CanvasGridRenderer {
         const cell = this.provider.getCell(row, col);
         if (cell && cell.value !== null) {
           const style = cell.style;
-          const fontSize = style?.fontSize ?? 12;
+          const fontSize = (style?.fontSize ?? 12) * zoom;
           const fontFamily = style?.fontFamily ?? "system-ui";
           const fontWeight = style?.fontWeight ?? "400";
           const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
@@ -3130,7 +3228,7 @@ export class CanvasGridRenderer {
   }
 
   private fillHandleRectInViewport(range: CellRange, viewport: GridViewportState): Rect | null {
-    const handleSize = 8;
+    const handleSize = 8 * this.zoom;
     const handleRow = range.endRow - 1;
     const handleCol = range.endCol - 1;
     const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);

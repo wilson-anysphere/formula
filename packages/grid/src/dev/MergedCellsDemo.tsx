@@ -1,7 +1,7 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { CellData, CellProvider, CellRange, CellStyle } from "../model/CellProvider";
-import { CanvasGrid } from "../react/CanvasGrid";
+import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
 
 function rangesIntersect(a: CellRange, b: CellRange): boolean {
   return a.startRow < b.endRow && a.endRow > b.startRow && a.startCol < b.endCol && a.endCol > b.startCol;
@@ -89,6 +89,12 @@ class MergedDemoProvider implements CellProvider {
 
 export function MergedCellsDemo(): React.ReactElement {
   const provider = useMemo(() => new MergedDemoProvider(), []);
+  const apiRef = useRef<GridApi | null>(null);
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    apiRef.current?.setZoom(zoom);
+  }, [zoom]);
 
   return (
     <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
@@ -107,6 +113,18 @@ export function MergedCellsDemo(): React.ReactElement {
           Try clicking inside merged regions (selection snaps to the anchor) and observe text overflowing into empty neighbors.
           Append <code>?demo=perf</code> to the URL to switch back to the perf harness.
         </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+          Zoom
+          <input
+            type="range"
+            min={0.5}
+            max={3}
+            step={0.1}
+            value={zoom}
+            onChange={(event) => setZoom(event.currentTarget.valueAsNumber)}
+          />
+          <span style={{ width: 44, textAlign: "right" }}>{Math.round(zoom * 100)}%</span>
+        </label>
       </div>
 
       <div style={{ flex: 1, position: "relative" }}>
@@ -120,6 +138,7 @@ export function MergedCellsDemo(): React.ReactElement {
           frozenCols={1}
           defaultRowHeight={24}
           defaultColWidth={80}
+          apiRef={apiRef}
         />
       </div>
     </div>

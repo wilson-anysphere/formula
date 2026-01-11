@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
 import { MockCellProvider } from "../model/MockCellProvider";
 
@@ -14,6 +14,7 @@ export function GridPerformanceHarness(props?: {
   const deltaY = props?.deltaY ?? 120;
 
   const apiRef = useRef<GridApi | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   const provider = useMemo(() => new MockCellProvider({ rowCount, colCount }), [rowCount, colCount]);
 
@@ -121,8 +122,39 @@ export function GridPerformanceHarness(props?: {
     };
   }, [rowCount, colCount]);
 
+  useEffect(() => {
+    apiRef.current?.setZoom(zoom);
+  }, [zoom]);
+
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      <div
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 12,
+          zIndex: 10,
+          background: "rgba(15, 23, 42, 0.75)",
+          color: "#ffffff",
+          borderRadius: 8,
+          padding: "8px 10px",
+          fontFamily: "system-ui, sans-serif",
+          fontSize: 12
+        }}
+      >
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          Zoom
+          <input
+            type="range"
+            min={0.5}
+            max={3}
+            step={0.1}
+            value={zoom}
+            onChange={(event) => setZoom(event.currentTarget.valueAsNumber)}
+          />
+          <span style={{ width: 44, textAlign: "right" }}>{Math.round(zoom * 100)}%</span>
+        </label>
+      </div>
       <CanvasGrid
         provider={provider}
         rowCount={rowCount}

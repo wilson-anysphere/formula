@@ -7,6 +7,7 @@ import { resolveGridTheme } from "../theme/GridTheme";
 import { resolveGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
+import { wheelDeltaToPixels } from "./wheelDeltaToPixels";
 
 export type ScrollToCellAlign = "auto" | "start" | "center" | "end";
 
@@ -14,6 +15,8 @@ export interface GridApi {
   scrollTo(x: number, y: number): void;
   scrollBy(deltaX: number, deltaY: number): void;
   getScroll(): { x: number; y: number };
+  setZoom(zoom: number): void;
+  getZoom(): number;
   setFrozen(frozenRows: number, frozenCols: number): void;
   setRowHeight(row: number, height: number): void;
   setColWidth(col: number, width: number): void;
@@ -93,6 +96,7 @@ export interface CanvasGridProps {
   theme?: Partial<GridTheme>;
   defaultRowHeight?: number;
   defaultColWidth?: number;
+  zoom?: number;
   enableResize?: boolean;
   /**
    * How many extra rows beyond the visible viewport to prefetch.
@@ -137,6 +141,14 @@ function clamp(value: number, min: number, max: number): number {
 function clampIndex(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return clamp(Math.trunc(value), min, max);
+}
+
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3.0;
+
+function clampZoom(zoom: number): number {
+  if (!Number.isFinite(zoom)) return 1;
+  return clamp(zoom, MIN_ZOOM, MAX_ZOOM);
 }
 
 function toColumnName(col0: number): string {
@@ -297,6 +309,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const enableResizeRef = useRef(props.enableResize ?? false);
   enableResizeRef.current = props.enableResize ?? false;
 
+  const zoomControlledRef = useRef(props.zoom !== undefined);
+  zoomControlledRef.current = props.zoom !== undefined;
+
+  const [uncontrolledZoom, setUncontrolledZoom] = useState(() => clampZoom(props.zoom ?? 1));
+  const zoom = props.zoom !== undefined ? clampZoom(props.zoom) : uncontrolledZoom;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+
   const statusId = useId();
   const activeCellId = useMemo(() => `formula-grid-active-cell-${statusId.replace(/:/g, "")}`, [statusId]);
   const [cssTheme, setCssTheme] = useState<Partial<GridTheme>>({});
@@ -392,7 +412,34 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     hThumb.style.transform = `translateX(${hThumbMetrics.offset}px)`;
   };
 
- 
+  const setZoomInternal = (nextZoom: number, options?: { anchorX?: number; anchorY?: number; force?: boolean }) => {
+    const clamped = clampZoom(nextZoom);
+    if (zoomControlledRef.current && !options?.force) return;
+
+    zoomRef.current = clamped;
+    if (!zoomControlledRef.current) {
+      setUncontrolledZoom(clamped);
+    }
+
+    const anchor =
+      options && (options.anchorX !== undefined || options.anchorY !== undefined)
+        ? { anchorX: options.anchorX, anchorY: options.anchorY }
+        : undefined;
+    rendererRef.current?.setZoom(clamped, anchor);
+    syncScrollbars();
+  };
+
+  useEffect(() => {
+    if (props.zoom === undefined) return;
+    const clamped = clampZoom(props.zoom);
+    setUncontrolledZoom(clamped);
+    setZoomInternal(clamped, { force: true });
+  }, [props.zoom]);
+
+  useLayoutEffect(() => {
+    syncScrollbars();
+  }, [zoom]);
+
   useImperativeHandle(
     props.apiRef,
     (): GridApi => ({
@@ -409,6 +456,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         syncScrollbars();
       },
       getScroll: () => rendererRef.current?.scroll.getScroll() ?? { x: 0, y: 0 },
+      setZoom: (nextZoom) => setZoomInternal(nextZoom),
+      getZoom: () => zoomRef.current,
       setFrozen: (rows, cols) => {
         const renderer = rendererRef.current;
         if (!renderer) return;
@@ -585,6 +634,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
     renderer.setFrozen(frozenRows, frozenCols);
+    renderer.setZoom(zoomRef.current);
 
     const resize = () => {
       const rect = container.getBoundingClientRect();
@@ -711,32 +761,27 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     if (!renderer) return;
 
     const onWheel = (event: WheelEvent) => {
-      if (!rendererRef.current) return;
-      let deltaX = event.deltaX;
-      let deltaY = event.deltaY;
+      const renderer = rendererRef.current;
+      if (!renderer) return;
 
-      if (event.deltaMode === 1) {
-        // DOM_DELTA_LINE: browsers use a "line" abstraction; normalize to CSS pixels.
-        const line = 16;
-        deltaX *= line;
-        deltaY *= line;
-      } else if (event.deltaMode === 2) {
-        // DOM_DELTA_PAGE.
-        const viewport = rendererRef.current.scroll.getViewportState();
-        deltaX *= viewport.width;
-        deltaY *= viewport.height;
-      }
+      const viewport = renderer.scroll.getViewportState();
+      const lineHeight = 16 * zoomRef.current;
+      const pageWidth = Math.max(0, viewport.width - viewport.frozenWidth);
+      const pageHeight = Math.max(0, viewport.height - viewport.frozenHeight);
 
-      // Common UX: shift+wheel scrolls horizontally.
-      if (event.shiftKey && deltaX === 0) {
-        deltaX = deltaY;
+      let deltaX = wheelDeltaToPixels(event.deltaX, event.deltaMode, { lineHeight, pageSize: pageWidth });
+      let deltaY = wheelDeltaToPixels(event.deltaY, event.deltaMode, { lineHeight, pageSize: pageHeight });
+
+      // Common spreadsheet UX: shift+wheel scrolls horizontally.
+      if (event.shiftKey) {
+        deltaX += deltaY;
         deltaY = 0;
       }
 
       if (deltaX === 0 && deltaY === 0) return;
 
       event.preventDefault();
-      rendererRef.current.scrollBy(deltaX, deltaY);
+      renderer.scrollBy(deltaX, deltaY);
       syncScrollbars();
     };
 
@@ -754,6 +799,23 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const RESIZE_HIT_RADIUS_PX = 4;
     const MIN_COL_WIDTH = 24;
     const MIN_ROW_HEIGHT = 16;
+    const TOUCH_PAN_THRESHOLD_PX = 4;
+
+    type TouchPanState = {
+      pointerId: number;
+      startClientX: number;
+      startClientY: number;
+      lastClientX: number;
+      lastClientY: number;
+      moved: boolean;
+    };
+
+    type TouchPinchState = { startDistance: number; startZoom: number };
+
+    const touchPointers = new Map<number, { clientX: number; clientY: number }>();
+    let touchPan: TouchPanState | null = null;
+    let touchPinch: TouchPinchState | null = null;
+    let touchTapDisabled = false;
 
     const stopAutoScroll = () => {
       if (autoScrollFrameRef.current === null) return;
@@ -1012,6 +1074,48 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const renderer = rendererRef.current;
       if (!renderer) return;
 
+      if (event.pointerType === "touch" && interactionModeRef.current !== "rangeSelection") {
+        event.preventDefault();
+        keyboardAnchorRef.current = null;
+        stopAutoScroll();
+
+        selectionPointerIdRef.current = null;
+        selectionAnchorRef.current = null;
+        lastPointerViewportRef.current = null;
+        dragModeRef.current = null;
+        fillHandleStateRef.current = null;
+        renderer.setFillPreviewRange(null);
+
+        touchPointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+        try {
+          selectionCanvas.setPointerCapture?.(event.pointerId);
+        } catch {
+          // Ignore capture failures.
+        }
+
+        if (touchPointers.size === 1) {
+          touchTapDisabled = false;
+          touchPan = {
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            lastClientX: event.clientX,
+            lastClientY: event.clientY,
+            moved: false
+          };
+          touchPinch = null;
+        } else if (touchPointers.size === 2) {
+          const points = Array.from(touchPointers.values());
+          const a = points[0]!;
+          const b = points[1]!;
+          const distance = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) || 1;
+          touchPinch = { startDistance: distance, startZoom: zoomRef.current };
+          touchPan = null;
+          touchTapDisabled = true;
+        }
+        return;
+      }
+
       event.preventDefault();
       keyboardAnchorRef.current = null;
       const point = getViewportPoint(event);
@@ -1268,6 +1372,46 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const renderer = rendererRef.current;
       if (!renderer) return;
 
+      if (event.pointerType === "touch" && interactionModeRef.current !== "rangeSelection") {
+        if (!touchPointers.has(event.pointerId)) return;
+
+        event.preventDefault();
+        touchPointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+
+        if (touchPinch && touchPointers.size >= 2) {
+          const points = Array.from(touchPointers.values());
+          const a = points[0]!;
+          const b = points[1]!;
+          const distance = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) || 1;
+          const rect = selectionCanvas.getBoundingClientRect();
+          const centerClientX = (a.clientX + b.clientX) / 2;
+          const centerClientY = (a.clientY + b.clientY) / 2;
+          const anchorX = centerClientX - rect.left;
+          const anchorY = centerClientY - rect.top;
+          setZoomInternal(touchPinch.startZoom * (distance / touchPinch.startDistance), { anchorX, anchorY });
+          return;
+        }
+
+        if (touchPan && touchPointers.size === 1 && event.pointerId === touchPan.pointerId) {
+          const dx = event.clientX - touchPan.lastClientX;
+          const dy = event.clientY - touchPan.lastClientY;
+          touchPan.lastClientX = event.clientX;
+          touchPan.lastClientY = event.clientY;
+
+          if (!touchPan.moved) {
+            const totalDx = event.clientX - touchPan.startClientX;
+            const totalDy = event.clientY - touchPan.startClientY;
+            if (Math.hypot(totalDx, totalDy) < TOUCH_PAN_THRESHOLD_PX) return;
+            touchPan.moved = true;
+          }
+
+          renderer.scrollBy(-dx, -dy);
+          syncScrollbars();
+        }
+
+        return;
+      }
+
       if (resizePointerIdRef.current !== null) {
         if (event.pointerId !== resizePointerIdRef.current) return;
         const drag = resizeDragRef.current;
@@ -1307,6 +1451,85 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     };
 
     const endDrag = (event: PointerEvent) => {
+      if (event.pointerType === "touch" && interactionModeRef.current !== "rangeSelection") {
+        if (!touchPointers.has(event.pointerId)) return;
+        event.preventDefault();
+
+        const renderer = rendererRef.current;
+        const wasPinching = touchPinch !== null;
+
+        touchPointers.delete(event.pointerId);
+
+        try {
+          selectionCanvas.releasePointerCapture?.(event.pointerId);
+        } catch {
+          // Ignore.
+        }
+
+        if (touchPointers.size < 2) {
+          touchPinch = null;
+        }
+
+        if (touchPointers.size === 0) {
+          touchPan = null;
+          touchPinch = null;
+          touchTapDisabled = false;
+        }
+
+        if (touchPan && event.pointerId === touchPan.pointerId) {
+          const didMove = touchPan.moved;
+          touchPan = null;
+
+          if (!didMove && !touchTapDisabled && renderer) {
+            containerRef.current?.focus({ preventScroll: true });
+            transientRangeRef.current = null;
+            renderer.setRangeSelection(null);
+
+            const prevSelection = renderer.getSelection();
+            const prevRange = renderer.getSelectionRange();
+
+            const point = getViewportPoint(event);
+            const picked = renderer.pickCellAt(point.x, point.y);
+            if (picked) {
+              renderer.setSelection(picked);
+              const nextSelection = renderer.getSelection();
+              const nextRange = renderer.getSelectionRange();
+              announceSelection(nextSelection, nextRange);
+
+              if (
+                (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+                (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+              ) {
+                onSelectionChangeRef.current?.(nextSelection);
+              }
+
+              if (
+                (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+                (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+                (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+                (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+              ) {
+                onSelectionRangeChangeRef.current?.(nextRange);
+              }
+            }
+          }
+        }
+
+        if (wasPinching && touchPointers.size === 1 && !touchPan) {
+          const [pointerId, pos] = touchPointers.entries().next().value as [number, { clientX: number; clientY: number }];
+          touchPan = {
+            pointerId,
+            startClientX: pos.clientX,
+            startClientY: pos.clientY,
+            lastClientX: pos.clientX,
+            lastClientY: pos.clientY,
+            moved: true
+          };
+        }
+
+        return;
+      }
+
       if (resizePointerIdRef.current !== null && event.pointerId === resizePointerIdRef.current) {
         resizePointerIdRef.current = null;
         resizeDragRef.current = null;
@@ -2046,6 +2269,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     }
   };
 
+  const scrollbarInset = 2 * zoom;
+  const scrollbarThickness = 10 * zoom;
+  const scrollbarGap = 4 * zoom;
+  const scrollbarCorner = scrollbarInset + scrollbarThickness + scrollbarGap;
+  const scrollbarRadius = 6 * zoom;
+  const scrollbarThumbInset = 1 * zoom;
+
   const containerStyle: React.CSSProperties = useMemo(
     () => ({
       position: "relative",
@@ -2065,7 +2295,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     top: 0,
     width: "100%",
     height: "100%",
-    display: "block"
+    display: "block",
+    touchAction: "none"
   };
 
   const ariaLabel = props.ariaLabelledBy ? undefined : (props.ariaLabel ?? "Spreadsheet grid");
@@ -2133,12 +2364,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         aria-hidden="true"
         style={{
           position: "absolute",
-          right: 2,
-          top: 2,
-          bottom: 16,
-          width: 10,
+          right: scrollbarInset,
+          top: scrollbarInset,
+          bottom: scrollbarCorner,
+          width: scrollbarThickness,
           background: resolvedTheme.scrollbarTrack,
-          borderRadius: 6
+          borderRadius: scrollbarRadius
         }}
       >
         <div
@@ -2146,11 +2377,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           style={{
             position: "absolute",
             top: 0,
-            left: 1,
-            right: 1,
+            left: scrollbarThumbInset,
+            right: scrollbarThumbInset,
             height: 40,
             background: resolvedTheme.scrollbarThumb,
-            borderRadius: 6,
+            borderRadius: scrollbarRadius,
             cursor: "pointer"
           }}
         />
@@ -2161,24 +2392,24 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         aria-hidden="true"
         style={{
           position: "absolute",
-          left: 2,
-          right: 16,
-          bottom: 2,
-          height: 10,
+          left: scrollbarInset,
+          right: scrollbarCorner,
+          bottom: scrollbarInset,
+          height: scrollbarThickness,
           background: resolvedTheme.scrollbarTrack,
-          borderRadius: 6
+          borderRadius: scrollbarRadius
         }}
       >
         <div
           ref={hThumbRef}
           style={{
             position: "absolute",
-            top: 1,
-            bottom: 1,
+            top: scrollbarThumbInset,
+            bottom: scrollbarThumbInset,
             left: 0,
             width: 40,
             background: resolvedTheme.scrollbarThumb,
-            borderRadius: 6,
+            borderRadius: scrollbarRadius,
             cursor: "pointer"
           }}
         />

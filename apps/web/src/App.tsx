@@ -57,6 +57,8 @@ function EngineDemoApp() {
   const headerColOffset = frozenCols > 0 ? 1 : 0;
 
   const gridApiRef = useRef<GridApi | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(zoom);
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
   const internalClipboardRef = useRef<{ tsv: string; html: string } | null>(null);
   const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
@@ -82,6 +84,11 @@ function EngineDemoApp() {
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+    gridApiRef.current?.setZoom(zoom);
+  }, [zoom]);
 
   useEffect(() => {
     isFormulaEditingRef.current = isFormulaEditing;
@@ -885,6 +892,21 @@ function EngineDemoApp() {
         />
       </label>
 
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+        Zoom:
+        <input
+          type="range"
+          min={0.5}
+          max={3}
+          step={0.1}
+          value={zoom}
+          onChange={(event) => setZoom(event.currentTarget.valueAsNumber)}
+          disabled={!provider}
+          style={{ width: 200 }}
+        />
+        <span style={{ width: 48, textAlign: "right" }}>{Math.round(zoom * 100)}%</span>
+      </label>
+
       <div style={{ marginTop: 16 }}>
         <label style={{ display: "block", fontSize: 12, color: "var(--formula-grid-cell-text, #64748b)", opacity: 0.75 }} htmlFor="formula-input">
           Formula
@@ -1002,14 +1024,15 @@ function EngineDemoApp() {
               headerCols={headerColOffset}
               frozenRows={frozenRows}
               frozenCols={frozenCols}
-              enableResize
-              apiRef={(api) => {
-                gridApiRef.current = api;
-                const params = new URLSearchParams(window.location.search);
-                if (params.has("e2e") || params.has("perf")) {
-                  (window as any).__gridApi = api;
-                }
-              }}
+               enableResize
+               apiRef={(api) => {
+                 gridApiRef.current = api;
+                 if (api) api.setZoom(zoomRef.current);
+                 const params = new URLSearchParams(window.location.search);
+                 if (params.has("e2e") || params.has("perf")) {
+                   (window as any).__gridApi = api;
+                 }
+               }}
               onSelectionChange={onSelectionChange}
               onRequestCellEdit={(request) => {
                 if (editingCell) return;
