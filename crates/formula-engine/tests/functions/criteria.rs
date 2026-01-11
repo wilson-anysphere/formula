@@ -123,6 +123,14 @@ fn criteria_parses_scientific_numbers() {
 }
 
 #[test]
+fn criteria_parses_grouped_numbers() {
+    let c = Criteria::parse(&Value::from("1,000")).unwrap();
+    let numeric = c.as_numeric_criteria().expect("should be numeric criteria");
+    assert_eq!(numeric.rhs, 1000.0);
+    assert!(c.matches(&Value::from("1,000")));
+}
+
+#[test]
 fn criteria_numeric_coercion_matches_text_and_blanks() {
     let c = Criteria::parse(&Value::from("=1")).unwrap();
     assert!(c.matches(&Value::Number(1.0)));
