@@ -2147,8 +2147,16 @@ export class SpreadsheetApp {
   }
 
   private cellFromPoint(pointX: number, pointY: number): CellCoord {
-    const sheetX = this.scrollX + (pointX - this.rowHeaderWidth);
-    const sheetY = this.scrollY + (pointY - this.colHeaderHeight);
+    // Pointer capture means we can receive coordinates outside the grid bounds
+    // while the user is dragging a selection. Clamp to the current viewport so
+    // we select the edge cell instead of snapping to the end of the sheet.
+    const maxX = Math.max(this.rowHeaderWidth, this.width - 1);
+    const maxY = Math.max(this.colHeaderHeight, this.height - 1);
+    const clampedX = Math.min(Math.max(pointX, this.rowHeaderWidth), maxX);
+    const clampedY = Math.min(Math.max(pointY, this.colHeaderHeight), maxY);
+
+    const sheetX = this.scrollX + (clampedX - this.rowHeaderWidth);
+    const sheetY = this.scrollY + (clampedY - this.colHeaderHeight);
 
     const colVisual = Math.floor(sheetX / this.cellWidth);
     const rowVisual = Math.floor(sheetY / this.cellHeight);
