@@ -120,3 +120,42 @@ fn decodes_ptgerr_unknown_code_without_aborting() {
         }]
     );
 }
+
+#[test]
+fn decodes_optimized_sum_using_tattrsum() {
+    // Excel can encode `SUM(A1:A3)` in optimized form as:
+    //   PtgArea(A1:A3) + PtgAttr(tAttrSum)
+    //
+    // This stream intentionally omits any explicit `PtgFuncVar(SUM)` token.
+    let rgce = [
+        0x25, // PtgArea
+        0x00, 0x00, 0x00, 0x00, // rowFirst = 0 (A1)
+        0x02, 0x00, 0x00, 0x00, // rowLast  = 2 (A3)
+        0x00, 0xC0, // colFirst = A, relative row/col
+        0x00, 0xC0, // colLast  = A, relative row/col
+        0x19, // PtgAttr
+        0x10, // tAttrSum
+        0x00, 0x00, // wAttr (unused for tAttrSum)
+    ];
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "SUM(A1:A3)");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
+fn ignores_tattrif_and_tattrskip_without_breaking_offsets() {
+    // `tAttrIf` / `tAttrSkip` are control-flow metadata used by Excel's evaluator
+    // for short-circuiting. They should not break best-effort formula printing.
+    let rgce = [
+        0x1E, 0x01, 0x00, // PtgInt(1)
+        0x19, 0x02, 0x00, 0x00, // PtgAttr(tAttrIf, wAttr=0)
+        0x1E, 0x02, 0x00, // PtgInt(2)
+        0x19, 0x08, 0x00, 0x00, // PtgAttr(tAttrSkip, wAttr=0)
+        0x03, // PtgAdd
+    ];
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "1+2");
+    assert_parses_and_roundtrips(&text);
+}

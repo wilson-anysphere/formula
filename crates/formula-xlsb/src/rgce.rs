@@ -309,10 +309,13 @@ fn decode_rgce_impl(
                 stack.push(format!("\"{escaped}\""));
             }
             0x19 => {
-                // PtgAttr: [grbit: u8][unused: u16]
+                // PtgAttr: [grbit: u8][wAttr: u16]
                 //
-                // Commonly used for spacing/optimization and does not affect expression semantics
-                // for our best-effort display purposes.
+                // Excel uses `PtgAttr` for multiple attributes. Most are evaluation hints or
+                // formatting metadata that do not affect the reconstructed formula text, but
+                // some do. In particular, `tAttrSum` is used for an optimization where
+                // `SUM(A1:A10)` is encoded as `PtgArea` + `PtgAttr(tAttrSum)` (no explicit
+                // `PtgFuncVar(SUM)` token).
                 if rgce.len().saturating_sub(i) < 3 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -321,7 +324,50 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
+                let grbit = rgce[i];
+                let w_attr = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]);
                 i += 3;
+
+                const T_ATTR_VOLATILE: u8 = 0x01;
+                const T_ATTR_IF: u8 = 0x02;
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                const T_ATTR_SKIP: u8 = 0x08;
+                const T_ATTR_SUM: u8 = 0x10;
+                const T_ATTR_SPACE: u8 = 0x40;
+                const T_ATTR_SEMI: u8 = 0x80;
+
+                if grbit & T_ATTR_SUM != 0 {
+                    let a = stack
+                        .pop()
+                        .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
+                    stack.push(format!("SUM({a})"));
+                } else if grbit & T_ATTR_CHOOSE != 0 {
+                    // `tAttrChoose` is followed by a jump table of `u16` offsets used for
+                    // short-circuit evaluation.
+                    //
+                    // We don't need it for printing, but we must consume it so subsequent
+                    // tokens stay aligned.
+                    let needed = (w_attr as usize).saturating_mul(2);
+                    if rgce.len().saturating_sub(i) < needed {
+                        return Err(DecodeError::UnexpectedEof {
+                            offset: ptg_offset,
+                            ptg,
+                            needed,
+                            remaining: rgce.len().saturating_sub(i),
+                        });
+                    }
+                    i += needed;
+                } else {
+                    // Other attributes:
+                    // - `tAttrIf` / `tAttrSkip`: control-flow metadata
+                    // - `tAttrVolatile`: recalc hint
+                    // - `tAttrSpace` / `tAttrSemi`: formatting metadata
+                    //
+                    // Ignore them for best-effort formula text, but keep the constants referenced
+                    // so this doesn't accidentally get treated as "dead" code.
+                    let _ = grbit
+                        & (T_ATTR_VOLATILE | T_ATTR_IF | T_ATTR_SKIP | T_ATTR_SPACE | T_ATTR_SEMI);
+                }
             }
             0x1C => {
                 // PtgErr: [err: u8]

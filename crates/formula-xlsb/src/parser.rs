@@ -1239,6 +1239,31 @@ fn materialize_rgce(base: &[u8], base_row: u32, base_col: u32, row: u32, col: u3
                 out.extend_from_slice(base.get(i..i + 8)?);
                 i += 8;
             }
+            0x19 => {
+                // PtgAttr: [grbit: u8][wAttr: u16]
+                //
+                // When materializing shared formulas we generally keep `PtgAttr` tokens as-is,
+                // but we still need to copy the payload (and any attribute-specific tail bytes)
+                // so the output rgce stays aligned.
+                if i + 3 > base.len() {
+                    return None;
+                }
+                out.push(ptg);
+                let grbit = base[i];
+                let w_attr = u16::from_le_bytes([base[i + 1], base[i + 2]]);
+                out.extend_from_slice(&base[i..i + 3]);
+                i += 3;
+
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                if grbit & T_ATTR_CHOOSE != 0 {
+                    let needed = (w_attr as usize).checked_mul(2)?;
+                    if i + needed > base.len() {
+                        return None;
+                    }
+                    out.extend_from_slice(&base[i..i + needed]);
+                    i += needed;
+                }
+            }
             0x24 | 0x44 | 0x64 => {
                 // PtgRef: [row: u32][col+flags: u16]
                 let row_raw = u32::from_le_bytes(base.get(i..i + 4)?.try_into().ok()?) as i64;
