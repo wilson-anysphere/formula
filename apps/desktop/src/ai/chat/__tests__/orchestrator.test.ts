@@ -168,4 +168,37 @@ describe("ai chat orchestrator", () => {
     const firstRequest = mock.requests[0];
     expect(firstRequest.messages?.[0]?.content).toContain("Workbook summary");
   });
+
+  it("creates a default ContextManager when none is provided", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_default_context" });
+    const mock = createMockLlmClient({ cell: "A1", value: 99 });
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_default_context",
+      llmClient: mock.client as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_default_context",
+      onApprovalRequired: async () => true,
+      previewOptions: { approval_cell_threshold: 0 },
+    });
+
+    const result = await orchestrator.sendMessage({
+      text: "Set A1 to 99",
+      history: [],
+    });
+
+    expect(result.finalText).toBe("ok");
+    expect(controller.getCell("Sheet1", "A1").value).toBe(99);
+    expect(result.context.promptContext).toContain("Workbook summary");
+    expect(result.context.retrievedChunkIds.length).toBeGreaterThan(0);
+
+    const firstRequest = mock.requests[0];
+    expect(firstRequest.messages?.[0]?.content).toContain("WORKBOOK_CONTEXT");
+  });
 });
