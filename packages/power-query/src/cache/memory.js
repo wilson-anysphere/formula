@@ -34,5 +34,17 @@ export class MemoryCacheStore {
   async clear() {
     this.map.clear();
   }
-}
 
+  /**
+   * Proactively delete expired entries.
+   *
+   * @param {number} [nowMs]
+   */
+  async pruneExpired(nowMs = Date.now()) {
+    for (const [key, entry] of this.map.entries()) {
+      if (entry?.expiresAtMs != null && entry.expiresAtMs <= nowMs) {
+        this.map.delete(key);
+      }
+    }
+  }
+}

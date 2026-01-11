@@ -353,20 +353,29 @@ function decodeFromJson(value, bins) {
  * @typedef {{
  *   __pq_cache_encrypted: typeof ENVELOPE_MARKER;
  *   v: number;
- *   payload: { keyVersion: number; iv: Uint8Array | ArrayBuffer; tag: Uint8Array | ArrayBuffer; ciphertext: Uint8Array | ArrayBuffer };
+  *   payload: { keyVersion: number; iv: Uint8Array | ArrayBuffer; tag: Uint8Array | ArrayBuffer; ciphertext: Uint8Array | ArrayBuffer };
  * }} EncryptedCacheEnvelopeV1
  */
 
 /**
  * @param {unknown} value
+ * @returns {number | null}
+ */
+function readEnvelopeVersion(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  // @ts-ignore - runtime access
+  if (value.__pq_cache_encrypted !== ENVELOPE_MARKER) return null;
+  // @ts-ignore - runtime access
+  const v = value.v;
+  return typeof v === "number" ? v : null;
+}
+
+/**
+ * @param {unknown} value
  * @returns {value is EncryptedCacheEnvelopeV1}
  */
-function isEncryptedEnvelope(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  // @ts-ignore - runtime access
-  if (value.__pq_cache_encrypted !== ENVELOPE_MARKER) return false;
-  // @ts-ignore - runtime access
-  if (value.v !== ENVELOPE_VERSION) return false;
+function isEncryptedEnvelopeV1(value) {
+  if (readEnvelopeVersion(value) !== ENVELOPE_VERSION) return false;
   // @ts-ignore - runtime access
   const payload = value.payload;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
@@ -425,8 +434,21 @@ export class EncryptedCacheStore {
     const entry = await this.store.get(key);
     if (!entry) return null;
 
-    if (!isEncryptedEnvelope(entry.value)) {
+    const envelopeVersion = readEnvelopeVersion(entry.value);
+    if (envelopeVersion == null) {
       // Backwards-compat: tolerate plaintext entries without crashing.
+      // Best-effort delete so plaintext doesn't linger once encryption is enabled.
+      await this.store.delete(key).catch(() => {});
+      return null;
+    }
+
+    // Forward-compat: keep unknown encrypted envelope versions so downgrades do
+    // not delete data that newer versions might still understand.
+    if (envelopeVersion !== ENVELOPE_VERSION) {
+      return null;
+    }
+
+    if (!isEncryptedEnvelopeV1(entry.value)) {
       await this.store.delete(key).catch(() => {});
       return null;
     }

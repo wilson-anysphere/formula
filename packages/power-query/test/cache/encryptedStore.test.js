@@ -96,6 +96,18 @@ test("EncryptedCacheStore: wrong key is treated as a miss and deleted", async ()
   assert.equal(underlying.map.has("k1"), false);
 });
 
+test("EncryptedCacheStore: storeId mismatch (AAD) is treated as a miss and deleted", async () => {
+  const underlying = new MemoryCacheStore();
+  const crypto = createTestCryptoProvider({ keyBytes: new Uint8Array(32).fill(3) });
+
+  const storeA = new EncryptedCacheStore({ store: underlying, crypto, storeId: "store-a" });
+  await storeA.set("k1", { value: { secret: "x" }, createdAtMs: 0, expiresAtMs: null });
+
+  const storeB = new EncryptedCacheStore({ store: underlying, crypto, storeId: "store-b" });
+  assert.equal(await storeB.get("k1"), null);
+  assert.equal(underlying.map.has("k1"), false);
+});
+
 test("EncryptedCacheStore: plaintext entries are treated as misses", async () => {
   const underlying = new MemoryCacheStore();
   await underlying.set("k1", { value: { secret: "plaintext" }, createdAtMs: 0, expiresAtMs: null });
@@ -103,6 +115,19 @@ test("EncryptedCacheStore: plaintext entries are treated as misses", async () =>
   const store = new EncryptedCacheStore({ store: underlying, crypto: createTestCryptoProvider(), storeId: "unit-test" });
   assert.equal(await store.get("k1"), null);
   assert.equal(underlying.map.has("k1"), false);
+});
+
+test("EncryptedCacheStore: unknown envelope versions are treated as misses but retained", async () => {
+  const underlying = new MemoryCacheStore();
+  await underlying.set("k1", {
+    value: { __pq_cache_encrypted: "power-query-cache-encrypted", v: 999, payload: { future: true } },
+    createdAtMs: 0,
+    expiresAtMs: null,
+  });
+
+  const store = new EncryptedCacheStore({ store: underlying, crypto: createTestCryptoProvider(), storeId: "unit-test" });
+  assert.equal(await store.get("k1"), null);
+  assert.equal(underlying.map.has("k1"), true);
 });
 
 test("EncryptedCacheStore + FileSystemCacheStore: persists encrypted blobs (no plaintext)", async () => {
