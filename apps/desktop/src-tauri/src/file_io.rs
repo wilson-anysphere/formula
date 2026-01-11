@@ -1197,6 +1197,24 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
 
             let edits = edits_by_sheet.entry(sheet_index).or_default();
             for (row, col) in &sheet.dirty_cells {
+                let (current_input, current_formula) = match sheet.cells.get(&(*row, *col)) {
+                    Some(cell) => (cell.input_value.clone(), cell.formula.clone()),
+                    None => (None, None),
+                };
+
+                if let Some((baseline_value, baseline_formula)) = workbook
+                    .cell_input_baseline
+                    .get(&(sheet.id.clone(), *row, *col))
+                {
+                    if &current_input == baseline_value && &current_formula == baseline_formula {
+                        continue;
+                    }
+                } else if current_input.is_none() && current_formula.is_none() {
+                    // No baseline and no stored cell: avoid inserting explicit blank records for
+                    // untouched cells (e.g. edit→revert cycles or formatting-only edits).
+                    continue;
+                }
+
                 let (value, formula) = match sheet.cells.get(&(*row, *col)) {
                     Some(cell) => (
                         cell.input_value
@@ -1240,6 +1258,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             }
         }
 
+        edits_by_sheet.retain(|_, edits| !edits.is_empty());
         let mut edits: Vec<(usize, Vec<XlsbCellEdit>)> = edits_by_sheet.into_iter().collect();
         edits.sort_by_key(|(sheet_index, _)| *sheet_index);
 
@@ -1604,6 +1623,45 @@ mod tests {
             .find(|c| c.row == 0 && c.col == 1)
             .expect("B1 exists");
         assert_eq!(b1.value, XlsbCellValue::Number(123.0));
+    }
+
+    #[test]
+    fn xlsb_edit_then_revert_does_not_change_workbook() {
+        use serde_json::Value as JsonValue;
+
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+
+        let mut state = AppState::new();
+        let info = state.load_workbook(workbook);
+        let sheet_id = info.sheets[0].id.clone();
+
+        // Pick a cell outside the used range so we can reliably "return to empty".
+        state
+            .set_cell(&sheet_id, 50, 50, Some(JsonValue::from(123)), None)
+            .expect("edit cell");
+        state
+            .set_cell(&sheet_id, 50, 50, None, None)
+            .expect("revert cell");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("reverted.xlsb");
+        write_xlsx_blocking(&out_path, state.get_workbook().unwrap()).expect("write workbook");
+
+        let report = diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        assert!(
+            report.is_empty(),
+            "expected no diffs, got:\n{}",
+            report
+                .differences
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
 
     #[test]

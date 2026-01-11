@@ -492,6 +492,7 @@ impl AppState {
             recovered.path = workbook.path.clone();
             recovered.origin_path = workbook.origin_path.clone();
             recovered.origin_xlsx_bytes = workbook.origin_xlsx_bytes.clone();
+            recovered.origin_xlsb_path = workbook.origin_xlsb_path.clone();
             recovered.vba_project_bin = workbook.vba_project_bin.clone();
             recovered.macro_fingerprint = workbook.macro_fingerprint.clone();
             recovered.preserved_drawing_parts = workbook.preserved_drawing_parts.clone();
@@ -511,6 +512,18 @@ impl AppState {
                 {
                     recovered_sheet.columnar = src.columnar.clone();
                 }
+            }
+
+            // Preserve XLSB sheet ordinals for round-tripping after crash recovery / autosave
+            // restores. These indices are used as a fallback when a sheet was renamed in-app.
+            for (idx, recovered_sheet) in recovered.sheets.iter_mut().enumerate() {
+                if recovered_sheet.origin_ordinal.is_some() {
+                    continue;
+                }
+                recovered_sheet.origin_ordinal = workbook
+                    .sheets
+                    .get(idx)
+                    .and_then(|sheet| sheet.origin_ordinal);
             }
 
             let sheet_metas = storage
@@ -973,7 +986,7 @@ impl AppState {
         }
 
         if let Some(workbook) = self.workbook.as_mut() {
-            if workbook.origin_xlsx_bytes.is_some() {
+            if workbook.origin_xlsx_bytes.is_some() || workbook.origin_xlsb_path.is_some() {
                 workbook
                     .cell_input_baseline
                     .entry((before.sheet_id.clone(), before.row, before.col))
@@ -1068,7 +1081,7 @@ impl AppState {
         }
 
         if let Some(workbook) = self.workbook.as_mut() {
-            if workbook.origin_xlsx_bytes.is_some() {
+            if workbook.origin_xlsx_bytes.is_some() || workbook.origin_xlsb_path.is_some() {
                 for snap in &before {
                     workbook
                         .cell_input_baseline
@@ -1443,7 +1456,7 @@ impl AppState {
         }
 
         if let Some(workbook) = self.workbook.as_mut() {
-            if workbook.origin_xlsx_bytes.is_some() {
+            if workbook.origin_xlsx_bytes.is_some() || workbook.origin_xlsb_path.is_some() {
                 for snap in &before {
                     workbook
                         .cell_input_baseline
@@ -1530,7 +1543,7 @@ impl AppState {
         }
 
         if let Some(workbook) = self.workbook.as_mut() {
-            if workbook.origin_xlsx_bytes.is_some() {
+            if workbook.origin_xlsx_bytes.is_some() || workbook.origin_xlsb_path.is_some() {
                 for snap in &before {
                     workbook
                         .cell_input_baseline
@@ -2790,6 +2803,39 @@ mod tests {
     };
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
+
+    #[test]
+    fn xlsb_provenance_survives_persistent_recovery() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+ 
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+ 
+        {
+            let workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+            let mut state = AppState::new();
+            state
+                .load_workbook_persistent(workbook, location.clone())
+                .expect("load persistent workbook");
+        }
+ 
+        let workbook = read_xlsx_blocking(fixture_path).expect("re-read xlsb workbook");
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, location)
+            .expect("recover workbook from autosave storage");
+ 
+        let recovered = state.get_workbook().expect("workbook");
+        assert_eq!(
+            recovered.origin_xlsb_path.as_deref(),
+            Some(fixture_path.to_string_lossy().as_ref())
+        );
+        assert_eq!(recovered.sheets[0].origin_ordinal, Some(0));
+    }
 
     #[test]
     fn normalize_formula_matches_formula_model_display_semantics() {
