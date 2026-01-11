@@ -122,14 +122,18 @@ export class CellConflictMonitor {
       const oldValue = change.oldValue ?? null;
       const newValue = cellMap.get("value") ?? null;
       const remoteUserId = (cellMap.get("modifiedBy") ?? "").toString();
+      const action = change.action;
+      const itemId = getItemId(cellMap, "value");
       const newItemOriginId = getItemOriginId(cellMap, "value");
 
       this._handleValueChange({
         cellKey,
         oldValue,
         newValue,
+        action,
         remoteUserId,
         origin: transaction.origin,
+        itemId,
         newItemOriginId
       });
     }
@@ -140,12 +144,14 @@ export class CellConflictMonitor {
    * @param {string} input.cellKey
    * @param {any} input.oldValue
    * @param {any} input.newValue
+   * @param {"add" | "update" | "delete"} input.action
    * @param {string} input.remoteUserId
    * @param {any} input.origin
+   * @param {{ client: number, clock: number } | null} input.itemId
    * @param {{ client: number, clock: number } | null} input.newItemOriginId
    */
   _handleValueChange(input) {
-    const { cellKey, oldValue, newValue, remoteUserId, origin, newItemOriginId } = input;
+    const { cellKey, oldValue, newValue, action, remoteUserId, origin, itemId, newItemOriginId } = input;
 
     const isLocal = this.localOrigins.has(origin);
     if (isLocal) return;
@@ -155,6 +161,13 @@ export class CellConflictMonitor {
 
     // Did this remote update overwrite the last value we wrote locally?
     if (!valuesDeeplyEqual(oldValue, lastLocal.value)) return;
+
+    // Sequential delete: remote explicitly deleted the exact item we wrote.
+    // Map deletes don't create a new Item, so we can't use origin ids like we do for overwrites.
+    if (action === "delete" && idsEqual(itemId, lastLocal.itemId)) {
+      this._lastLocalEditByCellKey.delete(cellKey);
+      return;
+    }
 
     // Sequential overwrite (remote saw our write) - ignore.
     if (idsEqual(newItemOriginId, lastLocal.itemId)) {
@@ -215,6 +228,25 @@ function getItemOriginId(ymap, key) {
   if (!origin || typeof origin !== "object") return null;
   const client = origin.client;
   const clock = origin.clock;
+  if (typeof client !== "number" || typeof clock !== "number") return null;
+  return { client, clock };
+}
+
+/**
+ * Extract the item id for the currently visible (or most recent tombstoned) value of a Y.Map key.
+ *
+ * @param {Y.Map<any>} ymap
+ * @param {string} key
+ * @returns {{ client: number, clock: number } | null}
+ */
+function getItemId(ymap, key) {
+  // @ts-ignore - accessing Yjs internals
+  const item = ymap?._map?.get?.(key);
+  if (!item) return null;
+  const id = item.id;
+  if (!id || typeof id !== "object") return null;
+  const client = id.client;
+  const clock = id.clock;
   if (typeof client !== "number" || typeof clock !== "number") return null;
   return { client, clock };
 }
@@ -288,4 +320,3 @@ function valuesDeeplyEqual(a, b, seen = new Map()) {
   }
   return true;
 }
-

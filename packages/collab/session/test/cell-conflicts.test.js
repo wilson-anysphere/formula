@@ -130,3 +130,46 @@ test("CollabSession cell value conflict monitor does not flag sequential value e
   docA.destroy();
   docB.destroy();
 });
+
+test("CollabSession cell value conflict monitor ignores sequential deletes that remove the value key", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  const disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    cellValueConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  // Remote doc (legacy) without a monitor.
+  const sessionB = createCollabSession({ doc: docB });
+
+  await sessionA.setCellValue("Sheet1:0:0", "x");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "x");
+
+  const cellMap = sessionB.cells.get("Sheet1:0:0");
+  assert.ok(cellMap, "expected Yjs cell map to exist");
+  assert.equal(typeof cellMap.get, "function");
+
+  // Simulate a legacy client that clears cells by deleting the `value` key.
+  docB.transact(() => {
+    cellMap.delete("value");
+    cellMap.set("modifiedBy", "user-b");
+    cellMap.set("modified", Date.now());
+  });
+
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, null);
+  assert.equal(conflictsA.length, 0);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});

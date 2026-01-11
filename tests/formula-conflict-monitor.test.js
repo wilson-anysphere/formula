@@ -67,6 +67,15 @@ function getFormula(cells, key) {
   return (cell?.get("formula") ?? "").toString();
 }
 
+/**
+ * @param {Y.Map<any>} cells
+ * @param {string} key
+ */
+function getValue(cells, key) {
+  const cell = /** @type {Y.Map<any>|undefined} */ (cells.get(key));
+  return cell?.get("value") ?? null;
+}
+
 test("concurrent same-cell edits surface a conflict and converge after resolution", () => {
   const a = createClient("alice");
   const b = createClient("bob");
@@ -198,6 +207,31 @@ test("sequential remote deletes that use key deletion do not surface conflicts",
 
   assert.equal(alice.conflicts.length, 0);
   assert.equal(getFormula(alice.cells, "s:0:0"), "");
+});
+
+test("sequential remote deletes that use key deletion do not surface value conflicts", () => {
+  const alice = createClient("alice", { mode: "formula+value" });
+
+  // Simulate a legacy client that clears values by deleting the key entirely.
+  const docB = new Y.Doc();
+  const cellsB = docB.getMap("cells");
+
+  alice.monitor.setLocalValue("s:0:0", "x");
+  syncDocs(alice.doc, docB);
+
+  const cellB = /** @type {Y.Map<any>} */ (cellsB.get("s:0:0"));
+  assert.ok(cellB);
+
+  docB.transact(() => {
+    cellB.delete("value");
+    cellB.set("modifiedBy", "bob");
+    cellB.set("modified", Date.now());
+  });
+
+  syncDocs(alice.doc, docB);
+
+  assert.equal(alice.conflicts.length, 0);
+  assert.equal(getValue(alice.cells, "s:0:0"), null);
 });
 
 test("choosing remote value in a value conflict does not clobber a concurrent formula", () => {

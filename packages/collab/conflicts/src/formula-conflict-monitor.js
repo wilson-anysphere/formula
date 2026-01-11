@@ -239,14 +239,18 @@ export class FormulaConflictMonitor {
         if (valueChange) {
           const oldValue = valueChange.oldValue ?? null;
           const newValue = cellMap.get("value") ?? null;
+          const action = valueChange.action;
+          const itemId = getItemId(cellMap, "value");
           const newItemOriginId = getItemOriginId(cellMap, "value");
 
           this._handleValueChange({
             cellKey,
             oldValue,
             newValue,
+            action,
             remoteUserId,
             origin: transaction.origin,
+            itemId,
             newItemOriginId
           });
         }
@@ -346,12 +350,14 @@ export class FormulaConflictMonitor {
    * @param {string} input.cellKey
    * @param {any} input.oldValue
    * @param {any} input.newValue
+   * @param {"add" | "update" | "delete"} input.action
    * @param {string} input.remoteUserId
    * @param {any} input.origin
+   * @param {{ client: number, clock: number } | null} input.itemId
    * @param {{ client: number, clock: number } | null} input.newItemOriginId
    */
   _handleValueChange(input) {
-    const { cellKey, oldValue, newValue, remoteUserId, origin, newItemOriginId } = input;
+    const { cellKey, oldValue, newValue, action, remoteUserId, origin, itemId, newItemOriginId } = input;
 
     const isLocal = this.localOrigins.has(origin);
     if (isLocal) return;
@@ -360,6 +366,13 @@ export class FormulaConflictMonitor {
     if (!lastLocal) return;
 
     if (!valuesDeeplyEqual(oldValue, lastLocal.value)) return;
+
+    // Sequential delete: remote explicitly deleted the exact item we wrote.
+    // Map deletes don't create a new Item, so we can't use origin ids like we do for overwrites.
+    if (action === "delete" && idsEqual(itemId, lastLocal.itemId)) {
+      this._lastLocalValueEditByCellKey.delete(cellKey);
+      return;
+    }
 
     // Sequential overwrite (remote saw our write) - ignore.
     if (idsEqual(newItemOriginId, lastLocal.itemId)) {
