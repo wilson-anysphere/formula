@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../../../app/spreadsheetApp";
+
+const OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -61,7 +63,14 @@ async function waitFor<T>(fn: () => T | null | undefined, timeoutMs = 2000): Pro
 }
 
 describe("AI inline edit (Cmd/Ctrl+K)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
+    document.body.innerHTML = "";
+
     // Node 22 ships an experimental `localStorage` global that errors unless configured via flags.
     // Provide a stable in-memory implementation for unit tests (also used by SpreadsheetApp's comment
     // persistence + the LocalStorageAIAuditStore).
@@ -189,5 +198,101 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     expect(auditEntries[0].mode).toBe("inline_edit");
     expect(auditEntries[0].tool_calls?.[0]?.name).toBe("set_range");
     expect(auditEntries[0].tool_calls?.[0]?.approved).toBe(true);
+  });
+
+  it("uses the OpenAIClient fallback when no inlineEdit llmClient is injected (localStorage key)", async () => {
+    const apiKey = "sk-test-inline-edit";
+    localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, apiKey);
+
+    let callCount = 0;
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      callCount++;
+      expect(init?.headers?.Authorization).toBe(`Bearer ${apiKey}`);
+
+      if (callCount === 1) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "call-1",
+                      type: "function",
+                      function: {
+                        name: "set_range",
+                        arguments: JSON.stringify({ range: "C1:C3", values: [[1], [2], [3]] }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+          }),
+        } as any;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: "done" } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+      } as any;
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = () =>
+      ({
+        width: 800,
+        height: 600,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }) as any;
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    // No inlineEdit config passed; controller should pick up localStorage key.
+    const app = new SpreadsheetApp(root, status);
+
+    app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 2, endCol: 2 } }); // C1:C3
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+
+    const overlay = await waitFor(() => document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]'));
+    const input = overlay.querySelector<HTMLInputElement>('[data-testid="inline-edit-prompt"]');
+    input!.value = "Fill with 1..3";
+
+    overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-run"]')!.click();
+
+    await waitFor(() => {
+      const el = overlay.querySelector<HTMLElement>('[data-testid="inline-edit-preview-summary"]');
+      return el && el.textContent?.includes("Changes:") ? el : null;
+    });
+
+    overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-approve"]')!.click();
+
+    const doc = app.getDocument();
+    await waitFor(() => (doc.getCell("Sheet1", "C3").value === 3 ? doc : null));
+    expect(doc.getCell("Sheet1", "C1").value).toBe(1);
+    expect(doc.getCell("Sheet1", "C2").value).toBe(2);
+    expect(doc.getCell("Sheet1", "C3").value).toBe(3);
+
+    expect(fetchMock).toHaveBeenCalled();
   });
 });
