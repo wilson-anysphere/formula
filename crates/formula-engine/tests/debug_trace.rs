@@ -334,3 +334,32 @@ fn debug_trace_supports_external_workbook_cell_refs() {
         })
     );
 }
+
+#[test]
+fn debug_trace_supports_unquoted_external_refs_with_non_ident_workbook_names() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Work Book-1.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        9.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Work Book-1.xlsx]Sheet1!A1")
+        .unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, Value::Number(9.0));
+    assert_eq!(
+        dbg.trace.reference,
+        Some(TraceRef::Cell {
+            sheet: formula_engine::functions::SheetId::External(
+                "[Work Book-1.xlsx]Sheet1".to_string()
+            ),
+            addr: CellAddr { row: 0, col: 0 }
+        })
+    );
+}

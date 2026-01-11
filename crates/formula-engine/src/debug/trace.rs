@@ -382,12 +382,24 @@ impl<'a> Lexer<'a> {
 
     fn lex_ident(&mut self) -> TokenKind {
         let start = self.pos;
+
+        // External workbook prefixes (`[Book.xlsx]Sheet1!A1`) are treated as a single identifier
+        // token, and the workbook portion inside `[...]` is more permissive than a normal Excel
+        // identifier (it may contain spaces, dashes, etc). Mirror the canonical lexer by consuming
+        // everything up to the closing `]` before switching back to strict identifier rules for
+        // the sheet name portion.
+        if self.peek_char() == Some('[') {
+            self.pos += 1; // '['
+            while let Some(ch) = self.peek_char() {
+                self.pos += ch.len_utf8();
+                if ch == ']' {
+                    break;
+                }
+            }
+        }
+
         while let Some(ch) = self.peek_char() {
-            // Include `[`/`]` so we can tokenize external workbook refs like `[Book.xlsx]Sheet1!A1`
-            // without requiring quoting.
-            if ch.is_ascii_alphanumeric()
-                || matches!(ch, '_' | '.' | '$' | '[' | ']')
-            {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$') {
                 self.pos += ch.len_utf8();
             } else {
                 break;
