@@ -111,6 +111,9 @@ test("contentHash falls back when WebCrypto digest throws", async () => {
 });
 
 test("contentHash works when TextEncoder is unavailable", async () => {
+  const modNormal = await import(`../src/utils/hash.js?normal-text-encoder=${Date.now()}`);
+  const surrogateDigest = await modNormal.contentHash("\uD800");
+
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "TextEncoder");
   if (descriptor && descriptor.configurable !== true) {
     // Can't override in this runtime; skip.
@@ -121,6 +124,8 @@ test("contentHash works when TextEncoder is unavailable", async () => {
     Object.defineProperty(globalThis, "TextEncoder", { value: undefined, configurable: true, writable: true });
     const mod = await import(`../src/utils/hash.js?no-text-encoder=${Date.now()}`);
     const digest = await mod.contentHash("hello");
+    const surrogateDigestNoEncoder = await mod.contentHash("\uD800");
+    assert.equal(surrogateDigestNoEncoder, surrogateDigest);
     if (globalThis.crypto?.subtle) {
       assert.equal(
         digest,

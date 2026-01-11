@@ -8,20 +8,34 @@ function utf8Bytes(text) {
   if (encoder) return encoder.encode(str);
 
   // Minimal UTF-8 encoder fallback for environments without TextEncoder.
-  const encoded = encodeURIComponent(str);
+  // Matches TextEncoder behavior for malformed surrogate pairs by replacing them
+  // with U+FFFD before encoding.
   /** @type {number[]} */
-  const bytes = [];
-  for (let i = 0; i < encoded.length; i += 1) {
-    const ch = encoded.charCodeAt(i);
-    if (ch === 37 /* % */) {
-      const hex = encoded.slice(i + 1, i + 3);
-      bytes.push(Number.parseInt(hex, 16));
-      i += 2;
-      continue;
+  const out = [];
+  for (let i = 0; i < str.length; i += 1) {
+    let cp = str.codePointAt(i);
+    if (cp == null) continue;
+    // Handle surrogate pairs.
+    if (cp > 0xffff) i += 1;
+    // Replace unpaired surrogates with U+FFFD (TextEncoder behavior).
+    if (cp >= 0xd800 && cp <= 0xdfff) cp = 0xfffd;
+
+    if (cp <= 0x7f) {
+      out.push(cp);
+    } else if (cp <= 0x7ff) {
+      out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+    } else if (cp <= 0xffff) {
+      out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    } else {
+      out.push(
+        0xf0 | (cp >> 18),
+        0x80 | ((cp >> 12) & 0x3f),
+        0x80 | ((cp >> 6) & 0x3f),
+        0x80 | (cp & 0x3f)
+      );
     }
-    bytes.push(ch);
   }
-  return Uint8Array.from(bytes);
+  return Uint8Array.from(out);
 }
 
 /**
