@@ -100,7 +100,7 @@
  *   headers?: Record<string, string>;
  *   // Optional per-request auth configuration. This is forwarded to
  *   // `HttpConnectorRequest.auth`.
- *   auth?: { type: "oauth2"; providerId: string; scopes?: string[] };
+ *   auth?: { type: "oauth2"; providerId: string; scopes?: string[] | string };
  * }} APIQuerySource
  */
 

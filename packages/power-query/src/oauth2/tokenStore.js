@@ -36,7 +36,7 @@ import { hashValue } from "../cache/key.js";
  */
 
 /**
- * @param {string[] | undefined} scopes
+ * @param {string[] | string | undefined} scopes
  * @returns {{ scopes: string[], scopesHash: string }}
  */
 export function normalizeScopes(scopes) {

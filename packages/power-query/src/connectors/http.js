@@ -11,7 +11,7 @@ import { parseCsv, parseCsvCell } from "./file.js";
  * @property {string} url
  * @property {string | undefined} [method]
  * @property {Record<string, string> | undefined} [headers]
- * @property {{ type: "oauth2"; providerId: string; scopes?: string[] } | undefined} [auth]
+ * @property {{ type: "oauth2"; providerId: string; scopes?: string[] | string } | undefined} [auth]
  * @property {"auto" | "json" | "csv" | "text" | undefined} [responseType]
  *   How to interpret the response body. Defaults to auto-detect.
  * @property {string | undefined} [jsonPath] Optional JSON path to select an array/object from a larger payload.
