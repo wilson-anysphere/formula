@@ -144,7 +144,10 @@ type LeveldbPersistence = LeveldbPersistenceLike & {
 };
 
 export type SyncServerCreateOptions = {
-  createLeveldbPersistence?: (location: string) => LeveldbPersistence;
+  createLeveldbPersistence?: (
+    location: string,
+    opts: { encryption: SyncServerConfig["persistence"]["encryption"] }
+  ) => LeveldbPersistence;
 };
 
 export function createSyncServer(
@@ -224,7 +227,6 @@ export function createSyncServer(
     if (persistenceInitialized) return;
 
     const nodeEnv = process.env.NODE_ENV ?? "development";
-    const leveldbEncryption = config.persistence.leveldbEncryption ?? null;
     await tombstones.init();
 
     if (config.persistence.backend === "file") {
@@ -234,18 +236,6 @@ export function createSyncServer(
           logger,
           keyRing: config.persistence.encryption.keyRing,
         });
-      }
-
-      if (leveldbEncryption) {
-        if (nodeEnv === "production") {
-          throw new Error(
-            "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 is set but SYNC_SERVER_PERSISTENCE_BACKEND=file. LevelDB value encryption is only supported with SYNC_SERVER_PERSISTENCE_BACKEND=leveldb."
-          );
-        }
-        logger.warn(
-          { strict: leveldbEncryption.strict },
-          "persistence_leveldb_encryption_key_set_backend_file_running_unencrypted"
-        );
       }
 
       persistenceInitialized = true;
@@ -272,7 +262,9 @@ export function createSyncServer(
     }
 
     if (createLeveldbPersistence) {
-      const ldb = createLeveldbPersistence(config.dataDir);
+      const ldb = createLeveldbPersistence(config.dataDir, {
+        encryption: config.persistence.encryption,
+      });
       const hashingEnabled = leveldbDocNameHashingEnabled;
       const hashedLdb = new LeveldbDocNameHashingLayer(ldb, hashingEnabled);
       const docsNeedingMigration = new Set<string>();
@@ -419,7 +411,15 @@ export function createSyncServer(
 
       maybeStartRetentionSweeper();
       logger.info(
-        { dir: config.dataDir, docNameHashing: hashingEnabled },
+        {
+          dir: config.dataDir,
+          docNameHashing: hashingEnabled,
+          encryption: config.persistence.encryption.mode,
+          strict:
+            config.persistence.encryption.mode === "keyring"
+              ? config.persistence.encryption.strict
+              : undefined,
+        },
         "persistence_leveldb_enabled"
       );
       return;
@@ -439,11 +439,6 @@ export function createSyncServer(
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "MODULE_NOT_FOUND") {
         if (nodeEnv === "production") {
-          if (leveldbEncryption) {
-            throw new Error(
-              "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 is set but y-leveldb is not installed. Install y-leveldb (and its native deps) or set SYNC_SERVER_PERSISTENCE_BACKEND=file and unset SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64."
-            );
-          }
           throw new Error(
             "y-leveldb is required for LevelDB persistence. Install y-leveldb or set SYNC_SERVER_PERSISTENCE_BACKEND=file."
           );
@@ -460,13 +455,6 @@ export function createSyncServer(
             logger,
             keyRing: config.persistence.encryption.keyRing,
           });
-        }
-
-        if (leveldbEncryption) {
-          logger.warn(
-            { strict: leveldbEncryption.strict },
-            "persistence_leveldb_encryption_key_set_y-leveldb_missing_running_unencrypted"
-          );
         }
 
         persistenceInitialized = true;
@@ -488,12 +476,6 @@ export function createSyncServer(
       throw err;
     }
 
-    if (config.persistence.encryption.mode === "keyring") {
-      throw new Error(
-        "SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring is only supported with SYNC_SERVER_PERSISTENCE_BACKEND=file."
-      );
-    }
-
     await fs.mkdir(config.dataDir, { recursive: true });
 
     const isLockError = (err: unknown) => {
@@ -505,57 +487,18 @@ export function createSyncServer(
     const maxAttempts = 5;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        let ldb: LeveldbPersistence;
-        if (leveldbEncryption) {
-          let baseLevel: any;
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            baseLevel = require("level");
-          } catch (err) {
-            if (nodeEnv === "production") {
-              throw new Error(
-                "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 is set but the 'level' module is not available. Ensure y-leveldb and its dependencies are installed."
-              );
-            }
-            logger.warn(
-              { err },
-              "level_module_not_installed_falling_back_to_file_persistence"
-            );
-            persistenceInitialized = true;
-            persistenceCleanup = null;
-            retentionManager = null;
-            persistenceBackend = "file";
-            const persistence = new FilePersistence(
-              config.dataDir,
-              logger,
-              config.persistence.compactAfterUpdates,
-              config.persistence.encryption,
-              shouldPersist
-            );
-            setPersistence(persistence);
-            clearPersistedDocument = (docName: string) =>
-              persistence.clearDocument(docName);
-            return;
-          }
+        const levelAdapter =
+          config.persistence.encryption.mode === "keyring"
+            ? createEncryptedLevelAdapter({
+                keyRing: config.persistence.encryption.keyRing,
+                strict: config.persistence.encryption.strict,
+              })(require("level") as any)
+            : undefined;
 
-          const encryptedLevel = createEncryptedLevelAdapter({
-            baseLevel,
-            key: leveldbEncryption.key,
-            strict: leveldbEncryption.strict,
-          });
-
-          logger.info(
-            {
-              mode: leveldbEncryption.strict ? "strict" : "compat",
-              strict: leveldbEncryption.strict,
-            },
-            "persistence_leveldb_encryption_enabled"
-          );
-
-          ldb = new LeveldbPersistenceCtor(config.dataDir, { level: encryptedLevel });
-        } else {
-          ldb = new LeveldbPersistenceCtor(config.dataDir);
-        }
+        const ldb = new LeveldbPersistenceCtor(
+          config.dataDir,
+          levelAdapter ? { level: levelAdapter } : undefined
+        );
         const hashingEnabled = leveldbDocNameHashingEnabled;
         const hashedLdb = new LeveldbDocNameHashingLayer(ldb, hashingEnabled);
         const docsNeedingMigration = new Set<string>();
@@ -704,7 +647,15 @@ export function createSyncServer(
 
         maybeStartRetentionSweeper();
         logger.info(
-          { dir: config.dataDir, docNameHashing: hashingEnabled },
+          {
+            dir: config.dataDir,
+            docNameHashing: hashingEnabled,
+            encryption: config.persistence.encryption.mode,
+            strict:
+              config.persistence.encryption.mode === "keyring"
+                ? config.persistence.encryption.strict
+                : undefined,
+          },
           "persistence_leveldb_enabled"
         );
         return;

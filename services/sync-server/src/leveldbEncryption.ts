@@ -1,199 +1,195 @@
-import crypto from "node:crypto";
+import type { KeyRing } from "../../../packages/security/crypto/keyring.js";
 
-const AES_256_GCM = "aes-256-gcm";
 const AES_GCM_IV_BYTES = 12;
 const AES_GCM_TAG_BYTES = 16;
 
-export const LEVELDB_ENCRYPTION_KEY_BYTES = 32;
-export const LEVELDB_ENCRYPTION_KEY_VERSION = 1;
-export const LEVELDB_ENCRYPTION_MAGIC = Buffer.from("FMLLDB01"); // 8 bytes
-export const LEVELDB_ENCRYPTION_AAD = Buffer.from(
-  "formula-sync-server-leveldb:v1",
-  "utf8"
-);
+const DEFAULT_MAGIC = Buffer.from("FMLLDB01", "ascii");
 
-const LEVELDB_ENCRYPTION_HEADER_BYTES =
-  LEVELDB_ENCRYPTION_MAGIC.length +
-  4 + // keyVersion (u32 BE)
-  AES_GCM_IV_BYTES +
-  AES_GCM_TAG_BYTES;
+export const DEFAULT_LEVELDB_VALUE_MAGIC = DEFAULT_MAGIC;
 
-function assertKey(key: Buffer): void {
-  if (key.byteLength !== LEVELDB_ENCRYPTION_KEY_BYTES) {
-    throw new Error(
-      `Encryption key must be ${LEVELDB_ENCRYPTION_KEY_BYTES} bytes (got ${key.byteLength}).`
-    );
+type LevelValueEncoding = {
+  encode: (value: unknown) => unknown;
+  decode: (value: unknown) => unknown;
+  buffer?: boolean;
+  type?: string;
+  [key: string]: unknown;
+};
+
+export type LevelAdapter = (location: string, opts?: Record<string, unknown>) => any;
+
+export type CreateEncryptedLevelAdapterOptions = {
+  keyRing: KeyRing;
+  strict: boolean;
+  /**
+   * 8-byte magic header to distinguish encrypted blobs from plaintext values.
+   *
+   * Defaults to `FMLLDB01`.
+   */
+  magic?: Buffer;
+};
+
+const LEVELDB_AAD_CONTEXT = {
+  scope: "formula-sync-server-leveldb",
+  schemaVersion: 1,
+} as const;
+
+/**
+ * Identity encoding that can be used to bypass the encrypted `valueEncoding` in tests.
+ */
+export const RAW_VALUE_ENCODING: LevelValueEncoding = {
+  buffer: true,
+  type: "raw",
+  encode: (value: unknown) => value,
+  decode: (value: unknown) => value,
+};
+
+function assertU32(value: number, name: string) {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+    throw new RangeError(`${name} must be a uint32`);
   }
 }
 
-export function encryptLeveldbValue(plaintext: Buffer, key: Buffer): Buffer {
-  if (!Buffer.isBuffer(plaintext)) {
-    throw new TypeError("plaintext must be a Buffer");
+function asBuffer(value: unknown, name: string): Buffer {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  throw new TypeError(`${name} must be a Buffer or Uint8Array`);
+}
+
+function isEncryptedBytes(bytes: Buffer, magic: Buffer): boolean {
+  if (bytes.length < magic.length + 4 + AES_GCM_IV_BYTES + AES_GCM_TAG_BYTES) {
+    return false;
   }
-  assertKey(key);
+  return bytes.subarray(0, magic.length).equals(magic);
+}
 
-  const iv = crypto.randomBytes(AES_GCM_IV_BYTES);
-  const cipher = crypto.createCipheriv(AES_256_GCM, key, iv, {
-    authTagLength: AES_GCM_TAG_BYTES,
-  });
-  cipher.setAAD(LEVELDB_ENCRYPTION_AAD);
+function encodeEncryptedBytes(
+  encrypted: { keyVersion: number; iv: Buffer; tag: Buffer; ciphertext: Buffer },
+  magic: Buffer
+): Buffer {
+  assertU32(encrypted.keyVersion, "keyVersion");
+  if (!Buffer.isBuffer(encrypted.iv) || encrypted.iv.length !== AES_GCM_IV_BYTES) {
+    throw new RangeError(`iv must be ${AES_GCM_IV_BYTES} bytes`);
+  }
+  if (!Buffer.isBuffer(encrypted.tag) || encrypted.tag.length !== AES_GCM_TAG_BYTES) {
+    throw new RangeError(`tag must be ${AES_GCM_TAG_BYTES} bytes`);
+  }
+  if (!Buffer.isBuffer(encrypted.ciphertext)) {
+    throw new TypeError("ciphertext must be a Buffer");
+  }
 
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const tag = cipher.getAuthTag();
+  const headerBytes = magic.length + 4 + AES_GCM_IV_BYTES + AES_GCM_TAG_BYTES;
+  const out = Buffer.allocUnsafe(headerBytes + encrypted.ciphertext.length);
 
-  const out = Buffer.allocUnsafe(
-    LEVELDB_ENCRYPTION_HEADER_BYTES + ciphertext.byteLength
-  );
   let offset = 0;
-  LEVELDB_ENCRYPTION_MAGIC.copy(out, offset);
-  offset += LEVELDB_ENCRYPTION_MAGIC.byteLength;
-
-  out.writeUInt32BE(LEVELDB_ENCRYPTION_KEY_VERSION, offset);
+  magic.copy(out, offset);
+  offset += magic.length;
+  out.writeUInt32BE(encrypted.keyVersion, offset);
   offset += 4;
-
-  iv.copy(out, offset);
+  encrypted.iv.copy(out, offset);
   offset += AES_GCM_IV_BYTES;
-
-  tag.copy(out, offset);
+  encrypted.tag.copy(out, offset);
   offset += AES_GCM_TAG_BYTES;
+  encrypted.ciphertext.copy(out, offset);
 
-  ciphertext.copy(out, offset);
   return out;
 }
 
-export function decryptLeveldbValue(
-  data: Buffer,
-  key: Buffer,
-  strict: boolean
-): Buffer {
-  if (!Buffer.isBuffer(data)) {
-    throw new TypeError("ciphertext must be a Buffer");
-  }
-  assertKey(key);
-
-  if (data.byteLength < LEVELDB_ENCRYPTION_MAGIC.byteLength) {
-    if (strict) {
-      throw new Error(
-        "LevelDB value is not encrypted (missing magic header). If you're migrating an existing DB, set SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT=false temporarily."
-      );
-    }
-    return data;
+function decodeEncryptedBytes(
+  bytes: Buffer,
+  magic: Buffer
+): { keyVersion: number; iv: Buffer; tag: Buffer; ciphertext: Buffer } {
+  if (!isEncryptedBytes(bytes, magic)) {
+    throw new Error("bytes are not in encrypted value format");
   }
 
-  const magic = data.subarray(0, LEVELDB_ENCRYPTION_MAGIC.byteLength);
-  if (!magic.equals(LEVELDB_ENCRYPTION_MAGIC)) {
-    if (strict) {
-      throw new Error(
-        "LevelDB value is not encrypted (missing magic header). If you're migrating an existing DB, set SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT=false temporarily."
-      );
-    }
-    return data;
-  }
+  const keyVersion = bytes.readUInt32BE(magic.length);
+  const ivOffset = magic.length + 4;
+  const tagOffset = ivOffset + AES_GCM_IV_BYTES;
+  const ciphertextOffset = tagOffset + AES_GCM_TAG_BYTES;
 
-  if (data.byteLength < LEVELDB_ENCRYPTION_HEADER_BYTES) {
-    throw new Error(
-      "Encrypted LevelDB value is truncated (missing header bytes)."
-    );
-  }
-
-  let offset = LEVELDB_ENCRYPTION_MAGIC.byteLength;
-  const version = data.readUInt32BE(offset);
-  offset += 4;
-  if (version !== LEVELDB_ENCRYPTION_KEY_VERSION) {
-    throw new Error(
-      `Unsupported LevelDB encryption key version ${version} (expected ${LEVELDB_ENCRYPTION_KEY_VERSION}).`
-    );
-  }
-
-  const iv = data.subarray(offset, offset + AES_GCM_IV_BYTES);
-  offset += AES_GCM_IV_BYTES;
-
-  const tag = data.subarray(offset, offset + AES_GCM_TAG_BYTES);
-  offset += AES_GCM_TAG_BYTES;
-
-  const ciphertext = data.subarray(offset);
-
-  try {
-    const decipher = crypto.createDecipheriv(AES_256_GCM, key, iv, {
-      authTagLength: AES_GCM_TAG_BYTES,
-    });
-    decipher.setAAD(LEVELDB_ENCRYPTION_AAD);
-    decipher.setAuthTag(tag);
-    return Buffer.concat([
-      decipher.update(ciphertext),
-      decipher.final(),
-    ]);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `Failed to decrypt LevelDB value (${reason}). Check SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64.`
-    );
-  }
+  return {
+    keyVersion,
+    iv: bytes.subarray(ivOffset, ivOffset + AES_GCM_IV_BYTES),
+    tag: bytes.subarray(tagOffset, tagOffset + AES_GCM_TAG_BYTES),
+    ciphertext: bytes.subarray(ciphertextOffset),
+  };
 }
 
-type LevelEncoding = {
-  encode: (data: any) => any;
-  decode: (data: any) => any;
-  buffer?: boolean;
-  type?: string;
-  [key: string]: any;
-};
-
-function isLevelEncoding(value: unknown): value is LevelEncoding {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "encode" in value &&
-    "decode" in value &&
-    typeof (value as LevelEncoding).encode === "function" &&
-    typeof (value as LevelEncoding).decode === "function"
-  );
-}
-
-function toBuffer(data: unknown): Buffer {
-  if (Buffer.isBuffer(data)) return data;
-  if (data instanceof Uint8Array) return Buffer.from(data);
-  if (typeof data === "string") return Buffer.from(data, "utf8");
-  throw new TypeError("LevelDB valueEncoding expects Buffer-like data");
-}
-
-export function createEncryptedLevelAdapter({
-  baseLevel,
-  key,
-  strict,
-}: {
-  baseLevel: (location: string, opts: any) => any;
-  key: Buffer | Uint8Array;
+function wrapValueEncoding(params: {
+  upstream: LevelValueEncoding;
+  keyRing: KeyRing;
   strict: boolean;
-}): (location: string, opts: any) => any {
-  const keyBuf = Buffer.isBuffer(key) ? key : Buffer.from(key);
-  assertKey(keyBuf);
+  magic: Buffer;
+}): LevelValueEncoding {
+  const { upstream, keyRing, strict, magic } = params;
 
-  return (location: string, opts: any) => {
-    const original = isLevelEncoding(opts?.valueEncoding)
-      ? (opts.valueEncoding as LevelEncoding)
-      : {
-          buffer: true,
-          type: "raw",
-          encode: (v: any) => v,
-          decode: (v: any) => v,
-        };
+  const upstreamEncode = upstream.encode.bind(upstream);
+  const upstreamDecode = upstream.decode.bind(upstream);
 
-    const valueEncoding: LevelEncoding = {
-      ...original,
-      buffer: true,
-      type: `${original.type ?? "value"}+${AES_256_GCM}`,
-      encode: (data: any) => {
-        const encoded = original.encode(data);
-        return encryptLeveldbValue(toBuffer(encoded), keyBuf);
-      },
-      decode: (data: any) => {
-        const decrypted = decryptLeveldbValue(toBuffer(data), keyBuf, strict);
-        return original.decode(decrypted);
-      },
+  return {
+    ...upstream,
+    buffer: true,
+    type: upstream.type ? `encrypted(${String(upstream.type)})` : "encrypted",
+    encode(value: unknown): Buffer {
+      const encoded = upstreamEncode(value);
+      const plaintext = asBuffer(encoded, "valueEncoding.encode()");
+
+      const encrypted = keyRing.encryptBytes(plaintext, { aadContext: LEVELDB_AAD_CONTEXT });
+      return encodeEncryptedBytes(encrypted, magic);
+    },
+    decode(value: unknown): unknown {
+      const bytes = asBuffer(value, "valueEncoding.decode()");
+      if (!isEncryptedBytes(bytes, magic)) {
+        if (strict) {
+          throw new Error(
+            `Encountered unencrypted LevelDB value (missing ${magic.toString("ascii")} header). ` +
+              "If this is legacy data, restart with SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT=0 to allow migration."
+          );
+        }
+        return upstreamDecode(bytes);
+      }
+
+      const payload = decodeEncryptedBytes(bytes, magic);
+      const plaintext = keyRing.decryptBytes(payload, { aadContext: LEVELDB_AAD_CONTEXT });
+      return upstreamDecode(plaintext);
+    },
+  };
+}
+
+export function createEncryptedLevelAdapter(
+  opts: CreateEncryptedLevelAdapterOptions
+): (baseLevel: LevelAdapter) => LevelAdapter {
+  const magic = opts.magic ?? DEFAULT_MAGIC;
+  if (!Buffer.isBuffer(magic) || magic.length !== 8) {
+    throw new RangeError("magic must be an 8-byte Buffer");
+  }
+
+  return (baseLevel: LevelAdapter) => {
+    return (location: string, levelOptions: Record<string, unknown> = {}) => {
+      const upstreamEncoding = levelOptions.valueEncoding;
+      if (!upstreamEncoding || typeof upstreamEncoding !== "object") {
+        throw new TypeError(
+          "Encrypted LevelDB adapter requires valueEncoding to be an object with encode/decode functions"
+        );
+      }
+
+      const valueEncoding = upstreamEncoding as LevelValueEncoding;
+      if (typeof valueEncoding.encode !== "function" || typeof valueEncoding.decode !== "function") {
+        throw new TypeError(
+          "Encrypted LevelDB adapter requires valueEncoding.encode and valueEncoding.decode"
+        );
+      }
+
+      return baseLevel(location, {
+        ...levelOptions,
+        valueEncoding: wrapValueEncoding({
+          upstream: valueEncoding,
+          keyRing: opts.keyRing,
+          strict: opts.strict,
+          magic,
+        }),
+      });
     };
-
-    return baseLevel(location, { ...opts, valueEncoding });
   };
 }
 

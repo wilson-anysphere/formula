@@ -34,17 +34,8 @@ export type SyncServerConfig = {
       | {
           mode: "keyring";
           keyRing: KeyRing;
+          strict: boolean;
         };
-    /**
-     * Optional encryption for y-leveldb persistence values.
-     *
-     * Note: this only encrypts LevelDB *values*. Keys (including doc ids) remain
-     * plaintext unless `SYNC_SERVER_LEVELDB_DOCNAME_HASHING` is enabled.
-     */
-    leveldbEncryption?: {
-      key: Buffer;
-      strict: boolean;
-    };
   };
 
   auth: AuthMode;
@@ -142,37 +133,19 @@ export function loadConfigFromEnv(): SyncServerConfig {
   const encryptionEnv = process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION ?? "off";
   const encryptionMode =
     encryptionEnv === "keyring" || encryptionEnv === "off" ? encryptionEnv : "off";
+  const encryptionStrictDefault = nodeEnv === "production";
+  const encryptionStrict = envBool(
+    process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT,
+    encryptionStrictDefault
+  );
   const encryption =
     encryptionMode === "keyring"
       ? {
           mode: "keyring" as const,
           keyRing: loadKeyRingFromEnv(),
+          strict: encryptionStrict,
         }
       : { mode: "off" as const };
-
-  const leveldbEncryptionKeyB64 =
-    process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64;
-  const leveldbEncryptionStrictDefault = nodeEnv === "production";
-  const leveldbEncryptionStrict = envBool(
-    process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT,
-    leveldbEncryptionStrictDefault
-  );
-  const leveldbEncryptionKey =
-    leveldbEncryptionKeyB64 === undefined
-      ? null
-      : Buffer.from(leveldbEncryptionKeyB64, "base64");
-  if (leveldbEncryptionKey !== null && leveldbEncryptionKey.byteLength !== 32) {
-    throw new Error(
-      "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 must be a base64-encoded 32-byte (256-bit) key."
-    );
-  }
-  const leveldbEncryption =
-    leveldbEncryptionKey === null
-      ? undefined
-      : {
-          key: leveldbEncryptionKey,
-          strict: leveldbEncryptionStrict,
-        };
 
   const leveldbDocNameHashing = envBool(
     process.env.SYNC_SERVER_LEVELDB_DOCNAME_HASHING,
@@ -234,7 +207,6 @@ export function loadConfigFromEnv(): SyncServerConfig {
       compactAfterUpdates,
       leveldbDocNameHashing,
       encryption,
-      leveldbEncryption,
     },
     auth,
     internalAdminToken,
