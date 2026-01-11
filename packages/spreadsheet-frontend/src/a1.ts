@@ -29,7 +29,10 @@ export function toA1(row0: number, col0: number): string {
 
 export function fromA1(address: string): { row0: number; col0: number } {
   const trimmed = address.trim();
-  const match = /^\$?([A-Za-z]+)\$?([1-9]\d*)$/.exec(trimmed);
+  const bangIndex = trimmed.lastIndexOf("!");
+  const cellRef = bangIndex === -1 ? trimmed : trimmed.slice(bangIndex + 1).trim();
+
+  const match = /^\$?([A-Za-z]+)\$?([1-9]\d*)$/.exec(cellRef);
   if (!match) {
     throw new Error(`Invalid A1 address: "${address}"`);
   }
@@ -55,4 +58,3 @@ export function range0ToA1(range: Range0): string {
   const end = toA1(range.endRow0Exclusive - 1, range.endCol0Exclusive - 1);
   return start === end ? start : `${start}:${end}`;
 }
-

@@ -17,6 +17,11 @@ describe("A1 conversions", () => {
     }
   });
 
+  it("parses optional sheet prefixes", () => {
+    expect(fromA1("Sheet1!B2")).toEqual({ row0: 1, col0: 1 });
+    expect(fromA1("'Sheet Name'!$C$3")).toEqual({ row0: 2, col0: 2 });
+  });
+
   it("converts column indices to labels", () => {
     expect(colToName(0)).toBe("A");
     expect(colToName(25)).toBe("Z");
@@ -25,4 +30,3 @@ describe("A1 conversions", () => {
     expect(colToName(702)).toBe("AAA");
   });
 });
-
