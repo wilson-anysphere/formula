@@ -3,6 +3,8 @@
  * @typedef {import("./table.js").ITable} ITable
  */
 
+import { valueKey } from "./valueKey.js";
+
 /**
  * @param {unknown} value
  * @returns {value is Date}
@@ -41,7 +43,11 @@ function escapeLikePattern(value) {
  */
 function isEqual(a, b) {
   if (a === b) return true;
+  if (a == null && b == null) return true;
   if (isDate(a) && isDate(b)) return a.getTime() === b.getTime();
+  if (typeof a === "object" && typeof b === "object" && a && b) {
+    return valueKey(a) === valueKey(b);
+  }
   return false;
 }
 

@@ -84,6 +84,30 @@ in
   ]);
 });
 
+test("m_language execution: Table.SelectRows compares records by value", async () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Key", "Value"},
+    {[a=1, b=2], 1},
+    {[b=2, a=1], 2},
+    {[a=1, b=3], 3}
+  }),
+  #"Filtered Rows" = Table.SelectRows(Source, each [Key] = [a=1, b=2])
+in
+  #"Filtered Rows"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Key", "Value"],
+    [{ a: 1, b: 2 }, 1],
+    [{ b: 2, a: 1 }, 2],
+  ]);
+});
+
 test("m_language execution: constant equality compares dates and records by value", async () => {
   const script = `
 let
