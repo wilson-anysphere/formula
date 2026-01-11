@@ -6,6 +6,10 @@ use crate::parser::{biff12, CellValue, Error};
 use crate::strings::FlagsWidth;
 use crate::writer::Biff12Writer;
 
+mod streaming;
+
+pub use streaming::patch_sheet_bin_streaming;
+
 // BIFF12 "wide string" flags (used by BrtCellSt inline strings and BrtFmlaString cached values).
 const FLAG_RICH: u16 = 0x0001;
 const FLAG_PHONETIC: u16 = 0x0002;
