@@ -152,7 +152,7 @@ type Permissions = {
 
 Notes:
 - For native Python, `"allowlist"` is enforced by wrapping `socket.create_connection` / `socket.socket.connect`.
-- For Pyodide, `"allowlist"` is enforced by wrapping `fetch`/`WebSocket` in the worker.
+- For Pyodide, `"allowlist"` is enforced by wrapping `fetch`/`WebSocket` in the worker or main-thread runtime (best-effort).
 
 ## Bundled Python files (Pyodide)
 
