@@ -13,9 +13,11 @@ use quick_xml::Reader;
 use thiserror::Error;
 use zip::ZipArchive;
 
-use crate::path::resolve_target;
+use crate::path::{rels_for_part, resolve_target};
 use crate::shared_strings::parse_shared_strings_xml;
+use crate::sheet_metadata::parse_sheet_tab_color;
 use crate::styles::StylesPart;
+use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
@@ -43,10 +45,14 @@ pub enum ReadError {
     Styles(#[from] crate::styles::StylesPartError),
     #[error("invalid worksheet name: {0}")]
     InvalidSheetName(#[from] formula_model::SheetNameError),
+    #[error(transparent)]
+    Xlsx(#[from] XlsxError),
     #[error("missing required part: {0}")]
     MissingPart(&'static str),
     #[error("invalid cell reference: {0}")]
     InvalidCellRef(String),
+    #[error("invalid range reference: {0}")]
+    InvalidRangeRef(String),
 }
 
 pub fn load_from_path(path: impl AsRef<Path>) -> Result<XlsxDocument, ReadError> {
@@ -122,6 +128,40 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         let sheet_xml = parts
             .get(&sheet.path)
             .ok_or(ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"))?;
+
+        // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
+        let sheet_xml_str = std::str::from_utf8(sheet_xml)?;
+
+        ws.tab_color = parse_sheet_tab_color(sheet_xml_str)?;
+
+        // Merged cells (must be parsed before cell content so we don't treat interior
+        // cells as value-bearing).
+        let merges =
+            crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str).map_err(
+                |err| match err {
+                    crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
+                    crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
+                    crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
+                    crate::merge_cells::MergeCellsError::InvalidRef(r) => {
+                        ReadError::InvalidRangeRef(r)
+                    }
+                    crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
+                    crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
+                },
+            )?;
+        for range in merges {
+            ws.merged_regions
+                .add(range)
+                .map_err(|e| ReadError::InvalidRangeRef(e.to_string()))?;
+        }
+
+        // Hyperlinks.
+        let rels_part = rels_for_part(&sheet.path);
+        let rels_xml = parts
+            .get(&rels_part)
+            .map(|bytes| std::str::from_utf8(bytes))
+            .transpose()?;
+        ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
 
         parse_worksheet_into_model(
             ws,
@@ -392,7 +432,9 @@ fn parse_worksheet_into_model(
                     }
                 }
                 if let Some(cell_ref) = cell_ref {
-                    if style_id != 0 {
+                    // Skip non-anchor cells inside merged regions. Excel stores the value
+                    // (and typically formatting) on the top-left cell only.
+                    if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref && style_id != 0 {
                         let mut cell = Cell::default();
                         cell.style_id = style_id;
                         worksheet.set_cell(cell_ref, cell);
@@ -402,34 +444,36 @@ fn parse_worksheet_into_model(
 
             Event::End(e) if in_sheet_data && e.name().as_ref() == b"c" => {
                 if let Some(cell_ref) = current_ref {
-                    let (value, value_kind, raw_value) =
-                        interpret_cell_value(current_t.as_deref(), &current_value_text, &current_inline_text, shared_strings);
+                    if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref {
+                        let (value, value_kind, raw_value) =
+                            interpret_cell_value(current_t.as_deref(), &current_value_text, &current_inline_text, shared_strings);
 
-                    let formula_in_model = current_formula.as_ref().and_then(|f| {
-                        let stripped = crate::formula_text::strip_xlfn_prefixes(&f.file_text);
-                        normalize_formula_text(&stripped)
-                    });
+                        let formula_in_model = current_formula.as_ref().and_then(|f| {
+                            let stripped = crate::formula_text::strip_xlfn_prefixes(&f.file_text);
+                            normalize_formula_text(&stripped)
+                        });
 
-                    let mut cell = Cell::default();
-                    cell.value = value;
-                    cell.formula = formula_in_model;
-                    cell.style_id = current_style;
+                        let mut cell = Cell::default();
+                        cell.value = value;
+                        cell.formula = formula_in_model;
+                        cell.style_id = current_style;
 
-                    if !cell.is_truly_empty() {
-                        worksheet.set_cell(cell_ref, cell);
-                    }
+                        if !cell.is_truly_empty() {
+                            worksheet.set_cell(cell_ref, cell);
+                        }
 
-                    let mut meta = CellMeta::default();
-                    meta.value_kind = value_kind;
-                    meta.raw_value = raw_value;
-                    meta.formula = current_formula.take();
+                        let mut meta = CellMeta::default();
+                        meta.value_kind = value_kind;
+                        meta.raw_value = raw_value;
+                        meta.formula = current_formula.take();
 
-                    if meta.value_kind.is_some()
-                        || meta.raw_value.is_some()
-                        || meta.formula.is_some()
-                        || current_style != 0
-                    {
-                        cell_meta_map.insert((worksheet_id, cell_ref), meta);
+                        if meta.value_kind.is_some()
+                            || meta.raw_value.is_some()
+                            || meta.formula.is_some()
+                            || current_style != 0
+                        {
+                            cell_meta_map.insert((worksheet_id, cell_ref), meta);
+                        }
                     }
                 }
 

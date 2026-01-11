@@ -3,8 +3,8 @@ use std::io::{Cursor, Write};
 
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
-    CellRef, CellValue, ErrorValue, Outline, OutlineEntry, Range, SheetVisibility, Worksheet,
-    WorksheetId,
+    CellRef, CellValue, ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range,
+    SheetVisibility, Worksheet, WorksheetId,
 };
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
@@ -14,9 +14,10 @@ use thiserror::Error;
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
-use crate::path::resolve_target;
+use crate::path::{rels_for_part, resolve_target};
+use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
 use crate::styles::StylesPart;
-use crate::{CellValueKind, DateSystem, SheetMeta, XlsxDocument};
+use crate::{CellValueKind, DateSystem, SheetMeta, XlsxDocument, XlsxError};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
@@ -39,6 +40,8 @@ pub enum WriteError {
     XmlAttr(#[from] AttrError),
     #[error(transparent)]
     Styles(#[from] crate::styles::StylesPartError),
+    #[error(transparent)]
+    Xlsx(#[from] XlsxError),
 }
 
 const WORKSHEET_REL_TYPE: &str =
@@ -321,21 +324,161 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
             .sheet(sheet_meta.worksheet_id)
             .ok_or_else(|| WriteError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "worksheet not found")))?;
         let orig = parts.get(&sheet_meta.path).map(|b| b.as_slice());
-        parts.insert(
-            sheet_meta.path.clone(),
-            write_worksheet_xml(
-                doc,
-                sheet_meta,
-                sheet,
-                orig,
-                &shared_string_lookup,
-                &style_to_xf,
-                &sheet_plan.cell_meta_sheet_ids,
-            )?,
-        );
+        let rels_part = rels_for_part(&sheet_meta.path);
+        let orig_rels = parts.get(&rels_part).map(|b| b.as_slice());
+
+        let (orig_tab_color, orig_merges, orig_hyperlinks) = if let Some(orig) = orig {
+            let orig_xml = std::str::from_utf8(orig).map_err(|e| {
+                WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?;
+            let orig_tab_color = parse_sheet_tab_color(orig_xml)?;
+
+            let orig_merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(orig_xml)
+                .map_err(|err| match err {
+                    crate::merge_cells::MergeCellsError::Xml(e) => WriteError::Xml(e),
+                    crate::merge_cells::MergeCellsError::Attr(e) => WriteError::XmlAttr(e),
+                    crate::merge_cells::MergeCellsError::Utf8(e) => WriteError::Io(
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+                    ),
+                    crate::merge_cells::MergeCellsError::InvalidRef(r) => WriteError::Io(
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, r),
+                    ),
+                    crate::merge_cells::MergeCellsError::Zip(e) => WriteError::Zip(e),
+                    crate::merge_cells::MergeCellsError::Io(e) => WriteError::Io(e),
+                })?;
+
+            let rels_xml = orig_rels
+                .map(std::str::from_utf8)
+                .transpose()
+                .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+            let orig_hyperlinks = crate::parse_worksheet_hyperlinks(orig_xml, rels_xml)?;
+
+            (orig_tab_color, orig_merges, orig_hyperlinks)
+        } else {
+            (None, Vec::new(), Vec::new())
+        };
+
+        let current_merges = normalize_merge_ranges(sheet.merged_regions.iter().map(|r| r.range));
+        let orig_merges = normalize_merge_ranges(orig_merges.iter().copied());
+        let merges_changed = current_merges != orig_merges;
+        let tab_color_changed = sheet.tab_color != orig_tab_color;
+
+        let current_hyperlinks = normalize_hyperlinks(&sheet.hyperlinks);
+        let orig_hyperlinks = normalize_hyperlinks(&orig_hyperlinks);
+        let hyperlinks_changed = current_hyperlinks != orig_hyperlinks;
+
+        let sheet_xml_bytes = write_worksheet_xml(
+            doc,
+            sheet_meta,
+            sheet,
+            orig,
+            &shared_string_lookup,
+            &style_to_xf,
+            &sheet_plan.cell_meta_sheet_ids,
+        )?;
+        if orig.is_some() && !tab_color_changed && !merges_changed && !hyperlinks_changed {
+            parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
+            continue;
+        }
+        let mut sheet_xml = std::str::from_utf8(&sheet_xml_bytes)
+            .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?
+            .to_string();
+
+        // Apply sheet-level metadata updates.
+        if orig.is_none() || tab_color_changed {
+            sheet_xml = write_sheet_tab_color(&sheet_xml, sheet.tab_color.as_ref())?;
+        }
+        if orig.is_none() || merges_changed {
+            sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;
+        }
+        if orig.is_none() || hyperlinks_changed {
+            sheet_xml = crate::update_worksheet_xml(&sheet_xml, &current_hyperlinks)?;
+
+            let rels_xml = orig_rels
+                .map(std::str::from_utf8)
+                .transpose()
+                .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+            let updated_rels = crate::update_worksheet_relationships(rels_xml, &current_hyperlinks)?;
+            match updated_rels {
+                Some(xml) => {
+                    parts.insert(rels_part, xml.into_bytes());
+                }
+                None => {
+                    parts.remove(&rels_part);
+                }
+            }
+        }
+
+        parts.insert(sheet_meta.path.clone(), sheet_xml.into_bytes());
     }
 
     Ok(parts)
+}
+
+fn normalize_merge_ranges(ranges: impl Iterator<Item = Range>) -> Vec<Range> {
+    let mut merges: Vec<Range> = ranges.filter(|r| !r.is_single_cell()).collect();
+    merges.sort_by_key(|r| (r.start.row, r.start.col, r.end.row, r.end.col));
+    merges
+}
+
+fn normalize_hyperlinks(links: &[Hyperlink]) -> Vec<Hyperlink> {
+    let mut out = links.to_vec();
+    out.sort_by(cmp_hyperlink);
+    out
+}
+
+fn cmp_hyperlink(a: &Hyperlink, b: &Hyperlink) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    a.range
+        .start
+        .row
+        .cmp(&b.range.start.row)
+        .then(a.range.start.col.cmp(&b.range.start.col))
+        .then(a.range.end.row.cmp(&b.range.end.row))
+        .then(a.range.end.col.cmp(&b.range.end.col))
+        .then(cmp_hyperlink_target(&a.target, &b.target))
+        .then(a.display.cmp(&b.display))
+        .then(a.tooltip.cmp(&b.tooltip))
+        .then(a.rel_id.cmp(&b.rel_id))
+        // Keep the ordering total even if we add new fields later.
+        .then_with(|| Ordering::Equal)
+}
+
+fn cmp_hyperlink_target(a: &HyperlinkTarget, b: &HyperlinkTarget) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    fn rank(target: &HyperlinkTarget) -> u8 {
+        match target {
+            HyperlinkTarget::ExternalUrl { .. } => 0,
+            HyperlinkTarget::Email { .. } => 1,
+            HyperlinkTarget::Internal { .. } => 2,
+        }
+    }
+
+    let rank_cmp = rank(a).cmp(&rank(b));
+    if rank_cmp != Ordering::Equal {
+        return rank_cmp;
+    }
+
+    match (a, b) {
+        (HyperlinkTarget::ExternalUrl { uri: a }, HyperlinkTarget::ExternalUrl { uri: b }) => a.cmp(b),
+        (HyperlinkTarget::Email { uri: a }, HyperlinkTarget::Email { uri: b }) => a.cmp(b),
+        (
+            HyperlinkTarget::Internal {
+                sheet: a_sheet,
+                cell: a_cell,
+            },
+            HyperlinkTarget::Internal {
+                sheet: b_sheet,
+                cell: b_cell,
+            },
+        ) => a_sheet
+            .cmp(b_sheet)
+            .then(a_cell.row.cmp(&b_cell.row))
+            .then(a_cell.col.cmp(&b_cell.col)),
+        _ => Ordering::Equal,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -645,11 +788,9 @@ fn write_workbook_xml(
     xml.push_str("/>");
     xml.push_str("<sheets>");
     for sheet_meta in sheets {
-        let name = doc
-            .workbook
-            .sheet(sheet_meta.worksheet_id)
-            .map(|s| s.name.as_str())
-            .unwrap_or("Sheet");
+        let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
+        let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
+        let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
         xml.push_str("<sheet");
         xml.push_str(&format!(r#" name="{}""#, escape_attr(name)));
         xml.push_str(&format!(r#" sheetId="{}""#, sheet_meta.sheet_id));
@@ -657,8 +798,10 @@ fn write_workbook_xml(
             r#" r:id="{}""#,
             escape_attr(&sheet_meta.relationship_id)
         ));
-        if let Some(state) = &sheet_meta.state {
-            xml.push_str(&format!(r#" state="{}""#, escape_attr(state)));
+        match visibility {
+            SheetVisibility::Visible => {}
+            SheetVisibility::Hidden => xml.push_str(r#" state="hidden""#),
+            SheetVisibility::VeryHidden => xml.push_str(r#" state="veryHidden""#),
         }
         xml.push_str("/>");
     }
@@ -732,11 +875,9 @@ fn patch_workbook_xml(
                 writer.get_mut().push(b'>');
 
                 for sheet_meta in sheets {
-                    let name = doc
-                        .workbook
-                        .sheet(sheet_meta.worksheet_id)
-                        .map(|s| s.name.as_str())
-                        .unwrap_or("Sheet");
+                    let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
+                    let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
+                    let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
                     writer.get_mut().extend_from_slice(b"<sheet");
                     writer.get_mut().extend_from_slice(b" name=\"");
                     writer.get_mut().extend_from_slice(escape_attr(name).as_bytes());
@@ -751,10 +892,14 @@ fn patch_workbook_xml(
                         escape_attr(&sheet_meta.relationship_id).as_bytes(),
                     );
                     writer.get_mut().push(b'"');
-                    if let Some(state) = &sheet_meta.state {
-                        writer.get_mut().extend_from_slice(b" state=\"");
-                        writer.get_mut().extend_from_slice(escape_attr(state).as_bytes());
-                        writer.get_mut().push(b'"');
+                    match visibility {
+                        SheetVisibility::Visible => {}
+                        SheetVisibility::Hidden => {
+                            writer.get_mut().extend_from_slice(b" state=\"hidden\"");
+                        }
+                        SheetVisibility::VeryHidden => {
+                            writer.get_mut().extend_from_slice(b" state=\"veryHidden\"");
+                        }
                     }
                     writer.get_mut().extend_from_slice(b"/>");
                 }
@@ -774,11 +919,9 @@ fn patch_workbook_xml(
                 }
                 writer.get_mut().push(b'>');
                 for sheet_meta in sheets {
-                    let name = doc
-                        .workbook
-                        .sheet(sheet_meta.worksheet_id)
-                        .map(|s| s.name.as_str())
-                        .unwrap_or("Sheet");
+                    let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
+                    let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
+                    let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
                     writer.get_mut().extend_from_slice(b"<sheet");
                     writer.get_mut().extend_from_slice(b" name=\"");
                     writer.get_mut().extend_from_slice(escape_attr(name).as_bytes());
@@ -793,10 +936,14 @@ fn patch_workbook_xml(
                         escape_attr(&sheet_meta.relationship_id).as_bytes(),
                     );
                     writer.get_mut().push(b'"');
-                    if let Some(state) = &sheet_meta.state {
-                        writer.get_mut().extend_from_slice(b" state=\"");
-                        writer.get_mut().extend_from_slice(escape_attr(state).as_bytes());
-                        writer.get_mut().push(b'"');
+                    match visibility {
+                        SheetVisibility::Visible => {}
+                        SheetVisibility::Hidden => {
+                            writer.get_mut().extend_from_slice(b" state=\"hidden\"");
+                        }
+                        SheetVisibility::VeryHidden => {
+                            writer.get_mut().extend_from_slice(b" state=\"veryHidden\"");
+                        }
                     }
                     writer.get_mut().extend_from_slice(b"/>");
                 }

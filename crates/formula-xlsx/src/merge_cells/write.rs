@@ -1,6 +1,11 @@
 use formula_model::Range;
 use std::fmt::Write as _;
 
+use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::{Reader, Writer};
+
+use crate::XlsxError;
+
 #[must_use]
 pub fn write_merge_cells_section(merges: &[Range]) -> String {
     if merges.is_empty() {
@@ -45,4 +50,78 @@ pub fn write_worksheet_xml(merges: &[Range]) -> String {
     }
     out.push_str("</worksheet>\n");
     out
+}
+
+/// Update (or remove) a worksheet `<mergeCells>` section to match `merges`.
+///
+/// If the worksheet already contains `<mergeCells>`, it is replaced. If it does not
+/// and `merges` is non-empty, the block is inserted before the closing `</worksheet>`.
+pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String, XlsxError> {
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut skip_depth: usize = 0;
+    let mut replaced = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
+            Event::Start(ref e) if e.local_name().as_ref() == b"mergeCells" => {
+                replaced = true;
+                if !merges.is_empty() {
+                    write_merge_cells_block(&mut writer, merges)?;
+                }
+                skip_depth = 1;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"mergeCells" => {
+                replaced = true;
+                if !merges.is_empty() {
+                    write_merge_cells_block(&mut writer, merges)?;
+                }
+            }
+            Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
+                if !replaced && !merges.is_empty() {
+                    write_merge_cells_block(&mut writer, merges)?;
+                    replaced = true;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            _ => {
+                writer.write_event(event.to_owned())?;
+            }
+        }
+        buf.clear();
+    }
+
+    Ok(String::from_utf8(writer.into_inner())?)
+}
+
+fn write_merge_cells_block<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    merges: &[Range],
+) -> Result<(), XlsxError> {
+    let count = merges.len().to_string();
+    let mut start = BytesStart::new("mergeCells");
+    start.push_attribute(("count", count.as_str()));
+    writer.write_event(Event::Start(start))?;
+
+    for merge in merges {
+        let range = merge.to_string();
+        let mut elem = BytesStart::new("mergeCell");
+        elem.push_attribute(("ref", range.as_str()));
+        writer.write_event(Event::Empty(elem))?;
+    }
+
+    writer.write_event(Event::End(BytesEnd::new("mergeCells")))?;
+    Ok(())
 }
