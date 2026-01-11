@@ -432,3 +432,82 @@ test("executeQueryStreaming(..., materialize:false) streams distinctRows (with s
   const expected = (await engine.executeQuery(query, {}, {})).toGrid();
   assert.deepEqual(streamed, expected);
 });
+
+test("executeQueryStreaming(..., materialize:false) streams promoteHeaders when it is the first operation", async () => {
+  const csvText = ["Region,Sales", "East,100", "West,200", "East,150"].join("\n") + "\n";
+
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("readText should not be called in streaming mode");
+      },
+      readTextStream: async function* () {
+        // Split mid-row so the streaming parser must stitch chunks together.
+        yield "Region,Sales\nEast,100\nWest,2";
+        yield "00\nEast,150\n";
+      },
+    },
+  });
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readText: async () => csvText,
+    },
+  });
+
+  const query = {
+    id: "q_stream_promote_headers",
+    name: "Promote headers",
+    source: { type: "csv", path: "/tmp/promote.csv", options: { hasHeaders: false } },
+    steps: [
+      { id: "s_promote", name: "Promote headers", operation: { type: "promoteHeaders" } },
+      { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["Region", "Sales"] } },
+      { id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } } },
+    ],
+  };
+
+  const batches = [];
+  await engineStreaming.executeQueryStreaming(query, {}, { batchSize: 2, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
+
+test("executeQueryStreaming(..., materialize:false) streams demoteHeaders", async () => {
+  const csvText = ["A,B", "1,2", "3,4"].join("\n") + "\n";
+
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("readText should not be called in streaming mode");
+      },
+      readTextStream: async function* () {
+        yield csvText;
+      },
+    },
+  });
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readText: async () => csvText,
+    },
+  });
+
+  const query = {
+    id: "q_stream_demote_headers",
+    name: "Demote headers",
+    source: { type: "csv", path: "/tmp/demote.csv", options: { hasHeaders: true } },
+    steps: [
+      { id: "s_demote", name: "Demote headers", operation: { type: "demoteHeaders" } },
+      { id: "s_take", name: "Take", operation: { type: "take", count: 2 } },
+    ],
+  };
+
+  const batches = [];
+  await engineStreaming.executeQueryStreaming(query, {}, { batchSize: 10, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});

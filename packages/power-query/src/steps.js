@@ -1258,6 +1258,7 @@ export const STREAMABLE_OPERATION_TYPES = new Set([
   "transformColumnNames",
   "replaceErrorValues",
   "splitColumn",
+  "demoteHeaders",
 ]);
 
 /**
@@ -1268,6 +1269,29 @@ export function isStreamableOperation(operation) {
     return Array.isArray(operation.newColumns) && operation.newColumns.length > 0;
   }
   return STREAMABLE_OPERATION_TYPES.has(operation.type);
+}
+
+/**
+ * Determine whether a sequence of operations can be executed incrementally without materializing.
+ *
+ * This includes special-casing `promoteHeaders`, which is streamable only as the first operation
+ * (the engine consumes the first data row to derive the new header names).
+ *
+ * @param {QueryOperation[]} operations
+ * @returns {boolean}
+ */
+export function isStreamableOperationSequence(operations) {
+  let sawPromoteHeaders = false;
+  for (let i = 0; i < operations.length; i++) {
+    const op = operations[i];
+    if (op.type === "promoteHeaders") {
+      if (i !== 0 || sawPromoteHeaders) return false;
+      sawPromoteHeaders = true;
+      continue;
+    }
+    if (!isStreamableOperation(op)) return false;
+  }
+  return true;
 }
 
 /**
@@ -1723,6 +1747,20 @@ export function compileStreamingPipeline(operations, inputColumns) {
           }),
           done: false,
         }));
+        break;
+      }
+      case "demoteHeaders": {
+        const width = columns.length;
+        const headerRow = columns.map((c) => c.name);
+        columns = Array.from({ length: width }, (_v, i) => ({ name: `Column${i + 1}`, type: "any" }));
+        columnIndex = buildIndex(columns);
+
+        let inserted = false;
+        transforms.push((rows) => {
+          if (inserted) return { rows, done: false };
+          inserted = true;
+          return { rows: [headerRow, ...rows], done: false };
+        });
         break;
       }
       default: {

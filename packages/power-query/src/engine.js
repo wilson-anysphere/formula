@@ -1,4 +1,4 @@
-import { applyOperation, compileStreamingPipeline, isStreamableOperation } from "./steps.js";
+import { applyOperation, compileStreamingPipeline, isStreamableOperationSequence } from "./steps.js";
 import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable, makeUniqueColumnNames } from "./table.js";
 
@@ -2828,8 +2828,13 @@ export class QueryEngine {
 
     const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
     const steps = query.steps.slice(0, maxStepIndex + 1);
+    /** @type {QueryOperation[]} */
+    const operations = steps.map((step) => step.operation);
+    if (options.limit != null) {
+      operations.push({ type: "take", count: options.limit });
+    }
 
-    const canStreamSteps = steps.every((step) => isStreamableOperation(step.operation));
+    const canStreamSteps = isStreamableOperationSequence(operations);
 
     const fileConnector = this.connectors.get("file");
     const canStreamSource =
@@ -2869,10 +2874,7 @@ export class QueryEngine {
     throwIfAborted(options.signal);
 
     /** @type {QueryOperation[]} */
-    const operations = steps.map((step) => step.operation);
-    if (options.limit != null) {
-      operations.push({ type: "take", count: options.limit });
-    }
+    let pipelineOperations = operations;
 
     const state = { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
     const callStack = new Set([query.id]);
@@ -2901,7 +2903,16 @@ export class QueryEngine {
     options.onProgress?.({ type: "source:start", queryId: query.id, sourceType: streamingSource.type });
     const source = await this.loadSourceBatchesForStreaming(streamingSource, context, callStack, options, state);
 
-    const pipeline = compileStreamingPipeline(operations, source.columns);
+    /** @type {import("./table.js").Column[]} */
+    let inputColumns = source.columns;
+    let inputBatches = source.batches;
+
+    if (pipelineOperations[0]?.type === "promoteHeaders") {
+      pipelineOperations = pipelineOperations.slice(1);
+      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(inputColumns, inputBatches, options.signal));
+    }
+
+    const pipeline = compileStreamingPipeline(pipelineOperations, inputColumns);
     const outputColumns = pipeline.columns;
 
     let totalRowsEmitted = 0;
@@ -2975,7 +2986,7 @@ export class QueryEngine {
     };
 
     try {
-      for await (const batchRows of source.batches) {
+      for await (const batchRows of inputBatches) {
         throwIfAborted(options.signal);
         const result = pipeline.transformBatch(batchRows);
         enqueue(result.rows);
@@ -3271,8 +3282,13 @@ export class QueryEngine {
 
     const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
     const steps = query.steps.slice(0, maxStepIndex + 1);
+    /** @type {QueryOperation[]} */
+    const operations = steps.map((step) => step.operation);
+    if (options.limit != null) {
+      operations.push({ type: "take", count: options.limit });
+    }
 
-    const canStreamSteps = steps.every((step) => isStreamableOperation(step.operation));
+    const canStreamSteps = isStreamableOperationSequence(operations);
 
     const fileConnector = this.connectors.get("file");
     const canStreamSource =
@@ -3306,10 +3322,7 @@ export class QueryEngine {
     }
 
     /** @type {QueryOperation[]} */
-    const operations = steps.map((step) => step.operation);
-    if (options.limit != null) {
-      operations.push({ type: "take", count: options.limit });
-    }
+    let pipelineOperations = operations;
 
     let streamingSource = query.source;
     if (streamingSource.type === "parquet") {
@@ -3334,7 +3347,16 @@ export class QueryEngine {
 
     const source = await this.loadSourceBatchesForStreaming(streamingSource, context, callStack, options, state);
 
-    const pipeline = compileStreamingPipeline(operations, source.columns);
+    /** @type {import("./table.js").Column[]} */
+    let inputColumns = source.columns;
+    let inputBatches = source.batches;
+
+    if (pipelineOperations[0]?.type === "promoteHeaders") {
+      pipelineOperations = pipelineOperations.slice(1);
+      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(inputColumns, inputBatches, options.signal));
+    }
+
+    const pipeline = compileStreamingPipeline(pipelineOperations, inputColumns);
     const outputColumns = pipeline.columns;
 
     async function* batches() {
@@ -3382,7 +3404,7 @@ export class QueryEngine {
         }
       };
 
-      for await (const batchRows of source.batches) {
+      for await (const batchRows of inputBatches) {
         throwIfAborted(options.signal);
         const result = pipeline.transformBatch(batchRows);
         enqueue(result.rows);
@@ -3425,6 +3447,96 @@ function normalizeCsvRow(row, width) {
     out[i] = parsed === undefined ? null : parsed;
   }
   return out;
+}
+
+/**
+ * Apply `promoteHeaders` without materializing the full table.
+ *
+ * This is only safe when `promoteHeaders` is the first operation in the pipeline. We
+ * consume the first data row from the source batches, use its values to derive unique
+ * column names, then drop that row from the remaining batches.
+ *
+ * @param {import("./table.js").Column[]} columns
+ * @param {AsyncIterable<unknown[][]>} batches
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<{ columns: import("./table.js").Column[]; batches: AsyncIterable<unknown[][]> }>}
+ */
+async function applyPromoteHeadersStreaming(columns, batches, signal) {
+  const width = columns.length;
+  const iterator = batches[Symbol.asyncIterator]();
+
+  /** @type {unknown[] | null} */
+  let headerRow = null;
+  /** @type {unknown[][] | null} */
+  let remainder = null;
+
+  try {
+    while (true) {
+      throwIfAborted(signal);
+      const next = await iterator.next();
+      if (next.done) break;
+      const batch = next.value;
+      if (!Array.isArray(batch) || batch.length === 0) continue;
+      headerRow = Array.isArray(batch[0]) ? batch[0] : [];
+      remainder = batch.slice(1);
+      break;
+    }
+  } catch (err) {
+    if (typeof iterator.return === "function") {
+      try {
+        await iterator.return();
+      } catch {
+        // ignore
+      }
+    }
+    throw err;
+  }
+
+  if (headerRow == null) {
+    // Empty table: match materialized behavior by returning the original columns and
+    // an empty batch stream.
+    if (typeof iterator.return === "function") {
+      try {
+        await iterator.return();
+      } catch {
+        // ignore
+      }
+    }
+    async function* empty() {
+      // no rows
+    }
+    return { columns, batches: empty() };
+  }
+
+  const names = makeUniqueColumnNames(Array.from({ length: width }, (_v, i) => headerRow[i]));
+  const promotedColumns = names.map((name) => ({ name, type: "any" }));
+
+  async function* rest() {
+    try {
+      if (remainder && remainder.length > 0) {
+        yield remainder;
+      }
+      while (true) {
+        throwIfAborted(signal);
+        const next = await iterator.next();
+        if (next.done) break;
+        const batch = next.value;
+        if (Array.isArray(batch) && batch.length > 0) {
+          yield batch;
+        }
+      }
+    } finally {
+      if (typeof iterator.return === "function") {
+        try {
+          await iterator.return();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  return { columns: promotedColumns, batches: rest() };
 }
 
 /**
