@@ -366,53 +366,105 @@ export class CpuBackend {
       );
     }
 
-    /** @type {Map<number, number | number[]>} */
-    const rightMap = new Map();
-    for (let j = 0; j < rightKeys.length; j++) {
-      const k = rightKeys[j];
-      const existing = rightMap.get(k);
-      if (existing === undefined) {
-        rightMap.set(k, j);
-      } else if (typeof existing === "number") {
-        rightMap.set(k, [existing, j]);
-      } else {
-        existing.push(j);
-      }
+    const EMPTY_U32 = 0xffff_ffff;
+    const EMPTY_KEY = 0xffff_ffff;
+
+    const leftU32 = leftKeys instanceof Uint32Array ? leftKeys : new Uint32Array(leftKeys.buffer, leftKeys.byteOffset, leftKeys.length);
+    const rightU32 = rightKeys instanceof Uint32Array ? rightKeys : new Uint32Array(rightKeys.buffer, rightKeys.byteOffset, rightKeys.length);
+    const leftLen = leftU32.length;
+    const rightLen = rightU32.length;
+
+    function nextPowerOfTwo(n) {
+      let p = 1;
+      while (p < n) p <<= 1;
+      return p;
     }
 
-    let total = 0;
-    for (let i = 0; i < leftKeys.length; i++) {
-      const entry = rightMap.get(leftKeys[i]);
-      if (entry === undefined) {
-        if (joinType === "left") total += 1;
-      } else if (typeof entry === "number") {
-        total += 1;
+    // Open-addressing hash table from rightKeys -> linked list of right indices.
+    // Use a dedicated last slot for the sentinel key (0xFFFF_FFFF).
+    const tableSize = nextPowerOfTwo(rightLen * 2);
+    const mask = tableSize - 1;
+    const tableLen = tableSize + 1;
+    const tableKeys = new Uint32Array(tableLen);
+    tableKeys.fill(EMPTY_KEY);
+    const heads = new Uint32Array(tableLen);
+    heads.fill(EMPTY_U32);
+    const next = new Uint32Array(rightLen);
+
+    for (let j = rightLen - 1; j >= 0; j--) {
+      const key = rightU32[j];
+      let slot;
+      if (key === EMPTY_KEY) {
+        slot = tableSize;
       } else {
-        total += entry.length;
+        slot = (Math.imul(key, 2654435761) >>> 0) & mask;
+        while (true) {
+          const existing = tableKeys[slot];
+          if (existing === EMPTY_KEY) {
+            tableKeys[slot] = key;
+            break;
+          }
+          if (existing === key) break;
+          slot = (slot + 1) & mask;
+        }
       }
+      next[j] = heads[slot];
+      heads[slot] = j;
+    }
+
+    /** @type {Uint32Array} */
+    const leftHead = new Uint32Array(leftLen);
+    leftHead.fill(EMPTY_U32);
+    /** @type {Uint32Array} */
+    const counts = new Uint32Array(leftLen);
+
+    let total = 0;
+    for (let i = 0; i < leftLen; i++) {
+      const key = leftU32[i];
+      let headPtr = EMPTY_U32;
+      if (key === EMPTY_KEY) {
+        headPtr = heads[tableSize];
+      } else {
+        let slot = (Math.imul(key, 2654435761) >>> 0) & mask;
+        while (true) {
+          const existing = tableKeys[slot];
+          if (existing === key) {
+            headPtr = heads[slot];
+            break;
+          }
+          if (existing === EMPTY_KEY) break;
+          slot = (slot + 1) & mask;
+        }
+      }
+
+      leftHead[i] = headPtr;
+      let c = 0;
+      for (let ptr = headPtr; ptr !== EMPTY_U32; ptr = next[ptr]) c += 1;
+      if (joinType === "left" && c === 0) c = 1;
+      counts[i] = c;
+      total += c;
+    }
+
+    if (total === 0) {
+      return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
     }
 
     const leftIndex = new Uint32Array(total);
     const rightIndex = new Uint32Array(total);
-
     let p = 0;
-    for (let i = 0; i < leftKeys.length; i++) {
-      const entry = rightMap.get(leftKeys[i]);
-      if (entry !== undefined) {
-        if (typeof entry === "number") {
-          leftIndex[p] = i;
-          rightIndex[p] = entry;
-          p += 1;
-        } else {
-          for (let k = 0; k < entry.length; k++) {
-            leftIndex[p] = i;
-            rightIndex[p] = entry[k];
-            p += 1;
-          }
-        }
-      } else if (joinType === "left") {
+    for (let i = 0; i < leftLen; i++) {
+      const c = counts[i];
+      if (c === 0) continue;
+      const headPtr = leftHead[i];
+      if (headPtr === EMPTY_U32) {
         leftIndex[p] = i;
-        rightIndex[p] = 0xffff_ffff;
+        rightIndex[p] = EMPTY_U32;
+        p += 1;
+        continue;
+      }
+      for (let ptr = headPtr; ptr !== EMPTY_U32; ptr = next[ptr]) {
+        leftIndex[p] = i;
+        rightIndex[p] = ptr;
         p += 1;
       }
     }
