@@ -605,7 +605,7 @@ fn unique_columns(array: Array, exactly_once: bool) -> Value {
 inventory::submit! {
     FunctionSpec {
         name: "TAKE",
-        min_args: 2,
+        min_args: 1,
         max_args: 3,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
@@ -639,6 +639,9 @@ fn take_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let (row_start, out_rows) = take_span(array.rows, rows);
     let (col_start, out_cols) = take_span(array.cols, cols);
+    if out_rows == 0 || out_cols == 0 {
+        return Value::Error(ErrorKind::Calc);
+    }
 
     let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
     for r in 0..out_rows {
@@ -658,7 +661,7 @@ fn take_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 inventory::submit! {
     FunctionSpec {
         name: "DROP",
-        min_args: 2,
+        min_args: 1,
         max_args: 3,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
@@ -675,7 +678,7 @@ fn drop_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let rows = match eval_optional_i64(ctx, args.get(1), 0) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -687,6 +690,9 @@ fn drop_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let (row_start, out_rows) = drop_span(array.rows, rows);
     let (col_start, out_cols) = drop_span(array.cols, cols);
+    if out_rows == 0 || out_cols == 0 {
+        return Value::Error(ErrorKind::Calc);
+    }
 
     let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
     for r in 0..out_rows {
