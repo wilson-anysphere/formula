@@ -1477,6 +1477,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       <div
         ref={vTrackRef}
+        aria-hidden="true"
         style={{
           position: "absolute",
           right: 2,
@@ -1504,6 +1505,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       <div
         ref={hTrackRef}
+        aria-hidden="true"
         style={{
           position: "absolute",
           left: 2,
