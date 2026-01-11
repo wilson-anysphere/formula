@@ -49,6 +49,7 @@ export class ExtensionHostManager {
    *   customFunctionTimeoutMs?: number,
    *   memoryMb?: number,
    *   spreadsheet?: any,
+   *   extensionManager?: any,
    * }} params
    */
   constructor({
@@ -64,6 +65,7 @@ export class ExtensionHostManager {
     customFunctionTimeoutMs,
     memoryMb,
     spreadsheet,
+    extensionManager = null,
   }) {
     if (!extensionsDir) throw new Error("extensionsDir is required");
     if (!statePath) throw new Error("statePath is required");
@@ -88,7 +90,12 @@ export class ExtensionHostManager {
       spreadsheet,
     });
 
+    this._extensionManagerSubscription = null;
     this._started = false;
+
+    if (extensionManager) {
+      this.bindToExtensionManager(extensionManager);
+    }
   }
 
   get spreadsheet() {
@@ -176,8 +183,38 @@ export class ExtensionHostManager {
   }
 
   async dispose() {
+    if (this._extensionManagerSubscription) {
+      try {
+        this._extensionManagerSubscription.dispose();
+      } catch {
+        // ignore
+      }
+      this._extensionManagerSubscription = null;
+    }
     await this._host.dispose();
     this._started = false;
+  }
+
+  bindToExtensionManager(extensionManager) {
+    if (!extensionManager || typeof extensionManager.onDidChange !== "function") {
+      throw new Error("bindToExtensionManager requires an ExtensionManager with onDidChange()");
+    }
+
+    if (this._extensionManagerSubscription) {
+      try {
+        this._extensionManagerSubscription.dispose();
+      } catch {
+        // ignore
+      }
+      this._extensionManagerSubscription = null;
+    }
+
+    this._extensionManagerSubscription = extensionManager.onDidChange(() => {
+      void this.syncInstalledExtensions().catch((error) => {
+        // eslint-disable-next-line no-console
+        console.warn(`Failed to sync installed extensions: ${String(error?.message ?? error)}`);
+      });
+    });
   }
 
   async syncInstalledExtensions() {

@@ -48,6 +48,37 @@ export class ExtensionManager {
     this.marketplaceClient = marketplaceClient;
     this.extensionsDir = extensionsDir;
     this.statePath = statePath;
+
+    /** @type {Set<(event: any) => void>} */
+    this._listeners = new Set();
+  }
+
+  /**
+   * Subscribe to install/update/uninstall events.
+   *
+   * @param {(event: { action: "install" | "update" | "uninstall", id: string, record?: any }) => void} listener
+   * @returns {{ dispose: () => void }}
+   */
+  onDidChange(listener) {
+    if (typeof listener !== "function") {
+      throw new Error("onDidChange listener must be a function");
+    }
+    this._listeners.add(listener);
+    return {
+      dispose: () => {
+        this._listeners.delete(listener);
+      },
+    };
+  }
+
+  _emit(event) {
+    for (const listener of [...this._listeners]) {
+      try {
+        listener(event);
+      } catch {
+        // ignore
+      }
+    }
   }
 
   async _loadState() {
@@ -80,7 +111,7 @@ export class ExtensionManager {
     await this._saveState(state);
   }
 
-  async install(id, version = null) {
+  async _installInternal(id, version = null) {
     const ext = await this.marketplaceClient.getExtension(id);
     if (!ext) throw new Error(`Extension not found: ${id}`);
 
@@ -139,6 +170,12 @@ export class ExtensionManager {
     return state.installed[id];
   }
 
+  async install(id, version = null) {
+    const record = await this._installInternal(id, version);
+    this._emit({ action: "install", id, record });
+    return record;
+  }
+
   async uninstall(id) {
     const installDir = path.join(this.extensionsDir, id);
     await fs.rm(installDir, { recursive: true, force: true });
@@ -146,6 +183,8 @@ export class ExtensionManager {
     const state = await this._loadState();
     delete state.installed[id];
     await this._saveState(state);
+
+    this._emit({ action: "uninstall", id });
   }
 
   async checkForUpdates() {
@@ -177,7 +216,9 @@ export class ExtensionManager {
       return installed;
     }
 
-    return this.install(id, ext.latestVersion);
+    const record = await this._installInternal(id, ext.latestVersion);
+    this._emit({ action: "update", id, record });
+    return record;
   }
 
   async verifyInstalled(id) {
