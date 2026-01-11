@@ -209,6 +209,43 @@ describe("AiCellFunctionEngine", () => {
     expect(llmClient.chat).not.toHaveBeenCalled();
   });
 
+  it("DLP does not allow restricted cells to be smuggled via conditional outputs (e.g. IF(A1,\"Y\",\"N\"))", () => {
+    const llmClient = { chat: vi.fn() };
+
+    const policy = createDefaultOrgPolicy();
+    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
+      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
+      redactDisallowed: false,
+    };
+
+    const documentId = "unit-test-doc";
+    const storage = createMemoryStorage();
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      documentId,
+      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+    );
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      dlp: {
+        policy,
+        documentId,
+        classificationStore,
+        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
+      },
+    });
+
+    const value = evaluateFormula('=AI("summarize", IF(A1, "Y", "N"))', (ref) => (ref === "A1" ? 1 : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
+    expect(value).toBe(AI_CELL_DLP_ERROR);
+    expect(llmClient.chat).not.toHaveBeenCalled();
+  });
+
   it("DLP does not allow restricted cells to be smuggled via arithmetic coercion (e.g. A1+0)", () => {
     const llmClient = { chat: vi.fn() };
 

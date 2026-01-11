@@ -245,7 +245,9 @@ function evalFunction(
     const chosenScalar = Array.isArray(chosen) ? ((chosen[0] ?? null) as CellValue) : chosen;
     const chosenUnwrapped = unwrapProvenance(chosenScalar);
     if (isErrorCode(chosenUnwrapped)) return chosenUnwrapped;
-    return chosenScalar;
+    if (!context.preserveReferenceProvenance) return chosenScalar;
+    const refs = [...provenanceRefs(cond), ...provenanceRefs(chosenScalar)];
+    return wrapWithProvenance(chosenUnwrapped as SpreadsheetValue, refs);
   }
 
   if (upper === "VLOOKUP") {

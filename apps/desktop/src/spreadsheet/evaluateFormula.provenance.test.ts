@@ -64,4 +64,21 @@ describe("evaluateFormula (AI provenance)", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args?.[1]).toEqual({ __cellRef: "Sheet1!A1", value: "secret" });
   });
+
+  it("taints conditional results derived from referenced cells (e.g. IF(A1,\"Y\",\"N\"))", () => {
+    const calls: any[] = [];
+    const ai = {
+      evaluateAiFunction: (params: any) => {
+        calls.push(params);
+        return "ok";
+      },
+    };
+
+    const getCellValue = (addr: string) => (addr === "A1" ? 1 : null);
+
+    const result = evaluateFormula('=AI("summarize", IF(A1, "Y", "N"))', getCellValue, { ai, cellAddress: "Sheet1!B1" });
+    expect(result).toBe("ok");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args?.[1]).toEqual({ __cellRef: "Sheet1!A1", value: "Y" });
+  });
 });
