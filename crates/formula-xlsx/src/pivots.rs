@@ -7,6 +7,7 @@ use quick_xml::Reader;
 use crate::XlsxError;
 
 pub mod cache_definition;
+pub mod cache_records;
 pub mod pivot_charts;
 pub mod slicers;
 pub mod graph;

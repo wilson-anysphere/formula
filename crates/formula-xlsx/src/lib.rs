@@ -66,6 +66,7 @@ pub use package::{XlsxError, XlsxPackage};
 pub use patch::{CellPatch, WorkbookCellPatches, WorksheetCellPatches};
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use pivots::{
+    cache_records::{PivotCacheRecordsReader, PivotCacheValue},
     graph::{PivotTableInstance, XlsxPivotGraph},
     pivot_charts::PivotChartPart,
     slicers::{PivotSlicerParts, SlicerDefinition, TimelineDefinition},

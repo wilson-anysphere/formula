@@ -6,6 +6,7 @@ use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 use thiserror::Error;
 
 use crate::patch::{apply_cell_patches_to_package, WorkbookCellPatches};
+use crate::pivots::cache_records::{PivotCacheRecordsReader, PivotCacheValue};
 use crate::pivots::XlsxPivots;
 use crate::recalc_policy::RecalcPolicyError;
 use crate::sheet_metadata::{
@@ -145,6 +146,35 @@ impl XlsxPackage {
     /// verbatim in the package.
     pub fn pivots(&self) -> Result<XlsxPivots, XlsxError> {
         XlsxPivots::parse_from_entries(&self.parts)
+    }
+
+    /// Create a streaming reader for a pivot cache records part
+    /// (e.g. `xl/pivotCache/pivotCacheRecords1.xml`).
+    pub fn pivot_cache_records<'a>(
+        &'a self,
+        part_name: &str,
+    ) -> Result<PivotCacheRecordsReader<'a>, XlsxError> {
+        let bytes = self
+            .part(part_name)
+            .ok_or_else(|| XlsxError::MissingPart(part_name.to_string()))?;
+        Ok(PivotCacheRecordsReader::new(bytes))
+    }
+
+    /// Parse all `pivotCacheRecords*.xml` parts in the package into memory.
+    ///
+    /// Prefer [`Self::pivot_cache_records`] for large caches.
+    pub fn pivot_cache_records_all(&self) -> BTreeMap<String, Vec<Vec<PivotCacheValue>>> {
+        let mut out = BTreeMap::new();
+        for (name, bytes) in &self.parts {
+            if name.starts_with("xl/pivotCache/")
+                && name.contains("pivotCacheRecords")
+                && name.ends_with(".xml")
+            {
+                let mut reader = PivotCacheRecordsReader::new(bytes);
+                out.insert(name.clone(), reader.parse_all_records());
+            }
+        }
+        out
     }
 
     /// Parse the ordered list of workbook sheets from `xl/workbook.xml`.
