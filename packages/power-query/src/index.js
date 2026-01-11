@@ -9,7 +9,18 @@ export { RefreshManager, QueryScheduler } from "./refresh.js";
 export { RefreshOrchestrator, computeQueryDependencies } from "./refreshGraph.js";
 export { InMemoryRefreshStateStore } from "./refreshStateStore.js";
 export { InMemorySheet, writeTableToSheet } from "./sheet.js";
-export { FileConnector, HttpConnector, ODataConnector, SqlConnector, parseCsv, parseCsvCell } from "./connectors/index.js";
+export {
+  FileConnector,
+  HttpConnector,
+  ODataConnector,
+  SqlConnector,
+  decodeBinaryText,
+  decodeBinaryTextStream,
+  parseCsv,
+  parseCsvCell,
+  parseCsvStream,
+  parseCsvStreamBatches,
+} from "./connectors/index.js";
 export { CacheManager } from "./cache/cache.js";
 export { MemoryCacheStore } from "./cache/memory.js";
 export { FileSystemCacheStore } from "./cache/filesystem.js";
