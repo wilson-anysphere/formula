@@ -1,6 +1,10 @@
 const NON_BREAKING_SPACES = new Set(["\u00A0", "\u202F", "\u2060"]);
 const WHITESPACE_RE = /\s/u;
 
+import GraphemeSplitter from "grapheme-splitter";
+
+const GRAPHEME_SPLITTER = new GraphemeSplitter();
+
 /** @type {Map<string, Intl.Segmenter>} */
 const SEGMENTER_CACHE = new Map();
 
@@ -47,20 +51,13 @@ function isBreakableWhitespaceSegment(s) {
  */
 export function graphemeBreakPositions(text, locale) {
   if (!text) return [0];
-  if (typeof Intl === "undefined" || typeof Intl.Segmenter === "undefined") {
-    const positions = [];
-    let idx = 0;
-    for (const ch of Array.from(text)) {
-      idx += ch.length;
-      positions.push(idx);
-    }
-    return positions.length ? positions : [text.length];
-  }
-
-  const segmenter = getSegmenter(locale, "grapheme");
+  // Prefer a library implementation to avoid subtle Intl/ICU version differences across platforms.
+  const graphemes = GRAPHEME_SPLITTER.splitGraphemes(text);
   const positions = [];
-  for (const seg of segmenter.segment(text)) {
-    positions.push(seg.index + seg.segment.length);
+  let idx = 0;
+  for (const g of graphemes) {
+    idx += g.length;
+    positions.push(idx);
   }
   return positions.length ? positions : [text.length];
 }
@@ -78,27 +75,40 @@ export function wordBreakPositions(text, locale) {
   const wordBreakSet = new Set();
 
   if (typeof Intl === "undefined" || typeof Intl.Segmenter === "undefined") {
+    // Best-effort fallback:
+    // - break before runs of breakable whitespace (so the whitespace is excluded from the line),
+    // - otherwise allow breaks at every grapheme boundary.
     for (let i = 0; i < text.length; i++) {
-      if (isBreakableWhitespaceChar(text[i])) {
-        breaks.push(i);
-        wordBreakSet.add(i);
-        while (i + 1 < text.length && isBreakableWhitespaceChar(text[i + 1])) i++;
-      }
+      if (!isBreakableWhitespaceChar(text[i])) continue;
+      breaks.push(i);
+      wordBreakSet.add(i);
+      while (i + 1 < text.length && isBreakableWhitespaceChar(text[i + 1])) i++;
     }
-    breaks.push(text.length);
-    return { breaks, wordBreakSet };
+    for (const b of graphemeBreakPositions(text, locale)) breaks.push(b);
+  } else {
+    const segmenter = getSegmenter(locale, "word");
+    for (const seg of segmenter.segment(text)) {
+      // For whitespace, break at the *start* of the whitespace segment so trailing whitespace is
+      // excluded from the rendered line (and can be skipped when starting the next line).
+      if (WHITESPACE_RE.test(seg.segment) && isBreakableWhitespaceSegment(seg.segment)) {
+        breaks.push(seg.index);
+        wordBreakSet.add(seg.index);
+        continue;
+      }
+
+      // Otherwise break at segment boundaries (UAX #29 word boundaries).
+      breaks.push(seg.index + seg.segment.length);
+    }
   }
 
-  const segmenter = getSegmenter(locale, "word");
-  for (const seg of segmenter.segment(text)) {
-    if (!WHITESPACE_RE.test(seg.segment)) continue;
-    if (!isBreakableWhitespaceSegment(seg.segment)) continue;
-    breaks.push(seg.index);
-    wordBreakSet.add(seg.index);
-  }
-
+  // Ensure final break and make monotonic.
   breaks.push(text.length);
-  return { breaks, wordBreakSet };
+  breaks.sort((a, b) => a - b);
+  const deduped = [];
+  for (let i = 0; i < breaks.length; i++) {
+    if (i === 0 || breaks[i] !== breaks[i - 1]) deduped.push(breaks[i]);
+  }
+  return { breaks: deduped, wordBreakSet };
 }
 
 /**
