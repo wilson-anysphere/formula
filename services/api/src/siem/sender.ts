@@ -182,8 +182,18 @@ export async function sendSiemBatch(
             ? (err as RetriableError)
             : Object.assign(new Error(`Failed to POST SIEM batch: ${String(err)}`), { retriable: true });
 
-        // Treat network/timeouts as retriable.
-        if (typeof error.retriable !== "boolean") error.retriable = true;
+        // Treat network/timeouts as retriable, but preserve explicit non-retriable
+        // errors surfaced via `error.cause` (e.g. certificate pinning failures).
+        if (typeof error.retriable !== "boolean") {
+          const cause = (error as any).cause as unknown;
+          const causeRetriable =
+            cause && typeof cause === "object" && "retriable" in cause ? (cause as any).retriable : undefined;
+          if (typeof causeRetriable === "boolean") {
+            error.retriable = causeRetriable;
+          } else {
+            error.retriable = true;
+          }
+        }
         throw error;
       }
     },

@@ -34,6 +34,7 @@ describe("TLS pinning helpers", () => {
       const err = check("example.com", { raw } as any);
 
       expect(err).toBeInstanceOf(Error);
+      expect((err as any).retriable).toBe(false);
       expect((err as Error).message).toContain("fingerprint mismatch");
       expect(fingerprint).not.toBe("00".repeat(32));
     } finally {
@@ -127,6 +128,7 @@ describe("fetchWithOrgTls", () => {
     await expect(res).rejects.toThrow();
 
     await res.catch((err: any) => {
+      expect(err?.cause?.retriable).toBe(false);
       const message =
         typeof err?.cause?.message === "string"
           ? err.cause.message
@@ -137,4 +139,3 @@ describe("fetchWithOrgTls", () => {
     });
   });
 });
-

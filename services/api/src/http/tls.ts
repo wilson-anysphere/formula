@@ -66,11 +66,15 @@ export function createPinnedCheckServerIdentity({ pins }: { pins: string[] }): C
         : null;
 
     if (!fingerprint) {
-      return new Error("Certificate pinning failed: certificate fingerprint not available");
+      const err = new Error("Certificate pinning failed: certificate fingerprint not available");
+      (err as { retriable?: boolean }).retriable = false;
+      return err;
     }
 
     if (!normalizedPins.includes(normalizeFingerprintHex(fingerprint))) {
-      return new Error("Certificate pinning failed: server certificate fingerprint mismatch");
+      const err = new Error("Certificate pinning failed: server certificate fingerprint mismatch");
+      (err as { retriable?: boolean }).retriable = false;
+      return err;
     }
 
     return undefined;
