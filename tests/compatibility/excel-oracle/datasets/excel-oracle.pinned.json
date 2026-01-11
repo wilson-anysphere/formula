@@ -10,7 +10,7 @@
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
     "sha256": "e8bfcab0a0113829c840b2c9461b33dd33b996340a9b88a232c1405a7c77ddf7",
-    "count": 397
+    "count": 398
   },
   "results": [
     {
@@ -3952,6 +3952,35 @@
       },
       "address": "C1",
       "displayText": "#NUM!"
+    },
+    {
+      "caseId": "spill_range_a18cd22aa987",
+      "outputCell": "C1",
+      "result": {
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 1.0
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 2.0
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 3.0
+            }
+          ]
+        ]
+      },
+      "address": "C1",
+      "displayText": "1"
     },
     {
       "caseId": "err_div0_f906f10b09bd",
