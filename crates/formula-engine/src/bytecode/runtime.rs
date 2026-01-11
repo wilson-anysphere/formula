@@ -742,7 +742,11 @@ fn parse_criteria_str(s: &str) -> Option<NumericCriteria> {
     } else {
         (CmpOp::Eq, s)
     };
-    let rhs: f64 = rest.trim().parse().ok()?;
+    let rhs_str = rest.trim();
+    if rhs_str.is_empty() {
+        return None;
+    }
+    let rhs = parse_number_from_text(rhs_str).ok()?;
     Some(NumericCriteria::new(op, rhs))
 }
 

@@ -4332,7 +4332,7 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
         if rhs.is_empty() {
             return false;
         }
-        rhs.parse::<f64>().is_ok()
+        crate::value::parse_number(rhs, crate::value::NumberLocale::en_us()).is_ok()
     }
 
     match expr {
