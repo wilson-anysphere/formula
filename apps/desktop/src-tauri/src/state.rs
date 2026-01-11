@@ -314,8 +314,8 @@ impl AppState {
 
         // Best effort: rebuild and calculate. Unsupported formulas become #NAME? via the engine.
         let _ = self.rebuild_engine_from_workbook();
-        self.engine.recalculate();
-        let _ = self.refresh_computed_values();
+        let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+        let _ = self.refresh_computed_values_from_recalc_changes(&recalc_changes);
 
         self.dirty = false;
         self.undo_stack.clear();
@@ -1659,6 +1659,13 @@ impl AppState {
             for ((row, col), cell) in sheet.cells_iter() {
                 let addr = coord_to_a1(row, col);
                 if let Some(formula) = &cell.formula {
+                    if cell.computed_value != CellScalar::Empty {
+                        let _ = self.engine.set_cell_value(
+                            sheet_name,
+                            &addr,
+                            scalar_to_engine_value(&cell.computed_value),
+                        );
+                    }
                     if self
                         .engine
                         .set_cell_formula(sheet_name, &addr, formula)
@@ -2024,6 +2031,7 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
         EngineValue::Bool(b) => CellScalar::Bool(b),
         EngineValue::Error(e) => CellScalar::Error(e.as_code().to_string()),
         EngineValue::Array(arr) => engine_value_to_scalar(arr.top_left()),
+        EngineValue::Lambda(_) => CellScalar::Text("<LAMBDA>".to_string()),
         EngineValue::Spill { .. } => CellScalar::Error("#SPILL!".to_string()),
     }
 }
