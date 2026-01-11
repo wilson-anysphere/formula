@@ -159,3 +159,14 @@ fn xor_handles_scalar_vs_range_semantics() {
     assert_eq!(sheet.eval("=XOR(A5, TRUE)"), Value::Error(ErrorKind::Div0));
     assert_eq!(sheet.eval("=XOR({TRUE,FALSE,TRUE})"), Value::Bool(false));
 }
+
+#[test]
+fn xor_dedupes_cells_in_reference_unions() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", true);
+    sheet.set("A2", true);
+    sheet.set("A3", false);
+
+    // A2 appears in both ranges; XOR should count it once (like AND/OR's union behavior).
+    assert_eq!(sheet.eval("=XOR((A1:A2,A2:A3))"), Value::Bool(false));
+}
