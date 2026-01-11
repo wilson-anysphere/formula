@@ -11,6 +11,11 @@ if [ -z "${CARGO_HOME:-}" ]; then
   export CARGO_HOME="$ROOT_DIR/target/cargo-home"
 fi
 mkdir -p "$CARGO_HOME"
+mkdir -p "$CARGO_HOME/bin"
+case ":$PATH:" in
+  *":$CARGO_HOME/bin:"*) ;;
+  *) export PATH="$CARGO_HOME/bin:$PATH" ;;
+esac
 
 REPORT_DIR="${REPORT_DIR:-security-report}"
 ALLOWLIST_CARGO="security/allowlist/cargo-audit.txt"

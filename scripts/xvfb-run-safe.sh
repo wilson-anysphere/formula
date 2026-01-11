@@ -22,6 +22,11 @@ if [ -z "${CARGO_HOME:-}" ]; then
   export CARGO_HOME="$REPO_ROOT/target/cargo-home"
 fi
 mkdir -p "$CARGO_HOME"
+mkdir -p "$CARGO_HOME/bin"
+case ":$PATH:" in
+  *":$CARGO_HOME/bin:"*) ;;
+  *) export PATH="$CARGO_HOME/bin:$PATH" ;;
+esac
 
 # Find an available display number
 find_display() {

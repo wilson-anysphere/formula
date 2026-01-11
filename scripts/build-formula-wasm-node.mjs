@@ -8,6 +8,16 @@ const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
 const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
 mkdirSync(cargoHome, { recursive: true });
+const cargoBinDir = path.join(cargoHome, "bin");
+mkdirSync(cargoBinDir, { recursive: true });
+if (process.env.PATH) {
+  const pathEntries = process.env.PATH.split(path.delimiter);
+  if (!pathEntries.includes(cargoBinDir)) {
+    process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`;
+  }
+} else {
+  process.env.PATH = cargoBinDir;
+}
 
 const outDir = path.join(crateDir, "pkg-node");
 const outPackageJsonPath = path.join(outDir, "package.json");

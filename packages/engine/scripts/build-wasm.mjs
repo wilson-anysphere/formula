@@ -13,6 +13,11 @@ const repoRoot = path.resolve(__dirname, "..", "..", "..");
 const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
 await mkdir(cargoHome, { recursive: true });
 const childEnv = { ...process.env, CARGO_HOME: cargoHome };
+const cargoBinDir = path.join(cargoHome, "bin");
+await mkdir(cargoBinDir, { recursive: true });
+if (!childEnv.PATH?.split(path.delimiter).includes(cargoBinDir)) {
+  childEnv.PATH = childEnv.PATH ? `${cargoBinDir}${path.delimiter}${childEnv.PATH}` : cargoBinDir;
+}
 
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
 const coreDir = path.join(repoRoot, "crates", "formula-core");
