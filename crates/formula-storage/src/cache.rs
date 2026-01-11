@@ -1,7 +1,7 @@
 use crate::storage::{CellChange, CellRange, Result as StorageResult, Storage};
 use crate::types::{CellData, CellSnapshot, CellValue, SheetMeta, Style};
 use lru::LruCache;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -435,8 +435,17 @@ impl MemoryManager {
     ) -> StorageResult<()> {
         if let Some(existing) = inner.pages.get_mut(&key) {
             let before_page_bytes = existing.bytes;
-            // Merge without overwriting locally modified cells.
+            let dirty_cells: HashSet<(i64, i64)> = existing
+                .pending_changes
+                .iter()
+                .map(|sc| (sc.change.row, sc.change.col))
+                .collect();
+
+            // Merge without overwriting locally modified cells (including deletes).
             for (coord, snapshot) in page.cells {
+                if dirty_cells.contains(&coord) {
+                    continue;
+                }
                 existing.cells.entry(coord).or_insert(snapshot);
             }
             existing.bytes = PAGE_BASE_OVERHEAD_BYTES;
@@ -702,5 +711,93 @@ fn estimate_cell_value_bytes(value: &CellValue) -> usize {
             bytes
         }
         CellValue::Spill(_) | CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Empty => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_merge_respects_pending_deletions() {
+        let storage = Storage::open_in_memory().expect("open storage");
+        let workbook = storage
+            .create_workbook("Book", None)
+            .expect("create workbook");
+        let sheet = storage
+            .create_sheet(workbook.id, "Sheet", 0, None)
+            .expect("create sheet");
+
+        storage
+            .apply_cell_changes(&[CellChange {
+                sheet_id: sheet.id,
+                row: 0,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Number(1.0),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            }])
+            .expect("seed cell");
+
+        let memory = MemoryManager::new(
+            storage.clone(),
+            MemoryManagerConfig {
+                max_memory_bytes: 1024 * 1024,
+                max_pages: 64,
+                eviction_watermark: 1.0,
+                rows_per_page: 64,
+                cols_per_page: 64,
+            },
+        );
+
+        // Load the page, then delete a cell so we have a pending tombstone.
+        memory
+            .load_viewport(sheet.id, CellRange::new(0, 0, 0, 0))
+            .expect("load viewport");
+        memory
+            .record_change(CellChange {
+                sheet_id: sheet.id,
+                row: 0,
+                col: 0,
+                data: CellData::empty(),
+                user_id: None,
+            })
+            .expect("record deletion");
+
+        // Simulate a concurrent load that read the old value from SQLite (which
+        // still contains the cell because we haven't flushed yet).
+        let key = memory.page_key_for_cell(sheet.id, 0, 0);
+        let loaded_cells = storage
+            .load_cells_in_range(sheet.id, memory.page_range(key))
+            .expect("load cells");
+        let mut cells = HashMap::new();
+        for (coord, snapshot) in loaded_cells {
+            cells.insert(coord, snapshot);
+        }
+        let page = PageData::new_loaded(cells);
+
+        {
+            let mut inner = memory.inner.lock().expect("memory manager mutex poisoned");
+            memory
+                .insert_page_locked(&mut inner, key, page)
+                .expect("merge insert");
+
+            let page = inner.pages.get(&key).expect("page cached");
+            assert!(
+                !page.cells.contains_key(&(0, 0)),
+                "merge should not resurrect deleted cells"
+            );
+            assert!(
+                page.pending_changes
+                    .iter()
+                    .any(|sc| sc.change.row == 0
+                        && sc.change.col == 0
+                        && sc.change.data.is_truly_empty()),
+                "expected pending deletion to remain"
+            );
+        }
     }
 }
