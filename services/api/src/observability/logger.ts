@@ -17,6 +17,8 @@ const LOG_REDACTIONS = [
   "req.body.sessionToken",
   "req.body.apiKey",
   "req.body.samlAssertion",
+  "req.body.SAMLResponse",
+  "req.body.samlResponse",
   "req.body.assertion",
   "req.body.access_token",
   "req.body.refresh_token",

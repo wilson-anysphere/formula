@@ -1,5 +1,6 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import formbody from "@fastify/formbody";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { AppConfig } from "./config";
@@ -14,6 +15,7 @@ import { registerDocRoutes } from "./routes/docs";
 import { registerDlpRoutes } from "./routes/dlp";
 import { registerInternalRoutes } from "./routes/internal";
 import { registerOrgRoutes } from "./routes/orgs";
+import { registerSamlProviderRoutes } from "./routes/samlProviders";
 import { registerScimAdminRoutes } from "./routes/scimAdmin";
 import { registerScimRoutes } from "./routes/scim";
 import { registerSiemRoutes } from "./routes/siem";
@@ -44,6 +46,8 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerSecurityHeaders(app);
 
   app.register(cookie);
+  // Needed for SAML IdP POST bindings (application/x-www-form-urlencoded).
+  app.register(formbody);
 
   const allowedOrigins = new Set<string>(options.config.corsAllowedOrigins ?? []);
   const normalizeOrigin = (value: string): string | null => {
@@ -55,7 +59,6 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       return null;
     }
   };
-
   app.register(cors, {
     origin(origin, cb) {
       if (!origin) return cb(null, false);
@@ -71,6 +74,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   registerAuthRoutes(app);
   registerOrgRoutes(app);
+  registerSamlProviderRoutes(app);
   registerApiKeyRoutes(app);
   registerScimAdminRoutes(app);
   registerScimRoutes(app);

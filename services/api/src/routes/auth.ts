@@ -6,6 +6,7 @@ import { authenticateApiKey } from "../auth/apiKeys";
 import { generateTotpSecret, buildOtpAuthUrl, verifyTotpCode } from "../auth/mfa";
 import { oidcCallback, oidcStart } from "../auth/oidc/oidc";
 import { hashPassword, verifyPassword } from "../auth/password";
+import { samlCallback, samlStart } from "../auth/saml/saml";
 import { createSession, lookupSessionByToken, revokeSession } from "../auth/sessions";
 import { withTransaction } from "../db/tx";
 import { TokenBucketRateLimiter, sha256Hex } from "../http/rateLimit";
@@ -97,6 +98,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   const loginEmailLimiter = new TokenBucketRateLimiter({ capacity: 5, refillMs: 60_000 });
   const registerIpLimiter = new TokenBucketRateLimiter({ capacity: 20, refillMs: 60_000 });
   const oidcIpLimiter = new TokenBucketRateLimiter({ capacity: 30, refillMs: 60_000 });
+  const samlIpLimiter = new TokenBucketRateLimiter({ capacity: 30, refillMs: 60_000 });
 
   const rateLimited = (reply: FastifyReply, retryAfterMs: number) => {
     return reply
@@ -544,11 +546,36 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     }
   };
 
-  app.get("/auth/oidc/:orgId/:provider/start", { preHandler: oidcRateLimitByIp("/auth/oidc/:orgId/:provider/start") }, oidcStart);
+  const samlRateLimitByIp = (route: string) => async (request: FastifyRequest, reply: FastifyReply) => {
+    const ip = getClientIp(request) ?? "unknown";
+    const limited = samlIpLimiter.take(ip);
+    if (!limited.ok) {
+      app.metrics.rateLimitedTotal.inc({ route, reason: "ip" });
+      return rateLimited(reply, limited.retryAfterMs);
+    }
+  };
+
+  app.get(
+    "/auth/oidc/:orgId/:provider/start",
+    { preHandler: oidcRateLimitByIp("/auth/oidc/:orgId/:provider/start") },
+    oidcStart
+  );
   app.get(
     "/auth/oidc/:orgId/:provider/callback",
     { preHandler: oidcRateLimitByIp("/auth/oidc/:orgId/:provider/callback") },
     oidcCallback
+  );
+
+  // SAML 2.0 SSO: per-organization providers.
+  app.get(
+    "/auth/saml/:orgId/:provider/start",
+    { preHandler: samlRateLimitByIp("/auth/saml/:orgId/:provider/start") },
+    samlStart
+  );
+  app.post(
+    "/auth/saml/:orgId/:provider/callback",
+    { preHandler: samlRateLimitByIp("/auth/saml/:orgId/:provider/callback") },
+    samlCallback
   );
 }
 

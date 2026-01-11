@@ -53,6 +53,8 @@ Enterprise adoption requires meeting the highest bars for security, compliance, 
 
 ### SSO Integration
 
+See also: [docs/saml.md](./saml.md)
+
 ```typescript
 interface SSOConfig {
   provider: "saml" | "oidc";
