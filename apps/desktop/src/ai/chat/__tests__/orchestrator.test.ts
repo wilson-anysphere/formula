@@ -182,6 +182,7 @@ describe("ai chat orchestrator", () => {
     expect(result.toolResults.length).toBe(1);
     expect(result.toolResults[0]?.ok).toBe(true);
     expect(controller.getCell("Sheet1", "A1").value).toBe(99);
+    expect(result.context.retrievedRanges).toContain("Sheet1!A1:B2");
 
     expect(onApprovalRequired).toHaveBeenCalledTimes(1);
     expect(onToolCall).toHaveBeenCalledTimes(1);
@@ -226,6 +227,7 @@ describe("ai chat orchestrator", () => {
     expect(controller.getCell("Sheet1", "A1").value).toBe(99);
     expect(result.context.promptContext).toContain("Workbook summary");
     expect(result.context.retrievedChunkIds.length).toBeGreaterThan(0);
+    expect(result.context.retrievedRanges).toContain("Sheet1!A1:B2");
 
     const firstRequest = mock.requests[0];
     expect(firstRequest.messages?.[0]?.content).toContain("WORKBOOK_CONTEXT");

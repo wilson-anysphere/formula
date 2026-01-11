@@ -7,6 +7,7 @@ import { ContextManager } from "../../../../../packages/ai-context/src/contextMa
 
 import { HashEmbedder } from "../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
 import { InMemoryVectorStore } from "../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
+import { rectToA1 } from "../../../../../packages/ai-rag/src/workbook/rect.js";
 
 import type { ToolExecutionResult } from "../../../../../packages/ai-tools/src/executor/tool-executor.js";
 import type {
@@ -55,6 +56,7 @@ export interface SendAiChatMessageResult {
     workbookId: string;
     promptContext: string;
     retrievedChunkIds: string[];
+    retrievedRanges: string[];
     retrieved: unknown[];
     indexStats?: unknown;
     tokenBudgetTokens?: number;
@@ -233,6 +235,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           workbookId: options.workbookId,
           promptContext: workbookContext.promptContext ?? "",
           retrievedChunkIds: (workbookContext.retrieved ?? []).map((c: any) => c.id).filter(Boolean),
+          retrievedRanges: extractRetrievedRanges(workbookContext.retrieved ?? []),
           retrieved: workbookContext.retrieved ?? [],
           indexStats: workbookContext.indexStats,
           tokenBudgetTokens: (contextManager as any)?.tokenBudgetTokens
@@ -350,6 +353,30 @@ function sanitizeHistory(history: LLMMessage[] | undefined): LLMMessage[] {
   // The orchestrator always injects its own system prompt (including context).
   // Drop any system messages that callers may have included.
   return history.filter((m) => m.role !== "system");
+}
+
+function extractRetrievedRanges(retrieved: any[]): string[] {
+  const out: string[] = [];
+  for (const chunk of retrieved) {
+    const meta = chunk?.metadata;
+    if (!meta) continue;
+    const sheetName = typeof meta.sheetName === "string" ? meta.sheetName : null;
+    const rect = meta.rect;
+    if (!sheetName || !rect) continue;
+    try {
+      const range = rectToA1(rect);
+      out.push(`${formatSheetNameForA1(sheetName)}!${range}`);
+    } catch {
+      // Ignore malformed rect metadata.
+    }
+  }
+  return out;
+}
+
+function formatSheetNameForA1(sheetName: string): string {
+  // Quote when needed (Excel style): 'Sheet Name'!A1
+  if (/^[A-Za-z0-9_]+$/.test(sheetName)) return sheetName;
+  return `'${sheetName.replace(/'/g, "''")}'`;
 }
 
 function createDefaultContextManager(options: AiChatOrchestratorOptions): ContextManager {
