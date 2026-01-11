@@ -144,7 +144,7 @@ fn parse_pivot_cache_definition_part(path: &str, xml: &[u8]) -> Result<PivotCach
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
-            Event::Start(e) => {
+            Event::Start(e) | Event::Empty(e) => {
                 if e.local_name().as_ref() == b"pivotCacheDefinition" {
                     for attr in e.attributes().with_checks(false) {
                         let attr = attr.map_err(quick_xml::Error::from)?;
@@ -225,6 +225,11 @@ mod tests {
         let pivots = pkg.pivots().expect("parse pivots");
         assert_eq!(pivots.pivot_tables.len(), 1);
         assert_eq!(pivots.pivot_tables[0].name.as_deref(), Some("PivotTable1"));
+        assert_eq!(pivots.pivot_cache_definitions.len(), 1);
+        assert_eq!(
+            pivots.pivot_cache_definitions[0].fields,
+            vec!["Region".to_string(), "Product".to_string(), "Sales".to_string()]
+        );
 
         let original_parts: Vec<(String, Vec<u8>)> = pivots
             .all_part_paths()
