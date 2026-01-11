@@ -223,6 +223,8 @@ function findDynamicImportSpecifier(tsSource) {
   }
 
   // Best-effort fallback (only used in minimal environments without TypeScript).
+  const literalImportMatch = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/m.exec(tsSource);
+  if (literalImportMatch) return literalImportMatch[2];
   if (/\bimport\s*\(/.test(tsSource)) return "<dynamic>";
   return null;
 }

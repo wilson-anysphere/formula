@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ScriptRuntime, Workbook } from "@formula/scripting/node";
+import { ScriptRuntime, Workbook } from "../packages/scripting/src/node.js";
 
 test("scripting: script-body is not treated as module when export appears only in a comment", async () => {
   const workbook = new Workbook();
@@ -28,4 +28,3 @@ test("scripting: module script without default export fails with clear error", a
   assert.ok(result.error, "expected module script to fail without default export");
   assert.match(result.error.message, /export.*default|default function|must export/i);
 });
-

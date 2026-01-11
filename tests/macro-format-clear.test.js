@@ -4,7 +4,7 @@ import test from "node:test";
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { MacroRecorder, generateTypeScriptMacro } from "../apps/desktop/src/macro-recorder/index.js";
 import { DocumentControllerWorkbookAdapter } from "../apps/desktop/src/scripting/documentControllerWorkbookAdapter.js";
-import { ScriptRuntime, Workbook } from "@formula/scripting/node";
+import { ScriptRuntime, Workbook } from "../packages/scripting/src/node.js";
 
 test("macro recorder output can clear formatting (in-memory workbook)", async () => {
   const workbook = new Workbook();
