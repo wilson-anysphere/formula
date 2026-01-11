@@ -86,3 +86,17 @@ test("Yjs doc adapter restore preserves Y.Text formatting when restoring text ro
   assert.equal(restored.toString(), "hello");
   assert.deepEqual(restored.toDelta(), [{ insert: "hello", attributes: { bold: true } }]);
 });
+
+test("Yjs doc adapter restore preserves Y.Text embeds when restoring text roots", () => {
+  const source = new Y.Doc();
+  const note = source.getText("note");
+  note.insertEmbed(0, { type: "emoji", value: "🙂" });
+  const snapshot = Y.encodeStateAsUpdate(source);
+
+  const target = new Y.Doc();
+  const adapter = createYjsSpreadsheetDocAdapter(target);
+  adapter.applyState(snapshot);
+
+  const restored = target.getText("note");
+  assert.deepEqual(restored.toDelta(), [{ insert: { type: "emoji", value: "🙂" } }]);
+});

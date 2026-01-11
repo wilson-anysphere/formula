@@ -44,11 +44,13 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
     if (mapSize > 0) return "map";
     if (hasStart) {
       // Distinguish Y.Text from Y.Array: Text content is represented using
-      // ContentString/ContentFormat nodes (e.g. `{ str }` or `{ key, value }`).
+      // ContentString/ContentFormat/ContentEmbed nodes (e.g. `{ str }`,
+      // `{ key, value }`, or `{ embed }`).
       const content = placeholder?._start?.content;
       if (content && typeof content === "object") {
         if ("str" in content) return "text";
         if ("key" in content && "value" in content) return "text";
+        if ("embed" in content) return "text";
       }
       return "array";
     }
