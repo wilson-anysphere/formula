@@ -28,6 +28,7 @@ fixtures/xlsx/
 
 - `basic/`:
   - `basic.xlsx` - minimal numeric + inline string.
+  - `bool-error.xlsx` - boolean + error cell types.
   - `shared-strings.xlsx` - uses `xl/sharedStrings.xml`.
   - `multi-sheet.xlsx` - 2 worksheets.
   - `comments.xlsx` - legacy comments parts.

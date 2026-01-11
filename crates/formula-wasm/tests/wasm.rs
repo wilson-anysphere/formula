@@ -78,22 +78,15 @@ fn recalculate_returns_empty_when_no_cells_changed() {
 #[wasm_bindgen_test]
 fn recalculate_reports_lambda_values_as_placeholder_text() {
     let mut wb = WasmWorkbook::new();
-    wb.set_cell(
-        "A1".to_string(),
-        JsValue::from_str("=LAMBDA(x,x)"),
-        None,
-    )
-    .unwrap();
+    wb.set_cell("A1".to_string(), JsValue::from_str("=LAMBDA(x,x)"), None)
+        .unwrap();
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].sheet, DEFAULT_SHEET);
     assert_eq!(changes[0].address, "A1");
-    assert_eq!(
-        changes[0].value,
-        JsonValue::String("<LAMBDA>".to_string())
-    );
+    assert_eq!(changes[0].value, JsonValue::String("<LAMBDA>".to_string()));
 
     let cell_js = wb.get_cell("A1".to_string(), None).unwrap();
     let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
@@ -151,10 +144,18 @@ fn recalculate_orders_changes_by_sheet_row_col() {
     wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
         .unwrap();
 
-    wb.set_cell("A1".to_string(), JsValue::from_f64(10.0), Some("Sheet2".to_string()))
-        .unwrap();
-    wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), Some("Sheet2".to_string()))
-        .unwrap();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_f64(10.0),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
+    wb.set_cell(
+        "A2".to_string(),
+        JsValue::from_str("=A1*2"),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
 
     // Establish initial formula values.
     wb.recalculate(None).unwrap();
@@ -162,8 +163,12 @@ fn recalculate_orders_changes_by_sheet_row_col() {
     // Dirty both sheets before a single recalc tick so ordering is deterministic.
     wb.set_cell("A1".to_string(), JsValue::from_f64(2.0), None)
         .unwrap();
-    wb.set_cell("A1".to_string(), JsValue::from_f64(11.0), Some("Sheet2".to_string()))
-        .unwrap();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_f64(11.0),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
@@ -212,10 +217,18 @@ fn recalculate_does_not_filter_changes_by_sheet_argument() {
     wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
         .unwrap();
 
-    wb.set_cell("A1".to_string(), JsValue::from_f64(10.0), Some("Sheet2".to_string()))
-        .unwrap();
-    wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), Some("Sheet2".to_string()))
-        .unwrap();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_f64(10.0),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
+    wb.set_cell(
+        "A2".to_string(),
+        JsValue::from_str("=A1*2"),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
 
     wb.recalculate(None).unwrap();
 
@@ -223,8 +236,12 @@ fn recalculate_does_not_filter_changes_by_sheet_argument() {
     // include all sheets so the JS cache remains coherent across sheet switches.
     wb.set_cell("A1".to_string(), JsValue::from_f64(2.0), None)
         .unwrap();
-    wb.set_cell("A1".to_string(), JsValue::from_f64(11.0), Some("Sheet2".to_string()))
-        .unwrap();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_f64(11.0),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
 
     let changes_js = wb.recalculate(Some("sHeEt1".to_string())).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
@@ -349,6 +366,36 @@ fn from_xlsx_bytes_loads_basic_fixture() {
     let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
     assert_eq!(b1.input, json!("Hello"));
     assert_eq!(b1.value, json!("Hello"));
+}
+
+#[wasm_bindgen_test]
+fn from_xlsx_bytes_imports_bool_and_error_cells() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/bool-error.xlsx"
+    ));
+
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    // No formulas → no recalculation deltas.
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert!(changes.is_empty());
+
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_eq!(a1.input, json!(true));
+    assert_eq!(a1.value, json!(true));
+
+    let a2_js = wb.get_cell("A2".to_string(), None).unwrap();
+    let a2: CellData = serde_wasm_bindgen::from_value(a2_js).unwrap();
+    assert_eq!(a2.input, json!(false));
+    assert_eq!(a2.value, json!(false));
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.input, json!("#DIV/0!"));
+    assert_eq!(b1.value, json!("#DIV/0!"));
 }
 
 #[wasm_bindgen_test]
@@ -497,7 +544,9 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
 
     let exported = wb.to_json().unwrap();
     let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
-    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"].as_object().unwrap();
+    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"]
+        .as_object()
+        .unwrap();
     assert!(!cells.contains_key("A1"));
 }
 
@@ -519,7 +568,9 @@ fn from_json_treats_null_cells_as_absent() {
 
     let exported = wb.to_json().unwrap();
     let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
-    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"].as_object().unwrap();
+    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"]
+        .as_object()
+        .unwrap();
 
     // JSON import should not store explicit `null` cells.
     assert!(!cells.contains_key("A1"));
@@ -553,6 +604,8 @@ fn set_range_clears_null_entries() {
 
     let exported = wb.to_json().unwrap();
     let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
-    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"].as_object().unwrap();
+    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"]
+        .as_object()
+        .unwrap();
     assert!(!cells.contains_key("A1"));
 }

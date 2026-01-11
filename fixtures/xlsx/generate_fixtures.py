@@ -546,6 +546,22 @@ def sheet_shared_strings_xml() -> str:
 """
 
 
+def sheet_bool_error_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="b"><v>1</v></c>
+      <c r="B1" t="e"><v>#DIV/0!</v></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="b"><v>0</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
 def sheet_varied_styles_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1031,6 +1047,11 @@ def main() -> None:
     write_xlsx(
         ROOT / "basic" / "basic.xlsx",
         [sheet_basic_xml()],
+        styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "basic" / "bool-error.xlsx",
+        [sheet_bool_error_xml()],
         styles_minimal_xml(),
     )
     write_xlsx(
