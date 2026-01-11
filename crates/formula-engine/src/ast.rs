@@ -41,6 +41,14 @@ pub struct ParseError {
     pub span: Span,
 }
 
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (at {}..{})", self.message, self.span.start, self.span.end)
+    }
+}
+
+impl std::error::Error for ParseError {}
+
 impl ParseError {
     #[must_use]
     pub fn new(message: impl Into<String>, span: Span) -> Self {
@@ -63,6 +71,14 @@ impl ParseError {
 pub struct SerializeError {
     pub message: String,
 }
+
+impl std::fmt::Display for SerializeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for SerializeError {}
 
 impl SerializeError {
     #[must_use]
@@ -112,9 +128,16 @@ impl LocaleConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReferenceStyle {
+    A1,
+    R1C1,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParseOptions {
     pub locale: LocaleConfig,
+    pub reference_style: ReferenceStyle,
     /// If provided, normalize relative A1 references into row/col offsets.
     pub normalize_relative_to: Option<CellAddr>,
 }
@@ -123,6 +146,7 @@ impl Default for ParseOptions {
     fn default() -> Self {
         Self {
             locale: LocaleConfig::en_us(),
+            reference_style: ReferenceStyle::A1,
             normalize_relative_to: None,
         }
     }
@@ -131,6 +155,7 @@ impl Default for ParseOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SerializeOptions {
     pub locale: LocaleConfig,
+    pub reference_style: ReferenceStyle,
     /// When `true`, serialize functions with `_xlfn.` prefix if present.
     pub include_xlfn_prefix: bool,
     /// Origin cell used to render relative offsets.
@@ -143,6 +168,7 @@ impl Default for SerializeOptions {
     fn default() -> Self {
         Self {
             locale: LocaleConfig::en_us(),
+            reference_style: ReferenceStyle::A1,
             include_xlfn_prefix: false,
             origin: None,
             omit_equals: false,
@@ -529,6 +555,41 @@ impl Coord {
             }
         }
     }
+
+    fn fmt_r1c1(
+        &self,
+        out: &mut String,
+        axis: char,
+        origin: Option<u32>,
+    ) -> Result<(), SerializeError> {
+        match self {
+            Coord::A1 { index, abs: true } => {
+                out.push(axis);
+                out.push_str(&((*index + 1).to_string()));
+            }
+            Coord::A1 { index, abs: false } => {
+                let origin = origin.ok_or_else(|| {
+                    SerializeError::new("Cannot render relative reference without an origin cell")
+                })?;
+                let delta = *index as i32 - origin as i32;
+                out.push(axis);
+                if delta != 0 {
+                    out.push('[');
+                    out.push_str(&delta.to_string());
+                    out.push(']');
+                }
+            }
+            Coord::Offset(delta) => {
+                out.push(axis);
+                if *delta != 0 {
+                    out.push('[');
+                    out.push_str(&delta.to_string());
+                    out.push(']');
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -561,18 +622,26 @@ impl CellRef {
     fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
         fmt_ref_prefix(out, &self.workbook, &self.sheet);
 
-        let origin = opts.origin;
-        let (col_idx, col_abs) = self.col.to_a1_index(origin.map(|o| o.col))?;
-        let (row_idx, row_abs) = self.row.to_a1_index(origin.map(|o| o.row))?;
+        match opts.reference_style {
+            ReferenceStyle::A1 => {
+                let origin = opts.origin;
+                let (col_idx, col_abs) = self.col.to_a1_index(origin.map(|o| o.col))?;
+                let (row_idx, row_abs) = self.row.to_a1_index(origin.map(|o| o.row))?;
 
-        if col_abs {
-            out.push('$');
+                if col_abs {
+                    out.push('$');
+                }
+                out.push_str(&col_to_a1(col_idx));
+                if row_abs {
+                    out.push('$');
+                }
+                out.push_str(&(row_idx + 1).to_string());
+            }
+            ReferenceStyle::R1C1 => {
+                self.row.fmt_r1c1(out, 'R', opts.origin.map(|o| o.row))?;
+                self.col.fmt_r1c1(out, 'C', opts.origin.map(|o| o.col))?;
+            }
         }
-        out.push_str(&col_to_a1(col_idx));
-        if row_abs {
-            out.push('$');
-        }
-        out.push_str(&(row_idx + 1).to_string());
         Ok(())
     }
 }
@@ -613,11 +682,18 @@ impl ColRef {
 
     fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
         fmt_ref_prefix(out, &self.workbook, &self.sheet);
-        let (col_idx, col_abs) = self.col.to_a1_index(opts.origin.map(|o| o.col))?;
-        if col_abs {
-            out.push('$');
+        match opts.reference_style {
+            ReferenceStyle::A1 => {
+                let (col_idx, col_abs) = self.col.to_a1_index(opts.origin.map(|o| o.col))?;
+                if col_abs {
+                    out.push('$');
+                }
+                out.push_str(&col_to_a1(col_idx));
+            }
+            ReferenceStyle::R1C1 => {
+                self.col.fmt_r1c1(out, 'C', opts.origin.map(|o| o.col))?;
+            }
         }
-        out.push_str(&col_to_a1(col_idx));
         Ok(())
     }
 }
@@ -644,11 +720,18 @@ impl RowRef {
 
     fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
         fmt_ref_prefix(out, &self.workbook, &self.sheet);
-        let (row_idx, row_abs) = self.row.to_a1_index(opts.origin.map(|o| o.row))?;
-        if row_abs {
-            out.push('$');
+        match opts.reference_style {
+            ReferenceStyle::A1 => {
+                let (row_idx, row_abs) = self.row.to_a1_index(opts.origin.map(|o| o.row))?;
+                if row_abs {
+                    out.push('$');
+                }
+                out.push_str(&(row_idx + 1).to_string());
+            }
+            ReferenceStyle::R1C1 => {
+                self.row.fmt_r1c1(out, 'R', opts.origin.map(|o| o.row))?;
+            }
         }
-        out.push_str(&(row_idx + 1).to_string());
         Ok(())
     }
 }

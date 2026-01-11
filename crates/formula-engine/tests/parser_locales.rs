@@ -1,9 +1,11 @@
-use formula_engine::{lex, LocaleConfig, TokenKind};
+use formula_engine::{lex, LocaleConfig, ParseOptions, TokenKind};
 
 #[test]
 fn lex_en_us_decimal_and_arg_separators() {
     let locale = LocaleConfig::en_us();
-    let tokens = lex("SUM(1.23,4.56)", &locale).unwrap();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex("SUM(1.23,4.56)", &opts).unwrap();
 
     assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
     assert!(matches!(tokens[1].kind, TokenKind::LParen));
@@ -17,7 +19,9 @@ fn lex_en_us_decimal_and_arg_separators() {
 #[test]
 fn lex_de_de_decimal_and_arg_separators() {
     let locale = LocaleConfig::de_de();
-    let tokens = lex("SUM(1,23;4,56)", &locale).unwrap();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex("SUM(1,23;4,56)", &opts).unwrap();
 
     assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "SUM"));
     assert!(matches!(tokens[1].kind, TokenKind::LParen));
@@ -31,7 +35,9 @@ fn lex_de_de_decimal_and_arg_separators() {
 #[test]
 fn lex_de_de_array_separators() {
     let locale = LocaleConfig::de_de();
-    let tokens = lex("{1\\2;3\\4}", &locale).unwrap();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex("{1\\2;3\\4}", &opts).unwrap();
 
     assert!(matches!(tokens[0].kind, TokenKind::LBrace));
     assert!(matches!(tokens[1].kind, TokenKind::Number(ref n) if n == "1"));

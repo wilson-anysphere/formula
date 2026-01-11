@@ -168,12 +168,14 @@ fn permute_row_properties(
 fn rewrite_formula_for_move(formula: &str, from: CellAddr, to: CellAddr) -> Option<String> {
     let opts = ParseOptions {
         locale: LocaleConfig::en_us(),
+        reference_style: crate::ReferenceStyle::A1,
         normalize_relative_to: Some(from),
     };
     let ast = parse_formula(formula, opts).ok()?;
 
     let out_opts = SerializeOptions {
         locale: LocaleConfig::en_us(),
+        reference_style: crate::ReferenceStyle::A1,
         include_xlfn_prefix: true,
         origin: Some(to),
         omit_equals: false,

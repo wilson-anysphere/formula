@@ -2,8 +2,8 @@
 
 use crate::{
     ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellRef, ColRef, Coord, Expr, FunctionCall,
-    FunctionName, LocaleConfig, NameRef, ParseError, ParseOptions, PostfixExpr, PostfixOp, RowRef,
-    Span, StructuredRef, UnaryExpr, UnaryOp,
+    FunctionName, LocaleConfig, NameRef, ParseError, ParseOptions, PostfixExpr, PostfixOp,
+    ReferenceStyle, RowRef, Span, StructuredRef, UnaryExpr, UnaryOp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +13,7 @@ pub enum TokenKind {
     Boolean(bool),
     Error(String),
     Cell(CellToken),
+    R1C1Cell(R1C1CellToken),
     Ident(String),
     QuotedIdent(String),
     Whitespace(String),
@@ -60,6 +61,12 @@ pub struct CellToken {
     pub row_abs: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct R1C1CellToken {
+    pub row: Coord,
+    pub col: Coord,
+}
+
 pub fn parse_formula(formula: &str, opts: ParseOptions) -> Result<Ast, ParseError> {
     let (has_equals, expr_src, span_offset) = if let Some(rest) = formula.strip_prefix('=') {
         (true, rest, 1)
@@ -67,7 +74,7 @@ pub fn parse_formula(formula: &str, opts: ParseOptions) -> Result<Ast, ParseErro
         (false, formula, 0)
     };
 
-    let tokens = lex(expr_src, &opts.locale).map_err(|e| e.add_offset(span_offset))?;
+    let tokens = lex(expr_src, &opts).map_err(|e| e.add_offset(span_offset))?;
     let mut parser = Parser::new(expr_src, tokens);
     let expr = parser
         .parse_expression(0)
@@ -115,7 +122,7 @@ pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse 
         (false, formula, 0)
     };
 
-    let tokens = match lex(expr_src, &opts.locale) {
+    let tokens = match lex(expr_src, &opts) {
         Ok(t) => t,
         Err(e) => {
             return PartialParse {
@@ -144,8 +151,8 @@ pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse 
     }
 }
 
-pub fn lex(formula: &str, locale: &LocaleConfig) -> Result<Vec<Token>, ParseError> {
-    Lexer::new(formula, locale.clone()).lex()
+pub fn lex(formula: &str, opts: &ParseOptions) -> Result<Vec<Token>, ParseError> {
+    Lexer::new(formula, opts.locale.clone(), opts.reference_style).lex()
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +166,7 @@ struct Lexer<'a> {
     chars: std::str::Chars<'a>,
     idx: usize,
     locale: LocaleConfig,
+    reference_style: ReferenceStyle,
     tokens: Vec<Token>,
     paren_stack: Vec<ParenContext>,
     brace_depth: usize,
@@ -167,12 +175,13 @@ struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    fn new(src: &'a str, locale: LocaleConfig) -> Self {
+    fn new(src: &'a str, locale: LocaleConfig, reference_style: ReferenceStyle) -> Self {
         Self {
             src,
             chars: src.chars(),
             idx: 0,
             locale,
+            reference_style,
             tokens: Vec::new(),
             paren_stack: Vec::new(),
             brace_depth: 0,
@@ -421,6 +430,13 @@ impl<'a> Lexer<'a> {
                     self.push(TokenKind::Number(raw), start, self.idx);
                 }
                 '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z' => {
+                    if self.reference_style == ReferenceStyle::R1C1 {
+                        if let Some(cell) = self.try_lex_r1c1_cell_ref() {
+                            self.push(TokenKind::R1C1Cell(cell), start, self.idx);
+                            continue;
+                        }
+                    }
+
                     if let Some(cell) = self.try_lex_cell_ref() {
                         self.push(TokenKind::Cell(cell), start, self.idx);
                     } else {
@@ -644,6 +660,122 @@ impl<'a> Lexer<'a> {
             row_abs,
         })
     }
+
+    fn try_lex_r1c1_cell_ref(&mut self) -> Option<R1C1CellToken> {
+        let save_idx = self.idx;
+        let save_chars = self.chars.clone();
+
+        let ch = self.peek_char()?;
+        if !matches!(ch, 'R' | 'r') {
+            return None;
+        }
+        self.bump(); // R
+
+        let row = match self.peek_char() {
+            Some('[') => {
+                let offset = self.lex_r1c1_offset_in_brackets().or_else(|| {
+                    self.idx = save_idx;
+                    self.chars = save_chars.clone();
+                    None
+                })?;
+                Coord::Offset(offset)
+            }
+            Some(c) if is_digit(c) => {
+                let raw = self.take_while(is_digit);
+                let row_1: u32 = match raw.parse().ok() {
+                    Some(v) => v,
+                    None => {
+                        self.idx = save_idx;
+                        self.chars = save_chars;
+                        return None;
+                    }
+                };
+                if row_1 == 0 {
+                    self.idx = save_idx;
+                    self.chars = save_chars;
+                    return None;
+                }
+                Coord::A1 {
+                    index: row_1 - 1,
+                    abs: true,
+                }
+            }
+            _ => Coord::Offset(0),
+        };
+
+        let Some(ch) = self.peek_char() else {
+            self.idx = save_idx;
+            self.chars = save_chars;
+            return None;
+        };
+        if !matches!(ch, 'C' | 'c') {
+            self.idx = save_idx;
+            self.chars = save_chars;
+            return None;
+        }
+        self.bump(); // C
+
+        let col = match self.peek_char() {
+            Some('[') => {
+                let offset = self.lex_r1c1_offset_in_brackets().or_else(|| {
+                    self.idx = save_idx;
+                    self.chars = save_chars.clone();
+                    None
+                })?;
+                Coord::Offset(offset)
+            }
+            Some(c) if is_digit(c) => {
+                let raw = self.take_while(is_digit);
+                let col_1: u32 = match raw.parse().ok() {
+                    Some(v) => v,
+                    None => {
+                        self.idx = save_idx;
+                        self.chars = save_chars;
+                        return None;
+                    }
+                };
+                if col_1 == 0 {
+                    self.idx = save_idx;
+                    self.chars = save_chars;
+                    return None;
+                }
+                Coord::A1 {
+                    index: col_1 - 1,
+                    abs: true,
+                }
+            }
+            _ => Coord::Offset(0),
+        };
+
+        Some(R1C1CellToken { row, col })
+    }
+
+    fn lex_r1c1_offset_in_brackets(&mut self) -> Option<i32> {
+        debug_assert_eq!(self.peek_char(), Some('['));
+        self.bump(); // '['
+        let sign = match self.peek_char() {
+            Some('+') => {
+                self.bump();
+                1i32
+            }
+            Some('-') => {
+                self.bump();
+                -1i32
+            }
+            _ => 1i32,
+        };
+        let digits = self.take_while(is_digit);
+        if digits.is_empty() {
+            return None;
+        }
+        if self.peek_char() != Some(']') {
+            return None;
+        }
+        self.bump(); // ']'
+
+        let mag: i32 = digits.parse().ok()?;
+        Some(sign.saturating_mul(mag))
+    }
 }
 
 fn is_digit(c: char) -> bool {
@@ -710,6 +842,7 @@ fn is_intersect_operand(kind: &TokenKind) -> bool {
     matches!(
         kind,
         TokenKind::Cell(_)
+            | TokenKind::R1C1Cell(_)
             | TokenKind::Ident(_)
             | TokenKind::QuotedIdent(_)
             | TokenKind::RParen
@@ -957,7 +1090,7 @@ impl<'a> Parser<'a> {
                     Expr::Missing
                 }
             },
-            TokenKind::Cell(_) | TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => {
+            TokenKind::Cell(_) | TokenKind::R1C1Cell(_) | TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => {
                 self.parse_reference_or_name_or_func_best_effort()
             }
             TokenKind::ArgSep | TokenKind::RParen | TokenKind::Eof => Expr::Missing,
@@ -1046,6 +1179,16 @@ impl<'a> Parser<'a> {
                         index: cell.row,
                         abs: cell.row_abs,
                     },
+                })
+            }
+            TokenKind::R1C1Cell(cell) => {
+                let cell = cell.clone();
+                self.next();
+                Expr::CellRef(CellRef {
+                    workbook: None,
+                    sheet: None,
+                    col: cell.col,
+                    row: cell.row,
                 })
             }
             TokenKind::QuotedIdent(name) => {
@@ -1264,7 +1407,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LBrace => self.parse_array_literal(),
             TokenKind::LBracket => self.parse_bracket_start(),
-            TokenKind::Cell(_) | TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => {
+            TokenKind::Cell(_) | TokenKind::R1C1Cell(_) | TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => {
                 self.parse_reference_or_name_or_func()
             }
             TokenKind::ArgSep => {
@@ -1341,6 +1484,16 @@ impl<'a> Parser<'a> {
                     },
                 }))
             }
+            TokenKind::R1C1Cell(cell) => {
+                let cell = cell.clone();
+                self.next();
+                Ok(Expr::CellRef(CellRef {
+                    workbook: None,
+                    sheet: None,
+                    col: cell.col,
+                    row: cell.row,
+                }))
+            }
             TokenKind::QuotedIdent(name) => {
                 let name = name.clone();
                 self.next();
@@ -1378,6 +1531,16 @@ impl<'a> Parser<'a> {
                         index: cell.row,
                         abs: cell.row_abs,
                     },
+                }))
+            }
+            TokenKind::R1C1Cell(cell) => {
+                let cell = cell.clone();
+                self.next();
+                Ok(Expr::CellRef(CellRef {
+                    workbook,
+                    sheet,
+                    col: cell.col,
+                    row: cell.row,
                 }))
             }
             TokenKind::Number(raw) => {

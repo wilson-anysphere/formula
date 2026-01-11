@@ -27,6 +27,10 @@ pub enum EngineError {
     Address(#[from] crate::eval::AddressParseError),
     #[error(transparent)]
     Parse(#[from] FormulaParseError),
+    #[error(transparent)]
+    AstParse(#[from] crate::ParseError),
+    #[error(transparent)]
+    AstSerialize(#[from] crate::SerializeError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,6 +480,58 @@ impl Engine {
             self.recalculate();
         }
         Ok(())
+    }
+
+    /// Set a cell formula that was entered using a different reference style (e.g. R1C1).
+    ///
+    /// The engine persists formulas in canonical A1 form, so this parses the input formula with
+    /// the provided [`crate::ParseOptions`] and then serializes it back to A1 based on the cell
+    /// location (`addr`).
+    pub fn set_cell_formula_with_options(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        formula: &str,
+        mut opts: crate::ParseOptions,
+    ) -> Result<(), EngineError> {
+        let origin_eval = parse_a1(addr)?;
+        let origin = crate::CellAddr::new(origin_eval.row, origin_eval.col);
+
+        // Normalize any relative A1 coordinates against the destination cell so the AST is
+        // origin-relative regardless of the input reference style.
+        opts.normalize_relative_to = Some(origin);
+
+        let ast = crate::parse_formula(formula, opts)?;
+
+        let canonical = ast.to_string(crate::SerializeOptions {
+            locale: crate::LocaleConfig::en_us(),
+            reference_style: crate::ReferenceStyle::A1,
+            // Preserve `_xlfn.` prefixes for round-trip safety when callers include them.
+            include_xlfn_prefix: true,
+            origin: Some(origin),
+            omit_equals: false,
+        })?;
+
+        self.set_cell_formula(sheet, addr, &canonical)
+    }
+
+    /// Convenience wrapper around [`Engine::set_cell_formula_with_options`] for R1C1 formulas.
+    pub fn set_cell_formula_r1c1(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        formula_r1c1: &str,
+    ) -> Result<(), EngineError> {
+        self.set_cell_formula_with_options(
+            sheet,
+            addr,
+            formula_r1c1,
+            crate::ParseOptions {
+                locale: crate::LocaleConfig::en_us(),
+                reference_style: crate::ReferenceStyle::R1C1,
+                normalize_relative_to: None,
+            },
+        )
     }
 
     /// Set a cell formula that was entered in a locale-specific display format.

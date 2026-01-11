@@ -1,8 +1,8 @@
-use formula_engine::{lex, parse_formula, Expr, LocaleConfig, ParseOptions, TokenKind};
+use formula_engine::{lex, parse_formula, Expr, ParseOptions, TokenKind};
 
 #[test]
 fn lex_div0_error_token() {
-    let tokens = lex("#DIV/0!", &LocaleConfig::en_us()).unwrap();
+    let tokens = lex("#DIV/0!", &ParseOptions::default()).unwrap();
     assert!(matches!(
         tokens[0].kind,
         TokenKind::Error(ref s) if s == "#DIV/0!"
@@ -12,7 +12,7 @@ fn lex_div0_error_token() {
 
 #[test]
 fn lex_na_error_token() {
-    let tokens = lex("#N/A", &LocaleConfig::en_us()).unwrap();
+    let tokens = lex("#N/A", &ParseOptions::default()).unwrap();
     assert!(matches!(
         tokens[0].kind,
         TokenKind::Error(ref s) if s == "#N/A"
