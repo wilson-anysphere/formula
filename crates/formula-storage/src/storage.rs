@@ -1132,6 +1132,10 @@ impl Storage {
         let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
 
         tx.execute(
+            "DELETE FROM sheet_drawings WHERE sheet_id = ?1",
+            params![sheet_id.to_string()],
+        )?;
+        tx.execute(
             "DELETE FROM cells WHERE sheet_id = ?1",
             params![sheet_id.to_string()],
         )?;
