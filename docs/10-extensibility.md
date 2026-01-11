@@ -620,6 +620,9 @@ Key properties:
   `process.binding(...)` is blocked.
 - **No string codegen**: `eval` / `new Function(...)` are disabled via
   `codeGeneration: { strings: false, wasm: false }`.
+- **Symlink-safe resolution**: all filesystem loads are validated using `realpath` so extensions
+  cannot escape the extension root via symlinks (including when Node is started with
+  `--preserve-symlinks`).
 - **Filesystem/network access is API-only**: extensions must use Formula APIs (e.g.
   `formula.network.fetch`, `formula.storage.*`) which are permission-gated by the host.
 - **Module restrictions**:
