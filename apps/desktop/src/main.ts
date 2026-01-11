@@ -47,8 +47,52 @@ app.getDocument().markSaved();
 app.focus();
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
 
-// Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools).
-app.getDocument().on("change", () => app.refresh());
+// --- Sheet tabs (minimal multi-sheet support) ---------------------------------
+
+const sheetTabsRoot = document.getElementById("sheet-tabs");
+if (!sheetTabsRoot) {
+  throw new Error("Missing #sheet-tabs container");
+}
+
+let lastSheetIds: string[] = [];
+
+function renderSheetTabs() {
+  const sheetIds = app.getDocument().getSheetIds();
+  const nextSheetIds = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+
+  lastSheetIds = nextSheetIds;
+  sheetTabsRoot.replaceChildren();
+
+  const active = app.getCurrentSheetId();
+
+  for (const sheetId of nextSheetIds) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "sheet-tab";
+    button.dataset.sheetId = sheetId;
+    button.dataset.testid = `sheet-tab-${sheetId}`;
+    button.dataset.active = sheetId === active ? "true" : "false";
+    button.textContent = sheetId;
+    button.addEventListener("click", () => {
+      app.activateSheet(sheetId);
+      renderSheetTabs();
+    });
+    sheetTabsRoot.appendChild(button);
+  }
+}
+
+renderSheetTabs();
+
+// Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools)
+// and re-render when edits create new sheets (DocumentController creates sheets lazily).
+app.getDocument().on("change", () => {
+  app.refresh();
+  const sheetIds = app.getDocument().getSheetIds();
+  const nextSheetIds = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+  if (nextSheetIds.length !== lastSheetIds.length || nextSheetIds.some((id, idx) => id !== lastSheetIds[idx])) {
+    renderSheetTabs();
+  }
+});
 
 // --- Dock layout + persistence (minimal shell wiring for e2e + demos) ----------
 

@@ -15,7 +15,7 @@
       #app {
         height: 100%;
         display: grid;
-        grid-template-rows: auto 1fr auto;
+        grid-template-rows: auto 1fr auto auto;
       }
 
       .formula-bar {
@@ -266,6 +266,32 @@
         overflow: hidden;
       }
 
+      .sheet-tabs {
+        display: flex;
+        gap: 4px;
+        padding: 6px 8px;
+        border-top: 1px solid #d4d4d4;
+        background: #fafafa;
+        align-items: center;
+        overflow-x: auto;
+      }
+
+      .sheet-tab {
+        padding: 4px 10px;
+        border: 1px solid #d4d4d4;
+        border-radius: 999px;
+        background: #ffffff;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .sheet-tab[data-active="true"] {
+        border-color: #0e65eb;
+        background: #e6f0ff;
+        font-weight: 600;
+      }
+
       .statusbar {
         display: flex;
         gap: 16px;
@@ -316,34 +342,36 @@
             aria-label="Secondary spreadsheet grid"
           ></div>
         </div>
-       </div>
-       <div class="statusbar">
-         <div>
-           Active:
-           <code data-testid="active-cell">A1</code>
-         </div>
-         <div>
-           Sheet:
-           <select data-testid="sheet-switcher"></select>
-         </div>
-         <div>
-           Selection:
-           <code data-testid="selection-range">A1</code>
-         </div>
-         <div>
-           Value:
-           <code data-testid="active-value"></code>
-         </div>
-         <button type="button" data-testid="split-vertical">Split vertical</button>
-         <button type="button" data-testid="split-horizontal">Split horizontal</button>
-         <button type="button" data-testid="split-none">Unsplit</button>
-         <button type="button" data-testid="open-ai-panel">AI panel</button>
-         <button type="button" data-testid="open-ai-audit-panel">Audit log</button>
-         <button type="button" data-testid="open-macros-panel">Macros</button>
-         <button type="button" data-testid="open-script-editor-panel">Scripts</button>
-         <button type="button" data-testid="open-vba-migrate-panel">Migrate Macros</button>
-         <button type="button" data-testid="open-comments-panel">Comments</button>
-       </div>
-      <script type="module" src="/src/main.ts"></script>
+      </div>
+      <div id="sheet-tabs" class="sheet-tabs" data-testid="sheet-tabs"></div>
+      <div class="statusbar">
+        <div>
+          Active:
+          <code data-testid="active-cell">A1</code>
+        </div>
+        <div>
+          Sheet:
+          <select data-testid="sheet-switcher"></select>
+        </div>
+        <div>
+          Selection:
+          <code data-testid="selection-range">A1</code>
+        </div>
+        <div>
+          Value:
+          <code data-testid="active-value"></code>
+        </div>
+        <button type="button" data-testid="split-vertical">Split vertical</button>
+        <button type="button" data-testid="split-horizontal">Split horizontal</button>
+        <button type="button" data-testid="split-none">Unsplit</button>
+        <button type="button" data-testid="open-ai-panel">AI panel</button>
+        <button type="button" data-testid="open-ai-audit-panel">Audit log</button>
+        <button type="button" data-testid="open-macros-panel">Macros</button>
+        <button type="button" data-testid="open-script-editor-panel">Scripts</button>
+        <button type="button" data-testid="open-vba-migrate-panel">Migrate Macros</button>
+        <button type="button" data-testid="open-comments-panel">Comments</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
