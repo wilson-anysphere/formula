@@ -207,6 +207,56 @@ fn yearfrac_spills_over_array_inputs() {
 }
 
 #[test]
+fn datedif_matches_excel_units() {
+    let mut sheet = TestSheet::new();
+    assert_number(
+        &sheet.eval("=DATEDIF(DATE(2011,1,15),DATE(2012,1,14),\"Y\")"),
+        0.0,
+    );
+    assert_number(
+        &sheet.eval("=DATEDIF(\"2011-01-15\",\"2012-01-14\",\"M\")"),
+        11.0,
+    );
+    assert_number(
+        &sheet.eval("=DATEDIF(DATE(2011,1,15),DATE(2012,1,14),\"D\")"),
+        364.0,
+    );
+    assert_number(
+        &sheet.eval("=DATEDIF(DATE(2011,1,15),DATE(2012,1,14),\"YM\")"),
+        11.0,
+    );
+    assert_number(
+        &sheet.eval("=DATEDIF(DATE(2011,1,15),DATE(2012,1,14),\"MD\")"),
+        30.0,
+    );
+    assert_number(
+        &sheet.eval("=DATEDIF(DATE(2011,1,15),DATE(2012,1,14),\"YD\")"),
+        364.0,
+    );
+
+    assert_eq!(
+        sheet.eval("=DATEDIF(DATE(2012,1,14),DATE(2011,1,15),\"D\")"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval("=DATEDIF(DATE(2011,1,15),DATE(2012,1,14),\"NOPE\")"),
+        Value::Error(ErrorKind::Num)
+    );
+}
+
+#[test]
+fn datedif_spills_over_array_inputs() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula(
+        "A1",
+        "=DATEDIF({DATE(2011,1,15);DATE(2011,2,15)},DATE(2012,1,14),\"M\")",
+    );
+    sheet.recalc();
+    assert_number(&sheet.get("A1"), 11.0);
+    assert_number(&sheet.get("A2"), 10.0);
+}
+
+#[test]
 fn hour_minute_second_extract_time_components() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=HOUR(TIME(1,2,3))"), 1.0);

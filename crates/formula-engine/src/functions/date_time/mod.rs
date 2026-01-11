@@ -311,6 +311,63 @@ pub fn yearfrac(start_date: i32, end_date: i32, basis: i32, system: ExcelDateSys
     }
 }
 
+fn full_months_between(start_date: i32, end_date: i32, system: ExcelDateSystem) -> ExcelResult<i32> {
+    debug_assert!(end_date >= start_date);
+    let start = crate::date::serial_to_ymd(start_date, system)?;
+    let end = crate::date::serial_to_ymd(end_date, system)?;
+
+    let years = i64::from(end.year) - i64::from(start.year);
+    let mut months = years
+        .checked_mul(12)
+        .and_then(|v| v.checked_add(i64::from(end.month) - i64::from(start.month)))
+        .ok_or(ExcelError::Num)?;
+    if end.day < start.day {
+        months = months.checked_sub(1).ok_or(ExcelError::Num)?;
+    }
+    i32::try_from(months).map_err(|_| ExcelError::Num)
+}
+
+fn normalize_unit(unit: &str) -> Option<String> {
+    let trimmed = unit.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_ascii_uppercase())
+}
+
+/// DATEDIF(start_date, end_date, unit)
+pub fn datedif(start_date: i32, end_date: i32, unit: &str, system: ExcelDateSystem) -> ExcelResult<i64> {
+    if start_date > end_date {
+        return Err(ExcelError::Num);
+    }
+
+    let unit = normalize_unit(unit).ok_or(ExcelError::Num)?;
+
+    match unit.as_str() {
+        "D" => Ok(i64::from(end_date) - i64::from(start_date)),
+        "Y" | "M" | "YM" | "MD" | "YD" => {
+            let full_months = full_months_between(start_date, end_date, system)?;
+            let years = full_months / 12;
+
+            match unit.as_str() {
+                "Y" => Ok(i64::from(years)),
+                "M" => Ok(i64::from(full_months)),
+                "YM" => Ok(i64::from(full_months.rem_euclid(12))),
+                "MD" => {
+                    let anchor = edate(start_date, full_months, system)?;
+                    Ok(i64::from(end_date) - i64::from(anchor))
+                }
+                "YD" => {
+                    let anchor = edate(start_date, years.saturating_mul(12), system)?;
+                    Ok(i64::from(end_date) - i64::from(anchor))
+                }
+                _ => unreachable!(),
+            }
+        }
+        _ => Err(ExcelError::Num),
+    }
+}
+
 /// WEEKDAY(serial_number, [return_type])
 pub fn weekday(
     serial_number: i32,

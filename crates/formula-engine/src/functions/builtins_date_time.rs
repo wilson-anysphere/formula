@@ -453,6 +453,53 @@ fn yearfrac_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "DATEDIF",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Text],
+        implementation: datedif_fn,
+    }
+}
+
+fn datedif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let start_date = eval_scalar_arg(ctx, &args[0]);
+    let end_date = eval_scalar_arg(ctx, &args[1]);
+    let unit = eval_scalar_arg(ctx, &args[2]);
+    let system = ctx.date_system();
+
+    broadcast_map3(start_date, end_date, unit, |start_date, end_date, unit| {
+        let start_serial = match datevalue_from_value(&start_date, system) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let end_serial = match datevalue_from_value(&end_date, system) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+
+        if let Value::Number(n) = &unit {
+            if !n.is_finite() {
+                return Value::Error(ErrorKind::Num);
+            }
+        }
+        let unit = match unit.coerce_to_string() {
+            Ok(s) => s,
+            Err(e) => return Value::Error(e),
+        };
+
+        match date_time::datedif(start_serial, end_serial, &unit, system) {
+            Ok(v) => Value::Number(v as f64),
+            Err(e) => Value::Error(excel_error_kind(e)),
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "EOMONTH",
         min_args: 2,
         max_args: 2,

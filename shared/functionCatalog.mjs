@@ -235,6 +235,18 @@ export default {
       ]
     },
     {
+      "name": "DATEDIF",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "text"
+      ]
+    },
+    {
       "name": "DATEVALUE",
       "min_args": 1,
       "max_args": 1,

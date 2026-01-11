@@ -92,6 +92,34 @@ fn yearfrac_respects_basis_conventions() {
 }
 
 #[test]
+fn datedif_matches_excel_units() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let start = ymd_to_serial(ExcelDate::new(2011, 1, 15), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2012, 1, 14), system).unwrap();
+
+    assert_eq!(date_time::datedif(start, end, "Y", system).unwrap(), 0);
+    assert_eq!(date_time::datedif(start, end, "M", system).unwrap(), 11);
+    assert_eq!(date_time::datedif(start, end, "D", system).unwrap(), 364);
+    assert_eq!(date_time::datedif(start, end, "YM", system).unwrap(), 11);
+    assert_eq!(date_time::datedif(start, end, "MD", system).unwrap(), 30);
+    assert_eq!(date_time::datedif(start, end, "YD", system).unwrap(), 364);
+
+    assert_eq!(
+        date_time::datedif(start, end, "  ym  ", system).unwrap(),
+        11
+    );
+
+    assert_eq!(
+        date_time::datedif(end, start, "D", system).unwrap_err(),
+        ExcelError::Num
+    );
+    assert_eq!(
+        date_time::datedif(start, end, "NOPE", system).unwrap_err(),
+        ExcelError::Num
+    );
+}
+
+#[test]
 fn weekday_matches_excel_return_types() {
     let system = ExcelDateSystem::EXCEL_1900;
     // 1900-01-01 is serial 1 and a Monday.
