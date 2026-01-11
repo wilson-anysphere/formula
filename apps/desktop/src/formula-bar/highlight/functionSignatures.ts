@@ -12,6 +12,7 @@ type CatalogFunction = {
   name: string;
   min_args: number;
   max_args: number;
+  arg_types?: string[];
 };
 
 const CATALOG_BY_NAME = new Map<string, CatalogFunction>();
@@ -165,12 +166,12 @@ function signatureFromCatalog(name: string): FunctionSignature | null {
 
   return {
     name,
-    params: buildParams(fn.min_args, fn.max_args),
+    params: buildParams(fn.min_args, fn.max_args, fn.arg_types),
     summary: "",
   };
 }
 
-function buildParams(minArgs: number, maxArgs: number): FunctionParam[] {
+function buildParams(minArgs: number, maxArgs: number, argTypes: string[] | undefined): FunctionParam[] {
   const MAX_PARAMS = 5;
 
   if (!Number.isFinite(minArgs) || !Number.isFinite(maxArgs) || minArgs < 0 || maxArgs < 0) {
@@ -180,14 +181,14 @@ function buildParams(minArgs: number, maxArgs: number): FunctionParam[] {
   if (maxArgs <= MAX_PARAMS) {
     const out: FunctionParam[] = [];
     for (let i = 1; i <= maxArgs; i++) {
-      out.push({ name: `arg${i}`, optional: i > minArgs });
+      out.push({ name: paramNameFromCatalogTypes(i, maxArgs, argTypes), optional: i > minArgs });
     }
     return out;
   }
 
   const requiredShown = Math.min(minArgs, MAX_PARAMS - 1);
   const out: FunctionParam[] = [];
-  for (let i = 1; i <= requiredShown; i++) out.push({ name: `arg${i}` });
+  for (let i = 1; i <= requiredShown; i++) out.push({ name: paramNameFromCatalogTypes(i, maxArgs, argTypes) });
 
   if (minArgs > requiredShown) {
     out.push({ name: "…" });
@@ -196,4 +197,29 @@ function buildParams(minArgs: number, maxArgs: number): FunctionParam[] {
 
   out.push({ name: "…", optional: true });
   return out;
+}
+
+function paramNameFromCatalogTypes(index1: number, maxArgs: number, argTypes: string[] | undefined): string {
+  const index0 = index1 - 1;
+  if (!Array.isArray(argTypes) || argTypes.length === 0) return `arg${index1}`;
+
+  let valueType: string | undefined;
+  if (argTypes.length === 1 && maxArgs > 1) {
+    valueType = argTypes[0];
+  } else {
+    valueType = argTypes[index0] ?? argTypes[argTypes.length - 1];
+  }
+
+  switch (valueType) {
+    case "number":
+      return `number${index1}`;
+    case "text":
+      return `text${index1}`;
+    case "bool":
+      return `logical${index1}`;
+    case "any":
+      return `value${index1}`;
+    default:
+      return `arg${index1}`;
+  }
 }
