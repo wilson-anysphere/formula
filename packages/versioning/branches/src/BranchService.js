@@ -65,6 +65,20 @@ function isLegacyCellsOnlyState(value) {
 }
 
 /**
+ * Backwards-compatible detection for older schemaVersion=1 clients that existed
+ * before BranchService started tracking workbook `metadata`.
+ *
+ * Those clients will send a schemaVersion=1 state missing the `metadata` field.
+ * Treat this as an overlay on the current branch head to avoid accidentally
+ * deleting metadata keys they don't know about.
+ *
+ * @param {any} value
+ */
+function isLegacySchemaV1WithoutMetadata(value) {
+  return isRecord(value) && value.schemaVersion === 1 && !("metadata" in value);
+}
+
+/**
  * BranchService provides high-level branch/merge operations for a single
  * document.
  *
@@ -259,6 +273,12 @@ export class BranchService {
         }
         if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
       }
+      effectiveNextState = merged;
+    } else if (isLegacySchemaV1WithoutMetadata(nextState)) {
+      // Migrate older schemaVersion=1 callers that pre-date workbook `metadata`.
+      // Preserve the current branch head metadata unless explicitly provided.
+      const merged = normalizeDocumentState(nextState);
+      merged.metadata = structuredClone(currentState.metadata ?? {});
       effectiveNextState = merged;
     }
 

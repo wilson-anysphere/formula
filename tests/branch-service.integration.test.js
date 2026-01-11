@@ -100,3 +100,40 @@ test("legacy commits preserve workbook metadata (sheets/namedRanges/comments)", 
   assert.ok(state.namedRanges.NR1);
   assert.equal(state.comments.c1?.content, "hello");
 });
+
+test("schemaVersion=1 commits missing metadata preserve existing metadata", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-no-metadata", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+    },
+    cells: { Sheet1: { A1: { value: 1 } } },
+    metadata: { scenario: "base" },
+    namedRanges: {},
+    comments: {},
+  });
+
+  // Simulate an older schemaVersion=1 client that doesn't know about metadata: it
+  // sends a schemaVersion=1 state missing the `metadata` field entirely.
+  await service.commit(actor, {
+    nextState: {
+      schemaVersion: 1,
+      sheets: {
+        order: ["Sheet1"],
+        metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+      },
+      cells: { Sheet1: { A1: { value: 2 } } },
+      namedRanges: {},
+      comments: {},
+    },
+  });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.cells.Sheet1.A1.value, 2);
+  assert.equal(state.metadata.scenario, "base");
+});
