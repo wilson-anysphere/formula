@@ -83,6 +83,12 @@ test(
 
       const secret = `pq-cache-secret-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       await cache.set("k1", { secret, bytes: new Uint8Array([1, 2, 3]) });
+      const roundtripped = await cache.get("k1");
+      assert.ok(roundtripped && typeof roundtripped === "object");
+      // @ts-ignore - runtime access
+      assert.equal(roundtripped.secret, secret);
+      // @ts-ignore - runtime access
+      assert.deepEqual(roundtripped.bytes, new Uint8Array([1, 2, 3]));
 
       // @ts-ignore - runtime access
       const store = cache.store;
