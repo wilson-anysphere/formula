@@ -30,12 +30,12 @@ ctx.ui.log("sum", values[0][0] + values[0][1]);
     const selection = workbook.getSelection();
 
     const blockedNetwork = await runtime.run(`
-await fetch("https://example.com");
+await ctx.fetch("https://example.com");
 `);
 
     const allowlistedNetwork = await runtime.run(
       `
-const res = await fetch("/scripting-test.html");
+const res = await ctx.fetch("/scripting-test.html");
 ctx.ui.log("status", res.status);
 `,
       {

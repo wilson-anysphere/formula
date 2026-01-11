@@ -166,6 +166,8 @@ function compileTypeScript(tsSource) {
 async function runUserScript(tsSource) {
   const jsSource = compileTypeScript(tsSource);
 
+  const networkSandbox = applyNetworkSandbox(workerData.permissions ?? {});
+
   const ctx = {
     workbook: createWorkbookProxy(),
     activeSheet: createSheetProxy(workerData.activeSheetName),
@@ -173,9 +175,9 @@ async function runUserScript(tsSource) {
     ui: {
       log: (...args) => safeConsole.log(...args),
     },
+    fetch: networkSandbox.fetch,
+    console: safeConsole,
   };
-
-  const networkSandbox = applyNetworkSandbox(workerData.permissions ?? {});
 
   const sandbox = {
     ctx,

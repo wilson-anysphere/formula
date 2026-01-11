@@ -43,7 +43,10 @@ export interface ScriptContext {
   activeSheet: Sheet;
   selection: Range;
   ui: UIHelpers;
+
+  // Network + logging helpers (subject to ScriptRuntime permissions).
+  fetch: typeof fetch;
+  console: Console;
 }
 
 declare const ctx: ScriptContext;
-

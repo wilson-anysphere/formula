@@ -187,6 +187,8 @@ async function runUserScript({ code, activeSheetName, selection, permissions }) 
     ui: {
       log: (...args) => safeConsole.log(...args),
     },
+    fetch: self.fetch?.bind(self),
+    console: safeConsole,
   };
 
   const runner = new Function(
