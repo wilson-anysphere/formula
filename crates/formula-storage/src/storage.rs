@@ -2870,21 +2870,19 @@ fn build_model_style_table(
     )?;
     let mut mapping_rows = mapping_stmt.query(params![workbook_id.to_string()])?;
 
-    let mut mapped_any = false;
     while let Some(row) = mapping_rows.next()? {
-        mapped_any = true;
         let style_id: i64 = row.get(1)?;
         let style = load_model_style(conn, style_id)?;
         let model_id = style_table.intern(style);
         storage_to_model.insert(style_id, model_id);
     }
 
-    if mapped_any {
-        return Ok((style_table, storage_to_model));
-    }
-
-    // Older databases (or workbooks created via the legacy APIs) do not have an explicit style
-    // table ordering. Build a minimal table from the styles referenced by cells.
+    // Include any additional styles referenced by cells that are not present in `workbook_styles`.
+    //
+    // This matters for backwards compatibility: workbooks imported from a `formula_model::Workbook`
+    // have `workbook_styles` populated, but callers can still create new styles through the legacy
+    // storage APIs (e.g. `apply_cell_changes` with a `Style` payload). Those style rows need to be
+    // emitted in exports so formatting does not get dropped.
     let mut stmt = conn.prepare(
         r#"
         SELECT DISTINCT c.style_id
@@ -2899,6 +2897,9 @@ fn build_model_style_table(
     let style_ids = stmt.query_map(params![workbook_id.to_string()], |r| r.get::<_, i64>(0))?;
     for style_id in style_ids {
         let style_id = style_id?;
+        if storage_to_model.contains_key(&style_id) {
+            continue;
+        }
         let style = load_model_style(conn, style_id)?;
         let model_id = style_table.intern(style);
         storage_to_model.insert(style_id, model_id);
