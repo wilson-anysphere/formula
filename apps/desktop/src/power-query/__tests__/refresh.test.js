@@ -206,6 +206,24 @@ test("DesktopPowerQueryRefreshManager refreshAll respects dependencies and appli
   mgr.dispose();
 });
 
+test("DesktopPowerQueryRefreshManager refreshWithDependencies refreshes dependencies and returns the target result", async () => {
+  const tableA = DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
+  const tableB = DataTable.fromGrid([["B"], [2]], { hasHeaders: true, inferTypes: true });
+  const engine = new OrderedEngine({ A: tableA, B: tableB });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 2, batchSize: 1 });
+
+  mgr.registerQuery({ id: "A", name: "A", source: { type: "range", range: { values: [["x"], [1]], hasHeaders: true } }, steps: [] });
+  mgr.registerQuery({ id: "B", name: "B", source: { type: "query", queryId: "A" }, steps: [] });
+
+  const result = await mgr.refreshWithDependencies("B").promise;
+  assert.deepEqual(engine.calls, ["A", "B"]);
+  assert.equal(result.meta.queryId, "B");
+
+  mgr.dispose();
+});
+
 test("DesktopPowerQueryRefreshManager refreshAll shares credential prompts across the session", async () => {
   let credentialRequests = 0;
   const engine = new QueryEngine({

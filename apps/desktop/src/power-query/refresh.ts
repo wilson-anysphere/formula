@@ -193,6 +193,31 @@ export class DesktopPowerQueryRefreshManager {
     };
   }
 
+  /**
+   * Refresh a single query using dependency-aware orchestration (equivalent to `refreshAll([queryId])`)
+   * while returning a single-query promise.
+   *
+   * This is useful for "refresh this query" UX where the host still wants to respect upstream
+   * query dependencies and share a single credential/permission session.
+   */
+  refreshWithDependencies(queryId: string, reason: any = "manual") {
+    const handle = this.refreshAll([queryId], reason);
+    const promise = handle.promise.then((results: any) => results?.[queryId]);
+    promise.catch(() => {});
+
+    return {
+      id: handle.sessionId,
+      sessionId: handle.sessionId,
+      queryId,
+      promise,
+      cancel: () => {
+        // Prefer per-query cancellation so we also abort any apply phase for the query.
+        (handle as any).cancelQuery?.(queryId);
+        handle.cancel();
+      },
+    };
+  }
+
   refreshAll(queryIds?: string[], reason: any = "manual") {
     const handle = this.orchestrator.refreshAll(queryIds, reason);
     const sessionPrefix = `${handle.sessionId}:`;
