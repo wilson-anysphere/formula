@@ -130,6 +130,14 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
     assert.equal(seenCheckpoint.checkpointLocked, true);
   }
 
+  // --- checkpointLocked updates sync A -> B ---
+  await clientA.versioning.setCheckpointLocked(checkpoint.id, false);
+  await waitForCondition(async () => {
+    const versions = await clientB.versioning.listVersions();
+    const v = versions.find((row) => row.id === checkpoint.id);
+    return v?.checkpointLocked === false;
+  }, 10_000);
+
   // --- Restore propagates A -> B ---
   await clientA.versioning.restoreVersion(checkpoint.id);
   await waitForCondition(() => clientB.session.getCell("Sheet1:0:0")?.value === 1, 10_000);
@@ -171,4 +179,8 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   assert.ok(versionsC.some((v) => v.id === checkpoint.id), "expected checkpoint to persist in doc");
   assert.ok(versionsC.some((v) => v.id === snapshot.id), "expected snapshot to persist in doc");
   assert.ok(versionsC.some((v) => v.kind === "restore"), "expected restore head to persist in doc");
+  {
+    const v = versionsC.find((row) => row.id === checkpoint.id);
+    assert.equal(v?.checkpointLocked, false, "expected checkpointLocked update to persist in doc");
+  }
 });

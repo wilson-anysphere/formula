@@ -9,6 +9,9 @@ test("YjsVersionStore: save/get/list/update/delete (gzip + chunks)", async () =>
   const ydoc = new Y.Doc();
   const store = new YjsVersionStore({ doc: ydoc, compression: "gzip", chunkSize: 4 });
 
+  const snapshotBytes = new Uint8Array(256);
+  for (let i = 0; i < snapshotBytes.length; i += 1) snapshotBytes[i] = i;
+
   const v1 = {
     id: "v1",
     kind: "checkpoint",
@@ -19,10 +22,18 @@ test("YjsVersionStore: save/get/list/update/delete (gzip + chunks)", async () =>
     checkpointName: "Approved",
     checkpointLocked: false,
     checkpointAnnotations: null,
-    snapshot: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    snapshot: snapshotBytes,
   };
 
   await store.saveVersion(v1);
+
+  {
+    const record = ydoc.getMap("versions").get("v1");
+    const chunks = record?.get?.("snapshotChunks");
+    assert.ok(chunks, "expected snapshotChunks to be stored");
+    assert.ok(typeof chunks.toArray === "function");
+    assert.ok(chunks.toArray().length > 1, "expected snapshot to be chunked");
+  }
 
   const loaded1 = await store.getVersion("v1");
   assert.ok(loaded1);
