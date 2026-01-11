@@ -348,7 +348,7 @@ export class CollabSession {
     };
   }
 
-  private transactLocal(fn: () => void): void {
+  transactLocal(fn: () => void): void {
     const undoTransact = this.undo?.transact;
     if (typeof undoTransact === "function") {
       undoTransact(fn);

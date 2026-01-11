@@ -1,10 +1,20 @@
 import * as Y from "yjs";
 
-import type { Comment, CommentAuthor, CommentKind } from "./types";
-import { createYComment, createYReply, getCommentsMap, yCommentToComment } from "./yjs";
+import type { Comment, CommentAuthor, CommentKind } from "./types.ts";
+import { createYComment, createYReply, getCommentsMap, yCommentToComment } from "./yjs.ts";
+
+export interface CommentManagerOptions {
+  transact?: (fn: () => void) => void;
+}
 
 export class CommentManager {
-  constructor(private readonly doc: Y.Doc) {}
+  private readonly doc: Y.Doc;
+  private readonly transact: (fn: () => void) => void;
+
+  constructor(doc: Y.Doc, options: CommentManagerOptions = {}) {
+    this.doc = doc;
+    this.transact = options.transact ?? ((fn) => doc.transact(fn));
+  }
 
   listAll(): Comment[] {
     const map = getCommentsMap(this.doc);
@@ -32,7 +42,7 @@ export class CommentManager {
     const id = input.id ?? createId();
     const now = input.now ?? Date.now();
 
-    this.doc.transact(() => {
+    this.transact(() => {
       map.set(
         id,
         createYComment({
@@ -70,7 +80,7 @@ export class CommentManager {
     const id = input.id ?? createId();
     const now = input.now ?? Date.now();
 
-    this.doc.transact(() => {
+    this.transact(() => {
       replies.push([
         createYReply({
           id,
@@ -93,7 +103,7 @@ export class CommentManager {
     }
     const now = input.now ?? Date.now();
 
-    this.doc.transact(() => {
+    this.transact(() => {
       yComment.set("resolved", input.resolved);
       yComment.set("updatedAt", now);
     });
@@ -107,7 +117,7 @@ export class CommentManager {
     }
     const now = input.now ?? Date.now();
 
-    this.doc.transact(() => {
+    this.transact(() => {
       yComment.set("content", input.content);
       yComment.set("updatedAt", now);
     });
@@ -139,7 +149,7 @@ export class CommentManager {
       throw new Error(`Reply missing at index ${replyIndex}: ${input.replyId}`);
     }
 
-    this.doc.transact(() => {
+    this.transact(() => {
       yReply.set("content", input.content);
       yReply.set("updatedAt", now);
       yComment.set("updatedAt", now);
