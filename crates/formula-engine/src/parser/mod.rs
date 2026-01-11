@@ -195,6 +195,226 @@ struct Lexer<'a> {
     prev_sig: Option<TokenKind>,
 }
 
+fn push_unique_u32(states: &mut [Vec<u32>], pos: usize, value: u32) {
+    if pos >= states.len() {
+        return;
+    }
+    let entry = &mut states[pos];
+    if !entry.contains(&value) {
+        entry.push(value);
+    }
+}
+
+const MODE_NORMAL: u32 = 0;
+const MODE_STRING: u32 = 1;
+const MODE_QUOTED_IDENT: u32 = 2;
+
+fn encode_state(depth: u32, mode: u32) -> u32 {
+    (depth << 2) | (mode & 0b11)
+}
+
+fn decode_depth(state: u32) -> u32 {
+    state >> 2
+}
+
+fn decode_mode(state: u32) -> u32 {
+    state & 0b11
+}
+
+fn push_depth(states: &mut [Vec<u32>], pos: usize, depth: u32) {
+    push_unique_u32(states, pos, depth);
+}
+
+fn push_state(states: &mut [Vec<u32>], pos: usize, depth: u32, mode: u32) {
+    if mode != MODE_NORMAL && depth != 0 {
+        return;
+    }
+    push_unique_u32(states, pos, encode_state(depth, mode));
+}
+
+/// Find the end position (exclusive) for a bracketed segment starting at `start`.
+///
+/// This handles Excel's structured-ref escape semantics where `]` inside an identifier is encoded
+/// as `]]`, which is ambiguous with nested bracket closure (e.g. `[[Col]]`).
+///
+/// The scanner explores both interpretations and returns the earliest closing bracket that does
+/// not immediately leave a stray `]` outside the segment (which would be invalid formula syntax).
+fn find_bracket_end(src: &str, start: usize) -> Option<usize> {
+    let mut positions = Vec::new();
+    let mut chars = Vec::new();
+    for (rel, ch) in src[start..].char_indices() {
+        positions.push(start + rel);
+        chars.push(ch);
+    }
+    if chars.first().copied() != Some('[') {
+        return None;
+    }
+
+    // Track reachable bracket depths at each char index. This treats `]]` as either:
+    // - closing bracket + another close (consume one char; the next `]` is processed normally), or
+    // - an escaped literal `]` (consume two chars; depth unchanged).
+    //
+    // We choose the earliest closing bracket that can still lead to a globally valid parse of the
+    // *remainder* of the formula (i.e. doesn't leave stray `]` tokens outside of any bracketed
+    // segment).
+    let n = chars.len();
+    if n < 2 {
+        return None;
+    }
+
+    let mut fwd: Vec<Vec<u32>> = vec![Vec::new(); n + 1];
+    fwd[1].push(1);
+    for i in 1..n {
+        let depths = fwd[i].clone();
+        if depths.is_empty() {
+            continue;
+        }
+        for depth in depths {
+            if depth == 0 {
+                continue;
+            }
+            match chars[i] {
+                '[' => push_depth(&mut fwd, i + 1, depth + 1),
+                ']' => {
+                    push_depth(&mut fwd, i + 1, depth - 1);
+                    if chars.get(i + 1) == Some(&']') {
+                        push_depth(&mut fwd, i + 2, depth);
+                    }
+                }
+                _ => push_depth(&mut fwd, i + 1, depth),
+            }
+        }
+    }
+
+    let mut bwd: Vec<Vec<u32>> = vec![Vec::new(); n + 1];
+    bwd[n].push(encode_state(0, MODE_NORMAL));
+    for i in (0..n).rev() {
+        match chars[i] {
+            '[' => {
+                for state in bwd[i + 1].clone() {
+                    let depth_after = decode_depth(state);
+                    let mode_after = decode_mode(state);
+                    if mode_after != MODE_NORMAL {
+                        push_state(&mut bwd, i, 0, mode_after);
+                    } else if depth_after > 0 {
+                        push_state(&mut bwd, i, depth_after - 1, MODE_NORMAL);
+                    }
+                }
+            }
+            ']' => {
+                for state in bwd[i + 1].clone() {
+                    let depth_after = decode_depth(state);
+                    let mode_after = decode_mode(state);
+                    if mode_after != MODE_NORMAL {
+                        push_state(&mut bwd, i, 0, mode_after);
+                    } else {
+                        push_state(&mut bwd, i, depth_after + 1, MODE_NORMAL);
+                    }
+                }
+
+                // Escape transitions are only valid while inside brackets (depth > 0).
+                if chars.get(i + 1) == Some(&']') {
+                    for state in bwd.get(i + 2).cloned().unwrap_or_default() {
+                        let depth_after = decode_depth(state);
+                        let mode_after = decode_mode(state);
+                        if mode_after == MODE_NORMAL && depth_after > 0 {
+                            push_state(&mut bwd, i, depth_after, MODE_NORMAL);
+                        }
+                    }
+                }
+            }
+            '"' => {
+                for state in bwd[i + 1].clone() {
+                    let depth_after = decode_depth(state);
+                    let mode_after = decode_mode(state);
+                    match mode_after {
+                        MODE_STRING if depth_after == 0 => {
+                            // Opening quote (`"`), entering string literal.
+                            push_state(&mut bwd, i, 0, MODE_NORMAL);
+                        }
+                        MODE_NORMAL => {
+                            if depth_after > 0 {
+                                // Quotes are literal characters inside brackets.
+                                push_state(&mut bwd, i, depth_after, MODE_NORMAL);
+                            } else if chars.get(i + 1) != Some(&'"') {
+                                // Closing quote (`"`), exiting string literal.
+                                push_state(&mut bwd, i, 0, MODE_STRING);
+                            }
+                        }
+                        MODE_QUOTED_IDENT if depth_after == 0 => {
+                            // Quotes are literal characters inside quoted identifiers.
+                            push_state(&mut bwd, i, 0, MODE_QUOTED_IDENT);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Escaped quote (`""`) within a string literal.
+                if chars.get(i + 1) == Some(&'"') {
+                    for state in bwd.get(i + 2).cloned().unwrap_or_default() {
+                        let depth_after = decode_depth(state);
+                        let mode_after = decode_mode(state);
+                        if depth_after == 0 && mode_after == MODE_STRING {
+                            push_state(&mut bwd, i, 0, MODE_STRING);
+                        }
+                    }
+                }
+            }
+            '\'' => {
+                for state in bwd[i + 1].clone() {
+                    let depth_after = decode_depth(state);
+                    let mode_after = decode_mode(state);
+                    match mode_after {
+                        MODE_QUOTED_IDENT if depth_after == 0 => {
+                            // Opening quote (`'`), entering quoted identifier.
+                            push_state(&mut bwd, i, 0, MODE_NORMAL);
+                        }
+                        MODE_NORMAL => {
+                            if depth_after > 0 {
+                                // Quotes are literal characters inside brackets.
+                                push_state(&mut bwd, i, depth_after, MODE_NORMAL);
+                            } else if chars.get(i + 1) != Some(&'\'') {
+                                // Closing quote (`'`), exiting quoted identifier.
+                                push_state(&mut bwd, i, 0, MODE_QUOTED_IDENT);
+                            }
+                        }
+                        MODE_STRING if depth_after == 0 => {
+                            // Quotes are literal characters inside string literals.
+                            push_state(&mut bwd, i, 0, MODE_STRING);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Escaped quote (`''`) within a quoted identifier.
+                if chars.get(i + 1) == Some(&'\'') {
+                    for state in bwd.get(i + 2).cloned().unwrap_or_default() {
+                        let depth_after = decode_depth(state);
+                        let mode_after = decode_mode(state);
+                        if depth_after == 0 && mode_after == MODE_QUOTED_IDENT {
+                            push_state(&mut bwd, i, 0, MODE_QUOTED_IDENT);
+                        }
+                    }
+                }
+            }
+            _ => {
+                for state in bwd[i + 1].clone() {
+                    let depth_after = decode_depth(state);
+                    let mode_after = decode_mode(state);
+                    push_state(&mut bwd, i, depth_after, mode_after);
+                }
+            }
+        }
+    }
+
+    for end_idx in 1..=n {
+        if fwd[end_idx].contains(&0) && bwd[end_idx].contains(&encode_state(0, MODE_NORMAL)) {
+            return Some(positions.get(end_idx).copied().unwrap_or(src.len()));
+        }
+    }
+    None
+}
+
 impl<'a> Lexer<'a> {
     fn new(src: &'a str, locale: LocaleConfig, reference_style: ReferenceStyle) -> Self {
         Self {
@@ -366,6 +586,27 @@ impl<'a> Lexer<'a> {
                     self.push(TokenKind::RBrace, start, self.idx);
                 }
                 '[' => {
+                    if self.bracket_depth == 0 {
+                        if let Some(end) = find_bracket_end(self.src, start) {
+                            self.bump();
+                            self.push(TokenKind::LBracket, start, self.idx);
+
+                            let inner_start = self.idx;
+                            let inner_end = end.saturating_sub(1);
+                            if inner_end > inner_start {
+                                let raw = self.src[inner_start..inner_end].to_string();
+                                self.idx = inner_end;
+                                self.chars = self.src[self.idx..].chars();
+                                self.push(TokenKind::Ident(raw), inner_start, inner_end);
+                            }
+
+                            let close_start = self.idx;
+                            self.bump();
+                            self.push(TokenKind::RBracket, close_start, self.idx);
+                            continue;
+                        }
+                    }
+
                     self.bump();
                     self.bracket_depth += 1;
                     self.push(TokenKind::LBracket, start, self.idx);

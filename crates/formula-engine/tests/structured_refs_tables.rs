@@ -1,6 +1,7 @@
 use formula_engine::eval::{CellAddr, Expr, Parser};
 use formula_engine::structured_refs::{
     resolve_structured_ref, StructuredColumn, StructuredColumns,
+    StructuredRefItem,
 };
 use formula_engine::{Engine, Value};
 use formula_model::table::TableColumn;
@@ -61,6 +62,27 @@ fn table_fixture_multi_col() -> Table {
                 totals_formula: None,
             },
         ],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
+    }
+}
+
+fn table_fixture_escaped_bracket_column() -> Table {
+    Table {
+        id: 1,
+        name: "Table1".into(),
+        display_name: "Table1".into(),
+        range: Range::from_a1("A1:A3").unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![TableColumn {
+            id: 1,
+            name: "A]B".into(),
+            formula: None,
+            totals_formula: None,
+        }],
         style: None,
         auto_filter: None,
         relationship_id: None,
@@ -145,6 +167,25 @@ fn parses_multi_column_selection() {
 }
 
 #[test]
+fn parses_escaped_bracket_nested_group_even_with_bracket_in_string_literal() {
+    let parsed = Parser::parse("=COUNTA(Table1[[#Headers],[A]]B]])&\"]\"").unwrap();
+    let Expr::Binary { left, .. } = parsed else {
+        panic!("expected binary expression");
+    };
+
+    let Expr::FunctionCall { args, .. } = &*left else {
+        panic!("expected function call on left side");
+    };
+    let [Expr::StructuredRef(sref)] = args.as_slice() else {
+        panic!("expected structured ref argument");
+    };
+
+    assert_eq!(sref.table_name.as_deref(), Some("Table1"));
+    assert_eq!(sref.item, Some(StructuredRefItem::Headers));
+    assert_eq!(sref.columns, StructuredColumns::Single("A]B".into()));
+}
+
+#[test]
 fn evaluates_multi_column_structured_ref_sum() {
     let mut engine = setup_engine_with_table();
     engine
@@ -205,6 +246,19 @@ fn this_row_bracketed_column_range_syntax_works() {
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(111.0));
+}
+
+#[test]
+fn evaluates_structured_ref_with_escaped_bracket_in_nested_group() {
+    let mut engine = Engine::new();
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_escaped_bracket_column()]);
+    engine.set_cell_value("Sheet1", "A1", "A]B").expect("A1");
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTA(Table1[[#Headers],[A]]B]])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
 }
 
 #[test]
