@@ -84,6 +84,13 @@ test("resource limits: memoryMb=0 disables worker heap limits", async (t) => {
   const extension = host._extensions.get(extensionId);
   assert.ok(extension?.worker);
 
-  assert.equal(extension.worker.resourceLimits.maxOldGenerationSizeMb, -1);
+  // Node's `Worker.resourceLimits` starts out reflecting the constructor options
+  // (unset limits show as -1), then updates asynchronously to reflect the actual
+  // runtime defaults once the worker thread finishes bootstrapping.
+  //
+  // We only care that Formula didn't *apply* a low heap cap when `memoryMb=0`.
+  const oldMb = extension.worker.resourceLimits.maxOldGenerationSizeMb;
+  const youngMb = extension.worker.resourceLimits.maxYoungGenerationSizeMb;
+  assert.ok(oldMb === -1 || oldMb > 64, `expected maxOldGenerationSizeMb to be unset/default, got ${oldMb}`);
+  assert.ok(youngMb === -1 || youngMb > 16, `expected maxYoungGenerationSizeMb to be unset/default, got ${youngMb}`);
 });
-
