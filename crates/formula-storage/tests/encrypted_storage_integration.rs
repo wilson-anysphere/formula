@@ -1,10 +1,12 @@
+use formula_model::{
+    Cell as ModelCell, CellRef, CellValue as ModelCellValue, Workbook as ModelWorkbook,
+};
 use formula_storage::encryption::is_encrypted_container;
+use formula_storage::{storage::StorageError, AutoSaveConfig, AutoSaveManager, EncryptionError};
 use formula_storage::{
     CellChange, CellData, CellRange, CellValue, ImportModelWorkbookOptions, InMemoryKeyProvider,
     KeyProvider, MemoryManager, MemoryManagerConfig, Storage,
 };
-use formula_storage::{AutoSaveConfig, AutoSaveManager, EncryptionError, storage::StorageError};
-use formula_model::{Cell as ModelCell, CellRef, CellValue as ModelCellValue, Workbook as ModelWorkbook};
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -15,7 +17,8 @@ fn encrypted_workbook_round_trip() {
     let path = dir.path().join("workbook.formula");
     let key_provider = Arc::new(InMemoryKeyProvider::default());
 
-    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let storage =
+        Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
     let workbook = storage
         .create_workbook("Book1", None)
         .expect("create workbook");
@@ -44,7 +47,8 @@ fn encrypted_workbook_round_trip() {
     assert!(is_encrypted_container(&on_disk));
     assert!(!on_disk.starts_with(b"SQLite format 3\0"));
 
-    let reopened = Storage::open_encrypted_path(&path, key_provider.clone()).expect("reopen encrypted");
+    let reopened =
+        Storage::open_encrypted_path(&path, key_provider.clone()).expect("reopen encrypted");
     let sheets = reopened.list_sheets(workbook.id).expect("list sheets");
     assert_eq!(sheets.len(), 1);
     assert_eq!(sheets[0].name, "Sheet1");
@@ -89,7 +93,8 @@ fn plaintext_migrates_to_encrypted_on_first_persist() {
     assert!(!is_encrypted_container(&before));
 
     let key_provider = Arc::new(InMemoryKeyProvider::default());
-    let encrypted = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let encrypted =
+        Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
     encrypted.persist().expect("persist migration");
     drop(encrypted);
 
@@ -177,7 +182,8 @@ async fn encrypted_autosave_persists_to_disk() {
     let path = dir.path().join("workbook.formula");
     let key_provider = Arc::new(InMemoryKeyProvider::default());
 
-    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let storage =
+        Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
     let workbook = storage
         .create_workbook("Book1", None)
         .expect("create workbook");
@@ -206,16 +212,16 @@ async fn encrypted_autosave_persists_to_disk() {
 
     autosave
         .record_change(CellChange {
-        sheet_id: sheet.id,
-        row: 0,
-        col: 0,
-        data: CellData {
-            value: CellValue::Number(42.0),
-            formula: None,
-            style: None,
-        },
-        user_id: None,
-    })
+            sheet_id: sheet.id,
+            row: 0,
+            col: 0,
+            data: CellData {
+                value: CellValue::Number(42.0),
+                formula: None,
+                style: None,
+            },
+            user_id: None,
+        })
         .expect("record change");
 
     tokio::time::sleep(Duration::from_millis(120)).await;
@@ -237,7 +243,8 @@ fn encrypted_workbook_survives_key_rotation() {
     let path = dir.path().join("workbook.formula");
     let key_provider = Arc::new(InMemoryKeyProvider::default());
 
-    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let storage =
+        Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
     let workbook = storage
         .create_workbook("Book1", None)
         .expect("create workbook");
@@ -266,12 +273,17 @@ fn encrypted_workbook_survives_key_rotation() {
     assert_eq!(key_version_v1, 1);
 
     // Rotate keys in the provider while retaining old versions.
-    let mut ring = key_provider.keyring().expect("keyring should exist after persist");
+    let mut ring = key_provider
+        .keyring()
+        .expect("keyring should exist after persist");
     ring.rotate();
-    key_provider.store_keyring(&ring).expect("store rotated keyring");
+    key_provider
+        .store_keyring(&ring)
+        .expect("store rotated keyring");
 
     // Reopen with rotated keyring; should still decrypt v1.
-    let reopened = Storage::open_encrypted_path(&path, key_provider.clone()).expect("reopen encrypted");
+    let reopened =
+        Storage::open_encrypted_path(&path, key_provider.clone()).expect("reopen encrypted");
     let cells = reopened
         .load_cells_in_range(sheet.id, CellRange::new(0, 10, 0, 10))
         .expect("load cells");
@@ -304,7 +316,8 @@ fn rotate_encryption_key_api_reencrypts_file() {
     let path = dir.path().join("workbook.formula");
     let key_provider = Arc::new(InMemoryKeyProvider::default());
 
-    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let storage =
+        Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
     let workbook = storage
         .create_workbook("Book1", None)
         .expect("create workbook");
@@ -386,7 +399,8 @@ fn encrypted_model_workbook_round_trip() {
         );
     }
 
-    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let storage =
+        Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
     let meta = storage
         .import_model_workbook(&model, ImportModelWorkbookOptions::new("Book"))
         .expect("import model workbook");
