@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import tls from "node:tls";
+import http from "node:http";
 import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
@@ -137,5 +138,36 @@ describe("fetchWithOrgTls", () => {
             : String(err);
       expect(message).toContain("Certificate pinning failed");
     });
+  });
+
+  it("fails fast when pinning is enabled for non-https URLs", async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected http server to listen on tcp");
+
+    const url = `http://127.0.0.1:${address.port}/`;
+    try {
+      await fetchWithOrgTls(
+        url,
+        { method: "GET" },
+        { tls: { certificatePinningEnabled: true, certificatePins: ["00".repeat(32)] } }
+      );
+      throw new Error("expected request to fail");
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toContain("requires an https URL");
+      expect(err.retriable).toBe(false);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+      });
+    }
   });
 });

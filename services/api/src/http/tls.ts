@@ -160,7 +160,14 @@ export async function fetchWithOrgTls(
   if (!policy) return undiciFetch(url, init);
 
   const parsed = typeof url === "string" ? new URL(url) : url;
-  if (parsed.protocol !== "https:") return undiciFetch(url, init);
+  if (parsed.protocol !== "https:") {
+    if (policy.certificatePinningEnabled) {
+      const err = new Error("certificate pinning requires an https URL");
+      (err as { retriable?: boolean }).retriable = false;
+      throw err;
+    }
+    return undiciFetch(url, init);
+  }
 
   const dispatcher: Dispatcher = getOrCreateAgent(policy);
   return undiciFetch(url, { ...init, dispatcher } as RequestInit);
