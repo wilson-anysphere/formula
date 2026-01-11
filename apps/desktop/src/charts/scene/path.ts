@@ -3,6 +3,8 @@ import { formatNumber } from "./format.js";
 export type PathCommand =
   | { kind: "M"; x: number; y: number }
   | { kind: "L"; x: number; y: number }
+  | { kind: "Q"; cpx: number; cpy: number; x: number; y: number }
+  | { kind: "C"; cp1x: number; cp1y: number; cp2x: number; cp2y: number; x: number; y: number }
   | { kind: "AT"; x1: number; y1: number; x2: number; y2: number; radius: number }
   | { kind: "A"; cx: number; cy: number; r: number; startAngle: number; endAngle: number; ccw?: boolean }
   | { kind: "Z" };
@@ -21,6 +23,16 @@ export class PathBuilder {
 
   lineTo(x: number, y: number): this {
     this.#commands.push({ kind: "L", x, y });
+    return this;
+  }
+
+  quadraticCurveTo(cpx: number, cpy: number, x: number, y: number): this {
+    this.#commands.push({ kind: "Q", cpx, cpy, x, y });
+    return this;
+  }
+
+  bezierCurveTo(cp1x: number, cp1y: number, cp2x: number, cp2y: number, x: number, y: number): this {
+    this.#commands.push({ kind: "C", cp1x, cp1y, cp2x, cp2y, x, y });
     return this;
   }
 
@@ -139,6 +151,36 @@ export function pathToSvgD(data: PathData): string {
         current = p;
         break;
       }
+      case "Q": {
+        const p = { x: cmd.x, y: cmd.y };
+        if (!current) {
+          parts.push(`M ${formatNumber(p.x)} ${formatNumber(p.y)}`);
+          current = p;
+          subpathStart = p;
+          break;
+        }
+        parts.push(
+          `Q ${formatNumber(cmd.cpx)} ${formatNumber(cmd.cpy)} ${formatNumber(p.x)} ${formatNumber(p.y)}`
+        );
+        current = p;
+        break;
+      }
+      case "C": {
+        const p = { x: cmd.x, y: cmd.y };
+        if (!current) {
+          parts.push(`M ${formatNumber(p.x)} ${formatNumber(p.y)}`);
+          current = p;
+          subpathStart = p;
+          break;
+        }
+        parts.push(
+          `C ${formatNumber(cmd.cp1x)} ${formatNumber(cmd.cp1y)} ${formatNumber(cmd.cp2x)} ${formatNumber(cmd.cp2y)} ${formatNumber(
+            p.x
+          )} ${formatNumber(p.y)}`
+        );
+        current = p;
+        break;
+      }
       case "AT": {
         if (!current) {
           const p = { x: cmd.x1, y: cmd.y1 };
@@ -231,6 +273,22 @@ export function applyPathToCanvas(ctx: CanvasRenderingContext2D, data: PathData)
         }
         ctx.lineTo(cmd.x, cmd.y);
         break;
+      case "Q":
+        if (!hasPoint) {
+          ctx.moveTo(cmd.x, cmd.y);
+          hasPoint = true;
+          break;
+        }
+        ctx.quadraticCurveTo(cmd.cpx, cmd.cpy, cmd.x, cmd.y);
+        break;
+      case "C":
+        if (!hasPoint) {
+          ctx.moveTo(cmd.x, cmd.y);
+          hasPoint = true;
+          break;
+        }
+        ctx.bezierCurveTo(cmd.cp1x, cmd.cp1y, cmd.cp2x, cmd.cp2y, cmd.x, cmd.y);
+        break;
       case "AT":
         if (!hasPoint) {
           ctx.moveTo(cmd.x1, cmd.y1);
@@ -249,4 +307,3 @@ export function applyPathToCanvas(ctx: CanvasRenderingContext2D, data: PathData)
     }
   }
 }
-

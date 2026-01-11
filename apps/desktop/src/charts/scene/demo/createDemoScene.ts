@@ -5,7 +5,7 @@ export function createDemoScene(): Scene {
   const zigzag = path()
     .moveTo(10, 60)
     .lineTo(30, 20)
-    .lineTo(50, 60)
+    .quadraticCurveTo(40, 0, 50, 60)
     .lineTo(70, 20)
     .lineTo(90, 60)
     .build();
@@ -60,4 +60,3 @@ export function createDemoScene(): Scene {
     ],
   };
 }
-

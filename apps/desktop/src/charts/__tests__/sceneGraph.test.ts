@@ -14,6 +14,8 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: stri
     beginPath: () => calls.push("beginPath"),
     moveTo: () => calls.push("moveTo"),
     lineTo: () => calls.push("lineTo"),
+    quadraticCurveTo: () => calls.push("quadraticCurveTo"),
+    bezierCurveTo: () => calls.push("bezierCurveTo"),
     arcTo: () => calls.push("arcTo"),
     arc: () => calls.push("arc"),
     closePath: () => calls.push("closePath"),
