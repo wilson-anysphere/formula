@@ -18,6 +18,8 @@ export type ToolName =
 
 export type ToolCategory = "read" | "analysis" | "mutate" | "format" | "chart" | "pivot" | "external_network";
 
+export type ToolRiskLevel = "low" | "medium" | "high";
+
 export interface ToolCapabilityMetadata {
   category: ToolCategory;
   mutates_workbook: boolean;
@@ -38,6 +40,12 @@ export interface ToolCapabilityMetadata {
    * be approval-gated regardless of mode (e.g. external network access).
    */
   requires_approval_by_default?: boolean;
+}
+
+export interface ToolMetadata {
+  categories: ToolCategory[];
+  risk: ToolRiskLevel;
+  defaultRequiresApproval: boolean;
 }
 
 /**
@@ -81,6 +89,29 @@ export const ToolNameSchema = z.enum([
   "fetch_external_data"
 ]);
 
+/**
+ * Rich tool metadata used for least-privilege tool policies and auditing.
+ *
+ * This is derived from `TOOL_CAPABILITIES` to keep one source of truth for
+ * mutation + approval semantics, while still allowing multi-category tagging.
+ */
+export const TOOL_METADATA: Record<ToolName, ToolMetadata> = Object.fromEntries(
+  (ToolNameSchema.options as ToolName[]).map((name) => {
+    const cap = TOOL_CAPABILITIES[name];
+
+    const categories: ToolCategory[] = [cap.category];
+    // Mutating tools should also be discoverable via the generic `mutate` category.
+    if (cap.mutates_workbook && !categories.includes("mutate")) categories.push("mutate");
+    // Analysis tools are read-only, so they are safe to include in read-only policies.
+    if (!cap.mutates_workbook && cap.category === "analysis" && !categories.includes("read")) categories.push("read");
+
+    const defaultRequiresApproval = Boolean(cap.requires_approval_by_default);
+    const risk: ToolRiskLevel = defaultRequiresApproval || cap.high_risk ? "high" : cap.mutates_workbook ? "medium" : "low";
+
+    return [name, { categories, risk, defaultRequiresApproval }];
+  })
+) as Record<ToolName, ToolMetadata>;
+
 export interface ToolPolicy {
   allowTools?: ToolName[];
   denyTools?: ToolName[];
@@ -99,20 +130,22 @@ export interface ToolPolicy {
 export function isToolAllowedByPolicy(name: ToolName, policy?: ToolPolicy): boolean {
   if (!policy) return true;
 
-  const capability = TOOL_CAPABILITIES[name];
-  const category = capability.category;
+  const metadata = TOOL_METADATA[name];
+  const categories = metadata.categories;
+  const mutatesWorkbook = TOOL_CAPABILITIES[name].mutates_workbook;
 
-  if (policy.mutationsAllowed === false && capability.mutates_workbook) return false;
-  if (policy.externalNetworkAllowed === false && category === "external_network") return false;
+  if (policy.mutationsAllowed === false && mutatesWorkbook) return false;
+  if (policy.externalNetworkAllowed === false && categories.includes("external_network")) return false;
 
   if (policy.denyTools?.includes(name)) return false;
-  if (policy.denyCategories?.includes(category)) return false;
+  if (policy.denyCategories?.some((category) => categories.includes(category))) return false;
 
   const allowTools = policy.allowTools;
   const allowCategories = policy.allowCategories;
   const hasAllowList = Boolean((allowTools && allowTools.length) || (allowCategories && allowCategories.length));
   if (hasAllowList) {
-    const allowed = Boolean(allowTools?.includes(name)) || Boolean(allowCategories?.includes(category));
+    const allowed =
+      Boolean(allowTools?.includes(name)) || Boolean(allowCategories?.some((category) => categories.includes(category)));
     if (!allowed) return false;
   }
 
