@@ -75,12 +75,15 @@ impl ViewportData {
         self.range
     }
 
-    /// Return the snapshot for a single cell inside the viewport (if non-empty).
+    /// Return the cached snapshot for a single cell inside the viewport (if present).
+    ///
+    /// The viewport is sparse: empty cells are absent unless they have persisted
+    /// metadata (e.g. style-only blanks) or in-memory edits.
     pub fn get(&self, row: i64, col: i64) -> Option<&CellSnapshot> {
         self.cells.get(&(row, col))
     }
 
-    /// Iterate over the non-empty cells contained in this viewport.
+    /// Iterate over the sparse cell entries contained in this viewport.
     pub fn non_empty_cells(&self) -> impl Iterator<Item = (&(i64, i64), &CellSnapshot)> {
         self.cells.iter()
     }
@@ -213,8 +216,9 @@ impl MemoryManager {
     /// just the requested range.
     ///
     /// This loads any missing pages from SQLite and inserts them into the
-    /// in-memory page cache. Only *non-empty* cells are returned in
-    /// [`ViewportData`].
+    /// in-memory page cache. The returned [`ViewportData`] is sparse: it only
+    /// contains cells that exist in storage (including style-only blanks) or
+    /// have in-memory edits.
     ///
     /// Notes:
     /// - Ranges are inclusive of start/end row/col.
