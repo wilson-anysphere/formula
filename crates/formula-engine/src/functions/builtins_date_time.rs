@@ -677,6 +677,10 @@ fn excel_error_kind(err: ExcelError) -> ErrorKind {
 fn map_unary(v: Value, mut f: impl FnMut(Value) -> Value) -> Value {
     match v {
         Value::Array(arr) => {
+            if arr.rows == 1 && arr.cols == 1 {
+                let el = arr.values.into_iter().next().unwrap_or(Value::Blank);
+                return f(el);
+            }
             let mut out = Vec::with_capacity(arr.values.len());
             for el in arr.values {
                 out.push(f(el));
@@ -688,13 +692,16 @@ fn map_unary(v: Value, mut f: impl FnMut(Value) -> Value) -> Value {
 }
 
 fn broadcast_map2(a: Value, b: Value, mut f: impl FnMut(Value, Value) -> Value) -> Value {
-    let (rows, cols) = broadcast_shape(&[&a, &b]);
+    let (rows, cols) = match broadcast_shape(&[&a, &b]) {
+        Ok(shape) => shape,
+        Err(e) => return Value::Error(e),
+    };
     if !is_broadcastable(&a, rows, cols) || !is_broadcastable(&b, rows, cols) {
         return Value::Error(ErrorKind::Value);
     }
 
-    if rows == 1 && cols == 1 && !matches!(a, Value::Array(_)) && !matches!(b, Value::Array(_)) {
-        return f(a, b);
+    if rows == 1 && cols == 1 {
+        return f(broadcast_get(&a, 0, 0), broadcast_get(&b, 0, 0));
     }
 
     let mut out = Vec::with_capacity(rows.saturating_mul(cols));
@@ -709,7 +716,10 @@ fn broadcast_map2(a: Value, b: Value, mut f: impl FnMut(Value, Value) -> Value) 
 }
 
 fn broadcast_map3(a: Value, b: Value, c: Value, mut f: impl FnMut(Value, Value, Value) -> Value) -> Value {
-    let (rows, cols) = broadcast_shape(&[&a, &b, &c]);
+    let (rows, cols) = match broadcast_shape(&[&a, &b, &c]) {
+        Ok(shape) => shape,
+        Err(e) => return Value::Error(e),
+    };
     if !is_broadcastable(&a, rows, cols)
         || !is_broadcastable(&b, rows, cols)
         || !is_broadcastable(&c, rows, cols)
@@ -717,13 +727,12 @@ fn broadcast_map3(a: Value, b: Value, c: Value, mut f: impl FnMut(Value, Value, 
         return Value::Error(ErrorKind::Value);
     }
 
-    if rows == 1
-        && cols == 1
-        && !matches!(a, Value::Array(_))
-        && !matches!(b, Value::Array(_))
-        && !matches!(c, Value::Array(_))
-    {
-        return f(a, b, c);
+    if rows == 1 && cols == 1 {
+        return f(
+            broadcast_get(&a, 0, 0),
+            broadcast_get(&b, 0, 0),
+            broadcast_get(&c, 0, 0),
+        );
     }
 
     let mut out = Vec::with_capacity(rows.saturating_mul(cols));
@@ -738,21 +747,29 @@ fn broadcast_map3(a: Value, b: Value, c: Value, mut f: impl FnMut(Value, Value, 
     Value::Array(Array::new(rows, cols, out))
 }
 
-fn broadcast_shape(values: &[&Value]) -> (usize, usize) {
-    let mut rows = 1usize;
-    let mut cols = 1usize;
+fn broadcast_shape(values: &[&Value]) -> Result<(usize, usize), ErrorKind> {
+    let mut shape: Option<(usize, usize)> = None;
     for v in values {
         if let Value::Array(arr) = v {
-            rows = rows.max(arr.rows);
-            cols = cols.max(arr.cols);
+            if arr.rows == 1 && arr.cols == 1 {
+                continue;
+            }
+            match shape {
+                None => shape = Some((arr.rows, arr.cols)),
+                Some((rows, cols)) => {
+                    if arr.rows != rows || arr.cols != cols {
+                        return Err(ErrorKind::Value);
+                    }
+                }
+            }
         }
     }
-    (rows, cols)
+    Ok(shape.unwrap_or((1, 1)))
 }
 
 fn is_broadcastable(v: &Value, rows: usize, cols: usize) -> bool {
     match v {
-        Value::Array(arr) => (arr.rows == 1 || arr.rows == rows) && (arr.cols == 1 || arr.cols == cols),
+        Value::Array(arr) => (arr.rows == 1 && arr.cols == 1) || (arr.rows == rows && arr.cols == cols),
         _ => true,
     }
 }

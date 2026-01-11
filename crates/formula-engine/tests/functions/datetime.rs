@@ -113,6 +113,19 @@ fn hour_minute_second_extract_time_components() {
 }
 
 #[test]
+fn date_time_1x1_arrays_coerce_back_to_scalars() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=ABS(TIME({1},0,0))"), 1.0 / 24.0);
+    assert_number(&sheet.eval("=ABS(YEAR({DATE(2020,1,1)}))"), 2020.0);
+}
+
+#[test]
+fn date_time_mismatched_array_shapes_return_value_error() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.eval("=TIME({1,2},{3;4},0)"), Value::Error(ErrorKind::Value));
+}
+
+#[test]
 fn weekday_and_weeknum_return_types() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=WEEKDAY(1)"), 2.0);
