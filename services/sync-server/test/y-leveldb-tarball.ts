@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 function execFileAsync(
   command: string,
@@ -43,7 +43,6 @@ export async function loadYLeveldbFromTarball(t: {
   // that re-exports `level-mem` so tests don't need native LevelDB bindings.
   const require = createRequire(import.meta.url);
   const levelMemEntry = require.resolve("level-mem");
-  const levelMemUrl = pathToFileURL(levelMemEntry).href;
 
   const linkDependency = async (linkName: string, pkgJsonPath: string) => {
     const targetDir = path.dirname(pkgJsonPath);
@@ -74,7 +73,6 @@ export async function loadYLeveldbFromTarball(t: {
       {
         name: "level",
         version: "0.0.0-test",
-        type: "module",
         main: "./index.js",
       },
       null,
@@ -83,15 +81,17 @@ export async function loadYLeveldbFromTarball(t: {
   );
   await writeFile(
     path.join(levelStubDir, "index.js"),
-    `import levelMem from ${JSON.stringify(levelMemUrl)};\nexport default levelMem;\n`
+    `module.exports = require(${JSON.stringify(levelMemEntry)});\n`
   );
 
-  const yLeveldbUrl = pathToFileURL(path.join(pkgRoot, "src", "y-leveldb.js")).href;
-  const mod = (await import(yLeveldbUrl)) as any;
+  // Load the CommonJS build so we don't import a second ESM copy of Yjs in the
+  // same test process (see https://github.com/yjs/yjs/issues/438).
+  const yLeveldbCjsPath = path.join(pkgRoot, "dist", "y-leveldb.cjs");
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mod = require(yLeveldbCjsPath) as any;
 
   return {
     LeveldbPersistence: mod.LeveldbPersistence,
     keyEncoding: mod.keyEncoding,
   };
 }
-

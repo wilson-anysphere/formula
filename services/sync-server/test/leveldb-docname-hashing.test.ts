@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { Readable } from "node:stream";
 import test from "node:test";
 
-import * as Y from "yjs";
+import { Y } from "./yjs-interop.ts";
 
 import { LeveldbDocNameHashingLayer, sha256Hex } from "../src/leveldb-docname.js";
 
@@ -72,7 +73,9 @@ test("LeveldbDocNameHashingLayer applies sha256(docName) to y-leveldb docName ar
 
 let yLeveldb: typeof import("y-leveldb") | null = null;
 try {
-  yLeveldb = await import("y-leveldb");
+  const require = createRequire(import.meta.url);
+  // Load the CommonJS build so we don't pull in a second (ESM) copy of Yjs.
+  yLeveldb = require("y-leveldb");
 } catch {
   // y-leveldb is an optional dependency (pulled in by y-websocket).
 }

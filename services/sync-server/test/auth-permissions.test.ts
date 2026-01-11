@@ -6,8 +6,7 @@ import test from "node:test";
 
 import jwt from "jsonwebtoken";
 import WebSocket from "ws";
-import * as Y from "yjs";
-import { WebsocketProvider } from "y-websocket";
+import { WebsocketProvider, Y } from "./yjs-interop.ts";
 
 import {
   getAvailablePort,
@@ -335,4 +334,3 @@ test("awareness sanitizes presence.id and blocks clientID spoof", async (t) => {
   assert.ok(victimProvider.awareness.getStates().has(docVictim.clientID));
   assert.ok(attackerProvider.awareness.getStates().has(docVictim.clientID));
 });
-

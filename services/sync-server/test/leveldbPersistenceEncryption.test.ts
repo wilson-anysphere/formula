@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import levelMem from "level-mem";
-import * as Y from "yjs";
+import { Y } from "./yjs-interop.ts";
 
 import { loadYLeveldbFromTarball } from "./y-leveldb-tarball.js";
 import {

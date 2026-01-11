@@ -5,8 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import WebSocket from "ws";
-import * as Y from "yjs";
-import { WebsocketProvider } from "y-websocket";
+import { WebsocketProvider, Y } from "./yjs-interop.ts";
 
 import {
   startSyncServer,
