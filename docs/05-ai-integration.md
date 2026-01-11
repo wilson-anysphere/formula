@@ -289,53 +289,59 @@ interface Attachment {
 **Implementation:**
 
 ```typescript
+// Helper that emits bounded, per-tool summaries (avoids huge `read_range` matrices).
+// See: `packages/llm/src/toolResultSerialization.js`
+import { serializeToolResultForModel } from "...";
+
 class ChatPanelEngine {
   private conversation: ChatMessage[] = [];
   private tools: SpreadsheetTools;
-  
+
   async processMessage(userMessage: string, attachments?: Attachment[]): Promise<ChatResponse> {
     // Add user message to conversation
     this.conversation.push({ role: "user", content: userMessage, attachments });
-    
+
     // Build context
     const context = await this.buildContext(attachments);
-    
+
     // Call LLM with tool use
     const response = await this.llm.chat({
-      messages: [
-        { role: "system", content: this.buildSystemPrompt(context) },
-        ...this.conversation
-      ],
+      messages: [{ role: "system", content: this.buildSystemPrompt(context) }, ...this.conversation],
       tools: this.getToolDefinitions(),
-      toolChoice: "auto"
+      toolChoice: "auto",
     });
-    
+
     // Process tool calls
     if (response.toolCalls) {
       const results = await this.executeToolCalls(response.toolCalls);
-      
+
       // IMPORTANT: Tool results are part of the model's context on the next turn.
       // They should be appended as `role: "tool"` messages (matching the provider
       // tool-calling protocol), and must be DLP-redacted/blocked *at tool execution*
       // time (not only during prompt context construction).
-      for (const result of results) {
+      //
+      // ALSO IMPORTANT: Never append full JSON tool results directly.
+      // Tools like `read_range` can return huge matrices, which can blow up
+      // model context windows and any persisted audit logs. Feed back a bounded,
+      // per-tool summary instead (see `packages/llm/src/toolResultSerialization.js`).
+      for (const { call, result } of results) {
         this.conversation.push({
           role: "tool",
-          toolCallId: result.id,
-          content: JSON.stringify(result, null, 2)
+          toolCallId: call.id,
+          content: serializeToolResultForModel({ toolCall: call, result, maxChars: 20_000 }),
         });
       }
-      
+
       // Get final response
       return this.processMessage("Please summarize what you did.");
     }
-    
+
     // Add assistant response to conversation
     this.conversation.push({ role: "assistant", content: response.content });
-    
+
     return {
       message: response.content,
-      actions: response.suggestedActions
+      actions: response.suggestedActions,
     };
   }
 }
