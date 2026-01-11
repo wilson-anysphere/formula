@@ -263,7 +263,7 @@ export class QueryFoldingEngine {
     const callStack = new Set([query.id]);
     const initial = this.compileSourceToSqlState(query.source, ctx, callStack);
     if (!initial) {
-      const reason = explainSourceFailure(query.source, { queries, callStack });
+      const reason = explainSourceFailure(query.source, { queries, callStack, dialect });
       return {
         plan: { type: "local", steps: query.steps },
         steps: query.steps.map((step) => ({
@@ -1032,7 +1032,7 @@ export class QueryFoldingEngine {
 
 /**
  * @param {import("../model.js").QuerySource} source
- * @param {{ queries: Record<string, Query> | null | undefined, callStack: Set<string> }} ctx
+ * @param {{ queries: Record<string, Query> | null | undefined, callStack: Set<string>, dialect?: SqlDialect }} ctx
  * @returns {string}
  */
 function explainSourceFailure(source, ctx) {
@@ -1045,6 +1045,9 @@ function explainSourceFailure(source, ctx) {
       return "unsupported_query";
     }
     case "database":
+      if (ctx.dialect?.name === "sqlserver" && !isSqlServerDerivedTableSafe(source.query)) {
+        return "sqlserver_order_by_in_source";
+      }
       return "unsupported_source";
     default:
       return "unsupported_source";

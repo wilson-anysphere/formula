@@ -173,10 +173,13 @@ test("QueryEngine: SQL Server sources with ORDER BY do not fold (derived table r
     ],
   };
 
-  const result = await engine.executeQuery(query, { queries: {} }, {});
+  const { table: result, meta } = await engine.executeQueryWithMeta(query, { queries: {} }, {});
   assert.ok(observed, "expected SQL connector to be invoked");
   assert.equal(observed.sql, baseSql);
   assert.equal(observed.params, undefined);
+  assert.ok(meta.folding, "expected folding metadata to be present");
+  assert.equal(meta.folding.planType, "local");
+  assert.equal(meta.folding.steps[0].reason, "sqlserver_order_by_in_source");
   assert.deepEqual(result.toGrid(), [
     ["Region", "Sales"],
     ["East", 100],
