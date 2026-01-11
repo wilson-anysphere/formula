@@ -65,7 +65,9 @@ function cellStateToEngineInput(cell: DocumentCellState): EngineCellScalar | nul
 
 /**
  * Export the current DocumentController workbook into the JSON format consumed by
- * `crates/formula-core` / `WasmWorkbook.fromJson`.
+ * `crates/formula-wasm` (`WasmWorkbook.fromJson`).
+ *
+ * Note: empty/cleared cells are omitted from the JSON entirely (sparse semantics).
  */
 export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson {
   const sheets: Record<string, { cells: Record<string, EngineCellScalar> }> = {};
