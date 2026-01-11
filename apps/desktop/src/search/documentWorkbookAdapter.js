@@ -36,6 +36,14 @@ export class DocumentWorkbookAdapter {
     /** @type {Map<string, DocumentSheetAdapter>} */
     this.#sheetsById = new Map();
 
+    /**
+     * Cache-buster for workbook metadata (defined names / tables).
+     *
+     * Consumers like tab-completion cache suggestions and need a cheap way to
+     * invalidate when metadata changes.
+     */
+    this.schemaVersion = 0;
+
     /** @type {Map<string, any>} */
     this.names = new Map();
     /** @type {Map<string, any>} */
@@ -63,7 +71,8 @@ export class DocumentWorkbookAdapter {
   }
 
   defineName(name, ref) {
-    this.names.set(normalizeName(name), ref);
+    this.schemaVersion += 1;
+    this.names.set(normalizeName(name), { ...ref, name: String(name) });
   }
 
   getName(name) {
@@ -71,11 +80,18 @@ export class DocumentWorkbookAdapter {
   }
 
   addTable(table) {
+    this.schemaVersion += 1;
     this.tables.set(normalizeName(table.name), table);
   }
 
   getTable(name) {
     return this.tables.get(normalizeName(name)) ?? null;
+  }
+
+  clearSchema() {
+    this.schemaVersion += 1;
+    this.names.clear();
+    this.tables.clear();
   }
 }
 

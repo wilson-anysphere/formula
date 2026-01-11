@@ -876,8 +876,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // Refresh workbook metadata (defined names + tables) used by the name box and
   // AI completion. This is separate from the cell snapshot that populates the
   // DocumentController.
-  workbook.names.clear();
-  workbook.tables.clear();
+  workbook.clearSchema();
   const sheetIdByName = new Map<string, string>();
   for (const [id, name] of workbookSheetNames.entries()) {
     sheetIdByName.set(name, id);

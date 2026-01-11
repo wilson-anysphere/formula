@@ -590,7 +590,10 @@ export class SpreadsheetApp {
         getSheetId: () => this.sheetId,
         limits: this.limits,
         schemaProvider: {
-          getNamedRanges: () => Array.from(this.searchWorkbook.names.keys()).map((name) => ({ name })),
+          getNamedRanges: () =>
+            Array.from(this.searchWorkbook.names.values())
+              .map((entry: any) => ({ name: typeof entry?.name === "string" ? entry.name : "" }))
+              .filter((entry: { name: string }) => entry.name.length > 0),
           getTables: () =>
             Array.from(this.searchWorkbook.tables.values())
               .map((table: any) => ({
@@ -598,7 +601,7 @@ export class SpreadsheetApp {
                 columns: Array.isArray(table?.columns) ? table.columns.map((c: unknown) => String(c)) : [],
               }))
               .filter((t: { name: string; columns: string[] }) => t.name.length > 0 && t.columns.length > 0),
-          getCacheKey: () => `names:${this.searchWorkbook.names.size}|tables:${this.searchWorkbook.tables.size}`,
+          getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
         },
       });
     }
