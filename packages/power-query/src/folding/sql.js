@@ -346,7 +346,14 @@ export class QueryFoldingEngine {
    * on other queries (e.g. `merge` + `append`).
    *
    * @param {Query} query
-   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null, getConnectionIdentity?: ((connection: unknown) => unknown) | null }} ctx
+   * @param {{
+   *   dialect: SqlDialect;
+   *   queries?: Record<string, Query> | null;
+   *   getConnectionIdentity?: ((connection: unknown) => unknown) | null;
+   *   privacyMode?: "ignore" | "enforce" | "warn";
+   *   privacyLevelsBySourceId?: Record<string, import("../privacy/levels.js").PrivacyLevel>;
+   *   diagnostics?: FoldingFirewallDiagnostic[];
+   * }} ctx
    * @param {Set<string>} callStack
    * @returns {SqlState | null}
    */
@@ -371,7 +378,14 @@ export class QueryFoldingEngine {
 
   /**
    * @param {import("../model.js").QuerySource} source
-   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null, getConnectionIdentity?: ((connection: unknown) => unknown) | null }} ctx
+   * @param {{
+   *   dialect: SqlDialect;
+   *   queries?: Record<string, Query> | null;
+   *   getConnectionIdentity?: ((connection: unknown) => unknown) | null;
+   *   privacyMode?: "ignore" | "enforce" | "warn";
+   *   privacyLevelsBySourceId?: Record<string, import("../privacy/levels.js").PrivacyLevel>;
+   *   diagnostics?: FoldingFirewallDiagnostic[];
+   * }} ctx
    * @param {Set<string>} callStack
    * @returns {SqlState | null}
    */
@@ -396,7 +410,14 @@ export class QueryFoldingEngine {
   /**
    * @param {SqlState} state
    * @param {QueryOperation} operation
-   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null, getConnectionIdentity?: ((connection: unknown) => unknown) | null }} ctx
+   * @param {{
+   *   dialect: SqlDialect;
+   *   queries?: Record<string, Query> | null;
+   *   getConnectionIdentity?: ((connection: unknown) => unknown) | null;
+   *   privacyMode?: "ignore" | "enforce" | "warn";
+   *   privacyLevelsBySourceId?: Record<string, import("../privacy/levels.js").PrivacyLevel>;
+   *   diagnostics?: FoldingFirewallDiagnostic[];
+   * }} ctx
    * @param {Set<string>} callStack
    * @returns {SqlState | null}
    */
@@ -770,7 +791,14 @@ export class QueryFoldingEngine {
    * @private
    * @param {SqlState} state
    * @param {QueryOperation} operation
-   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null }} ctx
+   * @param {{
+   *   dialect: SqlDialect;
+   *   queries?: Record<string, Query> | null;
+   *   getConnectionIdentity?: ((connection: unknown) => unknown) | null;
+   *   privacyMode?: "ignore" | "enforce" | "warn";
+   *   privacyLevelsBySourceId?: Record<string, import("../privacy/levels.js").PrivacyLevel>;
+   *   diagnostics?: FoldingFirewallDiagnostic[];
+   * }} ctx
    * @param {Set<string>} callStack
    * @returns {string}
    */
@@ -848,7 +876,19 @@ export class QueryFoldingEngine {
         if (!rightQuery) return "missing_query";
         const rightState = this.compileQueryToSqlState(rightQuery, ctx, callStack);
         if (!rightState?.columns) return "unsupported_query";
-        if (!connectionsMatch(state, rightState)) return "different_connection";
+        const leftSourceId = sqlSourceIdForState(state);
+        const rightSourceId = sqlSourceIdForState(rightState);
+        const privacyMode = ctx.privacyMode;
+        const levelsBySourceId = ctx.privacyLevelsBySourceId;
+        const leftLevel = privacyMode && privacyMode !== "ignore" ? getPrivacyLevel(levelsBySourceId, leftSourceId) : null;
+        const rightLevel = privacyMode && privacyMode !== "ignore" ? getPrivacyLevel(levelsBySourceId, rightSourceId) : null;
+        if (!connectionsMatch(state, rightState)) {
+          if (leftLevel && rightLevel && leftLevel !== rightLevel) return "privacy_firewall";
+          return "different_connection";
+        }
+        if (ctx.privacyMode && ctx.privacyMode !== "ignore") {
+          if (leftLevel && rightLevel && leftLevel !== rightLevel) return "privacy_firewall";
+        }
         const join = joinTypeToSql(ctx.dialect, operation.joinType);
         if (!join) return "unsupported_join_type";
         return "unsupported_op";
@@ -861,7 +901,25 @@ export class QueryFoldingEngine {
           if (!q) return "missing_query";
           const compiled = this.compileQueryToSqlState(q, ctx, callStack);
           if (!compiled?.columns) return "unsupported_query";
-          if (!connectionsMatch(state, compiled)) return "different_connection";
+          if (!connectionsMatch(state, compiled)) {
+            if (ctx.privacyMode && ctx.privacyMode !== "ignore") {
+              const baseSourceId = sqlSourceIdForState(state);
+              const branchSourceId = sqlSourceIdForState(compiled);
+              const levelsBySourceId = ctx.privacyLevelsBySourceId;
+              const leftLevel = getPrivacyLevel(levelsBySourceId, baseSourceId);
+              const rightLevel = getPrivacyLevel(levelsBySourceId, branchSourceId);
+              if (leftLevel !== rightLevel) return "privacy_firewall";
+            }
+            return "different_connection";
+          }
+          if (ctx.privacyMode && ctx.privacyMode !== "ignore") {
+            const baseSourceId = sqlSourceIdForState(state);
+            const branchSourceId = sqlSourceIdForState(compiled);
+            const levelsBySourceId = ctx.privacyLevelsBySourceId;
+            const leftLevel = getPrivacyLevel(levelsBySourceId, baseSourceId);
+            const rightLevel = getPrivacyLevel(levelsBySourceId, branchSourceId);
+            if (leftLevel !== rightLevel) return "privacy_firewall";
+          }
           if (!columnsCompatible(state.columns, compiled.columns)) return "incompatible_schema";
         }
         return "unsupported_op";
