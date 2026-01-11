@@ -605,6 +605,27 @@ class ExtensionHost {
 
     extension.active = false;
 
+    // Best-effort cleanup for runtime registrations that were tied to the crashed worker.
+    // Contributed commands stay registered so the app can still route them for future activations.
+    try {
+      const contributedCommands = new Set(
+        (extension.manifest.contributes.commands ?? []).map((c) => c.command)
+      );
+
+      for (const cmd of extension.registeredCommands) {
+        if (contributedCommands.has(cmd)) continue;
+        if (this._commands.get(cmd) === extension.id) this._commands.delete(cmd);
+      }
+      extension.registeredCommands.clear();
+    } catch {
+      // ignore
+    }
+
+    // Remove panels owned by this extension worker; they can no longer receive messages.
+    for (const [panelId, panel] of this._panels.entries()) {
+      if (panel?.extensionId === extension.id) this._panels.delete(panelId);
+    }
+
     // Reject outstanding requests bound for this worker.
     for (const [id, pending] of extension.pendingRequests.entries()) {
       if (pending.timeout) clearTimeout(pending.timeout);
