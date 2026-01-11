@@ -225,3 +225,50 @@ test("FileCollabPersistence does not write plaintext into an encrypted log when 
   const sizeAfter = (await stat(filePath)).size;
   assert.equal(sizeAfter, sizeBefore);
 });
+
+test("FileCollabPersistence upgrades legacy plaintext logs to encrypted format when KeyRing is enabled", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "collab-file-persistence-upgrade-"));
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const docId = `doc-${randomUUID()}`;
+  let filePath = "";
+
+  // Persist once using plaintext format (no header).
+  {
+    const persistence = new FileCollabPersistence(dir, { compactAfterUpdates: 1_000 });
+    const session = createCollabSession({ docId, persistence, schema: { autoInit: false } });
+    await session.whenLocalPersistenceLoaded();
+    await session.setCellValue("Sheet1:0:0", "hello");
+    await session.flushLocalPersistence();
+
+    session.destroy();
+    session.doc.destroy();
+    await persistence.flush(docId);
+  }
+
+  const yjsFiles = (await readdir(dir)).filter((name) => name.endsWith(".yjs"));
+  assert.equal(yjsFiles.length, 1);
+  filePath = path.join(dir, yjsFiles[0]);
+
+  const beforeBytes = await readFile(filePath);
+  assert.notEqual(beforeBytes.subarray(0, 8).toString("ascii"), "FMLYJS01");
+
+  // Restart with KeyRing-enabled encryption: load should upgrade the file.
+  const keyRing = KeyRing.create();
+  {
+    const persistence = new FileCollabPersistence(dir, { compactAfterUpdates: 1_000, keyRing });
+    const session = createCollabSession({ docId, persistence, schema: { autoInit: false } });
+    await session.whenLocalPersistenceLoaded();
+
+    assert.equal((await session.getCell("Sheet1:0:0"))?.value, "hello");
+
+    session.destroy();
+    session.doc.destroy();
+    await persistence.flush(docId);
+  }
+
+  const afterBytes = await readFile(filePath);
+  assert.equal(afterBytes.subarray(0, 8).toString("ascii"), "FMLYJS01");
+});
