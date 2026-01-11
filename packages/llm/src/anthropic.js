@@ -326,6 +326,8 @@ export class AnthropicClient {
 
       /** @type {Map<number, { id: string, type: "text" | "tool_use" }>} */
       const blocksByIndex = new Map();
+      /** @type {Map<string, { name?: string, started: boolean, pendingArgs: string, args: string }>} */
+      const toolCallsById = new Map();
       /** @type {Set<string>} */
       const openToolCalls = new Set();
 
@@ -333,6 +335,31 @@ export class AnthropicClient {
         const ids = Array.from(openToolCalls);
         openToolCalls.clear();
         return ids;
+      }
+
+      function getOrCreateToolCall(id) {
+        const existing = toolCallsById.get(id);
+        if (existing) return existing;
+        const next = { started: false, pendingArgs: "", args: "" };
+        toolCallsById.set(id, next);
+        return next;
+      }
+
+      /**
+       * Best-effort diffing: some Anthropic-compatible backends may resend the
+       * full `partial_json` payload instead of true deltas.
+       *
+       * @param {{ args: string }} state
+       * @param {string} fragment
+       */
+      function diffArgsFragment(state, fragment) {
+        const prev = state.args ?? "";
+        if (fragment.startsWith(prev)) {
+          state.args = fragment;
+          return fragment.slice(prev.length);
+        }
+        state.args = prev + fragment;
+        return fragment;
       }
 
       while (true) {
@@ -359,24 +386,38 @@ export class AnthropicClient {
             usage = next;
           }
 
-          if (json.type === "content_block_start") {
-            const index = json.index;
-            const block = json.content_block;
-            if (typeof index === "number" && block?.type === "tool_use" && typeof block.id === "string") {
-              blocksByIndex.set(index, { id: block.id, type: "tool_use" });
-              if (typeof block.name === "string") {
-                openToolCalls.add(block.id);
-                yield { type: "tool_call_start", id: block.id, name: block.name };
-              }
-              if (block.input && typeof block.input === "object") {
-                const encoded = toJsonString(block.input);
-                if (encoded && encoded !== "{}") {
-                  yield { type: "tool_call_delta", id: block.id, delta: encoded };
-                }
-              }
-            } else if (typeof index === "number" && block?.type === "text") {
-              blocksByIndex.set(index, { id: `text-${index}`, type: "text" });
-            }
+           if (json.type === "content_block_start") {
+             const index = json.index;
+             const block = json.content_block;
+             if (typeof index === "number" && block?.type === "tool_use" && typeof block.id === "string") {
+               blocksByIndex.set(index, { id: block.id, type: "tool_use" });
+               const state = getOrCreateToolCall(block.id);
+               if (typeof block.name === "string") state.name = block.name;
+               if (!state.started && state.name) {
+                 state.started = true;
+                 openToolCalls.add(block.id);
+                 yield { type: "tool_call_start", id: block.id, name: state.name };
+                 if (state.pendingArgs) {
+                   yield { type: "tool_call_delta", id: block.id, delta: state.pendingArgs };
+                   state.pendingArgs = "";
+                 }
+               }
+               if (block.input && typeof block.input === "object") {
+                 const encoded = toJsonString(block.input);
+                 if (encoded && encoded !== "{}") {
+                   const delta = diffArgsFragment(state, encoded);
+                   if (delta) {
+                     if (state.started) {
+                       yield { type: "tool_call_delta", id: block.id, delta };
+                     } else {
+                       state.pendingArgs += delta;
+                     }
+                   }
+                 }
+               }
+             } else if (typeof index === "number" && block?.type === "text") {
+               blocksByIndex.set(index, { id: `text-${index}`, type: "text" });
+             }
             continue;
           }
 
@@ -388,24 +429,35 @@ export class AnthropicClient {
               continue;
             }
 
-            if (delta?.type === "input_json_delta" && typeof delta.partial_json === "string") {
-              const block = typeof index === "number" ? blocksByIndex.get(index) : null;
-              if (block?.type === "tool_use") {
-                yield { type: "tool_call_delta", id: block.id, delta: delta.partial_json };
-              }
-              continue;
-            }
-          }
+             if (delta?.type === "input_json_delta" && typeof delta.partial_json === "string") {
+               const block = typeof index === "number" ? blocksByIndex.get(index) : null;
+               if (block?.type === "tool_use") {
+                 const state = getOrCreateToolCall(block.id);
+                 const diffed = diffArgsFragment(state, delta.partial_json);
+                 if (diffed) {
+                   if (state.started) {
+                     yield { type: "tool_call_delta", id: block.id, delta: diffed };
+                   } else {
+                     state.pendingArgs += diffed;
+                   }
+                 }
+               }
+               continue;
+             }
+           }
 
-          if (json.type === "content_block_stop") {
-            const index = json.index;
-            const block = typeof index === "number" ? blocksByIndex.get(index) : null;
-            if (block?.type === "tool_use") {
-              openToolCalls.delete(block.id);
-              yield { type: "tool_call_end", id: block.id };
-            }
-            continue;
-          }
+           if (json.type === "content_block_stop") {
+             const index = json.index;
+             const block = typeof index === "number" ? blocksByIndex.get(index) : null;
+             if (block?.type === "tool_use") {
+               const state = toolCallsById.get(block.id);
+               if (state?.started) {
+                 openToolCalls.delete(block.id);
+                 yield { type: "tool_call_end", id: block.id };
+               }
+             }
+             continue;
+           }
 
           if (json.type === "message_stop") {
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
