@@ -43,12 +43,15 @@ export function GridPerformanceHarness(props?: {
       } else {
         const trimmed = samples.slice(1);
         const avg = trimmed.reduce((sum, value) => sum + value, 0) / Math.max(1, trimmed.length);
+        const sorted = [...trimmed].sort((a, b) => a - b);
+        const p95Index = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * 0.95));
+        const p95 = sorted[p95Index] ?? 0;
         const stats = api.getPerfStats();
         const statsSuffix = stats
           ? ` cells=${stats.cellsPainted} fetches=${stats.cellFetches} dirty=${stats.dirtyRects.total} blit=${stats.blitUsed}`
           : "";
         console.log(
-          `[grid-perf] frames=${trimmed.length} avgFrame=${avg.toFixed(2)}ms (~${(1000 / avg).toFixed(1)}fps)${statsSuffix}`
+          `[grid-perf] frames=${trimmed.length} avgFrame=${avg.toFixed(2)}ms p95=${p95.toFixed(2)}ms (~${(1000 / avg).toFixed(1)}fps)${statsSuffix}`
         );
       }
     };
