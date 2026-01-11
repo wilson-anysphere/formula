@@ -201,10 +201,12 @@ export class KernelEngine {
    */
   _gpuSupports(kernel, precision) {
     if (!this._gpu) return false;
-    if (precision === "f32") return true;
     if (typeof this._gpu.supportsKernelPrecision === "function") {
       return this._gpu.supportsKernelPrecision(kernel, precision);
     }
+    // Back-compat: older/test GPU backends may not implement `supportsKernelPrecision`.
+    // Assume f32 kernels are supported, but require explicit support checks for f64/u32.
+    if (precision === "f32") return true;
     return false;
   }
 
