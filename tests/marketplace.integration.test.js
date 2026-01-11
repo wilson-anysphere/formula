@@ -18,7 +18,7 @@ import signingPkg from "../shared/crypto/signing.js";
 const { createMarketplaceServer } = marketplaceServerPkg;
 const { publishExtension, packageExtension } = publisherPkg;
 const { ExtensionHost } = extensionHostPkg;
-const { createExtensionPackageV1, createExtensionPackageV2 } = extensionPackagePkg;
+const { createExtensionPackageV1, createExtensionPackageV2, verifyExtensionPackageV2 } = extensionPackagePkg;
 const { signBytes, verifyBytesSignature, sha256 } = signingPkg;
 
 const EXTENSION_TIMEOUT_MS = 20_000;
@@ -55,6 +55,12 @@ async function patchManifest(extensionDir, patch) {
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   Object.assign(manifest, patch);
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
+function keyIdFromPublicKeyPem(publicKeyPem) {
+  const key = crypto.createPublicKey(publicKeyPem);
+  const der = key.export({ type: "spki", format: "der" });
+  return crypto.createHash("sha256").update(der).digest("hex");
 }
 
 test("desktop runtime: auto-load installed extensions + hot reload on update", async () => {
@@ -1204,6 +1210,296 @@ test("extension metadata ETag changes when publisher public key changes", async 
     assert.ok(etagB && etagB !== etagA);
     const bodyB = await second.json();
     assert.equal(bodyB.publisherPublicKeyPem, publicKeyPemB);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("publisher key rotation preserves verification + installs across historical versions", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-key-rotation-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+  const extensionsDir = path.join(tmpRoot, "installed-extensions");
+  const statePath = path.join(tmpRoot, "extensions-state.json");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const keyA = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPemA = keyA.publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPemA = keyA.privateKey.export({ type: "pkcs8", format: "pem" });
+    const keyIdA = keyIdFromPublicKeyPem(publicKeyPemA);
+
+    const keyB = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPemB = keyB.publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPemB = keyB.privateKey.export({ type: "pkcs8", format: "pem" });
+    const keyIdB = keyIdFromPublicKeyPem(publicKeyPemB);
+
+    const publisherToken = "publisher-token";
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+
+    const extV1 = path.join(tmpRoot, "ext-v1");
+    await copyDir(sampleExtensionSrc, extV1);
+    const manifestV1 = JSON.parse(await fs.readFile(path.join(extV1, "package.json"), "utf8"));
+    const extensionId = `${manifestV1.publisher}.${manifestV1.name}`;
+
+    const regA = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifestV1.publisher,
+        token: publisherToken,
+        publicKeyPem: publicKeyPemA,
+        verified: true,
+      }),
+    });
+    assert.equal(regA.status, 200);
+
+    // Publish a v1 package signed with key A.
+    const packageBytesV1 = await createExtensionPackageV1(extV1);
+    const signatureBase64V1 = signBytes(packageBytesV1, privateKeyPemA);
+    const publishV1 = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packageBytesV1.toString("base64"),
+        signatureBase64: signatureBase64V1,
+      }),
+    });
+    assert.equal(publishV1.status, 200);
+    assert.deepEqual(await publishV1.json(), { id: extensionId, version: "1.0.0" });
+
+    // Publish a v2 package signed with key A.
+    const extV2A = path.join(tmpRoot, "ext-v2-a");
+    await copyDir(sampleExtensionSrc, extV2A);
+    await writeManifestVersion(extV2A, "1.1.0");
+    const packagedA = await packageExtension(extV2A, { privateKeyPem: privateKeyPemA });
+    const publishV2A = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packagedA.packageBytes.toString("base64"),
+      }),
+    });
+    assert.equal(publishV2A.status, 200);
+    assert.deepEqual(await publishV2A.json(), { id: extensionId, version: "1.1.0" });
+
+    // Rotate publisher primary key to B (keep A in history).
+    const regB = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifestV1.publisher,
+        token: publisherToken,
+        publicKeyPem: publicKeyPemB,
+        verified: true,
+      }),
+    });
+    assert.equal(regB.status, 200);
+
+    // Publish a v2 package signed with key B.
+    const extV2B = path.join(tmpRoot, "ext-v2-b");
+    await copyDir(sampleExtensionSrc, extV2B);
+    await writeManifestVersion(extV2B, "1.2.0");
+    const packagedB = await packageExtension(extV2B, { privateKeyPem: privateKeyPemB });
+    const publishV2B = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packagedB.packageBytes.toString("base64"),
+      }),
+    });
+    assert.equal(publishV2B.status, 200);
+    assert.deepEqual(await publishV2B.json(), { id: extensionId, version: "1.2.0" });
+
+    const marketplaceClient = new MarketplaceClient({ baseUrl });
+
+    const ext = await marketplaceClient.getExtension(extensionId);
+    assert.ok(ext);
+    assert.equal(String(ext.publisherPublicKeyPem || "").trim(), String(publicKeyPemB).trim());
+    assert.ok(Array.isArray(ext.publisherKeys));
+    const keysById = new Map(ext.publisherKeys.map((k) => [k.id, k]));
+    assert.ok(keysById.has(keyIdA));
+    assert.ok(keysById.has(keyIdB));
+    assert.equal(keysById.get(keyIdA).revoked, false);
+    assert.equal(keysById.get(keyIdB).revoked, false);
+
+    const downloadV1 = await marketplaceClient.downloadPackage(extensionId, "1.0.0");
+    assert.ok(downloadV1);
+    assert.equal(downloadV1.publisherKeyId, keyIdA);
+    assert.ok(verifyBytesSignature(downloadV1.bytes, downloadV1.signatureBase64, publicKeyPemA));
+    assert.ok(!verifyBytesSignature(downloadV1.bytes, downloadV1.signatureBase64, publicKeyPemB));
+
+    const downloadV2A = await marketplaceClient.downloadPackage(extensionId, "1.1.0");
+    assert.ok(downloadV2A);
+    assert.equal(downloadV2A.publisherKeyId, keyIdA);
+    assert.doesNotThrow(() => verifyExtensionPackageV2(downloadV2A.bytes, publicKeyPemA));
+    assert.throws(() => verifyExtensionPackageV2(downloadV2A.bytes, publicKeyPemB));
+
+    const downloadV2B = await marketplaceClient.downloadPackage(extensionId, "1.2.0");
+    assert.ok(downloadV2B);
+    assert.equal(downloadV2B.publisherKeyId, keyIdB);
+    assert.doesNotThrow(() => verifyExtensionPackageV2(downloadV2B.bytes, publicKeyPemB));
+    assert.throws(() => verifyExtensionPackageV2(downloadV2B.bytes, publicKeyPemA));
+
+    // Ensure clients can still install older versions after rotation (primary key != signing key).
+    const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+    const installedV1 = await manager.install(extensionId, "1.0.0");
+    assert.equal(installedV1.version, "1.0.0");
+    const installedV2A = await manager.install(extensionId, "1.1.0");
+    assert.equal(installedV2A.version, "1.1.0");
+    const installedV2B = await manager.install(extensionId, "1.2.0");
+    assert.equal(installedV2B.version, "1.2.0");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("revoked signing keys are rejected for publish + install", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-key-revoke-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+  const extensionsDir = path.join(tmpRoot, "installed-extensions");
+  const statePath = path.join(tmpRoot, "extensions-state.json");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const keyA = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPemA = keyA.publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPemA = keyA.privateKey.export({ type: "pkcs8", format: "pem" });
+    const keyIdA = keyIdFromPublicKeyPem(publicKeyPemA);
+
+    const keyB = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPemB = keyB.publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPemB = keyB.privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extV2A = path.join(tmpRoot, "ext-v2-a");
+    await copyDir(sampleExtensionSrc, extV2A);
+    const manifest = JSON.parse(await fs.readFile(path.join(extV2A, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regA = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem: publicKeyPemA,
+        verified: true,
+      }),
+    });
+    assert.equal(regA.status, 200);
+
+    const packagedA = await packageExtension(extV2A, { privateKeyPem: privateKeyPemA });
+    const publishA = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packagedA.packageBytes.toString("base64"),
+      }),
+    });
+    assert.equal(publishA.status, 200);
+
+    // Rotate to key B.
+    const regB = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem: publicKeyPemB,
+        verified: true,
+      }),
+    });
+    assert.equal(regB.status, 200);
+
+    // Publish a version signed with key B.
+    const extV2B = path.join(tmpRoot, "ext-v2-b");
+    await copyDir(sampleExtensionSrc, extV2B);
+    await writeManifestVersion(extV2B, "1.1.0");
+    const packagedB = await packageExtension(extV2B, { privateKeyPem: privateKeyPemB });
+    const publishB = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packagedB.packageBytes.toString("base64"),
+      }),
+    });
+    assert.equal(publishB.status, 200);
+
+    const revoke = await fetch(
+      `${baseUrl}/api/publishers/${encodeURIComponent(manifest.publisher)}/keys/${encodeURIComponent(keyIdA)}/revoke`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      }
+    );
+    assert.equal(revoke.status, 200);
+
+    // Publishing with the revoked key should now fail.
+    const extV2A2 = path.join(tmpRoot, "ext-v2-a2");
+    await copyDir(sampleExtensionSrc, extV2A2);
+    await writeManifestVersion(extV2A2, "1.2.0");
+    const packagedA2 = await packageExtension(extV2A2, { privateKeyPem: privateKeyPemA });
+    const publishA2 = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packagedA2.packageBytes.toString("base64"),
+      }),
+    });
+    assert.equal(publishA2.status, 400);
+
+    const marketplaceClient = new MarketplaceClient({ baseUrl });
+    const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+    await assert.rejects(() => manager.install(extensionId, "1.0.0"), /signature verification failed/i);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });

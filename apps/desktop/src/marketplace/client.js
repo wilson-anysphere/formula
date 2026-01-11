@@ -163,6 +163,7 @@ export class MarketplaceClient {
             sha256: cached.sha256,
             formatVersion: Number(cached.formatVersion || 1),
             publisher: cached.publisher || null,
+            publisherKeyId: cached.publisherKeyId || null,
           };
         }
       } else {
@@ -183,6 +184,7 @@ export class MarketplaceClient {
     }
     const formatVersion = Number(response.headers.get("x-package-format-version") || "1");
     const publisher = response.headers.get("x-publisher");
+    const publisherKeyId = response.headers.get("x-publisher-key-id");
     const bytes = Buffer.from(await response.arrayBuffer());
 
     const computedSha = sha256Hex(bytes);
@@ -201,6 +203,7 @@ export class MarketplaceClient {
         signatureBase64: signatureBase64 || null,
         formatVersion,
         publisher: publisher || null,
+        publisherKeyId: publisherKeyId || null,
       };
       const bytesPath = path.join(cacheBase, `${safePathComponent(computedSha)}.fextpkg`);
       try {
@@ -211,6 +214,6 @@ export class MarketplaceClient {
       }
     }
 
-    return { bytes, signatureBase64, sha256: expectedSha, formatVersion, publisher };
+    return { bytes, signatureBase64, sha256: expectedSha, formatVersion, publisher, publisherKeyId };
   }
 }

@@ -118,9 +118,26 @@ export class ExtensionManager {
     const resolvedVersion = version || ext.latestVersion;
     if (!resolvedVersion) throw new Error("Marketplace did not provide latestVersion");
 
-    const publicKeyPem = ext.publisherPublicKeyPem;
-    if (!publicKeyPem) {
-      throw new Error("Marketplace did not provide publisher public key (mandatory)");
+    const rawPublisherKeys = Array.isArray(ext.publisherKeys) ? ext.publisherKeys : [];
+    const hasPublisherKeySet = rawPublisherKeys.length > 0;
+
+    /** @type {{ id?: string | null, publicKeyPem: string }[]} */
+    let candidateKeys = [];
+    if (hasPublisherKeySet) {
+      candidateKeys = rawPublisherKeys
+        .filter((k) => k && typeof k.publicKeyPem === "string" && typeof k.id === "string")
+        .filter((k) => !k.revoked)
+        .map((k) => ({ id: k.id, publicKeyPem: k.publicKeyPem }));
+
+      if (candidateKeys.length === 0) {
+        throw new Error("All publisher signing keys are revoked (refusing to install)");
+      }
+    } else {
+      const publicKeyPem = ext.publisherPublicKeyPem;
+      if (!publicKeyPem) {
+        throw new Error("Marketplace did not provide publisher public key (mandatory)");
+      }
+      candidateKeys = [{ id: null, publicKeyPem }];
     }
 
     const download = await this.marketplaceClient.downloadPackage(id, resolvedVersion);
@@ -129,6 +146,14 @@ export class ExtensionManager {
     const computedPackageSha256 = sha256Hex(download.bytes);
     if (download.sha256 && download.sha256 !== computedPackageSha256) {
       throw new Error("Marketplace download sha256 does not match downloaded bytes");
+    }
+
+    if (hasPublisherKeySet && download.publisherKeyId) {
+      const keyId = String(download.publisherKeyId);
+      const preferred = candidateKeys.find((k) => k.id === keyId);
+      if (preferred) {
+        candidateKeys = [preferred, ...candidateKeys.filter((k) => k.id !== keyId)];
+      }
     }
 
     const formatVersion =
@@ -141,13 +166,33 @@ export class ExtensionManager {
       ensureSignaturePresent(download.signatureBase64);
     }
 
-    const verified = await verifyAndExtractExtensionPackage(download.bytes, installDir, {
-      publicKeyPem,
-      signatureBase64: download.signatureBase64,
-      formatVersion,
-      expectedId: id,
-      expectedVersion: resolvedVersion,
-    });
+    let verified = null;
+    /** @type {any} */
+    let lastSignatureError = null;
+    for (const key of candidateKeys) {
+      try {
+        verified = await verifyAndExtractExtensionPackage(download.bytes, installDir, {
+          publicKeyPem: key.publicKeyPem,
+          signatureBase64: download.signatureBase64,
+          formatVersion,
+          expectedId: id,
+          expectedVersion: resolvedVersion,
+        });
+        break;
+      } catch (error) {
+        const message = String(error?.message ?? error);
+        if (message.toLowerCase().includes("signature verification failed")) {
+          lastSignatureError = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!verified) {
+      throw lastSignatureError || new Error("Extension signature verification failed (mandatory)");
+    }
+
     const expectedFiles = Array.isArray(verified.files) ? verified.files : [];
     const signatureBase64 = verified.signatureBase64 ?? null;
     const verifiedFormatVersion =

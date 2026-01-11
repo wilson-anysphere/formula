@@ -105,6 +105,20 @@ function randomId() {
   return crypto.randomUUID();
 }
 
+function normalizePublicKeyPem(publicKeyPem) {
+  const trimmed = String(publicKeyPem || "").trim();
+  return trimmed ? trimmed + "\n" : "";
+}
+
+function publisherKeyIdFromPublicKeyPem(publicKeyPem) {
+  const key = crypto.createPublicKey(publicKeyPem);
+  if (key.asymmetricKeyType !== "ed25519") {
+    throw new Error(`Unsupported public key type: ${key.asymmetricKeyType} (expected ed25519)`);
+  }
+  const der = key.export({ type: "spki", format: "der" });
+  return crypto.createHash("sha256").update(der).digest("hex");
+}
+
 function safeJoin(baseDir, relPath) {
   const normalized = String(relPath || "").replace(/\\\\/g, "/");
   if (normalized.startsWith("/") || normalized.includes("..")) {
@@ -380,6 +394,13 @@ class MarketplaceStore {
     await this.db.withTransaction(async (tx) => {
       for (const publisherRecord of Object.values(legacy.publishers || {})) {
         if (!publisherRecord?.publisher) continue;
+        const normalizedKeyPem = normalizePublicKeyPem(publisherRecord.publicKeyPem);
+        let keyId = null;
+        try {
+          keyId = normalizedKeyPem ? publisherKeyIdFromPublicKeyPem(normalizedKeyPem) : null;
+        } catch {
+          keyId = null;
+        }
         tx.run(
           `INSERT INTO publishers (publisher, token_sha256, public_key_pem, verified, created_at)
            VALUES (?, ?, ?, ?, ?)
@@ -390,11 +411,21 @@ class MarketplaceStore {
           [
             publisherRecord.publisher,
             publisherRecord.tokenSha256,
-            publisherRecord.publicKeyPem,
+            normalizedKeyPem,
             publisherRecord.verified ? 1 : 0,
             publisherRecord.createdAt || now,
           ]
         );
+
+        if (keyId) {
+          tx.run(
+            `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
+             VALUES (?, ?, ?, ?, 0, NULL, 1)
+             ON CONFLICT(id) DO UPDATE SET
+               public_key_pem = excluded.public_key_pem`,
+            [keyId, publisherRecord.publisher, normalizedKeyPem, publisherRecord.createdAt || now]
+          );
+        }
       }
 
       for (const extRecord of Object.values(legacy.extensions || {})) {
@@ -510,7 +541,42 @@ class MarketplaceStore {
     if (!publicKeyPem || typeof publicKeyPem !== "string") throw new Error("publicKeyPem is required");
 
     const now = new Date().toISOString();
+    const normalizedPublicKeyPem = normalizePublicKeyPem(publicKeyPem);
+    const keyId = publisherKeyIdFromPublicKeyPem(normalizedPublicKeyPem);
+
     await this.db.withTransaction((db) => {
+      // Preserve the previous primary key (if any) before we overwrite publishers.public_key_pem.
+      // This is required so that rotating keys doesn't "forget" the old key for already-published
+      // extension versions when upgrading from a schema that only stored one key.
+      const existingPublisherStmt = db.prepare(
+        `SELECT public_key_pem, created_at
+         FROM publishers
+         WHERE publisher = ?
+         LIMIT 1`
+      );
+      existingPublisherStmt.bind([publisher]);
+      if (existingPublisherStmt.step()) {
+        const existing = existingPublisherStmt.getAsObject();
+        existingPublisherStmt.free();
+        const existingPem = existing.public_key_pem ? normalizePublicKeyPem(String(existing.public_key_pem)) : "";
+        if (existingPem) {
+          try {
+            const existingKeyId = publisherKeyIdFromPublicKeyPem(existingPem);
+            db.run(
+              `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
+               VALUES (?, ?, ?, ?, 0, NULL, 0)
+               ON CONFLICT(id) DO UPDATE SET
+                 public_key_pem = excluded.public_key_pem`,
+              [existingKeyId, publisher, existingPem, existing.created_at ? String(existing.created_at) : now]
+            );
+          } catch {
+            // Ignore invalid legacy keys; publishers.public_key_pem is still updated below.
+          }
+        }
+      } else {
+        existingPublisherStmt.free();
+      }
+
       db.run(
         `
           INSERT INTO publishers (publisher, token_sha256, public_key_pem, verified, created_at)
@@ -520,14 +586,56 @@ class MarketplaceStore {
             public_key_pem = excluded.public_key_pem,
             verified = excluded.verified
         `,
-        [publisher, tokenSha256, publicKeyPem, verified ? 1 : 0, now]
+        [publisher, tokenSha256, normalizedPublicKeyPem, verified ? 1 : 0, now]
       );
+
+      // Guard against reusing the same key id across multiple publishers.
+      const existingKeyStmt = db.prepare(`SELECT publisher FROM publisher_keys WHERE id = ? LIMIT 1`);
+      existingKeyStmt.bind([keyId]);
+      if (existingKeyStmt.step()) {
+        const row = existingKeyStmt.getAsObject();
+        const existingPublisher = String(row.publisher || "");
+        existingKeyStmt.free();
+        if (existingPublisher && existingPublisher !== publisher) {
+          throw new Error(`Signing key id already registered to a different publisher: ${keyId}`);
+        }
+      } else {
+        existingKeyStmt.free();
+      }
+
+      db.run(
+        `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
+         VALUES (?, ?, ?, ?, 0, NULL, 0)
+         ON CONFLICT(id) DO UPDATE SET
+           public_key_pem = excluded.public_key_pem`,
+        [keyId, publisher, normalizedPublicKeyPem, now]
+      );
+
+      // Update primary key for this publisher (do not delete historical keys).
+      const revokedStmt = db.prepare(`SELECT revoked FROM publisher_keys WHERE id = ? LIMIT 1`);
+      revokedStmt.bind([keyId]);
+      const isRevoked = revokedStmt.step() ? Boolean(revokedStmt.getAsObject().revoked) : false;
+      revokedStmt.free();
+      if (isRevoked) {
+        throw new Error("Cannot set a revoked signing key as primary");
+      }
+      db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE publisher = ?`, [publisher]);
+      db.run(`UPDATE publisher_keys SET is_primary = 1 WHERE id = ?`, [keyId]);
 
       const audit = db.prepare(
         `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       );
-      audit.run([randomId(), "admin", "publisher.register", null, null, null, safeJsonStringify({ publisher }), now]);
+      audit.run([
+        randomId(),
+        "admin",
+        "publisher.register",
+        null,
+        null,
+        null,
+        safeJsonStringify({ publisher, keyId }),
+        now,
+      ]);
       audit.free();
     });
   }
@@ -576,6 +684,98 @@ class MarketplaceStore {
         createdAt: row.created_at,
       };
     });
+  }
+
+  async getPublisherKeys(publisher, { includeRevoked = true } = {}) {
+    return this.db.withRead((db) => {
+      const condition = includeRevoked ? "" : "AND revoked = 0";
+      const stmt = db.prepare(
+        `SELECT id, public_key_pem, created_at, revoked, revoked_at, is_primary
+         FROM publisher_keys
+         WHERE publisher = ? ${condition}
+         ORDER BY is_primary DESC, created_at ASC`
+      );
+      stmt.bind([publisher]);
+      const out = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        out.push({
+          id: String(row.id),
+          publicKeyPem: String(row.public_key_pem),
+          createdAt: String(row.created_at),
+          revoked: Boolean(row.revoked),
+          revokedAt: row.revoked_at ? String(row.revoked_at) : null,
+          isPrimary: Boolean(row.is_primary),
+        });
+      }
+      stmt.free();
+      return out;
+    });
+  }
+
+  async revokePublisherKey(publisher, keyId, { actor = "admin", ip = null } = {}) {
+    const now = new Date().toISOString();
+
+    await this.db.withTransaction((db) => {
+      const stmt = db.prepare(
+        `SELECT id, revoked, is_primary
+         FROM publisher_keys
+         WHERE publisher = ? AND id = ? LIMIT 1`
+      );
+      stmt.bind([publisher, keyId]);
+      if (!stmt.step()) {
+        stmt.free();
+        throw new Error("Publisher key not found");
+      }
+      const row = stmt.getAsObject();
+      stmt.free();
+
+      if (!row.revoked) {
+        db.run(`UPDATE publisher_keys SET revoked = 1, revoked_at = ?, is_primary = 0 WHERE id = ?`, [now, keyId]);
+      } else {
+        // Ensure we still clear primary in case it was left set by older schemas.
+        db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE id = ?`, [keyId]);
+      }
+
+      // If the primary key was revoked, promote the newest non-revoked key to primary (if any).
+      if (row.is_primary) {
+        const nextStmt = db.prepare(
+          `SELECT id, public_key_pem
+           FROM publisher_keys
+           WHERE publisher = ? AND revoked = 0
+           ORDER BY created_at DESC
+           LIMIT 1`
+        );
+        nextStmt.bind([publisher]);
+        if (nextStmt.step()) {
+          const next = nextStmt.getAsObject();
+          nextStmt.free();
+          db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE publisher = ?`, [publisher]);
+          db.run(`UPDATE publisher_keys SET is_primary = 1 WHERE id = ?`, [String(next.id)]);
+          db.run(`UPDATE publishers SET public_key_pem = ? WHERE publisher = ?`, [String(next.public_key_pem), publisher]);
+        } else {
+          nextStmt.free();
+        }
+      }
+
+      const audit = db.prepare(
+        `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      audit.run([
+        randomId(),
+        actor,
+        "publisher.key.revoke",
+        null,
+        null,
+        ip,
+        safeJsonStringify({ publisher, keyId }),
+        now,
+      ]);
+      audit.free();
+    });
+
+    return { publisher, keyId, revoked: true };
   }
 
   async setExtensionFlags(id, { verified, featured, deprecated, blocked, malicious }, { actor = "admin", ip = null } = {}) {
@@ -631,6 +831,32 @@ class MarketplaceStore {
     const publisherRecord = await this.getPublisher(publisher);
     if (!publisherRecord) throw new Error(`Unknown publisher: ${publisher}`);
 
+    const now = new Date().toISOString();
+
+    // Allow publisher signing key rotation: verify against any non-revoked key for the publisher,
+    // and persist which key succeeded so old versions remain verifiable after rotation.
+    let publisherKeys = await this.getPublisherKeys(publisher, { includeRevoked: false });
+    if (publisherKeys.length === 0 && publisherRecord.publicKeyPem) {
+      const fallbackPem = normalizePublicKeyPem(publisherRecord.publicKeyPem);
+      if (fallbackPem) {
+        const keyId = publisherKeyIdFromPublicKeyPem(fallbackPem);
+        await this.db.withTransaction((db) => {
+          db.run(
+            `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
+             VALUES (?, ?, ?, ?, 0, NULL, 1)
+             ON CONFLICT(id) DO UPDATE SET
+               public_key_pem = excluded.public_key_pem`,
+            [keyId, publisher, fallbackPem, now]
+          );
+          db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE publisher = ? AND id != ?`, [publisher, keyId]);
+        });
+        publisherKeys = await this.getPublisherKeys(publisher, { includeRevoked: false });
+      }
+    }
+    if (publisherKeys.length === 0) {
+      throw new Error("Publisher has no signing keys");
+    }
+
     const MAX_COMPRESSED_BYTES = 10 * 1024 * 1024;
     const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
     const MAX_UNPACKED_BYTES = 50 * 1024 * 1024;
@@ -647,6 +873,10 @@ class MarketplaceStore {
     let unpackedSize = 0;
     let readme = "";
     let storedSignatureBase64 = null;
+    /** @type {string | null} */
+    let signingKeyId = null;
+    /** @type {string | null} */
+    let signingPublicKeyPem = null;
 
     if (formatVersion === 1) {
       if (!signatureBase64) throw new Error("signatureBase64 is required for v1 extension packages");
@@ -654,9 +884,17 @@ class MarketplaceStore {
         throw new Error("Package exceeds maximum compressed size");
       }
 
-      const signatureOk = verifyBytesSignature(packageBytes, signatureBase64, publisherRecord.publicKeyPem);
-      if (!signatureOk) throw new Error("Package signature verification failed");
+      let matchingKey = null;
+      for (const key of publisherKeys) {
+        if (verifyBytesSignature(packageBytes, signatureBase64, key.publicKeyPem)) {
+          matchingKey = key;
+          break;
+        }
+      }
+      if (!matchingKey) throw new Error("Package signature verification failed");
       storedSignatureBase64 = String(signatureBase64);
+      signingKeyId = String(matchingKey.id);
+      signingPublicKeyPem = String(matchingKey.publicKeyPem);
 
       const bundle = await readExtensionPackageSafe(packageBytes, { maxUncompressedBytes: MAX_UNCOMPRESSED_BYTES });
       manifest = bundle.manifest;
@@ -719,13 +957,39 @@ class MarketplaceStore {
         throw new Error("Package exceeds maximum uncompressed payload size");
       }
     } else if (formatVersion === 2) {
-      const verified = verifyExtensionPackageV2(packageBytes, publisherRecord.publicKeyPem);
+      /** @type {ReturnType<typeof verifyExtensionPackageV2> | null} */
+      let verified = null;
+      let matchingKey = null;
+      let sawSignatureFailure = false;
+      for (const key of publisherKeys) {
+        try {
+          verified = verifyExtensionPackageV2(packageBytes, key.publicKeyPem);
+          matchingKey = key;
+          break;
+        } catch (error) {
+          const message = String(error?.message || error);
+          if (message.toLowerCase().includes("signature verification failed")) {
+            sawSignatureFailure = true;
+            continue;
+          }
+          throw error;
+        }
+      }
+      if (!verified || !matchingKey) {
+        if (sawSignatureFailure) {
+          throw new Error("Package signature verification failed");
+        }
+        throw new Error("Package signature verification failed");
+      }
+
       manifest = verified.manifest;
       storedSignatureBase64 = verified.signatureBase64;
       fileRecords = verified.files;
       fileCount = verified.fileCount;
       unpackedSize = verified.unpackedSize;
       readme = verified.readme || "";
+      signingKeyId = String(matchingKey.id);
+      signingPublicKeyPem = String(matchingKey.publicKeyPem);
 
       if (fileCount > MAX_FILES) throw new Error("Extension package contains too many files");
       if (unpackedSize > MAX_UNPACKED_BYTES) {
@@ -769,7 +1033,6 @@ class MarketplaceStore {
     const tags = normalizeStringArray(manifest.tags);
     const screenshots = normalizeStringArray(manifest.screenshots);
 
-    const now = new Date().toISOString();
     await this.db.withTransaction((db) => {
       const existingStmt = db.prepare(
         `SELECT id, verified, featured, deprecated, blocked, malicious, download_count, created_at
@@ -829,8 +1092,9 @@ class MarketplaceStore {
       db.run(
         `INSERT INTO extension_versions
           (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, package_path,
-           uploaded_at, yanked, yanked_at, format_version, file_count, unpacked_size, files_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)`,
+           uploaded_at, yanked, yanked_at, format_version, file_count, unpacked_size, files_json,
+           signing_key_id, signing_public_key_pem)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           version,
@@ -845,6 +1109,8 @@ class MarketplaceStore {
           fileCount,
           unpackedSize,
           filesJson,
+          signingKeyId,
+          signingPublicKeyPem,
         ]
       );
     }).catch((err) => {
@@ -1130,6 +1396,46 @@ class MarketplaceStore {
       const publisherRow = hasPublisher ? publisherStmt.getAsObject() : null;
       publisherStmt.free();
 
+      const publisherKeysStmt = db.prepare(
+        `SELECT id, public_key_pem, revoked, is_primary
+         FROM publisher_keys
+         WHERE publisher = ?
+         ORDER BY is_primary DESC, created_at ASC`
+      );
+      publisherKeysStmt.bind([row.publisher]);
+      /** @type {{ id: string, publicKeyPem: string, revoked: boolean }[]} */
+      const publisherKeys = [];
+      let primaryKeyPem = null;
+      while (publisherKeysStmt.step()) {
+        const keyRow = publisherKeysStmt.getAsObject();
+        const revoked = Boolean(keyRow.revoked);
+        const isPrimary = Boolean(keyRow.is_primary);
+        const pem = String(keyRow.public_key_pem || "");
+        publisherKeys.push({
+          id: String(keyRow.id),
+          publicKeyPem: pem,
+          revoked,
+        });
+        if (!primaryKeyPem && isPrimary && !revoked) {
+          primaryKeyPem = pem;
+        }
+      }
+      publisherKeysStmt.free();
+
+      const publisherPublicKeyPem = primaryKeyPem || (publisherRow ? String(publisherRow.public_key_pem) : null);
+      if (publisherKeys.length === 0 && publisherPublicKeyPem) {
+        try {
+          const normalized = normalizePublicKeyPem(publisherPublicKeyPem);
+          publisherKeys.push({
+            id: publisherKeyIdFromPublicKeyPem(normalized),
+            publicKeyPem: normalized,
+            revoked: false,
+          });
+        } catch {
+          // Ignore; publisherPublicKeyPem is still returned for backward compatibility.
+        }
+      }
+
       return {
         id: String(row.id),
         name: String(row.name),
@@ -1148,7 +1454,8 @@ class MarketplaceStore {
         latestVersion,
         versions,
         readme,
-        publisherPublicKeyPem: publisherRow ? String(publisherRow.public_key_pem) : null,
+        publisherPublicKeyPem,
+        publisherKeys,
         updatedAt: String(row.updated_at || ""),
         createdAt: String(row.created_at || ""),
       };
@@ -1159,7 +1466,8 @@ class MarketplaceStore {
     const meta = await this.db.withRead((db) => {
       const stmt = db.prepare(
         `SELECT e.publisher, e.blocked, e.malicious,
-                v.signature_base64, v.sha256, v.package_path, v.yanked, v.format_version
+                v.signature_base64, v.sha256, v.package_path, v.yanked, v.format_version,
+                v.signing_key_id
          FROM extensions e
          JOIN extension_versions v ON v.extension_id = e.id
          WHERE e.id = ? AND v.version = ? LIMIT 1`
@@ -1197,6 +1505,7 @@ class MarketplaceStore {
         signatureBase64: String(row.signature_base64),
         sha256: String(row.sha256),
         formatVersion: Number(row.format_version || 1),
+        signingKeyId: row.signing_key_id ? String(row.signing_key_id) : null,
         packageBytes,
         packagePath,
       };
@@ -1235,6 +1544,8 @@ class MarketplaceStore {
       sha256: meta.sha256,
       formatVersion: meta.formatVersion,
       publisher: meta.publisher,
+      packagePath: includePath ? fullPath : null,
+      signingKeyId: meta.signingKeyId,
       packagePath: includePath ? fullPath : null,
     };
   }

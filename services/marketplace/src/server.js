@@ -350,16 +350,20 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         }
 
         const etag = `"${pkgMeta.sha256}"`;
+        const baseHeaders = {
+          ETag: etag,
+          "Cache-Control": CACHE_CONTROL_REVALIDATE,
+          "X-Package-Signature": pkgMeta.signatureBase64,
+          "X-Package-Sha256": pkgMeta.sha256,
+          "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
+          "X-Publisher": pkgMeta.publisher,
+        };
+        if (pkgMeta.signingKeyId) {
+          baseHeaders["X-Publisher-Key-Id"] = String(pkgMeta.signingKeyId);
+        }
         if (etagMatches(req.headers["if-none-match"], etag)) {
           statusCode = 304;
-          res.writeHead(304, {
-            ETag: etag,
-            "Cache-Control": CACHE_CONTROL_REVALIDATE,
-            "X-Package-Signature": pkgMeta.signatureBase64,
-            "X-Package-Sha256": pkgMeta.sha256,
-            "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
-            "X-Publisher": pkgMeta.publisher,
-          });
+          res.writeHead(304, baseHeaders);
           res.end();
           return;
         }
@@ -382,12 +386,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           res.writeHead(200, {
             "Content-Type": "application/vnd.formula.extension-package",
             "Content-Length": stat.size,
-            ETag: etag,
-            "Cache-Control": CACHE_CONTROL_REVALIDATE,
-            "X-Package-Signature": pkgMeta.signatureBase64,
-            "X-Package-Sha256": pkgMeta.sha256,
-            "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
-            "X-Publisher": pkgMeta.publisher,
+            ...baseHeaders,
           });
 
           try {
@@ -414,12 +413,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         res.writeHead(200, {
           "Content-Type": "application/vnd.formula.extension-package",
           "Content-Length": pkgBytes.bytes.length,
-          ETag: etag,
-          "Cache-Control": CACHE_CONTROL_REVALIDATE,
-          "X-Package-Signature": pkgBytes.signatureBase64,
-          "X-Package-Sha256": pkgBytes.sha256,
-          "X-Package-Format-Version": String(pkgBytes.formatVersion ?? 1),
-          "X-Publisher": pkgBytes.publisher,
+          ...baseHeaders,
         });
         res.end(pkgBytes.bytes);
         return;
@@ -580,6 +574,40 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           verified: Boolean(body.verified),
         });
 
+        statusCode = 200;
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (
+        req.method === "POST" &&
+        segments[0] === "api" &&
+        segments[1] === "publishers" &&
+        segments[3] === "keys" &&
+        segments[5] === "revoke" &&
+        segments.length === 6
+      ) {
+        route = "/api/publishers/:publisher/keys/:id/revoke";
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const publisher = segments[2];
+        const keyId = segments[4];
+        try {
+          await store.revokePublisherKey(publisher, keyId, { actor: "admin", ip });
+        } catch (error) {
+          if (String(error?.message || "").toLowerCase().includes("not found")) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Not found" });
+          }
+          throw error;
+        }
         statusCode = 200;
         return sendJson(res, 200, { ok: true });
       }
