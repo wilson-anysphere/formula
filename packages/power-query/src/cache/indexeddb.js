@@ -320,14 +320,28 @@ export class IndexedDBCacheStore {
       // Still allow pruning expired entries when no explicit quotas are supplied.
     }
 
-    /** @type {any[]} */
-    let keys = [];
-    /** @type {any[]} */
-    let values = [];
-
+    /** @type {Array<{ id: any, value: any }>} */
+    let records = [];
     try {
-      keys = (await this.withRead((store) => store.getAllKeys())) ?? [];
-      values = (await this.withRead((store) => store.getAll())) ?? [];
+      const db = await this.open();
+      records = await new Promise((resolve, reject) => {
+        /** @type {Array<{ id: any, value: any }>} */
+        const out = [];
+        const tx = db.transaction(this.storeName, "readonly");
+        tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+        const store = tx.objectStore(this.storeName);
+        const req = store.openCursor();
+        req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (!cursor) {
+            resolve(out);
+            return;
+          }
+          out.push({ id: cursor.key, value: cursor.value });
+          cursor.continue();
+        };
+      });
     } catch {
       return;
     }
@@ -335,9 +349,9 @@ export class IndexedDBCacheStore {
     /** @type {{ id: any, entry: CacheEntry, sizeBytes: number, lastAccessMs: number }[]} */
     const items = [];
 
-    for (let i = 0; i < Math.min(keys.length, values.length); i++) {
-      const id = keys[i];
-      const value = values[i];
+    for (const record of records) {
+      const id = record.id;
+      const value = record.value;
 
       /** @type {CacheEntry | null} */
       let entry = null;
