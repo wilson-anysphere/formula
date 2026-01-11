@@ -196,6 +196,81 @@ describe("ToolExecutor", () => {
     expect(result.error?.message).toMatch(/10000/);
   });
 
+  it("read_range enforces max_read_range_chars to prevent huge cell payloads", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    // Default limit is 200,000 chars; ensure we exceed it with a single cell.
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "x".repeat(210_000) });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/max_read_range_chars/i);
+  });
+
+  it("filter_range caps matching_rows list and preserves total match count", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    // 1,201 matches > default cap (1,000)
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:A1201",
+        values: Array.from({ length: 1201 }, () => [1]),
+      },
+    });
+
+    const result = await executor.execute({
+      name: "filter_range",
+      parameters: {
+        range: "Sheet1!A1:A1201",
+        criteria: [{ column: "A", operator: "equals", value: 1 }],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("filter_range");
+    if (!result.ok || result.tool !== "filter_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.count).toBe(1201);
+    expect(result.data?.matching_rows).toHaveLength(1000);
+    expect(result.data?.truncated).toBe(true);
+  });
+
+  it("detect_anomalies caps large anomaly lists and reports total_anomalies", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:A1500",
+        values: Array.from({ length: 1500 }, (_, idx) => [idx + 1]),
+      },
+    });
+
+    // Use a tiny positive threshold (schema requires > 0) so every cell is treated as an anomaly.
+    const result = await executor.execute({
+      name: "detect_anomalies",
+      parameters: { range: "Sheet1!A1:A1500", method: "zscore", threshold: 0.0001 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("detect_anomalies");
+    if (!result.ok || result.tool !== "detect_anomalies") throw new Error("Unexpected tool result");
+    if (!result.data || result.data.method !== "zscore") throw new Error("Unexpected anomaly result");
+
+    expect(result.data.anomalies).toHaveLength(1000);
+    expect(result.data.truncated).toBe(true);
+    expect(result.data.total_anomalies).toBe(1500);
+  });
+
   it("quotes sheet names with spaces when formatting results", async () => {
     const workbook = new InMemoryWorkbook(["My Sheet"]);
     const executor = new ToolExecutor(workbook, { default_sheet: "My Sheet" });
