@@ -15,6 +15,10 @@ test.describe("Extensions UI integration", () => {
 
     const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
     await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
+    await expect(
+      frame.locator('meta[http-equiv="Content-Security-Policy"]'),
+      "webview should inject a restrictive CSP meta tag",
+    ).toHaveCount(1);
   });
 
   test("runs sampleHello.sumSelection via the Extensions panel and shows a toast", async ({ page }) => {

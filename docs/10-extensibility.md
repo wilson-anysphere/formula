@@ -19,10 +19,12 @@ The desktop app wires `@formula/extension-host` contribution points into the UI 
 
 ## Webview sandbox model (desktop)
 
-Extension panels are rendered as a sandboxed `<iframe>` using `srcdoc`:
+Extension panels are rendered as a sandboxed `<iframe>` (currently via a `blob:` URL generated from the HTML):
 
 - `sandbox="allow-scripts"` (no `allow-same-origin`)
 - No top navigation / popups enabled
+- A restrictive **Content Security Policy** is injected into the webview HTML to prevent bypassing the
+  extension host permission model (no network / remote scripts).
 - Communication is **postMessage-only**:
   - Webview → extension: `window.parent.postMessage(message, "*")`
   - Extension → webview: `panel.webview.postMessage(message)` delivered to the iframe via `postMessage`
