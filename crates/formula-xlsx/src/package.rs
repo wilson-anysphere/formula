@@ -261,9 +261,11 @@ impl XlsxPackage {
         Ok(out)
     }
 
-    /// Apply a set of cell edits to the package, rewriting only the targeted worksheet XML parts.
+    /// Apply a set of cell edits to the package and return the updated ZIP bytes.
     ///
-    /// All non-targeted parts are copied byte-for-byte from the original package.
+    /// This uses the streaming patch pipeline, which rewrites the targeted worksheet parts and
+    /// updates dependent workbook parts when needed (for example `xl/sharedStrings.xml` and the
+    /// calcChain/full-calc settings after formula edits).
     pub fn apply_cell_patches_to_bytes(&self, patches: &[CellPatch]) -> Result<Vec<u8>, XlsxError> {
         let mut sheet_name_to_part: HashMap<String, String> = HashMap::new();
         if patches
@@ -317,28 +319,17 @@ impl XlsxPackage {
             }
         }
 
-        let cursor = Cursor::new(Vec::new());
-        let mut zip = zip::ZipWriter::new(cursor);
-        let options = zip::write::FileOptions::<()>::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-
-        for (name, bytes) in &self.parts {
-            zip.start_file(name, options)?;
-            if let Some(sheet_patches) = patches_by_part.get(name) {
-                crate::streaming::patch_worksheet_xml_streaming(
-                    Cursor::new(bytes.as_slice()),
-                    &mut zip,
-                    name,
-                    sheet_patches,
-                    None,
-                )?;
-            } else {
-                zip.write_all(bytes)?;
-            }
+        // Route through the full streaming patch pipeline (sharedStrings-aware + recalc-policy
+        // aware) rather than directly rewriting worksheet XML parts.
+        let input_bytes = self.write_to_bytes()?;
+        let mut streaming_patches = Vec::with_capacity(patches.len());
+        for patches in patches_by_part.values() {
+            streaming_patches.extend_from_slice(patches);
         }
 
-        let cursor = zip.finish()?;
-        Ok(cursor.into_inner())
+        let mut out = Cursor::new(Vec::new());
+        crate::streaming::patch_xlsx_streaming(Cursor::new(input_bytes), &mut out, &streaming_patches)?;
+        Ok(out.into_inner())
     }
 
     /// Parse pivot-related parts (pivot tables + pivot caches) from the package.

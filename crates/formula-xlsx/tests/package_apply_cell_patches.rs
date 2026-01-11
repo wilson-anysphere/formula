@@ -121,3 +121,87 @@ fn apply_cell_patches_preserves_vba_project_bin_bytes() -> Result<(), Box<dyn st
 
     Ok(())
 }
+
+#[test]
+fn apply_cell_patches_preserves_shared_strings() -> Result<(), Box<dyn std::error::Error>> {
+    let path = fixture_path("xlsx/basic/shared-strings.xlsx");
+    let bytes = fs::read(&path)?;
+    let pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let patch = PackageCellPatch::for_sheet_name(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellValue::String("NewSharedString".to_string()),
+        None,
+    );
+    let out_bytes = pkg.apply_cell_patches_to_bytes(&[patch])?;
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&out_bytes))?;
+
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    let sheet_doc = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = sheet_doc
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A1"))
+        .expect("A1 cell should exist");
+    assert_eq!(
+        cell.attribute("t"),
+        Some("s"),
+        "patched cell should remain a shared string cell"
+    );
+
+    let mut shared_strings_xml = String::new();
+    archive
+        .by_name("xl/sharedStrings.xml")?
+        .read_to_string(&mut shared_strings_xml)?;
+    assert!(
+        shared_strings_xml.contains("NewSharedString"),
+        "sharedStrings.xml should include the inserted string"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_drops_calc_chain_when_formulas_change(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use zip::result::ZipError;
+
+    let bytes = include_bytes!("fixtures/calc_settings.xlsx");
+    let pkg = XlsxPackage::from_bytes(bytes)?;
+
+    let patch = PackageCellPatch::for_sheet_name(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(2.0),
+        Some("=1+1".to_string()),
+    );
+    let out_bytes = pkg.apply_cell_patches_to_bytes(&[patch])?;
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&out_bytes))?;
+    assert!(
+        matches!(archive.by_name("xl/calcChain.xml").err(), Some(ZipError::FileNotFound)),
+        "expected apply_cell_patches_to_bytes to drop xl/calcChain.xml after formula edits"
+    );
+
+    let mut workbook_xml = String::new();
+    archive
+        .by_name("xl/workbook.xml")?
+        .read_to_string(&mut workbook_xml)?;
+    let doc = roxmltree::Document::parse(&workbook_xml)?;
+    let calc_pr = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "calcPr")
+        .expect("workbook.xml should include <calcPr>");
+    assert_eq!(
+        calc_pr.attribute("fullCalcOnLoad"),
+        Some("1"),
+        "workbook.xml should request full recalculation on load when formulas change"
+    );
+
+    Ok(())
+}
