@@ -4,7 +4,8 @@
  * The cache manager is intentionally simple:
  * - deterministic keys (caller provided)
  * - optional TTL
- * - pluggable storage backends
+ * - pluggable storage backends (e.g. `MemoryCacheStore`, `FileSystemCacheStore`,
+ *   and `EncryptedFileSystemCacheStore` for encrypted-at-rest Node caching)
  */
 
 /**
