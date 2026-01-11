@@ -48,6 +48,9 @@ export async function ensurePyodideScript(resolvedIndexURL) {
     if (!existing) {
       script.src = src;
       script.async = true;
+      // Load Pyodide via CORS so cross-origin hosts can work under COEP when the
+      // CDN provides appropriate CORS headers.
+      script.crossOrigin = "anonymous";
       script.dataset.formulaPyodide = "true";
       (document.head ?? document.documentElement ?? document.body).appendChild(script);
     }
