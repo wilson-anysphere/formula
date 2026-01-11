@@ -5,7 +5,7 @@ import * as Y from "yjs";
 
 import { REMOTE_ORIGIN } from "@formula/collab-undo";
 
-import { createCommentManagerForSession } from "../../comments/src/index.ts";
+import { createCommentManagerForSession } from "../../comments/src/manager.ts";
 import { createCollabSession } from "../src/index.ts";
 
 /**
