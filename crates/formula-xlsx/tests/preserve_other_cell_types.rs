@@ -92,3 +92,42 @@ fn editing_other_cell_type_updates_value_but_preserves_t_attribute() -> Result<(
 
     Ok(())
 }
+
+#[test]
+fn set_cell_value_preserves_other_cell_type() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/date-type.xlsx");
+    let bytes = std::fs::read(&fixture)?;
+
+    let mut doc = load_from_bytes(&bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+    doc.set_cell_value(
+        sheet_id,
+        CellRef::from_a1("C1")?,
+        CellValue::String("2026-03-04T00:00:00Z".to_string()),
+    );
+
+    let saved = doc.save_to_vec()?;
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&saved))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    let parsed = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.has_tag_name((ns, "c")) && n.attribute("r") == Some("C1"))
+        .ok_or("missing C1")?;
+    assert_eq!(cell.attribute("t"), Some("d"));
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.has_tag_name((ns, "v")))
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(v, "2026-03-04T00:00:00Z");
+
+    Ok(())
+}

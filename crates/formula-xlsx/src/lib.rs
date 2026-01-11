@@ -214,9 +214,19 @@ impl XlsxDocument {
         };
 
         let meta = self.meta.cell_meta.entry((sheet_id, cell)).or_default();
-        let (value_kind, raw_value) = cell_meta_from_value(&cell_record.value);
-        meta.value_kind = value_kind;
-        meta.raw_value = raw_value;
+        match (&meta.value_kind, &cell_record.value) {
+            // Preserve less-common/unknown `t=` values by keeping the original type while the
+            // model stores the cell value as a string (e.g. `t="d"` uses an ISO-8601 `<v>`).
+            (Some(CellValueKind::Other { t }), CellValue::String(s)) => {
+                meta.value_kind = Some(CellValueKind::Other { t: t.clone() });
+                meta.raw_value = Some(s.clone());
+            }
+            _ => {
+                let (value_kind, raw_value) = cell_meta_from_value(&cell_record.value);
+                meta.value_kind = value_kind;
+                meta.raw_value = raw_value;
+            }
+        }
 
         if meta.value_kind.is_none() && meta.raw_value.is_none() && meta.formula.is_none() {
             self.meta.cell_meta.remove(&(sheet_id, cell));
@@ -275,9 +285,17 @@ impl XlsxDocument {
         }
 
         if let Some(cell_record) = sheet.cell(cell) {
-            let (value_kind, raw_value) = cell_meta_from_value(&cell_record.value);
-            meta.value_kind = value_kind;
-            meta.raw_value = raw_value;
+            match (&meta.value_kind, &cell_record.value) {
+                (Some(CellValueKind::Other { t }), CellValue::String(s)) => {
+                    meta.value_kind = Some(CellValueKind::Other { t: t.clone() });
+                    meta.raw_value = Some(s.clone());
+                }
+                _ => {
+                    let (value_kind, raw_value) = cell_meta_from_value(&cell_record.value);
+                    meta.value_kind = value_kind;
+                    meta.raw_value = raw_value;
+                }
+            }
         }
 
         true
