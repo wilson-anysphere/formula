@@ -492,9 +492,9 @@ fn write_json_file(path: &Path, value: &impl Serialize) -> Result<(), DesktopSto
     Ok(())
 }
 
-fn default_store_aad(schema_version: u32) -> serde_json::Value {
+fn store_aad(schema_version: u32, scope: &str) -> serde_json::Value {
     serde_json::json!({
-        "scope": DEFAULT_AAD_SCOPE,
+        "scope": scope,
         "schemaVersion": schema_version
     })
 }
@@ -507,6 +507,7 @@ pub struct DesktopStorageEncryption<P: KeychainProvider> {
     keychain: P,
     keychain_service: String,
     keychain_account: String,
+    aad_scope: String,
 }
 
 impl<P: KeychainProvider> DesktopStorageEncryption<P> {
@@ -516,6 +517,7 @@ impl<P: KeychainProvider> DesktopStorageEncryption<P> {
             keychain,
             keychain_service: DEFAULT_KEYCHAIN_SERVICE.to_string(),
             keychain_account: DEFAULT_KEYCHAIN_ACCOUNT.to_string(),
+            aad_scope: DEFAULT_AAD_SCOPE.to_string(),
         }
     }
 
@@ -526,6 +528,11 @@ impl<P: KeychainProvider> DesktopStorageEncryption<P> {
     ) -> Self {
         self.keychain_service = service.into();
         self.keychain_account = account.into();
+        self
+    }
+
+    pub fn with_aad_scope(mut self, scope: impl Into<String>) -> Self {
+        self.aad_scope = scope.into();
         self
     }
 
@@ -555,7 +562,7 @@ impl<P: KeychainProvider> DesktopStorageEncryption<P> {
             StoreFile::Plaintext(plain) => Ok((plain.schema_version, plain.documents)),
             StoreFile::Encrypted(encrypted) => {
                 let keyring = self.load_keyring()?.ok_or(DesktopStorageEncryptionError::MissingKeyRing)?;
-                let aad = default_store_aad(encrypted.schema_version);
+                let aad = store_aad(encrypted.schema_version, &self.aad_scope);
                 let plaintext_bytes = keyring.decrypt(&encrypted.envelope, Some(&aad))?;
                 let parsed: PlaintextStoreFile = serde_json::from_slice(&plaintext_bytes)?;
                 Ok((parsed.schema_version, parsed.documents))
@@ -598,7 +605,7 @@ impl<P: KeychainProvider> DesktopStorageEncryption<P> {
             encrypted: false,
             documents,
         })?;
-        let aad = default_store_aad(schema_version);
+        let aad = store_aad(schema_version, &self.aad_scope);
         let envelope = keyring.encrypt(&plaintext, Some(&aad))?;
 
         write_json_file(
@@ -616,6 +623,13 @@ impl<P: KeychainProvider> DesktopStorageEncryption<P> {
     pub fn enable_encryption(&self) -> Result<(), DesktopStorageEncryptionError> {
         let (schema_version, documents) = self.load_plaintext_documents()?;
         self.write_documents(schema_version, documents, true)
+    }
+
+    pub fn ensure_encrypted(&self) -> Result<(), DesktopStorageEncryptionError> {
+        match read_store_file(&self.file_path)? {
+            StoreFile::Encrypted(_) => Ok(()),
+            StoreFile::Plaintext(_) => self.enable_encryption(),
+        }
     }
 
     /// Disable encryption-at-rest and migrate ciphertext back to plaintext.
@@ -687,6 +701,25 @@ impl<P: KeychainProvider> DesktopStorageEncryption<P> {
         Ok(documents.get(doc_id).cloned())
     }
 
+    pub fn delete_document(&self, doc_id: &str) -> Result<(), DesktopStorageEncryptionError> {
+        if doc_id.is_empty() {
+            return Err(DesktopStorageEncryptionError::InvalidPayload(
+                "docId must be a non-empty string".to_string(),
+            ));
+        }
+
+        let on_disk = read_store_file(&self.file_path)?;
+        let (schema_version, mut documents) = self.load_plaintext_documents()?;
+        documents.remove(doc_id);
+        let should_encrypt = matches!(on_disk, StoreFile::Encrypted(_));
+        self.write_documents(schema_version, documents, should_encrypt)
+    }
+
+    pub fn list_document_ids(&self) -> Result<Vec<String>, DesktopStorageEncryptionError> {
+        let (_, documents) = self.load_plaintext_documents()?;
+        Ok(documents.keys().cloned().collect())
+    }
+
     pub fn file_path(&self) -> &Path {
         &self.file_path
     }
@@ -705,7 +738,7 @@ mod tests {
     #[test]
     fn aad_canonicalization_matches_js() {
         // JS canonicalJson sorts object keys, so "schemaVersion" comes before "scope".
-        let aad = default_store_aad(1);
+        let aad = store_aad(1, DEFAULT_AAD_SCOPE);
         let bytes = aad_from_context(Some(&aad)).unwrap().unwrap();
         let as_str = std::str::from_utf8(&bytes).unwrap();
         assert_eq!(

@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::macro_trust::MacroTrustDecision;
+#[cfg(feature = "desktop")]
+use crate::storage::power_query_credentials::{
+    PowerQueryCredentialEntry, PowerQueryCredentialListEntry, PowerQueryCredentialStore,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PrintCellRange {
@@ -434,6 +438,57 @@ pub async fn read_binary_file(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
 
     Ok(STANDARD.encode(bytes))
+}
+
+/// Power Query: retrieve a persisted credential entry by scope key.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn power_query_credential_get(scope_key: String) -> Result<Option<PowerQueryCredentialEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
+        store.get(&scope_key).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Power Query: persist a credential entry for a scope key.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn power_query_credential_set(
+    scope_key: String,
+    secret: JsonValue,
+) -> Result<PowerQueryCredentialEntry, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
+        store.set(&scope_key, secret).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Power Query: delete any persisted credential entry for a scope key.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn power_query_credential_delete(scope_key: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
+        store.delete(&scope_key).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Power Query: list persisted credential scope keys and IDs (for debugging).
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn power_query_credential_list() -> Result<Vec<PowerQueryCredentialListEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
+        store.list().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(feature = "desktop")]

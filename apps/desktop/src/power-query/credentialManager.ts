@@ -1,5 +1,6 @@
 import { CredentialManager } from "../../../../packages/power-query/src/credentials/manager.js";
 import { InMemoryCredentialStore } from "../../../../packages/power-query/src/credentials/stores/inMemory.js";
+import { hasTauriInvoke, TauriCredentialStore } from "./tauriCredentialStore.ts";
 
 export type PowerQueryCredentialPrompt = (args: {
   connectorId: string;
@@ -10,7 +11,8 @@ export type PowerQueryCredentialPrompt = (args: {
 /**
  * Minimal desktop integration helper for Power Query credentials.
  *
- * The desktop UI can supply a persistent store and a prompt callback later.
+ * When running in Tauri, this defaults to a persistent, OS-keychain-backed
+ * credential store. Tests can still override the store implementation.
  * For now this returns an `onCredentialRequest` implementation that can be
  * passed into `new QueryEngine({ onCredentialRequest })`.
  */
@@ -22,7 +24,7 @@ export function createPowerQueryCredentialManager(opts?: {
   };
   prompt?: PowerQueryCredentialPrompt;
 }) {
-  const store = opts?.store ?? new InMemoryCredentialStore();
+  const store = opts?.store ?? (hasTauriInvoke() ? new TauriCredentialStore() : new InMemoryCredentialStore());
   const manager = new CredentialManager({ store, prompt: opts?.prompt });
   return {
     store,
@@ -30,4 +32,3 @@ export function createPowerQueryCredentialManager(opts?: {
     onCredentialRequest: manager.onCredentialRequest.bind(manager),
   };
 }
-
