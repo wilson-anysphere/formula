@@ -26,6 +26,7 @@ fn transpose_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         },
         ArgValue::Reference(r) => {
             let r = r.normalized();
+            ctx.record_reference(&r);
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
             let mut values = Vec::with_capacity(rows.saturating_mul(cols));

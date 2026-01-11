@@ -57,6 +57,8 @@ fn dynamic_value_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
     match arg {
         ArgValue::Scalar(v) => v,
         ArgValue::Reference(r) => {
+            let r = r.normalized();
+            ctx.record_reference(&r);
             if r.is_single_cell() {
                 ctx.get_cell_value(&r.sheet_id, r.start)
             } else {
@@ -128,6 +130,7 @@ fn values_from_range_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec
     match arg {
         ArgValue::Reference(r) => {
             let r = r.normalized();
+            ctx.record_reference(&r);
             let rows = r.end.row - r.start.row + 1;
             let cols = r.end.col - r.start.col + 1;
             let len = (rows as usize).saturating_mul(cols as usize);
@@ -142,6 +145,7 @@ fn values_from_range_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec
             let mut values = Vec::new();
             for r in ranges {
                 let r = r.normalized();
+                ctx.record_reference(&r);
                 let rows = r.end.row - r.start.row + 1;
                 let cols = r.end.col - r.start.col + 1;
                 values.reserve((rows as usize).saturating_mul(cols as usize));

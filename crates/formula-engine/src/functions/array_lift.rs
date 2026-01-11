@@ -93,6 +93,7 @@ pub(crate) fn eval_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Value 
 
 fn reference_to_value(ctx: &dyn FunctionContext, reference: Reference) -> Value {
     let reference = reference.normalized();
+    ctx.record_reference(&reference);
     if reference.is_single_cell() {
         return ctx.get_cell_value(&reference.sheet_id, reference.start);
     }

@@ -432,6 +432,141 @@ fn indirect_dependency_switching_updates_graph_edges() {
 }
 
 #[test]
+fn indirect_updates_precedents_and_dependents_when_reference_is_dereferenced_by_array_lift() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1+1")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=ABS(INDIRECT("B1"))"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(2.0));
+
+    let precedents = engine.precedents("Sheet1", "C1").unwrap();
+    assert!(
+        precedents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 1 },
+            }
+        )),
+        "expected C1 precedents to include Sheet1!B1, got: {precedents:?}"
+    );
+
+    let dependents = engine.dependents("Sheet1", "B1").unwrap();
+    assert!(
+        dependents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 2 },
+            }
+        )),
+        "expected B1 dependents to include Sheet1!C1, got: {dependents:?}"
+    );
+}
+
+#[test]
+fn indirect_updates_precedents_and_dependents_for_concat_reference_args() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "y").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=CONCAT(INDIRECT("A1:A2"))"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("xy".to_string())
+    );
+
+    let precedents = engine.precedents("Sheet1", "B1").unwrap();
+    assert!(
+        precedents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr { row: 1, col: 0 },
+            }
+        )),
+        "expected B1 precedents to include Sheet1!A1:A2, got: {precedents:?}"
+    );
+
+    let dependents = engine.dependents("Sheet1", "A1").unwrap();
+    assert!(
+        dependents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 1 },
+            }
+        )),
+        "expected A1 dependents to include Sheet1!B1, got: {dependents:?}"
+    );
+}
+
+#[test]
+fn indirect_updates_precedents_and_dependents_for_sumproduct_reference_args() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "C1",
+            r#"=SUMPRODUCT(INDIRECT("A1:A2"),INDIRECT("B1:B2"))"#,
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(50.0));
+
+    let precedents = engine.precedents("Sheet1", "C1").unwrap();
+    assert!(
+        precedents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr { row: 1, col: 0 },
+            }
+        )),
+        "expected C1 precedents to include Sheet1!A1:A2, got: {precedents:?}"
+    );
+    assert!(
+        precedents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 1 },
+                end: CellAddr { row: 1, col: 1 },
+            }
+        )),
+        "expected C1 precedents to include Sheet1!B1:B2, got: {precedents:?}"
+    );
+
+    let dependents = engine.dependents("Sheet1", "A1").unwrap();
+    assert!(
+        dependents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 2 },
+            }
+        )),
+        "expected A1 dependents to include Sheet1!C1, got: {dependents:?}"
+    );
+}
+
+#[test]
 fn indirect_resolves_sheet_names_with_trailing_spaces() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1 ", "A1", 42.0).unwrap();

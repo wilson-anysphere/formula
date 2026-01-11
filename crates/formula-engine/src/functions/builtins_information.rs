@@ -26,11 +26,12 @@ where
     match ctx.eval_arg(expr) {
         ArgValue::Scalar(v) => map_value(&v, f),
         ArgValue::Reference(r) => {
+            let r = r.normalized();
+            ctx.record_reference(&r);
             if r.is_single_cell() {
                 let v = ctx.get_cell_value(&r.sheet_id, r.start);
                 map_value(&v, f)
             } else {
-                let r = r.normalized();
                 let rows = (r.end.row - r.start.row + 1) as usize;
                 let cols = (r.end.col - r.start.col + 1) as usize;
                 let mut values = Vec::with_capacity(rows.saturating_mul(cols));
@@ -174,6 +175,8 @@ fn type_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let code = match ctx.eval_arg(&args[0]) {
         ArgValue::Scalar(v) => information::r#type(&v),
         ArgValue::Reference(r) => {
+            let r = r.normalized();
+            ctx.record_reference(&r);
             if r.is_single_cell() {
                 information::r#type(&ctx.get_cell_value(&r.sheet_id, r.start))
             } else {

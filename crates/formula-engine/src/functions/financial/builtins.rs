@@ -73,6 +73,8 @@ fn collect_npv_values_from_arg(
             Value::Spill { .. } => Ok(vec![0.0]),
         },
         ArgValue::Reference(r) => {
+            let r = r.normalized();
+            ctx.record_reference(&r);
             let mut out = Vec::new();
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
@@ -94,6 +96,8 @@ fn collect_npv_values_from_arg(
         ArgValue::ReferenceUnion(ranges) => {
             let mut out = Vec::new();
             for r in ranges {
+                let r = r.normalized();
+                ctx.record_reference(&r);
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
@@ -149,6 +153,8 @@ fn collect_irr_values_from_arg(
             Value::Spill { .. } => Ok(vec![0.0]),
         },
         ArgValue::Reference(r) => {
+            let r = r.normalized();
+            ctx.record_reference(&r);
             let mut out = Vec::new();
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
@@ -170,6 +176,8 @@ fn collect_irr_values_from_arg(
         ArgValue::ReferenceUnion(ranges) => {
             let mut out = Vec::new();
             for r in ranges {
+                let r = r.normalized();
+                ctx.record_reference(&r);
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
@@ -207,6 +215,8 @@ fn collect_numbers_strict_from_arg(
             other => Ok(vec![other.coerce_to_number()?]),
         },
         ArgValue::Reference(r) => {
+            let r = r.normalized();
+            ctx.record_reference(&r);
             let mut out = Vec::new();
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
@@ -217,6 +227,8 @@ fn collect_numbers_strict_from_arg(
         ArgValue::ReferenceUnion(ranges) => {
             let mut out = Vec::new();
             for r in ranges {
+                let r = r.normalized();
+                ctx.record_reference(&r);
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
                     out.push(v.coerce_to_number()?);

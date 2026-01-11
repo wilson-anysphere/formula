@@ -514,6 +514,7 @@ fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<V
         },
         ArgValue::Reference(r) => {
             let r = r.normalized();
+            ctx.record_reference(&r);
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
             let mut out = Vec::with_capacity(rows.saturating_mul(cols));
@@ -539,6 +540,7 @@ fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<V
             let mut out = Vec::new();
             for r in ranges {
                 let r = r.normalized();
+                ctx.record_reference(&r);
                 let rows = (r.end.row - r.start.row + 1) as usize;
                 let cols = (r.end.col - r.start.col + 1) as usize;
                 out.reserve(rows.saturating_mul(cols));

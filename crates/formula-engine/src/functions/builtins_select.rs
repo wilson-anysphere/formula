@@ -187,6 +187,8 @@ fn choose_value_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
             other => other,
         },
         ArgValue::Reference(r) => {
+            let r = r.normalized();
+            ctx.record_reference(&r);
             if r.is_single_cell() {
                 ctx.get_cell_value(&r.sheet_id, r.start)
             } else {

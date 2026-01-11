@@ -1119,6 +1119,7 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         match arg {
             ArgValue::Reference(r) => {
                 let r = r.normalized();
+                ctx.record_reference(&r);
                 let rows = r.end.row - r.start.row + 1;
                 let cols = r.end.col - r.start.col + 1;
                 let len = (rows as usize).saturating_mul(cols as usize);
