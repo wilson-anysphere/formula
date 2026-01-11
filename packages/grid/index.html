@@ -53,22 +53,21 @@
 
       @media (prefers-contrast: more) {
         :root {
+          --formula-grid-bg: Canvas;
           --formula-grid-selection-fill: transparent;
-          --formula-grid-selection-border: #000000;
-          --formula-grid-selection-handle: #000000;
-          --formula-grid-line: #000000;
-          --formula-grid-scrollbar-thumb: #000000;
-          --formula-grid-freeze-line: #000000;
-        }
-      }
-
-      @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-        :root {
-          --formula-grid-selection-border: #ffffff;
-          --formula-grid-selection-handle: #ffffff;
-          --formula-grid-line: rgba(255, 255, 255, 0.8);
-          --formula-grid-scrollbar-thumb: #ffffff;
-          --formula-grid-freeze-line: #ffffff;
+          --formula-grid-selection-border: Highlight;
+          --formula-grid-selection-handle: Highlight;
+          --formula-grid-line: CanvasText;
+          --formula-grid-header-bg: Canvas;
+          --formula-grid-header-text: CanvasText;
+          --formula-grid-cell-text: CanvasText;
+          --formula-grid-error-text: CanvasText;
+          --formula-grid-scrollbar-track: Canvas;
+          --formula-grid-scrollbar-thumb: CanvasText;
+          --formula-grid-freeze-line: CanvasText;
+          --formula-grid-comment-indicator: CanvasText;
+          --formula-grid-comment-indicator-resolved: CanvasText;
+          --formula-grid-remote-presence-default: Highlight;
         }
       }
     </style>
