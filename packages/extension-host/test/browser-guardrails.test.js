@@ -231,3 +231,89 @@ test("BrowserExtensionHost: command timeout terminates worker, rejects in-flight
   assert.equal(await host.executeCommand("test.ok"), "ok");
 });
 
+test("BrowserExtensionHost: custom function timeout terminates worker and allows restart", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const scenarios = [
+    // First worker: activation succeeds; custom function invocation hangs.
+    {
+      onPostMessage(msg, worker) {
+        if (msg?.type === "init") return;
+        if (msg?.type === "activate") {
+          worker.emitMessage({ type: "activate_result", id: msg.id });
+          return;
+        }
+        if (msg?.type === "invoke_custom_function") {
+          return;
+        }
+      }
+    },
+    // Second worker: activation succeeds; custom function resolves.
+    {
+      onPostMessage(msg, worker) {
+        if (msg?.type === "init") return;
+        if (msg?.type === "activate") {
+          worker.emitMessage({ type: "activate_result", id: msg.id });
+          return;
+        }
+        if (msg?.type === "invoke_custom_function") {
+          worker.emitMessage({ type: "custom_function_result", id: msg.id, result: 42 });
+        }
+      }
+    }
+  ];
+
+  const PrevWorker = globalThis.Worker;
+  globalThis.Worker = createWorkerCtor(scenarios);
+  t.after(() => {
+    globalThis.Worker = PrevWorker;
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getSelection() {
+        return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+      },
+      async getCell() {
+        return null;
+      },
+      async setCell() {
+        // noop
+      }
+    },
+    permissionPrompt: async () => true,
+    activationTimeoutMs: 1000,
+    customFunctionTimeoutMs: 50
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.custom-function-timeout";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "custom-function-timeout",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: {
+        commands: [],
+        customFunctions: [
+          { name: "TEST_HANG", description: "hang", parameters: [], result: { type: "number" } }
+        ]
+      },
+      activationEvents: ["onCustomFunction:TEST_HANG"],
+      permissions: []
+    }
+  });
+
+  await assert.rejects(() => host.invokeCustomFunction("TEST_HANG"), /timed out/i);
+  assert.equal(host._extensions.get(extensionId).active, false);
+
+  assert.equal(await host.invokeCustomFunction("TEST_HANG"), 42);
+});
