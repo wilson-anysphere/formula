@@ -26,6 +26,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so the shared cache action works as intended.
+      - name: Use shared Cargo home for CI caching
+        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+
       - name: Run benchmark suite
         id: perf
         run: pnpm benchmark
