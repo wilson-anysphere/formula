@@ -50,6 +50,22 @@ function utf8Decode(bytes) {
 }
 
 /**
+ * Normalize a byte buffer into a plain `Uint8Array` view (not a Node Buffer).
+ *
+ * This avoids `Buffer#toJSON()` behavior when persisting encrypted payloads via
+ * JSON (e.g. `FileSystemCacheStore`).
+ *
+ * @param {Uint8Array | ArrayBuffer} value
+ * @returns {Uint8Array}
+ */
+function normalizeBytes(value) {
+  if (value instanceof Uint8Array) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return new Uint8Array(value);
+}
+
+/**
  * @param {Uint8Array} out
  * @param {number} offset
  * @param {number} value
@@ -454,11 +470,17 @@ export class EncryptedCacheStore {
     const aad = this.aad(ENVELOPE_VERSION);
 
     const payload = await this.crypto.encryptBytes(plaintext, aad);
+    const normalizedPayload = {
+      keyVersion: payload.keyVersion,
+      iv: normalizeBytes(payload.iv),
+      tag: normalizeBytes(payload.tag),
+      ciphertext: normalizeBytes(payload.ciphertext),
+    };
 
     const envelope = {
       __pq_cache_encrypted: ENVELOPE_MARKER,
       v: ENVELOPE_VERSION,
-      payload,
+      payload: normalizedPayload,
     };
 
     await this.store.set(key, { ...entry, value: envelope });

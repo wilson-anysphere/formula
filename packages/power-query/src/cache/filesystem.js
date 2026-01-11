@@ -21,6 +21,21 @@ function isBinaryMarker(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function containsBinaryMarker(value) {
+  if (isBinaryMarker(value)) return true;
+  if (Array.isArray(value)) return value.some((item) => containsBinaryMarker(item));
+  if (value && typeof value === "object") {
+    for (const v of Object.values(value)) {
+      if (containsBinaryMarker(v)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * JSON.stringify replacer that extracts Uint8Array payloads into a sibling `.bin`
  * file and replaces them with marker objects.
  *
@@ -241,7 +256,7 @@ export class FileSystemCacheStore {
       const entry = parsed.entry ?? null;
       const value = entry?.value;
 
-      if (hasBinaryMarkers) {
+      if (hasBinaryMarkers && containsBinaryMarker(value)) {
         const bytes = await fs.readFile(binPath);
         const restored = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         entry.value = hydrateBinarySegments(value, restored, binFileName);
