@@ -37,6 +37,65 @@ describe("ToolExecutor", () => {
     expect(cell.formula).toBe("=SUM(A1:A10)");
   });
 
+  it("write_cell normalizes formula whitespace (canonical display semantics)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Sheet1!B2", value: "  =  SUM(A1:A10)  " }
+    });
+
+    const cell = workbook.getCell(parseA1Cell("Sheet1!B2"));
+    expect(cell.value).toBeNull();
+    expect(cell.formula).toBe("=SUM(A1:A10)");
+  });
+
+  it("write_cell treats bare '=' as an empty formula (clears the cell)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Sheet1!A1", value: 5 }
+    });
+
+    const result = await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Sheet1!A1", value: "=" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("write_cell");
+    if (!result.ok || result.tool !== "write_cell") throw new Error("Unexpected tool result");
+    expect(result.data?.changed).toBe(true);
+
+    const cell = workbook.getCell(parseA1Cell("Sheet1!A1"));
+    expect(cell.value).toBeNull();
+    expect(cell.formula).toBeUndefined();
+  });
+
+  it("set_range normalizes formula inputs and clears empty formulas", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:B1",
+        values: [["  = 1+1  ", "="]]
+      }
+    });
+
+    const a1 = workbook.getCell(parseA1Cell("Sheet1!A1"));
+    expect(a1.value).toBeNull();
+    expect(a1.formula).toBe("=1+1");
+
+    const b1 = workbook.getCell(parseA1Cell("Sheet1!B1"));
+    expect(b1.value).toBeNull();
+    expect(b1.formula).toBeUndefined();
+  });
+
   it("set_range updates a rectangular range", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);

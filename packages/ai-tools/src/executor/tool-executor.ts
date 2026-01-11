@@ -9,6 +9,15 @@ import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../security/dlp/src/policyEngine.js";
 import { effectiveCellClassification, effectiveRangeClassification } from "../../../security/dlp/src/selectors.js";
 
+function normalizeFormulaTextOpt(value: unknown): string | null {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = strippedLeading.trim();
+  if (stripped === "") return null;
+  return `=${stripped}`;
+}
+
 export interface ToolExecutionError {
   code: "validation_error" | "not_implemented" | "permission_denied" | "runtime_error";
   message: string;
@@ -345,12 +354,12 @@ export class ToolExecutor {
     const before = shouldMaskChanged ? null : this.spreadsheet.getCell(address);
 
     const rest = params as { value: CellScalar; is_formula?: boolean };
-    const isFormula =
-      rest.is_formula === true || (typeof rest.value === "string" && rest.value.trim().startsWith("="));
+    const shouldTreatAsFormula =
+      rest.is_formula === true || (typeof rest.value === "string" && rest.value.trimStart().startsWith("="));
+    const normalizedFormula = shouldTreatAsFormula ? normalizeFormulaTextOpt(rest.value) : null;
 
-    const next: CellData = isFormula
-      ? { value: null, formula: String(rest.value) }
-      : { value: rest.value };
+    const next: CellData =
+      normalizedFormula != null ? { value: null, formula: normalizedFormula } : { value: shouldTreatAsFormula ? null : rest.value };
 
     this.spreadsheet.setCell(address, next);
     this.refreshPivotsForRange({
@@ -395,12 +404,13 @@ export class ToolExecutor {
 
     const cells: CellData[][] = normalizedValues.map((row: CellScalar[]) =>
       row.map((value) => {
-        const formulaCandidate = typeof value === "string" ? value.trim() : "";
         const shouldTreatAsFormula =
-          interpretAs === "formula" || (interpretAs === "auto" && typeof value === "string" && formulaCandidate.startsWith("="));
+          interpretAs === "formula" || (interpretAs === "auto" && typeof value === "string" && value.trimStart().startsWith("="));
 
         if (shouldTreatAsFormula) {
-          return { value: null, formula: String(value) };
+          const formula = normalizeFormulaTextOpt(value);
+          if (formula == null) return { value: null };
+          return { value: null, formula };
         }
 
         return { value };
@@ -440,8 +450,8 @@ export class ToolExecutor {
     const template = String(params.formula_template);
     let updated = 0;
     for (let row = startRow; row <= endRow; row++) {
-      const formula = template.replaceAll("{row}", String(row));
-      this.spreadsheet.setCell({ sheet, row, col: colIndex }, { value: null, formula });
+      const formula = normalizeFormulaTextOpt(template.replaceAll("{row}", String(row)));
+      this.spreadsheet.setCell({ sheet, row, col: colIndex }, formula == null ? { value: null } : { value: null, formula });
       updated++;
     }
 

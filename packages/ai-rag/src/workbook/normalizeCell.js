@@ -2,12 +2,29 @@
  * @param {any} raw
  * @returns {{ v?: any, f?: string }}
  */
+function normalizeFormulaTextOpt(formula) {
+  const trimmed = String(formula).trim();
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = strippedLeading.trim();
+  if (stripped === "") return null;
+  return `=${stripped}`;
+}
+
 export function normalizeCell(raw) {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const hasVF =
       Object.prototype.hasOwnProperty.call(raw, "v") || Object.prototype.hasOwnProperty.call(raw, "f");
     if (hasVF) {
-      return raw;
+      const f = raw.f;
+      if (typeof f !== "string") return raw;
+      const normalized = normalizeFormulaTextOpt(f);
+      if (normalized === f) return raw;
+      if (normalized == null) {
+        const v = raw.v ?? null;
+        if (v == null || v === "") return {};
+        return { v };
+      }
+      return { ...raw, f: normalized };
     }
 
     const hasValueFormula =
@@ -15,12 +32,7 @@ export function normalizeCell(raw) {
     if (hasValueFormula) {
       const value = raw.value ?? null;
       const formulaRaw = raw.formula ?? null;
-      const formula =
-        typeof formulaRaw === "string" && formulaRaw.trim() !== ""
-          ? formulaRaw.trim().startsWith("=")
-            ? formulaRaw.trim()
-            : `=${formulaRaw.trim()}`
-          : null;
+      const formula = typeof formulaRaw === "string" ? normalizeFormulaTextOpt(formulaRaw) : null;
 
       if (formula == null && (value == null || value === "")) return {};
       /** @type {{ v?: any, f?: string }} */
@@ -40,7 +52,10 @@ export function normalizeCell(raw) {
   if (typeof raw === "string") {
     const trimmed = raw.trim();
     if (!trimmed) return {};
-    if (trimmed.startsWith("=")) return { f: trimmed };
+    if (trimmed.startsWith("=")) {
+      const normalized = normalizeFormulaTextOpt(trimmed);
+      return normalized ? { f: normalized } : {};
+    }
     return { v: trimmed };
   }
 

@@ -129,7 +129,7 @@ export function chunkToText(chunk, opts) {
       const row = [];
       for (let c = 0; c < sampledColCount; c += 1) {
         const cell = cells[r][c] || {};
-        if (cell.f) row.push(`=${formatScalar(cell.f)}`);
+        if (cell.f) row.push(formatScalar(cell.f));
         else row.push(formatScalar(cell.v));
       }
       rows.push(row.join(" | "));
