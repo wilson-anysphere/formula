@@ -164,6 +164,49 @@ fn days360_spills_over_array_inputs() {
 }
 
 #[test]
+fn yearfrac_matches_basis_conventions() {
+    let mut sheet = TestSheet::new();
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2011,1,1),DATE(2011,12,31))"),
+        1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2011,1,1),DATE(2011,12,31),4)"),
+        359.0 / 360.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,3,1),DATE(2021,3,1),1)"),
+        1.0,
+    );
+
+    assert_eq!(
+        sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2020,12,31),9)"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval("=YEARFRAC(\"nope\",DATE(2020,1,1))"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    sheet.set("A1", Value::Number(f64::INFINITY));
+    assert_eq!(
+        sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2020,12,31),A1)"),
+        Value::Error(ErrorKind::Num)
+    );
+}
+
+#[test]
+fn yearfrac_spills_over_array_inputs() {
+    let mut sheet = TestSheet::new();
+    let expected1 = sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1))");
+    let expected2 = sheet.eval("=YEARFRAC(DATE(2020,1,2),DATE(2021,1,1))");
+    sheet.set_formula("A1", "=YEARFRAC({DATE(2020,1,1);DATE(2020,1,2)},DATE(2021,1,1))");
+    sheet.recalc();
+    assert_eq!(sheet.get("A1"), expected1);
+    assert_eq!(sheet.get("A2"), expected2);
+}
+
+#[test]
 fn hour_minute_second_extract_time_components() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=HOUR(TIME(1,2,3))"), 1.0);

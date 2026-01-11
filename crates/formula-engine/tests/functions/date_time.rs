@@ -61,6 +61,37 @@ fn days360_matches_excel_examples() {
 }
 
 #[test]
+fn yearfrac_respects_basis_conventions() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let start = ymd_to_serial(ExcelDate::new(2011, 1, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2011, 12, 31), system).unwrap();
+    assert!((date_time::yearfrac(start, end, 0, system).unwrap() - 1.0).abs() < 1e-12);
+    assert!(
+        (date_time::yearfrac(start, end, 4, system).unwrap() - (359.0 / 360.0)).abs() < 1e-12
+    );
+
+    let start = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let actual_days = (i64::from(end) - i64::from(start)) as f64;
+    assert!(
+        (date_time::yearfrac(start, end, 2, system).unwrap() - (actual_days / 360.0)).abs()
+            < 1e-12
+    );
+    assert!(
+        (date_time::yearfrac(start, end, 3, system).unwrap() - (actual_days / 365.0)).abs()
+            < 1e-12
+    );
+
+    // Basis 1 counts whole-year anniversaries with leap-day clamping.
+    let start = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2021, 3, 1), system).unwrap();
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - 1.0).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + 1.0).abs() < 1e-12);
+
+    assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
+}
+
+#[test]
 fn weekday_matches_excel_return_types() {
     let system = ExcelDateSystem::EXCEL_1900;
     // 1900-01-01 is serial 1 and a Monday.

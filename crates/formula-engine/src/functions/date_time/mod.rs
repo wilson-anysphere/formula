@@ -251,6 +251,66 @@ pub fn days360(start_date: i32, end_date: i32, method: bool, system: ExcelDateSy
     Ok(total)
 }
 
+fn whole_years_between(start_date: i32, end_date: i32, system: ExcelDateSystem) -> ExcelResult<i32> {
+    debug_assert!(end_date >= start_date);
+    let start = crate::date::serial_to_ymd(start_date, system)?;
+    let end = crate::date::serial_to_ymd(end_date, system)?;
+    let mut years = end.year - start.year;
+    if years <= 0 {
+        return Ok(0);
+    }
+
+    let months = years.checked_mul(12).ok_or(ExcelError::Num)?;
+    if edate(start_date, months, system)? > end_date {
+        years = years.saturating_sub(1);
+    }
+    Ok(years)
+}
+
+/// YEARFRAC(start_date, end_date, [basis])
+pub fn yearfrac(start_date: i32, end_date: i32, basis: i32, system: ExcelDateSystem) -> ExcelResult<f64> {
+    if !(0..=4).contains(&basis) {
+        return Err(ExcelError::Num);
+    }
+
+    match basis {
+        0 => Ok(days360(start_date, end_date, false, system)? as f64 / 360.0),
+        2 => Ok((i64::from(end_date) - i64::from(start_date)) as f64 / 360.0),
+        3 => Ok((i64::from(end_date) - i64::from(start_date)) as f64 / 365.0),
+        4 => Ok(days360(start_date, end_date, true, system)? as f64 / 360.0),
+        1 => {
+            if start_date == end_date {
+                return Ok(0.0);
+            }
+
+            let mut start = start_date;
+            let mut end = end_date;
+            let mut sign = 1.0;
+            if end < start {
+                sign = -1.0;
+                std::mem::swap(&mut start, &mut end);
+            }
+
+            let years = whole_years_between(start, end, system)?;
+            let months = years.checked_mul(12).ok_or(ExcelError::Num)?;
+            let anniversary = edate(start, months, system)?;
+            let remaining_days = i64::from(end) - i64::from(anniversary);
+            if remaining_days == 0 {
+                return Ok(sign * (years as f64));
+            }
+
+            let next_anniversary = edate(anniversary, 12, system)?;
+            let denom_days = i64::from(next_anniversary) - i64::from(anniversary);
+            if denom_days == 0 {
+                return Err(ExcelError::Num);
+            }
+
+            Ok(sign * (years as f64 + (remaining_days as f64) / (denom_days as f64)))
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// WEEKDAY(serial_number, [return_type])
 pub fn weekday(
     serial_number: i32,

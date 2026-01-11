@@ -403,6 +403,56 @@ fn days360_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "YEARFRAC",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number],
+        implementation: yearfrac_fn,
+    }
+}
+
+fn yearfrac_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let start_date = eval_scalar_arg(ctx, &args[0]);
+    let end_date = eval_scalar_arg(ctx, &args[1]);
+    let basis = if args.len() == 3 {
+        eval_scalar_arg(ctx, &args[2])
+    } else {
+        Value::Blank
+    };
+    let system = ctx.date_system();
+
+    broadcast_map3(start_date, end_date, basis, |start_date, end_date, basis| {
+        let start_serial = match datevalue_from_value(&start_date, system) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let end_serial = match datevalue_from_value(&end_date, system) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+
+        let basis = if matches!(basis, Value::Blank) {
+            0
+        } else {
+            match coerce_to_i32_trunc(&basis) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            }
+        };
+
+        match date_time::yearfrac(start_serial, end_serial, basis, system) {
+            Ok(v) => Value::Number(v),
+            Err(e) => Value::Error(excel_error_kind(e)),
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "EOMONTH",
         min_args: 2,
         max_args: 2,

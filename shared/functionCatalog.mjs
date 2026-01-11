@@ -1665,6 +1665,18 @@ export default {
       "arg_types": [
         "number"
       ]
+    },
+    {
+      "name": "YEARFRAC",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number"
+      ]
     }
   ]
 };
