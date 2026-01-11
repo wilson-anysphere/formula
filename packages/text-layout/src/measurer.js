@@ -14,6 +14,9 @@ import { fontKey, toCanvasFontString } from "./font.js";
 /**
  * @typedef {Object} TextMeasurer
  * @property {(text: string, font: FontSpec) => TextMeasurement} measure
+ * @property {string | (() => string)} [cacheKey] Optional cache key prefix. If provided, the layout
+ * engine will include it in its internal cache keys, allowing measurers to invalidate cached results
+ * when their font data / shaping behavior changes.
  */
 
 export class CanvasTextMeasurer {
@@ -69,4 +72,3 @@ export function createCanvasTextMeasurer() {
 
   return new CanvasTextMeasurer(ctx);
 }
-

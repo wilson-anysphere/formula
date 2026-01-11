@@ -97,6 +97,13 @@ export class TextLayoutEngine {
     this.layoutCache = new LRUCache(opts.maxLayoutCacheEntries ?? 2_000);
   }
 
+  #measurerCacheKey() {
+    const k = /** @type {any} */ (this.measurer).cacheKey;
+    if (!k) return "";
+    if (typeof k === "function") return k.call(this.measurer);
+    return String(k);
+  }
+
   /**
    * Cached measurement for a single text run.
    *
@@ -132,7 +139,7 @@ export class TextLayoutEngine {
    */
   #measureCached(text, font) {
     const fk = fontKey(font);
-    const key = `${fk}\n${text}`;
+    const key = `${this.#measurerCacheKey()}\n${fk}\n${text}`;
     const cached = this.measureCache.get(key);
     if (cached) return cached;
     const measurement = this.measurer.measure(text, font);
@@ -189,6 +196,7 @@ export class TextLayoutEngine {
       .join("|");
     return [
       `v1`,
+      `mk=${this.#measurerCacheKey()}`,
       `runs=${runsKey}`,
       `mw=${options.maxWidth}`,
       `wrap=${options.wrapMode}`,

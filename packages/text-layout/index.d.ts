@@ -17,6 +17,8 @@ export type TextMeasurement = {
 
 export interface TextMeasurer {
   measure(text: string, font: FontSpec): TextMeasurement;
+  /** Optional cache key prefix for invalidating `TextLayoutEngine` caches when the measurer changes. */
+  cacheKey?: string | (() => string);
 }
 
 export type TextRun = {
@@ -104,6 +106,7 @@ export class HarfBuzzFontManager {
 export class HarfBuzzTextMeasurer implements TextMeasurer {
   constructor(fontManager: HarfBuzzFontManager, opts?: { maxShapeCacheEntries?: number });
   fontManager: HarfBuzzFontManager;
+  cacheKey: string;
   measure(text: string, font: FontSpec): TextMeasurement;
 }
 

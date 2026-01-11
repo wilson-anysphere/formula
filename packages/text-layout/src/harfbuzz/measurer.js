@@ -24,6 +24,12 @@ export class HarfBuzzTextMeasurer {
     this.shapeCache = new LRUCache(opts.maxShapeCacheEntries ?? 10_000);
   }
 
+  get cacheKey() {
+    // Incorporate font-manager version so `TextLayoutEngine` caches are invalidated when fonts or
+    // fallback configuration changes.
+    return `harfbuzz:v${this.fontManager.version}`;
+  }
+
   /**
    * @param {string} text
    * @param {FontSpec} font
@@ -127,4 +133,3 @@ export class HarfBuzzTextMeasurer {
     return segments;
   }
 }
-

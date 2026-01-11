@@ -151,3 +151,47 @@ test("maxLines truncates and applies ellipsis within maxWidth", () => {
   assert.deepEqual(layout.lines.map((l) => l.text), ["Hell…"]);
   assert.equal(layout.lines[0].width, 5);
 });
+
+test("measurer cacheKey is included in engine caches so measurements can be invalidated", () => {
+  const measurer = {
+    calls: 0,
+    version: 0,
+    get cacheKey() {
+      return `v${this.version}`;
+    },
+    measure(text, font) {
+      this.calls++;
+      return {
+        width: text.length + this.version,
+        ascent: font.sizePx * 0.8,
+        descent: font.sizePx * 0.2,
+      };
+    },
+  };
+
+  const engine = new TextLayoutEngine(measurer);
+  const font = { family: "Inter", sizePx: 10, weight: 400 };
+
+  assert.equal(engine.measure("a", font).width, 1);
+  assert.equal(engine.measure("a", font).width, 1);
+  assert.equal(measurer.calls, 1, "expected measurement to be cached while cacheKey is stable");
+
+  measurer.version = 10;
+  assert.equal(engine.measure("a", font).width, 11);
+  assert.equal(measurer.calls, 2, "expected cacheKey change to force re-measurement");
+
+  const options = {
+    text: "abcd efgh",
+    font,
+    maxWidth: 5,
+    wrapMode: "word",
+    align: "left",
+    direction: "ltr",
+  };
+  const layoutA = engine.layout(options);
+
+  measurer.version = 20;
+  const layoutB = engine.layout(options);
+
+  assert.notStrictEqual(layoutA, layoutB, "expected cacheKey change to invalidate layout cache");
+});
