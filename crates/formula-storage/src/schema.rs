@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, Transaction};
 
-const LATEST_SCHEMA_VERSION: i64 = 4;
+const LATEST_SCHEMA_VERSION: i64 = 5;
 
 pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     // Ensure foreign keys are enforced (disabled by default in SQLite).
@@ -28,6 +28,7 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
             2 => migrate_to_v2(&tx)?,
             3 => migrate_to_v3(&tx)?,
             4 => migrate_to_v4(&tx)?,
+            5 => migrate_to_v5(&tx)?,
             _ => unreachable!("unknown schema migration target: {next}"),
         }
         tx.execute(
@@ -217,6 +218,30 @@ fn migrate_to_v4(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     ensure_column(tx, "workbooks", "defined_names", "defined_names JSON")?;
     ensure_column(tx, "workbooks", "print_settings", "print_settings JSON")?;
     ensure_column(tx, "workbooks", "view", "view JSON")?;
+    Ok(())
+}
+
+fn migrate_to_v5(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS workbook_images (
+          workbook_id TEXT NOT NULL REFERENCES workbooks(id),
+          image_id TEXT NOT NULL,
+          content_type TEXT,
+          bytes BLOB NOT NULL,
+          PRIMARY KEY (workbook_id, image_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_workbook_images_workbook ON workbook_images(workbook_id);
+
+        CREATE TABLE IF NOT EXISTS sheet_drawings (
+          sheet_id TEXT NOT NULL REFERENCES sheets(id),
+          position INTEGER NOT NULL,
+          data JSON NOT NULL,
+          PRIMARY KEY (sheet_id, position)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sheet_drawings_sheet ON sheet_drawings(sheet_id);
+        "#,
+    )?;
     Ok(())
 }
 

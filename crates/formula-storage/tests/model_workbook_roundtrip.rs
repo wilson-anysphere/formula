@@ -3,6 +3,10 @@ use formula_model::{
     DefinedNameScope, Font, Range, RichText, SheetVisibility, SpillValue, Style, TabColor,
     ThemePalette, WorkbookProtection, WorkbookView, WorkbookWindow, WorkbookWindowState,
 };
+use formula_model::drawings::{
+    Anchor, AnchorPoint, CellOffset, DrawingObject, DrawingObjectId, DrawingObjectKind, EmuSize,
+    ImageData, ImageId,
+};
 use formula_storage::{ImportModelWorkbookOptions, Storage};
 
 use std::collections::BTreeMap;
@@ -11,6 +15,21 @@ fn cells_as_map(sheet: &formula_model::Worksheet) -> BTreeMap<(u32, u32), Cell> 
     sheet
         .iter_cells()
         .map(|(cell_ref, cell)| ((cell_ref.row, cell_ref.col), cell.clone()))
+        .collect()
+}
+
+fn images_as_map(
+    workbook: &formula_model::Workbook,
+) -> BTreeMap<String, (Vec<u8>, Option<String>)> {
+    workbook
+        .images
+        .iter()
+        .map(|(id, data)| {
+            (
+                id.as_str().to_string(),
+                (data.bytes.clone(), data.content_type.clone()),
+            )
+        })
         .collect()
 }
 
@@ -36,6 +55,14 @@ fn model_workbook_import_export_round_trips() {
         lock_windows: true,
         password_hash: Some(123),
     };
+    let image_id = ImageId::new("image1.png");
+    workbook.images.insert(
+        image_id.clone(),
+        ImageData {
+            bytes: vec![0, 1, 2, 3],
+            content_type: Some("image/png".to_string()),
+        },
+    );
 
     let sheet_a = workbook.add_sheet("Äbc").expect("add sheet A");
     let sheet_b = workbook.add_sheet("Data").expect("add sheet B");
@@ -110,6 +137,19 @@ fn model_workbook_import_export_round_trips() {
             theme: Some(3),
             tint: Some(0.5),
             ..Default::default()
+        });
+        sheet.drawings.push(DrawingObject {
+            id: DrawingObjectId(1),
+            kind: DrawingObjectKind::Image {
+                image_id: image_id.clone(),
+            },
+            anchor: Anchor::OneCell {
+                from: AnchorPoint::new(CellRef::new(0, 0), CellOffset::new(0, 0)),
+                ext: EmuSize::new(100, 200),
+            },
+            z_order: 0,
+            size: Some(EmuSize::new(100, 200)),
+            preserved: Default::default(),
         });
 
         sheet.set_cell(
@@ -229,6 +269,7 @@ fn model_workbook_import_export_round_trips() {
     assert_eq!(exported.print_settings, workbook.print_settings);
     assert_eq!(exported.view, workbook.view);
     assert_eq!(exported.styles.styles, workbook.styles.styles);
+    assert_eq!(images_as_map(&exported), images_as_map(&workbook));
 
     assert_eq!(exported.sheets.len(), workbook.sheets.len());
     for (expected, actual) in workbook.sheets.iter().zip(exported.sheets.iter()) {
@@ -241,6 +282,7 @@ fn model_workbook_import_export_round_trips() {
         assert_eq!(actual.frozen_rows, expected.frozen_rows);
         assert_eq!(actual.frozen_cols, expected.frozen_cols);
         assert!((actual.zoom - expected.zoom).abs() < f32::EPSILON);
+        assert_eq!(actual.drawings, expected.drawings);
 
         assert_eq!(cells_as_map(actual), cells_as_map(expected));
     }

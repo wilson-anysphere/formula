@@ -357,6 +357,25 @@ impl Storage {
             ],
         )?;
 
+        // Persist workbook-scoped images.
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT INTO workbook_images (workbook_id, image_id, content_type, bytes)
+                VALUES (?1, ?2, ?3, ?4)
+                "#,
+            )?;
+            let workbook_id = workbook_meta.id.to_string();
+            for (image_id, image) in workbook.images.iter() {
+                stmt.execute(params![
+                    &workbook_id,
+                    image_id.as_str(),
+                    image.content_type.as_deref(),
+                    &image.bytes
+                ])?;
+            }
+        }
+
         // Insert worksheets in the order they appear in the model workbook.
         let mut seen_names: Vec<String> = Vec::with_capacity(workbook.sheets.len());
         let mut model_sheet_to_storage: HashMap<u32, Uuid> = HashMap::new();
@@ -419,6 +438,29 @@ impl Storage {
                     sheet.id as i64
                 ],
             )?;
+        }
+
+        // Persist sheet drawing objects (images, shapes, etc).
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT INTO sheet_drawings (sheet_id, position, data)
+                VALUES (?1, ?2, ?3)
+                "#,
+            )?;
+
+            for sheet in &workbook.sheets {
+                let Some(storage_sheet_id) = model_sheet_to_storage.get(&sheet.id) else {
+                    continue;
+                };
+                for (position, drawing) in sheet.drawings.iter().enumerate() {
+                    stmt.execute(params![
+                        storage_sheet_id.to_string(),
+                        position as i64,
+                        serde_json::to_value(drawing)?
+                    ])?;
+                }
+            }
         }
 
         // Persist styles (deduplicated globally), and preserve model style indices per workbook.
@@ -578,6 +620,28 @@ impl Storage {
         }
         model_workbook.styles = styles;
 
+        // Load workbook images.
+        {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT image_id, content_type, bytes
+                FROM workbook_images
+                WHERE workbook_id = ?1
+                ORDER BY image_id
+                "#,
+            )?;
+            let mut rows = stmt.query(params![workbook_id.to_string()])?;
+            while let Some(row) = rows.next()? {
+                let image_id: String = row.get(0)?;
+                let content_type: Option<String> = row.get(1)?;
+                let bytes: Vec<u8> = row.get(2)?;
+                model_workbook.images.insert(
+                    formula_model::drawings::ImageId::new(image_id),
+                    formula_model::drawings::ImageData { bytes, content_type },
+                );
+            }
+        }
+
         // Allocate deterministic worksheet ids for sheets that predate model import.
         let mut used_sheet_ids: HashSet<u32> = HashSet::new();
         let max_model_sheet_id: i64 = conn.query_row(
@@ -653,6 +717,27 @@ impl Storage {
             } else {
                 tab_color_fast.map(formula_model::TabColor::rgb)
             };
+
+            // Load sheet drawing objects.
+            {
+                let mut stmt = conn.prepare(
+                    r#"
+                    SELECT data
+                    FROM sheet_drawings
+                    WHERE sheet_id = ?1
+                    ORDER BY position
+                    "#,
+                )?;
+                let drawings = stmt
+                    .query_map(params![&storage_sheet_id], |r| r.get::<_, serde_json::Value>(0))?;
+                let mut out = Vec::new();
+                for drawing in drawings {
+                    out.push(serde_json::from_value::<formula_model::drawings::DrawingObject>(
+                        drawing?,
+                    )?);
+                }
+                sheet.drawings = out;
+            }
 
             stream_cells_into_model_sheet(
                 &conn,
