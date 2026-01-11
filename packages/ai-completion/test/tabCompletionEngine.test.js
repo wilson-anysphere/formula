@@ -476,3 +476,72 @@ test("Sheet-qualified ranges escape apostrophes in sheet names", async () => {
     `Expected an escaped sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
+
+test("Sheet-qualified range suggestions auto-quote unquoted sheet names with spaces", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`My Sheet!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "My Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  // User typed an invalid unquoted sheet name; completion should fix it by quoting.
+  const currentInput = "=SUM(My Sheet!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('My Sheet'!A1:A10)"),
+    `Expected an auto-quoted sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Sheet-qualified range suggestions auto-quote unquoted sheet names with apostrophes", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Bob's Sheet!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Bob's Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Bob's Sheet!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('Bob''s Sheet'!A1:A10)"),
+    `Expected an auto-quoted sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
