@@ -1,5 +1,6 @@
 import { computeChartLayout, type ChartLayout, type ChartModel as LayoutChartModel, type ChartTheme as LayoutChartTheme, type LinearScale } from "./layout/index.js";
 import { renderSceneToCanvas, renderSceneToSvg, path, type FontSpec as SceneFontSpec, type Node, type Paint, type Scene, type Stroke, type TextAlign, type TextBaseline } from "./scene/index.js";
+import { resolveCssVar } from "../theme/cssVars.js";
 
 export type ChartModel = LayoutChartModel & {
   /**
@@ -37,15 +38,20 @@ export type ChartTheme = {
 export type SizePx = { width: number; height: number };
 
 export const defaultChartTheme: ChartTheme = {
-  background: "#ffffff",
-  border: "#dddddd",
-  axis: "#333333",
-  gridline: "#e6e6e6",
-  title: "#111111",
-  label: "#333333",
+  background: "var(--chart-bg)",
+  border: "var(--chart-border)",
+  axis: "var(--chart-axis)",
+  gridline: "var(--chart-border)",
+  title: "var(--chart-title)",
+  label: "var(--chart-label)",
   fontFamily: "sans-serif",
   fontSize: 11,
-  seriesColors: ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc949"],
+  seriesColors: [
+    "var(--chart-series-1)",
+    "var(--chart-series-2)",
+    "var(--chart-series-3)",
+    "var(--chart-series-4)",
+  ],
 };
 
 function resolveTheme(theme: ChartTheme | null | undefined): ChartTheme {
@@ -54,6 +60,31 @@ function resolveTheme(theme: ChartTheme | null | undefined): ChartTheme {
     ...defaultChartTheme,
     ...theme,
     seriesColors: Array.isArray(theme.seriesColors) && theme.seriesColors.length ? theme.seriesColors : defaultChartTheme.seriesColors,
+  };
+}
+
+function resolveCssColor(value: string): string {
+  const trimmed = value.trim();
+  const varMatch = /^var\(\s*(--[^,\s)]+)(?:\s*,[^)]+)?\s*\)$/.exec(trimmed);
+  if (varMatch) {
+    return resolveCssVar(varMatch[1], { fallback: trimmed });
+  }
+  if (trimmed.startsWith("--")) {
+    return resolveCssVar(trimmed, { fallback: trimmed });
+  }
+  return trimmed;
+}
+
+function resolveThemeForCanvas(theme: ChartTheme): ChartTheme {
+  return {
+    ...theme,
+    background: resolveCssColor(theme.background),
+    border: resolveCssColor(theme.border),
+    axis: resolveCssColor(theme.axis),
+    gridline: resolveCssColor(theme.gridline),
+    title: resolveCssColor(theme.title),
+    label: resolveCssColor(theme.label),
+    seriesColors: theme.seriesColors.map(resolveCssColor),
   };
 }
 
@@ -214,7 +245,7 @@ function buildLegendNodes(model: ChartModel, layout: ChartLayout, theme: ChartTh
 
   const nodes: Node[] = [];
   for (const entry of layout.legend.entries) {
-    const color = theme.seriesColors[entry.seriesIndex % theme.seriesColors.length] ?? theme.seriesColors[0] ?? "#000000";
+    const color = theme.seriesColors[entry.seriesIndex % theme.seriesColors.length] ?? theme.axis;
     nodes.push({
       kind: "rect",
       x: entry.markerRect.x,
@@ -350,7 +381,7 @@ function buildBarNodes(data: ResolvedChartData, layout: ChartLayout, theme: Char
         y: top,
         width: barW,
         height: h,
-        fill: toPaint(theme.seriesColors[si % theme.seriesColors.length] ?? theme.seriesColors[0] ?? "#000000"),
+        fill: toPaint(theme.seriesColors[si % theme.seriesColors.length] ?? theme.axis),
       });
     }
   }
@@ -377,7 +408,7 @@ function buildLineNodes(model: ChartModel, data: ResolvedChartData, layout: Char
       points.push({ x: cx, y: scaleLinear(v, yScale) });
     }
 
-    const color = theme.seriesColors[si % theme.seriesColors.length] ?? theme.seriesColors[0] ?? "#000000";
+    const color = theme.seriesColors[si % theme.seriesColors.length] ?? theme.axis;
     nodes.push({
       kind: "polyline",
       points,
@@ -408,7 +439,7 @@ function buildScatterNodes(data: ResolvedChartData, layout: ChartLayout, theme: 
 
   const nodes: Node[] = [];
   for (let si = 0; si < data.series.length; si += 1) {
-    const color = theme.seriesColors[si % theme.seriesColors.length] ?? theme.seriesColors[0] ?? "#000000";
+    const color = theme.seriesColors[si % theme.seriesColors.length] ?? theme.axis;
     const xs = data.series[si]?.xValues ?? [];
     const ys = data.series[si]?.yValues ?? [];
     for (let i = 0; i < Math.min(xs.length, ys.length); i += 1) {
@@ -444,7 +475,7 @@ function buildPieNodes(data: ResolvedChartData, layout: ChartLayout, theme: Char
     const slice = (v / total) * Math.PI * 2;
     const next = angle + slice;
     const builder = path().moveTo(cx, cy).arc(cx, cy, r, angle, next).closePath();
-    const color = theme.seriesColors[i % theme.seriesColors.length] ?? theme.seriesColors[0] ?? "#000000";
+    const color = theme.seriesColors[i % theme.seriesColors.length] ?? theme.axis;
     nodes.push({
       kind: "path",
       path: builder.build(),
@@ -481,7 +512,7 @@ function buildPieLegendNodes(data: ResolvedChartData, layout: ChartLayout, theme
     };
     const labelX = markerRect.x + markerRect.width + markerGap;
     const label = String(labels[i] ?? "");
-    const color = theme.seriesColors[i % theme.seriesColors.length] ?? theme.seriesColors[0] ?? "#000000";
+    const color = theme.seriesColors[i % theme.seriesColors.length] ?? theme.axis;
     nodes.push({
       kind: "rect",
       x: markerRect.x,
@@ -612,7 +643,7 @@ export function renderChartToCanvas(
   theme: ChartTheme,
   sizePx: SizePx
 ): void {
-  const resolvedTheme = resolveTheme(theme);
+  const resolvedTheme = resolveThemeForCanvas(resolveTheme(theme));
   const scene = buildScene(model, data, resolvedTheme, sizePx);
   ctx.save();
   ctx.clearRect(0, 0, sizePx.width, sizePx.height);

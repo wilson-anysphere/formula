@@ -3,20 +3,39 @@ import { applyPathToCanvas } from "./path.js";
 import { applyInverseTransformToCanvas, applyTransformToCanvas } from "./transform.js";
 import type { CircleNode, ClipShape, Node, Paint, PathNode, PolylineNode, RectNode, Scene, Stroke, TextNode } from "./types.js";
 import { fontSpecToCss } from "./text.js";
+import { clamp01 } from "./format.js";
 
 function applyFill(ctx: CanvasRenderingContext2D, paint: Paint | undefined): boolean {
   if (!paint) return false;
   const rgba = paintToRgba(paint);
-  if (!rgba || rgba.a <= 0) return false;
-  ctx.fillStyle = rgbaToCss(rgba);
+  if (rgba) {
+    if (rgba.a <= 0) return false;
+    ctx.fillStyle = rgbaToCss(rgba);
+    return true;
+  }
+
+  const opacity = paint.opacity == null ? 1 : clamp01(paint.opacity);
+  if (opacity <= 0) return false;
+  if (paint.color) ctx.fillStyle = paint.color;
+  if (opacity < 1) ctx.globalAlpha = (typeof ctx.globalAlpha === "number" ? ctx.globalAlpha : 1) * opacity;
   return true;
 }
 
 function applyStroke(ctx: CanvasRenderingContext2D, stroke: Stroke | undefined): boolean {
   if (!stroke) return false;
   const rgba = paintToRgba(stroke.paint);
-  if (!rgba || rgba.a <= 0) return false;
-  ctx.strokeStyle = rgbaToCss(rgba);
+  if (rgba) {
+    if (rgba.a <= 0) return false;
+    ctx.strokeStyle = rgbaToCss(rgba);
+    ctx.lineWidth = stroke.width;
+    ctx.setLineDash(stroke.dash ?? []);
+    return true;
+  }
+
+  const opacity = stroke.paint.opacity == null ? 1 : clamp01(stroke.paint.opacity);
+  if (opacity <= 0) return false;
+  if (stroke.paint.color) ctx.strokeStyle = stroke.paint.color;
+  if (opacity < 1) ctx.globalAlpha = (typeof ctx.globalAlpha === "number" ? ctx.globalAlpha : 1) * opacity;
   ctx.lineWidth = stroke.width;
   if (stroke.lineCap) ctx.lineCap = stroke.lineCap;
   if (stroke.lineJoin) ctx.lineJoin = stroke.lineJoin;
