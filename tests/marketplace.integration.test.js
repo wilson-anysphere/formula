@@ -18,7 +18,7 @@ import signingPkg from "../shared/crypto/signing.js";
 const { createMarketplaceServer } = marketplaceServerPkg;
 const { publishExtension, packageExtension } = publisherPkg;
 const { ExtensionHost } = extensionHostPkg;
-const { createExtensionPackageV1 } = extensionPackagePkg;
+const { createExtensionPackageV1, createExtensionPackageV2 } = extensionPackagePkg;
 const { signBytes, verifyBytesSignature, sha256 } = signingPkg;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -587,6 +587,68 @@ test("publish-bin accepts v2 extension packages without X-Package-Signature", as
     assert.equal(publishRes.status, 200);
     const published = await publishRes.json();
     assert.deepEqual(published, { id: extensionId, version: manifest.version });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("publish-bin rejects invalid manifests (matches client validation)", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-invalid-manifest-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    // Patch the on-disk manifest to be invalid and bypass the extension-publisher's local
+    // validation by building a v2 package directly.
+    await patchManifest(extSource, { permissions: ["totally.not.real"] });
+    const packageBytes = await createExtensionPackageV2(extSource, { privateKeyPem });
+
+    const publishRes = await fetch(`${baseUrl}/api/publish-bin`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/vnd.formula.extension-package",
+        "X-Package-Sha256": sha256(packageBytes),
+      },
+      body: packageBytes,
+    });
+    assert.equal(publishRes.status, 400);
+    const body = await publishRes.json();
+    assert.ok(/invalid permission/i.test(String(body?.error || "")));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });

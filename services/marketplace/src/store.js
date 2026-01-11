@@ -210,7 +210,15 @@ async function readExtensionPackageSafe(packageBytes, { maxUncompressedBytes }) 
 function validateManifest(manifest) {
   if (!manifest || typeof manifest !== "object") throw new Error("Manifest must be an object");
 
-  const validated = validateExtensionManifest(manifest, { enforceEngine: false });
+  let validated;
+  try {
+    validated = validateExtensionManifest(manifest, { enforceEngine: false });
+  } catch (error) {
+    if (error && typeof error === "object" && error.name === "ManifestError") {
+      throw new Error(`Invalid manifest: ${error.message}`);
+    }
+    throw error;
+  }
 
   if (!NAME_RE.test(validated.name)) {
     throw new Error(`Invalid extension name "${validated.name}" (expected ${NAME_RE})`);
