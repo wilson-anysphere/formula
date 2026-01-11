@@ -1,3 +1,4 @@
+use formula_engine::eval::parse_a1;
 use formula_engine::{Engine, ErrorKind, Value};
 use pretty_assertions::assert_eq;
 
@@ -344,16 +345,38 @@ fn array_functions_spill_and_respect_spill_blocking() {
     engine
         .set_cell_formula("Sheet1", "D2", "=_xlfn.SEQUENCE(2,2,1,1)")
         .unwrap();
+    // A second, non-overlapping transpose should spill successfully even when another
+    // array formula is present elsewhere on the sheet.
+    engine
+        .set_cell_formula("Sheet1", "F1", "=TRANSPOSE(A1:C1)")
+        .unwrap();
     engine.recalculate();
 
-    // D1 is blocked because TRANSPOSE would spill into D2, which contains a formula.
+    assert_eq!(
+        engine.spill_range("Sheet1", "D1"),
+        None,
+    );
     assert_eq!(
         engine.get_cell_value("Sheet1", "D1"),
         Value::Error(ErrorKind::Spill)
     );
+
     // SEQUENCE spills a 2x2 matrix starting at D2.
+    assert_eq!(
+        engine.spill_range("Sheet1", "D2"),
+        Some((parse_a1("D2").unwrap(), parse_a1("E3").unwrap()))
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(4.0));
+
+    // TRANSPOSE spills down when unblocked.
+    assert_eq!(
+        engine.spill_range("Sheet1", "F1"),
+        Some((parse_a1("F1").unwrap(), parse_a1("F3").unwrap()))
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F3"), Value::Number(3.0));
 }
