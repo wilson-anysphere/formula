@@ -105,14 +105,14 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   await Promise.all([clientA.session.whenSynced(), clientB.session.whenSynced()]);
 
   // Seed initial workbook state and wait for propagation.
-  clientA.session.setCellValue("Sheet1:0:0", 1);
-  await waitForCondition(() => clientB.session.getCell("Sheet1:0:0")?.value === 1, 10_000);
+  await clientA.session.setCellValue("Sheet1:0:0", 1);
+  await waitForCondition(async () => (await clientB.session.getCell("Sheet1:0:0"))?.value === 1, 10_000);
 
   const checkpoint = await clientA.versioning.createCheckpoint({ name: "Approved", locked: true });
   assert.equal(checkpoint.kind, "checkpoint");
 
-  clientA.session.setCellValue("Sheet1:0:0", 2);
-  await waitForCondition(() => clientB.session.getCell("Sheet1:0:0")?.value === 2, 10_000);
+  await clientA.session.setCellValue("Sheet1:0:0", 2);
+  await waitForCondition(async () => (await clientB.session.getCell("Sheet1:0:0"))?.value === 2, 10_000);
   const snapshot = await clientA.versioning.createSnapshot({ description: "edit" });
   assert.equal(snapshot.kind, "snapshot");
 
@@ -140,7 +140,7 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
 
   // --- Restore propagates A -> B ---
   await clientA.versioning.restoreVersion(checkpoint.id);
-  await waitForCondition(() => clientB.session.getCell("Sheet1:0:0")?.value === 1, 10_000);
+  await waitForCondition(async () => (await clientB.session.getCell("Sheet1:0:0"))?.value === 1, 10_000);
 
   await waitForCondition(async () => {
     const versions = await clientB.versioning.listVersions();
@@ -173,7 +173,7 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   await clientC.session.whenSynced();
 
   // --- Hydration from persisted sync-server state ---
-  await waitForCondition(() => clientC.session.getCell("Sheet1:0:0")?.value === 1, 10_000);
+  await waitForCondition(async () => (await clientC.session.getCell("Sheet1:0:0"))?.value === 1, 10_000);
 
   const versionsC = await clientC.versioning.listVersions();
   assert.ok(versionsC.some((v) => v.id === checkpoint.id), "expected checkpoint to persist in doc");

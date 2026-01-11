@@ -143,7 +143,7 @@ test("CollabSession↔DocumentController binder blocks edits to non-editable cel
   // Seed a value as the editable user.
   dcA.setCellValue("Sheet1", "A1", "original");
   await waitForCondition(() => dcB.getCell("Sheet1", "A1").value === "original");
-  await waitForCondition(() => sessionA.getCell("Sheet1:0:0")?.value === "original");
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.value === "original");
 
   // Attempt an edit as the restricted user.
   dcB.setCellValue("Sheet1", "A1", "hacked");
@@ -152,7 +152,7 @@ test("CollabSession↔DocumentController binder blocks edits to non-editable cel
   await new Promise((r) => setTimeout(r, 25));
   assert.equal(dcB.getCell("Sheet1", "A1").value, "original");
   assert.equal(dcA.getCell("Sheet1", "A1").value, "original");
-  assert.equal(sessionA.getCell("Sheet1:0:0")?.value, "original");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, "original");
 
   binderA.destroy();
   binderB.destroy();

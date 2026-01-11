@@ -111,8 +111,8 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   await branchService.init(owner, { sheets: {} });
 
   // --- Commit initial state ---
-  sessionA.setCellValue("Sheet1:0:0", "base");
-  sessionA.setCellFormula("Sheet1:0:1", "=1+1");
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  await sessionA.setCellFormula("Sheet1:0:1", "=1+1");
   await workflow.commitCurrentState(owner, "initial");
 
   // --- Branch + divergent edits ---
@@ -125,7 +125,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     () => sessionB.doc.getMap("branching:meta").get("currentBranchName") === "feature",
     10_000
   );
-  sessionB.setCellValue("Sheet1:0:2", 99);
+  await sessionB.setCellValue("Sheet1:0:2", 99);
   const editorCommit = await workflowB.commitCurrentState(editor, "editor: add C1");
 
   // Ensure client A observes the branch head moving before making further commits.
@@ -134,9 +134,9 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     const feature = getYMap(branches.get("feature"));
     return feature?.get("headCommitId") === editorCommit.id;
   }, 10_000);
-  await waitForCondition(() => sessionA.getCell("Sheet1:0:2")?.value === 99, 10_000);
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:2"))?.value === 99, 10_000);
 
-  sessionA.setCellValue("Sheet1:0:0", "feature");
+  await sessionA.setCellValue("Sheet1:0:0", "feature");
   sessionA.doc.transact(() => {
     const cell = getYMap(sessionA.cells.get("Sheet1:0:1"));
     if (cell) cell.set("format", { numberFormat: "percent" });
@@ -144,7 +144,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   await workflow.commitCurrentState(owner, "feature edit");
 
   await workflow.checkoutBranch(owner, { name: "main" });
-  sessionA.setCellValue("Sheet1:0:0", "main");
+  await sessionA.setCellValue("Sheet1:0:0", "main");
   sessionA.doc.transact(() => {
     const cell = getYMap(sessionA.cells.get("Sheet1:0:1"));
     if (cell) cell.set("format", { numberFormat: "accounting" });
@@ -174,12 +174,12 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   });
 
   // --- Workbook state propagates to other collaborators ---
-  await waitForCondition(() => sessionB.getCell("Sheet1:0:0")?.value === "feature", 10_000);
-  assert.equal(sessionB.getCell("Sheet1:0:0")?.value, "feature");
-  await waitForCondition(() => sessionB.getCell("Sheet1:0:1")?.formula === "=1+1", 10_000);
-  assert.equal(sessionB.getCell("Sheet1:0:1")?.formula, "=1+1");
-  await waitForCondition(() => sessionB.getCell("Sheet1:0:2")?.value === 99, 10_000);
-  assert.equal(sessionB.getCell("Sheet1:0:2")?.value, 99);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "feature", 10_000);
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "feature");
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:1"))?.formula === "=1+1", 10_000);
+  assert.equal((await sessionB.getCell("Sheet1:0:1"))?.formula, "=1+1");
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:2"))?.value === 99, 10_000);
+  assert.equal((await sessionB.getCell("Sheet1:0:2"))?.value, 99);
   await waitForCondition(() => {
     const cell = getYMap(sessionB.cells.get("Sheet1:0:1"));
     return cell?.get("format")?.numberFormat === "percent";
@@ -244,9 +244,9 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   await sessionC.whenSynced();
 
   // --- Workbook state persisted ---
-  assert.equal(sessionC.getCell("Sheet1:0:0")?.value, "feature");
-  assert.equal(sessionC.getCell("Sheet1:0:1")?.formula, "=1+1");
-  assert.equal(sessionC.getCell("Sheet1:0:2")?.value, 99);
+  assert.equal((await sessionC.getCell("Sheet1:0:0"))?.value, "feature");
+  assert.equal((await sessionC.getCell("Sheet1:0:1"))?.formula, "=1+1");
+  assert.equal((await sessionC.getCell("Sheet1:0:2"))?.value, 99);
   assert.deepEqual(getYMap(sessionC.cells.get("Sheet1:0:1"))?.get("format"), {
     numberFormat: "percent",
   });
