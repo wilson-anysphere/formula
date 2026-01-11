@@ -43,6 +43,22 @@ test("Typing =VLO suggests VLOOKUP(", async () => {
   );
 });
 
+test("Typing =XLO suggests XLOOKUP(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=XLO",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=XLOOKUP("),
+    `Expected an XLOOKUP suggestion, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 

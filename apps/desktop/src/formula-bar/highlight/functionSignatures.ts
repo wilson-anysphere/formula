@@ -6,6 +6,19 @@ export type FunctionSignature = {
   summary: string;
 };
 
+import FUNCTION_CATALOG from "../../../../../shared/functionCatalog.json" with { type: "json" };
+
+type CatalogFunction = {
+  name: string;
+  min_args: number;
+  max_args: number;
+};
+
+const CATALOG_BY_NAME = new Map<string, CatalogFunction>();
+for (const fn of (FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? []) {
+  if (fn?.name) CATALOG_BY_NAME.set(fn.name.toUpperCase(), fn);
+}
+
 export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
   SUM: {
     name: "SUM",
@@ -39,7 +52,15 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
 };
 
 export function getFunctionSignature(name: string): FunctionSignature | null {
-  return FUNCTION_SIGNATURES[name.toUpperCase()] ?? null;
+  const requested = name.toUpperCase();
+  const lookup = requested.startsWith("_XLFN.") ? requested.slice("_XLFN.".length) : requested;
+
+  const known = FUNCTION_SIGNATURES[lookup] ?? signatureFromCatalog(lookup);
+  if (!known) return null;
+
+  // Preserve any `_xlfn.` prefix in the displayed name so formula-bar hints
+  // match pasted formulas from Excel files.
+  return lookup === requested ? known : { ...known, name: requested };
 }
 
 export type SignaturePart = { text: string; kind: "name" | "param" | "paramActive" | "punct" };
@@ -56,4 +77,43 @@ export function signatureParts(sig: FunctionSignature, activeParamIndex: number 
   });
   parts.push({ text: ")", kind: "punct" });
   return parts;
+}
+
+function signatureFromCatalog(name: string): FunctionSignature | null {
+  const fn = CATALOG_BY_NAME.get(name);
+  if (!fn) return null;
+
+  return {
+    name,
+    params: buildParams(fn.min_args, fn.max_args),
+    summary: "",
+  };
+}
+
+function buildParams(minArgs: number, maxArgs: number): FunctionParam[] {
+  const MAX_PARAMS = 5;
+
+  if (!Number.isFinite(minArgs) || !Number.isFinite(maxArgs) || minArgs < 0 || maxArgs < 0) {
+    return [];
+  }
+
+  if (maxArgs <= MAX_PARAMS) {
+    const out: FunctionParam[] = [];
+    for (let i = 1; i <= maxArgs; i++) {
+      out.push({ name: `arg${i}`, optional: i > minArgs });
+    }
+    return out;
+  }
+
+  const requiredShown = Math.min(minArgs, MAX_PARAMS - 1);
+  const out: FunctionParam[] = [];
+  for (let i = 1; i <= requiredShown; i++) out.push({ name: `arg${i}` });
+
+  if (minArgs > requiredShown) {
+    out.push({ name: "…" });
+    return out;
+  }
+
+  out.push({ name: "…", optional: true });
+  return out;
 }

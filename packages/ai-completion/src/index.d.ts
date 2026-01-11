@@ -58,7 +58,7 @@ export interface FunctionSpec {
 }
 
 export class FunctionRegistry {
-  constructor(functions?: FunctionSpec[]);
+  constructor(functions?: FunctionSpec[], options?: { catalog?: unknown });
   register(spec: FunctionSpec): void;
   list(): FunctionSpec[];
   getFunction(name: string): FunctionSpec | undefined;
@@ -159,4 +159,3 @@ export function normalizeCellRef(cellRef: CellRef): CellRefObject;
 export function toA1(ref: CellRefObject): string;
 export function parseA1(a1: string): CellRefObject | null;
 export function isEmptyCell(value: unknown): boolean;
-

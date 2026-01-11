@@ -1,0 +1,410 @@
+{
+  "functions": [
+    {
+      "name": "ABS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "AND",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "bool"
+    },
+    {
+      "name": "AVERAGE",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "CONCAT",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "text"
+    },
+    {
+      "name": "CONCATENATE",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "text"
+    },
+    {
+      "name": "COUNT",
+      "min_args": 0,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "COUNTA",
+      "min_args": 0,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "COUNTBLANK",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "DATE",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "DAY",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "DDB",
+      "min_args": 4,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "FIND",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "FV",
+      "min_args": 3,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "HLOOKUP",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "any"
+    },
+    {
+      "name": "IF",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any"
+    },
+    {
+      "name": "IFERROR",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "any"
+    },
+    {
+      "name": "IFNA",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "any"
+    },
+    {
+      "name": "INDEX",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any"
+    },
+    {
+      "name": "INT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "IPMT",
+      "min_args": 4,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "IRR",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "ISERROR",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool"
+    },
+    {
+      "name": "LEFT",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text"
+    },
+    {
+      "name": "LEN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "LOWER",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text"
+    },
+    {
+      "name": "MATCH",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "MAX",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "MID",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "text"
+    },
+    {
+      "name": "MIN",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "MIRR",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "MOD",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "MONTH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "NOT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool"
+    },
+    {
+      "name": "NOW",
+      "min_args": 0,
+      "max_args": 0,
+      "volatility": "volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "NPER",
+      "min_args": 3,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "NPV",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "OR",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "bool"
+    },
+    {
+      "name": "PMT",
+      "min_args": 3,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "PPMT",
+      "min_args": 4,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "PV",
+      "min_args": 3,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "RATE",
+      "min_args": 3,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "RIGHT",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text"
+    },
+    {
+      "name": "ROUND",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "ROUNDDOWN",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "ROUNDUP",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "SEARCH",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "SLN",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "SUM",
+      "min_args": 0,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "SYD",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "TODAY",
+      "min_args": 0,
+      "max_args": 0,
+      "volatility": "volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "TRIM",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text"
+    },
+    {
+      "name": "UPPER",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text"
+    },
+    {
+      "name": "VLOOKUP",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "any"
+    },
+    {
+      "name": "XIRR",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "XLOOKUP",
+      "min_args": 3,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "any"
+    },
+    {
+      "name": "XMATCH",
+      "min_args": 2,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "XNPV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    },
+    {
+      "name": "YEAR",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number"
+    }
+  ]
+}

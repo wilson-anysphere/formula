@@ -6,6 +6,8 @@
  * both numbers and ranges, VLOOKUP's 4th arg is optional, etc.).
  */
 
+import FUNCTION_CATALOG from "../../../shared/functionCatalog.json" with { type: "json" };
+
 /**
  * @typedef {{
  *   name: string,
@@ -26,13 +28,33 @@
 export class FunctionRegistry {
   /**
    * @param {FunctionSpec[]} [functions]
+   * @param {{ catalog?: any }} [options]
    */
-  constructor(functions) {
+  constructor(functions, options = {}) {
     /** @type {Map<string, FunctionSpec>} */
     this.functionsByName = new Map();
-    for (const fn of functions ?? DEFAULT_FUNCTIONS) {
+
+    /** @type {string[] | null} */
+    this._sortedUpperNames = null;
+
+    if (Array.isArray(functions)) {
+      for (const fn of functions) this.register(fn);
+      return;
+    }
+
+    const catalogSource = Object.prototype.hasOwnProperty.call(options, "catalog")
+      ? options.catalog
+      : FUNCTION_CATALOG;
+    const catalogFunctions = functionsFromCatalog(catalogSource);
+
+    for (const fn of catalogFunctions) {
       this.register(fn);
     }
+
+    // Signature/arg-type hints are intentionally curated until the catalog
+    // carries richer metadata. Curated entries override catalog name-only
+    // entries.
+    for (const fn of CURATED_FUNCTIONS) this.register(fn);
   }
 
   /**
@@ -43,6 +65,7 @@ export class FunctionRegistry {
       throw new Error("FunctionRegistry.register: function name is required");
     }
     this.functionsByName.set(spec.name.toUpperCase(), spec);
+    this._sortedUpperNames = null;
   }
 
   /**
@@ -58,7 +81,13 @@ export class FunctionRegistry {
    */
   getFunction(name) {
     if (typeof name !== "string") return undefined;
-    return this.functionsByName.get(name.toUpperCase());
+    const upper = name.toUpperCase();
+    const direct = this.functionsByName.get(upper);
+    if (direct) return direct;
+    if (upper.startsWith("_XLFN.")) {
+      return this.functionsByName.get(upper.slice("_XLFN.".length));
+    }
+    return undefined;
   }
 
   /**
@@ -70,12 +99,24 @@ export class FunctionRegistry {
     const limit = options.limit ?? 10;
     if (typeof prefix !== "string" || prefix.length === 0) return [];
     const normalized = prefix.toUpperCase();
-    const matches = [];
-    for (const spec of this.functionsByName.values()) {
-      if (spec.name.startsWith(normalized)) matches.push(spec);
+
+    if (!this._sortedUpperNames) {
+      this._sortedUpperNames = [...this.functionsByName.keys()].sort();
     }
-    matches.sort((a, b) => a.name.localeCompare(b.name));
-    return matches.slice(0, limit);
+
+    const names = this._sortedUpperNames;
+    const start = lowerBound(names, normalized);
+
+    /** @type {FunctionSpec[]} */
+    const matches = [];
+    for (let i = start; i < names.length && matches.length < limit; i++) {
+      const name = names[i];
+      if (!name.startsWith(normalized)) break;
+      const spec = this.functionsByName.get(name);
+      if (spec) matches.push(spec);
+    }
+
+    return matches;
   }
 
   /**
@@ -102,7 +143,7 @@ export class FunctionRegistry {
 }
 
 /** @type {FunctionSpec[]} */
-const DEFAULT_FUNCTIONS = [
+const CURATED_FUNCTIONS = [
   {
     name: "SUM",
     description: "Adds all the numbers in a range of cells.",
@@ -181,3 +222,40 @@ const DEFAULT_FUNCTIONS = [
     ],
   },
 ];
+
+/**
+ * Turn the Rust-generated catalog shape into name-only FunctionSpec entries.
+ * Validation is intentionally lenient so developer environments keep working
+ * even if the catalog is missing or corrupted.
+ *
+ * @param {any} catalog
+ * @returns {FunctionSpec[]}
+ */
+function functionsFromCatalog(catalog) {
+  if (!catalog || typeof catalog !== "object" || !Array.isArray(catalog.functions)) {
+    return [];
+  }
+
+  /** @type {FunctionSpec[]} */
+  const out = [];
+  for (const entry of catalog.functions) {
+    if (!entry || typeof entry.name !== "string" || entry.name.length === 0) continue;
+    out.push({ name: entry.name.toUpperCase(), args: [] });
+  }
+  return out;
+}
+
+/**
+ * @param {string[]} arr Sorted array.
+ * @param {string} target
+ */
+function lowerBound(arr, target) {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
