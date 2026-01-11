@@ -1,10 +1,12 @@
 use crate::eval::CompiledExpr;
 use crate::functions::lookup;
+use crate::functions::wildcard::WildcardPattern;
 use crate::functions::{
     eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 inventory::submit! {
@@ -1150,7 +1152,34 @@ fn array_1d_with_shape(arr: Array) -> Result<(XlookupVectorShape, Vec<Value>), E
     Err(ErrorKind::Value)
 }
 
+fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
+    let Value::Text(pattern) = lookup else {
+        return None;
+    };
+    if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('~') {
+        return None;
+    }
+    Some(WildcardPattern::new(pattern))
+}
+
 fn exact_match_values(lookup: &Value, values: &[Value]) -> Option<usize> {
+    if let Some(pattern) = wildcard_pattern_for_lookup(lookup) {
+        for (idx, candidate) in values.iter().enumerate() {
+            let text = match candidate {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_str()),
+                other => match other.coerce_to_string() {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(idx);
+            }
+        }
+        return None;
+    }
+
     values.iter().position(|v| excel_eq(lookup, v))
 }
 
@@ -1176,6 +1205,7 @@ fn exact_match_in_first_col(
     lookup: &Value,
     table: &Reference,
 ) -> Option<u32> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     let rows = table.start.row..=table.end.row;
     for (idx, row) in rows.enumerate() {
         let addr = crate::eval::CellAddr {
@@ -1183,7 +1213,19 @@ fn exact_match_in_first_col(
             col: table.start.col,
         };
         let key = ctx.get_cell_value(&table.sheet_id, addr);
-        if excel_eq(lookup, &key) {
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match &key {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_str()),
+                other => match other.coerce_to_string() {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(idx as u32);
+            }
+        } else if excel_eq(lookup, &key) {
             return Some(idx as u32);
         }
     }
@@ -1191,9 +1233,22 @@ fn exact_match_in_first_col(
 }
 
 fn exact_match_in_first_col_array(lookup: &Value, table: &Array) -> Option<u32> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     for row in 0..table.rows {
         let key = table.get(row, 0).unwrap_or(&Value::Blank);
-        if excel_eq(lookup, key) {
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match key {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_str()),
+                other => match other.coerce_to_string() {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(row as u32);
+            }
+        } else if excel_eq(lookup, key) {
             return Some(row as u32);
         }
     }
@@ -1205,6 +1260,7 @@ fn exact_match_in_first_row(
     lookup: &Value,
     table: &Reference,
 ) -> Option<u32> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     let cols = table.start.col..=table.end.col;
     for (idx, col) in cols.enumerate() {
         let addr = crate::eval::CellAddr {
@@ -1212,7 +1268,19 @@ fn exact_match_in_first_row(
             col,
         };
         let key = ctx.get_cell_value(&table.sheet_id, addr);
-        if excel_eq(lookup, &key) {
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match &key {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_str()),
+                other => match other.coerce_to_string() {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(idx as u32);
+            }
+        } else if excel_eq(lookup, &key) {
             return Some(idx as u32);
         }
     }
@@ -1220,9 +1288,22 @@ fn exact_match_in_first_row(
 }
 
 fn exact_match_in_first_row_array(lookup: &Value, table: &Array) -> Option<u32> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     for col in 0..table.cols {
         let key = table.get(0, col).unwrap_or(&Value::Blank);
-        if excel_eq(lookup, key) {
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match key {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_str()),
+                other => match other.coerce_to_string() {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(col as u32);
+            }
+        } else if excel_eq(lookup, key) {
             return Some(col as u32);
         }
     }
@@ -1305,9 +1386,22 @@ fn exact_match_1d(
     sheet_id: &SheetId,
     values: &[crate::eval::CellAddr],
 ) -> Option<usize> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     for (idx, addr) in values.iter().enumerate() {
         let v = ctx.get_cell_value(sheet_id, *addr);
-        if excel_eq(lookup, &v) {
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match &v {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_str()),
+                other => match other.coerce_to_string() {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(idx);
+            }
+        } else if excel_eq(lookup, &v) {
             return Some(idx);
         }
     }

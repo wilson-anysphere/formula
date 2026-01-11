@@ -43,6 +43,30 @@ fn match_and_vlookup_are_case_insensitive_for_unicode_text() {
 }
 
 #[test]
+fn match_and_vlookup_support_wildcard_exact_matching() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "apple");
+    sheet.set("A2", "banana");
+    sheet.set("A3", "*");
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("B3", 30.0);
+
+    assert_eq!(sheet.eval("=MATCH(\"b*\", A1:A3, 0)"), Value::Number(2.0));
+    assert_eq!(
+        sheet.eval("=VLOOKUP(\"b*\", A1:B3, 2, FALSE)"),
+        Value::Number(20.0)
+    );
+
+    // `~` escapes wildcards in lookup patterns.
+    assert_eq!(sheet.eval("=MATCH(\"~*\", A1:A3, 0)"), Value::Number(3.0));
+    assert_eq!(
+        sheet.eval("=VLOOKUP(\"~*\", A1:B3, 2, FALSE)"),
+        Value::Number(30.0)
+    );
+}
+
+#[test]
 fn xlookup_returns_if_not_found_when_provided() {
     let lookup_array = vec![Value::from("A"), Value::from("B")];
     let return_array = vec![Value::Number(10.0), Value::Number(20.0)];
