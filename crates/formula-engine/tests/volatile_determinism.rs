@@ -142,3 +142,48 @@ fn randarray_changes_across_recalcs_and_respects_bounds() {
         "expected RANDARRAY() to change across recalculations"
     );
 }
+
+#[test]
+fn map_with_rand_is_volatile_and_deterministic_within_one_recalc() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=MAP(SEQUENCE(3),LAMBDA(x,RAND()))")
+        .unwrap();
+
+    engine.recalculate();
+    let first: Vec<Value> = ["A1", "A2", "A3"]
+        .into_iter()
+        .map(|addr| engine.get_cell_value("Sheet1", addr))
+        .collect();
+
+    // Validate all cells are numbers in [0,1).
+    for (idx, value) in first.iter().enumerate() {
+        let n = match value {
+            Value::Number(n) => *n,
+            other => panic!("expected MAP RAND result to be a number, got {other:?}"),
+        };
+        assert!(
+            n >= 0.0 && n < 1.0,
+            "expected value {idx} in [0,1), got {n}"
+        );
+    }
+
+    // MAP should be treated as volatile because the supplied LAMBDA calls RAND().
+    // Allow a few attempts to avoid pathological collisions.
+    let mut changed = false;
+    for _ in 0..5 {
+        engine.recalculate();
+        let next: Vec<Value> = ["A1", "A2", "A3"]
+            .into_iter()
+            .map(|addr| engine.get_cell_value("Sheet1", addr))
+            .collect();
+        if next != first {
+            changed = true;
+            break;
+        }
+    }
+    assert!(
+        changed,
+        "expected MAP(...,LAMBDA(...,RAND())) to change across recalculations"
+    );
+}
