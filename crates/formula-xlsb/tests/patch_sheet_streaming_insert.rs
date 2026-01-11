@@ -423,3 +423,35 @@ fn patch_sheet_bin_streaming_inserts_text_cell_as_inline_string_when_isst_missin
     let (id, _payload) = find_cell_record(&patched_stream, 4, 2).expect("find inserted cell");
     assert_eq!(id, CELL_ST, "expected BrtCellSt/CELL_ST record id");
 }
+
+#[test]
+fn patch_sheet_bin_streaming_is_lossless_for_noop_formula_edit() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("NoopFormula");
+
+    // PtgInt 1 (formula token stream for literal `1`).
+    let rgce = vec![0x1E, 0x01, 0x00];
+    let extra = vec![0xDE, 0xAD, 0xBE, 0xEF];
+    builder.set_cell_formula_num(0, 0, 1.0, rgce, extra);
+
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(1.0),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert!(!changed, "expected no-op formula edit to report unchanged");
+    assert_eq!(patched_stream, sheet_bin);
+    assert_eq!(
+        patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin"),
+        sheet_bin
+    );
+}
