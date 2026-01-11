@@ -44,6 +44,14 @@ function isCatalogShape(value) {
   return value && typeof value === "object" && Array.isArray(value.functions);
 }
 
+function isCatalogValueType(value) {
+  return value === "any" || value === "number" || value === "text" || value === "bool";
+}
+
+function isCatalogVolatility(value) {
+  return value === "non_volatile" || value === "volatile";
+}
+
 const raw = await run("cargo", [
   "run",
   "--quiet",
@@ -66,8 +74,23 @@ if (!isCatalogShape(parsed)) {
 }
 
 for (const entry of parsed.functions) {
-  if (!entry || typeof entry.name !== "string") {
+  if (!entry || typeof entry.name !== "string" || entry.name.length === 0) {
     throw new Error("Rust function_catalog output contained invalid function entry");
+  }
+  if (!Number.isInteger(entry.min_args) || entry.min_args < 0) {
+    throw new Error(`Rust function_catalog output contained invalid min_args for ${entry.name}`);
+  }
+  if (!Number.isInteger(entry.max_args) || entry.max_args < entry.min_args) {
+    throw new Error(`Rust function_catalog output contained invalid max_args for ${entry.name}`);
+  }
+  if (!isCatalogVolatility(entry.volatility)) {
+    throw new Error(`Rust function_catalog output contained invalid volatility for ${entry.name}`);
+  }
+  if (!isCatalogValueType(entry.return_type)) {
+    throw new Error(`Rust function_catalog output contained invalid return_type for ${entry.name}`);
+  }
+  if (!Array.isArray(entry.arg_types) || !entry.arg_types.every(isCatalogValueType)) {
+    throw new Error(`Rust function_catalog output contained invalid arg_types for ${entry.name}`);
   }
 }
 
