@@ -227,23 +227,24 @@ pub(crate) fn parse_biff_workbook_globals(
         match record_id {
             // 1904 [MS-XLS 2.4.169]
             0x0022 => {
-                if data.len() < 2 {
-                    return Err("1904 record too short".to_string());
-                }
-                let flag = u16::from_le_bytes([data[0], data[1]]);
-                if flag != 0 {
-                    out.date_system = DateSystem::Excel1904;
+                if data.len() >= 2 {
+                    let flag = u16::from_le_bytes([data[0], data[1]]);
+                    if flag != 0 {
+                        out.date_system = DateSystem::Excel1904;
+                    }
                 }
             }
             // FORMAT / FORMAT2 [MS-XLS 2.4.90]
             0x041E | 0x001E => {
-                let (num_fmt_id, code) = parse_biff_format_record(record_id, data, encoding)?;
-                out.formats.insert(num_fmt_id, code);
+                if let Ok((num_fmt_id, code)) = parse_biff_format_record(record_id, data, encoding) {
+                    out.formats.insert(num_fmt_id, code);
+                }
             }
             // XF [MS-XLS 2.4.353]
             0x00E0 => {
-                let xf = parse_biff_xf_record(data)?;
-                out.xfs.push(xf);
+                if let Ok(xf) = parse_biff_xf_record(data) {
+                    out.xfs.push(xf);
+                }
             }
             // EOF terminates the workbook global substream.
             0x000A => {
@@ -327,11 +328,13 @@ pub(crate) fn parse_biff_bound_sheets(
             // BoundSheet8 [MS-XLS 2.4.28]
             0x0085 => {
                 if data.len() < 7 {
-                    return Err("BoundSheet8 record too short".to_string());
+                    continue;
                 }
 
                 let sheet_offset = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-                let (name, _) = parse_biff_short_string(&data[6..], biff, encoding)?;
+                let Ok((name, _)) = parse_biff_short_string(&data[6..], biff, encoding) else {
+                    continue;
+                };
                 let name = name.replace('\0', "");
                 out.push((name, sheet_offset));
             }
@@ -364,7 +367,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             // ROW [MS-XLS 2.4.184]
             0x0208 => {
                 if data.len() < 16 {
-                    return Err("ROW record too short".to_string());
+                    continue;
                 }
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let height_options = u16::from_le_bytes([data[6], data[7]]);
@@ -389,7 +392,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             // COLINFO [MS-XLS 2.4.48]
             0x007D => {
                 if data.len() < 12 {
-                    return Err("COLINFO record too short".to_string());
+                    continue;
                 }
                 let first_col = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let last_col = u16::from_le_bytes([data[2], data[3]]) as u32;
