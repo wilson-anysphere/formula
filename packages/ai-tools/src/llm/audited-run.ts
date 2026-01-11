@@ -356,8 +356,8 @@ function appendStrictToolInstruction(messages: any[]): any[] {
 
 function compactAuditValue(value: unknown, maxChars: number): unknown {
   const limit = typeof maxChars === "number" && Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : 20_000;
-  const json = safeJsonStringify(value);
-  if (json.length <= limit) return value;
+  const estimated = estimateJsonLength(value, limit);
+  if (estimated <= limit) return value;
 
   const attempts = [
     { maxDepth: 6, maxArrayLength: 100, maxObjectKeys: 100, maxStringLength: 2_000 },
@@ -370,31 +370,108 @@ function compactAuditValue(value: unknown, maxChars: number): unknown {
     const truncated = truncateUnknown(value, attempt);
     const candidate = withAuditTruncationMetadata(truncated.value, {
       truncated: true,
-      original_chars: json.length
+      // The original value exceeded the audit cap; we intentionally avoid a full
+      // JSON.stringify of the input (which can be very large) and store a lower-bound
+      // estimate instead.
+      original_chars: estimated
     });
     const candidateJson = safeJsonStringify(candidate);
     if (candidateJson.length <= limit) return candidate;
   }
 
-  // Fallback: keep a small preview plus metadata so the stored value is always bounded.
-  const previewChars = Math.min(1000, Math.max(0, limit - 200));
   return {
     audit_truncated: true,
-    audit_original_chars: json.length,
-    audit_preview: json.slice(0, previewChars)
+    audit_original_chars: estimated,
+    audit_note: "Tool call parameters exceeded audit size budget and could not be fully summarized."
   };
 }
 
 function safeJsonStringify(value: unknown): string {
   if (typeof value === "string") return value;
   try {
-    return JSON.stringify(value);
+    const json = JSON.stringify(value);
+    return typeof json === "string" ? json : String(value);
   } catch {
     try {
-      return JSON.stringify(String(value));
+      const json = JSON.stringify(String(value));
+      return typeof json === "string" ? json : String(value);
     } catch {
       return String(value);
     }
+  }
+}
+
+function estimateJsonLength(value: unknown, limit: number): number {
+  const max = typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 20_000;
+  let chars = 0;
+  const seen = new WeakSet<object>();
+  const stop = Symbol("stop");
+
+  const add = (count: number) => {
+    chars += count;
+    if (chars > max) throw stop;
+  };
+
+  const walk = (v: unknown) => {
+    if (v === null) {
+      add(4); // null
+      return;
+    }
+    const t = typeof v;
+    if (t === "string") {
+      add((v as string).length + 2); // quotes
+      return;
+    }
+    if (t === "number") {
+      add(String(v).length);
+      return;
+    }
+    if (t === "boolean") {
+      add(v ? 4 : 5);
+      return;
+    }
+    if (t === "undefined" || t === "function" || t === "symbol" || t === "bigint") {
+      // Not JSON-serializable (or omitted); treat as null-ish placeholder.
+      add(4);
+      return;
+    }
+
+    // object
+    if (Array.isArray(v)) {
+      add(1); // [
+      for (let i = 0; i < v.length; i++) {
+        if (i > 0) add(1); // comma
+        walk(v[i]);
+      }
+      add(1); // ]
+      return;
+    }
+
+    const obj = v as Record<string, unknown>;
+    if (seen.has(obj)) {
+      add(10); // "[Circular]" (approx)
+      return;
+    }
+    seen.add(obj);
+
+    add(1); // {
+    const keys = Object.keys(obj);
+    for (let i = 0; i < keys.length; i++) {
+      if (i > 0) add(1); // comma
+      const key = keys[i]!;
+      add(key.length + 2); // "key"
+      add(1); // :
+      walk(obj[key]);
+    }
+    add(1); // }
+  };
+
+  try {
+    walk(value);
+    return chars;
+  } catch (err) {
+    if (err === stop) return max + 1;
+    return max + 1;
   }
 }
 
