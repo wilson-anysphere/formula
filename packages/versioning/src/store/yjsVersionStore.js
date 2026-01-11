@@ -124,7 +124,7 @@ function splitIntoChunks(bytes, chunkSize) {
 async function gzipBytes(bytes) {
   // Prefer Node's zlib for stability/perf (Node also exposes CompressionStream).
   if (isNodeRuntime()) {
-    const zlib = await import("node:zlib");
+    const zlib = await import(/* @vite-ignore */ "node:zlib");
     return new Uint8Array(zlib.gzipSync(bytes));
   }
 
@@ -147,7 +147,7 @@ async function gzipBytes(bytes) {
  */
 async function gunzipBytes(bytes) {
   if (isNodeRuntime()) {
-    const zlib = await import("node:zlib");
+    const zlib = await import(/* @vite-ignore */ "node:zlib");
     return new Uint8Array(zlib.gunzipSync(bytes));
   }
 
