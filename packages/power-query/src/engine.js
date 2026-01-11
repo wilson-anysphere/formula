@@ -10,6 +10,9 @@ import { SqlConnector } from "./connectors/sql.js";
 import { QueryFoldingEngine } from "./folding/sql.js";
 import { normalizePostgresPlaceholders } from "./folding/placeholders.js";
 import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parquetProjection.js";
+import { collectSourcePrivacy, distinctPrivacyLevels, shouldBlockCombination } from "./privacy/firewall.js";
+import { getSourceIdForProvenance, getSourceIdForQuerySource } from "./privacy/sourceId.js";
+import { getPrivacyLevel } from "./privacy/levels.js";
 
 /**
  * Lazy-load Arrow/parquet helpers from `@formula/data-io`.
@@ -54,6 +57,7 @@ async function loadDataIoModule() {
  *   // Optional callback used to resolve a signature/version for a table name. If both
  *   // `getTableSignature` and `tableSignatures` are supplied, the callback wins.
  *   getTableSignature?: (tableName: string) => unknown;
+ *   privacy?: { levelsBySourceId: Record<string, import("./privacy/levels.js").PrivacyLevel> };
  * }} QueryExecutionContext
  */
 
@@ -86,6 +90,17 @@ async function loadDataIoModule() {
  *   stepIndex: number;
  *   stepId: string;
  *   operation: QueryOperation["type"];
+ * } | {
+ *   type: "privacy:firewall";
+ *   queryId: string;
+ *   phase: "folding" | "combine";
+ *   mode: "enforce" | "warn";
+ *   action: "prevent-folding" | "warn" | "block";
+ *   operation: "merge" | "append";
+ *   stepIndex?: number;
+ *   stepId?: string;
+ *   sources: Array<{ sourceId: string; level: import("./privacy/levels.js").PrivacyLevel }>;
+ *   message: string;
  * }} EngineProgressEvent
  */
 
@@ -169,6 +184,9 @@ async function loadDataIoModule() {
  *   When enabled and a dialect is known (either via `source.dialect` or this
  *   default dialect), the engine will execute a foldable prefix of operations
  *   in the source database via `QueryFoldingEngine`.
+ * @property {"ignore" | "enforce" | "warn" | undefined} [privacyMode]
+ *   Privacy enforcement mode for Power Query-style "privacy levels" / formula firewall.
+ *   Defaults to `"ignore"` for backwards compatibility.
  * @property {QueryEngineHooks["onPermissionRequest"] | undefined} [onPermissionRequest]
  * @property {QueryEngineHooks["onCredentialRequest"] | undefined} [onCredentialRequest]
  */
@@ -287,6 +305,10 @@ export class QueryEngine {
     this.onPermissionRequest = options.onPermissionRequest ?? null;
     this.onCredentialRequest = options.onCredentialRequest ?? null;
     this.fileAdapter = options.fileAdapter ?? null;
+    this.privacyMode = options.privacyMode ?? "ignore";
+
+    /** @type {WeakMap<object, Set<string>>} */
+    this._tableSourceIds = new WeakMap();
 
     /** @type {Map<string, any>} */
     this.connectors = new Map();
@@ -323,6 +345,100 @@ export class QueryEngine {
 
     /** @type {Map<string, Promise<{ columns: string[], types?: Record<string, import("./model.js").DataType> }>>} */
     this.databaseSchemaCache = new Map();
+  }
+
+  /**
+   * @private
+   * @param {ITable} table
+   * @returns {Set<string>}
+   */
+  getTableSourceIds(table) {
+    const ids = this._tableSourceIds.get(/** @type {any} */ (table));
+    return ids ?? new Set();
+  }
+
+  /**
+   * @private
+   * @param {ITable} table
+   * @param {Iterable<string>} sourceIds
+   */
+  setTableSourceIds(table, sourceIds) {
+    this._tableSourceIds.set(/** @type {any} */ (table), new Set(sourceIds));
+  }
+
+  /**
+   * @private
+   * @param {ConnectorMeta[]} metas
+   * @returns {Set<string>}
+   */
+  collectSourceIdsFromMetas(metas) {
+    /** @type {Set<string>} */
+    const ids = new Set();
+    for (const meta of metas) {
+      const sourceId = getSourceIdForProvenance(meta.provenance);
+      if (sourceId) ids.add(sourceId);
+    }
+    return ids;
+  }
+
+  /**
+   * Enforce the Power Query formula firewall for *local* data combination steps
+   * (`merge` / `append`).
+   *
+   * @private
+   * @param {{
+   *   queryId: string;
+   *   operation: "merge" | "append";
+   *   sourceIds: Set<string>;
+   *   context: QueryExecutionContext;
+   *   options: ExecuteOptions;
+   *   stepIndex?: number;
+   *   stepId?: string;
+   * }} args
+   */
+  enforceFirewallForCombination(args) {
+    if (this.privacyMode === "ignore") return;
+    if (this.privacyMode !== "warn" && this.privacyMode !== "enforce") return;
+
+    const infos = collectSourcePrivacy(args.sourceIds, args.context.privacy?.levelsBySourceId);
+    const levels = distinctPrivacyLevels(infos);
+    if (levels.size <= 1) return;
+
+    const message = `Formula firewall detected ${args.operation} across privacy levels (${Array.from(levels).join(", ")})`;
+    const mode = this.privacyMode;
+
+    if (mode === "enforce" && shouldBlockCombination(infos)) {
+      args.options.onProgress?.({
+        type: "privacy:firewall",
+        queryId: args.queryId,
+        phase: "combine",
+        mode,
+        action: "block",
+        operation: args.operation,
+        stepIndex: args.stepIndex,
+        stepId: args.stepId,
+        sources: infos,
+        message,
+      });
+      const err = new Error(
+        `Formula.Firewall: Query '${args.queryId}' blocked combining sources with incompatible privacy levels (${Array.from(levels).join(", ")})`,
+      );
+      err.name = "PrivacyError";
+      throw err;
+    }
+
+    args.options.onProgress?.({
+      type: "privacy:firewall",
+      queryId: args.queryId,
+      phase: "combine",
+      mode,
+      action: "warn",
+      operation: args.operation,
+      stepIndex: args.stepIndex,
+      stepId: args.stepId,
+      sources: infos,
+      message,
+    });
   }
 
   /**
@@ -467,8 +583,9 @@ export class QueryEngine {
                     ? deserializeTable(payload.table)
                     : payload?.table?.kind
                       ? deserializeAnyTable(payload.table)
-                      : deserializeTable(payload.table);
+                       : deserializeTable(payload.table);
               const meta = deserializeQueryMeta(payload.meta, startedAt, completedAt, { key: cacheKey, hit: true });
+              this.setTableSourceIds(table, this.collectSourceIdsFromMetas(meta.sources));
               options.onProgress?.({ type: "cache:hit", queryId: query.id, cacheKey });
               return { table, meta };
             } catch {
@@ -552,7 +669,13 @@ export class QueryEngine {
 
       foldingExplain = this.foldingEngine.explain(
         { ...query, source: sourceForFolding, steps },
-        { dialect: dialect ?? undefined, queries: context.queries ?? undefined, getConnectionIdentity },
+        {
+          dialect: dialect ?? undefined,
+          queries: context.queries ?? undefined,
+          getConnectionIdentity,
+          privacyMode: this.privacyMode,
+          privacyLevelsBySourceId: context.privacy?.levelsBySourceId,
+        },
       );
       foldedPlan = foldingExplain.plan;
     }
@@ -567,6 +690,21 @@ export class QueryEngine {
     if (query.source.type === "database") {
       executedSql = query.source.query;
       executedParams = [];
+    }
+
+    if (foldedPlan && Array.isArray(foldedPlan.diagnostics) && (this.privacyMode === "warn" || this.privacyMode === "enforce")) {
+      for (const diag of foldedPlan.diagnostics) {
+        options.onProgress?.({
+          type: "privacy:firewall",
+          queryId: query.id,
+          phase: "folding",
+          mode: this.privacyMode,
+          action: "prevent-folding",
+          operation: diag.operation,
+          sources: diag.sources,
+          message: diag.message,
+        });
+      }
     }
 
     /** @type {ITable} */
@@ -662,7 +800,7 @@ export class QueryEngine {
       outputRowCount: table.rowCount,
       cache: cacheKey ? { key: cacheKey, hit: false } : undefined,
       folding:
-        foldingExplain && query.source.type === "database" && executedSql && executedParams
+      foldingExplain && query.source.type === "database" && executedSql && executedParams
           ? {
               dialect: foldedDialect ? (typeof foldedDialect === "string" ? foldedDialect : foldedDialect.name) : undefined,
               planType: foldingExplain.plan.type,
@@ -673,6 +811,10 @@ export class QueryEngine {
             }
           : undefined,
     };
+
+    // Ensure the final materialized table is tagged with the full source set so
+    // downstream merge/append operations can enforce privacy levels correctly.
+    this.setTableSourceIds(table, this.collectSourceIdsFromMetas(sources));
 
     if (this.cache && cacheKey && cacheMode !== "bypass" && (table instanceof DataTable || table instanceof ArrowTableAdapter)) {
       try {
@@ -912,6 +1054,7 @@ export class QueryEngine {
       source: sourceSignature,
       steps: steps.map((s) => s.operation),
       options: { limit: options.limit ?? null, maxStepIndex: options.maxStepIndex ?? null },
+      privacy: { mode: this.privacyMode },
     };
 
     // Merge/append steps refer to other queries; include their signatures so the cache key changes when dependencies change.
@@ -982,24 +1125,42 @@ export class QueryEngine {
     }
 
     if (source.type === "range") {
-      return { type: "range", hasHeaders: source.range.hasHeaders ?? true, values: source.range.values, $cacheable: true };
+      const sourceId = getSourceIdForQuerySource(source);
+      return {
+        type: "range",
+        sourceId,
+        privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
+        hasHeaders: source.range.hasHeaders ?? true,
+        values: source.range.values,
+        $cacheable: true,
+      };
     }
     if (source.type === "table") {
+      const sourceId = getSourceIdForQuerySource(source);
       const signature =
         typeof context.getTableSignature === "function"
           ? context.getTableSignature(source.table)
           : context.tableSignatures
             ? context.tableSignatures[source.table]
             : undefined;
+      const privacyLevel = getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId);
       if (signature === undefined) {
-        return { type: "table", table: source.table, missingSignature: true, $cacheable: false };
+        return { type: "table", sourceId, privacyLevel, table: source.table, missingSignature: true, $cacheable: false };
       }
-      return { type: "table", table: source.table, signature, $cacheable: true };
+      return {
+        type: "table",
+        sourceId,
+        table: source.table,
+        privacyLevel,
+        signature,
+        $cacheable: true,
+      };
     }
 
     if (source.type === "csv" || source.type === "json" || source.type === "parquet") {
       const connector = this.connectors.get("file");
       if (!connector) return { type: source.type, missingConnector: "file" };
+      const sourceId = getSourceIdForQuerySource(source);
       const request =
         source.type === "csv"
           ? { format: "csv", path: source.path, csv: source.options ?? {} }
@@ -1013,6 +1174,8 @@ export class QueryEngine {
       const cacheable = credentials == null || credentialId != null;
       return {
         type: source.type,
+        sourceId,
+        privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
         request: connector.getCacheKey(request),
         credentialsHash: credentialId ? hashValue(credentialId) : null,
         $cacheable: cacheable,
@@ -1022,6 +1185,7 @@ export class QueryEngine {
     if (source.type === "api") {
       const connector = this.connectors.get("http");
       if (!connector) return { type: "api", missingConnector: "http" };
+      const sourceId = getSourceIdForQuerySource(source);
       const request = {
         url: source.url,
         method: source.method,
@@ -1035,6 +1199,8 @@ export class QueryEngine {
       const cacheable = credentials == null || credentialId != null;
       return {
         type: "api",
+        sourceId,
+        privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
         request: connector.getCacheKey(request),
         credentialsHash: credentialId ? hashValue(credentialId) : null,
         $cacheable: cacheable,
@@ -1045,9 +1211,13 @@ export class QueryEngine {
       const connector = this.connectors.get("sql");
       if (!connector) return { type: "database", missingConnector: "sql" };
       const connectionId = resolveDatabaseConnectionId(source, connector);
+      const sourceId = connectionId ? `sql:${connectionId}` : getSourceIdForQuerySource(source);
+      const privacyLevel = getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId);
       if (!connectionId) {
         return {
           type: "database",
+          sourceId,
+          privacyLevel,
           dialect: source.dialect ?? null,
           request: connector.getCacheKey({ connection: source.connection, sql: source.query }),
           credentialsHash: null,
@@ -1063,6 +1233,8 @@ export class QueryEngine {
       const cacheable = credentials == null || credentialId != null;
       return {
         type: "database",
+        sourceId,
+        privacyLevel,
         connectionId,
         dialect: source.dialect ?? null,
         request: connector.getCacheKey(request),
@@ -1094,18 +1266,19 @@ export class QueryEngine {
     for (let i = 0; i < steps.length; i++) {
       throwIfAborted(options.signal);
       const step = steps[i];
+      const stepIndex = i + stepIndexOffset;
       options.onProgress?.({
         type: "step:start",
         queryId,
-        stepIndex: i + stepIndexOffset,
+        stepIndex,
         stepId: step.id,
         operation: step.operation.type,
       });
-      current = await this.applyStep(current, step.operation, context, options, state, callStack, sources);
+      current = await this.applyStep(current, step.operation, context, options, state, callStack, sources, { stepIndex, stepId: step.id });
       options.onProgress?.({
         type: "step:complete",
         queryId,
-        stepIndex: i + stepIndexOffset,
+        stepIndex,
         stepId: step.id,
         operation: step.operation.type,
       });
@@ -1121,17 +1294,23 @@ export class QueryEngine {
    * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} [state]
    * @param {Set<string>} [callStack]
    * @param {ConnectorMeta[]} [sources]
+   * @param {{ stepIndex: number; stepId: string } | undefined} [stepContext]
    * @returns {Promise<ITable>}
    */
-  async applyStep(table, operation, context, options = {}, state, callStack, sources) {
+  async applyStep(table, operation, context, options = {}, state, callStack, sources, stepContext) {
     throwIfAborted(options.signal);
     switch (operation.type) {
       case "merge":
-        return this.mergeTables(table, operation, context, options, state, callStack, sources);
+        return this.mergeTables(table, operation, context, options, state, callStack, sources, stepContext);
       case "append":
-        return this.appendTables(table, operation, context, options, state, callStack, sources);
+        return this.appendTables(table, operation, context, options, state, callStack, sources, stepContext);
       default:
-        return applyOperation(table, operation);
+        // Pure local transforms preserve the source set.
+        {
+          const next = applyOperation(table, operation);
+          this.setTableSourceIds(next, this.getTableSourceIds(table));
+          return next;
+        }
     }
   }
 
@@ -1176,6 +1355,7 @@ export class QueryEngine {
     if (source.type === "range") {
       const hasHeaders = source.range.hasHeaders ?? true;
       const table = DataTable.fromGrid(source.range.values, { hasHeaders, inferTypes: true });
+      this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? "workbook:range"]);
       const meta = {
         refreshedAt: new Date(state.now()),
         schema: { columns: table.columns, inferred: true },
@@ -1192,6 +1372,7 @@ export class QueryEngine {
       if (!table) {
         throw new Error(`Unknown table '${source.table}'`);
       }
+      this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? `workbook:table:${source.table}`]);
       const meta = {
         refreshedAt: new Date(state.now()),
         schema: { columns: table.columns, inferred: true },
@@ -1235,6 +1416,7 @@ export class QueryEngine {
       nextStack.add(target.id);
       const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
       const { table, meta: queryMeta } = await this.executeQueryInternal(target, context, depOptions, state, nextStack);
+      this.setTableSourceIds(table, this.collectSourceIdsFromMetas(queryMeta.sources));
       const meta = {
         refreshedAt: queryMeta.refreshedAt,
         schema: queryMeta.outputSchema,
@@ -1280,6 +1462,7 @@ export class QueryEngine {
         const { parquetToArrowTable } = await loadDataIoModule();
         const arrowTable = await parquetToArrowTable(bytes, source.options);
         const table = new ArrowTableAdapter(arrowTable);
+        this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
         const meta = {
           refreshedAt: new Date(state.now()),
           sourceTimestamp: sourceState.sourceTimestamp,
@@ -1295,6 +1478,7 @@ export class QueryEngine {
       }
 
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? source.path]);
       const meta = {
         ...result.meta,
         sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
@@ -1327,6 +1511,7 @@ export class QueryEngine {
       }
 
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? source.url]);
       const meta = {
         ...result.meta,
         sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
@@ -1360,6 +1545,7 @@ export class QueryEngine {
       }
 
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? "<unknown-sql>"]);
       const meta = {
         ...result.meta,
         sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
@@ -1425,6 +1611,7 @@ export class QueryEngine {
     }
 
     const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+    this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? "<unknown-sql>"]);
     const meta = {
       ...result.meta,
       sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
@@ -1479,7 +1666,8 @@ export class QueryEngine {
    * @param {QueryExecutionContext} context
    * @returns {Promise<DataTable>}
    */
-  async mergeTables(left, op, context, options = {}, state, callStack, sources = []) {
+  async mergeTables(left, op, context, options = {}, state, callStack, sources = [], stepContext) {
+    const queryId = callStack ? Array.from(callStack).at(-1) ?? "<unknown>" : "<unknown>";
     if (callStack?.has(op.rightQuery)) {
       throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${op.rightQuery}`);
     }
@@ -1510,6 +1698,19 @@ export class QueryEngine {
     }
 
     if (rightMeta) sources.push(...rightMeta.sources);
+
+    const leftSourceIds = this.getTableSourceIds(left);
+    const rightSourceIds = this.getTableSourceIds(right);
+    const combinedSourceIds = new Set([...leftSourceIds, ...rightSourceIds]);
+    this.enforceFirewallForCombination({
+      queryId,
+      operation: "merge",
+      sourceIds: combinedSourceIds,
+      context,
+      options,
+      stepIndex: stepContext?.stepIndex,
+      stepId: stepContext?.stepId,
+    });
 
     const leftKeyIdx = left.getColumnIndex(op.leftKey);
     const rightKeyIdx = right.getColumnIndex(op.rightKey);
@@ -1584,7 +1785,9 @@ export class QueryEngine {
         }
       }
 
-      return new DataTable(outColumns, outRows);
+      const out = new DataTable(outColumns, outRows);
+      this.setTableSourceIds(out, combinedSourceIds);
+      return out;
     }
 
     if (op.joinType === "right") {
@@ -1608,7 +1811,9 @@ export class QueryEngine {
         }
       }
 
-      return new DataTable(outColumns, outRows);
+      const out = new DataTable(outColumns, outRows);
+      this.setTableSourceIds(out, combinedSourceIds);
+      return out;
     }
 
     throw new Error(`Unsupported joinType '${op.joinType}'`);
@@ -1620,8 +1825,10 @@ export class QueryEngine {
    * @param {QueryExecutionContext} context
    * @returns {Promise<DataTable>}
    */
-  async appendTables(current, op, context, options = {}, state, callStack, sources = []) {
+  async appendTables(current, op, context, options = {}, state, callStack, sources = [], stepContext) {
+    const queryId = callStack ? Array.from(callStack).at(-1) ?? "<unknown>" : "<unknown>";
     const tables = [current];
+    const combinedSourceIds = new Set(this.getTableSourceIds(current));
     for (const id of op.queries) {
       if (callStack?.has(id)) {
         throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${id}`);
@@ -1630,6 +1837,7 @@ export class QueryEngine {
       const existing = context.queryResults?.[id];
       if (existing) {
         sources.push(...existing.meta.sources);
+        for (const sourceId of this.getTableSourceIds(existing.table)) combinedSourceIds.add(sourceId);
         tables.push(existing.table);
         continue;
       }
@@ -1645,8 +1853,19 @@ export class QueryEngine {
       const depState = state ?? { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
       const { table, meta } = await this.executeQueryInternal(query, context, depOptions, depState, nextStack);
       sources.push(...meta.sources);
+      for (const sourceId of this.getTableSourceIds(table)) combinedSourceIds.add(sourceId);
       tables.push(table);
     }
+
+    this.enforceFirewallForCombination({
+      queryId,
+      operation: "append",
+      sourceIds: combinedSourceIds,
+      context,
+      options,
+      stepIndex: stepContext?.stepIndex,
+      stepId: stepContext?.stepId,
+    });
 
     /** @type {string[]} */
     const columns = [];
@@ -1671,7 +1890,9 @@ export class QueryEngine {
       }
     }
 
-    return new DataTable(outColumns, outRows);
+    const out = new DataTable(outColumns, outRows);
+    this.setTableSourceIds(out, combinedSourceIds);
+    return out;
   }
 
   /**

@@ -1,5 +1,6 @@
 import { DataTable } from "../table.js";
 import { hashValue } from "../cache/key.js";
+import { getSqlSourceId } from "../privacy/sourceId.js";
 
 /**
  * @typedef {import("./types.js").ConnectorExecuteOptions} ConnectorExecuteOptions
@@ -90,6 +91,9 @@ export class SqlConnector {
       credentials,
     });
 
+    const connectionId = resolveConnectionId(request, this.getConnectionIdentity);
+    const sourceId = connectionId ? getSqlSourceId(connectionId) : getSqlSourceId(request.connection);
+
     return {
       table,
       meta: {
@@ -97,7 +101,7 @@ export class SqlConnector {
         schema: { columns: table.columns, inferred: true },
         rowCount: table.rows.length,
         rowCountEstimate: table.rows.length,
-        provenance: { kind: "sql", sql: request.sql },
+        provenance: { kind: "sql", sourceId, connectionId: connectionId ?? undefined, sql: request.sql },
       },
     };
   }

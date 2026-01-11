@@ -2,6 +2,9 @@ import { predicateToSql } from "../predicate.js";
 import { hashValue } from "../cache/key.js";
 import { POSTGRES_DIALECT, getSqlDialect } from "./dialect.js";
 import { compileExprToSql, parseFormula } from "../expr/index.js";
+import { collectSourcePrivacy, distinctPrivacyLevels } from "../privacy/firewall.js";
+import { getPrivacyLevel } from "../privacy/levels.js";
+import { getSqlSourceId } from "../privacy/sourceId.js";
 
 /**
  * @typedef {import("../model.js").Query} Query
@@ -17,12 +20,14 @@ import { compileExprToSql, parseFormula } from "../expr/index.js";
  * @typedef {{
  *   type: "local";
  *   steps: QueryStep[];
+ *   diagnostics?: FoldingFirewallDiagnostic[];
  * }} LocalPlan
  *
  * @typedef {{
  *   type: "sql";
  *   sql: string;
  *   params: unknown[];
+ *   diagnostics?: FoldingFirewallDiagnostic[];
  * }} SqlPlan
  *
  * @typedef {{
@@ -30,6 +35,7 @@ import { compileExprToSql, parseFormula } from "../expr/index.js";
  *   sql: string;
  *   params: unknown[];
  *   localSteps: QueryStep[];
+ *   diagnostics?: FoldingFirewallDiagnostic[];
  * }} HybridPlan
  *
  * @typedef {LocalPlan | SqlPlan | HybridPlan} CompiledQueryPlan
@@ -78,11 +84,23 @@ import { compileExprToSql, parseFormula } from "../expr/index.js";
  * @typedef {{
  *   dialect?: SqlDialect | SqlDialectName;
  *   // Queries are required to fold operations like `merge`, `append`, and
-  *   // sources of type `query`.
-  *   queries?: Record<string, Query>;
-  *   getConnectionIdentity?: (connection: unknown) => unknown;
-  * }} CompileOptions
-  */
+ *   // sources of type `query`.
+ *   queries?: Record<string, Query>;
+ *   getConnectionIdentity?: (connection: unknown) => unknown;
+ *   privacyMode?: "ignore" | "enforce" | "warn";
+ *   privacyLevelsBySourceId?: Record<string, import("../privacy/levels.js").PrivacyLevel>;
+ * }} CompileOptions
+ */
+
+/**
+ * @typedef {{
+ *   kind: "privacy:firewall";
+ *   phase: "folding";
+ *   operation: "merge" | "append";
+ *   sources: Array<{ sourceId: string; level: import("../privacy/levels.js").PrivacyLevel }>;
+ *   message: string;
+ * }} FoldingFirewallDiagnostic
+ */
 
 /**
  * A conservative SQL query folding engine. It folds a prefix of operations to
@@ -133,13 +151,21 @@ export class QueryFoldingEngine {
     const dialect = resolveDialect(options.dialect ?? this.dialect);
     const queries = options.queries ?? this.queries;
     const getConnectionIdentity = options.getConnectionIdentity ?? null;
-    const initial = this.compileSourceToSqlState(
-      query.source,
-      { dialect, queries, getConnectionIdentity },
-      new Set([query.id]),
-    );
+    /** @type {FoldingFirewallDiagnostic[]} */
+    const diagnostics = [];
+    const ctx = {
+      dialect,
+      queries,
+      getConnectionIdentity,
+      privacyMode: options.privacyMode ?? "ignore",
+      privacyLevelsBySourceId: options.privacyLevelsBySourceId,
+      diagnostics,
+    };
+
+    const callStack = new Set([query.id]);
+    const initial = this.compileSourceToSqlState(query.source, ctx, callStack);
     if (!initial) {
-      return { type: "local", steps: query.steps };
+      return diagnostics.length > 0 ? { type: "local", steps: query.steps, diagnostics } : { type: "local", steps: query.steps };
     }
 
     /** @type {SqlState} */
@@ -160,7 +186,7 @@ export class QueryFoldingEngine {
         continue;
       }
 
-      const next = this.applySqlStep(current, step.operation, { dialect, queries, getConnectionIdentity }, new Set([query.id]));
+      const next = this.applySqlStep(current, step.operation, ctx, callStack);
       if (!next) {
         foldingBroken = true;
         localSteps.push(step);
@@ -170,9 +196,13 @@ export class QueryFoldingEngine {
     }
 
     if (localSteps.length === 0) {
-      return { type: "sql", sql: current.fragment.sql, params: current.fragment.params };
+      return diagnostics.length > 0
+        ? { type: "sql", sql: current.fragment.sql, params: current.fragment.params, diagnostics }
+        : { type: "sql", sql: current.fragment.sql, params: current.fragment.params };
     }
-    return { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps };
+    return diagnostics.length > 0
+      ? { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps, diagnostics }
+      : { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps };
   }
 
   /**
@@ -209,7 +239,16 @@ export class QueryFoldingEngine {
     }
 
     const dialect = resolveDialect(dialectInput);
-    const ctx = { dialect, queries, getConnectionIdentity };
+    /** @type {FoldingFirewallDiagnostic[]} */
+    const diagnostics = [];
+    const ctx = {
+      dialect,
+      queries,
+      getConnectionIdentity,
+      privacyMode: options.privacyMode ?? "ignore",
+      privacyLevelsBySourceId: options.privacyLevelsBySourceId,
+      diagnostics,
+    };
 
     const callStack = new Set([query.id]);
     const initial = this.compileSourceToSqlState(query.source, ctx, callStack);
@@ -285,9 +324,21 @@ export class QueryFoldingEngine {
     }
 
     if (localSteps.length === 0) {
-      return { plan: { type: "sql", sql: current.fragment.sql, params: current.fragment.params }, steps };
+      return {
+        plan:
+          diagnostics.length > 0
+            ? { type: "sql", sql: current.fragment.sql, params: current.fragment.params, diagnostics }
+            : { type: "sql", sql: current.fragment.sql, params: current.fragment.params },
+        steps,
+      };
     }
-    return { plan: { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps }, steps };
+    return {
+      plan:
+        diagnostics.length > 0
+          ? { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps, diagnostics }
+          : { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps },
+      steps,
+    };
   }
 
   /**
@@ -613,7 +664,22 @@ export class QueryFoldingEngine {
         if (!rightQuery) return null;
         const rightState = this.compileQueryToSqlState(rightQuery, ctx, callStack);
         if (!rightState?.columns) return null;
-        if (!connectionsMatch(state, rightState)) return null;
+        const leftSourceId = sqlSourceIdForState(state);
+        const rightSourceId = sqlSourceIdForState(rightState);
+        if (!connectionsMatch(state, rightState)) {
+          recordFoldingPrivacyDiagnostic(ctx, "merge", [leftSourceId, rightSourceId]);
+          return null;
+        }
+
+        if (ctx.privacyMode && ctx.privacyMode !== "ignore") {
+          const levelsBySourceId = ctx.privacyLevelsBySourceId;
+          const leftLevel = getPrivacyLevel(levelsBySourceId, leftSourceId);
+          const rightLevel = getPrivacyLevel(levelsBySourceId, rightSourceId);
+          if (leftLevel !== rightLevel) {
+            recordFoldingPrivacyDiagnostic(ctx, "merge", [leftSourceId, rightSourceId]);
+            return null;
+          }
+        }
 
         if (!state.columns.includes(operation.leftKey)) return null;
         if (!rightState.columns.includes(operation.rightKey)) return null;
@@ -658,13 +724,27 @@ export class QueryFoldingEngine {
         const baseColumns = state.columns;
         /** @type {SqlState[]} */
         const branches = [state];
+        const baseSourceId = sqlSourceIdForState(state);
 
         for (const id of operation.queries) {
           const q = queries[id];
           if (!q) return null;
           const compiled = this.compileQueryToSqlState(q, ctx, callStack);
           if (!compiled?.columns) return null;
-          if (!connectionsMatch(state, compiled)) return null;
+          const branchSourceId = sqlSourceIdForState(compiled);
+          if (!connectionsMatch(state, compiled)) {
+            recordFoldingPrivacyDiagnostic(ctx, "append", [baseSourceId, branchSourceId]);
+            return null;
+          }
+          if (ctx.privacyMode && ctx.privacyMode !== "ignore") {
+            const levelsBySourceId = ctx.privacyLevelsBySourceId;
+            const leftLevel = getPrivacyLevel(levelsBySourceId, baseSourceId);
+            const rightLevel = getPrivacyLevel(levelsBySourceId, branchSourceId);
+            if (leftLevel !== rightLevel) {
+              recordFoldingPrivacyDiagnostic(ctx, "append", [baseSourceId, branchSourceId]);
+              return null;
+            }
+          }
           if (!columnsCompatible(baseColumns, compiled.columns)) return null;
           branches.push(compiled);
         }
@@ -768,7 +848,7 @@ export class QueryFoldingEngine {
         if (!rightQuery) return "missing_query";
         const rightState = this.compileQueryToSqlState(rightQuery, ctx, callStack);
         if (!rightState?.columns) return "unsupported_query";
-        if (state.connection !== rightState.connection) return "different_connection";
+        if (!connectionsMatch(state, rightState)) return "different_connection";
         const join = joinTypeToSql(ctx.dialect, operation.joinType);
         if (!join) return "unsupported_join_type";
         return "unsupported_op";
@@ -781,7 +861,7 @@ export class QueryFoldingEngine {
           if (!q) return "missing_query";
           const compiled = this.compileQueryToSqlState(q, ctx, callStack);
           if (!compiled?.columns) return "unsupported_query";
-          if (state.connection !== compiled.connection) return "different_connection";
+          if (!connectionsMatch(state, compiled)) return "different_connection";
           if (!columnsCompatible(state.columns, compiled.columns)) return "incompatible_schema";
         }
         return "unsupported_op";
@@ -811,6 +891,40 @@ function explainSourceFailure(source, ctx) {
     default:
       return "unsupported_source";
   }
+}
+
+/**
+ * @param {{ privacyMode?: "ignore" | "enforce" | "warn", privacyLevelsBySourceId?: Record<string, import("../privacy/levels.js").PrivacyLevel>, diagnostics?: FoldingFirewallDiagnostic[] }} ctx
+ * @param {"merge" | "append"} operation
+ * @param {string[]} sourceIds
+ */
+function recordFoldingPrivacyDiagnostic(ctx, operation, sourceIds) {
+  const diagnostics = ctx.diagnostics;
+  if (!diagnostics) return;
+  if (!ctx.privacyMode || ctx.privacyMode === "ignore") return;
+
+  const infos = collectSourcePrivacy(sourceIds, ctx.privacyLevelsBySourceId);
+  const levels = distinctPrivacyLevels(infos);
+  if (levels.size <= 1) return;
+
+  diagnostics.push({
+    kind: "privacy:firewall",
+    phase: "folding",
+    operation,
+    sources: infos,
+    message: `Formula firewall prevented folding of ${operation} across privacy levels (${Array.from(levels).join(", ")})`,
+  });
+}
+
+/**
+ * Compute a stable privacy `sourceId` for a SQL folding branch.
+ *
+ * @param {SqlState} state
+ * @returns {string}
+ */
+function sqlSourceIdForState(state) {
+  if (state.connectionId) return getSqlSourceId(state.connectionId);
+  return getSqlSourceId(state.connection);
 }
 
 /**

@@ -23,6 +23,17 @@ export {
   normalizeScopes,
 } from "./oauth2/index.js";
 
+// Privacy levels / formula firewall helpers.
+export { getPrivacyLevel, privacyRank } from "./privacy/levels.js";
+export {
+  getFileSourceId,
+  getHttpSourceId,
+  getSqlSourceId,
+  getSourceIdForProvenance,
+  getSourceIdForQuerySource,
+  normalizeFilePath,
+} from "./privacy/sourceId.js";
+
 export { parseM } from "./m/parser.js";
 export { compileMToQuery } from "./m/compiler.js";
 export { prettyPrintQueryToM } from "./m/pretty.js";
