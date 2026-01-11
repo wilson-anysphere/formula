@@ -158,9 +158,42 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
 }
 
 fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Workbook, xlsb::Error> {
-    use formula_model::{normalize_formula_text, CellRef, CellValue, ErrorValue, Workbook as ModelWorkbook};
+    use formula_model::{
+        normalize_formula_text, CellRef, CellValue, DateSystem, ErrorValue, Style, Workbook as ModelWorkbook,
+    };
 
     let mut out = ModelWorkbook::new();
+    out.date_system = if wb.workbook_properties().date_system_1904 {
+        DateSystem::Excel1904
+    } else {
+        DateSystem::Excel1900
+    };
+
+    // Best-effort style mapping: XLSB cell records reference an XF index. We only
+    // preserve number formats for now (fonts/fills/etc are not yet exposed by
+    // `formula-xlsb::Styles`).
+    let mut xf_to_style_id: Vec<u32> = Vec::with_capacity(wb.styles().len());
+    for xf_idx in 0..wb.styles().len() {
+        if xf_idx == 0 {
+            xf_to_style_id.push(0);
+            continue;
+        }
+        let info = wb
+            .styles()
+            .get(xf_idx as u32)
+            .expect("xf index within wb.styles().len()");
+        let style_id = info
+            .number_format
+            .as_ref()
+            .map(|fmt| {
+                out.intern_style(Style {
+                    number_format: Some(fmt.clone()),
+                    ..Default::default()
+                })
+            })
+            .unwrap_or(0);
+        xf_to_style_id.push(style_id);
+    }
 
     for (sheet_index, meta) in wb.sheet_metas().iter().enumerate() {
         let sheet_id = out
@@ -172,6 +205,11 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
 
         wb.for_each_cell(sheet_index, |cell| {
             let cell_ref = CellRef::new(cell.row, cell.col);
+            let style_id = xf_to_style_id
+                .get(cell.style as usize)
+                .copied()
+                .unwrap_or(0);
+
             match cell.value {
                 xlsb::CellValue::Blank => {}
                 xlsb::CellValue::Number(v) => sheet.set_value(cell_ref, CellValue::Number(v)),
@@ -181,6 +219,12 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
                     cell_ref,
                     CellValue::Error(ErrorValue::from_code(code).unwrap_or(ErrorValue::Unknown)),
                 ),
+            }
+
+            // Cells with non-zero style ids must be stored, even if blank, matching
+            // Excel's ability to format empty cells.
+            if style_id != 0 {
+                sheet.set_style_id(cell_ref, style_id);
             }
 
             if let Some(formula) = cell.formula.and_then(|f| f.text) {
