@@ -18,6 +18,11 @@ mod stats;
 mod table;
 mod types;
 
+#[cfg(feature = "arrow")]
+pub mod arrow;
+#[cfg(feature = "arrow")]
+pub mod parquet;
+
 pub use crate::cache::{CacheStats, PageCacheConfig};
 pub use crate::query::{
     group_by, group_by_rows, hash_join, AggOp, AggSpec, GroupByEngine, GroupByResult, JoinResult,

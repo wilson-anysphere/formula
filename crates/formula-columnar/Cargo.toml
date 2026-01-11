@@ -3,4 +3,17 @@ name = "formula-columnar"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Arrow + Parquet interoperability is kept behind a feature so the default
+# build stays lightweight.
+arrow = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
+
 [dependencies]
+arrow-array = { version = "54", optional = true }
+arrow-ipc = { version = "54", optional = true }
+arrow-schema = { version = "54", optional = true }
+bytes = { version = "1", optional = true }
+# `parquet` pulls in a lot of optional compression backends by default.
+# For `formula-columnar` we only need the Arrow integration and uncompressed
+# I/O, so keep the dependency surface minimal.
+parquet = { version = "54", optional = true, default-features = false, features = ["arrow"] }

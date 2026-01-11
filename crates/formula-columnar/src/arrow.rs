@@ -1,0 +1,459 @@
+#![forbid(unsafe_code)]
+
+//! Arrow interoperability for `formula-columnar`.
+//!
+//! This module is behind the crate feature flag `arrow`.
+//!
+//! # Type mapping
+//!
+//! `formula-columnar` stores values using a small set of logical types
+//! (`ColumnType`). When exporting to Arrow we map them as follows:
+//!
+//! | `ColumnType` | Arrow `DataType` | Notes |
+//! |---|---|---|
+//! | `Number` | `Float64` | |
+//! | `Boolean` | `Boolean` | |
+//! | `String` | `Dictionary(UInt32, Utf8)` | Preserves dictionary encoding. |
+//! | `DateTime` | `Int64` | Stored as an integer with metadata. |
+//! | `Currency { scale }` | `Int64` | Stored as an integer with metadata (`scale`). |
+//! | `Percentage { scale }` | `Int64` | Stored as an integer with metadata (`scale`). |
+//!
+//! The `Int64` representation for `DateTime` / `Currency` / `Percentage` is a
+//! deliberate choice: the in-memory engine already stores these values as
+//! `i64`, and the exact units/semantics are defined by the higher-level model.
+//! To allow round-tripping without loss, we attach column type information as
+//! Arrow field metadata:
+//!
+//! - `formula:column_type` = one of `number`, `string`, `boolean`, `datetime`,
+//!   `currency`, `percentage`
+//! - `formula:scale` = `<u8>` for `currency` / `percentage`
+//!
+//! Consumers that do not understand these metadata keys will still see valid
+//! Arrow arrays (e.g. `Int64`), but may not interpret them as specialized
+//! logical types.
+
+use crate::table::{ColumnSchema, ColumnarTable, ColumnarTableBuilder, TableOptions};
+use crate::types::{ColumnType, Value};
+use arrow_array::builder::{
+    BooleanBuilder, Float64Builder, Int64Builder, StringDictionaryBuilder,
+};
+use arrow_array::{Array, ArrayRef, RecordBatch, UInt32Array};
+use arrow_schema::{DataType, Field, Schema};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+const META_COLUMN_TYPE: &str = "formula:column_type";
+const META_SCALE: &str = "formula:scale";
+
+#[derive(Debug)]
+pub enum ArrowInteropError {
+    Arrow(arrow_schema::ArrowError),
+    UnsupportedDataType(DataType),
+    UnsupportedDictionaryValueType(DataType),
+    InvalidMetadata { key: &'static str, value: String },
+}
+
+impl std::fmt::Display for ArrowInteropError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Arrow(err) => write!(f, "{err}"),
+            Self::UnsupportedDataType(dt) => write!(f, "unsupported Arrow data type: {dt:?}"),
+            Self::UnsupportedDictionaryValueType(dt) => {
+                write!(f, "unsupported dictionary value type: {dt:?}")
+            }
+            Self::InvalidMetadata { key, value } => {
+                write!(f, "invalid Arrow field metadata {key}={value:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ArrowInteropError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Arrow(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<arrow_schema::ArrowError> for ArrowInteropError {
+    fn from(value: arrow_schema::ArrowError) -> Self {
+        Self::Arrow(value)
+    }
+}
+
+fn column_type_tag(column_type: ColumnType) -> &'static str {
+    match column_type {
+        ColumnType::Number => "number",
+        ColumnType::String => "string",
+        ColumnType::Boolean => "boolean",
+        ColumnType::DateTime => "datetime",
+        ColumnType::Currency { .. } => "currency",
+        ColumnType::Percentage { .. } => "percentage",
+    }
+}
+
+fn arrow_data_type_for_column_type(column_type: ColumnType) -> DataType {
+    match column_type {
+        ColumnType::Number => DataType::Float64,
+        ColumnType::Boolean => DataType::Boolean,
+        ColumnType::String => DataType::Dictionary(Box::new(DataType::UInt32), Box::new(DataType::Utf8)),
+        ColumnType::DateTime | ColumnType::Currency { .. } | ColumnType::Percentage { .. } => {
+            DataType::Int64
+        }
+    }
+}
+
+fn field_metadata(column_type: ColumnType) -> HashMap<String, String> {
+    let mut meta = HashMap::new();
+    meta.insert(META_COLUMN_TYPE.to_owned(), column_type_tag(column_type).to_owned());
+    match column_type {
+        ColumnType::Currency { scale } | ColumnType::Percentage { scale } => {
+            meta.insert(META_SCALE.to_owned(), scale.to_string());
+        }
+        _ => {}
+    }
+    meta
+}
+
+fn arrow_field(schema: &ColumnSchema, nullable: bool) -> Field {
+    Field::new(
+        schema.name.clone(),
+        arrow_data_type_for_column_type(schema.column_type),
+        nullable,
+    )
+    .with_metadata(field_metadata(schema.column_type))
+}
+
+pub(crate) fn column_type_from_field(field: &Field) -> Result<ColumnType, ArrowInteropError> {
+    // Prefer explicit metadata as it is required to disambiguate Int64 columns.
+    let meta = field.metadata();
+    if let Some(tag) = meta.get(META_COLUMN_TYPE) {
+        let tag = tag.to_ascii_lowercase();
+        let parsed = match tag.as_str() {
+            "number" => ColumnType::Number,
+            "string" => ColumnType::String,
+            "boolean" => ColumnType::Boolean,
+            "datetime" => ColumnType::DateTime,
+            "currency" => {
+                let scale = meta
+                    .get(META_SCALE)
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .unwrap_or(0);
+                ColumnType::Currency { scale }
+            }
+            "percentage" => {
+                let scale = meta
+                    .get(META_SCALE)
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .unwrap_or(0);
+                ColumnType::Percentage { scale }
+            }
+            _ => {
+                return Err(ArrowInteropError::InvalidMetadata {
+                    key: META_COLUMN_TYPE,
+                    value: tag,
+                });
+            }
+        };
+        return Ok(parsed);
+    }
+
+    // Fall back to the physical Arrow data type.
+    Ok(match field.data_type() {
+        DataType::Float64 => ColumnType::Number,
+        DataType::Boolean => ColumnType::Boolean,
+        DataType::Utf8 | DataType::LargeUtf8 => ColumnType::String,
+        DataType::Dictionary(_, value) => match value.as_ref() {
+            DataType::Utf8 | DataType::LargeUtf8 => ColumnType::String,
+            other => return Err(ArrowInteropError::UnsupportedDictionaryValueType(other.clone())),
+        },
+        DataType::Int64 => ColumnType::Number,
+        other => return Err(ArrowInteropError::UnsupportedDataType(other.clone())),
+    })
+}
+
+pub(crate) fn value_from_array(
+    array: &dyn Array,
+    row: usize,
+    column_type: ColumnType,
+) -> Result<Value, ArrowInteropError> {
+    if array.is_null(row) {
+        return Ok(Value::Null);
+    }
+
+    match column_type {
+        ColumnType::Number => match array.data_type() {
+            DataType::Float64 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Float64Array>()
+                    .expect("Float64 array downcast");
+                Ok(Value::Number(arr.value(row)))
+            }
+            DataType::Int64 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Int64Array>()
+                    .expect("Int64 array downcast");
+                Ok(Value::Number(arr.value(row) as f64))
+            }
+            other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
+        },
+        ColumnType::Boolean => {
+            let arr = array
+                .as_any()
+                .downcast_ref::<arrow_array::BooleanArray>()
+                .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+            Ok(Value::Boolean(arr.value(row)))
+        }
+        ColumnType::String => match array.data_type() {
+            DataType::Utf8 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::StringArray>()
+                    .expect("Utf8 array downcast");
+                Ok(Value::String(Arc::<str>::from(arr.value(row))))
+            }
+            DataType::LargeUtf8 => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::LargeStringArray>()
+                    .expect("LargeUtf8 array downcast");
+                Ok(Value::String(Arc::<str>::from(arr.value(row))))
+            }
+            DataType::Dictionary(key, value) => match value.as_ref() {
+                DataType::Utf8 => match key.as_ref() {
+                    DataType::UInt32 => {
+                        let dict = array
+                            .as_any()
+                            .downcast_ref::<
+                                arrow_array::DictionaryArray<arrow_array::types::UInt32Type>,
+                            >()
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                            })?;
+                        let keys: &UInt32Array = dict.keys();
+                        let dict_values = dict
+                            .values()
+                            .as_any()
+                            .downcast_ref::<arrow_array::StringArray>()
+                            .expect("dictionary values utf8 downcast");
+                        let key = keys.value(row) as usize;
+                        Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
+                    }
+                    DataType::Int32 => {
+                        let dict = array
+                            .as_any()
+                            .downcast_ref::<arrow_array::DictionaryArray<arrow_array::types::Int32Type>>()
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                            })?;
+                        let key = dict.keys().value(row) as usize;
+                        let dict_values = dict
+                            .values()
+                            .as_any()
+                            .downcast_ref::<arrow_array::StringArray>()
+                            .expect("dictionary values utf8 downcast");
+                        Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
+                    }
+                    other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
+                },
+                DataType::LargeUtf8 => match key.as_ref() {
+                    DataType::UInt32 => {
+                        let dict = array
+                            .as_any()
+                            .downcast_ref::<
+                                arrow_array::DictionaryArray<arrow_array::types::UInt32Type>,
+                            >()
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                            })?;
+                        let keys: &UInt32Array = dict.keys();
+                        let dict_values = dict
+                            .values()
+                            .as_any()
+                            .downcast_ref::<arrow_array::LargeStringArray>()
+                            .expect("dictionary values large utf8 downcast");
+                        let key = keys.value(row) as usize;
+                        Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
+                    }
+                    DataType::Int32 => {
+                        let dict = array
+                            .as_any()
+                            .downcast_ref::<arrow_array::DictionaryArray<arrow_array::types::Int32Type>>()
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDataType(array.data_type().clone())
+                            })?;
+                        let key = dict.keys().value(row) as usize;
+                        let dict_values = dict
+                            .values()
+                            .as_any()
+                            .downcast_ref::<arrow_array::LargeStringArray>()
+                            .expect("dictionary values large utf8 downcast");
+                        Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
+                    }
+                    other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
+                },
+                other => Err(ArrowInteropError::UnsupportedDictionaryValueType(other.clone())),
+            },
+            other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
+        },
+        ColumnType::DateTime => {
+            let arr = array
+                .as_any()
+                .downcast_ref::<arrow_array::Int64Array>()
+                .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+            Ok(Value::DateTime(arr.value(row)))
+        }
+        ColumnType::Currency { .. } => {
+            let arr = array
+                .as_any()
+                .downcast_ref::<arrow_array::Int64Array>()
+                .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+            Ok(Value::Currency(arr.value(row)))
+        }
+        ColumnType::Percentage { .. } => {
+            let arr = array
+                .as_any()
+                .downcast_ref::<arrow_array::Int64Array>()
+                .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+            Ok(Value::Percentage(arr.value(row)))
+        }
+    }
+}
+
+fn array_from_column(table: &ColumnarTable, col: usize) -> Result<ArrayRef, ArrowInteropError> {
+    let column_schema = table
+        .schema()
+        .get(col)
+        .expect("column index within schema");
+    let rows = table.row_count();
+
+    let array: ArrayRef = match column_schema.column_type {
+        ColumnType::Number => {
+            let mut builder = Float64Builder::with_capacity(rows);
+            for row in 0..rows {
+                match table.get_cell(row, col) {
+                    Value::Number(v) => builder.append_value(v),
+                    Value::Null => builder.append_null(),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        ColumnType::Boolean => {
+            let mut builder = BooleanBuilder::with_capacity(rows);
+            for row in 0..rows {
+                match table.get_cell(row, col) {
+                    Value::Boolean(v) => builder.append_value(v),
+                    Value::Null => builder.append_null(),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        ColumnType::String => {
+            let mut builder = StringDictionaryBuilder::<arrow_array::types::UInt32Type>::new();
+            for row in 0..rows {
+                match table.get_cell(row, col) {
+                    Value::String(v) => {
+                        builder.append(v.as_ref())?;
+                    }
+                    Value::Null => builder.append_null(),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        ColumnType::DateTime => {
+            let mut builder = Int64Builder::with_capacity(rows);
+            for row in 0..rows {
+                match table.get_cell(row, col) {
+                    Value::DateTime(v) => builder.append_value(v),
+                    Value::Null => builder.append_null(),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        ColumnType::Currency { .. } => {
+            let mut builder = Int64Builder::with_capacity(rows);
+            for row in 0..rows {
+                match table.get_cell(row, col) {
+                    Value::Currency(v) => builder.append_value(v),
+                    Value::Null => builder.append_null(),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        ColumnType::Percentage { .. } => {
+            let mut builder = Int64Builder::with_capacity(rows);
+            for row in 0..rows {
+                match table.get_cell(row, col) {
+                    Value::Percentage(v) => builder.append_value(v),
+                    Value::Null => builder.append_null(),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+    };
+
+    Ok(array)
+}
+
+/// Convert a [`ColumnarTable`] into an Arrow [`RecordBatch`].
+pub fn columnar_to_record_batch(table: &ColumnarTable) -> Result<RecordBatch, ArrowInteropError> {
+    let mut fields = Vec::with_capacity(table.column_count());
+    let mut arrays = Vec::with_capacity(table.column_count());
+
+    for (col_idx, col_schema) in table.schema().iter().enumerate() {
+        let nullable = table
+            .scan()
+            .stats(col_idx)
+            .is_some_and(|stats| stats.null_count > 0);
+        fields.push(arrow_field(col_schema, nullable));
+        arrays.push(array_from_column(table, col_idx)?);
+    }
+
+    let schema = Arc::new(Schema::new(fields));
+    Ok(RecordBatch::try_new(schema, arrays)?)
+}
+
+/// Convert an Arrow [`RecordBatch`] into a [`ColumnarTable`] using [`TableOptions::default`].
+pub fn record_batch_to_columnar(batch: &RecordBatch) -> Result<ColumnarTable, ArrowInteropError> {
+    record_batch_to_columnar_with_options(batch, TableOptions::default())
+}
+
+/// Convert an Arrow [`RecordBatch`] into a [`ColumnarTable`] using the provided [`TableOptions`].
+pub fn record_batch_to_columnar_with_options(
+    batch: &RecordBatch,
+    options: TableOptions,
+) -> Result<ColumnarTable, ArrowInteropError> {
+    let schema = batch.schema();
+    let mut column_schema = Vec::with_capacity(schema.fields().len());
+    for field in schema.fields() {
+        column_schema.push(ColumnSchema {
+            name: field.name().clone(),
+            column_type: column_type_from_field(field)?,
+        });
+    }
+
+    let mut builder = ColumnarTableBuilder::new(column_schema.clone(), options);
+    let rows = batch.num_rows();
+    let cols = batch.num_columns();
+    for row in 0..rows {
+        let mut values = Vec::with_capacity(cols);
+        for col in 0..cols {
+            let ty = column_schema[col].column_type;
+            let array = batch.column(col).as_ref();
+            values.push(value_from_array(array, row, ty)?);
+        }
+        builder.append_row(&values);
+    }
+
+    Ok(builder.finalize())
+}
