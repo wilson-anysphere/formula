@@ -707,8 +707,13 @@ function collectWorkbookTableSourceIds(query: any, queries: Record<string, any> 
     const source = q.source;
     if (source && typeof source === "object") {
       if (source.type === "table" && typeof source.table === "string") {
+        const explicitSourceId = typeof (source as any).sourceId === "string" ? String((source as any).sourceId) : "";
+        if (explicitSourceId) out.add(explicitSourceId);
+        // Backwards compatibility: table sources default to `workbook:table:<name>`.
         out.add(`workbook:table:${source.table}`);
       } else if (source.type === "range") {
+        const explicitSourceId = typeof (source as any).sourceId === "string" ? String((source as any).sourceId) : "";
+        if (explicitSourceId) out.add(explicitSourceId);
         out.add("workbook:range");
       } else if (source.type === "query" && typeof source.queryId === "string") {
         const dep = queries?.[source.queryId];
@@ -773,6 +778,12 @@ class DesktopQueryEngine extends QueryEngine {
           for (const source of sources) {
             const provenance = source?.provenance;
             if (!provenance || typeof provenance !== "object") continue;
+            const provenanceSourceId =
+              typeof (provenance as any).sourceId === "string" ? String((provenance as any).sourceId) : "";
+            if (provenanceSourceId) {
+              base[provenanceSourceId] = this.workbookPrivacyLevel;
+              continue;
+            }
             const kind = (provenance as any).kind;
             if (kind === "table" && typeof (provenance as any).table === "string") {
               base[`workbook:table:${(provenance as any).table}`] = this.workbookPrivacyLevel;
