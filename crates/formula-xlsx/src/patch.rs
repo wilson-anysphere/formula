@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue};
+use formula_model::{CellRef, CellValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader, Writer};
 
@@ -17,11 +17,15 @@ use crate::openxml::{parse_relationships, rels_part_name, resolve_relationship_t
 use crate::path::resolve_target;
 use crate::recalc_policy::apply_recalc_policy_to_parts;
 use crate::shared_strings::{parse_shared_strings_xml, write_shared_strings_xml, SharedStrings};
+use crate::styles::XlsxStylesEditor;
 use crate::{RecalcPolicy, WorkbookSheetInfo, XlsxError, XlsxPackage};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+
+const REL_TYPE_STYLES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 
 /// An owned set of cell edits to apply to an existing workbook package.
 ///
@@ -90,33 +94,54 @@ impl WorksheetCellPatches {
     }
 }
 
+/// A cell style reference used by patch APIs.
+///
+/// Excel stores cell formatting as `xf` indices (`c/@s`) referencing `<cellXfs>` in `styles.xml`.
+/// `formula_model` cells instead refer to a `style_id` in a [`StyleTable`].
+///
+/// Both representations use `0` as the default style; patchers treat `0` as a signal to **remove**
+/// the `s` attribute (equivalent to setting it to `0`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellStyleRef {
+    /// A SpreadsheetML `xf` index (`c/@s`).
+    XfIndex(u32),
+    /// A `formula_model` `style_id` (resolved to an `xf` index via [`XlsxStylesEditor`]).
+    StyleId(u32),
+}
+
 /// A single cell edit.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CellPatch {
     /// Clear cell contents (formula + value). Formatting is preserved unless
-    /// `style_index` overrides it.
+    /// `style` overrides it.
     Clear {
-        /// Optional `s` attribute override (cell XF index).
-        style_index: Option<u32>,
+        /// Optional style override.
+        style: Option<CellStyleRef>,
     },
     /// Set a cell value (and optionally a formula).
     Set {
         value: CellValue,
         /// If provided, writes an `<f>` element (leading `=` is accepted).
         formula: Option<String>,
-        /// Optional `s` attribute override (cell XF index).
-        style_index: Option<u32>,
+        /// Optional style override.
+        style: Option<CellStyleRef>,
     },
 }
 
 impl CellPatch {
     pub fn clear() -> Self {
-        Self::Clear { style_index: None }
+        Self::Clear { style: None }
     }
 
     pub fn clear_with_style(style_index: u32) -> Self {
         Self::Clear {
-            style_index: Some(style_index),
+            style: Some(CellStyleRef::XfIndex(style_index)),
+        }
+    }
+
+    pub fn clear_with_style_id(style_id: u32) -> Self {
+        Self::Clear {
+            style: Some(CellStyleRef::StyleId(style_id)),
         }
     }
 
@@ -124,7 +149,7 @@ impl CellPatch {
         Self::Set {
             value,
             formula: None,
-            style_index: None,
+            style: None,
         }
     }
 
@@ -132,13 +157,113 @@ impl CellPatch {
         Self::Set {
             value,
             formula: Some(formula.into()),
-            style_index: None,
+            style: None,
+        }
+    }
+
+    pub fn set_value_with_style(value: CellValue, style_index: u32) -> Self {
+        Self::Set {
+            value,
+            formula: None,
+            style: Some(CellStyleRef::XfIndex(style_index)),
+        }
+    }
+
+    pub fn set_value_with_style_id(value: CellValue, style_id: u32) -> Self {
+        Self::Set {
+            value,
+            formula: None,
+            style: Some(CellStyleRef::StyleId(style_id)),
+        }
+    }
+
+    pub fn set_value_with_formula_and_style(
+        value: CellValue,
+        formula: impl Into<String>,
+        style_index: u32,
+    ) -> Self {
+        Self::Set {
+            value,
+            formula: Some(formula.into()),
+            style: Some(CellStyleRef::XfIndex(style_index)),
+        }
+    }
+
+    pub fn set_value_with_formula_and_style_id(
+        value: CellValue,
+        formula: impl Into<String>,
+        style_id: u32,
+    ) -> Self {
+        Self::Set {
+            value,
+            formula: Some(formula.into()),
+            style: Some(CellStyleRef::StyleId(style_id)),
+        }
+    }
+
+    pub fn with_style_ref(self, style: CellStyleRef) -> Self {
+        match self {
+            CellPatch::Clear { .. } => CellPatch::Clear { style: Some(style) },
+            CellPatch::Set { value, formula, .. } => CellPatch::Set {
+                value,
+                formula,
+                style: Some(style),
+            },
+        }
+    }
+
+    pub fn with_style_id(self, style_id: u32) -> Self {
+        self.with_style_ref(CellStyleRef::StyleId(style_id))
+    }
+
+    pub fn with_style_index(self, style_index: u32) -> Self {
+        self.with_style_ref(CellStyleRef::XfIndex(style_index))
+    }
+
+    pub fn style_ref(&self) -> Option<CellStyleRef> {
+        match self {
+            CellPatch::Clear { style } | CellPatch::Set { style, .. } => *style,
+        }
+    }
+
+    pub fn style_id(&self) -> Option<u32> {
+        match self.style_ref()? {
+            CellStyleRef::StyleId(style_id) => Some(style_id),
+            _ => None,
         }
     }
 
     pub fn style_index(&self) -> Option<u32> {
-        match self {
-            CellPatch::Clear { style_index } | CellPatch::Set { style_index, .. } => *style_index,
+        match self.style_ref()? {
+            CellStyleRef::XfIndex(xf_index) => Some(xf_index),
+            // Clearing by style_id doesn't require an `xf` mapping.
+            CellStyleRef::StyleId(0) => Some(0),
+            CellStyleRef::StyleId(_) => None,
+        }
+    }
+
+    fn style_index_override(
+        &self,
+        style_id_to_xf: Option<&HashMap<u32, u32>>,
+    ) -> Result<Option<u32>, XlsxError> {
+        let Some(style) = self.style_ref() else {
+            return Ok(None);
+        };
+
+        match style {
+            CellStyleRef::XfIndex(xf_index) => Ok(Some(xf_index)),
+            CellStyleRef::StyleId(0) => Ok(Some(0)),
+            CellStyleRef::StyleId(style_id) => {
+                let style_id_to_xf = style_id_to_xf.ok_or_else(|| {
+                    XlsxError::Invalid(
+                        "style_id patches require apply_cell_patches_with_styles".to_string(),
+                    )
+                })?;
+                let xf_index = style_id_to_xf.get(&style_id).copied().ok_or_else(|| {
+                    XlsxError::Invalid(format!("unknown style_id {style_id} (missing xf mapping)"))
+                })?;
+                Ok(Some(xf_index))
+            }
         }
     }
 }
@@ -215,6 +340,62 @@ pub(crate) fn apply_cell_patches_to_package(
         return Ok(());
     }
 
+    let style_ids = collect_style_id_overrides(patches);
+    if !style_ids.is_empty() {
+        return Err(XlsxError::Invalid(
+            "style_id patches require apply_cell_patches_with_styles".to_string(),
+        ));
+    }
+
+    apply_cell_patches_to_package_inner(pkg, patches, None, recalc_policy)
+}
+
+pub(crate) fn apply_cell_patches_to_package_with_styles(
+    pkg: &mut XlsxPackage,
+    patches: &WorkbookCellPatches,
+    style_table: &StyleTable,
+    recalc_policy: RecalcPolicy,
+) -> Result<(), XlsxError> {
+    if patches.is_empty() {
+        return Ok(());
+    }
+
+    let style_ids = collect_style_id_overrides(patches);
+    if style_ids.is_empty() {
+        return apply_cell_patches_to_package(pkg, patches, recalc_policy);
+    }
+
+    let styles_part_name = resolve_styles_part(pkg)?;
+    let styles_bytes = pkg
+        .part(&styles_part_name)
+        .ok_or_else(|| XlsxError::MissingPart(styles_part_name.clone()))?;
+
+    let mut style_table = style_table.clone();
+    let mut styles_editor =
+        XlsxStylesEditor::parse_or_default(Some(styles_bytes), &mut style_table)
+            .map_err(|e| XlsxError::Invalid(format!("styles.xml error: {e}")))?;
+
+    let before_xfs = styles_editor.styles_part().cell_xfs_count();
+    let style_id_to_xf = styles_editor
+        .ensure_styles_for_style_ids(style_ids, &style_table)
+        .map_err(|e| XlsxError::Invalid(format!("styles.xml error: {e}")))?;
+    let after_xfs = styles_editor.styles_part().cell_xfs_count();
+
+    // Avoid rewriting styles.xml unless we actually appended new xfs; preserving the original
+    // bytes keeps unrelated diffs smaller for high-fidelity edit workflows.
+    if before_xfs != after_xfs {
+        pkg.set_part(styles_part_name, styles_editor.to_styles_xml_bytes());
+    }
+
+    apply_cell_patches_to_package_inner(pkg, patches, Some(&style_id_to_xf), recalc_policy)
+}
+
+fn apply_cell_patches_to_package_inner(
+    pkg: &mut XlsxPackage,
+    patches: &WorkbookCellPatches,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
+    recalc_policy: RecalcPolicy,
+) -> Result<(), XlsxError> {
     let workbook_sheets = pkg.workbook_sheets()?;
 
     let shared_strings_part_name = resolve_shared_strings_part_name(pkg)?
@@ -243,8 +424,12 @@ pub(crate) fn apply_cell_patches_to_package(
             .part(&worksheet_part)
             .ok_or_else(|| XlsxError::MissingPart(worksheet_part.clone()))?;
 
-        let (updated, formula_changed) =
-            patch_worksheet_xml(original, sheet_patches, shared_strings.as_mut())?;
+        let (updated, formula_changed) = patch_worksheet_xml(
+            original,
+            sheet_patches,
+            shared_strings.as_mut(),
+            style_id_to_xf,
+        )?;
         any_formula_changed |= formula_changed;
 
         pkg.set_part(worksheet_part, updated);
@@ -291,10 +476,53 @@ fn resolve_worksheet_part(
     })
 }
 
+fn resolve_styles_part(pkg: &XlsxPackage) -> Result<String, XlsxError> {
+    let rels_name = rels_part_name(WORKBOOK_PART);
+    let rels_bytes = match pkg.part(&rels_name) {
+        Some(bytes) => bytes,
+        None => {
+            // Fallback: common path when rels are missing but the part exists (best-effort).
+            if pkg.part("xl/styles.xml").is_some() {
+                return Ok("xl/styles.xml".to_string());
+            }
+            return Err(XlsxError::Invalid(
+                "workbook.xml.rels missing styles relationship".to_string(),
+            ));
+        }
+    };
+    let rels = parse_relationships(rels_bytes)?;
+
+    if let Some(rel) = rels.iter().find(|rel| rel.type_uri == REL_TYPE_STYLES) {
+        return Ok(resolve_target(WORKBOOK_PART, &rel.target));
+    }
+
+    // Fallback: common path when rels are missing but the part exists (best-effort).
+    if pkg.part("xl/styles.xml").is_some() {
+        return Ok("xl/styles.xml".to_string());
+    }
+
+    Err(XlsxError::Invalid(
+        "workbook.xml.rels missing styles relationship".to_string(),
+    ))
+}
+
+fn collect_style_id_overrides(patches: &WorkbookCellPatches) -> Vec<u32> {
+    let mut out = Vec::new();
+    for (_, sheet_patches) in patches.sheets() {
+        for (_, patch) in sheet_patches.iter() {
+            if let Some(style_id) = patch.style_id().filter(|id| *id != 0) {
+                out.push(style_id);
+            }
+        }
+    }
+    out
+}
+
 fn patch_worksheet_xml(
     original: &[u8],
     patches: &WorksheetCellPatches,
     mut shared_strings: Option<&mut SharedStringsState>,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<(Vec<u8>, bool), XlsxError> {
     // Adding a formula where none existed is always a "formula change" for the workbook.
     // (Removing formulas is detected while patching existing cells.)
@@ -352,6 +580,7 @@ fn patch_worksheet_xml(
                     &mut remaining_patch_rows,
                     &mut patch_row_idx,
                     &mut shared_strings,
+                    style_id_to_xf,
                 )?;
                 formula_changed |= changed;
             }
@@ -364,7 +593,13 @@ fn patch_worksheet_xml(
                     writer.write_event(Event::Start(e.into_owned()))?;
                     for row in remaining_patch_rows.iter().skip(patch_row_idx).copied() {
                         let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
-                        write_new_row(&mut writer, row, cells, &mut shared_strings)?;
+                        write_new_row(
+                            &mut writer,
+                            row,
+                            cells,
+                            &mut shared_strings,
+                            style_id_to_xf,
+                        )?;
                     }
                     patch_row_idx = remaining_patch_rows.len();
                     writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
@@ -376,7 +611,13 @@ fn patch_worksheet_xml(
                     writer.write_event(Event::Start(BytesStart::new("sheetData")))?;
                     for row in remaining_patch_rows.iter().skip(patch_row_idx).copied() {
                         let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
-                        write_new_row(&mut writer, row, cells, &mut shared_strings)?;
+                        write_new_row(
+                            &mut writer,
+                            row,
+                            cells,
+                            &mut shared_strings,
+                            style_id_to_xf,
+                        )?;
                     }
                     patch_row_idx = remaining_patch_rows.len();
                     writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
@@ -399,6 +640,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
     remaining_patch_rows: &mut [u32],
     patch_row_idx: &mut usize,
     shared_strings: &mut Option<&mut SharedStringsState>,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<bool, XlsxError> {
     let mut buf = Vec::new();
     let mut formula_changed = false;
@@ -417,7 +659,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                 {
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
-                    write_new_row(writer, row, cells, shared_strings)?;
+                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
                     *patch_row_idx += 1;
                 }
 
@@ -430,7 +672,14 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     }
 
                     writer.write_event(Event::Start(row_start.clone()))?;
-                    let changed = patch_row(reader, writer, row_num, cells, shared_strings)?;
+                    let changed = patch_row(
+                        reader,
+                        writer,
+                        row_num,
+                        cells,
+                        shared_strings,
+                        style_id_to_xf,
+                    )?;
                     formula_changed |= changed;
                     // patch_row writes the row end.
                 } else {
@@ -449,7 +698,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                 {
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
-                    write_new_row(writer, row, cells, shared_strings)?;
+                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
                     *patch_row_idx += 1;
                 }
 
@@ -463,7 +712,16 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     // Convert `<row/>` into `<row>...</row>`.
                     writer.write_event(Event::Start(row_empty.clone()))?;
                     for (col, patch) in cells {
-                        write_cell_patch(writer, row_num, *col, patch, None, None, shared_strings)?;
+                        write_cell_patch(
+                            writer,
+                            row_num,
+                            *col,
+                            patch,
+                            None,
+                            None,
+                            shared_strings,
+                            style_id_to_xf,
+                        )?;
                     }
                     writer.write_event(Event::End(BytesEnd::new("row")))?;
                 } else {
@@ -475,7 +733,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                 while *patch_row_idx < remaining_patch_rows.len() {
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
-                    write_new_row(writer, row, cells, shared_strings)?;
+                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
                     *patch_row_idx += 1;
                 }
                 writer.write_event(Event::End(e.into_owned()))?;
@@ -500,6 +758,7 @@ fn patch_row<R: std::io::BufRead>(
     row_num: u32,
     patches: &[(u32, &CellPatch)],
     shared_strings: &mut Option<&mut SharedStringsState>,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<bool, XlsxError> {
     let mut buf = Vec::new();
     let mut patch_idx = 0usize;
@@ -533,6 +792,7 @@ fn patch_row<R: std::io::BufRead>(
                         None,
                         None,
                         shared_strings,
+                        style_id_to_xf,
                     )?;
                     patch_idx += 1;
                 }
@@ -580,6 +840,7 @@ fn patch_row<R: std::io::BufRead>(
                         existing_t.as_deref(),
                         existing_s.as_deref(),
                         shared_strings,
+                        style_id_to_xf,
                     )?;
 
                     // Any formula removal counts as a formula change.
@@ -624,6 +885,7 @@ fn patch_row<R: std::io::BufRead>(
                         None,
                         None,
                         shared_strings,
+                        style_id_to_xf,
                     )?;
                     patch_idx += 1;
                 }
@@ -649,6 +911,7 @@ fn patch_row<R: std::io::BufRead>(
                         existing_t.as_deref(),
                         existing_s.as_deref(),
                         shared_strings,
+                        style_id_to_xf,
                     )?;
                 } else {
                     writer.write_event(Event::Empty(cell_empty))?;
@@ -657,7 +920,16 @@ fn patch_row<R: std::io::BufRead>(
             Event::End(e) if local_name(e.name().as_ref()) == b"row" => {
                 while patch_idx < patches.len() {
                     let (col, patch) = patches[patch_idx];
-                    write_cell_patch(writer, row_num, col, patch, None, None, shared_strings)?;
+                    write_cell_patch(
+                        writer,
+                        row_num,
+                        col,
+                        patch,
+                        None,
+                        None,
+                        shared_strings,
+                        style_id_to_xf,
+                    )?;
                     patch_idx += 1;
                 }
                 writer.write_event(Event::End(e.into_owned()))?;
@@ -681,12 +953,22 @@ fn write_new_row(
     row_num: u32,
     patches: &[(u32, &CellPatch)],
     shared_strings: &mut Option<&mut SharedStringsState>,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<(), XlsxError> {
     let mut row = BytesStart::new("row");
     row.push_attribute(("r", row_num.to_string().as_str()));
     writer.write_event(Event::Start(row))?;
     for (col, patch) in patches {
-        write_cell_patch(writer, row_num, *col, patch, None, None, shared_strings)?;
+        write_cell_patch(
+            writer,
+            row_num,
+            *col,
+            patch,
+            None,
+            None,
+            shared_strings,
+            style_id_to_xf,
+        )?;
     }
     writer.write_event(Event::End(BytesEnd::new("row")))?;
     Ok(())
@@ -700,13 +982,14 @@ fn write_cell_patch(
     existing_t: Option<&str>,
     existing_s: Option<&str>,
     shared_strings: &mut Option<&mut SharedStringsState>,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<bool, XlsxError> {
     let cell_ref = CellRef::new(row_num - 1, col);
     let a1 = cell_ref.to_a1();
 
     // Style: explicit override wins, otherwise preserve existing s=... if present.
     let style_index = patch
-        .style_index()
+        .style_index_override(style_id_to_xf)?
         .or_else(|| existing_s.and_then(|s| s.parse::<u32>().ok()));
 
     let mut cell = String::new();
@@ -768,8 +1051,7 @@ fn write_cell_patch(
                         value_xml.push_str(&escape_text(s));
                         value_xml.push_str("</v>");
                     } else {
-                        let prefer_shared =
-                            shared_strings.is_some() && existing_t != "inlineStr";
+                        let prefer_shared = shared_strings.is_some() && existing_t != "inlineStr";
 
                         match (existing_t, prefer_shared) {
                             ("inlineStr", _) => {

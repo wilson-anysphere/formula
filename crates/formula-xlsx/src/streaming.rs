@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
-use formula_model::{CellRef, CellValue};
+use formula_model::{CellRef, CellValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use thiserror::Error;
@@ -13,8 +13,12 @@ use crate::recalc_policy::{
     content_types_remove_calc_chain, workbook_rels_remove_calc_chain,
     workbook_xml_force_full_calc_on_load, RecalcPolicyError,
 };
+use crate::styles::XlsxStylesEditor;
 use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
 use crate::RecalcPolicy;
+
+const REL_TYPE_STYLES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 
 #[derive(Debug, Error)]
 pub enum StreamingPatchError {
@@ -147,6 +151,19 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
         return patch_xlsx_streaming(input, output, &[]);
     }
 
+    // StyleId patches require rewriting styles.xml; callers should use the style-aware variant.
+    for (_, sheet_patches) in patches.sheets() {
+        for (_, patch) in sheet_patches.iter() {
+            if patch.style_id().is_some_and(|id| id != 0) {
+                return Err(crate::XlsxError::Invalid(
+                    "style_id patches require patch_xlsx_streaming_workbook_cell_patches_with_styles"
+                        .to_string(),
+                )
+                .into());
+            }
+        }
+    }
+
     let mut archive = ZipArchive::new(input)?;
 
     let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
@@ -154,8 +171,11 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
     let workbook_xml = String::from_utf8(workbook_xml).map_err(crate::XlsxError::from)?;
     let workbook_sheets = parse_workbook_sheets(&workbook_xml)?;
 
-    let workbook_rels_bytes =
-        read_zip_part(&mut archive, "xl/_rels/workbook.xml.rels", &mut pre_read_parts)?;
+    let workbook_rels_bytes = read_zip_part(
+        &mut archive,
+        "xl/_rels/workbook.xml.rels",
+        &mut pre_read_parts,
+    )?;
     let rels = parse_relationships(&workbook_rels_bytes)?;
     let mut rel_targets: HashMap<String, String> = HashMap::new();
     for rel in rels {
@@ -171,12 +191,11 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
         let sheet = workbook_sheets
             .iter()
             .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
-            .ok_or_else(|| crate::XlsxError::Invalid(format!("unknown sheet name: {sheet_name}")))?;
+            .ok_or_else(|| {
+                crate::XlsxError::Invalid(format!("unknown sheet name: {sheet_name}"))
+            })?;
         let worksheet_part = rel_targets.get(&sheet.rel_id).cloned().ok_or_else(|| {
-            crate::XlsxError::Invalid(format!(
-                "missing worksheet relationship for {}",
-                sheet.name
-            ))
+            crate::XlsxError::Invalid(format!("missing worksheet relationship for {}", sheet.name))
         })?;
 
         for (cell_ref, patch) in sheet_patches.iter() {
@@ -189,13 +208,152 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
             patches_by_part
                 .entry(worksheet_part.clone())
                 .or_default()
-                .push(WorksheetCellPatch::new(
-                    worksheet_part.clone(),
-                    cell_ref,
-                    value,
-                    formula,
-                )
-                .with_xf_index(xf_index));
+                .push(
+                    WorksheetCellPatch::new(worksheet_part.clone(), cell_ref, value, formula)
+                        .with_xf_index(xf_index),
+                );
+        }
+    }
+
+    for patches in patches_by_part.values_mut() {
+        patches.sort_by_key(|p| (p.cell.row, p.cell.col));
+    }
+
+    let recalc_policy = if saw_formula_patch {
+        RecalcPolicy::default()
+    } else {
+        RecalcPolicy::Preserve
+    };
+
+    patch_xlsx_streaming_with_archive(
+        &mut archive,
+        output,
+        &patches_by_part,
+        &pre_read_parts,
+        recalc_policy,
+    )?;
+    Ok(())
+}
+
+/// Apply [`WorkbookCellPatches`] using the streaming ZIP rewriter, resolving `style_id` overrides
+/// via `styles.xml`.
+///
+/// This variant updates `styles.xml` deterministically when new styles are introduced.
+pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W: Write + Seek>(
+    input: R,
+    output: W,
+    patches: &WorkbookCellPatches,
+    style_table: &StyleTable,
+) -> Result<(), StreamingPatchError> {
+    if patches.is_empty() {
+        return patch_xlsx_streaming(input, output, &[]);
+    }
+
+    let mut archive = ZipArchive::new(input)?;
+
+    let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
+    let workbook_xml = read_zip_part(&mut archive, "xl/workbook.xml", &mut pre_read_parts)?;
+    let workbook_xml = String::from_utf8(workbook_xml).map_err(crate::XlsxError::from)?;
+    let workbook_sheets = parse_workbook_sheets(&workbook_xml)?;
+
+    let workbook_rels_bytes = read_zip_part(
+        &mut archive,
+        "xl/_rels/workbook.xml.rels",
+        &mut pre_read_parts,
+    )?;
+    let rels = parse_relationships(&workbook_rels_bytes)?;
+    let mut rel_targets: HashMap<String, String> = HashMap::new();
+    let mut styles_part: Option<String> = None;
+    for rel in rels {
+        let resolved = resolve_target("xl/workbook.xml", &rel.target);
+        if rel.type_uri == REL_TYPE_STYLES {
+            styles_part = Some(resolved.clone());
+        }
+        rel_targets.insert(rel.id, resolved);
+    }
+
+    let mut style_id_overrides: Vec<u32> = Vec::new();
+    for (_, sheet_patches) in patches.sheets() {
+        for (_, patch) in sheet_patches.iter() {
+            if let Some(style_id) = patch.style_id().filter(|id| *id != 0) {
+                style_id_overrides.push(style_id);
+            }
+        }
+    }
+
+    let style_id_to_xf = if style_id_overrides.is_empty() {
+        None
+    } else {
+        let styles_part = styles_part.ok_or_else(|| {
+            crate::XlsxError::Invalid("workbook.xml.rels missing styles relationship".to_string())
+        })?;
+
+        let styles_bytes = read_zip_part(&mut archive, &styles_part, &mut pre_read_parts)?;
+        let mut style_table = style_table.clone();
+        let mut styles_editor =
+            XlsxStylesEditor::parse_or_default(Some(styles_bytes.as_slice()), &mut style_table)
+                .map_err(|e| crate::XlsxError::Invalid(format!("styles.xml error: {e}")))?;
+
+        let before_xfs = styles_editor.styles_part().cell_xfs_count();
+        let style_id_to_xf = styles_editor
+            .ensure_styles_for_style_ids(style_id_overrides, &style_table)
+            .map_err(|e| crate::XlsxError::Invalid(format!("styles.xml error: {e}")))?;
+        let after_xfs = styles_editor.styles_part().cell_xfs_count();
+
+        if before_xfs != after_xfs {
+            pre_read_parts.insert(styles_part, styles_editor.to_styles_xml_bytes());
+        }
+
+        Some(style_id_to_xf)
+    };
+
+    let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+    let mut saw_formula_patch = false;
+    for (sheet_name, sheet_patches) in patches.sheets() {
+        if sheet_patches.is_empty() {
+            continue;
+        }
+        let sheet = workbook_sheets
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
+            .ok_or_else(|| {
+                crate::XlsxError::Invalid(format!("unknown sheet name: {sheet_name}"))
+            })?;
+        let worksheet_part = rel_targets.get(&sheet.rel_id).cloned().ok_or_else(|| {
+            crate::XlsxError::Invalid(format!("missing worksheet relationship for {}", sheet.name))
+        })?;
+
+        for (cell_ref, patch) in sheet_patches.iter() {
+            let (value, formula) = match patch {
+                CellPatch::Clear { .. } => (CellValue::Empty, None),
+                CellPatch::Set { value, formula, .. } => (value.clone(), formula.clone()),
+            };
+            saw_formula_patch |= formula.is_some();
+
+            let xf_index = if let Some(style_id) = patch.style_id() {
+                if style_id == 0 {
+                    Some(0)
+                } else {
+                    let map = style_id_to_xf.as_ref().ok_or_else(|| {
+                        crate::XlsxError::Invalid(
+                            "missing style_id mapping (styles.xml not updated)".to_string(),
+                        )
+                    })?;
+                    Some(*map.get(&style_id).ok_or_else(|| {
+                        crate::XlsxError::Invalid(format!("unknown style_id {style_id}"))
+                    })?)
+                }
+            } else {
+                patch.style_index()
+            };
+
+            patches_by_part
+                .entry(worksheet_part.clone())
+                .or_default()
+                .push(
+                    WorksheetCellPatch::new(worksheet_part.clone(), cell_ref, value, formula)
+                        .with_xf_index(xf_index),
+                );
         }
     }
 
@@ -520,7 +678,9 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
             }
 
             // Inside a row that needs patching, intercept cell events.
-            Event::Start(ref e) if in_sheet_data && row_state.is_some() && e.name().as_ref() == b"c" => {
+            Event::Start(ref e)
+                if in_sheet_data && row_state.is_some() && e.name().as_ref() == b"c" =>
+            {
                 let state = row_state.as_mut().expect("row_state just checked");
                 let (cell_ref, col_0) = parse_cell_ref_and_col(e)?;
 
@@ -534,7 +694,9 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     in_cell = true;
                 }
             }
-            Event::Empty(ref e) if in_sheet_data && row_state.is_some() && e.name().as_ref() == b"c" => {
+            Event::Empty(ref e)
+                if in_sheet_data && row_state.is_some() && e.name().as_ref() == b"c" =>
+            {
                 let state = row_state.as_mut().expect("row_state just checked");
                 let (cell_ref, col_0) = parse_cell_ref_and_col(e)?;
 
@@ -546,20 +708,28 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
-            Event::End(ref e) if in_sheet_data && row_state.is_some() && in_cell && e.name().as_ref() == b"c" => {
+            Event::End(ref e)
+                if in_sheet_data && row_state.is_some() && in_cell && e.name().as_ref() == b"c" =>
+            {
                 in_cell = false;
                 writer.write_event(Event::End(e.to_owned()))?;
             }
             // Ensure cells are emitted before any non-cell elements (e.g. extLst) in the row.
             Event::Start(ref e)
-                if in_sheet_data && row_state.is_some() && !in_cell && e.name().as_ref() != b"c" =>
+                if in_sheet_data
+                    && row_state.is_some()
+                    && !in_cell
+                    && e.name().as_ref() != b"c" =>
             {
                 let state = row_state.as_mut().expect("row_state just checked");
                 insert_pending_before_non_cell(&mut writer, state)?;
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
             Event::Empty(ref e)
-                if in_sheet_data && row_state.is_some() && !in_cell && e.name().as_ref() != b"c" =>
+                if in_sheet_data
+                    && row_state.is_some()
+                    && !in_cell
+                    && e.name().as_ref() != b"c" =>
             {
                 let state = row_state.as_mut().expect("row_state just checked");
                 insert_pending_before_non_cell(&mut writer, state)?;
@@ -574,7 +744,9 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     }
 
     if !saw_sheet_data {
-        return Err(StreamingPatchError::MissingSheetData(worksheet_part.to_string()));
+        return Err(StreamingPatchError::MissingSheetData(
+            worksheet_part.to_string(),
+        ));
     }
 
     Ok(())
@@ -811,9 +983,7 @@ fn write_patched_cell_children<W: Write>(
                 idx += 1;
                 continue;
             }
-            Event::Start(e)
-                if e.name().as_ref() == b"v" || e.name().as_ref() == b"is" =>
-            {
+            Event::Start(e) if e.name().as_ref() == b"v" || e.name().as_ref() == b"is" => {
                 saw_value = true;
 
                 if !formula_written {
@@ -916,9 +1086,7 @@ fn write_formula_element<W: Write>(
     if let Some(orig) = original {
         for attr in orig.attributes() {
             let attr = attr?;
-            if detach_shared
-                && matches!(attr.key.as_ref(), b"t" | b"ref" | b"si")
-            {
+            if detach_shared && matches!(attr.key.as_ref(), b"t" | b"ref" | b"si") {
                 continue;
             }
             f.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
@@ -1076,7 +1244,10 @@ fn cell_representation(
     match value {
         CellValue::Empty => Ok((None, CellBodyKind::None)),
         CellValue::Number(n) => Ok((None, CellBodyKind::V(n.to_string()))),
-        CellValue::Boolean(b) => Ok((Some("b"), CellBodyKind::V(if *b { "1" } else { "0" }.to_string()))),
+        CellValue::Boolean(b) => Ok((
+            Some("b"),
+            CellBodyKind::V(if *b { "1" } else { "0" }.to_string()),
+        )),
         CellValue::Error(err) => Ok((Some("e"), CellBodyKind::V(err.as_str().to_string()))),
         CellValue::String(s) => {
             if formula.is_some() {
@@ -1190,6 +1361,9 @@ fn parse_dimension_ref(s: &str) -> Option<(CellRef, CellRef)> {
     let mut parts = s.split(':');
     let start = parts.next()?;
     let start = CellRef::from_a1(start).ok()?;
-    let end = parts.next().and_then(|p| CellRef::from_a1(p).ok()).unwrap_or(start);
+    let end = parts
+        .next()
+        .and_then(|p| CellRef::from_a1(p).ok())
+        .unwrap_or(start);
     Some((start, end))
 }

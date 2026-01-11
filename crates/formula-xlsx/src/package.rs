@@ -5,7 +5,9 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 use thiserror::Error;
 
-use crate::patch::{apply_cell_patches_to_package, WorkbookCellPatches};
+use crate::patch::{
+    apply_cell_patches_to_package, apply_cell_patches_to_package_with_styles, WorkbookCellPatches,
+};
 use crate::pivots::cache_records::{PivotCacheRecordsReader, PivotCacheValue};
 use crate::pivots::XlsxPivots;
 use crate::recalc_policy::RecalcPolicyError;
@@ -15,7 +17,7 @@ use crate::sheet_metadata::{
 };
 use crate::RecalcPolicy;
 use crate::theme::{parse_theme_palette, ThemePalette};
-use formula_model::TabColor;
+use formula_model::{StyleTable, TabColor};
 
 #[derive(Debug, Error)]
 pub enum XlsxError {
@@ -248,6 +250,18 @@ impl XlsxPackage {
         recalc_policy: RecalcPolicy,
     ) -> Result<(), XlsxError> {
         apply_cell_patches_to_package(self, patches, recalc_policy)
+    }
+
+    /// Apply cell edits that reference `formula_model` style IDs.
+    ///
+    /// This behaves like [`Self::apply_cell_patches`], but allows patches to specify cell styles
+    /// via `style_id` and updates `styles.xml` deterministically when new styles are introduced.
+    pub fn apply_cell_patches_with_styles(
+        &mut self,
+        patches: &WorkbookCellPatches,
+        style_table: &StyleTable,
+    ) -> Result<(), XlsxError> {
+        apply_cell_patches_to_package_with_styles(self, patches, style_table, RecalcPolicy::default())
     }
 
     /// Remove macro-related parts and relationships from the package.

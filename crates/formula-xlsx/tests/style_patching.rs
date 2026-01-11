@@ -1,8 +1,11 @@
 use std::fs;
 use std::io::{Cursor, Read};
 
-use formula_model::{CellRef, CellValue};
-use formula_xlsx::{load_from_bytes, patch_xlsx_streaming, WorksheetCellPatch};
+use formula_model::{CellRef, CellValue, Style};
+use formula_xlsx::{
+    load_from_bytes, patch_xlsx_streaming, CellPatch, WorkbookCellPatches, WorksheetCellPatch,
+    XlsxPackage,
+};
 use zip::ZipArchive;
 
 fn load_fixture() -> Vec<u8> {
@@ -31,6 +34,15 @@ fn cell_s_attr(sheet_xml: &str, a1: &str) -> Option<String> {
         .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some(a1))
         .and_then(|n| n.attribute("s"))
         .map(str::to_string)
+}
+
+fn cell_xfs_count(styles_xml: &str) -> u32 {
+    let doc = roxmltree::Document::parse(styles_xml).expect("valid xml");
+    doc.descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "cellXfs")
+        .and_then(|n| n.attribute("count"))
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0)
 }
 
 #[test]
@@ -65,7 +77,10 @@ fn patch_preserves_existing_style_when_xf_index_none() -> Result<(), Box<dyn std
     let cell = sheet.cell(a1).expect("A1 should exist after patch");
 
     assert_eq!(cell.value, CellValue::String("Updated".to_string()));
-    assert_eq!(cell.style_id, orig_style, "style should be preserved by default");
+    assert_eq!(
+        cell.style_id, orig_style,
+        "style should be preserved by default"
+    );
     Ok(())
 }
 
@@ -105,3 +120,49 @@ fn patch_can_override_style_xf_index() -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+#[test]
+fn package_apply_cell_patches_updates_styles_xml_when_new_style_added(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = load_fixture();
+
+    // Use the model loader to get a StyleTable that already contains the workbook's styles.
+    let doc = load_from_bytes(&bytes)?;
+    let mut style_table = doc.workbook.styles.clone();
+
+    let new_style_id = style_table.intern(Style {
+        // A unique number format string to force a new xf record.
+        number_format: Some("0.0000000000000000\"STYLE_TEST\"".to_string()),
+        ..Default::default()
+    });
+
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+    let before_styles = std::str::from_utf8(pkg.part("xl/styles.xml").expect("styles.xml exists"))?;
+    let before_count = cell_xfs_count(before_styles);
+
+    let a1 = CellRef::from_a1("A1")?;
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        a1,
+        CellPatch::set_value(CellValue::String("Styled".to_string())).with_style_id(new_style_id),
+    );
+
+    pkg.apply_cell_patches_with_styles(&patches, &style_table)?;
+
+    let after_styles = std::str::from_utf8(pkg.part("xl/styles.xml").expect("styles.xml exists"))?;
+    let after_count = cell_xfs_count(after_styles);
+    assert_eq!(
+        after_count,
+        before_count + 1,
+        "expected a new xf record to be appended"
+    );
+
+    let expected_xf = before_count;
+    let sheet_xml = std::str::from_utf8(
+        pkg.part("xl/worksheets/sheet1.xml")
+            .expect("sheet1.xml exists"),
+    )?;
+    assert_eq!(cell_s_attr(sheet_xml, "A1"), Some(expected_xf.to_string()));
+
+    Ok(())
+}

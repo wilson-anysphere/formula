@@ -34,6 +34,8 @@ mod xml;
 pub mod drawingml;
 pub mod drawings;
 pub mod hyperlinks;
+pub mod merge_cells;
+pub mod minimal;
 pub mod outline;
 pub mod theme;
 mod package;
@@ -46,28 +48,27 @@ mod read;
 mod reader;
 mod relationships;
 pub mod shared_strings;
-pub mod merge_cells;
-pub mod minimal;
 mod sheet_metadata;
+pub mod streaming;
 pub mod styles;
 pub mod tables;
 pub mod vba;
-pub mod streaming;
 mod workbook;
 pub mod write;
 mod writer;
 
 use std::collections::{BTreeMap, HashMap};
 
-pub use compare::*;
+pub use crate::minimal::write_minimal_xlsx;
 pub use calc_settings::CalcSettingsError;
+pub use compare::*;
 pub use conditional_formatting::*;
 pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
 };
-pub use package::{XlsxError, XlsxPackage};
-pub use patch::{CellPatch, WorkbookCellPatches, WorksheetCellPatches};
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
+pub use package::{XlsxError, XlsxPackage};
+pub use patch::{CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches};
 pub use pivots::{
     cache_records::{pivot_cache_datetime_to_naive_date, PivotCacheRecordsReader, PivotCacheValue},
     graph::{PivotTableInstance, XlsxPivotGraph},
@@ -83,15 +84,15 @@ pub use sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
     WorkbookSheetInfo,
 };
+pub use streaming::{
+    patch_xlsx_streaming, patch_xlsx_streaming_workbook_cell_patches,
+    patch_xlsx_streaming_workbook_cell_patches_with_styles, StreamingPatchError,
+    WorksheetCellPatch,
+};
 pub use styles::*;
-pub use crate::minimal::write_minimal_xlsx;
 pub use workbook::ChartExtractionError;
 pub use writer::{write_workbook, write_workbook_to_writer, XlsxWriteError};
 pub use xml::XmlDomError;
-pub use streaming::{
-    patch_xlsx_streaming, patch_xlsx_streaming_workbook_cell_patches, StreamingPatchError,
-    WorksheetCellPatch,
-};
 
 use formula_model::rich_text::RichText;
 use formula_model::{CellRef, CellValue, Workbook, WorksheetId};
@@ -148,7 +149,9 @@ pub struct FormulaMeta {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CellValueKind {
     Number,
-    SharedString { index: u32 },
+    SharedString {
+        index: u32,
+    },
     InlineString,
     Bool,
     Error,
@@ -159,7 +162,9 @@ pub enum CellValueKind {
     /// payload. Excel emits additional values beyond the common `s/b/e/str/inlineStr` set (for
     /// example `t="d"` for ISO-8601 dates). When we don't understand the type, we keep the `t`
     /// string and the raw `<v>` text so we can rewrite `sheetData` without corrupting the file.
-    Other { t: String },
+    Other {
+        t: String,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -229,7 +234,12 @@ impl XlsxDocument {
         write::write_to_vec_with_recalc_policy(self, recalc_policy)
     }
 
-    pub fn set_cell_value(&mut self, sheet_id: WorksheetId, cell: CellRef, value: CellValue) -> bool {
+    pub fn set_cell_value(
+        &mut self,
+        sheet_id: WorksheetId,
+        cell: CellRef,
+        value: CellValue,
+    ) -> bool {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
@@ -380,7 +390,10 @@ fn cell_meta_from_value(value: &CellValue) -> (Option<CellValueKind>, Option<Str
             Some(if *b { "1" } else { "0" }.to_string()),
         ),
         CellValue::Error(err) => (Some(CellValueKind::Error), Some(err.as_str().to_string())),
-        CellValue::String(s) => (Some(CellValueKind::SharedString { index: 0 }), Some(s.clone())),
+        CellValue::String(s) => (
+            Some(CellValueKind::SharedString { index: 0 }),
+            Some(s.clone()),
+        ),
         CellValue::RichText(rich) => (
             Some(CellValueKind::SharedString { index: 0 }),
             Some(rich.text.clone()),

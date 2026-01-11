@@ -11,8 +11,8 @@
 use std::collections::HashMap;
 
 use formula_model::{
-    Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font, HorizontalAlignment,
-    Protection, Style, StyleTable, VerticalAlignment,
+    Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,
+    HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,
 };
 
 use crate::xml::{QName, XmlDomError, XmlElement, XmlNode};
@@ -167,6 +167,13 @@ impl StylesPart {
             .get(xf_index as usize)
             .copied()
             .unwrap_or(0)
+    }
+
+    /// Return the number of `<xf>` records in `cellXfs`.
+    ///
+    /// This corresponds to the valid range of worksheet `c/@s` indices.
+    pub fn cell_xfs_count(&self) -> usize {
+        self.xf_style_ids.len()
     }
 
     pub fn xf_index_for_style(
