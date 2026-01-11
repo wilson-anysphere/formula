@@ -467,6 +467,79 @@ test("publish-bin accepts v2 extension packages without X-Package-Signature", as
   }
 });
 
+test("publish-bin accepts v1 extension packages with detached X-Package-Signature", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-v1-bin-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    const packageBytes = await createExtensionPackageV1(extSource);
+    const signatureBase64 = signBytes(packageBytes, privateKeyPem);
+
+    const publishRes = await fetch(`${baseUrl}/api/publish-bin`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/vnd.formula.extension-package",
+        "X-Package-Signature": signatureBase64,
+      },
+      body: packageBytes,
+    });
+    assert.equal(publishRes.status, 200);
+    const published = await publishRes.json();
+    assert.deepEqual(published, { id: extensionId, version: manifest.version });
+
+    const missingSigRes = await fetch(`${baseUrl}/api/publish-bin`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/vnd.formula.extension-package",
+      },
+      body: packageBytes,
+    });
+    assert.equal(missingSigRes.status, 400);
+    const missingError = await missingSigRes.json();
+    assert.match(String(missingError?.error || ""), /x-package-signature/i);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("publish accepts v1 extension packages with detached signatureBase64", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-v1-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");

@@ -9,7 +9,7 @@ function usage() {
   console.error(
     [
       "Usage:",
-      "  formula-extension-publisher publish <extensionDir> --marketplace <url> --token <token> --private-key <pemPath>",
+      "  formula-extension-publisher publish <extensionDir> --marketplace <url> --token <token> --private-key <pemPath> [--format-version <1|2>]",
       "",
     ].join("\n"),
   );
@@ -34,8 +34,14 @@ async function main() {
   const marketplaceUrl = readFlag("--marketplace");
   const token = readFlag("--token");
   const privateKey = readFlag("--private-key");
+  const formatVersionRaw = readFlag("--format-version");
+  const formatVersion = formatVersionRaw ? Number(formatVersionRaw) : 2;
 
   if (!extensionDir || !marketplaceUrl || !token || !privateKey) {
+    usage();
+    process.exit(1);
+  }
+  if (formatVersion !== 1 && formatVersion !== 2) {
     usage();
     process.exit(1);
   }
@@ -45,6 +51,7 @@ async function main() {
     marketplaceUrl,
     token,
     privateKeyPemOrPath: privateKey,
+    formatVersion,
   });
 
   // eslint-disable-next-line no-console
@@ -56,4 +63,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
