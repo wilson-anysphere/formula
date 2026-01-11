@@ -2,6 +2,7 @@ use formula_storage::encryption::is_encrypted_container;
 use formula_storage::{
     CellChange, CellData, CellRange, CellValue, InMemoryKeyProvider, KeyProvider, Storage,
 };
+use formula_storage::{EncryptionError, storage::StorageError};
 use std::sync::Arc;
 use tempfile::tempdir;
 
@@ -113,6 +114,31 @@ fn encrypted_persist_creates_parent_directories() {
         .expect("create workbook");
     storage.persist().expect("persist should create dirs");
     assert!(path.exists(), "expected encrypted workbook file to exist");
+}
+
+#[test]
+fn encrypted_open_with_wrong_key_fails() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("workbook.formula");
+
+    let good_provider = Arc::new(InMemoryKeyProvider::default());
+    let storage = Storage::open_encrypted_path(&path, good_provider).expect("open encrypted");
+    storage
+        .create_workbook("Book1", None)
+        .expect("create workbook");
+    storage.persist().expect("persist encrypted");
+    drop(storage);
+
+    // Use a different key (but same key version) to ensure decrypt fails safely.
+    let wrong_keyring = formula_storage::KeyRing::from_key(1, [0xAA; 32]);
+    let wrong_provider = Arc::new(InMemoryKeyProvider::new(Some(wrong_keyring)));
+
+    let err = Storage::open_encrypted_path(&path, wrong_provider)
+        .expect_err("open should fail with wrong key");
+    match err {
+        StorageError::Encryption(EncryptionError::Aead) => {}
+        other => panic!("unexpected error: {other:?}"),
+    }
 }
 
 #[test]
