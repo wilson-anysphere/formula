@@ -267,6 +267,51 @@ test("permissions: sheets.createSheet requires sheets.manage", async (t) => {
   await assert.rejects(() => host.executeCommand(commandId), /Permission denied: sheets\.manage/);
 });
 
+test("permissions: sheets.activateSheet requires sheets.manage", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sheets-activate-deny-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+ 
+  const commandId = "sheetExt.activateDenied";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "sheet-activate-denied-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Sheet Activate Denied" }] },
+      permissions: ["ui.commands", "sheets.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          return formula.sheets.activateSheet("Sheet1");
+        }));
+      };
+    `
+  );
+ 
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async ({ permissions }) => !permissions.includes("sheets.manage")
+  });
+ 
+  t.after(async () => {
+    await host.dispose();
+  });
+ 
+  await host.loadExtension(extDir);
+  await assert.rejects(() => host.executeCommand(commandId), /Permission denied: sheets\.manage/);
+});
+
 test("api surface: sheets.deleteSheet removes sheets and cannot delete last sheet", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sheets-delete-"));
   const extDir = path.join(dir, "ext");
@@ -545,6 +590,59 @@ test("permissions: workbook.openWorkbook requires workbook.manage", async (t) =>
   await host.loadExtension(extDir);
 
   await assert.rejects(() => host.executeCommand(commandId), /Permission denied: workbook\.manage/);
+});
+
+test("permissions: workbook.saveAs requires workbook.manage and denial prevents updating workbook path", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-saveas-deny-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.saveAsDenied";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-saveas-denied-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook SaveAs Denied" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async (nextPath) => {
+          await formula.workbook.saveAs(nextPath);
+          return true;
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async ({ permissions }) => !permissions.includes("workbook.manage")
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const initialPath = path.join(dir, "Initial.xlsx");
+  host.openWorkbook(initialPath);
+
+  const nextPath = path.join(dir, "Next.xlsx");
+  await assert.rejects(() => host.executeCommand(commandId, nextPath), /Permission denied: workbook\.manage/);
+
+  assert.deepEqual(host._workbook, { name: "Initial.xlsx", path: initialPath });
 });
 
 test("events: workbook.save emits beforeSave with stable payload", async (t) => {
