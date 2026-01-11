@@ -27,13 +27,13 @@ test("copies and pastes a rectangular grid selection via TSV clipboard payload",
   await page.mouse.move(a1X, a2Y);
   await page.mouse.up();
 
-  await page.keyboard.press("Control+C");
+  await page.keyboard.press("ControlOrMeta+C");
 
   const c1X = a1X + colWidth * 2;
   await selectionCanvas.click({ position: { x: c1X - box!.x, y: a1Y - box!.y } });
   await expect(page.getByTestId("active-address")).toHaveText("C1");
 
-  await page.keyboard.press("Control+V");
+  await page.keyboard.press("ControlOrMeta+V");
 
   await expect(page.getByTestId("formula-bar-value")).toHaveText("1");
 
@@ -41,4 +41,3 @@ test("copies and pastes a rectangular grid selection via TSV clipboard payload",
   await expect(page.getByTestId("active-address")).toHaveText("C2");
   await expect(page.getByTestId("formula-bar-value")).toHaveText("2");
 });
-

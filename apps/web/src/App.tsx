@@ -393,6 +393,18 @@ function EngineDemoApp() {
 
     event.clipboardData?.setData("text/plain", tsv);
     event.clipboardData?.setData("text/html", html);
+    if (!event.clipboardData) {
+      const clipboard = navigator.clipboard;
+      if (clipboard && typeof clipboard.write === "function" && typeof ClipboardItem !== "undefined") {
+        const item = new ClipboardItem({
+          "text/plain": new Blob([tsv], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" })
+        });
+        void clipboard.write([item]).catch(() => {
+          // Ignore clipboard API failures (permissions, unsupported platform, etc).
+        });
+      }
+    }
     event.preventDefault();
   };
 
