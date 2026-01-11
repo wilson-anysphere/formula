@@ -60,6 +60,28 @@ fn imports_biff_number_formats_and_formatted_blanks() {
 }
 
 #[test]
+fn does_not_intern_datetime_fallback_styles_when_biff_styles_present() {
+    let bytes = xls_fixture_builder::build_number_format_fixture_xls(false);
+    let result = import_fixture(&bytes);
+
+    // If the importer had to fall back to `DateTimeStyleIds`, it would have
+    // interned this datetime format code (even though the fixture has no such
+    // cell). BIFF-derived styles should be sufficient, so this should not appear.
+    let has_fallback = (0..result.workbook.styles.len() as u32).any(|id| {
+        result
+            .workbook
+            .styles
+            .get(id)
+            .and_then(|s| s.number_format.as_deref())
+            == Some("m/d/yy h:mm:ss")
+    });
+    assert!(
+        !has_fallback,
+        "unexpected DateTimeStyleIds fallback style was interned"
+    );
+}
+
+#[test]
 fn respects_1904_date_system_flag() {
     let bytes = xls_fixture_builder::build_number_format_fixture_xls(true);
     let result = import_fixture(&bytes);
