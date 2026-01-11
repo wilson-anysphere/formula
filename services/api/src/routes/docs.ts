@@ -2,7 +2,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
-import { enforceOrgIpAllowlistForSessionWithAllowlist } from "../auth/orgIpAllowlist";
+import {
+  enforceOrgIpAllowlistForSession,
+  enforceOrgIpAllowlistForSessionWithAllowlist
+} from "../auth/orgIpAllowlist";
 import { isMfaEnforcedForOrg } from "../auth/mfa";
 import { encryptEnvelope, ENVELOPE_VERSION } from "../crypto/envelope";
 import { createKeyring } from "../crypto/keyring";
@@ -133,6 +136,8 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (!(await requireOrgMembership(request, orgId))) {
       return reply.code(403).send({ error: "forbidden" });
     }
+
+    if (!(await enforceOrgIpAllowlistForSession(request, reply, orgId))) return;
 
     if ((await isMfaEnforcedForOrg(app.db, orgId)) && !request.user!.mfaTotpEnabled) {
       return reply.code(403).send({ error: "mfa_required" });
@@ -890,9 +895,19 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const tokenHash = hashShareToken(token);
     const linkRes = await app.db.query(
       `
-        SELECT l.id, l.document_id, l.visibility, l.role, l.expires_at, l.revoked_at, d.org_id
+        SELECT
+          l.id,
+          l.document_id,
+          l.visibility,
+          l.role,
+          l.expires_at,
+          l.revoked_at,
+          d.org_id,
+          os.allow_external_sharing,
+          os.ip_allowlist
         FROM document_share_links l
         JOIN documents d ON d.id = l.document_id
+        LEFT JOIN org_settings os ON os.org_id = d.org_id
         WHERE l.token_hash = $1
         LIMIT 1
       `,
@@ -912,12 +927,11 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const visibility = linkRow.visibility as ShareLinkVisibility;
     const linkRole = linkRow.role as ShareLinkRole;
 
-    const orgSettings = await app.db.query(
-      "SELECT allow_external_sharing FROM org_settings WHERE org_id = $1",
-      [orgId]
-    );
+    const ipAllowlist = (linkRow as any).ip_allowlist as unknown;
     const allowExternalSharing =
-      orgSettings.rowCount === 1 ? Boolean((orgSettings.rows[0] as any).allow_external_sharing) : true;
+      (linkRow as any).allow_external_sharing == null ? true : Boolean((linkRow as any).allow_external_sharing);
+
+    if (!(await enforceOrgIpAllowlistForSessionWithAllowlist(request, reply, orgId, ipAllowlist))) return;
 
     const orgMembership = await app.db.query(
       "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2",

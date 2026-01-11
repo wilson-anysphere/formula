@@ -170,6 +170,16 @@ describe("security hardening", () => {
     });
     expect(setAllowlist.statusCode).toBe(200);
 
+    const blockedCreateDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie },
+      remoteAddress: "203.0.113.10",
+      payload: { orgId, title: "Blocked Doc" }
+    });
+    expect(blockedCreateDoc.statusCode).toBe(403);
+    expect((blockedCreateDoc.json() as any).error).toBe("ip_not_allowed");
+
     const blockedOrg = await app.inject({
       method: "GET",
       url: `/orgs/${orgId}`,
@@ -206,6 +216,26 @@ describe("security hardening", () => {
     });
     expect(blockedDocDlp.statusCode).toBe(403);
     expect((blockedDocDlp.json() as any).error).toBe("ip_not_allowed");
+
+    const createShareLink = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/share-links`,
+      headers: { cookie },
+      remoteAddress: "10.1.2.3",
+      payload: { visibility: "public", role: "viewer" }
+    });
+    expect(createShareLink.statusCode).toBe(200);
+    const shareToken = (createShareLink.json() as any).shareLink.token as string;
+    expect(shareToken).toBeTypeOf("string");
+
+    const blockedRedeem = await app.inject({
+      method: "POST",
+      url: `/share-links/${shareToken}/redeem`,
+      headers: { cookie },
+      remoteAddress: "203.0.113.10"
+    });
+    expect(blockedRedeem.statusCode).toBe(403);
+    expect((blockedRedeem.json() as any).error).toBe("ip_not_allowed");
 
     const allowedOrg = await app.inject({
       method: "GET",
