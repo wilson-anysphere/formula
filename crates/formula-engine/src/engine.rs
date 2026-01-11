@@ -424,6 +424,43 @@ impl Engine {
         Ok(())
     }
 
+    /// Clears a cell's stored value/formula so it behaves as if it does not exist.
+    ///
+    /// This is distinct from setting a cell to [`Value::Blank`]: clearing removes the
+    /// corresponding entry from the sheet's sparse cell map, preserving sparsity and
+    /// avoiding explicit blank entries for large cleared ranges.
+    pub fn clear_cell(&mut self, sheet: &str, addr: &str) -> Result<(), EngineError> {
+        let addr = parse_a1(addr)?;
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Ok(());
+        };
+        let key = CellKey { sheet: sheet_id, addr };
+        let cell_id = cell_id_from_key(key);
+
+        self.clear_spill_for_cell(key);
+        self.clear_blocked_spill_for_origin(key);
+
+        // Remove any existing formula and dependencies.
+        self.calc_graph.remove_cell(cell_id);
+        self.clear_cell_name_refs(key);
+        self.dirty.remove(&key);
+        self.dirty_reasons.remove(&key);
+
+        if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
+            sheet.cells.remove(&addr);
+        }
+
+        // Mark downstream dependents dirty.
+        self.mark_dirty_dependents_with_reasons(key);
+        self.calc_graph.mark_dirty(cell_id);
+        self.mark_dirty_blocked_spill_origins_for_cell(key);
+        self.sync_dirty_from_calc_graph();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+        Ok(())
+    }
+
     /// Replace the set of tables for a given worksheet.
     ///
     /// Tables are needed to resolve structured references like `Table1[Col]` and `[@Col]`.
@@ -4398,6 +4435,44 @@ mod tests {
     }
 
     #[test]
+    fn clear_cell_removes_literal_entry_from_sheet_map() {
+        let mut engine = Engine::new();
+        engine.set_cell_value("Sheet1", "A1", 123.0).unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").unwrap();
+        assert!(
+            engine.workbook.sheets[sheet_id].cells.contains_key(&addr),
+            "literal cell should be stored"
+        );
+
+        engine.clear_cell("Sheet1", "A1").unwrap();
+
+        assert!(
+            !engine.workbook.sheets[sheet_id].cells.contains_key(&addr),
+            "cleared literal cell should be removed from sparse storage"
+        );
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Blank);
+    }
+
+    #[test]
+    fn clear_cell_marks_dependents_dirty() {
+        let mut engine = Engine::new();
+        engine.set_cell_value("Sheet1", "A1", 2.0).unwrap();
+        engine.set_cell_formula("Sheet1", "B1", "=A1*2").unwrap();
+        engine.recalculate();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(4.0));
+
+        engine.clear_cell("Sheet1", "A1").unwrap();
+        engine.recalculate();
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "B1"),
+            Value::Number(0.0),
+            "clearing an input should propagate to dependent formulas"
+        );
+    }
+
+    #[test]
     fn recalculate_with_value_changes_tracks_scalar_formula_updates() {
         let mut engine = Engine::new();
         engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
@@ -4449,6 +4524,29 @@ mod tests {
                 value: Value::Blank,
             }]
         );
+    }
+
+    #[test]
+    fn clear_cell_removes_formula_entry_from_sheet_map() {
+        let mut engine = Engine::new();
+        engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").unwrap();
+        assert!(
+            engine.workbook.sheets[sheet_id].cells.contains_key(&addr),
+            "formula cell should be stored"
+        );
+        assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=1+1"));
+
+        engine.clear_cell("Sheet1", "A1").unwrap();
+
+        assert!(
+            !engine.workbook.sheets[sheet_id].cells.contains_key(&addr),
+            "cleared formula cell should be removed from sparse storage"
+        );
+        assert_eq!(engine.get_cell_formula("Sheet1", "A1"), None);
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Blank);
     }
 
     #[test]
