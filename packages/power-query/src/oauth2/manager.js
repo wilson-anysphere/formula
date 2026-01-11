@@ -242,10 +242,8 @@ export class OAuth2Manager {
     });
 
     const accessToken = refreshed.access_token;
-    const expiresAtMs =
-      typeof refreshed.expires_in === "number" && Number.isFinite(refreshed.expires_in)
-        ? params.now() + refreshed.expires_in * 1000
-        : null;
+    const expiresInSeconds = parsePositiveInt(refreshed.expires_in);
+    const expiresAtMs = expiresInSeconds != null ? params.now() + expiresInSeconds * 1000 : null;
     const nextRefreshToken = refreshed.refresh_token ?? cached.refreshToken;
 
     cached.accessToken = accessToken;
@@ -338,8 +336,8 @@ export class OAuth2Manager {
     });
 
     const accessToken = token.access_token;
-    const expiresAtMs =
-      typeof token.expires_in === "number" && Number.isFinite(token.expires_in) ? params.now() + token.expires_in * 1000 : null;
+    const expiresInSeconds = parsePositiveInt(token.expires_in);
+    const expiresAtMs = expiresInSeconds != null ? params.now() + expiresInSeconds * 1000 : null;
     const refreshToken = token.refresh_token ?? null;
 
     const cacheKey = OAuth2Manager.keyString(params.storeKey);
@@ -468,20 +466,24 @@ export class OAuth2Manager {
     }
     await options.broker.openAuthUrl(verificationUri);
 
-    const expiresAtMs = now() + started.expires_in * 1000;
+    const deviceExpiresIn = parsePositiveInt(started.expires_in);
+    if (deviceExpiresIn == null) {
+      throw new Error("OAuth2 device code response missing expires_in");
+    }
+    const expiresAtMs = now() + deviceExpiresIn * 1000;
     const token = await this.client.deviceCodePoll({
       tokenEndpoint: provider.tokenEndpoint,
       clientId: provider.clientId,
       clientSecret: provider.clientSecret,
       deviceCode: started.device_code,
-      intervalMs: (started.interval ?? 5) * 1000,
+      intervalMs: (parsePositiveInt(started.interval) ?? 5) * 1000,
       expiresAtMs,
       signal: options.signal,
     });
 
     const accessToken = token.access_token;
-    const accessExpiresAtMs =
-      typeof token.expires_in === "number" && Number.isFinite(token.expires_in) ? now() + token.expires_in * 1000 : null;
+    const tokenExpiresIn = parsePositiveInt(token.expires_in);
+    const accessExpiresAtMs = tokenExpiresIn != null ? now() + tokenExpiresIn * 1000 : null;
     const refreshToken = token.refresh_token ?? null;
 
     const storeKey = { providerId: provider.id, scopesHash: normalized.scopesHash };
@@ -521,4 +523,17 @@ export class OAuth2Manager {
     this.cache.delete(cacheKey);
     await this.tokenStore.delete(storeKey);
   }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
+function parsePositiveInt(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }

@@ -39,7 +39,7 @@ test("OAuth2Manager: exchanges authorization code and refreshes with rotation", 
       return jsonResponse({
         access_token: "access-1",
         token_type: "Bearer",
-        expires_in: 3600,
+        expires_in: "3600",
         refresh_token: "refresh-1",
       });
     }
@@ -50,7 +50,7 @@ test("OAuth2Manager: exchanges authorization code and refreshes with rotation", 
       return jsonResponse({
         access_token: refreshCalls === 1 ? "access-2" : "access-3",
         token_type: "Bearer",
-        expires_in: 3600,
+        expires_in: "3600",
         refresh_token: refreshCalls === 1 ? "refresh-2" : "refresh-3",
       });
     }
