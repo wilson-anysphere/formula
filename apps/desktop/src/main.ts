@@ -18,7 +18,7 @@ import {
   type MacroTrustDecision,
 } from "./macros";
 import { applyMacroCellUpdates } from "./macros/applyUpdates";
-import { MacroEventBridge, type SelectionRect } from "./macros/eventBridge";
+import { fireWorkbookBeforeCloseBestEffort, installVbaEventMacros } from "./macros/event_macros";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
@@ -42,6 +42,7 @@ let pendingBackendSync: Promise<void> = Promise.resolve();
 let queuedInvoke: TauriInvoke | null = null;
 let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 let rerenderLayout: (() => void) | null = null;
+let vbaEventMacros: ReturnType<typeof installVbaEventMacros> | null = null;
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -104,7 +105,15 @@ function stopPowerQueryService(): void {
 startPowerQueryService();
 window.addEventListener("unload", () => stopPowerQueryService());
 
-let macroEventBridge: MacroEventBridge | null = null;
+type SelectionRect = {
+  sheetId: string;
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+  activeRow: number;
+  activeCol: number;
+};
 
 function currentSelectionRect(): SelectionRect {
   const sheetId = app.getCurrentSheetId();
@@ -136,19 +145,6 @@ function currentSelectionRect(): SelectionRect {
     activeCol: active.col,
   };
 }
-
-let suppressSelectionEventMacros = false;
-let sawInitialSelection = false;
-app.subscribeSelection(() => {
-  // `subscribeSelection` invokes the listener immediately with the current selection. Excel
-  // does not fire `Worksheet_SelectionChange` on workbook load, so we skip the initial call.
-  if (!sawInitialSelection) {
-    sawInitialSelection = true;
-    return;
-  }
-  if (suppressSelectionEventMacros) return;
-  macroEventBridge?.notifySelectionChanged(currentSelectionRect());
-});
 
 // --- Sheet tabs (minimal multi-sheet support) ---------------------------------
 
@@ -507,25 +503,26 @@ if (
            const refreshRunner = () =>
              renderMacroRunner(runnerPanel, backend, workbookId, {
                onApplyUpdates: async (updates) => {
-                 const doc = app.getDocument();
-                 if (macroEventBridge) {
-                   macroEventBridge.applyMacroUpdates(updates, { label: "Run macro" });
-                 } else {
-                   doc.beginBatch({ label: "Run macro" });
-                   let committed = false;
-                   try {
-                     applyMacroCellUpdates(doc, updates);
-                     committed = true;
-                   } finally {
-                     if (committed) doc.endBatch();
-                     else doc.cancelBatch();
-                   }
-                 }
-                 app.refresh();
-                 await app.whenIdle();
-                 app.refresh();
-               },
-             });
+                  if (vbaEventMacros) {
+                    await vbaEventMacros.applyMacroUpdates(updates, { label: "Run macro" });
+                    return;
+                  }
+
+                  const doc = app.getDocument();
+                  doc.beginBatch({ label: "Run macro" });
+                  let committed = false;
+                  try {
+                    applyMacroCellUpdates(doc, updates);
+                    committed = true;
+                  } finally {
+                    if (committed) doc.endBatch();
+                    else doc.cancelBatch();
+                  }
+                  app.refresh();
+                  await app.whenIdle();
+                  app.refresh();
+                },
+              });
 
           const title = document.createElement("div");
           title.textContent = "Macro Recorder";
@@ -1374,17 +1371,30 @@ async function openWorkbookFromPath(path: string): Promise<void> {
   if (!ok) return;
 
   const hadActiveWorkbook = activeWorkbook != null;
+  vbaEventMacros?.dispose();
+  vbaEventMacros = null;
 
-  workbookSync?.stop();
-  workbookSync = null;
   stopPowerQueryService();
-
-  suppressSelectionEventMacros = true;
   try {
     // Allow any microtask-batched workbook edits to enqueue into the backend queue,
     // then drain the queue fully before swapping the workbook state.
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     await drainBackendSync();
+
+    if (hadActiveWorkbook && queuedInvoke) {
+      try {
+        await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        // Applying macro updates may schedule backend sync in a microtask; drain it to avoid
+        // interleaving stale edits with the next workbook load.
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        await drainBackendSync();
+      } catch (err) {
+        console.warn("Workbook_BeforeClose event macro failed:", err);
+      }
+    }
+
+    workbookSync?.stop();
+    workbookSync = null;
 
     activeWorkbook = await tauriBackend.openWorkbook(path);
     await loadWorkbookIntoDocument(activeWorkbook);
@@ -1396,12 +1406,8 @@ async function openWorkbookFromPath(path: string): Promise<void> {
       engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
     });
 
-    // Fire Workbook_Open once the workbook is loaded into the UI. This mirrors Excel's
-    // automatic event macros (subject to Trust Center and sandbox permissions).
-    if (macroEventBridge) {
-      await macroEventBridge.fireWorkbookOpen().catch((err) => {
-        console.error("Failed to fire Workbook_Open:", err);
-      });
+    if (queuedInvoke) {
+      vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     }
   } catch (err) {
     // If we were unable to swap workbooks, restore syncing for the previously-active
@@ -1411,11 +1417,12 @@ async function openWorkbookFromPath(path: string): Promise<void> {
         document: app.getDocument(),
         engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
       });
+      if (queuedInvoke) {
+        vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+      }
     }
     startPowerQueryService();
     throw err;
-  } finally {
-    suppressSelectionEventMacros = false;
   }
 }
 
@@ -1473,17 +1480,28 @@ async function handleNewWorkbook(): Promise<void> {
   if (!ok) return;
 
   const hadActiveWorkbook = activeWorkbook != null;
+  vbaEventMacros?.dispose();
+  vbaEventMacros = null;
 
-  workbookSync?.stop();
-  workbookSync = null;
   stopPowerQueryService();
-
-  suppressSelectionEventMacros = true;
   try {
     // Allow any microtask-batched workbook edits to enqueue into the backend queue,
     // then drain the queue fully before replacing the backend workbook state.
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     await drainBackendSync();
+
+    if (hadActiveWorkbook && queuedInvoke) {
+      try {
+        await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        await drainBackendSync();
+      } catch (err) {
+        console.warn("Workbook_BeforeClose event macro failed:", err);
+      }
+    }
+
+    workbookSync?.stop();
+    workbookSync = null;
 
     activeWorkbook = await tauriBackend.newWorkbook();
     await loadWorkbookIntoDocument(activeWorkbook);
@@ -1495,10 +1513,8 @@ async function handleNewWorkbook(): Promise<void> {
       engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
     });
 
-    if (macroEventBridge) {
-      await macroEventBridge.fireWorkbookOpen().catch((err) => {
-        console.error("Failed to fire Workbook_Open:", err);
-      });
+    if (queuedInvoke) {
+      vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     }
   } catch (err) {
     if (hadActiveWorkbook) {
@@ -1506,11 +1522,12 @@ async function handleNewWorkbook(): Promise<void> {
         document: app.getDocument(),
         engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
       });
+      if (queuedInvoke) {
+        vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+      }
     }
     startPowerQueryService();
     throw err;
-  } finally {
-    suppressSelectionEventMacros = false;
   }
 }
 
@@ -1523,19 +1540,10 @@ try {
     // can sequence behind pending workbook writes from `startWorkbookSync`.
     (globalThis as any).__FORMULA_WORKBOOK_INVOKE__ = queuedInvoke;
   }
-  window.addEventListener("unload", () => workbookSync?.stop());
-
-  if (invoke) {
-    const invokeForEvents = queuedInvoke ?? invoke;
-    macroEventBridge = new MacroEventBridge({
-      workbookId,
-      document: app.getDocument(),
-      invoke: invokeForEvents,
-      drainBackendSync,
-      getSelection: currentSelectionRect,
-    });
-    macroEventBridge.start();
-  }
+  window.addEventListener("unload", () => {
+    vbaEventMacros?.dispose();
+    workbookSync?.stop();
+  });
 
   const listen = getTauriListen();
   void listen("file-dropped", async (event) => {
@@ -1582,9 +1590,6 @@ try {
     if (closeInFlight) return;
     closeInFlight = true;
     try {
-      const beforeClose = macroEventBridge ? await macroEventBridge.fireWorkbookBeforeClose() : { ran: true };
-      if (!beforeClose.ran) return;
-
       const doc = app.getDocument();
       if (doc.isDirty) {
         const discard = window.confirm("You have unsaved changes. Discard them?");

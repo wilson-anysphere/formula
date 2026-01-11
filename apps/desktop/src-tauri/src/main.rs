@@ -8,10 +8,68 @@ mod tray;
 mod updater;
 
 use formula_desktop_tauri::commands;
-use formula_desktop_tauri::macro_trust::{MacroTrustStore, SharedMacroTrustStore};
+use formula_desktop_tauri::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
+use formula_desktop_tauri::macros::MacroExecutionOptions;
 use formula_desktop_tauri::state::{AppState, SharedAppState};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
+
+const WORKBOOK_ID: &str = "local-workbook";
+
+fn signature_status(vba_project_bin: &[u8]) -> commands::MacroSignatureStatus {
+    let parsed = formula_vba::verify_vba_digital_signature(vba_project_bin)
+        .ok()
+        .flatten();
+
+    match parsed {
+        Some(sig) => match sig.verification {
+            formula_vba::VbaSignatureVerification::SignedVerified => {
+                commands::MacroSignatureStatus::SignedVerified
+            }
+            formula_vba::VbaSignatureVerification::SignedInvalid => {
+                commands::MacroSignatureStatus::SignedInvalid
+            }
+            formula_vba::VbaSignatureVerification::SignedParseError => {
+                commands::MacroSignatureStatus::SignedParseError
+            }
+            formula_vba::VbaSignatureVerification::SignedButUnverified => {
+                commands::MacroSignatureStatus::SignedUnverified
+            }
+        },
+        None => commands::MacroSignatureStatus::Unsigned,
+    }
+}
+
+fn macros_trusted_for_before_close(
+    state: &mut AppState,
+    trust_store: &MacroTrustStore,
+) -> Result<bool, String> {
+    let workbook = match state.get_workbook_mut() {
+        Ok(workbook) => workbook,
+        Err(_) => return Ok(false),
+    };
+
+    let Some(vba_bin) = workbook.vba_project_bin.as_deref() else {
+        return Ok(false);
+    };
+
+    let fingerprint = if let Some(fp) = workbook.macro_fingerprint.as_deref() {
+        fp.to_string()
+    } else {
+        let identity = workbook
+            .origin_path
+            .as_deref()
+            .or(workbook.path.as_deref())
+            .unwrap_or(WORKBOOK_ID);
+        let fp = compute_macro_fingerprint(identity, vba_bin);
+        workbook.macro_fingerprint = Some(fp.clone());
+        fp
+    };
+
+    let trust = trust_store.trust_state(&fingerprint);
+    let sig_status = signature_status(vba_bin);
+    Ok(commands::evaluate_macro_trust(trust, sig_status).is_ok())
+}
 
 fn main() {
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
@@ -105,12 +163,71 @@ fn main() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                // Delegate close-handling to the frontend so it can:
-                // - fire `Workbook_BeforeClose` macros
-                // - prompt for unsaved changes
-                // - decide whether to hide the window or keep it open
+                // Keep the process alive so the tray icon stays available.
                 api.prevent_close();
-                let _ = window.emit("close-requested", ());
+
+                let window = window.clone();
+                let shared_state = window.state::<SharedAppState>().inner().clone();
+                let shared_trust = window.state::<SharedMacroTrustStore>().inner().clone();
+
+                tauri::async_runtime::spawn(async move {
+                    // Best-effort Workbook_BeforeClose. We do this in a background task so we
+                    // don't block the window event loop. Cancellation isn't supported yet.
+                    let state_for_macro = shared_state.clone();
+                    let trust_for_macro = shared_trust.clone();
+                    let macro_outcome = tauri::async_runtime::spawn_blocking(move || {
+                        let mut state = state_for_macro.lock().unwrap();
+                        let trust_store = trust_for_macro.lock().unwrap();
+
+                        let should_run = macros_trusted_for_before_close(&mut state, &trust_store)?;
+                        drop(trust_store);
+
+                        if !should_run {
+                            return Ok::<_, String>(());
+                        }
+
+                        let options = MacroExecutionOptions {
+                            permissions: Vec::new(),
+                            timeout_ms: None,
+                        };
+
+                        match state.fire_workbook_before_close(options) {
+                            Ok(outcome) => {
+                                if outcome.permission_request.is_some() {
+                                    eprintln!(
+                                        "[macro] Workbook_BeforeClose requested additional permissions; refusing to escalate."
+                                    );
+                                }
+                                if !outcome.ok {
+                                    let msg = outcome
+                                        .error
+                                        .unwrap_or_else(|| "unknown macro error".to_string());
+                                    eprintln!("[macro] Workbook_BeforeClose failed: {msg}");
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("[macro] Workbook_BeforeClose failed: {err}");
+                            }
+                        }
+
+                        Ok(())
+                    })
+                    .await;
+
+                    match macro_outcome {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => {
+                            eprintln!("[macro] Workbook_BeforeClose task failed: {err}");
+                        }
+                        Err(err) => {
+                            eprintln!("[macro] Workbook_BeforeClose task panicked: {err}");
+                        }
+                    }
+
+                    // Delegate the rest of close-handling to the frontend (unsaved changes prompt
+                    // + deciding whether to hide the window or keep it open).
+                    let _ = window.emit("close-requested", ());
+                });
             }
             tauri::WindowEvent::DragDrop(drag_drop) => {
                 if let tauri::DragDropEvent::Drop { paths, .. } = drag_drop {
