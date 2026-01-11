@@ -2140,18 +2140,96 @@ export class SpreadsheetApp {
     this.focus();
   }
 
+  private closestVisibleIndexInRange(values: number[], target: number, start: number, end: number): number | null {
+    if (values.length === 0) return null;
+    const rangeStart = Math.min(start, end);
+    const rangeEnd = Math.max(start, end);
+
+    const startIdx = this.lowerBound(values, rangeStart);
+    const endExclusive = this.lowerBound(values, rangeEnd + 1);
+    if (startIdx >= endExclusive) return null;
+
+    const idx = this.lowerBound(values, target);
+    const clampedIdx = Math.min(Math.max(idx, startIdx), endExclusive - 1);
+
+    let bestIdx = clampedIdx;
+    let bestValue = values[bestIdx] ?? null;
+    if (bestValue == null) return null;
+    let bestDist = Math.abs(bestValue - target);
+
+    const belowIdx = idx - 1;
+    if (belowIdx >= startIdx && belowIdx < endExclusive) {
+      const below = values[belowIdx];
+      if (below != null) {
+        const dist = Math.abs(below - target);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = belowIdx;
+          bestValue = below;
+        }
+      }
+    }
+
+    const aboveIdx = idx;
+    if (aboveIdx >= startIdx && aboveIdx < endExclusive) {
+      const above = values[aboveIdx];
+      if (above != null) {
+        const dist = Math.abs(above - target);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = aboveIdx;
+          bestValue = above;
+        }
+      }
+    }
+
+    return bestValue;
+  }
+
   private ensureActiveCellVisible(): void {
+    const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0] ?? null;
     let { row, col } = this.selection.active;
+    let canPreserveSelection = range != null;
 
     if (this.isRowHidden(row)) {
-      row = this.findNextVisibleRow(row, 1) ?? this.findNextVisibleRow(row, -1) ?? row;
+      const withinRange = range
+        ? this.closestVisibleIndexInRange(this.rowIndexByVisual, row, range.startRow, range.endRow)
+        : null;
+      if (withinRange != null) {
+        row = withinRange;
+      } else {
+        row = this.findNextVisibleRow(row, 1) ?? this.findNextVisibleRow(row, -1) ?? row;
+        canPreserveSelection = false;
+      }
     }
     if (this.isColHidden(col)) {
-      col = this.findNextVisibleCol(col, 1) ?? this.findNextVisibleCol(col, -1) ?? col;
+      const withinRange = range
+        ? this.closestVisibleIndexInRange(this.colIndexByVisual, col, range.startCol, range.endCol)
+        : null;
+      if (withinRange != null) {
+        col = withinRange;
+      } else {
+        col = this.findNextVisibleCol(col, 1) ?? this.findNextVisibleCol(col, -1) ?? col;
+        canPreserveSelection = false;
+      }
     }
 
     if (row !== this.selection.active.row || col !== this.selection.active.col) {
-      this.selection = setActiveCell(this.selection, { row, col }, this.limits);
+      if (canPreserveSelection) {
+        this.selection = buildSelection(
+          {
+            ranges: this.selection.ranges,
+            active: { row, col },
+            anchor: this.selection.anchor,
+            activeRangeIndex: this.selection.activeRangeIndex,
+          },
+          this.limits
+        );
+      } else {
+        // If there are no visible cells inside the current selection range (e.g. a fully-hidden row),
+        // fall back to collapsing to the nearest visible cell to keep interaction predictable.
+        this.selection = setActiveCell(this.selection, { row, col }, this.limits);
+      }
     }
   }
 
