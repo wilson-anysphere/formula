@@ -19,6 +19,42 @@ use crate::xml::{QName, XmlDomError, XmlElement, XmlNode};
 
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
+/// Default `styles.xml` payload used when a package omits the styles part.
+///
+/// This mirrors what Excel generates for a blank workbook and is shared across
+/// the `WorkbookPackage` and `XlsxDocument` pipelines.
+const DEFAULT_STYLES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1">
+    <font>
+      <sz val="11"/>
+      <color theme="1"/>
+      <name val="Calibri"/>
+      <family val="2"/>
+      <scheme val="minor"/>
+    </font>
+  </fonts>
+  <fills count="2">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+  </fills>
+  <borders count="1">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+  </borders>
+  <cellStyleXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+  </cellStyleXfs>
+  <cellXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+  </cellXfs>
+  <cellStyles count="1">
+    <cellStyle name="Normal" xfId="0" builtinId="0"/>
+  </cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>
+"#;
+
 #[derive(Debug, thiserror::Error)]
 pub enum StylesPartError {
     #[error("styles.xml root is not <styleSheet>")]
@@ -116,6 +152,16 @@ impl StylesPart {
         })
     }
 
+    pub fn parse_or_default(
+        bytes: Option<&[u8]>,
+        style_table: &mut StyleTable,
+    ) -> Result<Self, StylesPartError> {
+        match bytes {
+            Some(bytes) => Self::parse(bytes, style_table),
+            None => Self::parse(DEFAULT_STYLES_XML.as_bytes(), style_table),
+        }
+    }
+
     pub fn style_id_for_xf(&self, xf_index: u32) -> u32 {
         self.xf_style_ids
             .get(xf_index as usize)
@@ -159,6 +205,29 @@ impl StylesPart {
 
     pub fn to_xml_bytes(&self) -> Vec<u8> {
         self.root.to_xml_string().into_bytes()
+    }
+
+    /// Ensure every `style_id` in `style_ids` has a corresponding `xf` index.
+    ///
+    /// The returned map can be used to set worksheet `c/@s` attributes.
+    ///
+    /// `style_ids` are processed in sorted order so new `xf` records are appended
+    /// deterministically.
+    pub fn xf_indices_for_style_ids(
+        &mut self,
+        style_ids: impl IntoIterator<Item = u32>,
+        style_table: &StyleTable,
+    ) -> Result<HashMap<u32, u32>, StylesPartError> {
+        let mut ids: Vec<u32> = style_ids.into_iter().collect();
+        ids.sort_unstable();
+        ids.dedup();
+
+        let mut out = HashMap::with_capacity(ids.len());
+        for style_id in ids {
+            let xf_index = self.xf_index_for_style(style_id, style_table)?;
+            out.insert(style_id, xf_index);
+        }
+        Ok(out)
     }
 
     fn append_cell_xf(&mut self, xf: XmlElement) -> u32 {
@@ -974,4 +1043,3 @@ fn insertion_index(root: &XmlElement, local: &str) -> usize {
 
     root.children.len()
 }
-

@@ -1,4 +1,4 @@
-use formula_model::{Cell, CellRef, CellValue, Workbook};
+use formula_model::{Cell, CellRef, CellValue, Font, Style, Workbook};
 use formula_xlsx::{load_from_bytes, XlsxDocument};
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -8,6 +8,14 @@ fn new_document_saves_and_loads_with_multiple_sheets() {
     let mut workbook = Workbook::new();
     let sheet1 = workbook.add_sheet("First");
     let sheet2 = workbook.add_sheet("Second");
+
+    let italic_style_id = workbook.intern_style(Style {
+        font: Some(Font {
+            italic: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
 
     {
         let ws1 = workbook.sheet_mut(sheet1).unwrap();
@@ -21,7 +29,7 @@ fn new_document_saves_and_loads_with_multiple_sheets() {
     {
         let ws2 = workbook.sheet_mut(sheet2).unwrap();
         let mut cell = Cell::new(CellValue::Boolean(true));
-        cell.style_id = 7;
+        cell.style_id = italic_style_id;
         ws2.set_cell(CellRef::from_a1("C3").unwrap(), cell);
     }
 
@@ -43,7 +51,13 @@ fn new_document_saves_and_loads_with_multiple_sheets() {
 
     let ws2 = loaded.workbook.sheet_by_name("Second").unwrap();
     assert_eq!(ws2.value_a1("C3").unwrap(), CellValue::Boolean(true));
-    assert_eq!(ws2.cell_a1("C3").unwrap().unwrap().style_id, 7);
+    let styled_cell = ws2.cell_a1("C3").unwrap().unwrap();
+    let style = loaded
+        .workbook
+        .styles
+        .get(styled_cell.style_id)
+        .expect("style id valid");
+    assert!(style.font.as_ref().is_some_and(|font| font.italic));
 
     let rels = std::str::from_utf8(
         loaded
@@ -70,8 +84,8 @@ fn new_document_saves_and_loads_with_multiple_sheets() {
         .get("xl/styles.xml")
         .expect("styles part present");
     assert!(
-        cell_xfs_count(styles) >= 8,
-        "styles.xml should contain enough <xf> entries for the highest style_id"
+        cell_xfs_count(styles) >= 2,
+        "styles.xml should contain at least one xf for the workbook default and one for our style"
     );
 }
 

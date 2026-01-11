@@ -11,6 +11,7 @@ use thiserror::Error;
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
+use crate::styles::StylesPart;
 use crate::{CellValueKind, DateSystem, SheetMeta, XlsxDocument};
 
 #[derive(Debug, Error)]
@@ -23,6 +24,8 @@ pub enum WriteError {
     Xml(#[from] quick_xml::Error),
     #[error("xml attribute error: {0}")]
     XmlAttr(#[from] AttrError),
+    #[error(transparent)]
+    Styles(#[from] crate::styles::StylesPartError),
 }
 
 pub fn write_to_vec(doc: &XlsxDocument) -> Result<Vec<u8>, WriteError> {
@@ -54,17 +57,20 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         parts.insert("xl/sharedStrings.xml".to_string(), shared_strings_xml);
     }
 
-    // styles.xml is required by most files even if we don't model it.
-    if !parts.contains_key("xl/styles.xml") {
-        let max_style_id = doc
-            .workbook
-            .sheets
-            .iter()
-            .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
-            .max()
-            .unwrap_or(0);
-        parts.insert("xl/styles.xml".to_string(), minimal_styles_xml(max_style_id));
-    }
+    // Parse/update styles.xml (cellXfs) so cell `s` attributes refer to real xf indices.
+    let mut style_table = doc.workbook.styles.clone();
+    let mut styles_part = StylesPart::parse_or_default(
+        parts.get("xl/styles.xml").map(|b| b.as_slice()),
+        &mut style_table,
+    )?;
+    let style_ids = doc
+        .workbook
+        .sheets
+        .iter()
+        .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
+        .filter(|style_id| *style_id != 0);
+    let style_to_xf = styles_part.xf_indices_for_style_ids(style_ids, &style_table)?;
+    parts.insert("xl/styles.xml".to_string(), styles_part.to_xml_bytes());
 
     // Ensure core relationship/content types metadata exists when we synthesize new
     // parts for existing packages. For existing relationships we preserve IDs by
@@ -108,7 +114,14 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         let orig = parts.get(&sheet_meta.path).map(|b| b.as_slice());
         parts.insert(
             sheet_meta.path.clone(),
-            write_worksheet_xml(doc, sheet_meta, sheet, orig, &shared_string_lookup)?,
+            write_worksheet_xml(
+                doc,
+                sheet_meta,
+                sheet,
+                orig,
+                &shared_string_lookup,
+                &style_to_xf,
+            )?,
         );
     }
 
@@ -643,16 +656,17 @@ fn write_worksheet_xml(
     sheet: &Worksheet,
     original: Option<&[u8]>,
     shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
 ) -> Result<Vec<u8>, WriteError> {
     if let Some(original) = original {
-        return patch_worksheet_xml(doc, sheet_meta, sheet, original, shared_lookup);
+        return patch_worksheet_xml(doc, sheet_meta, sheet, original, shared_lookup, style_to_xf);
     }
 
     let dimension = sheet
         .used_range()
         .unwrap_or(Range::new(CellRef::new(0, 0), CellRef::new(0, 0)))
         .to_string();
-    let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup, None);
+    let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup, style_to_xf, None);
 
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
@@ -671,11 +685,19 @@ fn patch_worksheet_xml(
     sheet: &Worksheet,
     original: &[u8],
     shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
 ) -> Result<Vec<u8>, WriteError> {
     let outline = std::str::from_utf8(original)
         .ok()
         .and_then(|xml| crate::outline::read_outline_from_worksheet_xml(xml).ok());
-    let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup, outline.as_ref());
+    let sheet_data_xml = render_sheet_data(
+        doc,
+        sheet_meta,
+        sheet,
+        shared_lookup,
+        style_to_xf,
+        outline.as_ref(),
+    );
 
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(false);
@@ -712,6 +734,7 @@ fn render_sheet_data(
     sheet_meta: &SheetMeta,
     sheet: &Worksheet,
     shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
     outline: Option<&Outline>,
 ) -> String {
     let mut out = String::new();
@@ -778,7 +801,9 @@ fn render_sheet_data(
         out.push('"');
 
         if cell.style_id != 0 {
-            out.push_str(&format!(r#" s="{}""#, cell.style_id));
+            if let Some(xf_index) = style_to_xf.get(&cell.style_id) {
+                out.push_str(&format!(r#" s="{xf_index}""#));
+            }
         }
 
         let meta = doc.meta.cell_meta.get(&(sheet_meta.worksheet_id, cell_ref));
@@ -1067,30 +1092,6 @@ fn shared_string_index(
         }
         _ => 0,
     }
-}
-
-fn minimal_styles_xml(max_style_id: u32) -> Vec<u8> {
-    let cell_xfs_count = max_style_id.saturating_add(1).max(1) as usize;
-    let mut cell_xfs = String::new();
-    for _ in 0..cell_xfs_count {
-        cell_xfs.push_str(r#"<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>"#);
-    }
-
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font></fonts>
-  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
-  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="{cell_xfs_count}">{cell_xfs}</cellXfs>
-  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
-  <dxfs count="0"/>
-  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
-</styleSheet>
-"#
-    )
-    .into_bytes()
 }
 
 fn generate_minimal_package(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {

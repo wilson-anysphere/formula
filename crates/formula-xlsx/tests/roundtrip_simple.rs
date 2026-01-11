@@ -26,17 +26,16 @@ fn roundtrip_simple_preserves_key_parts() {
         &zip_part(FIXTURE, "xl/sharedStrings.xml"),
         &zip_part(&saved, "xl/sharedStrings.xml"),
     );
+    assert_xml_semantic_eq(
+        &zip_part(FIXTURE, "xl/styles.xml"),
+        &zip_part(&saved, "xl/styles.xml"),
+    );
 
     // Parts we don't model should be preserved byte-for-byte.
     assert_eq!(
         zip_part(FIXTURE, "xl/theme/theme1.xml"),
         zip_part(&saved, "xl/theme/theme1.xml"),
         "theme xml should be preserved verbatim"
-    );
-    assert_eq!(
-        zip_part(FIXTURE, "xl/styles.xml"),
-        zip_part(&saved, "xl/styles.xml"),
-        "styles.xml should be preserved verbatim"
     );
     assert_eq!(
         zip_part(FIXTURE, "xl/calcChain.xml"),

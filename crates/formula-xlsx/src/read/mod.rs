@@ -12,6 +12,7 @@ use thiserror::Error;
 use zip::ZipArchive;
 
 use crate::shared_strings::parse_shared_strings_xml;
+use crate::styles::StylesPart;
 use crate::{CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta};
 
 #[derive(Debug, Error)]
@@ -28,6 +29,8 @@ pub enum ReadError {
     Utf8(#[from] std::str::Utf8Error),
     #[error("sharedStrings.xml parse error: {0}")]
     SharedStrings(#[from] crate::shared_strings::SharedStringsError),
+    #[error(transparent)]
+    Styles(#[from] crate::styles::StylesPartError),
     #[error("missing required part: {0}")]
     MissingPart(&'static str),
     #[error("invalid cell reference: {0}")]
@@ -74,6 +77,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let (date_system, calc_pr, sheets) = parse_workbook_metadata(workbook_xml, &rels_map)?;
 
     let mut workbook = Workbook::new();
+    let styles_part = StylesPart::parse_or_default(parts.get("xl/styles.xml").map(|b| b.as_slice()), &mut workbook.styles)?;
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
 
@@ -87,7 +91,14 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             .get(&sheet.path)
             .ok_or(ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"))?;
 
-        parse_worksheet_into_model(ws, ws_id, sheet_xml, &shared_strings, &mut cell_meta)?;
+        parse_worksheet_into_model(
+            ws,
+            ws_id,
+            sheet_xml,
+            &shared_strings,
+            &styles_part,
+            &mut cell_meta,
+        )?;
 
         sheet_meta.push(SheetMeta {
             worksheet_id: ws_id,
@@ -248,6 +259,7 @@ fn parse_worksheet_into_model(
     worksheet_id: formula_model::WorksheetId,
     worksheet_xml: &[u8],
     shared_strings: &[RichText],
+    styles_part: &StylesPart,
     cell_meta_map: &mut std::collections::HashMap<(formula_model::WorksheetId, CellRef), CellMeta>,
 ) -> Result<(), ReadError> {
     let mut reader = Reader::from_reader(worksheet_xml);
@@ -298,7 +310,8 @@ fn parse_worksheet_into_model(
                         }
                         b"t" => current_t = Some(attr.unescape_value()?.into_owned()),
                         b"s" => {
-                            current_style = attr.unescape_value()?.into_owned().parse().unwrap_or(0)
+                            let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
+                            current_style = styles_part.style_id_for_xf(xf_index);
                         }
                         _ => {}
                     }
@@ -317,7 +330,10 @@ fn parse_worksheet_into_model(
                                     .map_err(|_| ReadError::InvalidCellRef(a1))?,
                             );
                         }
-                        b"s" => style_id = attr.unescape_value()?.into_owned().parse().unwrap_or(0),
+                        b"s" => {
+                            let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
+                            style_id = styles_part.style_id_for_xf(xf_index);
+                        }
                         _ => {}
                     }
                 }

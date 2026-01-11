@@ -14,38 +14,6 @@ const REL_TYPE_WORKSHEET: &str =
 const REL_TYPE_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 
-const DEFAULT_STYLES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="1">
-    <font>
-      <sz val="11"/>
-      <color theme="1"/>
-      <name val="Calibri"/>
-      <family val="2"/>
-      <scheme val="minor"/>
-    </font>
-  </fonts>
-  <fills count="2">
-    <fill><patternFill patternType="none"/></fill>
-    <fill><patternFill patternType="gray125"/></fill>
-  </fills>
-  <borders count="1">
-    <border><left/><right/><top/><bottom/><diagonal/></border>
-  </borders>
-  <cellStyleXfs count="1">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
-  </cellStyleXfs>
-  <cellXfs count="1">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-  </cellXfs>
-  <cellStyles count="1">
-    <cellStyle name="Normal" xfId="0" builtinId="0"/>
-  </cellStyles>
-  <dxfs count="0"/>
-  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
-</styleSheet>
-"#;
-
 #[derive(Debug, thiserror::Error)]
 pub enum WorkbookPackageError {
     #[error("io error: {0}")]
@@ -135,10 +103,7 @@ impl WorkbookPackage {
             .unwrap_or_else(|| "xl/styles.xml".to_string());
 
         let mut workbook = Workbook::new();
-        let styles = match package.part(&styles_part_name) {
-            Some(bytes) => StylesPart::parse(bytes, &mut workbook.styles)?,
-            None => StylesPart::parse(DEFAULT_STYLES_XML.as_bytes(), &mut workbook.styles)?,
-        };
+        let styles = StylesPart::parse_or_default(package.part(&styles_part_name), &mut workbook.styles)?;
 
         let Some(sheets_el) = workbook_root.child("sheets") else {
             return Err(WorkbookPackageError::MissingSheets);
@@ -195,12 +160,13 @@ impl WorkbookPackage {
 
     pub fn save(&mut self, out_path: &Path) -> Result<(), WorkbookPackageError> {
         // Ensure we have xf indices for any styles referenced by stored cells.
-        for sheet in &self.workbook.sheets {
-            for (_, cell) in sheet.iter_cells() {
-                self.styles
-                    .xf_index_for_style(cell.style_id, &self.workbook.styles)?;
-            }
-        }
+        let style_ids = self
+            .workbook
+            .sheets
+            .iter()
+            .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id));
+        self.styles
+            .xf_indices_for_style_ids(style_ids, &self.workbook.styles)?;
 
         // Update worksheet `s` attributes from style_ids.
         for part in &mut self.worksheets {
