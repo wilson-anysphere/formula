@@ -629,3 +629,48 @@ test("sqlite connections with relative paths are treated as non-cacheable", asyn
   const key = await engine.getCacheKey(query, {}, {});
   assert.equal(key, null);
 });
+
+test("sqlite database cache entries are invalidated when the db file mtime changes", async () => {
+  let mtimeMs = 1_000;
+  let queryCount = 0;
+
+  const engine = createDesktopQueryEngine({
+    fileAdapter: {
+      readText: async () => "",
+      readBinary: async () => new Uint8Array(),
+      stat: async () => ({ mtimeMs }),
+    },
+  });
+
+  const originalTauri = globalThis.__TAURI__;
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd) => {
+        if (cmd === "sql_query") {
+          queryCount += 1;
+          return { columns: ["A"], types: { A: "number" }, rows: [[1]] };
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const query = {
+      id: "q_db_cache_mtime",
+      name: "DB Cache mtime",
+      source: { type: "database", connection: { kind: "sqlite", path: "/tmp/test.db" }, query: "SELECT 1 AS A" },
+      steps: [],
+    };
+
+    await engine.executeQuery(query, {}, {});
+    await engine.executeQuery(query, {}, {});
+    assert.equal(queryCount, 1, "expected second execution to reuse cached result");
+
+    mtimeMs = 2_000;
+    await engine.executeQuery(query, {}, {});
+    assert.equal(queryCount, 2, "expected cache to invalidate when sqlite db mtime changes");
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});

@@ -1001,6 +1001,36 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     getConnectionIdentity: parseConnectionIdentity,
   });
 
+  // Enable cache validation for file-backed SQLite connections by probing the
+  // database file mtime (similar to the file connector's source-state handling).
+  //
+  // Postgres (and in-memory SQLite) do not currently have a deterministic, cheap
+  // source-state probe, so they return `{}` and fall back to cache hits.
+  (sql as any).getSourceState = async (request: any, stateOptions: any = {}) => {
+    const signal = stateOptions?.signal as AbortSignal | undefined;
+    if (signal?.aborted) throw abortError();
+
+    if (!fileAdapter.stat) return {};
+    const connection = request?.connection;
+    if (!connection || typeof connection !== "object" || Array.isArray(connection)) return {};
+    if (connection.kind !== "sqlite") return {};
+
+    const inMemory = connection.inMemory ?? connection.in_memory;
+    if (inMemory) return {};
+
+    const path = typeof connection.path === "string" ? connection.path : "";
+    if (!path) return {};
+    const normalized = normalizeFilePath(path);
+    const isAbsolute = normalized.startsWith("/") || /^[a-z]:\//.test(normalized);
+    if (!isAbsolute) return {};
+
+    const result = await fileAdapter.stat(path);
+    if (signal?.aborted) throw abortError();
+    const mtimeMs = result?.mtimeMs;
+    if (typeof mtimeMs !== "number" || !Number.isFinite(mtimeMs)) return {};
+    return { sourceTimestamp: new Date(mtimeMs) };
+  };
+
   // Cache permission prompts across executions so previewing the same query
   // doesn't repeatedly ask the user.
   const permissionPromptCache = new Map<string, Promise<boolean>>();
