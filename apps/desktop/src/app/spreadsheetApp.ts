@@ -2765,7 +2765,7 @@ export class SpreadsheetApp {
 
     const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
-    return this.computeCellValue(cell, memo, stack);
+    return this.computeCellValue(this.sheetId, cell, memo, stack);
   }
 
   private computedKey(sheetId: string, address: string): string {
@@ -2825,31 +2825,50 @@ export class SpreadsheetApp {
   }
 
   private computeCellValue(
+    sheetId: string,
     cell: CellCoord,
     memo: Map<string, SpreadsheetValue>,
     stack: Set<string>
   ): SpreadsheetValue {
-    const key = cellToA1(cell);
-    const computedKey = this.computedKey(this.sheetId, key);
+    const address = cellToA1(cell);
+    const computedKey = this.computedKey(sheetId, address);
     if (this.computedValues.has(computedKey)) {
       return this.computedValues.get(computedKey) ?? null;
     }
-    const cached = memo.get(key);
-    if (cached !== undefined || memo.has(key)) return cached ?? null;
-    if (stack.has(key)) return "#REF!";
+    const cached = memo.get(computedKey);
+    if (cached !== undefined || memo.has(computedKey)) return cached ?? null;
+    if (stack.has(computedKey)) return "#REF!";
 
-    stack.add(key);
-    const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+    stack.add(computedKey);
+    const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
     let value: SpreadsheetValue;
 
     if (state?.formula != null) {
+      const resolveSheetId = (name: string): string | null => {
+        const trimmed = name.trim();
+        if (!trimmed) return null;
+        const knownSheets = this.document.getSheetIds();
+        return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+      };
+
       value = evaluateFormula(state.formula, (ref) => {
-        const normalized = ref.replaceAll("$", "");
-        const coord = parseA1(normalized);
-        return this.computeCellValue(coord, memo, stack);
+        const normalized = ref.replaceAll("$", "").trim();
+        let targetSheet = sheetId;
+        let targetAddress = normalized;
+        if (normalized.includes("!")) {
+          const [maybeSheet, addr] = normalized.split("!", 2);
+          if (maybeSheet && addr) {
+            const resolved = resolveSheetId(maybeSheet);
+            if (!resolved) return "#REF!";
+            targetSheet = resolved;
+            targetAddress = addr.trim();
+          }
+        }
+        const coord = parseA1(targetAddress);
+        return this.computeCellValue(targetSheet, coord, memo, stack);
       }, {
         ai: this.aiCellFunctions,
-        cellAddress: `${this.sheetId}!${key}`,
+        cellAddress: `${sheetId}!${address}`,
       });
     } else if (state?.value != null) {
       value = isRichTextValue(state.value) ? state.value.text : (state.value as SpreadsheetValue);
@@ -2857,8 +2876,8 @@ export class SpreadsheetApp {
       value = null;
     }
 
-    stack.delete(key);
-    memo.set(key, value);
+    stack.delete(computedKey);
+    memo.set(computedKey, value);
     return value;
   }
 
