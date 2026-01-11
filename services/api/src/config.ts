@@ -174,6 +174,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (!config.publicBaseUrl) {
       throw new Error("Refusing to start in production without PUBLIC_BASE_URL");
     }
+    if (!config.publicBaseUrl.startsWith("https://")) {
+      throw new Error("Refusing to start in production with PUBLIC_BASE_URL that is not https");
+    }
 
     const invalidSecrets: string[] = [];
     if (config.syncTokenSecret === DEV_SYNC_TOKEN_SECRET) invalidSecrets.push("SYNC_TOKEN_SECRET");
