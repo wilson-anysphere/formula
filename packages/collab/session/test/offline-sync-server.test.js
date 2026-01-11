@@ -75,6 +75,9 @@ test("CollabSession offline persistence survives restart and merges on reconnect
 
   // Go offline.
   sessionA.disconnect();
+  // Tear down the websocket provider before stopping the server so the child
+  // process can exit promptly (avoids flaky shutdown delays in CI).
+  sessionA.provider?.destroy?.();
   await server.stop();
   server = null;
 
@@ -133,4 +136,3 @@ test("CollabSession offline persistence survives restart and merges on reconnect
   assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value, "offline");
   assert.equal((await sessionB.getCell("Sheet1:0:2"))?.formula, "=1+2");
 });
-
