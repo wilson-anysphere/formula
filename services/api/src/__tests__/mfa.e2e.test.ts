@@ -504,6 +504,53 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     expect(user.rows[0].mfa_totp_enabled).toBe(true);
   });
 
+  it("does not treat password reauth for recovery-code regeneration as satisfying org require_mfa", async () => {
+    const reg = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "org-mfa-password-stepup@example.com", password: "password1234", name: "Org Admin", orgName: "Org" }
+    });
+    expect(reg.statusCode).toBe(200);
+    const cookie = extractCookie(reg.headers["set-cookie"]);
+    const body = reg.json() as any;
+    const userId = body.user.id as string;
+    const orgId = body.organization.id as string;
+
+    await db.query("UPDATE org_settings SET require_mfa = true WHERE org_id = $1", [orgId]);
+    // Simulate a user that has enrolled local MFA, but whose current session has
+    // not satisfied MFA (e.g. legacy sessions created before this feature).
+    await db.query("UPDATE users SET mfa_totp_enabled = true WHERE id = $1", [userId]);
+
+    const blockedBefore = await app.inject({
+      method: "PATCH",
+      url: `/orgs/${orgId}/settings`,
+      headers: { cookie },
+      payload: { allowPublicLinks: false }
+    });
+    expect(blockedBefore.statusCode).toBe(403);
+    expect((blockedBefore.json() as any).error).toBe("mfa_required");
+
+    const regen = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/recovery-codes/regenerate",
+      headers: { cookie },
+      payload: { password: "password1234" }
+    });
+    expect(regen.statusCode).toBe(200);
+    const codes = (regen.json() as any).codes as string[];
+    expect(Array.isArray(codes)).toBe(true);
+    expect(codes).toHaveLength(10);
+
+    const blockedAfter = await app.inject({
+      method: "PATCH",
+      url: `/orgs/${orgId}/settings`,
+      headers: { cookie },
+      payload: { allowPublicLinks: false }
+    });
+    expect(blockedAfter.statusCode).toBe(403);
+    expect((blockedAfter.json() as any).error).toBe("mfa_required");
+  });
+
   it("enforces org require_mfa on share-link management endpoints", async () => {
     const reg = await app.inject({
       method: "POST",

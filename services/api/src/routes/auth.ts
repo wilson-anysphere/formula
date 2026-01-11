@@ -858,11 +858,16 @@ export function registerAuthRoutes(app: FastifyInstance): void {
             [crypto.randomUUID(), userId, hashRecoveryCode(code)]
           );
         }
-        await setSessionMfaSatisfied(client, {
-          sessionId: request.session!.id,
-          userId,
-          mfaSatisfied: true
-        });
+        // Only a successful TOTP or recovery-code challenge counts as satisfying MFA for this session.
+        // Password re-auth is still allowed (useful for recovering access while logged in) but should not
+        // be treated as MFA for org-level `require_mfa` enforcement.
+        if (totpCode || recoveryCode) {
+          await setSessionMfaSatisfied(client, {
+            sessionId: request.session!.id,
+            userId,
+            mfaSatisfied: true
+          });
+        }
         return { ok: true as const, usedRecoveryCodeId };
       });
 
