@@ -5,7 +5,7 @@ import { KernelEngine } from "../src/index.js";
 
 class FakeGpuBackend {
   kind = "webgpu";
-  calls = { sum: 0 };
+  calls = { sum: 0, min: 0 };
   /** @type {any} */
   lastOpts = null;
 
@@ -22,7 +22,7 @@ class FakeGpuBackend {
 
   supportsKernelPrecision(kernel, precision) {
     if (precision === "f32") return true;
-    return kernel === "sum" ? this._supportsF64 : false;
+    return kernel === "sum" || kernel === "min" ? this._supportsF64 : false;
   }
 
   dispose() {}
@@ -31,6 +31,12 @@ class FakeGpuBackend {
     this.calls.sum += 1;
     this.lastOpts = opts;
     return 123;
+  }
+
+  async min(_values, opts) {
+    this.calls.min += 1;
+    this.lastOpts = opts;
+    return 5;
   }
 }
 
@@ -118,3 +124,52 @@ test("precision=fast: uses f32 on GPU and does not validate by default", async (
   assert.equal(diag.lastKernelPrecision.sum, "f32");
 });
 
+test("new kernels: min follows the same excel/fast precision rules", async () => {
+  {
+    const fakeGpu = new FakeGpuBackend(false);
+    const engine = new KernelEngine({
+      precision: "excel",
+      gpuBackend: fakeGpu,
+      thresholds: { min: 0 }
+    });
+
+    const values = new Float64Array([3, 1, 2]);
+    const result = await engine.min(values);
+    assert.equal(result, 1);
+    assert.equal(fakeGpu.calls.min, 0);
+    assert.equal(engine.lastKernelBackend().min, "cpu");
+  }
+
+  {
+    const fakeGpu = new FakeGpuBackend(true);
+    const engine = new KernelEngine({
+      precision: "excel",
+      gpuBackend: fakeGpu,
+      thresholds: { min: 0 },
+      validation: { enabled: false }
+    });
+
+    const values = new Float32Array([3, 1, 2]);
+    const result = await engine.min(values);
+    assert.equal(result, 5);
+    assert.equal(fakeGpu.calls.min, 1);
+    assert.equal(engine.lastKernelBackend().min, "webgpu");
+    assert.equal(engine.diagnostics().lastKernelPrecision.min, "f64");
+    assert.deepEqual(fakeGpu.lastOpts, { precision: "f64", allowFp32FallbackForF64: false });
+  }
+
+  {
+    const fakeGpu = new FakeGpuBackend(true);
+    const engine = new KernelEngine({
+      precision: "fast",
+      gpuBackend: fakeGpu,
+      thresholds: { min: 0 }
+    });
+
+    const values = new Float64Array([3, 1, 2]);
+    const result = await engine.min(values);
+    assert.equal(result, 5);
+    assert.equal(engine.lastKernelBackend().min, "webgpu");
+    assert.equal(engine.diagnostics().lastKernelPrecision.min, "f32");
+  }
+});

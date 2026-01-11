@@ -36,6 +36,9 @@ await engine.dispose();
   - `precision: "excel"` (default): uses **f64** GPU kernels when supported and otherwise falls back to CPU. This mode never silently downcasts `Float64Array` inputs to `f32`.
   - `precision: "fast"`: prefers **f32** GPU kernels and may downcast `Float64Array` inputs for performance.
 - Optional safety net: in `"excel"` mode the engine can validate some GPU results against CPU for smaller workloads (default `maxElements=32768`) and fall back to CPU if the difference exceeds a strict tolerance (`abs=1e-9`, `rel=1e-12`). Configure via the `validation` option.
+- Kernel edge cases:
+  - **Sort** matches `TypedArray#sort` semantics for special values: `NaN` sorts to the end, and `±Infinity` sorts normally.
+  - **Histogram** ignores `NaN` values and clamps `±Infinity` into the first/last bin.
 
 ## Benchmarks
 ```bash

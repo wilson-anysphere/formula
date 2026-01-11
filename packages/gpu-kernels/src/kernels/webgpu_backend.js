@@ -640,6 +640,13 @@ export class WebGpuBackend {
     const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
     const requested = opts.precision ?? "auto";
 
+    if (a.length !== aRows * aCols) {
+      throw new Error(`MMULT A shape mismatch: a.length=${a.length} vs ${aRows}x${aCols}`);
+    }
+    if (b.length !== aCols * bCols) {
+      throw new Error(`MMULT B shape mismatch: b.length=${b.length} vs ${aCols}x${bCols}`);
+    }
+
     const aDtype = dtypeOf(a);
     const bDtype = dtypeOf(b);
     const inferred = aDtype === "f64" || bDtype === "f64" ? "f64" : "f32";
