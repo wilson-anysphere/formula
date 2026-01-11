@@ -309,6 +309,9 @@ export class CanvasGridRenderer {
     setupHiDpiCanvas(this.selectionCanvas, this.selectionCtx, width, height, devicePixelRatio);
 
     this.ensureBlitCanvas();
+    if (this.remotePresences.length > 0) {
+      this.remotePresenceDirtyPadding = this.getRemotePresenceDirtyPadding(this.selectionCtx);
+    }
     this.markAllDirty();
   }
 
