@@ -150,9 +150,14 @@ describe("internal sync token introspection", () => {
       payload: { token: syncToken, docId }
     });
     expect(roleUpdatedRes.statusCode).toBe(200);
+    // Sync tokens treat the embedded role as an upper bound and clamp it to the
+    // current DB role (so token refreshes aren't required for simple demotions).
     expect(roleUpdatedRes.json()).toMatchObject({ ok: true, role: "viewer" });
 
     await db.query("DELETE FROM document_members WHERE document_id = $1 AND user_id = $2", [docId, bobId]);
+
+    const failuresBeforeRes = await app.inject({ method: "GET", url: "/metrics" });
+    const failuresBefore = getCounterValue(failuresBeforeRes.body, "sync_token_introspect_failures_total");
 
     const membershipRemovedRes = await app.inject({
       method: "POST",
@@ -165,7 +170,7 @@ describe("internal sync token introspection", () => {
 
     const metricsRes = await app.inject({ method: "GET", url: "/metrics" });
     const failures = getCounterValue(metricsRes.body, "sync_token_introspect_failures_total");
-    expect(failures).toBeGreaterThanOrEqual(1);
+    expect(failures).toBeGreaterThanOrEqual(failuresBefore + 1);
     },
     15_000
   );
@@ -231,6 +236,9 @@ describe("internal sync token introspection", () => {
     });
     expect(logoutRes.statusCode).toBe(200);
 
+    const failuresBeforeRes = await app.inject({ method: "GET", url: "/metrics" });
+    const failuresBefore = getCounterValue(failuresBeforeRes.body, "sync_token_introspect_failures_total");
+
     const revokedRes = await app.inject({
       method: "POST",
       url: "/internal/sync/introspect",
@@ -242,8 +250,8 @@ describe("internal sync token introspection", () => {
 
     const metricsRes = await app.inject({ method: "GET", url: "/metrics" });
     const failures = getCounterValue(metricsRes.body, "sync_token_introspect_failures_total");
-    expect(failures).toBeGreaterThanOrEqual(2);
+    expect(failures).toBeGreaterThanOrEqual(failuresBefore + 1);
     },
     15_000
   );
-});
+}); 
