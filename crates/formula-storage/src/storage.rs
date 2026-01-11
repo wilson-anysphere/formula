@@ -11,7 +11,7 @@ use crate::types::{
 use formula_model::{validate_sheet_name, ErrorValue, SheetNameError};
 use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
-use serde_json::json;
+use serde_json::{json, Value as JsonValue};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
@@ -447,6 +447,7 @@ impl Storage {
                 .as_ref()
                 .map(|c| serde_json::to_value(c))
                 .transpose()?;
+            let model_sheet_json = worksheet_metadata_json(sheet)?;
 
             tx.execute(
                 r#"
@@ -464,9 +465,10 @@ impl Storage {
                   frozen_cols,
                   zoom,
                   metadata,
-                  model_sheet_id
+                  model_sheet_id,
+                  model_sheet_json
                 ) VALUES (
-                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
                 )
                 "#,
                 params![
@@ -483,7 +485,8 @@ impl Storage {
                     sheet.frozen_cols as i64,
                     sheet.zoom as f64,
                     Option::<serde_json::Value>::None,
-                    sheet.id as i64
+                    sheet.id as i64,
+                    model_sheet_json
                 ],
             )?;
         }
@@ -712,7 +715,8 @@ impl Storage {
               frozen_rows,
               frozen_cols,
               zoom,
-              model_sheet_id
+              model_sheet_id,
+              model_sheet_json
             FROM sheets
             WHERE workbook_id = ?1
             ORDER BY position
@@ -735,6 +739,7 @@ impl Storage {
             let frozen_cols: i64 = row.get(9)?;
             let zoom: f64 = row.get(10)?;
             let model_sheet_id: Option<i64> = row.get(11)?;
+            let model_sheet_json: Option<serde_json::Value> = row.get(12)?;
 
             let sheet_id = match model_sheet_id.map(|id| id.max(0) as u32) {
                 Some(explicit) if !used_sheet_ids.contains(&explicit) => explicit,
@@ -749,7 +754,13 @@ impl Storage {
             };
             used_sheet_ids.insert(sheet_id);
 
-            let mut sheet = formula_model::Worksheet::new(sheet_id, name.clone());
+            let mut sheet = match model_sheet_json {
+                Some(json) => serde_json::from_value::<formula_model::Worksheet>(json)
+                    .unwrap_or_else(|_| formula_model::Worksheet::new(sheet_id, name.clone())),
+                None => formula_model::Worksheet::new(sheet_id, name.clone()),
+            };
+            sheet.id = sheet_id;
+            sheet.name = name.clone();
             sheet.visibility = storage_sheet_visibility_to_model(&visibility_raw);
             sheet.xlsx_sheet_id = xlsx_sheet_id.map(|v| v as u32);
             sheet.xlsx_rel_id = xlsx_rel_id;
@@ -1786,6 +1797,15 @@ fn cell_value_fast_path(value: &CellValue) -> (Option<String>, Option<f64>, Opti
         CellValue::Error(err) => (Some("error".to_string()), None, Some(err.as_str().to_string())),
         CellValue::RichText(_) | CellValue::Array(_) | CellValue::Spill(_) => (None, None, None),
     }
+}
+
+fn worksheet_metadata_json(sheet: &formula_model::Worksheet) -> Result<Option<JsonValue>> {
+    let mut value = serde_json::to_value(sheet)?;
+    if let JsonValue::Object(map) = &mut value {
+        map.remove("cells");
+        map.remove("drawings");
+    }
+    Ok(Some(value))
 }
 
 fn get_or_insert_style_component_tx(

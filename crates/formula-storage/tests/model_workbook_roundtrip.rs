@@ -3,6 +3,7 @@ use formula_model::{
     DefinedNameScope, Font, Range, RichText, SheetVisibility, SpillValue, Style, TabColor,
     ThemePalette, WorkbookProtection, WorkbookView, WorkbookWindow, WorkbookWindowState,
 };
+use formula_model::{ColProperties, Comment, CommentAuthor, CommentKind, RowProperties, SheetSelection};
 use formula_model::drawings::{
     Anchor, AnchorPoint, CellOffset, DrawingObject, DrawingObjectId, DrawingObjectKind, EmuSize,
     ImageData, ImageId,
@@ -151,6 +152,49 @@ fn model_workbook_import_export_round_trips() {
             size: Some(EmuSize::new(100, 200)),
             preserved: Default::default(),
         });
+        sheet.view.show_grid_lines = false;
+        sheet.view.selection = Some(SheetSelection::new(
+            CellRef::new(5, 5),
+            vec![Range::new(CellRef::new(5, 5), CellRef::new(6, 6))],
+        ));
+        sheet.row_properties.insert(
+            10,
+            RowProperties {
+                height: Some(20.0),
+                hidden: true,
+            },
+        );
+        sheet.col_properties.insert(
+            3,
+            ColProperties {
+                width: Some(12.0),
+                hidden: false,
+            },
+        );
+        sheet.merged_regions
+            .add(Range::new(CellRef::new(10, 10), CellRef::new(11, 11)))
+            .expect("add merge");
+        sheet.outline.pr.summary_below = false;
+        sheet.outline.group_rows(1, 2);
+        sheet.add_comment(
+            CellRef::new(5, 5),
+            Comment {
+                id: String::new(),
+                cell_ref: CellRef::new(0, 0),
+                author: CommentAuthor {
+                    id: "u1".to_string(),
+                    name: "Alice".to_string(),
+                },
+                created_at: 1,
+                updated_at: 2,
+                resolved: false,
+                kind: CommentKind::Threaded,
+                content: "Hello".to_string(),
+                mentions: Vec::new(),
+                replies: Vec::new(),
+            },
+        )
+        .expect("add comment");
 
         sheet.set_cell(
             CellRef::new(0, 0),
@@ -283,6 +327,21 @@ fn model_workbook_import_export_round_trips() {
         assert_eq!(actual.frozen_cols, expected.frozen_cols);
         assert!((actual.zoom - expected.zoom).abs() < f32::EPSILON);
         assert_eq!(actual.drawings, expected.drawings);
+        assert_eq!(actual.view, expected.view);
+        assert_eq!(actual.row_properties, expected.row_properties);
+        assert_eq!(actual.col_properties, expected.col_properties);
+        assert_eq!(actual.outline, expected.outline);
+        assert_eq!(actual.merged_regions.regions, expected.merged_regions.regions);
+
+        let expected_comments: Vec<_> = expected
+            .iter_comments()
+            .map(|(cell, comment)| (cell, comment.clone()))
+            .collect();
+        let actual_comments: Vec<_> = actual
+            .iter_comments()
+            .map(|(cell, comment)| (cell, comment.clone()))
+            .collect();
+        assert_eq!(actual_comments, expected_comments);
 
         assert_eq!(cells_as_map(actual), cells_as_map(expected));
     }

@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, Transaction};
 
-const LATEST_SCHEMA_VERSION: i64 = 6;
+const LATEST_SCHEMA_VERSION: i64 = 7;
 
 pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     // Ensure foreign keys are enforced (disabled by default in SQLite).
@@ -30,6 +30,7 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
             4 => migrate_to_v4(&tx)?,
             5 => migrate_to_v5(&tx)?,
             6 => migrate_to_v6(&tx)?,
+            7 => migrate_to_v7(&tx)?,
             _ => unreachable!("unknown schema migration target: {next}"),
         }
         tx.execute(
@@ -336,6 +337,13 @@ fn migrate_to_v6(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         "#,
     )?;
 
+    Ok(())
+}
+
+fn migrate_to_v7(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    // Optional JSON representation of `formula_model::Worksheet` metadata (excluding cells).
+    // This enables round-tripping features not yet modeled in first-class columns/tables.
+    ensure_column(tx, "sheets", "model_sheet_json", "model_sheet_json JSON")?;
     Ok(())
 }
 
