@@ -491,6 +491,7 @@ npx tsc --incremental                 # Preferred for large projects
 cargo build -j4                       # Safe
 cargo test -j4                        # Safe
 ./scripts/safe-cargo-build.sh        # Auto-detects
+./scripts/safe-cargo-check.sh        # Auto-detects
 ./scripts/safe-cargo-test.sh         # Auto-detects
 ./scripts/safe-cargo-run.sh --help   # Auto-detects (also used by perf benchmarks)
 ./scripts/safe-cargo-bench.sh        # Auto-detects
