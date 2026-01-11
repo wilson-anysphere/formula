@@ -543,6 +543,13 @@ function normalizePgJson(value) {
   return {};
 }
 
+function normalizeOptionalText(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function auditLogRowToAuditEvent(row) {
   if (!row || typeof row !== "object") {
     throw new TypeError("auditLogRowToAuditEvent requires a row object");
@@ -555,9 +562,9 @@ function auditLogRowToAuditEvent(row) {
   const details = { ...detailsWithMeta };
   delete details.__audit;
 
-  const orgId = row.org_id ?? null;
-  const userId = row.user_id ?? null;
-  const userEmail = row.user_email ?? null;
+  const orgId = normalizeOptionalText(row.org_id);
+  const userId = normalizeOptionalText(row.user_id);
+  const userEmail = normalizeOptionalText(row.user_email);
 
   const actorFromMeta = meta && isPlainObject(meta.actor) ? meta.actor : null;
   const actor =
@@ -578,35 +585,38 @@ function auditLogRowToAuditEvent(row) {
         }
       : undefined;
 
-  const resourceName = meta && (typeof meta.resourceName === "string" || meta.resourceName === null) ? meta.resourceName : null;
-  const resource = row.resource_type
-    ? {
-        type: String(row.resource_type),
-        id: row.resource_id ?? null,
-        name: resourceName
-      }
-    : undefined;
+  const resourceName =
+    meta && (typeof meta.resourceName === "string" || meta.resourceName === null)
+      ? normalizeOptionalText(meta.resourceName)
+      : null;
+  const resourceType = normalizeOptionalText(row.resource_type) ?? "unknown";
+  const resourceId = normalizeOptionalText(row.resource_id);
+  const resource = {
+    type: resourceType,
+    id: resourceId,
+    name: resourceName
+  };
 
   const error =
     row.error_code || row.error_message
-      ? { code: row.error_code ?? null, message: row.error_message ?? null }
+      ? { code: normalizeOptionalText(row.error_code), message: normalizeOptionalText(row.error_message) }
       : undefined;
 
   const timestamp = new Date(row.created_at).toISOString();
 
   return createAuditEvent({
     schemaVersion: AUDIT_EVENT_SCHEMA_VERSION,
-    id: String(row.id),
+    id: normalizeOptionalText(row.id) ?? crypto.randomUUID(),
     timestamp,
-    eventType: String(row.event_type),
+    eventType: normalizeOptionalText(row.event_type) ?? "audit.unknown",
     actor,
     context: {
       orgId,
       userId,
       userEmail,
-      ipAddress: row.ip_address ?? null,
-      userAgent: row.user_agent ?? null,
-      sessionId: row.session_id ?? null
+      ipAddress: normalizeOptionalText(row.ip_address),
+      userAgent: normalizeOptionalText(row.user_agent),
+      sessionId: normalizeOptionalText(row.session_id)
     },
     resource,
     success: Boolean(row.success),
