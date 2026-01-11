@@ -68,4 +68,42 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
       .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1")))
       .toBe("Hello");
   });
+
+  test("copy/paste shifts relative references inside formulas (Excel-style)", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    // Seed a simple scenario where shifting is observable:
+    // B1 = A1 + 1, and A2 has a different value so pasting down should change the result.
+    await page.waitForFunction(() => (window as any).__formulaApp);
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.beginBatch({ label: "Seed clipboard formula shift" });
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "A2", 10);
+      doc.setCellInput(sheetId, "B1", "=A1+1");
+      doc.endBatch();
+      app.refresh();
+    });
+    await waitForIdle(page);
+
+    // Copy B1.
+    await page.click("#grid", { position: { x: 160, y: 40 } }); // B1
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+
+    // Paste into B2: formula should shift A1 -> A2, so computed value becomes 11.
+    await page.click("#grid", { position: { x: 160, y: 64 } }); // B2
+    await expect(page.getByTestId("active-cell")).toHaveText("B2");
+    await page.keyboard.press(`${modifier}+V`);
+    await waitForIdle(page);
+
+    const b2Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B2"));
+    expect(b2Value).toBe("11");
+  });
 });

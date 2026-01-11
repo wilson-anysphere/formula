@@ -13,7 +13,6 @@ import {
   copyRangeToClipboardPayload,
   createClipboardProvider,
   parseClipboardContentToCellGrid,
-  pasteClipboardContent
 } from "../clipboard/index.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 import { navigateSelectionByKey } from "../selection/navigation";
@@ -355,6 +354,7 @@ export class SpreadsheetApp {
   private pendingRenderMode: "full" | "scroll" = "full";
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
+  private clipboardCopyContext: { range: Range; payload: { text?: string; html?: string } } | null = null;
   private dlpContext: ReturnType<typeof createDesktopDlpContext> | null = null;
 
   private readonly chartElements = new Map<string, HTMLDivElement>();
@@ -3218,6 +3218,7 @@ export class SpreadsheetApp {
       );
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
+      this.clipboardCopyContext = { range, payload };
     } catch {
       // Ignore clipboard failures (permissions, platform restrictions).
     }
@@ -3235,8 +3236,43 @@ export class SpreadsheetApp {
       if (rowCount === 0 || colCount === 0) return;
 
       const start = { ...this.selection.active };
-      const didPaste = pasteClipboardContent(this.document, this.sheetId, start, content, { mode: "all" });
-      if (!didPaste) return;
+      const ctx = this.clipboardCopyContext;
+      let deltaRow = 0;
+      let deltaCol = 0;
+
+      const normalizeClipboardText = (text: string): string => text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+      if (
+        ctx &&
+        ((typeof content.text === "string" &&
+          typeof ctx.payload.text === "string" &&
+          normalizeClipboardText(content.text) === normalizeClipboardText(ctx.payload.text)) ||
+          (typeof content.html === "string" &&
+            typeof ctx.payload.html === "string" &&
+            content.html === ctx.payload.html))
+      ) {
+        deltaRow = start.row - ctx.range.startRow;
+        deltaCol = start.col - ctx.range.startCol;
+      }
+
+      const values = grid.map((row) =>
+        row.map((cell) => {
+          const format = cell.format ?? null;
+          const rawFormula = cell.formula;
+          const formula =
+            rawFormula != null && (deltaRow !== 0 || deltaCol !== 0)
+              ? shiftA1References(rawFormula, deltaRow, deltaCol)
+              : rawFormula;
+
+          if (formula != null) {
+            return { formula, format };
+          }
+
+          return { value: cell.value ?? null, format };
+        })
+      );
+
+      this.document.setRangeValues(this.sheetId, start, values, { label: t("clipboard.paste") });
 
       const range: Range = {
         startRow: start.row,
@@ -3278,6 +3314,7 @@ export class SpreadsheetApp {
 
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
+      this.clipboardCopyContext = { range, payload };
 
       const label = (() => {
         const translated = t("clipboard.cut");
