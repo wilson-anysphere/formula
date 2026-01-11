@@ -128,8 +128,8 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
                 return Value::Error(ErrorKind::Value);
             };
             match arg {
-                ArgValue::Reference(r) => ranges.push(*r),
-                ArgValue::ReferenceUnion(rs) => ranges.extend(rs.iter().copied()),
+                ArgValue::Reference(r) => ranges.push(r.clone()),
+                ArgValue::ReferenceUnion(rs) => ranges.extend(rs.iter().cloned()),
                 ArgValue::Scalar(Value::Error(e)) => return Value::Error(*e),
                 _ => return Value::Error(ErrorKind::Value),
             }
@@ -181,7 +181,7 @@ fn choose_value_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
         },
         ArgValue::Reference(r) => {
             if r.is_single_cell() {
-                ctx.get_cell_value(r.sheet_id, r.start)
+                ctx.get_cell_value(&r.sheet_id, r.start)
             } else {
                 Value::Error(ErrorKind::Value)
             }

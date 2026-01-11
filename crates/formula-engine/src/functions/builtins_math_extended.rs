@@ -23,7 +23,7 @@ fn reference_to_array(ctx: &dyn FunctionContext, reference: Reference) -> Array 
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for row in reference.start.row..=reference.end.row {
         for col in reference.start.col..=reference.end.col {
-            values.push(ctx.get_cell_value(reference.sheet_id, CellAddr { row, col }));
+            values.push(ctx.get_cell_value(&reference.sheet_id, CellAddr { row, col }));
         }
     }
     Array::new(rows, cols, values)
@@ -34,7 +34,7 @@ fn implicit_intersection_union(ctx: &dyn FunctionContext, ranges: &[Reference]) 
     // succeeding only when exactly one area intersects.
     let mut hits = Vec::new();
     for r in ranges {
-        let v = ctx.apply_implicit_intersection(*r);
+        let v = ctx.apply_implicit_intersection(r);
         if !matches!(v, Value::Error(ErrorKind::Value)) {
             hits.push(v);
         }
@@ -48,7 +48,7 @@ fn implicit_intersection_union(ctx: &dyn FunctionContext, ranges: &[Reference]) 
 fn scalar_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
     match arg {
         ArgValue::Scalar(v) => v,
-        ArgValue::Reference(r) => ctx.apply_implicit_intersection(r),
+        ArgValue::Reference(r) => ctx.apply_implicit_intersection(&r),
         ArgValue::ReferenceUnion(ranges) => implicit_intersection_union(ctx, &ranges),
     }
 }
@@ -58,7 +58,7 @@ fn dynamic_value_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
         ArgValue::Scalar(v) => v,
         ArgValue::Reference(r) => {
             if r.is_single_cell() {
-                ctx.get_cell_value(r.sheet_id, r.start)
+                ctx.get_cell_value(&r.sheet_id, r.start)
             } else {
                 Value::Array(reference_to_array(ctx, r))
             }
@@ -133,7 +133,7 @@ fn values_from_range_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec
             let len = (rows as usize).saturating_mul(cols as usize);
             let mut values = Vec::with_capacity(len);
             for addr in r.iter_cells() {
-                values.push(ctx.get_cell_value(r.sheet_id, addr));
+                values.push(ctx.get_cell_value(&r.sheet_id, addr));
             }
             Ok(values)
         }
@@ -146,10 +146,10 @@ fn values_from_range_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec
                 let cols = r.end.col - r.start.col + 1;
                 values.reserve((rows as usize).saturating_mul(cols as usize));
                 for addr in r.iter_cells() {
-                    if !seen.insert((r.sheet_id, addr)) {
+                    if !seen.insert((r.sheet_id.clone(), addr)) {
                         continue;
                     }
-                    values.push(ctx.get_cell_value(r.sheet_id, addr));
+                    values.push(ctx.get_cell_value(&r.sheet_id, addr));
                 }
             }
             Ok(values)
@@ -165,20 +165,18 @@ fn append_values_for_aggregate(ctx: &dyn FunctionContext, arg: ArgValue, out: &m
         ArgValue::Scalar(Value::Array(arr)) => out.extend(arr.values),
         ArgValue::Scalar(v) => out.push(v),
         ArgValue::Reference(r) => {
-            let sheet_id = r.sheet_id;
-            for addr in ctx.iter_reference_cells(r) {
-                out.push(ctx.get_cell_value(sheet_id, addr));
+            for addr in ctx.iter_reference_cells(&r) {
+                out.push(ctx.get_cell_value(&r.sheet_id, addr));
             }
         }
         ArgValue::ReferenceUnion(ranges) => {
             let mut seen = HashSet::new();
             for r in ranges {
-                let sheet_id = r.sheet_id;
-                for addr in ctx.iter_reference_cells(r) {
-                    if !seen.insert((sheet_id, addr)) {
+                for addr in ctx.iter_reference_cells(&r) {
+                    if !seen.insert((r.sheet_id.clone(), addr)) {
                         continue;
                     }
-                    out.push(ctx.get_cell_value(sheet_id, addr));
+                    out.push(ctx.get_cell_value(&r.sheet_id, addr));
                 }
             }
         }
@@ -697,9 +695,8 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
-                let sheet_id = r.sheet_id;
-                for addr in ctx.iter_reference_cells(r) {
-                    match ctx.get_cell_value(sheet_id, addr) {
+                for addr in ctx.iter_reference_cells(&r) {
+                    match ctx.get_cell_value(&r.sheet_id, addr) {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => values.push(n),
                         // Excel quirk: logicals/text in references are ignored.
@@ -717,12 +714,11 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = HashSet::new();
                 for r in ranges {
-                    let sheet_id = r.sheet_id;
-                    for addr in ctx.iter_reference_cells(r) {
-                        if !seen.insert((sheet_id, addr)) {
+                    for addr in ctx.iter_reference_cells(&r) {
+                        if !seen.insert((r.sheet_id.clone(), addr)) {
                             continue;
                         }
-                        match ctx.get_cell_value(sheet_id, addr) {
+                        match ctx.get_cell_value(&r.sheet_id, addr) {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => values.push(n),
                             Value::Bool(_)

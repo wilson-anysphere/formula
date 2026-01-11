@@ -14,7 +14,9 @@ pub enum SheetReference<S> {
     /// Resolution is based on workbook sheet order.
     SheetRange(S, S),
     /// External workbook reference like `[Book.xlsx]Sheet1!A1`.
-    /// Not implemented yet; evaluating it yields `#REF!`.
+    ///
+    /// The evaluator resolves these through an external value provider (if configured).
+    /// Missing external links evaluate to `#REF!`.
     External(String),
 }
 

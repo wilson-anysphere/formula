@@ -94,14 +94,14 @@ pub(crate) fn eval_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Value 
 fn reference_to_value(ctx: &dyn FunctionContext, reference: Reference) -> Value {
     let reference = reference.normalized();
     if reference.is_single_cell() {
-        return ctx.get_cell_value(reference.sheet_id, reference.start);
+        return ctx.get_cell_value(&reference.sheet_id, reference.start);
     }
 
     let rows = (reference.end.row - reference.start.row + 1) as usize;
     let cols = (reference.end.col - reference.start.col + 1) as usize;
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for addr in reference.iter_cells() {
-        values.push(ctx.get_cell_value(reference.sheet_id, addr));
+        values.push(ctx.get_cell_value(&reference.sheet_id, addr));
     }
     Value::Array(Array::new(rows, cols, values))
 }

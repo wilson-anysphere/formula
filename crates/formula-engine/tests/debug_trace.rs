@@ -58,7 +58,7 @@ fn trace_preserves_reference_context_for_sum() {
     assert_eq!(
         range_node.reference,
         Some(TraceRef::Range {
-            sheet: 0,
+            sheet: formula_engine::functions::SheetId::Local(0),
             start: formula_engine::eval::CellAddr { row: 0, col: 0 },
             end: formula_engine::eval::CellAddr { row: 1, col: 0 }
         })
@@ -158,7 +158,7 @@ fn trace_preserves_reference_context_for_named_ranges() {
     assert_eq!(
         arg_node.reference,
         Some(TraceRef::Range {
-            sheet: 0,
+            sheet: formula_engine::functions::SheetId::Local(0),
             start: formula_engine::eval::CellAddr { row: 0, col: 0 },
             end: formula_engine::eval::CellAddr { row: 1, col: 0 }
         })

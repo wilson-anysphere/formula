@@ -75,7 +75,7 @@ fn collect_npv_values_from_arg(
         ArgValue::Reference(r) => {
             let mut out = Vec::new();
             for addr in r.iter_cells() {
-                let v = ctx.get_cell_value(r.sheet_id, addr);
+                let v = ctx.get_cell_value(&r.sheet_id, addr);
                 match v {
                     Value::Error(e) => return Err(e),
                     Value::Number(n) => out.push(n),
@@ -95,7 +95,7 @@ fn collect_npv_values_from_arg(
             let mut out = Vec::new();
             for r in ranges {
                 for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Err(e),
                         Value::Number(n) => out.push(n),
@@ -151,7 +151,7 @@ fn collect_irr_values_from_arg(
         ArgValue::Reference(r) => {
             let mut out = Vec::new();
             for addr in r.iter_cells() {
-                let v = ctx.get_cell_value(r.sheet_id, addr);
+                let v = ctx.get_cell_value(&r.sheet_id, addr);
                 match v {
                     Value::Error(e) => return Err(e),
                     Value::Number(n) => out.push(n),
@@ -171,7 +171,7 @@ fn collect_irr_values_from_arg(
             let mut out = Vec::new();
             for r in ranges {
                 for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Err(e),
                         Value::Number(n) => out.push(n),
@@ -209,7 +209,7 @@ fn collect_numbers_strict_from_arg(
         ArgValue::Reference(r) => {
             let mut out = Vec::new();
             for addr in r.iter_cells() {
-                let v = ctx.get_cell_value(r.sheet_id, addr);
+                let v = ctx.get_cell_value(&r.sheet_id, addr);
                 out.push(v.coerce_to_number()?);
             }
             Ok(out)
@@ -218,7 +218,7 @@ fn collect_numbers_strict_from_arg(
             let mut out = Vec::new();
             for r in ranges {
                 for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
                     out.push(v.coerce_to_number()?);
                 }
             }

@@ -181,9 +181,8 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
-                let sheet_id = r.sheet_id;
-                for addr in ctx.iter_reference_cells(r) {
-                    let v = ctx.get_cell_value(sheet_id, addr);
+                for addr in ctx.iter_reference_cells(&r) {
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => {
@@ -212,12 +211,11 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
                 for r in ranges {
-                    let sheet_id = r.sheet_id;
-                    for addr in ctx.iter_reference_cells(r) {
-                        if !seen.insert((sheet_id, addr)) {
+                    for addr in ctx.iter_reference_cells(&r) {
+                        if !seen.insert((r.sheet_id.clone(), addr)) {
                             continue;
                         }
-                        let v = ctx.get_cell_value(sheet_id, addr);
+                        let v = ctx.get_cell_value(&r.sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => {
@@ -322,9 +320,8 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
-                let sheet_id = r.sheet_id;
-                for addr in ctx.iter_reference_cells(r) {
-                    let v = ctx.get_cell_value(sheet_id, addr);
+                for addr in ctx.iter_reference_cells(&r) {
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => {
@@ -352,12 +349,11 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
                 for r in ranges {
-                    let sheet_id = r.sheet_id;
-                    for addr in ctx.iter_reference_cells(r) {
-                        if !seen.insert((sheet_id, addr)) {
+                    for addr in ctx.iter_reference_cells(&r) {
+                        if !seen.insert((r.sheet_id.clone(), addr)) {
                             continue;
                         }
-                        let v = ctx.get_cell_value(sheet_id, addr);
+                        let v = ctx.get_cell_value(&r.sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => {

@@ -519,7 +519,7 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Error(ErrorKind::Ref);
             };
             Value::Reference(crate::functions::Reference {
-                sheet_id,
+                sheet_id: crate::functions::SheetId::Local(sheet_id),
                 start: r.addr,
                 end: r.addr,
             })
@@ -529,7 +529,7 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Error(ErrorKind::Ref);
             };
             Value::Reference(crate::functions::Reference {
-                sheet_id,
+                sheet_id: crate::functions::SheetId::Local(sheet_id),
                 start: r.start,
                 end: r.end,
             })

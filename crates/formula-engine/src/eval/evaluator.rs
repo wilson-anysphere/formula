@@ -4,7 +4,9 @@ use crate::eval::address::CellAddr;
 use crate::eval::ast::{
     BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp,
 };
-use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
+use crate::functions::{
+    ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId,
+};
 use crate::value::{Array, ErrorKind, NumberLocale, Value};
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -51,8 +53,15 @@ impl DependencyTrace {
 
     #[must_use]
     pub fn precedents(&self) -> Vec<FnReference> {
-        let mut out: Vec<FnReference> = self.precedents.iter().copied().collect();
-        out.sort_by_key(|r| (r.sheet_id, r.start.row, r.start.col, r.end.row, r.end.col));
+        let mut out: Vec<FnReference> = self.precedents.iter().cloned().collect();
+        out.sort_by(|a, b| {
+            a.sheet_id
+                .cmp(&b.sheet_id)
+                .then_with(|| a.start.row.cmp(&b.start.row))
+                .then_with(|| a.start.col.cmp(&b.start.col))
+                .then_with(|| a.end.row.cmp(&b.end.row))
+                .then_with(|| a.end.col.cmp(&b.end.col))
+        });
         out
     }
 }
@@ -60,6 +69,14 @@ impl DependencyTrace {
 pub trait ValueResolver {
     fn sheet_exists(&self, sheet_id: usize) -> bool;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
+    /// Resolve a value from an external workbook reference like `[Book.xlsx]Sheet1!A1`.
+    ///
+    /// The `sheet` key is the canonical bracketed form (`"[Book.xlsx]Sheet1"`).
+    /// Returning `None` indicates the external reference could not be resolved and should
+    /// evaluate to `#REF!`.
+    fn get_external_value(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
+        None
+    }
     /// Resolve a worksheet name to an internal sheet id.
     ///
     /// This is used by volatile reference functions like `INDIRECT` that parse sheet names
@@ -101,15 +118,15 @@ pub enum ResolvedName {
     Expr(CompiledExpr),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ResolvedRange {
-    sheet_id: usize,
+    sheet_id: FnSheetId,
     start: CellAddr,
     end: CellAddr,
 }
 
 impl ResolvedRange {
-    fn normalized(self) -> Self {
+    fn normalized(&self) -> Self {
         let (r1, r2) = if self.start.row <= self.end.row {
             (self.start.row, self.end.row)
         } else {
@@ -121,13 +138,13 @@ impl ResolvedRange {
             (self.end.col, self.start.col)
         };
         Self {
-            sheet_id: self.sheet_id,
+            sheet_id: self.sheet_id.clone(),
             start: CellAddr { row: r1, col: c1 },
             end: CellAddr { row: r2, col: c2 },
         }
     }
 
-    fn is_single_cell(self) -> bool {
+    fn is_single_cell(&self) -> bool {
         self.start == self.end
     }
 }
@@ -247,16 +264,16 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         self
     }
 
-    fn trace_reference(&self, reference: FnReference) {
+    fn trace_reference(&self, reference: &FnReference) {
         let Some(trace) = self.tracer else {
             return;
         };
-        trace.borrow_mut().record_reference(reference);
+        trace.borrow_mut().record_reference(reference.clone());
     }
 
-    fn trace_cell(&self, sheet_id: usize, addr: CellAddr) {
-        self.trace_reference(FnReference {
-            sheet_id,
+    fn trace_cell(&self, sheet_id: &FnSheetId, addr: CellAddr) {
+        self.trace_reference(&FnReference {
+            sheet_id: sheet_id.clone(),
             start: addr,
             end: addr,
         });
@@ -299,7 +316,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 Some(sheet_ids) => {
                     let mut ranges = Vec::with_capacity(sheet_ids.len());
                     for sheet_id in sheet_ids {
-                        if !self.resolver.sheet_exists(sheet_id) {
+                        if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id)) {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
                         ranges.push(ResolvedRange {
@@ -316,7 +333,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 Some(sheet_ids) => {
                     let mut ranges = Vec::with_capacity(sheet_ids.len());
                     for sheet_id in sheet_ids {
-                        if !self.resolver.sheet_exists(sheet_id) {
+                        if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id)) {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
                         ranges.push(ResolvedRange {
@@ -340,7 +357,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         ranges
                             .into_iter()
                             .map(|(sheet_id, start, end)| ResolvedRange {
-                                sheet_id,
+                                sheet_id: FnSheetId::Local(sheet_id),
                                 start,
                                 end,
                             })
@@ -364,17 +381,19 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Value));
                         }
 
-                        let Some(origin) = self.resolver.spill_origin(range.sheet_id, range.start)
-                        else {
+                        let FnSheetId::Local(sheet_id) = range.sheet_id else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
-                        let Some((start, end)) = self.resolver.spill_range(range.sheet_id, origin)
+                        let Some(origin) = self.resolver.spill_origin(sheet_id, range.start) else {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                        };
+                        let Some((start, end)) = self.resolver.spill_range(sheet_id, origin)
                         else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
 
                         EvalValue::Reference(vec![ResolvedRange {
-                            sheet_id: range.sheet_id,
+                            sheet_id: FnSheetId::Local(sheet_id),
                             start,
                             end,
                         }])
@@ -567,6 +586,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         let Some(sheet_id) = self.resolve_sheet_id(&nref.sheet) else {
             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
         };
+        let FnSheetId::Local(sheet_id) = sheet_id else {
+            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+        };
         if !self.resolver.sheet_exists(sheet_id) {
             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
         }
@@ -628,38 +650,50 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn resolve_sheet_id(&self, sheet: &SheetReference<usize>) -> Option<usize> {
+    fn resolve_sheet_id(&self, sheet: &SheetReference<usize>) -> Option<FnSheetId> {
         match sheet {
-            SheetReference::Current => Some(self.ctx.current_sheet),
-            SheetReference::Sheet(id) => Some(*id),
+            SheetReference::Current => Some(FnSheetId::Local(self.ctx.current_sheet)),
+            SheetReference::Sheet(id) => Some(FnSheetId::Local(*id)),
             SheetReference::SheetRange(a, b) => {
                 if a == b {
-                    Some(*a)
+                    Some(FnSheetId::Local(*a))
                 } else {
                     None
                 }
             }
-            SheetReference::External(_) => None,
+            SheetReference::External(key) => is_valid_external_sheet_key(key)
+                .then(|| FnSheetId::External(key.clone())),
         }
     }
 
-    fn resolve_sheet_ids(&self, sheet: &SheetReference<usize>) -> Option<Vec<usize>> {
+    fn resolve_sheet_ids(&self, sheet: &SheetReference<usize>) -> Option<Vec<FnSheetId>> {
         match sheet {
-            SheetReference::Current => Some(vec![self.ctx.current_sheet]),
-            SheetReference::Sheet(id) => Some(vec![*id]),
+            SheetReference::Current => Some(vec![FnSheetId::Local(self.ctx.current_sheet)]),
+            SheetReference::Sheet(id) => Some(vec![FnSheetId::Local(*id)]),
             SheetReference::SheetRange(a, b) => {
                 let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
-                Some((start..=end).collect())
+                Some((start..=end).map(FnSheetId::Local).collect())
             }
-            SheetReference::External(_) => None,
+            SheetReference::External(key) => is_valid_external_sheet_key(key)
+                .then(|| vec![FnSheetId::External(key.clone())]),
+        }
+    }
+
+    fn get_sheet_cell_value(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Value {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.get_cell_value(*id, addr),
+            FnSheetId::External(key) => self
+                .resolver
+                .get_external_value(key, addr)
+                .unwrap_or(Value::Error(ErrorKind::Ref)),
         }
     }
 
     fn deref_reference_scalar(&self, ranges: &[ResolvedRange]) -> Value {
         match ranges {
             [only] if only.is_single_cell() => {
-                self.trace_cell(only.sheet_id, only.start);
-                self.resolver.get_cell_value(only.sheet_id, only.start)
+                self.trace_cell(&only.sheet_id, only.start);
+                self.get_sheet_cell_value(&only.sheet_id, only.start)
             }
             [_only] => {
                 // Multi-cell references used as scalars behave like a spill attempt.
@@ -672,32 +706,33 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     fn deref_reference_dynamic(&self, ranges: Vec<ResolvedRange>) -> Value {
         match ranges.as_slice() {
             [] => Value::Error(ErrorKind::Ref),
-            [only] => self.deref_reference_dynamic_single(*only),
+            [only] => self.deref_reference_dynamic_single(only),
             // Discontiguous unions cannot be represented as a single rectangular spill.
             _ => Value::Error(ErrorKind::Value),
         }
     }
 
-    fn deref_reference_dynamic_single(&self, range: ResolvedRange) -> Value {
+    fn deref_reference_dynamic_single(&self, range: &ResolvedRange) -> Value {
         if range.is_single_cell() {
-            self.trace_cell(range.sheet_id, range.start);
-            return self.resolver.get_cell_value(range.sheet_id, range.start);
+            self.trace_cell(&range.sheet_id, range.start);
+            return self.get_sheet_cell_value(&range.sheet_id, range.start);
         }
         let range = range.normalized();
-        self.trace_reference(FnReference {
-            sheet_id: range.sheet_id,
+        let reference = FnReference {
+            sheet_id: range.sheet_id.clone(),
             start: range.start,
             end: range.end,
-        });
+        };
+        self.trace_reference(&reference);
         let rows = (range.end.row - range.start.row + 1) as usize;
         let cols = (range.end.col - range.start.col + 1) as usize;
         let mut values = Vec::with_capacity(rows.saturating_mul(cols));
         for row in range.start.row..=range.end.row {
             for col in range.start.col..=range.end.col {
-                values.push(
-                    self.resolver
-                        .get_cell_value(range.sheet_id, CellAddr { row, col }),
-                );
+                values.push(self.get_sheet_cell_value(
+                    &range.sheet_id,
+                    CellAddr { row, col },
+                ));
             }
         }
         Value::Array(Array::new(rows, cols, values))
@@ -706,13 +741,13 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     fn apply_implicit_intersection(&self, ranges: &[ResolvedRange]) -> Value {
         match ranges {
             [] => Value::Error(ErrorKind::Value),
-            [only] => self.apply_implicit_intersection_single(*only),
+            [only] => self.apply_implicit_intersection_single(only),
             many => {
                 // If multiple areas intersect, Excel's implicit intersection is ambiguous. We
                 // approximate by succeeding only when exactly one area intersects.
                 let mut hits = Vec::new();
                 for r in many {
-                    let v = self.apply_implicit_intersection_single(*r);
+                    let v = self.apply_implicit_intersection_single(r);
                     if !matches!(v, Value::Error(ErrorKind::Value)) {
                         hits.push(v);
                     }
@@ -725,10 +760,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn apply_implicit_intersection_single(&self, range: ResolvedRange) -> Value {
+    fn apply_implicit_intersection_single(&self, range: &ResolvedRange) -> Value {
         if range.is_single_cell() {
-            self.trace_cell(range.sheet_id, range.start);
-            return self.resolver.get_cell_value(range.sheet_id, range.start);
+            self.trace_cell(&range.sheet_id, range.start);
+            return self.get_sheet_cell_value(&range.sheet_id, range.start);
         }
 
         let range = range.normalized();
@@ -741,8 +776,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     row: cur.row,
                     col: range.start.col,
                 };
-                self.trace_cell(range.sheet_id, addr);
-                return self.resolver.get_cell_value(range.sheet_id, addr);
+                self.trace_cell(&range.sheet_id, addr);
+                return self.get_sheet_cell_value(&range.sheet_id, addr);
             }
             return Value::Error(ErrorKind::Value);
         }
@@ -752,8 +787,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     row: range.start.row,
                     col: cur.col,
                 };
-                self.trace_cell(range.sheet_id, addr);
-                return self.resolver.get_cell_value(range.sheet_id, addr);
+                self.trace_cell(&range.sheet_id, addr);
+                return self.get_sheet_cell_value(&range.sheet_id, addr);
             }
             return Value::Error(ErrorKind::Value);
         }
@@ -764,8 +799,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             && cur.col >= range.start.col
             && cur.col <= range.end.col
         {
-            self.trace_cell(range.sheet_id, cur);
-            return self.resolver.get_cell_value(range.sheet_id, cur);
+            self.trace_cell(&range.sheet_id, cur);
+            return self.get_sheet_cell_value(&range.sheet_id, cur);
         }
 
         Value::Error(ErrorKind::Value)
@@ -788,11 +823,11 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
         match op {
             BinaryOp::Union => {
-                let Some(sheet_id) = left.first().map(|r| r.sheet_id) else {
+                let Some(sheet_id) = left.first().map(|r| &r.sheet_id) else {
                     return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                 };
-                if left.iter().any(|r| r.sheet_id != sheet_id)
-                    || right.iter().any(|r| r.sheet_id != sheet_id)
+                if left.iter().any(|r| &r.sheet_id != sheet_id)
+                    || right.iter().any(|r| &r.sheet_id != sheet_id)
                 {
                     return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                 }
@@ -808,7 +843,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         if a.sheet_id != b.sheet_id {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
-                        if let Some(r) = intersect_ranges(*a, *b) {
+                        if let Some(r) = intersect_ranges(a, b) {
                             out.push(r);
                         }
                     }
@@ -819,7 +854,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 EvalValue::Reference(out)
             }
             BinaryOp::Range => {
-                let (Some(a), Some(b)) = (left.first().copied(), right.first().copied()) else {
+                let (Some(a), Some(b)) = (left.first(), right.first()) else {
                     return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                 };
                 if left.len() != 1 || right.len() != 1 {
@@ -863,7 +898,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     // `crate::functions::call_function`.
 }
 
-fn intersect_ranges(a: ResolvedRange, b: ResolvedRange) -> Option<ResolvedRange> {
+fn intersect_ranges(a: &ResolvedRange, b: &ResolvedRange) -> Option<ResolvedRange> {
     if a.sheet_id != b.sheet_id {
         return None;
     }
@@ -894,6 +929,18 @@ fn intersect_ranges(a: ResolvedRange, b: ResolvedRange) -> Option<ResolvedRange>
     })
 }
 
+pub(crate) fn is_valid_external_sheet_key(key: &str) -> bool {
+    if !key.starts_with('[') {
+        return false;
+    }
+    let Some(end) = key.find(']') else {
+        return false;
+    };
+    let workbook = &key[1..end];
+    let sheet = &key[end + 1..];
+    !workbook.is_empty() && !sheet.is_empty()
+}
+
 impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn eval_arg(&self, expr: &CompiledExpr) -> FnArgValue {
         match self.eval_value(expr) {
@@ -901,11 +948,17 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             EvalValue::Reference(mut ranges) => {
                 // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
                 // multi-area union).
-                ranges
-                    .sort_by_key(|r| (r.sheet_id, r.start.row, r.start.col, r.end.row, r.end.col));
+                ranges.sort_by(|a, b| {
+                    a.sheet_id
+                        .cmp(&b.sheet_id)
+                        .then_with(|| a.start.row.cmp(&b.start.row))
+                        .then_with(|| a.start.col.cmp(&b.start.col))
+                        .then_with(|| a.end.row.cmp(&b.end.row))
+                        .then_with(|| a.end.col.cmp(&b.end.col))
+                });
                 match ranges.as_slice() {
                     [only] => FnArgValue::Reference(FnReference {
-                        sheet_id: only.sheet_id,
+                        sheet_id: only.sheet_id.clone(),
                         start: only.start,
                         end: only.end,
                     }),
@@ -953,34 +1006,39 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         self.capture_lexical_env_map()
     }
 
-    fn apply_implicit_intersection(&self, reference: FnReference) -> Value {
+    fn apply_implicit_intersection(&self, reference: &FnReference) -> Value {
         Evaluator::apply_implicit_intersection(
             self,
             &[ResolvedRange {
-                sheet_id: reference.sheet_id,
+                sheet_id: reference.sheet_id.clone(),
                 start: reference.start,
                 end: reference.end,
             }],
         )
     }
 
-    fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {
-        self.resolver.get_cell_value(sheet_id, addr)
+    fn get_cell_value(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Value {
+        self.get_sheet_cell_value(sheet_id, addr)
     }
 
-    fn iter_reference_cells(
-        &self,
-        reference: FnReference,
-    ) -> Box<dyn Iterator<Item = CellAddr> + '_> {
+    fn iter_reference_cells<'b>(
+        &'b self,
+        reference: &'b FnReference,
+    ) -> Box<dyn Iterator<Item = CellAddr> + 'b> {
         self.trace_reference(reference);
-        if let Some(iter) = self.resolver.iter_sheet_cells(reference.sheet_id) {
-            Box::new(iter.filter(move |addr| reference.contains(*addr)))
-        } else {
-            Box::new(reference.iter_cells())
+        match &reference.sheet_id {
+            FnSheetId::Local(sheet_id) => {
+                if let Some(iter) = self.resolver.iter_sheet_cells(*sheet_id) {
+                    Box::new(iter.filter(move |addr| reference.contains(*addr)))
+                } else {
+                    Box::new(reference.iter_cells())
+                }
+            }
+            FnSheetId::External(_) => Box::new(reference.iter_cells()),
         }
     }
 
-    fn record_reference(&self, reference: FnReference) {
+    fn record_reference(&self, reference: &FnReference) {
         self.trace_reference(reference);
     }
 

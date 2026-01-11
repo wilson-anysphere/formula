@@ -53,9 +53,8 @@ fn push_numbers_from_reference(
     out: &mut Vec<f64>,
     reference: crate::functions::Reference,
 ) -> Result<(), ErrorKind> {
-    let sheet_id = reference.sheet_id;
-    for addr in ctx.iter_reference_cells(reference) {
-        let v = ctx.get_cell_value(sheet_id, addr);
+    for addr in ctx.iter_reference_cells(&reference) {
+        let v = ctx.get_cell_value(&reference.sheet_id, addr);
         match v {
             Value::Error(e) => return Err(e),
             Value::Number(n) => out.push(n),
@@ -79,12 +78,11 @@ fn push_numbers_from_reference_union(
 ) -> Result<(), ErrorKind> {
     let mut seen = HashSet::new();
     for reference in ranges {
-        let sheet_id = reference.sheet_id;
-        for addr in ctx.iter_reference_cells(reference) {
-            if !seen.insert((sheet_id, addr)) {
+        for addr in ctx.iter_reference_cells(&reference) {
+            if !seen.insert((reference.sheet_id.clone(), addr)) {
                 continue;
             }
-            let v = ctx.get_cell_value(sheet_id, addr);
+            let v = ctx.get_cell_value(&reference.sheet_id, addr);
             match v {
                 Value::Error(e) => return Err(e),
                 Value::Number(n) => out.push(n),
@@ -160,9 +158,8 @@ fn push_numbers_a_from_reference(
     out: &mut Vec<f64>,
     reference: crate::functions::Reference,
 ) -> Result<(), ErrorKind> {
-    let sheet_id = reference.sheet_id;
-    for addr in ctx.iter_reference_cells(reference) {
-        let v = ctx.get_cell_value(sheet_id, addr);
+    for addr in ctx.iter_reference_cells(&reference) {
+        let v = ctx.get_cell_value(&reference.sheet_id, addr);
         match v {
             Value::Error(e) => return Err(e),
             Value::Number(n) => out.push(n),
@@ -185,12 +182,11 @@ fn push_numbers_a_from_reference_union(
 ) -> Result<(), ErrorKind> {
     let mut seen = HashSet::new();
     for reference in ranges {
-        let sheet_id = reference.sheet_id;
-        for addr in ctx.iter_reference_cells(reference) {
-            if !seen.insert((sheet_id, addr)) {
+        for addr in ctx.iter_reference_cells(&reference) {
+            if !seen.insert((reference.sheet_id.clone(), addr)) {
                 continue;
             }
-            let v = ctx.get_cell_value(sheet_id, addr);
+            let v = ctx.get_cell_value(&reference.sheet_id, addr);
             match v {
                 Value::Error(e) => return Err(e),
                 Value::Number(n) => out.push(n),
@@ -259,7 +255,7 @@ fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<V
             let cols = (r.end.col - r.start.col + 1) as usize;
             let mut out = Vec::with_capacity(rows.saturating_mul(cols));
             for addr in r.iter_cells() {
-                let v = ctx.get_cell_value(r.sheet_id, addr);
+                let v = ctx.get_cell_value(&r.sheet_id, addr);
                 match v {
                     Value::Error(e) => return Err(e),
                     Value::Number(n) => out.push(Some(n)),
@@ -284,10 +280,10 @@ fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<V
                 let cols = (r.end.col - r.start.col + 1) as usize;
                 out.reserve(rows.saturating_mul(cols));
                 for addr in r.iter_cells() {
-                    if !seen.insert((r.sheet_id, addr)) {
+                    if !seen.insert((r.sheet_id.clone(), addr)) {
                         continue;
                     }
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Err(e),
                         Value::Number(n) => out.push(Some(n)),

@@ -20,7 +20,7 @@ use formula_model::{CellId, CellRef, Range, Table};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 use std::cell::RefCell;
-use std::cmp::max;
+use std::cmp::{max, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
@@ -188,7 +188,7 @@ impl Workbook {
 ///
 /// This can represent either a single cell or a rectangular range reference without
 /// expanding it into per-cell nodes (which is prohibitive for `A:A`, `1:1`, etc).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PrecedentNode {
     Cell {
         sheet: SheetId,
@@ -196,6 +196,17 @@ pub enum PrecedentNode {
     },
     Range {
         sheet: SheetId,
+        start: CellAddr,
+        end: CellAddr,
+    },
+    /// Cell reference into an external workbook, e.g. `[Book.xlsx]Sheet1!A1`.
+    ExternalCell {
+        sheet: String,
+        addr: CellAddr,
+    },
+    /// Range reference into an external workbook, e.g. `[Book.xlsx]Sheet1!A1:B3`.
+    ExternalRange {
+        sheet: String,
         start: CellAddr,
         end: CellAddr,
     },
@@ -212,7 +223,7 @@ pub enum PrecedentNode {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum DirtyReason {
     Cell(CellKey),
     ViaRange { from: CellKey, range: PrecedentNode },
@@ -1594,7 +1605,12 @@ impl Engine {
                     &self.spills,
                 );
                 for reference in trace.borrow().precedents() {
-                    let sheet_id = sheet_id_for_graph(reference.sheet_id);
+                    let crate::functions::SheetId::Local(sheet_id) = reference.sheet_id else {
+                        // External references can't be represented in the internal dependency graph yet.
+                        // They are treated as volatile and surfaced via the precedents API instead.
+                        continue;
+                    };
+                    let sheet_id = sheet_id_for_graph(sheet_id);
                     if reference.start == reference.end {
                         new_precedents.insert(Precedent::Cell(CellId::new(
                             sheet_id,
@@ -2575,7 +2591,7 @@ impl Engine {
         }];
         let mut current = key;
         let mut guard = 0usize;
-        while let Some(reason) = self.dirty_reasons.get(&current).copied() {
+        while let Some(reason) = self.dirty_reasons.get(&current).cloned() {
             match reason {
                 DirtyReason::Cell(prev) => {
                     path.push(PrecedentNode::Cell {
@@ -2693,6 +2709,15 @@ impl Engine {
             .into_iter()
             .map(precedent_to_node)
             .collect();
+        if let Some(cell) = self.workbook.get_cell(key) {
+            if let Some(compiled) = cell.compiled.as_ref() {
+                out.extend(analyze_external_precedents(
+                    compiled.ast(),
+                    key,
+                    &self.workbook,
+                ));
+            }
+        }
         sort_and_dedup_nodes(&mut out);
         Ok(out)
     }
@@ -2811,7 +2836,7 @@ impl Engine {
         let mut out: Vec<PrecedentNode> = Vec::new();
         let mut queue: VecDeque<PrecedentNode> = VecDeque::new();
 
-        visited.insert(start_node);
+        visited.insert(start_node.clone());
         queue.push_back(start_node);
 
         while let Some(node) = queue.pop_front() {
@@ -2819,11 +2844,22 @@ impl Engine {
                 PrecedentNode::Cell { sheet, addr } => {
                     let key = CellKey { sheet, addr };
                     let cell_id = cell_id_from_key(key);
-                    self.calc_graph
+                    let mut neighbors: Vec<PrecedentNode> = self
+                        .calc_graph
                         .precedents_of(cell_id)
                         .into_iter()
                         .map(precedent_to_node)
-                        .collect()
+                        .collect();
+                    if let Some(cell) = self.workbook.get_cell(key) {
+                        if let Some(compiled) = cell.compiled.as_ref() {
+                            neighbors.extend(analyze_external_precedents(
+                                compiled.ast(),
+                                key,
+                                &self.workbook,
+                            ));
+                        }
+                    }
+                    neighbors
                 }
                 PrecedentNode::Range { sheet, start, end } => {
                     let range = Range::new(cell_ref_from_addr(start), cell_ref_from_addr(end));
@@ -2844,11 +2880,14 @@ impl Engine {
                     sheet,
                     addr: origin,
                 }],
+                PrecedentNode::ExternalCell { .. } | PrecedentNode::ExternalRange { .. } => {
+                    Vec::new()
+                }
             };
 
             for n in neighbors {
-                if visited.insert(n) {
-                    out.push(n);
+                if visited.insert(n.clone()) {
+                    out.push(n.clone());
                     queue.push_back(n);
                 }
             }
@@ -3358,25 +3397,96 @@ fn precedent_to_node(precedent: Precedent) -> PrecedentNode {
     }
 }
 
-fn precedent_node_sort_key(node: PrecedentNode) -> (u8, SheetId, u32, u32, u32, u32, u32, u32) {
-    match node {
-        PrecedentNode::Cell { sheet, addr } => (0, sheet, addr.row, addr.col, 0, 0, 0, 0),
-        PrecedentNode::Range { sheet, start, end } => {
-            (1, sheet, start.row, start.col, end.row, end.col, 0, 0)
+fn precedent_node_cmp(a: &PrecedentNode, b: &PrecedentNode) -> Ordering {
+    let rank = |node: &PrecedentNode| match node {
+        PrecedentNode::Cell { .. } => 0u8,
+        PrecedentNode::Range { .. } => 1,
+        PrecedentNode::SpillRange { .. } => 2,
+        PrecedentNode::ExternalCell { .. } => 3,
+        PrecedentNode::ExternalRange { .. } => 4,
+    };
+
+    rank(a).cmp(&rank(b)).then_with(|| match (a, b) {
+        (PrecedentNode::Cell { sheet: a_sheet, addr: a_addr }, PrecedentNode::Cell { sheet: b_sheet, addr: b_addr }) => {
+            a_sheet
+                .cmp(b_sheet)
+                .then_with(|| a_addr.row.cmp(&b_addr.row))
+                .then_with(|| a_addr.col.cmp(&b_addr.col))
         }
-        PrecedentNode::SpillRange {
-            sheet,
-            origin,
-            start,
-            end,
-        } => (
-            2, sheet, origin.row, origin.col, start.row, start.col, end.row, end.col,
-        ),
-    }
+        (
+            PrecedentNode::Range {
+                sheet: a_sheet,
+                start: a_start,
+                end: a_end,
+            },
+            PrecedentNode::Range {
+                sheet: b_sheet,
+                start: b_start,
+                end: b_end,
+            },
+        ) => a_sheet
+            .cmp(b_sheet)
+            .then_with(|| a_start.row.cmp(&b_start.row))
+            .then_with(|| a_start.col.cmp(&b_start.col))
+            .then_with(|| a_end.row.cmp(&b_end.row))
+            .then_with(|| a_end.col.cmp(&b_end.col)),
+        (
+            PrecedentNode::SpillRange {
+                sheet: a_sheet,
+                origin: a_origin,
+                start: a_start,
+                end: a_end,
+            },
+            PrecedentNode::SpillRange {
+                sheet: b_sheet,
+                origin: b_origin,
+                start: b_start,
+                end: b_end,
+            },
+        ) => a_sheet
+            .cmp(b_sheet)
+            .then_with(|| a_origin.row.cmp(&b_origin.row))
+            .then_with(|| a_origin.col.cmp(&b_origin.col))
+            .then_with(|| a_start.row.cmp(&b_start.row))
+            .then_with(|| a_start.col.cmp(&b_start.col))
+            .then_with(|| a_end.row.cmp(&b_end.row))
+            .then_with(|| a_end.col.cmp(&b_end.col)),
+        (
+            PrecedentNode::ExternalCell {
+                sheet: a_sheet,
+                addr: a_addr,
+            },
+            PrecedentNode::ExternalCell {
+                sheet: b_sheet,
+                addr: b_addr,
+            },
+        ) => a_sheet
+            .cmp(b_sheet)
+            .then_with(|| a_addr.row.cmp(&b_addr.row))
+            .then_with(|| a_addr.col.cmp(&b_addr.col)),
+        (
+            PrecedentNode::ExternalRange {
+                sheet: a_sheet,
+                start: a_start,
+                end: a_end,
+            },
+            PrecedentNode::ExternalRange {
+                sheet: b_sheet,
+                start: b_start,
+                end: b_end,
+            },
+        ) => a_sheet
+            .cmp(b_sheet)
+            .then_with(|| a_start.row.cmp(&b_start.row))
+            .then_with(|| a_start.col.cmp(&b_start.col))
+            .then_with(|| a_end.row.cmp(&b_end.row))
+            .then_with(|| a_end.col.cmp(&b_end.col)),
+        _ => Ordering::Equal,
+    })
 }
 
 fn sort_and_dedup_nodes(nodes: &mut Vec<PrecedentNode>) {
-    nodes.sort_by_key(|n| precedent_node_sort_key(*n));
+    nodes.sort_by(precedent_node_cmp);
     nodes.dedup();
 }
 
@@ -3400,6 +3510,7 @@ fn normalize_range(start: CellAddr, end: CellAddr) -> (CellAddr, CellAddr) {
 fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId, CellAddr)> {
     #[derive(Debug, Clone)]
     enum Stream {
+        Empty,
         Single {
             sheet: SheetId,
             addr: CellAddr,
@@ -3444,11 +3555,13 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
                         done: false,
                     }
                 }
+                PrecedentNode::ExternalCell { .. } | PrecedentNode::ExternalRange { .. } => Stream::Empty,
             }
         }
 
         fn peek(&self) -> Option<(SheetId, CellAddr)> {
             match self {
+                Stream::Empty => None,
                 Stream::Single { sheet, addr, done } => (!*done).then_some((*sheet, *addr)),
                 Stream::Range {
                     sheet, cur, done, ..
@@ -3458,6 +3571,7 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
 
         fn advance(&mut self) {
             match self {
+                Stream::Empty => {}
                 Stream::Single { done, .. } => *done = true,
                 Stream::Range {
                     start,
@@ -3653,6 +3767,12 @@ impl crate::eval::ValueResolver for Snapshot {
         }
 
         Value::Blank
+    }
+
+    fn get_external_value(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+        self.external_value_provider
+            .as_ref()
+            .and_then(|provider| provider.get(sheet, addr))
     }
 
     fn sheet_id(&self, name: &str) -> Option<usize> {
@@ -4554,9 +4674,21 @@ fn walk_expr_flags(
                 lexical_scopes,
             );
         }
-        Expr::CellRef(_)
-        | Expr::RangeRef(_)
-        | Expr::StructuredRef(_)
+        Expr::CellRef(r) => {
+            if let SheetReference::External(key) = &r.sheet {
+                if crate::eval::is_valid_external_sheet_key(key) {
+                    *volatile = true;
+                }
+            }
+        }
+        Expr::RangeRef(r) => {
+            if let SheetReference::External(key) = &r.sheet {
+                if crate::eval::is_valid_external_sheet_key(key) {
+                    *volatile = true;
+                }
+            }
+        }
+        Expr::StructuredRef(_)
         | Expr::Number(_)
         | Expr::Text(_)
         | Expr::Bool(_)
@@ -4586,6 +4718,104 @@ fn analyze_calc_precedents(
         &mut lexical_scopes,
     );
     out
+}
+
+fn analyze_external_precedents(
+    expr: &CompiledExpr,
+    current_cell: CellKey,
+    workbook: &Workbook,
+) -> Vec<PrecedentNode> {
+    let mut out: HashSet<PrecedentNode> = HashSet::new();
+    let mut visiting_names = HashSet::new();
+    walk_external_expr(expr, current_cell, workbook, &mut out, &mut visiting_names);
+    out.into_iter().collect()
+}
+
+fn walk_external_expr(
+    expr: &CompiledExpr,
+    current_cell: CellKey,
+    workbook: &Workbook,
+    precedents: &mut HashSet<PrecedentNode>,
+    visiting_names: &mut HashSet<(SheetId, String)>,
+) {
+    match expr {
+        Expr::CellRef(r) => {
+            if let SheetReference::External(key) = &r.sheet {
+                if crate::eval::is_valid_external_sheet_key(key) {
+                    precedents.insert(PrecedentNode::ExternalCell {
+                        sheet: key.clone(),
+                        addr: r.addr,
+                    });
+                }
+            }
+        }
+        Expr::RangeRef(r) => {
+            if let SheetReference::External(key) = &r.sheet {
+                if crate::eval::is_valid_external_sheet_key(key) {
+                    precedents.insert(PrecedentNode::ExternalRange {
+                        sheet: key.clone(),
+                        start: r.start,
+                        end: r.end,
+                    });
+                }
+            }
+        }
+        Expr::NameRef(nref) => {
+            let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
+                return;
+            };
+            let name_key = normalize_defined_name(&nref.name);
+            if name_key.is_empty() {
+                return;
+            }
+
+            let visit_key = (sheet, name_key.clone());
+            if !visiting_names.insert(visit_key.clone()) {
+                return;
+            }
+            if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                if let Some(expr) = def.compiled.as_ref() {
+                    walk_external_expr(
+                        expr,
+                        CellKey {
+                            sheet,
+                            addr: current_cell.addr,
+                        },
+                        workbook,
+                        precedents,
+                        visiting_names,
+                    );
+                }
+            }
+            visiting_names.remove(&visit_key);
+        }
+        Expr::Unary { expr, .. }
+        | Expr::Postfix { expr, .. }
+        | Expr::ImplicitIntersection(expr)
+        | Expr::SpillRange(expr) => {
+            walk_external_expr(expr, current_cell, workbook, precedents, visiting_names)
+        }
+        Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
+            walk_external_expr(left, current_cell, workbook, precedents, visiting_names);
+            walk_external_expr(right, current_cell, workbook, precedents, visiting_names);
+        }
+        Expr::FunctionCall { args, .. } => {
+            for a in args {
+                walk_external_expr(a, current_cell, workbook, precedents, visiting_names);
+            }
+        }
+        Expr::ArrayLiteral { values, .. } => {
+            for el in values.iter() {
+                walk_external_expr(el, current_cell, workbook, precedents, visiting_names);
+            }
+        }
+        Expr::StructuredRef(_)
+        | Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Bool(_)
+        | Expr::Blank
+        | Expr::Error(_) => {}
+    }
 }
 
 fn spill_range_target_cell(expr: &CompiledExpr, current_cell: CellKey) -> Option<CellKey> {

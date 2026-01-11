@@ -31,7 +31,7 @@ fn transpose_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let mut values = Vec::with_capacity(rows.saturating_mul(cols));
             for row in r.start.row..=r.end.row {
                 for col in r.start.col..=r.end.col {
-                    values.push(ctx.get_cell_value(r.sheet_id, CellAddr { row, col }));
+                    values.push(ctx.get_cell_value(&r.sheet_id, CellAddr { row, col }));
                 }
             }
             Array::new(rows, cols, values)

@@ -1164,15 +1164,15 @@ fn collect_holidays(
     match ctx.eval_arg(expr) {
         ArgValue::Scalar(v) => push_value(&mut out, v)?,
         ArgValue::Reference(r) => {
-            for addr in ctx.iter_reference_cells(r) {
-                let v = ctx.get_cell_value(r.sheet_id, addr);
+            for addr in ctx.iter_reference_cells(&r) {
+                let v = ctx.get_cell_value(&r.sheet_id, addr);
                 push_value(&mut out, v)?;
             }
         }
         ArgValue::ReferenceUnion(ranges) => {
             for r in ranges {
-                for addr in ctx.iter_reference_cells(r) {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                for addr in ctx.iter_reference_cells(&r) {
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
                     push_value(&mut out, v)?;
                 }
             }

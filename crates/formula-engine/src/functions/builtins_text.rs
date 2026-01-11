@@ -41,7 +41,7 @@ fn concat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v.coerce_to_string() {
                         Ok(s) => out.push_str(&s),
                         Err(e) => return Value::Error(e),
@@ -51,7 +51,7 @@ fn concat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ArgValue::ReferenceUnion(ranges) => {
                 for r in ranges {
                     for addr in r.iter_cells() {
-                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        let v = ctx.get_cell_value(&r.sheet_id, addr);
                         match v.coerce_to_string() {
                             Ok(s) => out.push_str(&s),
                             Err(e) => return Value::Error(e),
@@ -1008,13 +1008,13 @@ fn eval_matrix_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Mat
         ArgValue::Reference(r) => {
             let r = r.normalized();
             if r.is_single_cell() {
-                return Ok(MatrixArg::Scalar(ctx.get_cell_value(r.sheet_id, r.start)));
+                return Ok(MatrixArg::Scalar(ctx.get_cell_value(&r.sheet_id, r.start)));
             }
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
             let mut values = Vec::with_capacity(rows.saturating_mul(cols));
             for addr in r.iter_cells() {
-                values.push(ctx.get_cell_value(r.sheet_id, addr));
+                values.push(ctx.get_cell_value(&r.sheet_id, addr));
             }
             Ok(MatrixArg::Array(Array::new(rows, cols, values)))
         }
@@ -1183,7 +1183,7 @@ fn flatten_textjoin_reference(
 ) {
     let reference = reference.normalized();
     for addr in reference.iter_cells() {
-        out.push(ctx.get_cell_value(reference.sheet_id, addr));
+        out.push(ctx.get_cell_value(&reference.sheet_id, addr));
     }
 }
 
@@ -1196,10 +1196,10 @@ fn flatten_textjoin_reference_union(
     for range in ranges {
         let range = range.normalized();
         for addr in range.iter_cells() {
-            if !seen.insert((range.sheet_id, addr)) {
+            if !seen.insert((range.sheet_id.clone(), addr)) {
                 continue;
             }
-            out.push(ctx.get_cell_value(range.sheet_id, addr));
+            out.push(ctx.get_cell_value(&range.sheet_id, addr));
         }
     }
 }

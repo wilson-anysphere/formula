@@ -15,6 +15,19 @@ pub mod text;
 pub(crate) mod array_lift;
 pub(crate) mod wildcard;
 
+/// Identifies the source worksheet for a reference argument.
+///
+/// Most references target a worksheet inside the current workbook (`Local`). Excel formulas can
+/// also reference cells/ranges in external workbooks, e.g. `=[Book.xlsx]Sheet1!A1`.
+///
+/// External sheet keys are preserved in the canonical bracketed form produced by the parser
+/// (`"[Book.xlsx]Sheet1"`), which avoids allocating synthetic local sheet ids.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SheetId {
+    Local(usize),
+    External(String),
+}
+
 // Built-in Excel-compatible functions registered with the inventory-backed
 // registry live in dedicated modules to avoid merge conflicts.
 mod builtins_array;
@@ -58,15 +71,15 @@ pub enum ValueType {
     Bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Reference {
-    pub sheet_id: usize,
+    pub sheet_id: SheetId,
     pub start: CellAddr,
     pub end: CellAddr,
 }
 
 impl Reference {
-    pub fn normalized(self) -> Self {
+    pub fn normalized(&self) -> Self {
         let (r1, r2) = if self.start.row <= self.end.row {
             (self.start.row, self.end.row)
         } else {
@@ -78,24 +91,24 @@ impl Reference {
             (self.end.col, self.start.col)
         };
         Self {
-            sheet_id: self.sheet_id,
+            sheet_id: self.sheet_id.clone(),
             start: CellAddr { row: r1, col: c1 },
             end: CellAddr { row: r2, col: c2 },
         }
     }
 
-    pub fn is_single_cell(self) -> bool {
+    pub fn is_single_cell(&self) -> bool {
         self.start == self.end
     }
 
-    pub fn size(self) -> u64 {
+    pub fn size(&self) -> u64 {
         let norm = self.normalized();
         let rows = norm.end.row as u64 - norm.start.row as u64 + 1;
         let cols = norm.end.col as u64 - norm.start.col as u64 + 1;
         rows.saturating_mul(cols)
     }
 
-    pub fn contains(self, addr: CellAddr) -> bool {
+    pub fn contains(&self, addr: CellAddr) -> bool {
         let norm = self.normalized();
         addr.row >= norm.start.row
             && addr.row <= norm.end.row
@@ -103,7 +116,7 @@ impl Reference {
             && addr.col <= norm.end.col
     }
 
-    pub fn iter_cells(self) -> impl Iterator<Item = CellAddr> {
+    pub fn iter_cells(&self) -> impl Iterator<Item = CellAddr> {
         let norm = self.normalized();
         let rows = norm.start.row..=norm.end.row;
         let cols = norm.start.col..=norm.end.col;
@@ -125,15 +138,17 @@ pub trait FunctionContext {
     fn eval_formula(&self, expr: &CompiledExpr) -> Value;
     fn eval_formula_with_bindings(&self, expr: &CompiledExpr, bindings: &HashMap<String, Value>) -> Value;
     fn capture_lexical_env(&self) -> HashMap<String, Value>;
-    fn apply_implicit_intersection(&self, reference: Reference) -> Value;
-    fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
-    fn iter_reference_cells(&self, reference: Reference)
-        -> Box<dyn Iterator<Item = CellAddr> + '_>;
+    fn apply_implicit_intersection(&self, reference: &Reference) -> Value;
+    fn get_cell_value(&self, sheet_id: &SheetId, addr: CellAddr) -> Value;
+    fn iter_reference_cells<'a>(
+        &'a self,
+        reference: &'a Reference,
+    ) -> Box<dyn Iterator<Item = CellAddr> + 'a>;
     /// Records that `reference` was dereferenced during evaluation.
     ///
     /// Implementations may use this to build dynamic dependency sets. The default is a no-op so
     /// callers that do not care about dependency tracing can ignore it.
-    fn record_reference(&self, _reference: Reference) {}
+    fn record_reference(&self, _reference: &Reference) {}
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc>;
     fn date_system(&self) -> ExcelDateSystem;
     fn current_sheet_id(&self) -> usize;
@@ -230,7 +245,7 @@ pub fn call_function(ctx: &dyn FunctionContext, name: &str, args: &[CompiledExpr
 pub(crate) fn eval_scalar_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Value {
     match ctx.eval_arg(expr) {
         ArgValue::Scalar(v) => v,
-        ArgValue::Reference(r) => ctx.apply_implicit_intersection(r),
+        ArgValue::Reference(r) => ctx.apply_implicit_intersection(&r),
         ArgValue::ReferenceUnion(ranges) => apply_implicit_intersection_union(ctx, &ranges),
     }
 }
@@ -240,7 +255,7 @@ fn apply_implicit_intersection_union(ctx: &dyn FunctionContext, ranges: &[Refere
     // succeeding only when exactly one area intersects.
     let mut hits = Vec::new();
     for r in ranges {
-        let v = ctx.apply_implicit_intersection(*r);
+        let v = ctx.apply_implicit_intersection(r);
         if !matches!(v, Value::Error(ErrorKind::Value)) {
             hits.push(v);
         }

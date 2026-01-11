@@ -2,7 +2,7 @@ use crate::error::ExcelError;
 use crate::eval::{
     parse_a1, CellAddr, CompareOp, EvalContext, FormulaParseError, SheetReference, UnaryOp,
 };
-use crate::functions::{ArgValue as FnArgValue, FunctionContext};
+use crate::functions::{ArgValue as FnArgValue, FunctionContext, SheetId as FnSheetId};
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
 
@@ -21,12 +21,9 @@ impl Span {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TraceRef {
-    Cell {
-        sheet: usize,
-        addr: CellAddr,
-    },
+    Cell { sheet: FnSheetId, addr: CellAddr },
     Range {
-        sheet: usize,
+        sheet: FnSheetId,
         start: CellAddr,
         end: CellAddr,
     },
@@ -999,15 +996,15 @@ impl ParserImpl {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ResolvedRange {
-    sheet_id: usize,
+    sheet_id: FnSheetId,
     start: CellAddr,
     end: CellAddr,
 }
 
 impl ResolvedRange {
-    fn normalized(self) -> Self {
+    fn normalized(&self) -> Self {
         let (r1, r2) = if self.start.row <= self.end.row {
             (self.start.row, self.end.row)
         } else {
@@ -1019,17 +1016,17 @@ impl ResolvedRange {
             (self.end.col, self.start.col)
         };
         Self {
-            sheet_id: self.sheet_id,
+            sheet_id: self.sheet_id.clone(),
             start: CellAddr { row: r1, col: c1 },
             end: CellAddr { row: r2, col: c2 },
         }
     }
 
-    fn is_single_cell(self) -> bool {
+    fn is_single_cell(&self) -> bool {
         self.start == self.end
     }
 
-    fn iter_cells(self) -> impl Iterator<Item = CellAddr> {
+    fn iter_cells(&self) -> impl Iterator<Item = CellAddr> {
         let norm = self.normalized();
         let rows = norm.start.row..=norm.end.row;
         let cols = norm.start.col..=norm.end.col;
@@ -1059,6 +1056,16 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 trace.value = scalar.clone();
                 (scalar, trace)
             }
+        }
+    }
+
+    fn get_sheet_cell_value(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Value {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.get_cell_value(*id, addr),
+            FnSheetId::External(key) => self
+                .resolver
+                .get_external_value(key, addr)
+                .unwrap_or(Value::Error(ErrorKind::Ref)),
         }
     }
 
@@ -1188,11 +1195,13 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             SpannedExprKind::CellRef(r) => match self.resolve_sheet_ids(&r.sheet) {
                 Some(sheet_ids)
                     if !sheet_ids.is_empty()
-                        && sheet_ids.iter().all(|id| self.resolver.sheet_exists(*id)) =>
+                        && sheet_ids.iter().all(|sheet_id| {
+                            !matches!(sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
+                        }) =>
                 {
                     let reference = if sheet_ids.len() == 1 {
                         Some(TraceRef::Cell {
-                            sheet: sheet_ids[0],
+                            sheet: sheet_ids[0].clone(),
                             addr: r.addr,
                         })
                     } else {
@@ -1236,11 +1245,13 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             SpannedExprKind::RangeRef(r) => match self.resolve_sheet_ids(&r.sheet) {
                 Some(sheet_ids)
                     if !sheet_ids.is_empty()
-                        && sheet_ids.iter().all(|id| self.resolver.sheet_exists(*id)) =>
+                        && sheet_ids.iter().all(|sheet_id| {
+                            !matches!(sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
+                        }) =>
                 {
                     let reference = if sheet_ids.len() == 1 {
                         Some(TraceRef::Range {
-                            sheet: sheet_ids[0],
+                            sheet: sheet_ids[0].clone(),
                             start: r.start,
                             end: r.end,
                         })
@@ -1283,7 +1294,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 }
             },
             SpannedExprKind::NameRef(nref) => match self.resolve_sheet_id(&nref.sheet) {
-                Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
+                Some(FnSheetId::Local(sheet_id)) if self.resolver.sheet_exists(sheet_id) => {
                     let resolved = self.resolver.resolve_name(sheet_id, &nref.name);
                     match resolved {
                         Some(crate::eval::ResolvedName::Constant(v)) => (
@@ -1321,19 +1332,20 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                     },
                                 ),
                                 FnArgValue::Reference(r) => {
+                                    let sheet_id = r.sheet_id.clone();
                                     let range = ResolvedRange {
-                                        sheet_id: r.sheet_id,
+                                        sheet_id: sheet_id.clone(),
                                         start: r.start,
                                         end: r.end,
                                     };
                                     let reference = if r.is_single_cell() {
                                         Some(TraceRef::Cell {
-                                            sheet: r.sheet_id,
+                                            sheet: sheet_id.clone(),
                                             addr: r.start,
                                         })
                                     } else {
                                         Some(TraceRef::Range {
-                                            sheet: r.sheet_id,
+                                            sheet: sheet_id.clone(),
                                             start: r.start,
                                             end: r.end,
                                         })
@@ -1436,30 +1448,39 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             if !range.is_single_cell() {
                                 (EvalValue::Scalar(Value::Error(ErrorKind::Value)), None)
                             } else {
-                                let sheet_id = range.sheet_id;
                                 let addr = range.start;
-                                match self.resolver.spill_origin(sheet_id, addr) {
-                                    Some(origin) => {
-                                        match self.resolver.spill_range(sheet_id, origin) {
-                                            Some((start, end)) => (
-                                                EvalValue::Reference(vec![ResolvedRange {
-                                                    sheet_id,
-                                                    start,
-                                                    end,
-                                                }]),
-                                                Some(TraceRef::Range {
-                                                    sheet: sheet_id,
-                                                    start,
-                                                    end,
-                                                }),
-                                            ),
+                                match range.sheet_id {
+                                    FnSheetId::Local(sheet_id) => {
+                                        match self.resolver.spill_origin(sheet_id, addr) {
+                                            Some(origin) => {
+                                                match self.resolver.spill_range(sheet_id, origin) {
+                                                    Some((start, end)) => {
+                                                        let sheet = FnSheetId::Local(sheet_id);
+                                                        (
+                                                            EvalValue::Reference(vec![ResolvedRange {
+                                                                sheet_id: sheet.clone(),
+                                                                start,
+                                                                end,
+                                                            }]),
+                                                            Some(TraceRef::Range { sheet, start, end }),
+                                                        )
+                                                    }
+                                                    None => (
+                                                        EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                                                        None,
+                                                    ),
+                                                }
+                                            }
                                             None => (
                                                 EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
                                                 None,
                                             ),
                                         }
                                     }
-                                    None => (EvalValue::Scalar(Value::Error(ErrorKind::Ref)), None),
+                                    FnSheetId::External(_) => (
+                                        EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                                        None,
+                                    ),
                                 }
                             }
                         }
@@ -1671,38 +1692,38 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         }
     }
 
-    fn resolve_sheet_id(&self, sheet: &SheetReference<usize>) -> Option<usize> {
+    fn resolve_sheet_id(&self, sheet: &SheetReference<usize>) -> Option<FnSheetId> {
         match sheet {
-            SheetReference::Current => Some(self.ctx.current_sheet),
-            SheetReference::Sheet(id) => Some(*id),
+            SheetReference::Current => Some(FnSheetId::Local(self.ctx.current_sheet)),
+            SheetReference::Sheet(id) => Some(FnSheetId::Local(*id)),
             SheetReference::SheetRange(a, b) => {
                 if a == b {
-                    Some(*a)
+                    Some(FnSheetId::Local(*a))
                 } else {
                     None
                 }
             }
-            SheetReference::External(_) => None,
+            SheetReference::External(key) => crate::eval::is_valid_external_sheet_key(key)
+                .then(|| FnSheetId::External(key.clone())),
         }
     }
 
-    fn resolve_sheet_ids(&self, sheet: &SheetReference<usize>) -> Option<Vec<usize>> {
+    fn resolve_sheet_ids(&self, sheet: &SheetReference<usize>) -> Option<Vec<FnSheetId>> {
         match sheet {
-            SheetReference::Current => Some(vec![self.ctx.current_sheet]),
-            SheetReference::Sheet(id) => Some(vec![*id]),
+            SheetReference::Current => Some(vec![FnSheetId::Local(self.ctx.current_sheet)]),
+            SheetReference::Sheet(id) => Some(vec![FnSheetId::Local(*id)]),
             SheetReference::SheetRange(a, b) => {
                 let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
-                Some((start..=end).collect())
+                Some((start..=end).map(FnSheetId::Local).collect())
             }
-            SheetReference::External(_) => None,
+            SheetReference::External(key) => crate::eval::is_valid_external_sheet_key(key)
+                .then(|| vec![FnSheetId::External(key.clone())]),
         }
     }
 
     fn deref_reference_scalar(&self, ranges: &[ResolvedRange]) -> Value {
         match ranges {
-            [only] if only.is_single_cell() => {
-                self.resolver.get_cell_value(only.sheet_id, only.start)
-            }
+            [only] if only.is_single_cell() => self.get_sheet_cell_value(&only.sheet_id, only.start),
             [_only] => Value::Error(ErrorKind::Spill),
             _ => Value::Error(ErrorKind::Value),
         }
@@ -1711,13 +1732,13 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
     fn apply_implicit_intersection(&self, ranges: &[ResolvedRange]) -> Value {
         match ranges {
             [] => Value::Error(ErrorKind::Value),
-            [only] => self.apply_implicit_intersection_single(*only),
+            [only] => self.apply_implicit_intersection_single(only),
             many => {
                 // If multiple areas intersect, Excel's implicit intersection is ambiguous. We
                 // approximate by succeeding only when exactly one area intersects.
                 let mut hits = Vec::new();
                 for r in many {
-                    let v = self.apply_implicit_intersection_single(*r);
+                    let v = self.apply_implicit_intersection_single(r);
                     if !matches!(v, Value::Error(ErrorKind::Value)) {
                         hits.push(v);
                     }
@@ -1730,9 +1751,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         }
     }
 
-    fn apply_implicit_intersection_single(&self, range: ResolvedRange) -> Value {
+    fn apply_implicit_intersection_single(&self, range: &ResolvedRange) -> Value {
         if range.is_single_cell() {
-            return self.resolver.get_cell_value(range.sheet_id, range.start);
+            return self.get_sheet_cell_value(&range.sheet_id, range.start);
         }
 
         let range = range.normalized();
@@ -1740,8 +1761,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
 
         if range.start.col == range.end.col {
             if cur.row >= range.start.row && cur.row <= range.end.row {
-                return self.resolver.get_cell_value(
-                    range.sheet_id,
+                return self.get_sheet_cell_value(
+                    &range.sheet_id,
                     CellAddr {
                         row: cur.row,
                         col: range.start.col,
@@ -1752,8 +1773,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         }
         if range.start.row == range.end.row {
             if cur.col >= range.start.col && cur.col <= range.end.col {
-                return self.resolver.get_cell_value(
-                    range.sheet_id,
+                return self.get_sheet_cell_value(
+                    &range.sheet_id,
                     CellAddr {
                         row: range.start.row,
                         col: cur.col,
@@ -1768,7 +1789,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             && cur.col >= range.start.col
             && cur.col <= range.end.col
         {
-            return self.resolver.get_cell_value(range.sheet_id, cur);
+            return self.get_sheet_cell_value(&range.sheet_id, cur);
         }
 
         Value::Error(ErrorKind::Value)
@@ -1880,7 +1901,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 EvalValue::Reference(ranges) => {
                     for range in ranges {
                         for addr in range.iter_cells() {
-                            let v = self.resolver.get_cell_value(range.sheet_id, addr);
+                            let v = self.get_sheet_cell_value(&range.sheet_id, addr);
                             match v {
                                 Value::Error(e) => return (Value::Error(e), traces),
                                 Value::Number(n) => acc += n,
@@ -1968,7 +1989,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     row,
                     col: table_range.start.col,
                 };
-                let candidate = self.resolver.get_cell_value(table_range.sheet_id, key);
+                let candidate = self.get_sheet_cell_value(&table_range.sheet_id, key);
                 if matches!(candidate, Value::Error(_)) {
                     continue;
                 }
@@ -1981,8 +2002,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         col: target_col,
                     };
                     return (
-                        self.resolver
-                            .get_cell_value(table_range.sheet_id, result_addr),
+                        self.get_sheet_cell_value(&table_range.sheet_id, result_addr),
                         traces,
                     );
                 }
@@ -1995,7 +2015,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     row,
                     col: table_range.start.col,
                 };
-                let candidate = self.resolver.get_cell_value(table_range.sheet_id, key);
+                let candidate = self.get_sheet_cell_value(&table_range.sheet_id, key);
                 if matches!(candidate, Value::Error(_)) {
                     continue;
                 }
@@ -2013,8 +2033,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     col: target_col,
                 };
                 (
-                    self.resolver
-                        .get_cell_value(table_range.sheet_id, result_addr),
+                    self.get_sheet_cell_value(&table_range.sheet_id, result_addr),
                     traces,
                 )
             } else {

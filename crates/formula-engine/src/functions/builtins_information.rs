@@ -27,7 +27,7 @@ where
         ArgValue::Scalar(v) => map_value(&v, f),
         ArgValue::Reference(r) => {
             if r.is_single_cell() {
-                let v = ctx.get_cell_value(r.sheet_id, r.start);
+                let v = ctx.get_cell_value(&r.sheet_id, r.start);
                 map_value(&v, f)
             } else {
                 let r = r.normalized();
@@ -36,7 +36,7 @@ where
                 let mut values = Vec::with_capacity(rows.saturating_mul(cols));
                 for row in r.start.row..=r.end.row {
                     for col in r.start.col..=r.end.col {
-                        let v = ctx.get_cell_value(r.sheet_id, CellAddr { row, col });
+                        let v = ctx.get_cell_value(&r.sheet_id, CellAddr { row, col });
                         values.push(f(&v));
                     }
                 }
@@ -175,7 +175,7 @@ fn type_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ArgValue::Scalar(v) => information::r#type(&v),
         ArgValue::Reference(r) => {
             if r.is_single_cell() {
-                information::r#type(&ctx.get_cell_value(r.sheet_id, r.start))
+                information::r#type(&ctx.get_cell_value(&r.sheet_id, r.start))
             } else {
                 64
             }

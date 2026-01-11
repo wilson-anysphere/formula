@@ -15,6 +15,7 @@ pub use ast::{
     SheetReference, UnaryOp,
 };
 pub use compiler::{compile_canonical_expr, lower_ast, lower_expr};
+pub(crate) use evaluator::is_valid_external_sheet_key;
 pub use evaluator::{
     DependencyTrace, EvalContext, Evaluator, RecalcContext, ResolvedName, ValueResolver,
 };

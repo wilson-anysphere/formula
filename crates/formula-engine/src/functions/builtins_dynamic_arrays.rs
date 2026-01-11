@@ -259,7 +259,7 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let (order_is_blank, order_arg) = evaluated[idx].clone();
             let order_value = match order_arg {
                 ArgValue::Scalar(v) => v,
-                ArgValue::Reference(r) => ctx.apply_implicit_intersection(r),
+                ArgValue::Reference(r) => ctx.apply_implicit_intersection(&r),
                 ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
             };
             if !order_is_blank {
@@ -1472,7 +1472,7 @@ fn arg_value_to_array(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Array,
             let mut values = Vec::with_capacity(rows.saturating_mul(cols));
             for row in r.start.row..=r.end.row {
                 for col in r.start.col..=r.end.col {
-                    values.push(ctx.get_cell_value(r.sheet_id, CellAddr { row, col }));
+                    values.push(ctx.get_cell_value(&r.sheet_id, CellAddr { row, col }));
                 }
             }
             Ok(Array::new(rows, cols, values))

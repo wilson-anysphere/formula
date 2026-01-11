@@ -1,7 +1,7 @@
 use crate::eval::CompiledExpr;
 use crate::functions::lookup;
 use crate::functions::{
-    eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference,
+    eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
@@ -52,12 +52,12 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
 
             let row_offset = if approx {
-                match approximate_match_in_first_col(ctx, &lookup_value, table) {
+                match approximate_match_in_first_col(ctx, &lookup_value, &table) {
                     Some(r) => r,
                     None => return Value::Error(ErrorKind::NA),
                 }
             } else {
-                match exact_match_in_first_col(ctx, &lookup_value, table) {
+                match exact_match_in_first_col(ctx, &lookup_value, &table) {
                     Some(r) => r,
                     None => return Value::Error(ErrorKind::NA),
                 }
@@ -67,7 +67,7 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 row: table.start.row + row_offset,
                 col: table.start.col + (col_index as u32) - 1,
             };
-            ctx.get_cell_value(table.sheet_id, result_addr)
+            ctx.get_cell_value(&table.sheet_id, result_addr)
         }
         ArgValue::Scalar(Value::Array(table)) => {
             let cols = i64::try_from(table.cols).unwrap_or(i64::MAX);
@@ -142,12 +142,12 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
 
             let col_offset = if approx {
-                match approximate_match_in_first_row(ctx, &lookup_value, table) {
+                match approximate_match_in_first_row(ctx, &lookup_value, &table) {
                     Some(c) => c,
                     None => return Value::Error(ErrorKind::NA),
                 }
             } else {
-                match exact_match_in_first_row(ctx, &lookup_value, table) {
+                match exact_match_in_first_row(ctx, &lookup_value, &table) {
                     Some(c) => c,
                     None => return Value::Error(ErrorKind::NA),
                 }
@@ -157,7 +157,7 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 row: table.start.row + (row_index as u32) - 1,
                 col: table.start.col + col_offset,
             };
-            ctx.get_cell_value(table.sheet_id, result_addr)
+            ctx.get_cell_value(&table.sheet_id, result_addr)
         }
         ArgValue::Scalar(Value::Array(table)) => {
             let rows = i64::try_from(table.rows).unwrap_or(i64::MAX);
@@ -229,7 +229,7 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 row: array.start.row + (row as u32) - 1,
                 col: array.start.col + (col as u32) - 1,
             };
-            ctx.get_cell_value(array.sheet_id, addr)
+            ctx.get_cell_value(&array.sheet_id, addr)
         }
         ArgValue::Scalar(Value::Array(arr)) => {
             let rows = i64::try_from(arr.rows).unwrap_or(i64::MAX);
@@ -278,14 +278,14 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let pos = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => {
             let array = r.normalized();
-            let values = match flatten_1d(array) {
+            let values = match flatten_1d(&array) {
                 Some(v) => v,
                 None => return Value::Error(ErrorKind::NA),
             };
             match match_type {
-                0 => exact_match_1d(ctx, &lookup, array.sheet_id, &values),
-                1 => approximate_match_1d(ctx, &lookup, array.sheet_id, &values, true),
-                -1 => approximate_match_1d(ctx, &lookup, array.sheet_id, &values, false),
+                0 => exact_match_1d(ctx, &lookup, &array.sheet_id, &values),
+                1 => approximate_match_1d(ctx, &lookup, &array.sheet_id, &values, true),
+                -1 => approximate_match_1d(ctx, &lookup, &array.sheet_id, &values, false),
                 _ => return Value::Error(ErrorKind::NA),
             }
         }
@@ -329,7 +329,6 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
-
     let match_mode = match args.get(2) {
         Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::MatchMode::Exact,
         Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
@@ -356,14 +355,14 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => {
             let r = r.normalized();
-            let (shape, len) = match reference_1d_shape_len(r) {
+            let (shape, len) = match reference_1d_shape_len(&r) {
                 Some(v) => v,
                 None => return Value::Error(ErrorKind::Value),
             };
             // Record that the lookup_array reference was dereferenced so dynamic reference
             // arguments (OFFSET/INDIRECT) participate in dependency tracing.
-            ctx.record_reference(r);
-            let sheet_id = r.sheet_id;
+            ctx.record_reference(&r);
+            let sheet_id = &r.sheet_id;
             let start = r.start;
 
             let pos = lookup::xmatch_with_modes_accessor(
@@ -481,7 +480,8 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     impl XlookupLookupArray {
         fn shape(&self) -> XlookupVectorShape {
             match self {
-                XlookupLookupArray::Values { shape, .. } | XlookupLookupArray::Reference { shape, .. } => *shape,
+                XlookupLookupArray::Values { shape, .. }
+                | XlookupLookupArray::Reference { shape, .. } => *shape,
             }
         }
 
@@ -508,7 +508,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     reference,
                     len,
                 } => {
-                    let sheet_id = reference.sheet_id;
+                    let sheet_id = &reference.sheet_id;
                     let start = reference.start;
                     lookup::xmatch_with_modes_accessor(
                         lookup_value,
@@ -540,13 +540,13 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let lookup_array = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => {
             let r = r.normalized();
-            let (shape, len) = match reference_1d_shape_len(r) {
+            let (shape, len) = match reference_1d_shape_len(&r) {
                 Some(v) => v,
                 None => return Value::Error(ErrorKind::Value),
             };
             // Record that the lookup_array reference was dereferenced so dynamic reference
             // arguments (OFFSET/INDIRECT) participate in dependency tracing.
-            ctx.record_reference(r);
+            ctx.record_reference(&r);
             XlookupLookupArray::Reference {
                 shape,
                 reference: r,
@@ -585,7 +585,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             match self {
                 XlookupReturnArray::Array(arr) => arr.get(row, col).cloned().unwrap_or(Value::Blank),
                 XlookupReturnArray::Reference(r) => ctx.get_cell_value(
-                    r.sheet_id,
+                    &r.sheet_id,
                     crate::eval::CellAddr {
                         row: r.start.row + row as u32,
                         col: r.start.col + col as u32,
@@ -645,7 +645,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     if let XlookupReturnArray::Reference(r) = &return_array {
         // Record dereference for dynamic dependency tracing (e.g. XLOOKUP with OFFSET return_array).
-        ctx.record_reference(*r);
+        ctx.record_reference(r);
     }
 
     match lookup_shape {
@@ -721,7 +721,7 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let layout = match find_pivot_layout(ctx, pivot_ref, &data_field) {
+    let layout = match find_pivot_layout(ctx, &pivot_ref, &data_field) {
         Ok(l) => l,
         Err(e) => return Value::Error(e),
     };
@@ -751,16 +751,16 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     if criteria.is_empty() {
-        return getpivotdata_grand_total(ctx, pivot_ref.sheet_id, &layout);
+        return getpivotdata_grand_total(ctx, &pivot_ref.sheet_id, &layout);
     }
 
-    match getpivotdata_find_row(ctx, pivot_ref.sheet_id, &layout, &criteria) {
+    match getpivotdata_find_row(ctx, &pivot_ref.sheet_id, &layout, &criteria) {
         Ok(row) => {
             let addr = crate::eval::CellAddr {
                 row,
                 col: layout.data_col,
             };
-            ctx.get_cell_value(pivot_ref.sheet_id, addr)
+            ctx.get_cell_value(&pivot_ref.sheet_id, addr)
         }
         Err(e) => Value::Error(e),
     }
@@ -768,7 +768,7 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 fn find_pivot_layout(
     ctx: &dyn FunctionContext,
-    pivot_ref: Reference,
+    pivot_ref: &Reference,
     data_field: &str,
 ) -> Result<PivotLayout, ErrorKind> {
     // Heuristics (MVP, pivot-engine-compatible):
@@ -789,7 +789,7 @@ fn find_pivot_layout(
     const MAX_SCAN_ROWS: u32 = 10_000;
     const MAX_SCAN_COLS: u32 = 64;
 
-    let sheet_id = pivot_ref.sheet_id;
+    let sheet_id = &pivot_ref.sheet_id;
     let anchor = pivot_ref.start;
 
     let mut header_row: Option<u32> = None;
@@ -960,7 +960,7 @@ fn find_pivot_layout(
 
 fn getpivotdata_grand_total(
     ctx: &dyn FunctionContext,
-    sheet_id: usize,
+    sheet_id: &SheetId,
     layout: &PivotLayout,
 ) -> Value {
     const MAX_SCAN_ROWS: u32 = 10_000;
@@ -1012,7 +1012,7 @@ fn getpivotdata_grand_total(
 
 fn getpivotdata_find_row(
     ctx: &dyn FunctionContext,
-    sheet_id: usize,
+    sheet_id: &SheetId,
     layout: &PivotLayout,
     criteria: &[(u32, Value)],
 ) -> Result<u32, ErrorKind> {
@@ -1086,7 +1086,7 @@ fn pivot_item_matches(cell: &Value, item: &Value) -> Result<bool, ErrorKind> {
     }
 }
 
-fn flatten_1d(r: Reference) -> Option<Vec<crate::eval::CellAddr>> {
+fn flatten_1d(r: &Reference) -> Option<Vec<crate::eval::CellAddr>> {
     if r.start.row == r.end.row {
         let cols = r.start.col..=r.end.col;
         Some(
@@ -1109,14 +1109,13 @@ fn flatten_1d(r: Reference) -> Option<Vec<crate::eval::CellAddr>> {
         None
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XlookupVectorShape {
     Horizontal,
     Vertical,
 }
 
-fn reference_1d_shape_len(r: Reference) -> Option<(XlookupVectorShape, usize)> {
+fn reference_1d_shape_len(r: &Reference) -> Option<(XlookupVectorShape, usize)> {
     if r.start.row == r.end.row && r.start.col == r.end.col {
         return Some((XlookupVectorShape::Vertical, 1));
     }
@@ -1130,7 +1129,6 @@ fn reference_1d_shape_len(r: Reference) -> Option<(XlookupVectorShape, usize)> {
     }
     None
 }
-
 fn array_1d_with_shape(arr: Array) -> Result<(XlookupVectorShape, Vec<Value>), ErrorKind> {
     if arr.rows == 1 && arr.cols == 1 {
         return Ok((XlookupVectorShape::Vertical, arr.values));
@@ -1168,7 +1166,7 @@ fn approximate_match_values(lookup: &Value, values: &[Value], ascending: bool) -
 fn exact_match_in_first_col(
     ctx: &dyn FunctionContext,
     lookup: &Value,
-    table: Reference,
+    table: &Reference,
 ) -> Option<u32> {
     let rows = table.start.row..=table.end.row;
     for (idx, row) in rows.enumerate() {
@@ -1176,7 +1174,7 @@ fn exact_match_in_first_col(
             row,
             col: table.start.col,
         };
-        let key = ctx.get_cell_value(table.sheet_id, addr);
+        let key = ctx.get_cell_value(&table.sheet_id, addr);
         if excel_eq(lookup, &key) {
             return Some(idx as u32);
         }
@@ -1197,7 +1195,7 @@ fn exact_match_in_first_col_array(lookup: &Value, table: &Array) -> Option<u32> 
 fn exact_match_in_first_row(
     ctx: &dyn FunctionContext,
     lookup: &Value,
-    table: Reference,
+    table: &Reference,
 ) -> Option<u32> {
     let cols = table.start.col..=table.end.col;
     for (idx, col) in cols.enumerate() {
@@ -1205,7 +1203,7 @@ fn exact_match_in_first_row(
             row: table.start.row,
             col,
         };
-        let key = ctx.get_cell_value(table.sheet_id, addr);
+        let key = ctx.get_cell_value(&table.sheet_id, addr);
         if excel_eq(lookup, &key) {
             return Some(idx as u32);
         }
@@ -1226,7 +1224,7 @@ fn exact_match_in_first_row_array(lookup: &Value, table: &Array) -> Option<u32> 
 fn approximate_match_in_first_col(
     ctx: &dyn FunctionContext,
     lookup: &Value,
-    table: Reference,
+    table: &Reference,
 ) -> Option<u32> {
     let mut best: Option<u32> = None;
     let rows = table.start.row..=table.end.row;
@@ -1235,7 +1233,7 @@ fn approximate_match_in_first_col(
             row,
             col: table.start.col,
         };
-        let key = ctx.get_cell_value(table.sheet_id, addr);
+        let key = ctx.get_cell_value(&table.sheet_id, addr);
         if excel_le(&key, lookup)? {
             best = Some(idx as u32);
         } else {
@@ -1261,7 +1259,7 @@ fn approximate_match_in_first_col_array(lookup: &Value, table: &Array) -> Option
 fn approximate_match_in_first_row(
     ctx: &dyn FunctionContext,
     lookup: &Value,
-    table: Reference,
+    table: &Reference,
 ) -> Option<u32> {
     let mut best: Option<u32> = None;
     let cols = table.start.col..=table.end.col;
@@ -1270,7 +1268,7 @@ fn approximate_match_in_first_row(
             row: table.start.row,
             col,
         };
-        let key = ctx.get_cell_value(table.sheet_id, addr);
+        let key = ctx.get_cell_value(&table.sheet_id, addr);
         if excel_le(&key, lookup)? {
             best = Some(idx as u32);
         } else {
@@ -1296,7 +1294,7 @@ fn approximate_match_in_first_row_array(lookup: &Value, table: &Array) -> Option
 fn exact_match_1d(
     ctx: &dyn FunctionContext,
     lookup: &Value,
-    sheet_id: usize,
+    sheet_id: &SheetId,
     values: &[crate::eval::CellAddr],
 ) -> Option<usize> {
     for (idx, addr) in values.iter().enumerate() {
@@ -1311,7 +1309,7 @@ fn exact_match_1d(
 fn approximate_match_1d(
     ctx: &dyn FunctionContext,
     lookup: &Value,
-    sheet_id: usize,
+    sheet_id: &SheetId,
     values: &[crate::eval::CellAddr],
     ascending: bool,
 ) -> Option<usize> {

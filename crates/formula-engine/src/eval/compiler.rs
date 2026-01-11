@@ -351,8 +351,9 @@ fn try_lower_static_range_operand(
 /// to an engine sheet id. Returning `None` indicates that the sheet does not exist and should be
 /// treated like an invalid reference (evaluates to `#REF!`).
 ///
-/// External workbook references are preserved syntactically but compile to
-/// [`SheetReference::External`], which evaluates to `#REF!`.
+/// External workbook references are preserved syntactically and compile to
+/// [`SheetReference::External`]. Evaluation resolves them through an external value provider
+/// (if configured), falling back to `#REF!` when they cannot be resolved.
 pub fn compile_canonical_expr(
     expr: &crate::Expr,
     current_sheet: usize,
@@ -867,8 +868,16 @@ fn try_compile_static_range_ref(
                 end,
             })
         }
+        SheetReference::External(key) => {
+            let (start, end) =
+                bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
+            Some(RangeRef {
+                sheet: SheetReference::External(key),
+                start,
+                end,
+            })
+        }
         SheetReference::Current => None,
-        SheetReference::External(_) => None,
     }
 }
 
