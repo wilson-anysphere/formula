@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook_auto, Reader};
 use formula_xlsb::XlsbWorkbook;
 use pretty_assertions::assert_eq;
+
+mod fixture_builder;
+use fixture_builder::XlsbFixtureBuilder;
 
 type CellCoord = (u32, u32);
 type SheetFormulas<T> = HashMap<String, HashMap<CellCoord, T>>;
@@ -24,6 +28,52 @@ fn formulas_match_calamine_for_all_fixtures() {
     for fixture in fixtures {
         compare_fixture(&fixture);
     }
+}
+
+#[test]
+fn formulas_match_calamine_for_generated_fixture() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("Sheet1");
+
+    builder.set_cell_number(0, 0, 1.0);
+    builder.set_cell_number(0, 1, 2.0);
+    builder.set_cell_formula_num(
+        0,
+        2,
+        3.0,
+        // `A1+B1`
+        vec![
+            0x24, 0, 0, 0, 0, 0x00, 0xC0, // A1
+            0x24, 0, 0, 0, 0, 0x01, 0xC0, // B1
+            0x03, // +
+        ],
+        Vec::new(),
+    );
+
+    builder.set_cell_formula_num(
+        1,
+        0,
+        -3.0,
+        // `-(A1+B1)`
+        vec![
+            0x24, 0, 0, 0, 0, 0x00, 0xC0, // A1
+            0x24, 0, 0, 0, 0, 0x01, 0xC0, // B1
+            0x03, // +
+            0x15, // (..)
+            0x13, // unary -
+        ],
+        Vec::new(),
+    );
+
+    let bytes = builder.build_bytes();
+    let mut tmp = tempfile::Builder::new()
+        .prefix("formula_xlsb_generated_")
+        .suffix(".xlsb")
+        .tempfile()
+        .expect("create temp xlsb");
+    tmp.write_all(&bytes).expect("write temp xlsb");
+
+    compare_fixture(tmp.path());
 }
 
 fn discover_xlsb_fixtures(fixtures_dir: &Path) -> Vec<PathBuf> {

@@ -73,7 +73,6 @@ impl XlsbFixtureBuilder {
     pub fn build_bytes(&self) -> Vec<u8> {
         let workbook_bin = build_workbook_bin(&self.sheet_name);
         let sheet1_bin = build_sheet_bin(&self.cells);
-        let styles_bin = build_styles_bin();
         let shared_strings_bin = if self.shared_strings.is_empty() {
             None
         } else {
@@ -118,10 +117,6 @@ impl XlsbFixtureBuilder {
                 .expect("write xl/sharedStrings.bin");
         }
 
-        zip.start_file("xl/styles.bin", options)
-            .expect("start xl/styles.bin");
-        zip.write_all(&styles_bin).expect("write xl/styles.bin");
-
         zip.finish().expect("finish xlsb zip").into_inner()
     }
 }
@@ -148,11 +143,7 @@ fn build_content_types_xml(has_shared_strings: bool) -> String {
         );
     }
 
-    xml.push_str(
-        r#"  <Override PartName="/xl/styles.bin" ContentType="application/vnd.ms-excel.styles"/>
-</Types>
-"#,
-    );
+    xml.push_str("</Types>\n");
     xml
 }
 
@@ -175,12 +166,6 @@ fn build_workbook_rels_xml(has_shared_strings: bool) -> String {
     if has_shared_strings {
         xml.push_str(
             r#"  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.bin"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.bin"/>
-"#,
-        );
-    } else {
-        xml.push_str(
-            r#"  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.bin"/>
 "#,
         );
     }
@@ -215,8 +200,8 @@ mod biff12 {
     pub const SST_END: u32 = 0x01A0;
     pub const SI: u32 = 0x0013;
 
-    pub const BEGIN_STYLES: u32 = 0x0296;
-    pub const END_STYLES: u32 = 0x0297;
+    // Stylesheet records are intentionally omitted from fixtures. `formula-xlsb`
+    // does not parse them, and Calamine is tolerant of missing `styles.bin`.
 }
 
 fn build_workbook_bin(sheet_name: &str) -> Vec<u8> {
@@ -310,13 +295,6 @@ fn build_shared_strings_bin(strings: &[String]) -> Vec<u8> {
     }
 
     write_record(&mut out, biff12::SST_END, &[]);
-    out
-}
-
-fn build_styles_bin() -> Vec<u8> {
-    let mut out = Vec::<u8>::new();
-    write_record(&mut out, biff12::BEGIN_STYLES, &[]);
-    write_record(&mut out, biff12::END_STYLES, &[]);
     out
 }
 
