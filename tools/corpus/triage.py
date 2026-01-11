@@ -139,6 +139,9 @@ def _build_rust_helper() -> Path:
     """Build (or reuse) the Rust triage helper binary."""
 
     root = _repo_root()
+    env = os.environ.copy()
+    env.setdefault("CARGO_HOME", str(root / "target" / "cargo-home"))
+    Path(env["CARGO_HOME"]).mkdir(parents=True, exist_ok=True)
     target_dir_env = os.environ.get("CARGO_TARGET_DIR")
     if target_dir_env:
         target_dir = Path(target_dir_env)
@@ -155,6 +158,7 @@ def _build_rust_helper() -> Path:
         subprocess.run(
             ["cargo", "build", "-p", "formula-corpus-triage"],
             cwd=root,
+            env=env,
             check=True,
         )
     except FileNotFoundError as e:  # noqa: PERF203 (CI signal)

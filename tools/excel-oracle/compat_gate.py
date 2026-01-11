@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -122,6 +123,11 @@ def main() -> int:
     include_tags = args.include_tag or list(DEFAULT_INCLUDE_TAGS)
     exclude_tags = args.exclude_tag
 
+    repo_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env.setdefault("CARGO_HOME", str(repo_root / "target" / "cargo-home"))
+    Path(env["CARGO_HOME"]).mkdir(parents=True, exist_ok=True)
+
     engine_cmd = [
         "cargo",
         "run",
@@ -142,7 +148,7 @@ def main() -> int:
     for t in exclude_tags:
         engine_cmd += ["--exclude-tag", t]
 
-    subprocess.run(engine_cmd, check=True)
+    subprocess.run(engine_cmd, check=True, cwd=repo_root, env=env)
 
     compare_cmd = [
         sys.executable,
