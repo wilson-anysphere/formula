@@ -1603,21 +1603,34 @@ impl<'a> Executor<'a> {
                 ))))
             }
             "worksheets" | "sheets" => {
-                let name = self
-                    .eval_expr(
-                        frame,
-                        &args
-                            .get(0)
-                            .ok_or_else(|| {
-                                VbaError::Runtime("Worksheets() missing name".to_string())
-                            })?
-                            .expr,
-                    )?
-                    .to_string_lossy();
-                let idx = self
-                    .sheet
-                    .sheet_index(&name)
-                    .ok_or_else(|| VbaError::Runtime(format!("Unknown worksheet `{name}`")))?;
+                let arg = self.eval_expr(
+                    frame,
+                    &args
+                        .get(0)
+                        .ok_or_else(|| VbaError::Runtime("Worksheets() missing name".to_string()))?
+                        .expr,
+                )?;
+                let idx = match arg {
+                    VbaValue::String(name) => self
+                        .sheet
+                        .sheet_index(&name)
+                        .ok_or_else(|| VbaError::Runtime(format!("Unknown worksheet `{name}`")))?,
+                    other => {
+                        let n = other.to_f64().unwrap_or(0.0) as isize;
+                        if n <= 0 {
+                            return Err(VbaError::Runtime(format!(
+                                "Worksheet index must be >= 1 (got {n})"
+                            )));
+                        }
+                        let idx = (n - 1) as usize;
+                        if idx >= self.sheet.sheet_count() {
+                            return Err(VbaError::Runtime(format!(
+                                "Worksheet index out of range: {n}"
+                            )));
+                        }
+                        idx
+                    }
+                };
                 Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
                     sheet: idx,
                 })))
@@ -2085,13 +2098,28 @@ impl<'a> Executor<'a> {
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range_ref))))
                 }
                 "worksheets" | "sheets" => {
-                    let name = self
-                        .eval_required_arg(frame, args, 0, "Worksheets")?
-                        .to_string_lossy();
-                    let idx = self
-                        .sheet
-                        .sheet_index(&name)
-                        .ok_or_else(|| VbaError::Runtime(format!("Unknown worksheet `{name}`")))?;
+                    let arg = self.eval_required_arg(frame, args, 0, "Worksheets")?;
+                    let idx = match arg {
+                        VbaValue::String(name) => self
+                            .sheet
+                            .sheet_index(&name)
+                            .ok_or_else(|| VbaError::Runtime(format!("Unknown worksheet `{name}`")))?,
+                        other => {
+                            let n = other.to_f64().unwrap_or(0.0) as isize;
+                            if n <= 0 {
+                                return Err(VbaError::Runtime(format!(
+                                    "Worksheet index must be >= 1 (got {n})"
+                                )));
+                            }
+                            let idx = (n - 1) as usize;
+                            if idx >= self.sheet.sheet_count() {
+                                return Err(VbaError::Runtime(format!(
+                                    "Worksheet index out of range: {n}"
+                                )));
+                            }
+                            idx
+                        }
+                    };
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
                         sheet: idx,
                     })))
@@ -2102,13 +2130,28 @@ impl<'a> Executor<'a> {
             },
             VbaObject::Workbook => match member_lc.as_str() {
                 "worksheets" | "sheets" => {
-                    let name = self
-                        .eval_required_arg(frame, args, 0, "Worksheets")?
-                        .to_string_lossy();
-                    let idx = self
-                        .sheet
-                        .sheet_index(&name)
-                        .ok_or_else(|| VbaError::Runtime(format!("Unknown worksheet `{name}`")))?;
+                    let arg = self.eval_required_arg(frame, args, 0, "Worksheets")?;
+                    let idx = match arg {
+                        VbaValue::String(name) => self
+                            .sheet
+                            .sheet_index(&name)
+                            .ok_or_else(|| VbaError::Runtime(format!("Unknown worksheet `{name}`")))?,
+                        other => {
+                            let n = other.to_f64().unwrap_or(0.0) as isize;
+                            if n <= 0 {
+                                return Err(VbaError::Runtime(format!(
+                                    "Worksheet index must be >= 1 (got {n})"
+                                )));
+                            }
+                            let idx = (n - 1) as usize;
+                            if idx >= self.sheet.sheet_count() {
+                                return Err(VbaError::Runtime(format!(
+                                    "Worksheet index out of range: {n}"
+                                )));
+                            }
+                            idx
+                        }
+                    };
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
                         sheet: idx,
                     })))

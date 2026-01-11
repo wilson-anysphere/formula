@@ -298,6 +298,29 @@ End Sub
 }
 
 #[test]
+fn worksheets_accept_numeric_index() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Worksheets(2).Activate
+    Range("A1") = ActiveSheet.Name
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+    wb.add_sheet("Sheet2");
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(
+        wb.get_value_a1("Sheet2", "A1").unwrap(),
+        VbaValue::from("Sheet2")
+    );
+}
+
+#[test]
 fn rows_and_columns_count_match_excel_limits() {
     let code = r#"
 Option Explicit
