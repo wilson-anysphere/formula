@@ -1,5 +1,7 @@
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{Cursor, Read};
+use std::path::Path;
 
 use formula_xlsb::biff12_varint::{
     read_record_id, read_record_len, write_record_id, write_record_len,
@@ -154,56 +156,76 @@ fn record_len_rejects_values_above_28_bits() {
 
 #[test]
 fn fixture_headers_reserialize_byte_for_byte() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
-    let file = File::open(path).expect("open simple.xlsb");
-    let mut zip = zip::ZipArchive::new(file).expect("read xlsb zip");
-
-    for i in 0..zip.len() {
-        let mut entry = zip.by_index(i).expect("read zip entry");
-        let name = entry.name().to_string();
-        if !name.ends_with(".bin") {
+    let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for entry in std::fs::read_dir(&fixtures_dir).expect("read fixtures dir") {
+        let path = entry.expect("fixture entry").path();
+        if path.extension() != Some(OsStr::new("xlsb")) {
             continue;
         }
 
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut bytes).expect("read part bytes");
+        let file = File::open(&path).expect("open xlsb fixture");
+        let mut zip = zip::ZipArchive::new(file).expect("read xlsb zip");
 
-        let mut cursor = Cursor::new(&bytes);
-        let mut record_index = 0usize;
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i).expect("read zip entry");
+            let name = entry.name().to_string();
+            if !is_biff12_record_stream_part(&name) {
+                continue;
+            }
 
-        loop {
-            let start = cursor.position() as usize;
-            let Some(id) = read_record_id(&mut cursor).expect("read record id") else {
-                break;
-            };
-            let Some(len) = read_record_len(&mut cursor).expect("read record len") else {
-                panic!("unexpected EOF while reading record len in {name} after id={id:#x}");
-            };
-            let end = cursor.position() as usize;
+            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut bytes).expect("read part bytes");
 
-            let mut encoded_header = Vec::new();
-            write_record_id(&mut encoded_header, id).expect("re-encode id");
-            write_record_len(&mut encoded_header, len).expect("re-encode len");
+            let mut cursor = Cursor::new(&bytes);
+            let mut record_index = 0usize;
+
+            loop {
+                let start = cursor.position() as usize;
+                let Some(id) = read_record_id(&mut cursor).expect("read record id") else {
+                    break;
+                };
+                let Some(len) = read_record_len(&mut cursor).expect("read record len") else {
+                    panic!(
+                        "unexpected EOF while reading record len in {} ({name}) after id={id:#x}",
+                        path.display()
+                    );
+                };
+                let end = cursor.position() as usize;
+
+                let mut encoded_header = Vec::new();
+                write_record_id(&mut encoded_header, id).expect("re-encode id");
+                write_record_len(&mut encoded_header, len).expect("re-encode len");
+
+                assert_eq!(
+                    encoded_header,
+                    bytes[start..end],
+                    "header mismatch in {} ({name}) record {record_index} (id={id:#x}, len={len:#x})",
+                    path.display()
+                );
+
+                let next_pos = cursor.position() + len as u64;
+                assert!(
+                    (next_pos as usize) <= bytes.len(),
+                    "record payload out of bounds in {} ({name}) record {record_index} (id={id:#x}, len={len:#x})",
+                    path.display()
+                );
+                cursor.set_position(next_pos);
+                record_index += 1;
+            }
 
             assert_eq!(
-                encoded_header,
-                bytes[start..end],
-                "header mismatch in {name} record {record_index} (id={id:#x}, len={len:#x})"
+                cursor.position() as usize,
+                bytes.len(),
+                "did not consume entire part stream for {} ({name})",
+                path.display()
             );
-
-            let next_pos = cursor.position() + len as u64;
-            assert!(
-                (next_pos as usize) <= bytes.len(),
-                "record payload out of bounds in {name} record {record_index} (id={id:#x}, len={len:#x})"
-            );
-            cursor.set_position(next_pos);
-            record_index += 1;
         }
-
-        assert_eq!(
-            cursor.position() as usize,
-            bytes.len(),
-            "did not consume entire part stream for {name}"
-        );
     }
+}
+
+fn is_biff12_record_stream_part(name: &str) -> bool {
+    matches!(
+        name,
+        "xl/workbook.bin" | "xl/sharedStrings.bin" | "xl/styles.bin" | "xl/calcChain.bin"
+    ) || name.starts_with("xl/worksheets/")
 }
