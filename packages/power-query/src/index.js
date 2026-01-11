@@ -14,6 +14,7 @@ export { MemoryCacheStore } from "./cache/memory.js";
 export { FileSystemCacheStore } from "./cache/filesystem.js";
 export { IndexedDBCacheStore } from "./cache/indexeddb.js";
 export { EncryptedCacheStore } from "./cache/encryptedStore.js";
+export { createWebCryptoCacheProvider } from "./cache/webCryptoProvider.js";
 export {
   OAuth2Manager,
   OAuth2TokenClient,
