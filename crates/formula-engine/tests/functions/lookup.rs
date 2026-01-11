@@ -228,6 +228,29 @@ fn xlookup_errors_on_mismatched_shapes_and_invalid_modes() {
 }
 
 #[test]
+fn xmatch_and_xlookup_treat_missing_optional_args_as_defaults() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 3.0);
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("B3", 30.0);
+
+    // Missing search_mode should default to 1 (first-to-last), not error.
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A3, 0,)"), Value::Number(2.0));
+
+    // Missing if_not_found should still default to #N/A when the lookup is absent.
+    assert_eq!(
+        sheet.eval("=XLOOKUP(4, A1:A3, B1:B3,,0,1)"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    // Missing search_mode should default to 1 for XLOOKUP as well.
+    assert_eq!(sheet.eval("=XLOOKUP(2, A1:A3, B1:B3,,0,)"), Value::Number(20.0));
+}
+
+#[test]
 fn vlookup_exact_match_and_errors() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

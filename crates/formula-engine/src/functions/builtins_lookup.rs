@@ -344,6 +344,7 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let match_mode = match args.get(2) {
+        Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::MatchMode::Exact,
         Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
             Ok(n) => match lookup::MatchMode::try_from(n) {
                 Ok(m) => m,
@@ -354,6 +355,7 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => lookup::MatchMode::Exact,
     };
     let search_mode = match args.get(3) {
+        Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::SearchMode::FirstToLast,
         Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
             Ok(n) => match lookup::SearchMode::try_from(n) {
                 Ok(m) => m,
@@ -404,9 +406,14 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let if_not_found = args.get(3).map(|expr| eval_scalar_arg(ctx, expr));
+    let if_not_found = match args.get(3) {
+        Some(expr) if matches!(expr, CompiledExpr::Blank) => None,
+        Some(expr) => Some(eval_scalar_arg(ctx, expr)),
+        None => None,
+    };
 
     let match_mode = match args.get(4) {
+        Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::MatchMode::Exact,
         Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
             Ok(n) => match lookup::MatchMode::try_from(n) {
                 Ok(m) => m,
@@ -417,6 +424,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => lookup::MatchMode::Exact,
     };
     let search_mode = match args.get(5) {
+        Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::SearchMode::FirstToLast,
         Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
             Ok(n) => match lookup::SearchMode::try_from(n) {
                 Ok(m) => m,
