@@ -88,7 +88,10 @@ fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
             original_name: call.name.original.clone(),
             args: call.args.iter().map(lower_expr).collect(),
         },
-        crate::Expr::Call(_) => Expr::Error(ErrorKind::Value),
+        crate::Expr::Call(call) => Expr::Call {
+            callee: Box::new(lower_expr(call.callee.as_ref())),
+            args: call.args.iter().map(lower_expr).collect(),
+        },
 
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Expr::Unary {

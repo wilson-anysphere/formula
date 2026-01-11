@@ -85,7 +85,10 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             original_name: call.name.original.clone(),
             args: call.args.iter().map(|a| lower_expr(a, origin)).collect(),
         },
-        crate::Expr::Call(_) => Expr::Error(ErrorKind::Value),
+        crate::Expr::Call(call) => Expr::Call {
+            callee: Box::new(lower_expr(call.callee.as_ref(), origin)),
+            args: call.args.iter().map(|a| lower_expr(a, origin)).collect(),
+        },
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Expr::Unary {
                 op: UnaryOp::Plus,
@@ -472,7 +475,19 @@ fn compile_expr_inner(
                 args,
             }
         }
-        crate::Expr::Call(_) => Expr::Error(ErrorKind::Value),
+        crate::Expr::Call(call) => Expr::Call {
+            callee: Box::new(compile_expr_inner(
+                call.callee.as_ref(),
+                current_sheet,
+                current_cell,
+                resolve_sheet,
+            )),
+            args: call
+                .args
+                .iter()
+                .map(|a| compile_expr_inner(a, current_sheet, current_cell, resolve_sheet))
+                .collect(),
+        },
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Expr::Unary {
                 op: UnaryOp::Plus,

@@ -4687,6 +4687,32 @@ fn walk_expr_flags(
                 );
             }
         }
+        Expr::Call { callee, args } => {
+            walk_expr_flags(
+                callee,
+                current_cell,
+                workbook,
+                names,
+                volatile,
+                thread_safe,
+                dynamic_deps,
+                visiting_names,
+                lexical_scopes,
+            );
+            for a in args {
+                walk_expr_flags(
+                    a,
+                    current_cell,
+                    workbook,
+                    names,
+                    volatile,
+                    thread_safe,
+                    dynamic_deps,
+                    visiting_names,
+                    lexical_scopes,
+                );
+            }
+        }
         Expr::ArrayLiteral { values, .. } => {
             for el in values.iter() {
                 walk_expr_flags(
@@ -4841,6 +4867,12 @@ fn walk_external_expr(
             walk_external_expr(right, current_cell, workbook, precedents, visiting_names);
         }
         Expr::FunctionCall { args, .. } => {
+            for a in args {
+                walk_external_expr(a, current_cell, workbook, precedents, visiting_names);
+            }
+        }
+        Expr::Call { callee, args } => {
+            walk_external_expr(callee, current_cell, workbook, precedents, visiting_names);
             for a in args {
                 walk_external_expr(a, current_cell, workbook, precedents, visiting_names);
             }
@@ -5157,6 +5189,30 @@ fn walk_calc_expr(
                 }
             }
 
+            for a in args {
+                walk_calc_expr(
+                    a,
+                    current_cell,
+                    tables_by_sheet,
+                    workbook,
+                    spills,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
+            }
+        }
+        Expr::Call { callee, args } => {
+            walk_calc_expr(
+                callee,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
             for a in args {
                 walk_calc_expr(
                     a,

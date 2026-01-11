@@ -10,6 +10,8 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+const ANON_LAMBDA_CALL_NAME: &str = "\u{0}ANON_LAMBDA_CALL";
+
 #[derive(Debug, Clone, Copy)]
 pub struct EvalContext {
     pub current_sheet: usize,
@@ -450,6 +452,37 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             }
             Expr::FunctionCall { name, args, .. } => {
                 let value = self.eval_function_call(name, args);
+                match value {
+                    Value::Reference(r) => EvalValue::Reference(vec![ResolvedRange {
+                        sheet_id: r.sheet_id,
+                        start: r.start,
+                        end: r.end,
+                    }]),
+                    Value::ReferenceUnion(ranges) => EvalValue::Reference(
+                        ranges
+                            .into_iter()
+                            .map(|r| ResolvedRange {
+                                sheet_id: r.sheet_id,
+                                start: r.start,
+                                end: r.end,
+                            })
+                            .collect(),
+                    ),
+                    other => EvalValue::Scalar(other),
+                }
+            }
+            Expr::Call { callee, args } => {
+                let call_name = match callee.as_ref() {
+                    Expr::NameRef(nref) => nref.name.as_str(),
+                    _ => ANON_LAMBDA_CALL_NAME,
+                };
+
+                let callee_value = match self.eval_value(callee) {
+                    EvalValue::Scalar(v) => v,
+                    EvalValue::Reference(ranges) => self.deref_reference_scalar(&ranges),
+                };
+
+                let value = self.call_value_as_function(call_name, callee_value, args);
                 match value {
                     Value::Reference(r) => EvalValue::Reference(vec![ResolvedRange {
                         sheet_id: r.sheet_id,

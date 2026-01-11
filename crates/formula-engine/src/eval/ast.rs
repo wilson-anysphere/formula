@@ -121,6 +121,10 @@ pub enum Expr<S> {
         original_name: String,
         args: Vec<Expr<S>>,
     },
+    Call {
+        callee: Box<Expr<S>>,
+        args: Vec<Expr<S>>,
+    },
     /// Excel's implicit intersection operator (`@`).
     ImplicitIntersection(Box<Expr<S>>),
     /// Excel spill-range reference operator (`#`), e.g. `A1#`.
@@ -186,6 +190,10 @@ impl<S: Clone> Expr<S> {
             } => Expr::FunctionCall {
                 name: name.clone(),
                 original_name: original_name.clone(),
+                args: args.iter().map(|a| a.map_sheets(f)).collect(),
+            },
+            Expr::Call { callee, args } => Expr::Call {
+                callee: Box::new(callee.map_sheets(f)),
                 args: args.iter().map(|a| a.map_sheets(f)).collect(),
             },
             Expr::ImplicitIntersection(inner) => {

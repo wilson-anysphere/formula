@@ -51,6 +51,12 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
             collect_unknown_function_calls(left, unknown);
             collect_unknown_function_calls(right, unknown);
         }
+        eval::Expr::Call { callee, args } => {
+            collect_unknown_function_calls(callee, unknown);
+            for arg in args {
+                collect_unknown_function_calls(arg, unknown);
+            }
+        }
         eval::Expr::ArrayLiteral { values, .. } => {
             for el in values.iter() {
                 collect_unknown_function_calls(el, unknown);
