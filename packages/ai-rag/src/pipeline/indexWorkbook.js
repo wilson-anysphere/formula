@@ -40,7 +40,7 @@ export async function indexWorkbook(params) {
 
   for (const chunk of chunks) {
     const text = chunkToText(chunk, { sampleRows });
-    const contentHash = sha256Hex(text);
+    const contentHash = await sha256Hex(text);
     currentIds.add(chunk.id);
 
     if (existingHashes.get(chunk.id) === contentHash) continue;

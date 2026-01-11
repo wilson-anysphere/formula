@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
+import { createSqliteFileVectorStore } from "../src/store/sqliteFileVectorStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,14 +22,14 @@ test("SqliteVectorStore persists vectors and can reload them", { skip: !sqlJsAva
   const filePath = path.join(tmpDir, "vectors.sqlite");
 
   try {
-    const store1 = await SqliteVectorStore.create({ filePath, dimension: 3, autoSave: true });
+    const store1 = await createSqliteFileVectorStore({ filePath, dimension: 3, autoSave: true });
     await store1.upsert([
       { id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb", label: "A" } },
       { id: "b", vector: [0, 1, 0], metadata: { workbookId: "wb", label: "B" } },
     ]);
     await store1.close();
 
-    const store2 = await SqliteVectorStore.create({ filePath, dimension: 3, autoSave: false });
+    const store2 = await createSqliteFileVectorStore({ filePath, dimension: 3, autoSave: false });
     const rec = await store2.get("a");
     assert.ok(rec);
     assert.equal(rec.metadata.label, "A");
@@ -41,4 +41,3 @@ test("SqliteVectorStore persists vectors and can reload them", { skip: !sqlJsAva
     await rm(tmpDir, { recursive: true, force: true });
   }
 });
-

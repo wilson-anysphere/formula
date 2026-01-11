@@ -3,8 +3,10 @@ export { OllamaEmbedder } from "./embedding/ollamaEmbedder.js";
 export { OpenAIEmbedder } from "./embedding/openaiEmbedder.js";
 
 export { InMemoryVectorStore } from "./store/inMemoryVectorStore.js";
-export { JsonFileVectorStore } from "./store/jsonFileVectorStore.js";
+export { JsonVectorStore } from "./store/jsonVectorStore.js";
 export { SqliteVectorStore } from "./store/sqliteVectorStore.js";
+
+export { InMemoryBinaryStorage, LocalStorageBinaryStorage } from "./store/binaryStorage.js";
 
 export { chunkWorkbook } from "./workbook/chunkWorkbook.js";
 export { chunkToText } from "./workbook/chunkToText.js";

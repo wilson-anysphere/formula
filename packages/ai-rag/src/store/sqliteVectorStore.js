@@ -1,27 +1,40 @@
-import { createRequire } from "node:module";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
-
+import { InMemoryBinaryStorage } from "./binaryStorage.js";
 import { normalizeL2, toFloat32Array } from "./vectorMath.js";
 
-function locateSqlJsFile(file) {
+function locateSqlJsFile(file, prefix = "") {
   try {
-    const require = createRequire(import.meta.url);
-    return require.resolve(`sql.js/dist/${file}`);
+    if (typeof import.meta.resolve === "function") {
+      const resolved = import.meta.resolve(`sql.js/dist/${file}`);
+      if (resolved) {
+        if (resolved.startsWith("file://")) {
+          let pathname = decodeURIComponent(new URL(resolved).pathname);
+          if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
+          return pathname;
+        }
+        return resolved;
+      }
+    }
   } catch {
-    return file;
+    // ignore
   }
+  // Emscripten calls locateFile(path, prefix). When we can't fully resolve,
+  // preserve the default behaviour (prefix + path).
+  return prefix ? `${prefix}${file}` : file;
 }
 
-let sqlJsPromise;
-async function getSqlJs() {
-  if (!sqlJsPromise) {
-    sqlJsPromise = import("sql.js").then((mod) => {
-      const initSqlJs = mod.default ?? mod;
-      return initSqlJs({ locateFile: locateSqlJsFile });
-    });
+const sqlJsPromises = new Map();
+async function getSqlJs(locateFile) {
+  const locator = locateFile ?? locateSqlJsFile;
+  if (!sqlJsPromises.has(locator)) {
+    sqlJsPromises.set(
+      locator,
+      import("sql.js").then((mod) => {
+        const initSqlJs = mod.default ?? mod;
+        return initSqlJs({ locateFile: locator });
+      })
+    );
   }
-  return sqlJsPromise;
+  return sqlJsPromises.get(locator);
 }
 
 function blobToFloat32(blob) {
@@ -53,11 +66,11 @@ function float32ToBlob(vec) {
 export class SqliteVectorStore {
   /**
    * @param {any} db
-   * @param {{ filePath?: string|null, dimension: number, autoSave: boolean }} opts
+   * @param {{ storage: any, dimension: number, autoSave: boolean }} opts
    */
   constructor(db, opts) {
     this._db = db;
-    this._filePath = opts.filePath ?? null;
+    this._storage = opts.storage;
     this._dimension = opts.dimension;
     this._autoSave = opts.autoSave;
 
@@ -70,21 +83,19 @@ export class SqliteVectorStore {
       throw new Error("SqliteVectorStore requires a positive dimension");
     }
 
-    const SQL = await getSqlJs();
-    let existing = null;
-
     if (opts.filePath) {
-      try {
-        const buffer = await readFile(opts.filePath);
-        existing = new Uint8Array(buffer);
-      } catch (err) {
-        if (err && err.code !== "ENOENT") throw err;
-      }
+      throw new Error(
+        "SqliteVectorStore.create no longer accepts filePath. Pass { storage } instead (e.g. LocalStorageBinaryStorage / NodeFileBinaryStorage)."
+      );
     }
+
+    const storage = opts.storage ?? new InMemoryBinaryStorage();
+    const SQL = await getSqlJs(opts.locateFile);
+    const existing = await storage.load();
 
     const db = existing ? new SQL.Database(existing) : new SQL.Database();
     const store = new SqliteVectorStore(db, {
-      filePath: opts.filePath ?? null,
+      storage,
       dimension: opts.dimension,
       autoSave: opts.autoSave ?? true,
     });
@@ -153,13 +164,8 @@ export class SqliteVectorStore {
   }
 
   async _persist() {
-    if (!this._filePath) return;
-    const dir = path.dirname(this._filePath);
-    await mkdir(dir, { recursive: true });
     const data = this._db.export();
-    const tmp = `${this._filePath}.tmp`;
-    await writeFile(tmp, data);
-    await rename(tmp, this._filePath);
+    await this._storage.save(data);
   }
 
   /**
