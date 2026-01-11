@@ -654,6 +654,17 @@ function queueBackendOp<T>(op: () => Promise<T>): Promise<T> {
   return result;
 }
 
+async function drainBackendSync(): Promise<void> {
+  // `pendingBackendSync` is a growing promise chain. While awaiting it, more work can
+  // be appended (e.g. a microtask-batched `set_cell` series). Loop until the chain
+  // stabilizes so we don't interleave new workbook opens/saves with stale edits.
+  while (true) {
+    const current = pendingBackendSync;
+    await current;
+    if (pendingBackendSync === current) return;
+  }
+}
+
 async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   if (!tauriBackend) {
     throw new Error("Workbook backend not available");
@@ -747,18 +758,16 @@ async function openWorkbookFromPath(path: string): Promise<void> {
   const ok = await confirmDiscardDirtyState("open another workbook");
   if (!ok) return;
 
-  // Drain any queued workbook sync IPC before swapping the backend workbook.
-  // Otherwise stale `set_cell` / `set_range` calls could land in the newly-opened workbook.
-  await new Promise<void>((resolve) => queueMicrotask(resolve));
-
   const hadActiveWorkbook = activeWorkbook != null;
 
   workbookSync?.stop();
   workbookSync = null;
 
   try {
-    await pendingBackendSync;
-    pendingBackendSync = Promise.resolve();
+    // Allow any microtask-batched workbook edits to enqueue into the backend queue,
+    // then drain the queue fully before swapping the workbook state.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await drainBackendSync();
 
     activeWorkbook = await tauriBackend.openWorkbook(path);
     await loadWorkbookIntoDocument(activeWorkbook);
@@ -822,7 +831,7 @@ async function handleSaveAs(): Promise<void> {
 
   // Ensure any pending microtask-batched workbook edits are flushed before saving.
   await new Promise<void>((resolve) => queueMicrotask(resolve));
-  await pendingBackendSync;
+  await drainBackendSync();
   await tauriBackend.saveWorkbook(path);
   activeWorkbook = { ...activeWorkbook, path };
   app.getDocument().markSaved();

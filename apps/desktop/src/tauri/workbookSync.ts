@@ -149,15 +149,17 @@ async function sendEditsViaTauri(invoke: TauriInvoke, edits: PendingEdit[]): Pro
     }
 
     // Non-rectangular: fall back to per-cell updates.
-    for (const edit of sheetEdits) {
-      await invoke("set_cell", {
-        sheet_id: sheetId,
-        row: edit.row,
-        col: edit.col,
-        value: edit.edit.value,
-        formula: edit.edit.formula
-      });
-    }
+    await Promise.all(
+      sheetEdits.map((edit) =>
+        invoke("set_cell", {
+          sheet_id: sheetId,
+          row: edit.row,
+          col: edit.col,
+          value: edit.edit.value,
+          formula: edit.edit.formula
+        }),
+      ),
+    );
   }
 }
 
@@ -257,6 +259,7 @@ export function startWorkbookSync(args: {
   return {
     stop() {
       stopped = true;
+      pending.clear();
       stopListening();
     },
     async markSaved() {
