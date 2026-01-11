@@ -1165,6 +1165,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   }
 
   const doc = app.getDocument();
+  const workbookSignaturePromise = computeWorkbookSignature(info);
   const sheets = normalizeSheetList(info);
   if (sheets.length === 0) {
     throw new Error("Workbook contains no sheets");
@@ -1235,6 +1236,11 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   }
 
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
+  const workbookSignature = await workbookSignaturePromise;
+  // Reset Power Query table signatures before applying the snapshot so any
+  // in-flight query executions cannot reuse cached table results from a
+  // previously-opened workbook.
+  refreshTableSignaturesFromBackend(doc, [], { workbookSignature });
   await app.restoreDocumentState(snapshot);
 
   // Refresh workbook metadata (defined names + tables) used by the name box and
@@ -1246,10 +1252,9 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     sheetIdByName.set(name, id);
   }
 
-  const [definedNames, tables, workbookSignature] = await Promise.all([
+  const [definedNames, tables] = await Promise.all([
     tauriBackend.listDefinedNames().catch(() => []),
     tauriBackend.listTables().catch(() => []),
-    computeWorkbookSignature(info),
   ]);
 
   const normalizedTables = tables.map((table) => {
