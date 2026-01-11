@@ -3277,7 +3277,6 @@ export class SpreadsheetApp {
   private async copySelectionToClipboard(): Promise<void> {
     try {
       const range = this.getClipboardCopyRange();
-      const cells = this.snapshotClipboardCells(range);
       const dlp = this.dlpContext;
       const payload = copyRangeToClipboardPayload(
         this.document,
@@ -3296,6 +3295,7 @@ export class SpreadsheetApp {
             }
           : undefined
       );
+      const cells = this.snapshotClipboardCells(range);
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
       this.clipboardCopyContext = { range, payload, cells };
@@ -3399,7 +3399,6 @@ export class SpreadsheetApp {
   private async cutSelectionToClipboard(): Promise<void> {
     try {
       const range = this.getClipboardCopyRange();
-      const cells = this.snapshotClipboardCells(range);
       const dlp = this.dlpContext;
       const payload = copyRangeToClipboardPayload(
         this.document,
@@ -3419,6 +3418,7 @@ export class SpreadsheetApp {
           : undefined
       );
 
+      const cells = this.snapshotClipboardCells(range);
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
       this.clipboardCopyContext = { range, payload, cells };
