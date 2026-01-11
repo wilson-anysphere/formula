@@ -304,6 +304,7 @@ export class SpreadsheetApp {
   private dragAutoScrollRaf: number | null = null;
 
   private resizeObserver: ResizeObserver;
+  private disposed = false;
 
   private readonly inlineEditController: InlineEditController;
 
@@ -641,6 +642,7 @@ export class SpreadsheetApp {
   }
 
   destroy(): void {
+    this.disposed = true;
     this.formulaBarCompletion?.destroy();
     this.wasmUnsubscribe?.();
     this.wasmUnsubscribe = null;
@@ -648,6 +650,11 @@ export class SpreadsheetApp {
     this.wasmEngine = null;
     this.stopCommentPersistence?.();
     this.resizeObserver.disconnect();
+    if (this.dragAutoScrollRaf != null) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
+      else globalThis.clearTimeout(this.dragAutoScrollRaf);
+      this.dragAutoScrollRaf = null;
+    }
     if (this.windowKeyDownListener && typeof window !== "undefined") {
       window.removeEventListener("keydown", this.windowKeyDownListener);
       this.windowKeyDownListener = null;
@@ -662,6 +669,7 @@ export class SpreadsheetApp {
    * can update the UI after mutating the DocumentController.
    */
   refresh(mode: "full" | "scroll" = "full"): void {
+    if (this.disposed) return;
     if (this.renderScheduled) {
       // Upgrade a pending scroll-only render to a full render if needed.
       if (mode === "full") this.pendingRenderMode = "full";
@@ -679,6 +687,7 @@ export class SpreadsheetApp {
 
     schedule(() => {
       this.renderScheduled = false;
+      if (this.disposed) return;
       const renderMode = this.pendingRenderMode;
       this.pendingRenderMode = "full";
       this.renderGrid();
@@ -2307,6 +2316,7 @@ export class SpreadsheetApp {
   }
 
   private maybeStartDragAutoScroll(): void {
+    if (this.disposed) return;
     if (!this.dragState || !this.dragPointerPos) return;
 
     const margin = 8;
