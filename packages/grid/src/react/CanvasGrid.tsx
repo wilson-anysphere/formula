@@ -388,6 +388,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     const viewport = renderer.scroll.getViewportState();
     const scroll = renderer.scroll.getScroll();
+    const minThumbSize = 24 * zoomRef.current;
 
     const vTrackSize = vTrack.getBoundingClientRect().height;
     const hTrackSize = hTrack.getBoundingClientRect().width;
@@ -399,7 +400,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       scrollPos: scroll.y,
       viewportSize: Math.max(0, viewport.height - frozenHeight),
       contentSize: Math.max(0, viewport.totalHeight - frozenHeight),
-      trackSize: vTrackSize
+      trackSize: vTrackSize,
+      minThumbSize
     });
 
     vThumb.style.height = `${vThumbMetrics.size}px`;
@@ -409,7 +411,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       scrollPos: scroll.x,
       viewportSize: Math.max(0, viewport.width - frozenWidth),
       contentSize: Math.max(0, viewport.totalWidth - frozenWidth),
-      trackSize: hTrackSize
+      trackSize: hTrackSize,
+      minThumbSize
     });
 
     hThumb.style.width = `${hThumbMetrics.size}px`;
