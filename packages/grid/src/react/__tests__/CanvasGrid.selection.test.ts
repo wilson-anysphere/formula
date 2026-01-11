@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import React from "react";
-import { act } from "react-dom/test-utils";
+import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { CanvasGrid, MockCellProvider, type GridApi } from "../../index";
+
+// React 18 relies on this flag to suppress act() warnings in test runners.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 function createMock2dContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const noop = () => {};
@@ -138,4 +141,3 @@ describe("CanvasGrid selection API", () => {
     host.remove();
   });
 });
-
