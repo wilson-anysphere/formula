@@ -3,7 +3,6 @@ from __future__ import annotations
 import builtins
 import io
 import os
-import threading
 import sysconfig
 from typing import Any, Dict
 
@@ -20,12 +19,14 @@ except Exception:  # pragma: no cover - native only
 _ORIGINAL_IO_OPEN = getattr(io, "open", None)
 _ORIGINAL__IO_OPEN = getattr(_io_builtin, "open", None) if _io_builtin else None
 
-_SOCKET_THREAD_LOCAL = threading.local()
 _ORIGINAL_SOCKET_CREATE_CONNECTION = None
 _ORIGINAL_SOCKET_CONNECT = None
 _ORIGINAL_SOCKET_CONNECT_EX = None
 _ORIGINAL_SOCKET_SENDTO = None
 _ORIGINAL_SOCKET_SENDMSG = None
+_ORIGINAL_SOCKET_GETADDRINFO = None
+_ORIGINAL_SOCKET_GLOBAL_DEFAULT_TIMEOUT = None
+_ORIGINAL_SOCKET_SOCKET_CLASS = None
 _ORIGINAL__SOCKET_SOCKET = None
 _ORIGINAL__SOCKET_SOCKETTYPE = None
 
@@ -278,6 +279,9 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     global _ORIGINAL_SOCKET_CONNECT_EX
     global _ORIGINAL_SOCKET_SENDTO
     global _ORIGINAL_SOCKET_SENDMSG
+    global _ORIGINAL_SOCKET_GETADDRINFO
+    global _ORIGINAL_SOCKET_GLOBAL_DEFAULT_TIMEOUT
+    global _ORIGINAL_SOCKET_SOCKET_CLASS
     global _ORIGINAL__SOCKET_SOCKET
     global _ORIGINAL__SOCKET_SOCKETTYPE
 
@@ -305,6 +309,12 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
         _ORIGINAL_SOCKET_SENDTO = getattr(socket.socket, "sendto", None)
     if _ORIGINAL_SOCKET_SENDMSG is None:
         _ORIGINAL_SOCKET_SENDMSG = getattr(socket.socket, "sendmsg", None)
+    if _ORIGINAL_SOCKET_GETADDRINFO is None:
+        _ORIGINAL_SOCKET_GETADDRINFO = getattr(socket, "getaddrinfo", None)
+    if _ORIGINAL_SOCKET_GLOBAL_DEFAULT_TIMEOUT is None:
+        _ORIGINAL_SOCKET_GLOBAL_DEFAULT_TIMEOUT = getattr(socket, "_GLOBAL_DEFAULT_TIMEOUT", object())
+    if _ORIGINAL_SOCKET_SOCKET_CLASS is None:
+        _ORIGINAL_SOCKET_SOCKET_CLASS = getattr(socket, "socket", None)
 
     _socket_mod = getattr(socket, "_socket", None)
     if _socket_mod is not None:
@@ -363,19 +373,10 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
             raise PermissionError(f"Network access to {hostname!r} is not permitted")
 
     def guarded_connect(self, address):  # type: ignore[no-untyped-def]
-        # When socket.create_connection() is used, it resolves DNS and calls
-        # socket.connect() with IP literals. Preserve the original allowlist
-        # decision made on the hostname by skipping checks in that call chain.
-        if getattr(_SOCKET_THREAD_LOCAL, "bypass_connect_check", 0):
-            return _ORIGINAL_SOCKET_CONNECT(self, address)  # type: ignore[misc]
-
         enforce_hostname(_extract_hostname(address))
         return _ORIGINAL_SOCKET_CONNECT(self, address)  # type: ignore[misc]
 
     def guarded_connect_ex(self, address):  # type: ignore[no-untyped-def]
-        if getattr(_SOCKET_THREAD_LOCAL, "bypass_connect_check", 0):
-            return _ORIGINAL_SOCKET_CONNECT_EX(self, address)  # type: ignore[misc]
-
         enforce_hostname(_extract_hostname(address))
         return _ORIGINAL_SOCKET_CONNECT_EX(self, address)  # type: ignore[misc]
 
@@ -404,14 +405,65 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
             enforce_hostname(_extract_hostname(address))
         return _ORIGINAL_SOCKET_SENDMSG(self, *args, **kwargs)  # type: ignore[misc]
 
-    def guarded_create_connection(address, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def guarded_create_connection(
+        address, timeout=_ORIGINAL_SOCKET_GLOBAL_DEFAULT_TIMEOUT, source_address=None, all_errors=False
+    ):  # type: ignore[no-untyped-def]
+        """
+        Re-implementation of socket.create_connection with allowlist enforcement.
+
+        We avoid delegating to the stdlib implementation directly because it can be
+        influenced by user monkeypatching (e.g. overriding socket.getaddrinfo),
+        which can otherwise be abused to bypass allowlist checks.
+        """
+
         enforce_hostname(_extract_hostname(address))
 
-        _SOCKET_THREAD_LOCAL.bypass_connect_check = getattr(_SOCKET_THREAD_LOCAL, "bypass_connect_check", 0) + 1
+        if (
+            _ORIGINAL_SOCKET_GETADDRINFO is None
+            or _ORIGINAL_SOCKET_SOCKET_CLASS is None
+            or not isinstance(address, (tuple, list))
+            or len(address) < 2
+        ):
+            # Fallback to the original implementation (best-effort).
+            return _ORIGINAL_SOCKET_CREATE_CONNECTION(address, timeout=timeout, source_address=source_address)  # type: ignore[misc]
+
+        host, port = address[0], address[1]
+        errors: list[BaseException] = []
+
         try:
-            return _ORIGINAL_SOCKET_CREATE_CONNECTION(address, *args, **kwargs)  # type: ignore[misc]
-        finally:
-            _SOCKET_THREAD_LOCAL.bypass_connect_check -= 1
+            addr_infos = _ORIGINAL_SOCKET_GETADDRINFO(host, port, 0, getattr(socket, "SOCK_STREAM", 1))  # type: ignore[misc]
+        except Exception as err:
+            raise err
+
+        for res in addr_infos:
+            af, socktype, proto, _canonname, sa = res
+            sock_obj = None
+            try:
+                sock_obj = _ORIGINAL_SOCKET_SOCKET_CLASS(af, socktype, proto)
+                if timeout is not _ORIGINAL_SOCKET_GLOBAL_DEFAULT_TIMEOUT:
+                    sock_obj.settimeout(timeout)
+                if source_address:
+                    sock_obj.bind(source_address)
+                _ORIGINAL_SOCKET_CONNECT(sock_obj, sa)  # type: ignore[misc]
+                return sock_obj
+            except BaseException as err:
+                errors.append(err)
+                if sock_obj is not None:
+                    try:
+                        sock_obj.close()
+                    except Exception:
+                        pass
+
+        if all_errors:
+            try:
+                raise ExceptionGroup("create_connection failed", errors)  # type: ignore[name-defined]
+            except NameError:
+                # Python < 3.11; fall back to the last error.
+                pass
+
+        if errors:
+            raise errors[-1]
+        raise OSError("getaddrinfo returns an empty list")
 
     if _ORIGINAL_SOCKET_CREATE_CONNECTION is not None:
         try:
@@ -451,14 +503,10 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
             __slots__ = ()
 
             def connect(self, address):  # type: ignore[no-untyped-def]
-                if getattr(_SOCKET_THREAD_LOCAL, "bypass_connect_check", 0):
-                    return super().connect(address)
                 enforce_hostname(_extract_hostname(address))
                 return super().connect(address)
 
             def connect_ex(self, address):  # type: ignore[no-untyped-def]
-                if getattr(_SOCKET_THREAD_LOCAL, "bypass_connect_check", 0):
-                    return super().connect_ex(address)
                 enforce_hostname(_extract_hostname(address))
                 return super().connect_ex(address)
 

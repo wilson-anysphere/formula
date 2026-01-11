@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import http from "node:http";
+import net from "node:net";
 
 import { NativePythonRuntime } from "@formula/python-runtime/native";
 import { MockWorkbook } from "@formula/python-runtime/test-utils";
@@ -436,6 +437,68 @@ s.sendmsg([b"hi"], [], 0, ("127.0.0.1", 9))
         permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
       }),
     ).rejects.toThrow(/Network access to/);
+  });
+
+  it("ignores monkeypatched getaddrinfo in create_connection (native allowlist sandbox)", async () => {
+    let hits1271 = 0;
+    let hits1272 = 0;
+
+    const server1272 = net.createServer((socket) => {
+      hits1272 += 1;
+      socket.end();
+    });
+    await new Promise<void>((resolve, reject) => {
+      server1272.listen(0, "127.0.0.2", () => resolve());
+      server1272.on("error", reject);
+    });
+    const addr1272 = server1272.address();
+    if (!addr1272 || typeof addr1272 === "string") {
+      server1272.close();
+      throw new Error("Failed to bind 127.0.0.2 server");
+    }
+
+    const server1271 = net.createServer((socket) => {
+      hits1271 += 1;
+      socket.end();
+    });
+    await new Promise<void>((resolve, reject) => {
+      server1271.listen(addr1272.port, "127.0.0.1", () => resolve());
+      server1271.on("error", reject);
+    });
+
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import socket
+
+orig = socket.getaddrinfo
+
+def fake_getaddrinfo(host, port, *args, **kwargs):
+    return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.2", port))]
+
+socket.getaddrinfo = fake_getaddrinfo
+
+sock = socket.create_connection(("127.0.0.1", ${addr1272.port}), timeout=1)
+sock.close()
+`;
+
+    try {
+      await runtime.execute(script, {
+        api: workbook,
+        permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["127.0.0.1"] },
+      });
+    } finally {
+      await new Promise<void>((resolve) => server1271.close(() => resolve()));
+      await new Promise<void>((resolve) => server1272.close(() => resolve()));
+    }
+
+    expect(hits1271).toBeGreaterThan(0);
+    expect(hits1272).toBe(0);
   });
 
   it("blocks obvious command execution escape hatches (os.system)", async () => {
