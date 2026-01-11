@@ -1,5 +1,5 @@
 use crate::{ErrorKind, Value};
-use crate::functions::wildcard::wildcard_match;
+use crate::functions::wildcard::WildcardPattern;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
@@ -226,6 +226,7 @@ fn xmatch_linear(
                 Ok(s) => s,
                 Err(e) => return Err(e),
             };
+            let pattern = WildcardPattern::new(&pattern);
             for (idx, candidate) in iter {
                 let text = match candidate {
                     Value::Error(_) => continue,
@@ -235,7 +236,7 @@ fn xmatch_linear(
                         Err(_) => continue,
                     },
                 };
-                if wildcard_match(&pattern, text.as_ref()) {
+                if pattern.matches(text.as_ref()) {
                     return Ok(idx);
                 }
             }
@@ -326,6 +327,7 @@ fn xmatch_linear_accessor(
                 Ok(s) => s,
                 Err(e) => return Err(e),
             };
+            let pattern = WildcardPattern::new(&pattern);
             for idx in iter {
                 let candidate = value_at(idx);
                 let text = match &candidate {
@@ -336,7 +338,7 @@ fn xmatch_linear_accessor(
                         Err(_) => continue,
                     },
                 };
-                if wildcard_match(&pattern, text.as_ref()) {
+                if pattern.matches(text.as_ref()) {
                     return Ok(idx);
                 }
             }

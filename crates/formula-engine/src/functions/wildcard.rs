@@ -5,11 +5,26 @@ enum Token {
     Literal(char),
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct WildcardPattern {
+    tokens: Vec<Token>,
+}
+
+impl WildcardPattern {
+    pub(crate) fn new(pattern: &str) -> Self {
+        Self {
+            tokens: tokenize_pattern(pattern),
+        }
+    }
+
+    pub(crate) fn matches(&self, text: &str) -> bool {
+        let text: Vec<char> = text.chars().map(|c| c.to_ascii_uppercase()).collect();
+        wildcard_match_tokens(&self.tokens, &text)
+    }
+}
+
 pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let pattern = pattern.to_ascii_uppercase();
-    let text = text.to_ascii_uppercase();
-    let tokens = tokenize_pattern(&pattern);
-    wildcard_match_tokens(&tokens, &text.chars().collect::<Vec<_>>())
+    WildcardPattern::new(pattern).matches(text)
 }
 
 fn tokenize_pattern(pattern: &str) -> Vec<Token> {
@@ -19,14 +34,14 @@ fn tokenize_pattern(pattern: &str) -> Vec<Token> {
         match c {
             '~' => {
                 if let Some(next) = chars.next() {
-                    tokens.push(Token::Literal(next));
+                    tokens.push(Token::Literal(next.to_ascii_uppercase()));
                 } else {
                     tokens.push(Token::Literal('~'));
                 }
             }
             '*' => tokens.push(Token::Star),
             '?' => tokens.push(Token::QMark),
-            other => tokens.push(Token::Literal(other)),
+            other => tokens.push(Token::Literal(other.to_ascii_uppercase())),
         }
     }
     tokens
@@ -76,4 +91,3 @@ fn wildcard_match_tokens(pattern: &[Token], text: &[char]) -> bool {
 
     pi == pattern.len()
 }
-
