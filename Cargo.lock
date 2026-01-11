@@ -1827,6 +1827,7 @@ dependencies = [
  "cfb 0.10.0",
  "chrono",
  "formula-engine",
+ "formula-format",
  "formula-model",
  "formula-vba",
  "insta",

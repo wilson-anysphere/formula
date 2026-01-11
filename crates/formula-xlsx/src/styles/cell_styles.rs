@@ -946,12 +946,22 @@ fn builtin_num_fmt_code(id: u16) -> Option<&'static str> {
 }
 
 fn builtin_num_fmt_id_for_code(code: &str) -> Option<u16> {
-    match code {
-        "$#,##0.00" | "$#,##0.00_);($#,##0.00)" => Some(7),
-        "0%" => Some(9),
-        "m/d/yyyy" => Some(14),
-        _ => None,
+    // Some writers emit simplified forms of Excel built-ins (especially currency).
+    // Accept these aliases so we can re-emit built-in ids instead of introducing
+    // custom `numFmtId` entries.
+    if code == "$#,##0.00" {
+        return Some(7);
     }
+
+    for id in 0u16..=49u16 {
+        if let Some(builtin) = formula_format::builtin_format_code(id) {
+            if builtin == code {
+                return Some(id);
+            }
+        }
+    }
+
+    None
 }
 
 fn parse_builtin_placeholder(code: &str) -> Option<u16> {

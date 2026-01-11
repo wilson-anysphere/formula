@@ -8,6 +8,7 @@ description = "XLSX/XLSM import/export and package preservation utilities for Fo
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 formula-engine = { path = "../formula-engine" }
+formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
 formula-vba = { path = "../formula-vba" }
 quick-xml = { version = "0.37", features = ["serialize"] }

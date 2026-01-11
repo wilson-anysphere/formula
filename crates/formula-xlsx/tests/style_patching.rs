@@ -85,6 +85,49 @@ fn patch_preserves_existing_style_when_xf_index_none() -> Result<(), Box<dyn std
 }
 
 #[test]
+fn builtin_number_formats_use_builtin_num_fmt_ids_on_write() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = load_fixture();
+
+    // Use the model loader to get a StyleTable that already contains the workbook's styles.
+    let doc = load_from_bytes(&bytes)?;
+    let mut style_table = doc.workbook.styles.clone();
+
+    // Built-in id 1 is `0`.
+    let style_id = style_table.intern(Style {
+        number_format: Some("0".to_string()),
+        ..Default::default()
+    });
+
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let a1 = CellRef::from_a1("A1")?;
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        a1,
+        CellPatch::set_value(CellValue::Number(123.0)).with_style_id(style_id),
+    );
+
+    pkg.apply_cell_patches_with_styles(&patches, &style_table)?;
+
+    let styles_xml = std::str::from_utf8(pkg.part("xl/styles.xml").expect("styles.xml exists"))?;
+
+    // We should not introduce a custom <numFmt ... formatCode="0"> entry.
+    assert!(
+        !styles_xml.contains(r#"formatCode="0""#),
+        "styles.xml should not contain a custom numFmt for built-in '0' format:\n{styles_xml}"
+    );
+
+    // The new XF should reference the built-in numFmtId.
+    assert!(
+        styles_xml.contains(r#"numFmtId="1""#),
+        "expected built-in numFmtId=1 to appear in styles.xml:\n{styles_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn patch_can_override_style_xf_index() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = load_fixture();
     let a1 = CellRef::from_a1("A1")?;
