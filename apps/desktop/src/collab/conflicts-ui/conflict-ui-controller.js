@@ -10,7 +10,7 @@ export class ConflictUiController {
   /**
    * @param {object} opts
    * @param {HTMLElement} opts.container
-   * @param {{ resolveConflict: (id: string, formula: string) => boolean }} opts.monitor
+   * @param {{ resolveConflict: (id: string, chosen: any) => boolean }} opts.monitor
    */
   constructor(opts) {
     this.container = opts.container;
@@ -54,10 +54,13 @@ export class ConflictUiController {
     toast.dataset.testid = "conflict-toast";
 
     const msg = document.createElement("div");
-    msg.textContent =
-      this.conflicts.length === 1
-        ? `Formula conflict detected (${formatCell(this.conflicts[0].cell)})`
-        : `${this.conflicts.length} formula conflicts detected`;
+    if (this.conflicts.length === 1) {
+      const conflict = this.conflicts[0];
+      const label = conflict.kind === "value" ? "Value" : "Formula";
+      msg.textContent = `${label} conflict detected (${formatCell(conflict.cell)})`;
+    } else {
+      msg.textContent = `${this.conflicts.length} conflicts detected`;
+    }
 
     const btn = document.createElement("button");
     btn.textContent = "Resolve…";
@@ -81,25 +84,40 @@ export class ConflictUiController {
     dialog.dataset.testid = "conflict-dialog";
 
     const title = document.createElement("h2");
-    title.textContent = `Resolve conflict in ${formatCell(conflict.cell)}`;
+    const label = conflict.kind === "value" ? "value" : "formula";
+    title.textContent = `Resolve ${label} conflict in ${formatCell(conflict.cell)}`;
     dialog.appendChild(title);
 
     const body = document.createElement("div");
     body.style.display = "flex";
     body.style.gap = "16px";
 
-    const left = this._renderFormulaPanel({
-      testid: "conflict-local",
-      label: "Yours",
-      formula: conflict.localFormula,
-      preview: conflict.localPreview
-    });
-    const right = this._renderFormulaPanel({
-      testid: "conflict-remote",
-      label: `Theirs (${conflict.remoteUserId})`,
-      formula: conflict.remoteFormula,
-      preview: conflict.remotePreview
-    });
+    const left =
+      conflict.kind === "value"
+        ? this._renderValuePanel({
+            testid: "conflict-local",
+            label: "Yours",
+            value: conflict.localValue
+          })
+        : this._renderFormulaPanel({
+            testid: "conflict-local",
+            label: "Yours",
+            formula: conflict.localFormula,
+            preview: conflict.localPreview
+          });
+    const right =
+      conflict.kind === "value"
+        ? this._renderValuePanel({
+            testid: "conflict-remote",
+            label: `Theirs (${conflict.remoteUserId})`,
+            value: conflict.remoteValue
+          })
+        : this._renderFormulaPanel({
+            testid: "conflict-remote",
+            label: `Theirs (${conflict.remoteUserId})`,
+            formula: conflict.remoteFormula,
+            preview: conflict.remotePreview
+          });
 
     body.appendChild(left);
     body.appendChild(right);
@@ -112,19 +130,23 @@ export class ConflictUiController {
 
     actions.appendChild(
       this._button("Keep yours", "conflict-choose-local", () => {
-        this._resolve(conflict.id, conflict.localFormula);
+        const chosen = conflict.kind === "value" ? conflict.localValue : conflict.localFormula;
+        this._resolve(conflict.id, chosen);
       })
     );
     actions.appendChild(
       this._button("Use theirs", "conflict-choose-remote", () => {
-        this._resolve(conflict.id, conflict.remoteFormula);
+        const chosen = conflict.kind === "value" ? conflict.remoteValue : conflict.remoteFormula;
+        this._resolve(conflict.id, chosen);
       })
     );
-    actions.appendChild(
-      this._button("Edit…", "conflict-edit", () => {
-        this._renderManualEditor(dialog, conflict);
-      })
-    );
+    if (conflict.kind !== "value") {
+      actions.appendChild(
+        this._button("Edit…", "conflict-edit", () => {
+          this._renderManualEditor(dialog, conflict);
+        })
+      );
+    }
     actions.appendChild(
       this._button("Close", "conflict-close", () => {
         this.activeConflictId = null;
@@ -180,6 +202,29 @@ export class ConflictUiController {
   }
 
   /**
+   * @param {object} input
+   * @param {string} input.testid
+   * @param {string} input.label
+   * @param {any} input.value
+   */
+  _renderValuePanel(input) {
+    const panel = document.createElement("div");
+    panel.dataset.testid = input.testid;
+    panel.style.flex = "1";
+
+    const label = document.createElement("div");
+    label.textContent = input.label;
+    label.style.fontWeight = "bold";
+    panel.appendChild(label);
+
+    const pre = document.createElement("pre");
+    pre.textContent = formatValue(input.value);
+    panel.appendChild(pre);
+
+    return panel;
+  }
+
+  /**
    * @param {HTMLElement} dialog
    * @param {any} conflict
    */
@@ -208,10 +253,10 @@ export class ConflictUiController {
 
   /**
    * @param {string} conflictId
-   * @param {string} chosenFormula
+   * @param {any} chosen
    */
-  _resolve(conflictId, chosenFormula) {
-    const ok = this.monitor.resolveConflict(conflictId, chosenFormula);
+  _resolve(conflictId, chosen) {
+    const ok = this.monitor.resolveConflict(conflictId, chosen);
     if (!ok) return;
 
     this.conflicts = this.conflicts.filter((c) => c.id !== conflictId);
@@ -225,4 +270,18 @@ export class ConflictUiController {
  */
 function formatCell(cell) {
   return `${cell.sheetId}!${numberToCol(cell.col)}${cell.row + 1}`;
+}
+
+/**
+ * @param {any} value
+ */
+function formatValue(value) {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return JSON.stringify(value);
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
