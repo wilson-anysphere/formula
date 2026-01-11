@@ -755,7 +755,13 @@ try {
     path.dirname(workerData.apiModulePath)
   );
   apiModule.loaded = true;
-  formulaApi = apiModule.exports;
+  formulaApi = vm.runInContext(
+    "globalThis[Symbol.for('formula.extensionApi.api')]",
+    sandboxContext
+  );
+  if (!formulaApi) {
+    throw createSandboxError("@formula/extension-api runtime failed to initialize");
+  }
 } catch (error) {
   parentPort.postMessage({
     type: "activate_error",

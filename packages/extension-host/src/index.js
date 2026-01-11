@@ -145,7 +145,10 @@ class ExtensionHost {
     });
 
     this._workerScriptPath = path.resolve(__dirname, "../worker/extension-worker.js");
-    this._apiModulePath = path.resolve(__dirname, "../../extension-api/index.js");
+    // Load the extension API runtime directly inside the VM sandbox. The public CommonJS entrypoint
+    // (`packages/extension-api/index.js`) may `require()` sibling files, but the sandboxed API loader
+    // intentionally runs with a locked-down `require` implementation.
+    this._apiModulePath = path.resolve(__dirname, "../../extension-api/src/runtime.js");
 
     this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
     this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
