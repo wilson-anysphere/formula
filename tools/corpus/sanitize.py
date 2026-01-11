@@ -950,7 +950,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("customUI/")}
             removed_parts |= {n for n in names if n.startswith("docProps/thumbnail")}
 
-        if options.scrub_metadata:
+        if options.scrub_metadata or options.remove_secrets:
             removed_parts |= {n for n in names if n == "docProps/custom.xml"}
 
         sheet_rename_map: dict[str, str] = {}
@@ -1053,6 +1053,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                             or options.hash_strings
                             or options.scrub_metadata
                             or options.remove_external_links
+                            or options.remove_secrets
                             or options.rename_sheets
                         )
                     ):
@@ -1126,7 +1127,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         new = _sanitize_drawing(raw, options=options)
                         rewritten.append(name)
                     elif name.startswith("xl/drawings/") and name.endswith(".vml") and (
-                        options.scrub_metadata or options.hash_strings
+                        options.scrub_metadata or options.hash_strings or options.remove_secrets
                     ):
                         new = _sanitize_vml_drawing(raw, options=options)
                         rewritten.append(name)

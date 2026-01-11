@@ -262,6 +262,94 @@ def _make_minimal_xlsx_with_protection_and_sharing() -> bytes:
     return buf.getvalue()
 
 
+def _make_minimal_xlsx_with_vml_imagedata() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>
+  <Default Extension="jpeg" ContentType="image/jpeg"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>
+""",
+        )
+        z.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+  <legacyDrawing r:id="rId1"/>
+</worksheet>
+""",
+        )
+        z.writestr(
+            "xl/worksheets/_rels/sheet1.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/drawings/vmlDrawing1.vml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<xml xmlns:v="urn:schemas-microsoft-com:vml"
+     xmlns:o="urn:schemas-microsoft-com:office:office"
+     xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <v:shape id="_x0000_s1025" type="#_x0000_t75">
+    <v:imagedata o:relid="rId1"/>
+  </v:shape>
+</xml>
+""",
+        )
+        z.writestr(
+            "xl/drawings/_rels/vmlDrawing1.vml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.jpeg"/>
+</Relationships>
+""",
+        )
+        z.writestr("xl/media/image1.jpeg", b"JPEGDATA alice@example.com")
+
+    return buf.getvalue()
+
+
 class SanitizeTests(unittest.TestCase):
     def test_sanitize_removes_common_secret_bearing_parts(self) -> None:
         original = _make_minimal_xlsx_with_secrets()
@@ -454,6 +542,42 @@ class SanitizeTests(unittest.TestCase):
             self.assertNotIn("sheetProtection", sheet_xml)
             self.assertNotIn("ABCDEF", sheet_xml)
             self.assertNotIn("MySecretSheetCode", sheet_xml)
+
+    def test_remove_secrets_sanitizes_worksheets_even_without_redaction(self) -> None:
+        original = _make_minimal_xlsx_with_protection_and_sharing()
+        sanitized, _ = sanitize_xlsx_bytes(
+            original,
+            options=SanitizeOptions(
+                redact_cell_values=False,
+                remove_secrets=True,
+                scrub_metadata=False,
+                remove_external_links=False,
+            ),
+        )
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            sheet_xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8", errors="ignore")
+            self.assertNotIn("sheetProtection", sheet_xml)
+
+    def test_remove_secrets_strips_vml_imagedata_when_media_removed(self) -> None:
+        original = _make_minimal_xlsx_with_vml_imagedata()
+        sanitized, _ = sanitize_xlsx_bytes(
+            original,
+            options=SanitizeOptions(
+                redact_cell_values=False,
+                remove_secrets=True,
+                scrub_metadata=False,
+                remove_external_links=False,
+            ),
+        )
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            names = set(z.namelist())
+            self.assertNotIn("xl/media/image1.jpeg", names)
+            vml = z.read("xl/drawings/vmlDrawing1.vml").decode("utf-8", errors="ignore")
+            self.assertNotIn("imagedata", vml)
+            rels = z.read("xl/drawings/_rels/vmlDrawing1.vml.rels").decode("utf-8", errors="ignore")
+            self.assertNotIn("image1.jpeg", rels)
 
 
 if __name__ == "__main__":
