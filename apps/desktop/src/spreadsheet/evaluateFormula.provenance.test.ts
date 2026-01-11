@@ -75,6 +75,29 @@ describe("evaluateFormula (AI provenance)", () => {
     expect((rangeArg as any).__totalCells).toBe(500);
   });
 
+  it("uses the AI evaluator's rangeSampleLimit when provided", () => {
+    const calls: any[] = [];
+    const ai = {
+      rangeSampleLimit: 10,
+      evaluateAiFunction: (params: any) => {
+        calls.push(params);
+        return "ok";
+      },
+    };
+
+    let readCount = 0;
+    const getCellValue = (_addr: string) => {
+      readCount += 1;
+      return 1;
+    };
+
+    const result = evaluateFormula('=AI("summarize", A1:A50)', getCellValue, { ai, cellAddress: "Sheet1!B1" });
+    expect(result).toBe("ok");
+    expect(readCount).toBe(10);
+    expect(calls[0]?.args?.[1]).toHaveLength(10);
+    expect((calls[0]?.args?.[1] as any).__totalCells).toBe(50);
+  });
+
   it("does not sample ranges inside nested non-AI functions (e.g. SUM) within AI arguments", () => {
     const calls: any[] = [];
     const ai = {
