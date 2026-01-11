@@ -298,19 +298,47 @@ impl MemoryManager {
         self.get_sheet(change.sheet_id)?;
 
         let key = self.page_key_for_cell(change.sheet_id, change.row, change.col);
-        let needs_load = {
-            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-            if inner.pages.contains(&key) {
-                inner.pages.get(&key);
-                inner.stats.page_hits = inner.stats.page_hits.saturating_add(1);
-                false
-            } else {
-                inner.stats.page_misses = inner.stats.page_misses.saturating_add(1);
-                true
-            }
-        };
+        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        if inner.pages.contains(&key) {
+            inner.stats.page_hits = inner.stats.page_hits.saturating_add(1);
+            self.apply_change_to_page_locked(&mut inner, key, change)?;
+            self.evict_if_needed_locked(&mut inner)?;
+            return Ok(());
+        }
 
-        if needs_load {
+        inner.stats.page_misses = inner.stats.page_misses.saturating_add(1);
+        drop(inner);
+
+        let range = self.page_range(key);
+        let loaded = self.storage.load_cells_in_range(change.sheet_id, range)?;
+        let mut cells = HashMap::new();
+        for (coord, snapshot) in loaded {
+            cells.insert(coord, snapshot);
+        }
+        let page = PageData::new_loaded(cells);
+
+        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        if !inner.pages.contains(&key) {
+            inner.stats.pages_loaded = inner.stats.pages_loaded.saturating_add(1);
+            self.insert_page_locked(&mut inner, key, page)?;
+        }
+
+        // If another thread inserted it while we were loading, we ignore the
+        // locally loaded copy and apply the edit to the cached page.
+        self.apply_change_to_page_locked(&mut inner, key, change)?;
+        self.evict_if_needed_locked(&mut inner)?;
+        Ok(())
+    }
+
+    fn apply_change_to_page_locked(
+        &self,
+        inner: &mut Inner,
+        key: PageKey,
+        change: CellChange,
+    ) -> StorageResult<()> {
+        if !inner.pages.contains(&key) {
+            // Callers must ensure the page exists (either already cached or
+            // inserted after loading from storage).
             let range = self.page_range(key);
             let loaded = self.storage.load_cells_in_range(change.sheet_id, range)?;
             let mut cells = HashMap::new();
@@ -318,60 +346,52 @@ impl MemoryManager {
                 cells.insert(coord, snapshot);
             }
             let page = PageData::new_loaded(cells);
-            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-            if !inner.pages.contains(&key) {
-                inner.stats.pages_loaded = inner.stats.pages_loaded.saturating_add(1);
-                self.insert_page_locked(&mut inner, key, page)?;
-            }
+            inner.stats.pages_loaded = inner.stats.pages_loaded.saturating_add(1);
+            self.insert_page_locked(inner, key, page)?;
         }
 
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
         let seq = inner.next_change_seq;
         inner.next_change_seq = inner.next_change_seq.saturating_add(1);
 
-        let mut before_page_bytes = None;
-        let mut after_page_bytes = None;
-        if let Some(page) = inner.pages.get_mut(&key) {
-            let page_before = page.bytes;
-            // Update cached snapshot.
-            match page.cells.get(&(change.row, change.col)) {
-                Some(existing) => {
-                    page.bytes = page
-                        .bytes
-                        .saturating_sub(estimate_cell_snapshot_bytes(existing));
-                }
-                None => {}
-            }
-            if change.data.is_truly_empty() {
-                page.cells.remove(&(change.row, change.col));
-            } else {
-                page.cells.insert(
-                    (change.row, change.col),
-                    CellSnapshot {
-                        value: change.data.value.clone(),
-                        formula: change.data.formula.clone(),
-                        style_id: None,
-                    },
-                );
-            }
-            if let Some(updated) = page.cells.get(&(change.row, change.col)) {
-                page.bytes = page
-                    .bytes
-                    .saturating_add(estimate_cell_snapshot_bytes(updated));
-            }
+        let page = inner
+            .pages
+            .get_mut(&key)
+            .expect("page present after insert");
 
-            page.bytes = page.bytes.saturating_add(estimate_cell_change_bytes(&change));
-            page.pending_changes.push(SequencedCellChange { seq, change });
-
-            before_page_bytes = Some(page_before);
-            after_page_bytes = Some(page.bytes);
+        let before_page_bytes = page.bytes;
+        // Update cached snapshot.
+        if let Some(existing) = page.cells.get(&(change.row, change.col)) {
+            page.bytes = page
+                .bytes
+                .saturating_sub(estimate_cell_snapshot_bytes(existing));
         }
 
-        if let (Some(before), Some(after)) = (before_page_bytes, after_page_bytes) {
-            inner.bytes = inner.bytes.saturating_sub(before).saturating_add(after);
+        if change.data.is_truly_empty() {
+            page.cells.remove(&(change.row, change.col));
+        } else {
+            page.cells.insert(
+                (change.row, change.col),
+                CellSnapshot {
+                    value: change.data.value.clone(),
+                    formula: change.data.formula.clone(),
+                    style_id: None,
+                },
+            );
         }
 
-        self.evict_if_needed_locked(&mut inner)?;
+        if let Some(updated) = page.cells.get(&(change.row, change.col)) {
+            page.bytes = page
+                .bytes
+                .saturating_add(estimate_cell_snapshot_bytes(updated));
+        }
+
+        page.bytes = page.bytes.saturating_add(estimate_cell_change_bytes(&change));
+        page.pending_changes.push(SequencedCellChange { seq, change });
+
+        inner.bytes = inner
+            .bytes
+            .saturating_sub(before_page_bytes)
+            .saturating_add(page.bytes);
         Ok(())
     }
 
