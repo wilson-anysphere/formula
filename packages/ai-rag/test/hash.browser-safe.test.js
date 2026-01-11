@@ -1,7 +1,27 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+
+/**
+ * @param {string} dir
+ * @param {string[]} out
+ */
+async function collectJsFiles(dir, out) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectJsFiles(full, out);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (!entry.name.endsWith(".js")) continue;
+    out.push(full);
+  }
+}
 
 test("utils/hash.js is browser-safe (no Node builtin crypto import)", async () => {
   const mod = await import("../src/utils/hash.js");
@@ -17,4 +37,18 @@ test("utils/hash.js is browser-safe (no Node builtin crypto import)", async () =
   const source = await readFile(sourcePath, "utf8");
   const nodeCryptoSpecifier = ["node", "crypto"].join(":");
   assert.equal(source.includes(nodeCryptoSpecifier), false);
+
+  // Ensure we didn't accidentally re-introduce a Node crypto import elsewhere in ai-rag.
+  const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
+  /** @type {string[]} */
+  const files = [];
+  await collectJsFiles(srcDir, files);
+  for (const file of files) {
+    const contents = await readFile(file, "utf8");
+    assert.equal(
+      contents.includes(nodeCryptoSpecifier),
+      false,
+      `Unexpected Node crypto import specifier in ${path.relative(srcDir, file)}`
+    );
+  }
 });
