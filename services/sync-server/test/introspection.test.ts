@@ -119,19 +119,23 @@ test("sync-server rejects connections when introspection marks token inactive", 
       calls.push({ token: parsed.token as string, docId: parsed.docId as string });
 
       let body: any;
+      let statusCode = 200;
       if (parsed.token === okToken) {
         // Exercise compatibility: allow `ok` responses without `active`.
         body = { ok: true, userId: "u-ok", orgId: "o1", role: "editor" };
       } else if (parsed.token === revokedToken) {
-        // Exercise compatibility: allow `error` responses without `reason` and without `active`.
-        body = { ok: false, error: "session_revoked", userId: "u-revoked", orgId: "o1", role: "editor" };
+        // Exercise compatibility: when the API returns a 403 + `reason` without an
+        // explicit `{ active/ok }` boolean, the sync-server should still map the
+        // reason to a 401 rejection (revoked sessions are unauthorized).
+        statusCode = 403;
+        body = { reason: "session_revoked", error: "forbidden" };
       } else if (parsed.token === notMemberToken) {
         body = { active: false, reason: "not_member", userId: "u-removed", orgId: "o1", role: "editor" };
       } else {
         body = { active: false, reason: "unknown_token" };
       }
 
-      res.writeHead(200, { "content-type": "application/json" });
+      res.writeHead(statusCode, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     })().catch((err) => {
       res.writeHead(500, { "content-type": "application/json" });

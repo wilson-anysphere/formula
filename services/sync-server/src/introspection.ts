@@ -120,10 +120,10 @@ export function createSyncTokenIntrospectionClient(config: {
         // Token is inactive/invalid (or the introspection endpoint rejected our request).
         const fallbackReason =
           json && typeof json === "object"
-            ? typeof (json as any).error === "string" && (json as any).error.length > 0
-              ? ((json as any).error as string)
-              : typeof (json as any).reason === "string" && (json as any).reason.length > 0
-                ? ((json as any).reason as string)
+            ? typeof (json as any).reason === "string" && (json as any).reason.length > 0
+              ? ((json as any).reason as string)
+              : typeof (json as any).error === "string" && (json as any).error.length > 0
+                ? ((json as any).error as string)
                 : "forbidden"
             : "forbidden";
 
