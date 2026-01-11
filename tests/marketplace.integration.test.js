@@ -1599,11 +1599,13 @@ test("desktop client uses on-disk cache + If-None-Match for package downloads", 
     const client = new MarketplaceClient({ baseUrl, cacheDir });
     const first = await client.downloadPackage(extensionId, manifest.version);
     assert.ok(first);
+    assert.ok(first.publisherKeyId);
 
     const second = await client.downloadPackage(extensionId, manifest.version);
     assert.ok(second);
     assert.equal(second.sha256, first.sha256);
     assert.ok(second.bytes.equals(first.bytes));
+    assert.equal(second.publisherKeyId, first.publisherKeyId);
 
     const metricsRes = await fetch(`${baseUrl}/api/internal/metrics`);
     assert.equal(metricsRes.status, 200);

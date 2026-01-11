@@ -148,11 +148,13 @@ export class MarketplaceClient {
 
     let cached = null;
     let cachedBytes = null;
+    let cacheBase = null;
+    let indexPath = null;
     if (this.cacheDir) {
       const safeId = safePathComponent(id);
       const safeVersion = safePathComponent(version);
-      const cacheBase = path.join(this.cacheDir, "packages", safeId, safeVersion);
-      const indexPath = path.join(cacheBase, "index.json");
+      cacheBase = path.join(this.cacheDir, "packages", safeId, safeVersion);
+      indexPath = path.join(cacheBase, "index.json");
       cached = await readJsonIfExists(indexPath);
       const cachedSha256 =
         cached && typeof cached === "object" && typeof cached.sha256 === "string" ? cached.sha256.trim().toLowerCase() : null;
@@ -187,13 +189,27 @@ export class MarketplaceClient {
         if (headerShaNorm && (!isSha256Hex(headerShaNorm) || headerShaNorm !== String(cached.sha256).toLowerCase())) {
           response = await fetch(url);
         } else {
+          const headerPublisherKeyId = response.headers.get("x-publisher-key-id");
+          const resolvedPublisherKeyId =
+            headerPublisherKeyId && headerPublisherKeyId.trim().length > 0
+              ? String(headerPublisherKeyId).trim()
+              : cached.publisherKeyId || null;
+
+          if (this.cacheDir && cacheBase && indexPath && resolvedPublisherKeyId && resolvedPublisherKeyId !== cached.publisherKeyId) {
+            try {
+              await atomicWriteJson(indexPath, { ...cached, publisherKeyId: resolvedPublisherKeyId });
+            } catch {
+              // ignore cache update failures
+            }
+          }
+
           return {
             bytes: Buffer.from(cachedBytes),
             signatureBase64: cached.signatureBase64 || null,
             sha256: cached.sha256,
             formatVersion: Number(cached.formatVersion || 1),
             publisher: cached.publisher || null,
-            publisherKeyId: cached.publisherKeyId || null,
+            publisherKeyId: resolvedPublisherKeyId,
           };
         }
       } else {
