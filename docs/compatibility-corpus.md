@@ -51,16 +51,26 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
   - numeric cells are normalized to `0`
   - string cells are replaced with `"REDACTED"`
   - formula cached values are removed (to avoid leaking computed results)
+  - formula **string literals** are also redacted/hardened to prevent secrets surviving in formulas
 - **Hash strings** (`--hash-strings --hash-salt ...`)
   - shared strings / inline strings are replaced with stable `H_<digest>` tokens
+  - additional text surfaces are hashed too (comments, headers/footers, drawing text, table names, formula string literals)
   - use a private salt to avoid dictionary attacks
 - **Remove external links**
   - drops `xl/externalLinks/**`
   - scrubs any relationship with `TargetMode="External"` to `https://redacted.invalid/`
+  - scrubs hyperlink display/tooltips inside worksheets
 - **Remove secrets**
   - drops common secret-bearing parts like `xl/connections.xml`, `customXml/**`, and `xl/queryTables/**`
+  - removes `xl/vbaProject.bin`, `customUI/**`, and embedded binaries like `xl/media/**`
 - **Scrub metadata**
   - redacts author fields in `docProps/core.xml` and sensitive fields in `docProps/app.xml`
+  - removes workbook defined names (`<definedNames>`) which often embed business terms
+  - scrubs comments (`xl/comments*.xml`), headers/footers, drawing text, and table names
+
+As a defense-in-depth safety net, `tools/corpus/sanitize.py` also includes a **leak scanner**
+(`scan_xlsx_bytes_for_leaks`) that can be used to fail CI if sanitized outputs still match high-risk
+patterns (emails, URLs, AWS keys, JWTs) or known plaintext strings.
 
 The design constraint: triage reports must not leak plaintext cell values.
 
@@ -81,6 +91,12 @@ export CORPUS_ENCRYPTION_KEY="..."
 python -m tools.corpus.ingest --input /path/to/workbook.xlsx
 ```
 
+For additional hardening, consider enabling deterministic sheet renaming:
+
+```bash
+python -m tools.corpus.ingest --input /path/to/workbook.xlsx --rename-sheets
+```
+
 This stores:
 - an **encrypted** original (`originals/*.enc`)
 - a sanitized workbook (`sanitized/*.xlsx`)
@@ -94,6 +110,12 @@ python -m tools.corpus.triage \
   --corpus-dir tools/corpus/public \
   --out-dir tools/corpus/out/public \
   --expectations tools/corpus/public/expectations.json
+```
+
+To fail fast on suspicious plaintext in a corpus directory:
+
+```bash
+python -m tools.corpus.triage --corpus-dir tools/corpus/public --out-dir tools/corpus/out/public --leak-scan
 ```
 
 ### Generate the scorecard/dashboard

@@ -3,8 +3,10 @@ from __future__ import annotations
 import io
 import unittest
 import zipfile
+from pathlib import Path
 
-from tools.corpus.sanitize import SanitizeOptions, sanitize_xlsx_bytes
+from tools.corpus.sanitize import SanitizeOptions, sanitize_xlsx_bytes, scan_xlsx_bytes_for_leaks
+from tools.corpus.util import read_workbook_input
 
 
 def _make_minimal_xlsx_with_secrets() -> bytes:
@@ -164,6 +166,62 @@ class SanitizeTests(unittest.TestCase):
             sst = z.read("xl/sharedStrings.xml").decode("utf-8")
             self.assertNotIn("SecretValue", sst)
             self.assertIn("REDACTED", sst)
+
+    def test_sanitize_scrubs_pii_surfaces_and_leak_scan_passes(self) -> None:
+        fixture_path = Path(__file__).parent / "fixtures" / "pii-surfaces.xlsx.b64"
+        wb = read_workbook_input(fixture_path)
+        original = wb.data
+
+        sanitized, summary = sanitize_xlsx_bytes(original, options=SanitizeOptions())
+
+        # High-level summary: removed binary/custom UI surfaces + rewrote XML parts.
+        self.assertIn("xl/vbaProject.bin", summary.removed_parts)
+        self.assertIn("customUI/customUI.xml", summary.removed_parts)
+        self.assertIn("xl/workbook.xml", summary.rewritten_parts)
+        self.assertIn("xl/worksheets/sheet1.xml", summary.rewritten_parts)
+        self.assertIn("xl/comments1.xml", summary.rewritten_parts)
+        self.assertIn("xl/charts/chart1.xml", summary.rewritten_parts)
+        self.assertIn("xl/drawings/drawing1.xml", summary.rewritten_parts)
+
+        sensitive_tokens = [
+            "alice@example.com",
+            "leaky.example.com",
+            "ACME_SECRET_NAME",
+            "ACME_SECRET_TOKEN",
+            "CHART_TOKEN_123",
+            "DRAWING_TOKEN",
+            "VBASECRET",
+        ]
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            # Output ZIP remains readable and contains workbook.xml.
+            self.assertIn("xl/workbook.xml", z.namelist())
+
+            # Removed parts should not exist and must be removed from [Content_Types].xml.
+            names = set(z.namelist())
+            self.assertNotIn("xl/vbaProject.bin", names)
+            self.assertNotIn("customUI/customUI.xml", names)
+            ct = z.read("[Content_Types].xml").decode("utf-8")
+            self.assertNotIn("/xl/vbaProject.bin", ct)
+            self.assertNotIn("/customUI/customUI.xml", ct)
+
+            # Ensure common leak surfaces no longer contain the injected tokens.
+            for part in z.namelist():
+                data = z.read(part)
+                text = data.decode("utf-8", errors="ignore")
+                for token in sensitive_tokens:
+                    self.assertNotIn(token, text, msg=f"Token {token!r} leaked via {part}")
+
+            # External hyperlink target should be scrubbed.
+            rels = z.read("xl/worksheets/_rels/sheet1.xml.rels").decode("utf-8")
+            self.assertIn("https://redacted.invalid/", rels)
+            self.assertNotIn("leaky.example.com", rels)
+
+        # Leak scanner should detect issues in the original, but not in the sanitized output.
+        original_scan = scan_xlsx_bytes_for_leaks(original, plaintext_strings=sensitive_tokens)
+        self.assertFalse(original_scan.ok)
+        sanitized_scan = scan_xlsx_bytes_for_leaks(sanitized, plaintext_strings=sensitive_tokens)
+        self.assertTrue(sanitized_scan.ok)
 
 
 if __name__ == "__main__":

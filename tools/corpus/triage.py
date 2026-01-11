@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .sanitize import scan_xlsx_bytes_for_leaks
 from .util import (
     WorkbookInput,
     ensure_dir,
@@ -246,6 +247,11 @@ def main() -> int:
     parser.add_argument("--corpus-dir", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument(
+        "--leak-scan",
+        action="store_true",
+        help="Fail fast if any workbook contains obvious plaintext PII/secrets (emails, URLs, keys).",
+    )
+    parser.add_argument(
         "--expectations",
         type=Path,
         help="Optional JSON mapping display_name -> expected result fields (for regression gating).",
@@ -266,6 +272,13 @@ def main() -> int:
     for path in iter_workbook_paths(args.corpus_dir):
         try:
             wb = read_workbook_input(path, fernet_key=fernet_key)
+            if args.leak_scan:
+                scan = scan_xlsx_bytes_for_leaks(wb.data)
+                if not scan.ok:
+                    print(f"LEAKS DETECTED in {path.name} ({len(scan.findings)} findings)")
+                    for f in scan.findings[:25]:
+                        print(f"  {f.kind} in {f.part_name} sha256={f.match_sha256[:16]}")
+                    return 1
             report = triage_workbook(wb)
         except Exception as e:  # noqa: BLE001
             report = {

@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from .crypto import get_fernet_key_from_env
-from .sanitize import SanitizeOptions, sanitize_xlsx_bytes
+from .sanitize import SanitizeOptions, sanitize_xlsx_bytes, scan_xlsx_bytes_for_leaks
 from .triage import triage_workbook
 from .util import WorkbookInput, ensure_dir, sha256_hex, utc_now_iso, write_json
 
@@ -27,6 +27,22 @@ def main() -> int:
     parser.add_argument("--keep-external-links", action="store_true")
     parser.add_argument("--keep-secrets", action="store_true")
     parser.add_argument("--no-scrub-metadata", action="store_true")
+    parser.add_argument(
+        "--rename-sheets",
+        action="store_true",
+        help="Deterministically rename sheets to Sheet1, Sheet2, ... (updates formulas).",
+    )
+    parser.add_argument(
+        "--no-leak-scan",
+        action="store_true",
+        help="Skip leak scanning the sanitized output (not recommended).",
+    )
+    parser.add_argument(
+        "--leak-scan-string",
+        action="append",
+        default=[],
+        help="Plaintext string expected not to appear in sanitized output. Can be repeated.",
+    )
     parser.add_argument("--no-triage", action="store_true", help="Skip triage (faster ingest).")
     args = parser.parse_args()
 
@@ -56,8 +72,18 @@ def main() -> int:
         remove_external_links=not args.keep_external_links,
         remove_secrets=not args.keep_secrets,
         scrub_metadata=not args.no_scrub_metadata,
+        rename_sheets=args.rename_sheets,
     )
     sanitized_bytes, sanitize_summary = sanitize_xlsx_bytes(raw, options=options)
+
+    if not args.no_leak_scan:
+        scan = scan_xlsx_bytes_for_leaks(sanitized_bytes, plaintext_strings=args.leak_scan_string)
+        if not scan.ok:
+            print(f"Leak scan failed ({len(scan.findings)} findings); refusing to ingest.")
+            for f in scan.findings[:25]:
+                print(f"  {f.kind} in {f.part_name} sha256={f.match_sha256[:16]}")
+            return 1
+
     sanitized_path = sanitized_dir / f"{workbook_id}{ext}"
     sanitized_path.write_bytes(sanitized_bytes)
 
@@ -92,4 +118,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

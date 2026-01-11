@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import io
 import posixpath
+import re
 import zipfile
 from dataclasses import dataclass
+from typing import Iterable
 from xml.etree import ElementTree as ET
 
 
@@ -29,11 +31,31 @@ class SanitizeOptions:
     remove_secrets: bool = True
     scrub_metadata: bool = True
 
+    # Optional: deterministically rename sheets to Sheet1, Sheet2, ...
+    # This is off by default because it requires rewriting references in formulas.
+    rename_sheets: bool = False
+
 
 @dataclass(frozen=True)
 class SanitizeSummary:
     removed_parts: list[str]
     rewritten_parts: list[str]
+
+
+@dataclass(frozen=True)
+class LeakScanFinding:
+    part_name: str
+    kind: str  # plaintext | email | url | aws_key | jwt
+    match_sha256: str
+
+
+@dataclass(frozen=True)
+class LeakScanResult:
+    findings: list[LeakScanFinding]
+
+    @property
+    def ok(self) -> bool:
+        return not self.findings
 
 
 def _hash_text(value: str, *, salt: str) -> str:
@@ -43,13 +65,43 @@ def _hash_text(value: str, *, salt: str) -> str:
     return f"H_{digest[:16]}"
 
 
+def _require_hash_salt(options: SanitizeOptions) -> str:
+    if options.hash_strings and not options.hash_salt:
+        raise ValueError("hash_strings requires hash_salt")
+    return options.hash_salt or ""
+
+
+def _sanitize_text(value: str, *, options: SanitizeOptions) -> str:
+    if options.hash_strings:
+        return _hash_text(value, salt=_require_hash_salt(options))
+    return "REDACTED"
+
+
+def _sanitize_xml_text_elements(root: ET.Element, *, options: SanitizeOptions, local_names: set[str]) -> None:
+    for el in root.iter():
+        if el.tag.split("}")[-1] not in local_names:
+            continue
+        if el.text is None:
+            continue
+        el.text = _sanitize_text(el.text, options=options)
+
+
+def _sanitize_xml_attributes(
+    root: ET.Element, *, options: SanitizeOptions, attr_names: set[str]
+) -> None:
+    for el in root.iter():
+        for k, v in list(el.attrib.items()):
+            if k.split("}")[-1] not in attr_names:
+                continue
+            el.attrib[k] = _sanitize_text(v, options=options)
+
+
 def _sanitize_shared_strings(xml: bytes, *, options: SanitizeOptions) -> bytes:
     root = ET.fromstring(xml)
     if root.tag != qn(NS_MAIN, "sst"):
         return xml
 
-    if options.hash_strings and not options.hash_salt:
-        raise ValueError("hash_strings requires hash_salt")
+    _require_hash_salt(options)
 
     for t in root.iter(qn(NS_MAIN, "t")):
         if t.text is None:
@@ -66,8 +118,7 @@ def _sanitize_shared_strings(xml: bytes, *, options: SanitizeOptions) -> bytes:
 
 
 def _sanitize_inline_string(el: ET.Element, *, options: SanitizeOptions) -> None:
-    if options.hash_strings and not options.hash_salt:
-        raise ValueError("hash_strings requires hash_salt")
+    _require_hash_salt(options)
 
     for t in el.iter(qn(NS_MAIN, "t")):
         if t.text is None:
@@ -92,12 +143,13 @@ def _sanitize_worksheet(xml: bytes, *, options: SanitizeOptions) -> bytes:
         is_el = c.find(qn(NS_MAIN, "is"))
 
         if f_el is not None:
-            # Preserve formulas/structure, but drop cached results which can leak data.
-            if v_el is not None:
-                c.remove(v_el)
-            # Inline strings do not make sense on formula cells, but be defensive.
-            if is_el is not None:
-                c.remove(is_el)
+            # Preserve formulas/structure, but optionally drop cached results which can leak data.
+            if options.redact_cell_values or options.hash_strings:
+                if v_el is not None:
+                    c.remove(v_el)
+                # Inline strings do not make sense on formula cells, but be defensive.
+                if is_el is not None:
+                    c.remove(is_el)
             continue
 
         if is_el is not None:
@@ -114,8 +166,7 @@ def _sanitize_worksheet(xml: bytes, *, options: SanitizeOptions) -> bytes:
             continue
 
         if t in {"str"} and v_el is not None:
-            if options.hash_strings and not options.hash_salt:
-                raise ValueError("hash_strings requires hash_salt")
+            _require_hash_salt(options)
             if options.redact_cell_values:
                 if options.hash_strings:
                     v_el.text = _hash_text(v_el.text or "", salt=options.hash_salt or "")
@@ -134,6 +185,31 @@ def _sanitize_worksheet(xml: bytes, *, options: SanitizeOptions) -> bytes:
                 v_el.text = "#N/A"
             else:
                 v_el.text = "0"
+
+    # Header/footer text can contain PII (names, phone numbers, emails, etc).
+    if options.scrub_metadata or options.hash_strings:
+        for hf in root.iter():
+            if hf.tag.split("}")[-1] != "headerFooter":
+                continue
+            for child in hf.iter():
+                if child is hf:
+                    continue
+                if child.text is None:
+                    continue
+                child.text = _sanitize_text(child.text, options=options)
+
+    # Hyperlink display text / tooltips can leak URLs even when relationship targets are scrubbed.
+    if options.remove_external_links or options.scrub_metadata or options.hash_strings:
+        for hl in root.iter():
+            if hl.tag.split("}")[-1] != "hyperlink":
+                continue
+            for attr in ("display", "tooltip"):
+                if attr in hl.attrib:
+                    hl.attrib[attr] = _sanitize_text(hl.attrib[attr], options=options)
+            # Be defensive: some writers put external URLs in `location`.
+            loc = hl.attrib.get("location")
+            if loc and _looks_like_external_url(loc):
+                hl.attrib["location"] = _sanitize_text(loc, options=options)
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
@@ -163,6 +239,124 @@ def _sanitize_app_properties(xml: bytes) -> bytes:
         local = el.tag.split("}")[-1]
         if local in {"Company", "Manager", "HyperlinkBase"}:
             el.text = "REDACTED"
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _sanitize_comments(xml: bytes, *, options: SanitizeOptions) -> bytes:
+    root = ET.fromstring(xml)
+    # Comments are in the spreadsheetml main namespace, but be robust and match by local-name.
+    if root.tag.split("}")[-1] != "comments":
+        return xml
+    if options.scrub_metadata or options.hash_strings:
+        _sanitize_xml_text_elements(root, options=options, local_names={"t", "author"})
+        # Some comment models store author info as attributes.
+        _sanitize_xml_attributes(root, options=options, attr_names={"author", "userId", "displayName"})
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _sanitize_threaded_comments(xml: bytes, *, options: SanitizeOptions) -> bytes:
+    root = ET.fromstring(xml)
+    if options.scrub_metadata or options.hash_strings:
+        # Threaded comments use newer namespaces; sanitize common text/PII fields defensively.
+        _sanitize_xml_text_elements(root, options=options, local_names={"t", "text"})
+        _sanitize_xml_attributes(root, options=options, attr_names={"displayName", "userId", "author"})
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _sanitize_table(
+    xml: bytes, *, options: SanitizeOptions, table_rename_map: dict[str, str] | None = None
+) -> bytes:
+    root = ET.fromstring(xml)
+    if root.tag.split("}")[-1] != "table":
+        return xml
+
+    if options.scrub_metadata or options.hash_strings:
+        # Table name/displayName can leak business terms and are user-visible.
+        # Avoid collapsing all tables to the same identifier (Excel requires uniqueness).
+        old = root.attrib.get("displayName") or root.attrib.get("name") or ""
+        new = table_rename_map.get(old, "") if table_rename_map else ""
+        if not new:
+            if options.hash_strings:
+                new = _hash_text(old, salt=_require_hash_salt(options))
+            else:
+                # Fall back to a deterministic, non-sensitive name that doesn't require a salt.
+                new = "Table1"
+        for attr in ("name", "displayName"):
+            if attr in root.attrib:
+                root.attrib[attr] = new
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _sanitize_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
+    root = ET.fromstring(xml)
+    if options.scrub_metadata or options.hash_strings:
+        # Text in drawings (text boxes, chart titles, etc.) uses DrawingML <a:t>.
+        _sanitize_xml_text_elements(root, options=options, local_names={"t"})
+        _sanitize_xml_attributes(root, options=options, attr_names={"name", "descr", "title"})
+
+    # Images can contain PII; remove picture nodes when secret removal is enabled.
+    if options.remove_secrets:
+        for parent in list(root.iter()):
+            for child in list(parent):
+                if child.tag.split("}")[-1] == "pic":
+                    parent.remove(child)
+
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _sanitize_vml_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
+    root = ET.fromstring(xml)
+    if options.scrub_metadata or options.hash_strings:
+        for el in root.iter():
+            if el.text and el.text.strip():
+                el.text = _sanitize_text(el.text, options=options)
+            if el.tail and el.tail.strip():
+                el.tail = _sanitize_text(el.tail, options=options)
+        _sanitize_xml_attributes(root, options=options, attr_names={"alt", "title", "href"})
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _sanitize_chart(
+    xml: bytes,
+    *,
+    options: SanitizeOptions,
+    sheet_rename_map: dict[str, str] | None = None,
+    table_rename_map: dict[str, str] | None = None,
+) -> bytes:
+    root = ET.fromstring(xml)
+    # Remove cached series values; these can leak computed data.
+    if options.redact_cell_values or options.hash_strings:
+        for parent in list(root.iter()):
+            for child in list(parent):
+                local = child.tag.split("}")[-1]
+                if local in {
+                    "numCache",
+                    "strCache",
+                    "multiLvlStrCache",
+                    "numLit",
+                    "strLit",
+                    "multiLvlStrLit",
+                    "dateCache",
+                }:
+                    parent.remove(child)
+
+    # Chart titles / labels can contain PII as DrawingML text.
+    if options.scrub_metadata or options.hash_strings:
+        _sanitize_xml_text_elements(root, options=options, local_names={"t"})
+
+    if sheet_rename_map or table_rename_map:
+        for el in root.iter():
+            if el.tag.split("}")[-1] != "f":
+                continue
+            if not el.text:
+                continue
+            el.text = _sanitize_formula_text(
+                el.text,
+                options=options,
+                sheet_rename_map=sheet_rename_map or {},
+                table_rename_map=table_rename_map or {},
+            )
+
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -207,8 +401,9 @@ def _sanitize_relationships(
         target = rel.attrib.get("Target", "")
         target_mode = rel.attrib.get("TargetMode")
 
-        if options.remove_external_links and target_mode == "External":
+        if options.remove_external_links and (target_mode == "External" or _looks_like_external_url(target)):
             rel.attrib["Target"] = "https://redacted.invalid/"
+            rel.attrib["TargetMode"] = "External"
             continue
 
         if not target or target_mode == "External":
@@ -245,15 +440,237 @@ def _sanitize_content_types(xml: bytes, *, removed_parts: set[str]) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-def _sanitize_workbook(xml: bytes, *, options: SanitizeOptions) -> bytes:
-    if not options.remove_external_links:
-        return xml
+def _sanitize_workbook(
+    xml: bytes, *, options: SanitizeOptions, sheet_rename_map: dict[str, str] | None = None
+) -> bytes:
     root = ET.fromstring(xml)
     # `<externalReferences>` has no consistent prefix usage, so match by local name.
-    for child in list(root):
-        if child.tag.split("}")[-1] == "externalReferences":
-            root.remove(child)
+    if options.remove_external_links:
+        for child in list(root):
+            if child.tag.split("}")[-1] == "externalReferences":
+                root.remove(child)
+
+    # Defined names can embed sensitive business terms (both the name and the definition).
+    if options.scrub_metadata or options.hash_strings:
+        for child in list(root):
+            if child.tag.split("}")[-1] == "definedNames":
+                root.remove(child)
+    elif sheet_rename_map:
+        # Sheet rename mode must keep workbook-internal references consistent.
+        for el in root.iter():
+            if el.tag.split("}")[-1] != "definedName":
+                continue
+            if el.text is None:
+                continue
+            el.text = _rewrite_formula_sheet_references(el.text, sheet_rename_map=sheet_rename_map)
+
+    if sheet_rename_map:
+        sheets = None
+        for child in list(root):
+            if child.tag.split("}")[-1] == "sheets":
+                sheets = child
+                break
+        if sheets is not None:
+            for sheet in sheets:
+                if sheet.tag.split("}")[-1] != "sheet":
+                    continue
+                old = sheet.attrib.get("name")
+                if not old:
+                    continue
+                new = sheet_rename_map.get(old)
+                if new:
+                    sheet.attrib["name"] = new
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _looks_like_external_url(value: str) -> bool:
+    v = value.strip().lower()
+    return v.startswith(("http://", "https://", "mailto:", "ftp://", "ftps://", "file:"))
+
+
+def _rewrite_formula_sheet_references(formula: str, *, sheet_rename_map: dict[str, str]) -> str:
+    if not sheet_rename_map:
+        return formula
+
+    # Replace quoted sheet references first: 'Old Name'!
+    for old, new in sheet_rename_map.items():
+        if not old:
+            continue
+        old_escaped = old.replace("'", "''")
+        formula = formula.replace(f"'{old_escaped}'!", f"{new}!")
+        formula = formula.replace(f"{old}!", f"{new}!")
+    return formula
+
+
+def _rewrite_formula_table_references(formula: str, *, table_rename_map: dict[str, str]) -> str:
+    if not table_rename_map:
+        return formula
+
+    out = formula
+    for old, new in table_rename_map.items():
+        if not old:
+            continue
+        out = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?=\\[)", new, out)
+    return out
+
+
+def _sanitize_formula_text(
+    formula: str,
+    *,
+    options: SanitizeOptions,
+    sheet_rename_map: dict[str, str],
+    table_rename_map: dict[str, str],
+) -> str:
+    out = formula
+    if sheet_rename_map:
+        out = _rewrite_formula_sheet_references(out, sheet_rename_map=sheet_rename_map)
+    if table_rename_map:
+        out = _rewrite_formula_table_references(out, table_rename_map=table_rename_map)
+
+    # If we're hashing, also hash string literals inside formulas; those can leak PII.
+    if options.hash_strings:
+        salt = _require_hash_salt(options)
+        # Excel formula string literals: "..." with doubled quotes for escaping.
+        def _repl(match: re.Match[str]) -> str:
+            raw = match.group(0)
+            inner = raw[1:-1].replace('""', '"')
+            hashed = _hash_text(inner, salt=salt)
+            return f'"{hashed}"'
+
+        out = re.sub(r'"(?:[^"]|"")*"', _repl, out)
+    elif options.redact_cell_values:
+        # Redact formula string literals too so PII doesn't survive via formulas.
+        out = re.sub(r'"(?:[^"]|"")*"', '"REDACTED"', out)
+    return out
+
+
+def _sanitize_formula_cells_in_worksheet(
+    root: ET.Element,
+    *,
+    options: SanitizeOptions,
+    sheet_rename_map: dict[str, str],
+    table_rename_map: dict[str, str],
+) -> None:
+    for c in root.iter(qn(NS_MAIN, "c")):
+        f_el = c.find(qn(NS_MAIN, "f"))
+        if f_el is None or not f_el.text:
+            continue
+        f_el.text = _sanitize_formula_text(
+            f_el.text,
+            options=options,
+            sheet_rename_map=sheet_rename_map,
+            table_rename_map=table_rename_map,
+        )
+
+    if sheet_rename_map:
+        for hl in root.iter():
+            if hl.tag.split("}")[-1] != "hyperlink":
+                continue
+            loc = hl.attrib.get("location")
+            if not loc or _looks_like_external_url(loc):
+                continue
+            hl.attrib["location"] = _rewrite_formula_sheet_references(loc, sheet_rename_map=sheet_rename_map)
+
+
+def scan_xlsx_bytes_for_leaks(
+    data: bytes,
+    *,
+    plaintext_strings: Iterable[str] | None = None,
+    scan_patterns: bool = True,
+) -> LeakScanResult:
+    """Scan an XLSX zip blob for common PII/secret leaks.
+
+    This is intentionally heuristic and should be used as a safety net, not a substitute
+    for sanitizing known parts.
+
+    Note: Findings intentionally avoid returning the matched plaintext (only a SHA256),
+    so callers can fail CI without leaking secrets into logs.
+    """
+
+    findings: list[LeakScanFinding] = []
+
+    # Keep URL matching fairly strict to avoid false positives on unrelated strings.
+    email_re = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+    url_re = re.compile(r"\bhttps?://[^\s\"'<>]+", re.IGNORECASE)
+    aws_key_re = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
+    jwt_re = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
+
+    url_allowlist = {
+        "schemas.openxmlformats.org",
+        "schemas.microsoft.com",
+        "www.w3.org",
+        "purl.org",
+        "redacted.invalid",
+    }
+
+    def _sha(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _record(part: str, kind: str, match: str) -> None:
+        findings.append(LeakScanFinding(part_name=part, kind=kind, match_sha256=_sha(match)))
+
+    def _xml_escape(s: str) -> str:
+        return (
+            s.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+        )
+
+    needles: list[str] = []
+    if plaintext_strings:
+        for s in plaintext_strings:
+            if not s:
+                continue
+            if len(s) < 4:
+                # Avoid a flood of false positives on short substrings.
+                continue
+            needles.append(s)
+            needles.append(_xml_escape(s))
+
+    input_buf = io.BytesIO(data)
+    with zipfile.ZipFile(input_buf, "r") as zin:
+        for info in zin.infolist():
+            if info.is_dir():
+                continue
+            part = info.filename
+            raw = zin.read(part)
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                text = raw.decode("utf-8", errors="ignore")
+
+            for s in needles:
+                if s in text:
+                    _record(part, "plaintext", s)
+
+            if not scan_patterns:
+                continue
+
+            for m in email_re.findall(text):
+                _record(part, "email", m)
+
+            for m in aws_key_re.findall(text):
+                _record(part, "aws_key", m)
+
+            for m in jwt_re.findall(text):
+                _record(part, "jwt", m)
+
+            for m in url_re.findall(text):
+                # Filter out standard OOXML namespace URLs.
+                try:
+                    from urllib.parse import urlparse
+
+                    parsed = urlparse(m)
+                    host = (parsed.hostname or "").lower()
+                except Exception:
+                    host = ""
+                if host in url_allowlist or any(host.endswith("." + d) for d in url_allowlist):
+                    continue
+                _record(part, "url", m)
+
+    return LeakScanResult(findings=findings)
 
 
 def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes, SanitizeSummary]:
@@ -277,6 +694,53 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("xl/queryTables/")}
             removed_parts |= {n for n in names if n.startswith("customXml/")}
             removed_parts |= {n for n in names if n.startswith("xl/customXml/")}
+            removed_parts |= {n for n in names if n.startswith("xl/media/")}
+            removed_parts |= {n for n in names if n.startswith("xl/embeddings/")}
+            removed_parts |= {n for n in names if n == "xl/vbaProject.bin"}
+            removed_parts |= {n for n in names if n.startswith("customUI/")}
+
+        sheet_rename_map: dict[str, str] = {}
+        if options.rename_sheets:
+            try:
+                wb_root = ET.fromstring(zin.read("xl/workbook.xml"))
+                sheets = None
+                for child in wb_root:
+                    if child.tag.split("}")[-1] == "sheets":
+                        sheets = child
+                        break
+                if sheets is not None:
+                    idx = 1
+                    for sheet in sheets:
+                        if sheet.tag.split("}")[-1] != "sheet":
+                            continue
+                        name = sheet.attrib.get("name")
+                        if not name:
+                            continue
+                        sheet_rename_map[name] = f"Sheet{idx}"
+                        idx += 1
+            except Exception:
+                sheet_rename_map = {}
+
+        table_rename_map: dict[str, str] = {}
+        if options.scrub_metadata or options.hash_strings:
+            table_parts = sorted([n for n in names if n.startswith("xl/tables/") and n.endswith(".xml")])
+            idx = 1
+            for part in table_parts:
+                try:
+                    t_root = ET.fromstring(zin.read(part))
+                except Exception:
+                    continue
+                if t_root.tag.split("}")[-1] != "table":
+                    continue
+                old = t_root.attrib.get("displayName") or t_root.attrib.get("name")
+                if not old:
+                    continue
+                if options.hash_strings:
+                    new = _hash_text(old, salt=_require_hash_salt(options))
+                else:
+                    new = f"Table{idx}"
+                table_rename_map[old] = new
+                idx += 1
 
         rewritten: list[str] = []
 
@@ -302,15 +766,33 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         )
                         rewritten.append(name)
                     elif name == "xl/workbook.xml":
-                        new = _sanitize_workbook(raw, options=options)
+                        new = _sanitize_workbook(
+                            raw, options=options, sheet_rename_map=sheet_rename_map or None
+                        )
                         if new != raw:
                             rewritten.append(name)
                     elif (
-                        name.startswith("xl/worksheets/") and name.endswith(".xml") and options.redact_cell_values
-                    ) or (
-                        name.startswith("xl/worksheets/") and name.endswith(".xml") and options.hash_strings
+                        name.startswith("xl/worksheets/")
+                        and name.endswith(".xml")
+                        and (
+                            options.redact_cell_values
+                            or options.hash_strings
+                            or options.scrub_metadata
+                            or options.remove_external_links
+                            or options.rename_sheets
+                        )
                     ):
                         new = _sanitize_worksheet(raw, options=options)
+                        if options.redact_cell_values or options.hash_strings or sheet_rename_map or table_rename_map:
+                            # Rewrite formula sheet/table references and scrub string literals.
+                            ws_root = ET.fromstring(new)
+                            _sanitize_formula_cells_in_worksheet(
+                                ws_root,
+                                options=options,
+                                sheet_rename_map=sheet_rename_map,
+                                table_rename_map=table_rename_map,
+                            )
+                            new = ET.tostring(ws_root, encoding="utf-8", xml_declaration=True)
                         rewritten.append(name)
                     elif name == "xl/sharedStrings.xml" and (options.redact_cell_values or options.hash_strings):
                         new = _sanitize_shared_strings(raw, options=options)
@@ -320,6 +802,44 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         rewritten.append(name)
                     elif name == "docProps/app.xml" and options.scrub_metadata:
                         new = _sanitize_app_properties(raw)
+                        rewritten.append(name)
+                    elif name.startswith("xl/comments") and name.endswith(".xml") and (
+                        options.scrub_metadata or options.hash_strings
+                    ):
+                        new = _sanitize_comments(raw, options=options)
+                        rewritten.append(name)
+                    elif (
+                        name.startswith("xl/threadedComments/") or name.startswith("xl/persons/")
+                    ) and name.endswith(".xml") and (options.scrub_metadata or options.hash_strings):
+                        new = _sanitize_threaded_comments(raw, options=options)
+                        rewritten.append(name)
+                    elif name.startswith("xl/tables/") and name.endswith(".xml") and (
+                        options.scrub_metadata or options.hash_strings
+                    ):
+                        new = _sanitize_table(raw, options=options, table_rename_map=table_rename_map)
+                        rewritten.append(name)
+                    elif name.startswith("xl/drawings/") and name.endswith(".xml") and (
+                        options.scrub_metadata or options.hash_strings or options.remove_secrets
+                    ):
+                        new = _sanitize_drawing(raw, options=options)
+                        rewritten.append(name)
+                    elif name.startswith("xl/drawings/") and name.endswith(".vml") and (
+                        options.scrub_metadata or options.hash_strings
+                    ):
+                        new = _sanitize_vml_drawing(raw, options=options)
+                        rewritten.append(name)
+                    elif name.startswith("xl/charts/") and name.endswith(".xml") and (
+                        options.redact_cell_values
+                        or options.hash_strings
+                        or options.scrub_metadata
+                        or options.rename_sheets
+                    ):
+                        new = _sanitize_chart(
+                            raw,
+                            options=options,
+                            sheet_rename_map=sheet_rename_map or None,
+                            table_rename_map=table_rename_map or None,
+                        )
                         rewritten.append(name)
                 except ET.ParseError:
                     # If a part isn't well-formed XML, leave it untouched (we still might remove it above).
