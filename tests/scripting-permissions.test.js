@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ScriptRuntime, Workbook } from "@formula/scripting/node";
+import { ScriptRuntime, Workbook } from "../packages/scripting/src/node.js";
 
 test("scripting (node): blocks network access by default", async () => {
   const workbook = new Workbook();
