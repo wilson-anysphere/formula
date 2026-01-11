@@ -2,8 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import extensionHostPkg from "../../../../packages/extension-host/src/index.js";
+import extensionPackagePkg from "../../../../shared/extension-package/index.js";
 
 const { ExtensionHost } = extensionHostPkg;
+const { verifyExtractedExtensionDir } = extensionPackagePkg;
 
 async function readJsonIfExists(filePath, fallback) {
   try {
@@ -13,6 +15,13 @@ async function readJsonIfExists(filePath, fallback) {
     if (error && (error.code === "ENOENT" || error.code === "ENOTDIR")) return fallback;
     throw error;
   }
+}
+
+async function atomicWriteJson(filePath, data) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(data, null, 2));
+  await fs.rename(tmp, filePath);
 }
 
 /**
@@ -88,7 +97,49 @@ export class ExtensionHostManager {
 
   async _loadInstalledState() {
     const state = await readJsonIfExists(this.statePath, { installed: {} });
-    return state && typeof state === "object" ? state : { installed: {} };
+    if (!state || typeof state !== "object") return { installed: {} };
+    if (!state.installed || typeof state.installed !== "object") state.installed = {};
+    return state;
+  }
+
+  async _saveInstalledState(state) {
+    await atomicWriteJson(this.statePath, state);
+  }
+
+  async _markCorrupted(state, extensionId, reason) {
+    const record = state.installed?.[extensionId];
+    if (!record || typeof record !== "object") return;
+    record.corrupted = true;
+    record.corruptedAt = new Date().toISOString();
+    record.corruptedReason = reason;
+    await this._saveInstalledState(state);
+  }
+
+  async _verifyInstalledExtension(state, extensionId) {
+    const record = state.installed?.[extensionId];
+    if (!record || typeof record !== "object") {
+      return { ok: false, reason: "Missing installed extension metadata" };
+    }
+
+    if (record.corrupted) {
+      return { ok: false, reason: record.corruptedReason || "Extension is quarantined" };
+    }
+
+    if (!Array.isArray(record.files) || record.files.length === 0) {
+      const reason =
+        "Missing integrity metadata (installed with an older version). Repair (reinstall) is required.";
+      await this._markCorrupted(state, extensionId, reason);
+      return { ok: false, reason };
+    }
+
+    const extensionPath = path.join(this.extensionsDir, extensionId);
+    const result = await verifyExtractedExtensionDir(extensionPath, record.files, {
+      ignoreExtraPaths: [".DS_Store", "Thumbs.db", "desktop.ini"],
+    });
+    if (!result.ok) {
+      await this._markCorrupted(state, extensionId, result.reason || "Extension integrity check failed");
+    }
+    return result;
   }
 
   /**
@@ -102,6 +153,15 @@ export class ExtensionHostManager {
 
     for (const extensionId of installedIds) {
       if (loaded.has(extensionId)) continue;
+
+      const verification = await this._verifyInstalledExtension(state, extensionId);
+      if (!verification.ok) {
+        const reason = verification.reason || "unknown reason";
+        throw new Error(
+          `Extension integrity check failed for ${extensionId}: ${reason}. Repair (reinstall) the extension to continue.`
+        );
+      }
+
       const extensionPath = path.join(this.extensionsDir, extensionId);
       await this._host.loadExtension(extensionPath);
     }
@@ -146,6 +206,15 @@ export class ExtensionHostManager {
     const loaded = this._host.listExtensions().some((ext) => ext.id === id);
     if (loaded) {
       await this._host.unloadExtension(id);
+    }
+
+    const state = await this._loadInstalledState();
+    const verification = await this._verifyInstalledExtension(state, id);
+    if (!verification.ok) {
+      const reason = verification.reason || "unknown reason";
+      throw new Error(
+        `Extension integrity check failed for ${id}: ${reason}. Repair (reinstall) the extension to continue.`
+      );
     }
 
     const extensionPath = path.join(this.extensionsDir, id);

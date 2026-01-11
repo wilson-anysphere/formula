@@ -1,10 +1,15 @@
 const v1 = require("./v1");
 const v2 = require("./v2");
+const integrity = require("./integrity");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
 const { verifyBytesSignature } = require("../crypto/signing");
+
+function sha256Hex(bytes) {
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
 
 function detectExtensionPackageFormatVersion(packageBytes) {
   if (!packageBytes || packageBytes.length < 2) {
@@ -60,6 +65,8 @@ async function verifyAndExtractExtensionPackage(packageBytes, destDir, options =
   /** @type {any} */
   let manifest = null;
   let signatureBase64 = null;
+  /** @type {{ path: string, sha256: string, size: number }[] | null} */
+  let files = null;
 
   /** @type {(stagingDir: string) => Promise<void>} */
   let writeToStaging = null;
@@ -77,6 +84,12 @@ async function verifyAndExtractExtensionPackage(packageBytes, destDir, options =
     const bundle = v1.readExtensionPackageV1(packageBytes);
     manifest = bundle.manifest;
     signatureBase64 = options.signatureBase64;
+    files = bundle.files
+      .map((f) => {
+        const bytes = Buffer.from(f.dataBase64, "base64");
+        return { path: f.path, sha256: sha256Hex(bytes), size: bytes.length };
+      })
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     writeToStaging = (stagingDir) => v1.extractExtensionPackageV1FromBundle(bundle, stagingDir);
   } else if (formatVersion === 2) {
     const parsed = v2.readExtensionPackageV2(packageBytes);
@@ -90,6 +103,7 @@ async function verifyAndExtractExtensionPackage(packageBytes, destDir, options =
 
     manifest = verified.manifest;
     signatureBase64 = verified.signatureBase64;
+    files = verified.files;
 
     // Optional transport cross-check: if the server included an X-Package-Signature header,
     // ensure it matches the signed payload inside the package.
@@ -128,7 +142,7 @@ async function verifyAndExtractExtensionPackage(packageBytes, destDir, options =
     }
   }
 
-  return { manifest, formatVersion, signatureBase64 };
+  return { manifest, formatVersion, signatureBase64, files };
 }
 
 async function atomicReplaceDir(stagingDir, destDir) {
@@ -197,4 +211,7 @@ module.exports = {
   verifyExtensionPackageV2: v2.verifyExtensionPackageV2,
   createSignaturePayloadBytes: v2.createSignaturePayloadBytes,
   canonicalJsonBytes: v2.canonicalJsonBytes,
+
+  // extracted directory integrity
+  verifyExtractedExtensionDir: integrity.verifyExtractedExtensionDir,
 };

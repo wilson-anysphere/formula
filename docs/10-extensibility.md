@@ -1024,6 +1024,46 @@ class ExtensionPublisher {
 
 ---
 
+## Installed extension integrity (tamper detection + quarantine)
+
+Extensions are treated as **immutable** after installation.
+
+### What we guarantee
+
+1. **Package signature verification at install time**
+   - When installing from the marketplace, the desktop app verifies the extension package signature
+     using the publisher public key.
+   - The installer persists verification metadata (package SHA-256, signature, and per-file
+     SHA-256 + size).
+
+2. **On-disk integrity verification before execution**
+   - Before loading an installed extension into the runtime, the desktop app verifies the installed
+     extension directory matches the recorded per-file hashes.
+   - If any expected file is missing, modified, or if unexpected files are present, the extension is
+     considered **corrupted**.
+
+### Quarantine behavior (“corrupted”)
+
+If integrity verification fails, the extension is **quarantined**:
+
+- The extension is marked `corrupted: true` in the desktop marketplace state along with a timestamp
+  and human-readable reason.
+- The extension host refuses to load/execute the extension and surfaces an **“integrity check
+  failed”** error.
+
+This protects users from accidental edits to the extension folder and from malware that tampers with
+installed extension code.
+
+### Recovery (“repair”)
+
+Users recover by reinstalling the extension from the marketplace:
+
+- **Repair** downloads and verifies the package again, then re-extracts it atomically over the
+  existing installation.
+- On success, the `corrupted` flag is cleared and the extension can be loaded again.
+
+--- 
+
 ## Extension Examples
 
 ### Repo sample extension (runnable)

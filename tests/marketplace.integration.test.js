@@ -254,9 +254,9 @@ test("marketplace publish → discover → install → verify signature → run 
       extensionStoragePath: path.join(tmpRoot, "storage.json"),
       permissionPrompt: async () => true,
     });
-
+ 
     const installedPath = path.join(extensionsDir, extensionId);
-    await host.loadExtension(installedPath);
+    await manager.loadIntoHost(host, extensionId);
 
     host.spreadsheet.setCell(0, 0, 1);
     host.spreadsheet.setCell(0, 1, 2);
@@ -296,8 +296,8 @@ test("marketplace publish → discover → install → verify signature → run 
       extensionStoragePath: path.join(tmpRoot, "storage.json"),
       permissionPrompt: async () => true,
     });
-
-    await host2.loadExtension(installedPath);
+ 
+    await manager.loadIntoHost(host2, extensionId);
     host2.spreadsheet.setCell(0, 0, 1);
     host2.spreadsheet.setCell(0, 1, 2);
     host2.spreadsheet.setCell(1, 0, 3);
@@ -403,6 +403,117 @@ test("tampered marketplace download does not clobber an existing install", async
     );
     assert.equal(installedPackageJson.version, "1.0.0");
   } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("installed extension tampering is detected, quarantines execution, and repair reinstalls", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-integrity-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+  const extensionsDir = path.join(tmpRoot, "installed-extensions");
+  const statePath = path.join(tmpRoot, "extensions-state.json");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  let runtime = null;
+  let runtime2 = null;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({
+      extensionDir: extSource,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const marketplaceClient = new MarketplaceClient({ baseUrl });
+    const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+    await manager.install(extensionId);
+
+    const tamperPath = path.join(extensionsDir, extensionId, "dist", "extension.js");
+    await fs.appendFile(tamperPath, "\n// tampered\n", "utf8");
+
+    runtime = new ExtensionHostManager({
+      extensionsDir,
+      statePath,
+      engineVersion: "1.0.0",
+      permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
+      extensionStoragePath: path.join(tmpRoot, "storage.json"),
+      permissionPrompt: async () => true,
+    });
+
+    await assert.rejects(() => runtime.startup(), /integrity check failed|corrupt|checksum|size mismatch/i);
+
+    const corruptedState = await manager.getInstalled(extensionId);
+    assert.ok(corruptedState?.corrupted);
+    assert.match(
+      String(corruptedState?.corruptedReason ?? ""),
+      /Checksum mismatch|Size mismatch|Unexpected file|Missing expected file|integrity/i,
+    );
+
+    await manager.repair(extensionId);
+
+    runtime2 = new ExtensionHostManager({
+      extensionsDir,
+      statePath,
+      engineVersion: "1.0.0",
+      permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
+      extensionStoragePath: path.join(tmpRoot, "storage.json"),
+      permissionPrompt: async () => true,
+    });
+
+    await runtime2.startup();
+    runtime2.spreadsheet.setCell(0, 0, 1);
+    runtime2.spreadsheet.setCell(0, 1, 2);
+    runtime2.spreadsheet.setCell(1, 0, 3);
+    runtime2.spreadsheet.setCell(1, 1, 4);
+    runtime2.spreadsheet.setSelection({ startRow: 0, startCol: 0, endRow: 1, endCol: 1 });
+
+    const result = await runtime2.executeCommand("sampleHello.sumSelection");
+    assert.equal(result, 10);
+
+    const repaired = await manager.getInstalled(extensionId);
+    assert.ok(repaired);
+    assert.ok(!repaired.corrupted);
+  } finally {
+    if (runtime) await runtime.dispose().catch(() => {});
+    if (runtime2) await runtime2.dispose().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }

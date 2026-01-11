@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -5,7 +6,11 @@ import semverPkg from "../../../../shared/semver.js";
 import extensionPackagePkg from "../../../../shared/extension-package/index.js";
 
 const { compareSemver } = semverPkg;
-const { detectExtensionPackageFormatVersion, verifyAndExtractExtensionPackage } = extensionPackagePkg;
+const {
+  detectExtensionPackageFormatVersion,
+  verifyAndExtractExtensionPackage,
+  verifyExtractedExtensionDir,
+} = extensionPackagePkg;
 
 async function readJsonIfExists(filePath, fallback) {
   try {
@@ -30,6 +35,10 @@ function ensureSignaturePresent(signatureBase64) {
   }
 }
 
+function sha256Hex(bytes) {
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
 export class ExtensionManager {
   constructor({ marketplaceClient, extensionsDir, statePath }) {
     if (!marketplaceClient) throw new Error("marketplaceClient is required");
@@ -42,7 +51,10 @@ export class ExtensionManager {
   }
 
   async _loadState() {
-    return readJsonIfExists(this.statePath, { installed: {} });
+    const state = await readJsonIfExists(this.statePath, { installed: {} });
+    if (!state || typeof state !== "object") return { installed: {} };
+    if (!state.installed || typeof state.installed !== "object") state.installed = {};
+    return state;
   }
 
   async _saveState(state) {
@@ -57,6 +69,15 @@ export class ExtensionManager {
   async getInstalled(id) {
     const state = await this._loadState();
     return state.installed[id] || null;
+  }
+
+  async _markCorrupted(state, id, reason) {
+    const installed = state.installed[id];
+    if (!installed) return;
+    installed.corrupted = true;
+    installed.corruptedAt = new Date().toISOString();
+    installed.corruptedReason = reason;
+    await this._saveState(state);
   }
 
   async install(id, version = null) {
@@ -74,6 +95,11 @@ export class ExtensionManager {
     const download = await this.marketplaceClient.downloadPackage(id, resolvedVersion);
     if (!download) throw new Error(`Package not found: ${id}@${resolvedVersion}`);
 
+    const computedPackageSha256 = sha256Hex(download.bytes);
+    if (download.sha256 && download.sha256 !== computedPackageSha256) {
+      throw new Error("Marketplace download sha256 does not match downloaded bytes");
+    }
+
     const formatVersion =
       typeof download.formatVersion === "number" && Number.isFinite(download.formatVersion)
         ? download.formatVersion
@@ -84,19 +110,29 @@ export class ExtensionManager {
       ensureSignaturePresent(download.signatureBase64);
     }
 
-    await verifyAndExtractExtensionPackage(download.bytes, installDir, {
+    const verified = await verifyAndExtractExtensionPackage(download.bytes, installDir, {
       publicKeyPem,
       signatureBase64: download.signatureBase64,
       formatVersion,
       expectedId: id,
       expectedVersion: resolvedVersion,
     });
+    const expectedFiles = Array.isArray(verified.files) ? verified.files : [];
+    const signatureBase64 = verified.signatureBase64 ?? null;
+    const verifiedFormatVersion =
+      typeof verified.formatVersion === "number" && Number.isFinite(verified.formatVersion)
+        ? verified.formatVersion
+        : formatVersion;
 
     const state = await this._loadState();
     state.installed[id] = {
       id,
       version: resolvedVersion,
       installedAt: new Date().toISOString(),
+      formatVersion: verifiedFormatVersion,
+      packageSha256: computedPackageSha256,
+      signatureBase64,
+      files: expectedFiles,
     };
     await this._saveState(state);
 
@@ -142,5 +178,82 @@ export class ExtensionManager {
     }
 
     return this.install(id, ext.latestVersion);
+  }
+
+  async verifyInstalled(id) {
+    const state = await this._loadState();
+    const installed = state.installed[id];
+    if (!installed) throw new Error(`Not installed: ${id}`);
+
+    if (installed.corrupted) {
+      return { ok: false, reason: installed.corruptedReason || "Extension is quarantined" };
+    }
+
+    if (!Array.isArray(installed.files) || installed.files.length === 0) {
+      const reason =
+        "Missing integrity metadata (installed with an older version). Repair (reinstall) is required.";
+      await this._markCorrupted(state, id, reason);
+      return { ok: false, reason };
+    }
+
+    const installDir = path.join(this.extensionsDir, id);
+    let result;
+    try {
+      result = await verifyExtractedExtensionDir(installDir, installed.files, {
+        ignoreExtraPaths: [".DS_Store", "Thumbs.db", "desktop.ini"],
+      });
+    } catch (error) {
+      result = { ok: false, reason: error?.message ?? String(error) };
+    }
+
+    if (!result.ok) {
+      await this._markCorrupted(state, id, result.reason || "Extension integrity check failed");
+    }
+
+    return result;
+  }
+
+  async verifyAllInstalled() {
+    const installed = await this.listInstalled();
+    /** @type {Record<string, { ok: boolean, reason?: string }>} */
+    const out = {};
+    for (const item of installed) {
+      try {
+        out[item.id] = await this.verifyInstalled(item.id);
+      } catch (error) {
+        out[item.id] = { ok: false, reason: error?.message ?? String(error) };
+      }
+    }
+    return out;
+  }
+
+  async loadIntoHost(extensionHost, id) {
+    if (!extensionHost || typeof extensionHost.loadExtension !== "function") {
+      throw new Error("extensionHost with loadExtension() is required");
+    }
+
+    const verification = await this.verifyInstalled(id);
+    if (!verification.ok) {
+      const reason = verification.reason || "unknown reason";
+      throw new Error(
+        `Extension integrity check failed for ${id}: ${reason}. Run repair() to reinstall the extension.`
+      );
+    }
+
+    const installDir = path.join(this.extensionsDir, id);
+    return extensionHost.loadExtension(installDir);
+  }
+
+  async repair(id) {
+    const installed = await this.getInstalled(id);
+    if (!installed) throw new Error(`Not installed: ${id}`);
+
+    try {
+      return await this.install(id, installed.version);
+    } catch (error) {
+      const msg = error?.message ?? String(error);
+      if (!/Package not found/i.test(msg)) throw error;
+      return this.install(id);
+    }
   }
 }
