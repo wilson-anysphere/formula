@@ -6,6 +6,7 @@ import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 
 import type { SyncServerConfig } from "../src/config.js";
+import { sha256Hex } from "../src/leveldb-docname.js";
 import { createLogger } from "../src/logger.js";
 import { LAST_SEEN_META_KEY } from "../src/retention.js";
 import { createSyncServer } from "../src/server.js";
@@ -108,6 +109,21 @@ function createConfig(ttlMs: number): SyncServerConfig {
   };
 }
 
+function waitForWebSocketOpen(ws: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (err: unknown) => {
+      ws.off("open", onOpen);
+      reject(err);
+    };
+    const onOpen = () => {
+      ws.off("error", onError);
+      resolve();
+    };
+    ws.once("error", onError);
+    ws.once("open", onOpen);
+  });
+}
+
 test("retention sweep purges inactive docs (leveldb)", async (t) => {
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
@@ -201,6 +217,47 @@ test("retention sweep skips docs with active websocket connections", async (t) =
 
   const remaining = await ldb.getAllDocNames();
   assert.deepEqual(remaining, ["active-doc"]);
+});
+
+test("pong-based lastSeen refresh uses persisted docName when docName hashing is enabled", async (t) => {
+  const ldb = new InMemoryLeveldbPersistence();
+  const logger = createLogger("silent");
+  const server = createSyncServer(
+    {
+      ...createConfig(60_000),
+      persistence: {
+        ...createConfig(60_000).persistence,
+        leveldbDocNameHashing: true,
+      },
+    },
+    logger,
+    { createLeveldbPersistence: () => ldb as any }
+  );
+
+  await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = "active-doc";
+  const persistedName = sha256Hex(docName);
+
+  const ws = new WebSocket(`${server.getWsUrl()}/${docName}?token=test-token`);
+  t.after(() => {
+    ws.terminate();
+  });
+
+  await waitForWebSocketOpen(ws);
+
+  // Wait for the initial `markSeen(persistedName)` to land.
+  await new Promise((r) => setTimeout(r, 20));
+
+  // Send a pong frame to trigger the server's `ws.on("pong")` handler.
+  ws.pong();
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(typeof (await ldb.getMeta(persistedName, LAST_SEEN_META_KEY)), "number");
+  assert.equal(await ldb.getMeta(docName, LAST_SEEN_META_KEY), undefined);
 });
 
 test("retention sweep endpoint returns 404 when internal admin token is disabled", async (t) => {
