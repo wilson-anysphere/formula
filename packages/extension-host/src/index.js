@@ -151,7 +151,22 @@ class ExtensionHost {
 
     const extensionId = `${manifest.publisher}.${manifest.name}`;
 
-    const mainPath = path.resolve(extensionPath, manifest.main);
+    const extensionRoot = path.resolve(extensionPath);
+    const mainPath = path.resolve(extensionRoot, manifest.main);
+    if (!mainPath.startsWith(extensionRoot + path.sep)) {
+      throw new Error(
+        `Extension entrypoint must resolve inside extension folder: '${manifest.main}' resolved to '${mainPath}'`
+      );
+    }
+    const stat = await fs.stat(mainPath).catch((error) => {
+      if (error && error.code === "ENOENT") {
+        throw new Error(`Extension entrypoint not found: ${manifest.main}`);
+      }
+      throw error;
+    });
+    if (!stat.isFile()) {
+      throw new Error(`Extension entrypoint is not a file: ${manifest.main}`);
+    }
     const extension = {
       id: extensionId,
       path: extensionPath,

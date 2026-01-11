@@ -162,19 +162,24 @@ class BrowserExtensionHost {
     const manifest = validateExtensionManifest(parsed, { engineVersion: this._engineVersion });
     const extensionId = `${manifest.publisher}.${manifest.name}`;
 
-    const baseUrl = new URL("./", resolvedUrl).toString();
+    const baseUrl = new URL("./", resolvedUrl);
     const entry = manifest.browser ?? manifest.module ?? manifest.main;
     if (!entry) {
       throw new Error(`Extension manifest missing entrypoint (main/module/browser): ${extensionId}`);
     }
 
-    const mainUrl = new URL(entry, baseUrl).toString();
+    const mainUrl = new URL(entry, baseUrl);
+    if (!mainUrl.href.startsWith(baseUrl.href)) {
+      throw new Error(
+        `Extension entrypoint must resolve inside extension base URL: '${entry}' resolved to '${mainUrl.href}'`
+      );
+    }
 
     await this.loadExtension({
       extensionId,
-      extensionPath: baseUrl,
+      extensionPath: baseUrl.toString(),
       manifest,
-      mainUrl
+      mainUrl: mainUrl.toString()
     });
 
     return extensionId;
