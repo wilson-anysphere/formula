@@ -339,6 +339,42 @@ fn from_xlsx_bytes_loads_basic_fixture() {
 }
 
 #[wasm_bindgen_test]
+fn from_xlsx_bytes_loads_multi_sheet_fixture() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/multi-sheet.xlsx"
+    ));
+
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert!(changes.is_empty());
+
+    let sheet2_a1_js = wb.get_cell("A1".to_string(), Some("Sheet2".to_string())).unwrap();
+    let sheet2_a1: formula_core::CellData = serde_wasm_bindgen::from_value(sheet2_a1_js).unwrap();
+    assert_eq!(sheet2_a1.value, json!(2.0));
+}
+
+#[wasm_bindgen_test]
+fn from_xlsx_bytes_imports_defined_names() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/metadata/defined-names.xlsx"
+    ));
+
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+    wb.set_cell("C1".to_string(), JsValue::from_str("=ZedName"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let cell_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.input, json!("=ZedName"));
+    assert_eq!(cell.value, json!("Hello"));
+}
+
+#[wasm_bindgen_test]
 fn cross_sheet_formulas_recalculate() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), Some("Sheet1".to_string()))
