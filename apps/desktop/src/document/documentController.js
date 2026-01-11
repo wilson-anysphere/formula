@@ -52,6 +52,8 @@ function encodeUtf8(text) {
   return Buffer.from(text, "utf8");
 }
 
+const NUMERIC_LITERAL_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
 /**
  * Canonicalize formula text for storage.
  *
@@ -789,6 +791,19 @@ export class DocumentController {
       const trimmed = input.trimStart();
       if (trimmed.startsWith("=") && trimmed.length > 1) {
         return { value: null, formula: normalizeFormula(trimmed), styleId: before.styleId };
+      }
+
+      // Excel-style scalar coercion: numeric literals and TRUE/FALSE become typed values.
+      // (More complex conversions like dates are handled by number formats / future parsing layers.)
+      const scalar = input.trim();
+      if (scalar) {
+        const upper = scalar.toUpperCase();
+        if (upper === "TRUE") return { value: true, formula: null, styleId: before.styleId };
+        if (upper === "FALSE") return { value: false, formula: null, styleId: before.styleId };
+        if (NUMERIC_LITERAL_RE.test(scalar)) {
+          const num = Number(scalar);
+          if (Number.isFinite(num)) return { value: num, formula: null, styleId: before.styleId };
+        }
       }
     }
 

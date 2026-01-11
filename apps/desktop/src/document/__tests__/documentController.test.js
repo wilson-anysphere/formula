@@ -224,6 +224,25 @@ test("setCellInput interprets '=' as formula and apostrophe as literal text", ()
   assert.equal(doc.getCell("Sheet1", "A2").value, "=1+2");
 });
 
+test("setCellInput coerces numeric/boolean literals (Excel-style)", () => {
+  const doc = new DocumentController();
+
+  doc.setCellInput("Sheet1", "A1", "123");
+  assert.equal(doc.getCell("Sheet1", "A1").value, 123);
+
+  doc.setCellInput("Sheet1", "A2", "TRUE");
+  assert.equal(doc.getCell("Sheet1", "A2").value, true);
+
+  doc.setCellInput("Sheet1", "A3", "false");
+  assert.equal(doc.getCell("Sheet1", "A3").value, false);
+
+  // Apostrophe forces text (no coercion).
+  doc.setCellInput("Sheet1", "A4", "'123");
+  assert.equal(doc.getCell("Sheet1", "A4").value, "123");
+  doc.setCellInput("Sheet1", "A5", "'TRUE");
+  assert.equal(doc.getCell("Sheet1", "A5").value, "TRUE");
+});
+
 test("setRangeValues treats strings starting with '=' as formulas", () => {
   const doc = new DocumentController();
 

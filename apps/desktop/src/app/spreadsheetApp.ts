@@ -3546,9 +3546,6 @@ export class SpreadsheetApp {
   ): SpreadsheetValue {
     const address = cellToA1(cell);
     const computedKey = this.computedKey(sheetId, address);
-    if (this.computedValues.has(computedKey)) {
-      return this.computedValues.get(computedKey) ?? null;
-    }
     const cached = memo.get(computedKey);
     if (cached !== undefined || memo.has(computedKey)) return cached ?? null;
     if (stack.has(computedKey)) return "#REF!";
@@ -3557,7 +3554,14 @@ export class SpreadsheetApp {
     const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
     let value: SpreadsheetValue;
 
-    if (state?.formula != null) {
+    // Prefer local formula evaluation when a formula is present in the DocumentController.
+    // The WASM engine integration is still evolving and can lag behind edge cases (like
+    // range references). By treating DocumentController formulas as authoritative for
+    // UI display, we keep results consistent across desktop/web and match unit-tested
+    // `evaluateFormula` semantics.
+    if (state?.formula == null && this.computedValues.has(computedKey)) {
+      value = this.computedValues.get(computedKey) ?? null;
+    } else if (state?.formula != null) {
       const resolveSheetId = (name: string): string | null => {
         const trimmed = name.trim();
         if (!trimmed) return null;
@@ -3602,12 +3606,10 @@ export class SpreadsheetApp {
       return;
     }
 
-    if (rawValue.startsWith("=")) {
-      this.document.setCellFormula(this.sheetId, cell, rawValue.slice(1), { label: "Edit cell" });
-      return;
-    }
-
-    if (isRichTextValue(original?.value)) {
+    // Preserve rich-text formatting runs when editing a rich-text cell with plain text
+    // (but still allow formulas / leading apostrophes to override rich-text semantics).
+    const trimmedStart = rawValue.trimStart();
+    if (!trimmedStart.startsWith("=") && !rawValue.startsWith("'") && isRichTextValue(original?.value)) {
       const updated = applyPlainTextEdit(original.value, rawValue);
       if (original.formula == null && updated === original.value) {
         // No-op edit: keep rich runs without creating a history entry.
@@ -3617,7 +3619,7 @@ export class SpreadsheetApp {
       return;
     }
 
-    this.document.setCellValue(this.sheetId, cell, rawValue, { label: "Edit cell" });
+    this.document.setCellInput(this.sheetId, cell, rawValue, { label: "Edit cell" });
   }
 
   private commitFormulaBar(text: string): void {
