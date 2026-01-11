@@ -419,6 +419,20 @@ class MarketplaceStore {
         );
 
         if (keyId) {
+          // Guard against reusing the same key id across multiple publishers.
+          const existingKeyStmt = tx.prepare(`SELECT publisher FROM publisher_keys WHERE id = ? LIMIT 1`);
+          existingKeyStmt.bind([keyId]);
+          if (existingKeyStmt.step()) {
+            const row = existingKeyStmt.getAsObject();
+            const existingPublisher = String(row.publisher || "");
+            existingKeyStmt.free();
+            if (existingPublisher && existingPublisher !== publisherRecord.publisher) {
+              throw new Error(`Signing key id already registered to a different publisher: ${keyId}`);
+            }
+          } else {
+            existingKeyStmt.free();
+          }
+
           publisherKeyByPublisher.set(publisherRecord.publisher, { id: keyId, publicKeyPem: normalizedKeyPem });
           tx.run(
             `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
