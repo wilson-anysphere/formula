@@ -71,6 +71,7 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
   - removes `docProps/custom.xml` (custom document properties)
   - removes workbook defined names (`<definedNames>`) which often embed business terms
   - scrubs comments (`xl/comments*.xml`), headers/footers, drawing text, and table/table-column names
+  - rewrites/scrubs `docProps/app.xml` `TitlesOfParts` (sheet title metadata)
 
 As a defense-in-depth safety net, `tools/corpus/sanitize.py` also includes a **leak scanner**
 (`scan_xlsx_bytes_for_leaks`) that can be used to fail CI if sanitized outputs still match high-risk

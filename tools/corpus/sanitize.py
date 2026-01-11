@@ -229,7 +229,7 @@ def _sanitize_worksheet(xml: bytes, *, options: SanitizeOptions) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-def _sanitize_core_properties(xml: bytes) -> bytes:
+def _sanitize_core_properties(xml: bytes, *, options: SanitizeOptions) -> bytes:
     root = ET.fromstring(xml)
     # Redact common authoring metadata; leave structure intact.
     for el in root.iter():
@@ -242,18 +242,35 @@ def _sanitize_core_properties(xml: bytes) -> bytes:
             "description",
             "keywords",
         }:
-            el.text = "REDACTED"
+            if el.text is not None:
+                el.text = _sanitize_text(el.text, options=options)
         if local in {"created", "modified"}:
             el.text = "1970-01-01T00:00:00Z"
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-def _sanitize_app_properties(xml: bytes) -> bytes:
+def _sanitize_app_properties(
+    xml: bytes, *, options: SanitizeOptions, sheet_rename_map: dict[str, str] | None = None
+) -> bytes:
     root = ET.fromstring(xml)
     for el in root.iter():
         local = el.tag.split("}")[-1]
-        if local in {"Company", "Manager", "HyperlinkBase"}:
-            el.text = "REDACTED"
+        if (options.scrub_metadata or options.hash_strings) and local in {"Company", "Manager", "HyperlinkBase"}:
+            if el.text is not None:
+                el.text = _sanitize_text(el.text, options=options)
+
+        if local == "TitlesOfParts":
+            for title in el.iter():
+                if title is el:
+                    continue
+                if title.tag.split("}")[-1] != "lpstr":
+                    continue
+                if title.text is None:
+                    continue
+                if sheet_rename_map and title.text in sheet_rename_map:
+                    title.text = sheet_rename_map[title.text]
+                elif options.scrub_metadata or options.hash_strings:
+                    title.text = _sanitize_text(title.text, options=options)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -1060,11 +1077,15 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                     elif name == "xl/sharedStrings.xml" and (options.redact_cell_values or options.hash_strings):
                         new = _sanitize_shared_strings(raw, options=options)
                         rewritten.append(name)
-                    elif name == "docProps/core.xml" and options.scrub_metadata:
-                        new = _sanitize_core_properties(raw)
+                    elif name == "docProps/core.xml" and (options.scrub_metadata or options.hash_strings):
+                        new = _sanitize_core_properties(raw, options=options)
                         rewritten.append(name)
-                    elif name == "docProps/app.xml" and options.scrub_metadata:
-                        new = _sanitize_app_properties(raw)
+                    elif name == "docProps/app.xml" and (
+                        options.scrub_metadata or options.hash_strings or options.rename_sheets
+                    ):
+                        new = _sanitize_app_properties(
+                            raw, options=options, sheet_rename_map=sheet_rename_map or None
+                        )
                         rewritten.append(name)
                     elif name.startswith("xl/comments") and name.endswith(".xml") and (
                         options.scrub_metadata or options.hash_strings

@@ -127,6 +127,7 @@ def _make_minimal_xlsx_for_sheet_rename() -> bytes:
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
 </Types>
 """,
         )
@@ -181,6 +182,22 @@ def _make_minimal_xlsx_for_sheet_rename() -> bytes:
     </row>
   </sheetData>
 </worksheet>
+""",
+        )
+        z.writestr(
+            "docProps/app.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+            xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Microsoft Excel</Application>
+  <Company>ACME Corp</Company>
+  <TitlesOfParts>
+    <vt:vector size="2" baseType="lpstr">
+      <vt:lpstr>Sensitive Sheet</vt:lpstr>
+      <vt:lpstr>Other</vt:lpstr>
+    </vt:vector>
+  </TitlesOfParts>
+</Properties>
 """,
         )
     return buf.getvalue()
@@ -413,6 +430,13 @@ class SanitizeTests(unittest.TestCase):
             f = sheet2.find(".//m:c[@r='A1']/m:f", ns)
             self.assertIsNotNone(f)
             self.assertEqual(f.text, "Sheet1!A1")
+
+            # app.xml sheet titles should be rewritten too (avoid leaking old names).
+            app = z.read("docProps/app.xml").decode("utf-8", errors="ignore")
+            self.assertNotIn("Sensitive Sheet", app)
+            self.assertNotIn("Other", app)
+            self.assertIn("Sheet1", app)
+            self.assertIn("Sheet2", app)
 
     def test_sanitize_strips_protection_and_sharing_metadata(self) -> None:
         original = _make_minimal_xlsx_with_protection_and_sharing()
