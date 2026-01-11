@@ -103,6 +103,7 @@ export class CellStructuralConflictMonitor {
     if (!conflict) return false;
  
     this._isApplyingResolution = true;
+    let ok = true;
     try {
       if (conflict.type === "move") {
         const oursTo = conflict.local?.toCellKey ?? null;
@@ -114,9 +115,7 @@ export class CellStructuralConflictMonitor {
         else if (resolution.choice === "theirs") target = theirsTo;
         else target = resolution.to ?? null;
  
-        if (!target) {
-          throw new Error("Move conflict resolution requires a destination cellKey");
-        }
+        if (!target) return false;
  
         this.doc.transact(() => {
           // Clear source + both destinations.
@@ -142,10 +141,13 @@ export class CellStructuralConflictMonitor {
           }
         }, this.origin);
       }
+    } catch {
+      ok = false;
     } finally {
       this._isApplyingResolution = false;
     }
  
+    if (!ok) return false;
     this._conflicts.delete(conflictId);
     return true;
   }
@@ -386,14 +388,40 @@ export class CellStructuralConflictMonitor {
  
     this._isApplyingResolution = true;
     try {
-      this.doc.transact(() => {
-        this.cells.delete(move.fromCellKey);
-        if (desired === null) {
-          this.cells.delete(move.toCellKey);
-        } else {
-          this._writeCell(move.toCellKey, desired);
-        }
-      }, this.origin);
+      try {
+        this.doc.transact(() => {
+          this.cells.delete(move.fromCellKey);
+          if (desired === null) {
+            this.cells.delete(move.toCellKey);
+          } else {
+            this._writeCell(move.toCellKey, desired);
+          }
+        }, this.origin);
+      } catch {
+        // If we can't apply the auto-merge safely (e.g. destination is encrypted
+        // and we'd need to write plaintext), surface as a delete-vs-edit conflict
+        // at the source cell.
+        const moveDelete = {
+          kind: "delete",
+          userId: move.userId,
+          beforeState: move.beforeState,
+          afterState: move.afterState,
+          touchedCells: move.touchedCells,
+          cellKey: move.fromCellKey,
+          before: move.cell ?? null,
+          after: null
+        };
+ 
+        const oursIsEdit = edit.userId === this.localUserId;
+ 
+        this._emitConflict({
+          type: "cell",
+          reason: "delete-vs-edit",
+          sourceCellKey: move.fromCellKey,
+          local: oursIsEdit ? edit : moveDelete,
+          remote: oursIsEdit ? moveDelete : edit
+        });
+      }
     } finally {
       this._isApplyingResolution = false;
     }
@@ -440,7 +468,20 @@ export class CellStructuralConflictMonitor {
       return;
     }
  
-    if (normalized.enc != null) {
+    const existingEnc = cellMap.get("enc");
+ 
+    // Never downgrade an encrypted cell to plaintext (CollabSession enforces the
+    // same invariant). We allow format-only writes by preserving the existing
+    // encrypted payload.
+    if (existingEnc !== undefined && normalized.enc == null) {
+      const wantsContent = normalized.formula != null || normalized.value != null;
+      if (wantsContent) {
+        throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
+      }
+      cellMap.set("enc", existingEnc);
+      cellMap.delete("value");
+      cellMap.delete("formula");
+    } else if (normalized.enc != null) {
       cellMap.set("enc", normalized.enc);
       cellMap.delete("value");
       cellMap.delete("formula");
