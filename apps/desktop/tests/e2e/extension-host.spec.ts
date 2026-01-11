@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -90,5 +91,108 @@ test.describe("BrowserExtensionHost", () => {
     expect(result.sum).toBe(10);
     expect(result.a3).toBe("10");
   });
-});
 
+  test("network.fetch is permission gated in the browser host", async ({ page }) => {
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end("hello");
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : null;
+    if (!port) throw new Error("Failed to allocate test port");
+
+    try {
+      await page.goto("/");
+
+      const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
+      const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+      const url = `http://127.0.0.1:${port}/`;
+
+      const result = await page.evaluate(
+        async ({ manifestUrl, hostModuleUrl, url }) => {
+          const { BrowserExtensionHost } = await import(hostModuleUrl);
+
+          const host = new BrowserExtensionHost({
+            engineVersion: "1.0.0",
+            spreadsheetApi: {
+              async getSelection() {
+                return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+              },
+              async getCell() {
+                return null;
+              },
+              async setCell() {
+                // noop
+              },
+            },
+            permissionPrompt: async () => true,
+          });
+
+          await host.loadExtensionFromUrl(manifestUrl);
+          const text = await host.executeCommand("sampleHello.fetchText", url);
+          const messages = host.getMessages();
+          await host.dispose();
+          return { text, messages };
+        },
+        { manifestUrl, hostModuleUrl, url }
+      );
+
+      expect(result.text).toBe("hello");
+      expect(result.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("denied network permission blocks fetch in the browser host", async ({ page }) => {
+    await page.goto("/");
+
+    const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
+    const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+
+    const result = await page.evaluate(
+      async ({ manifestUrl, hostModuleUrl }) => {
+        const { BrowserExtensionHost } = await import(hostModuleUrl);
+
+        const host = new BrowserExtensionHost({
+          engineVersion: "1.0.0",
+          spreadsheetApi: {
+            async getSelection() {
+              return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+            },
+            async getCell() {
+              return null;
+            },
+            async setCell() {
+              // noop
+            },
+          },
+          permissionPrompt: async ({ permissions }: { permissions: string[] }) => {
+            if (permissions.includes("network")) return false;
+            return true;
+          },
+        });
+
+        await host.loadExtensionFromUrl(manifestUrl);
+
+        let errorMessage = "";
+        try {
+          await host.executeCommand("sampleHello.fetchText", "http://example.invalid/");
+        } catch (err: any) {
+          errorMessage = String(err?.message ?? err);
+        }
+
+        await host.dispose();
+        return { errorMessage };
+      },
+      { manifestUrl, hostModuleUrl }
+    );
+
+    expect(result.errorMessage).toContain("Permission denied");
+  });
+});
