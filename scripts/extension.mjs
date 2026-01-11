@@ -28,6 +28,13 @@ function readFlag(args, name) {
   return args[idx + 1] || null;
 }
 
+function readFlagOrEnv(args, name, envKey) {
+  const direct = readFlag(args, name);
+  if (direct) return direct;
+  const fromEnv = envKey ? process.env[envKey] : null;
+  return fromEnv || null;
+}
+
 async function readPemFromArg(value) {
   if (!value) return null;
   if (value.includes(path.sep) || value.endsWith(".pem")) {
@@ -38,8 +45,9 @@ async function readPemFromArg(value) {
 
 async function cmdPack(args) {
   const dir = args[0] ? path.resolve(args[0]) : null;
-  const out = readFlag(args, "--out");
-  const privateKeyArg = readFlag(args, "--private-key") ?? process.env.FORMULA_EXTENSION_PRIVATE_KEY;
+  const out = readFlagOrEnv(args, "--out", "npm_config_out");
+  const privateKeyArg =
+    readFlagOrEnv(args, "--private-key", "npm_config_private_key") ?? process.env.FORMULA_EXTENSION_PRIVATE_KEY;
 
   if (!dir || !out) {
     usage();
@@ -66,7 +74,7 @@ async function cmdPack(args) {
 
 async function cmdVerify(args) {
   const file = args[0] ? path.resolve(args[0]) : null;
-  const pubkeyArg = readFlag(args, "--pubkey") ?? process.env.FORMULA_EXTENSION_PUBLIC_KEY;
+  const pubkeyArg = readFlagOrEnv(args, "--pubkey", "npm_config_pubkey") ?? process.env.FORMULA_EXTENSION_PUBLIC_KEY;
   if (!file || !pubkeyArg) {
     usage();
     process.exit(1);
@@ -174,4 +182,3 @@ async function main() {
 // Ensure stack traces point at this file when invoked via pnpm.
 void fileURLToPath(import.meta.url);
 main();
-

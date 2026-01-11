@@ -475,6 +475,7 @@ class MarketplaceStore {
     const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
     const MAX_UNPACKED_BYTES = 50 * 1024 * 1024;
     const MAX_FILES = 500;
+    const MAX_SINGLE_FILE_BYTES = 10 * 1024 * 1024;
 
     const formatVersion = detectExtensionPackageFormatVersion(packageBytes);
 
@@ -517,6 +518,9 @@ class MarketplaceStore {
         seen.add(normalizedPath);
 
         const bytes = Buffer.from(file.dataBase64, "base64");
+        if (bytes.length > MAX_SINGLE_FILE_BYTES) {
+          throw new Error(`Extension package contains oversized file: ${normalizedPath}`);
+        }
         unpackedSize += bytes.length;
         fileRecords.push({ path: normalizedPath, sha256: sha256(bytes), size: bytes.length });
 
@@ -545,6 +549,9 @@ class MarketplaceStore {
       for (const file of fileRecords) {
         if (!isAllowedFilePath(file.path)) {
           throw new Error(`Disallowed file type in extension package: ${file.path}`);
+        }
+        if (typeof file.size === "number" && file.size > MAX_SINGLE_FILE_BYTES) {
+          throw new Error(`Extension package contains oversized file: ${file.path}`);
         }
       }
 

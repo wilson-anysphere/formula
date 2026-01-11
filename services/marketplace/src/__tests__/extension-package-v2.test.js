@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
+const { createRequire } = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -14,6 +15,7 @@ const { generateEd25519KeyPair, signBytes } = require("../../../../shared/crypto
 const { MarketplaceStore } = require("../store");
 
 const UNIQUE_MARKER = "UNIQUE_PAYLOAD_MARKER_1b2e6b3a";
+const requireFromHere = createRequire(__filename);
 
 async function createTempExtensionDir() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-extpkg-"));
@@ -138,7 +140,14 @@ test("v2 rejects path traversal entries", async () => {
   }
 });
 
-test("marketplace store accepts v1 packages during transition", async () => {
+test("marketplace store accepts v1 packages during transition", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-v1-"));
   const dataDir = path.join(tmpRoot, "data");
   const { dir, manifest } = await createTempExtensionDir();

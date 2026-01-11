@@ -12,7 +12,7 @@ async function walkFiles(rootDir) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       const abs = path.join(dir, entry.name);
-      const rel = path.relative(rootDir, abs).replace(/\\\\/g, "/");
+      const rel = path.relative(rootDir, abs).replace(/\\/g, "/");
 
       if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) continue;
 
@@ -79,7 +79,7 @@ function readExtensionPackageV1(packageBytes) {
 }
 
 function safeJoin(baseDir, relPath) {
-  const normalized = relPath.replace(/\\\\/g, "/");
+  const normalized = relPath.replace(/\\/g, "/");
   if (normalized.startsWith("/") || normalized.includes("..")) {
     throw new Error(`Invalid path in extension package: ${relPath}`);
   }
@@ -117,4 +117,3 @@ module.exports = {
   loadExtensionManifest,
   readExtensionPackageV1,
 };
-
