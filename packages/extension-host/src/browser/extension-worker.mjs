@@ -927,7 +927,7 @@ function assertAllowedStaticImport(specifier, parentUrl) {
   }
 
   throw new Error(
-    `Disallowed import specifier '${request}' in ${parentUrl}: only relative imports ('./' or '../') and '@formula/extension-api' are allowed`
+    `Disallowed import specifier '${request}' in ${parentUrl}: only relative imports ('./' or '../') and '@formula/extension-api' (or 'formula') are allowed`
   );
 }
 

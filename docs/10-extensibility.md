@@ -806,10 +806,12 @@ guardrails:
   - any static import specifier that is not relative (`./` / `../`) or `@formula/extension-api`
     (optionally `formula` if an import map/alias is provided)
   - any dynamic `import(...)` usage
+  - any module URL that resolves outside the extension base URL (including redirects)
   - implication: browser extensions must bundle third-party dependencies and reference any split
     chunks via relative imports inside the extension package.
 - **Code generation lockdown (best-effort)**: `eval`, `Function` (and related constructors), and
   string timer callbacks (`setTimeout("...")`) are disabled by default.
+  - configurable via `new BrowserExtensionHost({ sandbox: { strictImports, disableEval } })`
 
 Limitations:
 
