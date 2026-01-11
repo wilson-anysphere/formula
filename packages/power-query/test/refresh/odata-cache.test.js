@@ -12,8 +12,13 @@ test("QueryEngine: folded OData queries reuse cache entries with source-state va
   const cache = new CacheManager({ store, now: () => now });
 
   let etag = '"v1"';
+  const initialEtag = etag;
   let lastModified = "Mon, 01 Jan 2024 00:00:00 GMT";
   let getCount = 0;
+  /** @type {number[]} */
+  const headStatuses = [];
+  /** @type {Array<Record<string, string> | undefined>} */
+  const headHeaders = [];
 
   /**
    * @param {{
@@ -44,10 +49,19 @@ test("QueryEngine: folded OData queries reuse cache entries with source-state va
   const fetchMock = async (_url, init) => {
     const method = String(init?.method ?? "GET").toUpperCase();
     if (method === "HEAD") {
+      // @ts-ignore - fetch init headers are passed as a plain object in tests.
+      headHeaders.push(init?.headers);
+      const ifNoneMatch = Object.entries(/** @type {any} */ (init?.headers ?? {})).find(([name]) => name.toLowerCase() === "if-none-match")?.[1];
+      if (ifNoneMatch === etag) {
+        headStatuses.push(304);
+        return makeResponse({ status: 304 });
+      }
+      headStatuses.push(200);
       return makeResponse({ headers: { etag, "last-modified": lastModified } });
     }
     getCount += 1;
     return makeResponse({
+      headers: { etag },
       body: JSON.stringify({ value: [{ Id: getCount }] }),
     });
   };
@@ -69,10 +83,16 @@ test("QueryEngine: folded OData queries reuse cache entries with source-state va
   const first = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(first.meta.cache?.hit, false);
   assert.equal(getCount, 1);
+  assert.deepEqual(headStatuses, [200]);
 
   const second = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(second.meta.cache?.hit, true);
   assert.equal(getCount, 1, "cache hit should not refetch the resource");
+  assert.deepEqual(headStatuses, [200, 304]);
+  assert.equal(
+    Object.entries(headHeaders[1] ?? {}).find(([name]) => name.toLowerCase() === "if-none-match")?.[1],
+    initialEtag,
+  );
 
   now = 1;
   etag = '"v2"';
@@ -81,5 +101,9 @@ test("QueryEngine: folded OData queries reuse cache entries with source-state va
   const third = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(third.meta.cache?.hit, false);
   assert.equal(getCount, 2, "changed source state should invalidate the cache entry");
+  assert.deepEqual(headStatuses, [200, 304, 200, 200]);
+  assert.equal(
+    Object.entries(headHeaders[2] ?? {}).find(([name]) => name.toLowerCase() === "if-none-match")?.[1],
+    initialEtag,
+  );
 });
-

@@ -515,6 +515,9 @@ export class ODataConnector {
     /** @type {Date | undefined} */
     let sourceTimestamp;
 
+    /** @type {string | undefined} */
+    let etag;
+
     /** @type {string | null} */
     let nextUrl = initialUrl;
 
@@ -532,6 +535,11 @@ export class ODataConnector {
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} for ${nextUrl}`);
+      }
+
+      if (!etag) {
+        const nextEtag = response.headers.get("etag");
+        if (typeof nextEtag === "string" && nextEtag !== "") etag = nextEtag;
       }
 
       if (!sourceTimestamp) {
@@ -561,6 +569,7 @@ export class ODataConnector {
       meta: {
         refreshedAt: new Date(now()),
         sourceTimestamp,
+        etag,
         schema: { columns: table.columns, inferred: true },
         rowCount: table.rows.length,
         rowCountEstimate: table.rows.length,
