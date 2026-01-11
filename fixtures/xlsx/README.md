@@ -11,6 +11,7 @@ Goals:
 ```
 fixtures/xlsx/
   basic/
+  metadata/
   formulas/
   styles/
   conditional-formatting/
@@ -35,6 +36,11 @@ fixtures/xlsx/
   - `print-settings.xlsx` - page setup + print titles/areas.
 - `formulas/`:
   - `formulas.xlsx` - simple formula + cached result.
+- `metadata/`:
+  - `row-col-properties.xlsx` - custom row height + hidden row, custom column width + hidden column.
+  - `data-validation-list.xlsx` - simple list data validation (`<dataValidations>`).
+  - `defined-names.xlsx` - workbook named ranges (`<definedNames>` in `xl/workbook.xml`).
+  - `external-link.xlsx` - minimal external link parts (`xl/externalLinks/externalLink1.xml` + rels).
 - `styles/`:
   - `styles.xlsx` - simple bold cell style.
   - `rich-text-shared-strings.xlsx` - shared strings with rich-text runs.

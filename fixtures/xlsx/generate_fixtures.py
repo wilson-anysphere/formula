@@ -31,6 +31,10 @@ def write_xlsx(
     *,
     sheet_names: list[str] | None = None,
     shared_strings_xml: str | None = None,
+    workbook_xml_override: str | None = None,
+    workbook_rels_extra: list[str] | None = None,
+    content_types_extra_overrides: list[str] | None = None,
+    extra_parts: dict[str, str] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -48,18 +52,24 @@ def write_xlsx(
             content_types_xml(
                 sheet_count=len(sheet_xmls),
                 include_shared_strings=shared_strings_xml is not None,
+                extra_overrides=content_types_extra_overrides,
             ),
         )
         _zip_write(zf, "_rels/.rels", package_rels_xml())
         _zip_write(zf, "docProps/core.xml", core_props_xml())
         _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
-        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/workbook.xml",
+            workbook_xml_override if workbook_xml_override is not None else workbook_xml(sheet_names),
+        )
         _zip_write(
             zf,
             "xl/_rels/workbook.xml.rels",
             workbook_rels_xml(
                 sheet_count=len(sheet_xmls),
                 include_shared_strings=shared_strings_xml is not None,
+                extra_relationships=workbook_rels_extra,
             ),
         )
         for idx, sheet_xml in enumerate(sheet_xmls, start=1):
@@ -67,9 +77,14 @@ def write_xlsx(
         _zip_write(zf, "xl/styles.xml", styles_xml)
         if shared_strings_xml is not None:
             _zip_write(zf, "xl/sharedStrings.xml", shared_strings_xml)
+        if extra_parts is not None:
+            for name, data in extra_parts.items():
+                _zip_write(zf, name, data)
 
 
-def content_types_xml(*, sheet_count: int, include_shared_strings: bool) -> str:
+def content_types_xml(
+    *, sheet_count: int, include_shared_strings: bool, extra_overrides: list[str] | None = None
+) -> str:
     overrides = [
         '  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
     ]
@@ -84,6 +99,8 @@ def content_types_xml(*, sheet_count: int, include_shared_strings: bool) -> str:
         overrides.append(
             '  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
         )
+    if extra_overrides:
+        overrides.extend(extra_overrides)
     overrides.append(
         '  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
     )
@@ -130,7 +147,30 @@ def workbook_xml(sheet_names: list[str]) -> str:
     )
 
 
-def workbook_rels_xml(*, sheet_count: int, include_shared_strings: bool) -> str:
+def workbook_xml_with_extra(sheet_names: list[str], extra: str) -> str:
+    sheets = []
+    for idx, name in enumerate(sheet_names, start=1):
+        sheets.append(f'    <sheet name="{xml_escape(name)}" sheetId="{idx}" r:id="rId{idx}"/>')
+    return (
+        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+%s
+  </sheets>
+%s
+</workbook>
+"""
+        % ("\n".join(sheets), extra)
+    )
+
+
+def workbook_rels_xml(
+    *,
+    sheet_count: int,
+    include_shared_strings: bool,
+    extra_relationships: list[str] | None = None,
+) -> str:
     rels = []
     for idx in range(1, sheet_count + 1):
         rels.append(
@@ -147,6 +187,9 @@ def workbook_rels_xml(*, sheet_count: int, include_shared_strings: bool) -> str:
         rels.append(
             f'  <Relationship Id="rId{next_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
         )
+
+    if extra_relationships:
+        rels.extend(extra_relationships)
 
     return (
         """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -502,6 +545,83 @@ def sheet_two_xml() -> str:
     </row>
   </sheetData>
 </worksheet>
+"""
+
+
+def sheet_row_col_properties_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="3" max="3" hidden="1"/>
+    <col min="2" max="2" width="25" customWidth="1"/>
+  </cols>
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1" t="inlineStr"><is><t>Wide</t></is></c>
+      <c r="C1" t="inlineStr"><is><t>Hidden</t></is></c>
+    </row>
+    <row r="2" ht="30" customHeight="1">
+      <c r="A2"><v>2</v></c>
+    </row>
+    <row r="3" hidden="1">
+      <c r="A3"><v>3</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
+def sheet_data_validation_list_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Pick</t></is></c>
+    </row>
+  </sheetData>
+  <dataValidations count="1">
+    <dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="A1">
+      <formula1>"Yes,No"</formula1>
+    </dataValidation>
+  </dataValidations>
+</worksheet>
+"""
+
+
+def sheet_external_link_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1">
+        <f>'[external.xlsx]Sheet1'!A1</f>
+        <v>0</v>
+      </c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
+def external_link1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <externalBook r:id="rId1">
+    <sheetNames>
+      <sheetName val="Sheet1"/>
+    </sheetNames>
+  </externalBook>
+</externalLink>
+"""
+
+
+def external_link1_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="external.xlsx" TargetMode="External"/>
+</Relationships>
 """
 
 
@@ -906,6 +1026,52 @@ def main() -> None:
     write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
     write_image_xlsx(ROOT / "basic" / "image.xlsx")
     write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
+
+    write_xlsx(
+        ROOT / "metadata" / "row-col-properties.xlsx",
+        [sheet_row_col_properties_xml()],
+        styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "metadata" / "data-validation-list.xlsx",
+        [sheet_data_validation_list_xml()],
+        styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "metadata" / "defined-names.xlsx",
+        [sheet_basic_xml()],
+        styles_minimal_xml(),
+        workbook_xml_override=workbook_xml_with_extra(
+            ["Sheet1"],
+            """  <definedNames>
+    <definedName name="ZedName">Sheet1!$B$1</definedName>
+    <definedName name="MyRange">Sheet1!$A$1:$A$1</definedName>
+  </definedNames>""",
+        ),
+        sheet_names=["Sheet1"],
+    )
+    write_xlsx(
+        ROOT / "metadata" / "external-link.xlsx",
+        [sheet_external_link_xml()],
+        styles_minimal_xml(),
+        workbook_xml_override=workbook_xml_with_extra(
+            ["Sheet1"],
+            """  <externalReferences>
+    <externalReference r:id="rId3"/>
+  </externalReferences>""",
+        ),
+        workbook_rels_extra=[
+            '  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink1.xml"/>'
+        ],
+        content_types_extra_overrides=[
+            '  <Override PartName="/xl/externalLinks/externalLink1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/>'
+        ],
+        extra_parts={
+            "xl/externalLinks/externalLink1.xml": external_link1_xml(),
+            "xl/externalLinks/_rels/externalLink1.xml.rels": external_link1_rels_xml(),
+        },
+        sheet_names=["Sheet1"],
+    )
 
     # Directory scaffold for future corpora (kept empty for now).
     for name in ["charts", "pivots", "macros"]:

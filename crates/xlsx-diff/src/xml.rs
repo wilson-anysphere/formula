@@ -174,9 +174,23 @@ fn normalize_child_order(parent: &QName, children: &mut Vec<XmlNode>, part_name:
 
     if part_name.starts_with("xl/worksheets/")
         && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
+        && parent.local == "cols"
+    {
+        children.sort_by_key(cols_child_sort_key);
+    }
+
+    if part_name.starts_with("xl/worksheets/")
+        && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
         && parent.local == "row"
     {
         children.sort_by_key(row_child_sort_key);
+    }
+
+    if part_name == "xl/workbook.xml"
+        && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
+        && parent.local == "definedNames"
+    {
+        children.sort_by_key(defined_names_child_sort_key);
     }
 }
 
@@ -242,6 +256,36 @@ fn row_child_sort_key(node: &XmlNode) -> (u8, u32, u32, String) {
         }
         XmlNode::Element(el) => (1, u32::MAX, u32::MAX, el.name.local.clone()),
         XmlNode::Text(_) => (2, u32::MAX, u32::MAX, String::new()),
+    }
+}
+
+fn cols_child_sort_key(node: &XmlNode) -> (u8, u32, u32, String) {
+    match node {
+        XmlNode::Element(el) if el.name.local == "col" => {
+            let min = attr_value(el, "min")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(u32::MAX);
+            let max = attr_value(el, "max")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(u32::MAX);
+            (0, min, max, String::new())
+        }
+        XmlNode::Element(el) => (1, u32::MAX, u32::MAX, el.name.local.clone()),
+        XmlNode::Text(_) => (2, u32::MAX, u32::MAX, String::new()),
+    }
+}
+
+fn defined_names_child_sort_key(node: &XmlNode) -> (u8, String, u32, String) {
+    match node {
+        XmlNode::Element(el) if el.name.local == "definedName" => {
+            let name = attr_value(el, "name").unwrap_or_default().to_string();
+            let local_sheet_id = attr_value(el, "localSheetId")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(u32::MAX);
+            (0, name, local_sheet_id, String::new())
+        }
+        XmlNode::Element(el) => (1, el.name.local.clone(), u32::MAX, String::new()),
+        XmlNode::Text(_) => (2, String::new(), u32::MAX, String::new()),
     }
 }
 
