@@ -16,6 +16,8 @@ node_modules/
 **/.pnpm-store/
 dist/
 **/dist/
+!extensions/sample-hello/dist/
+!extensions/sample-hello/dist/**
 
 build/
 **/build/

@@ -3,6 +3,13 @@ const crypto = require("node:crypto");
 
 const { MarketplaceStore } = require("./store");
 
+class HttpError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
 function sendJson(res, statusCode, body) {
   const bytes = Buffer.from(JSON.stringify(body, null, 2));
   res.writeHead(statusCode, {
@@ -55,32 +62,185 @@ function parsePath(pathname) {
   return pathname.split("/").filter(Boolean);
 }
 
-async function createMarketplaceServer({ dataDir, adminToken = null } = {}) {
+function getClientIp(req) {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.trim()) return xff.split(",")[0].trim();
+  return req.socket?.remoteAddress || "unknown";
+}
+
+function parseBooleanParam(value) {
+  if (value === null || value === undefined) return undefined;
+  const raw = String(value).toLowerCase().trim();
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  if (raw === "0" || raw === "false" || raw === "no") return false;
+  return undefined;
+}
+
+class TokenBucketRateLimiter {
+  constructor({ capacity, refillMs }) {
+    this.capacity = capacity;
+    this.refillMs = refillMs;
+    /** @type {Map<string, { tokens: number, updatedAt: number }>} */
+    this.state = new Map();
+  }
+
+  take(key) {
+    if (!Number.isFinite(this.capacity) || this.capacity <= 0) {
+      return { ok: true, retryAfterMs: 0 };
+    }
+
+    const now = Date.now();
+    const existing = this.state.get(key) || { tokens: this.capacity, updatedAt: now };
+    const elapsed = now - existing.updatedAt;
+    const refill = (elapsed / this.refillMs) * this.capacity;
+    const tokens = Math.min(this.capacity, existing.tokens + refill);
+
+    if (tokens < 1) {
+      this.state.set(key, { tokens, updatedAt: now });
+      return { ok: false, retryAfterMs: Math.ceil(this.refillMs - elapsed) };
+    }
+
+    this.state.set(key, { tokens: tokens - 1, updatedAt: now });
+    return { ok: true, retryAfterMs: 0 };
+  }
+}
+
+function createLogger() {
+  return {
+    info(event) {
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify({ level: "info", time: new Date().toISOString(), ...event }));
+    },
+    error(event) {
+      // eslint-disable-next-line no-console
+      console.error(JSON.stringify({ level: "error", time: new Date().toISOString(), ...event }));
+    },
+  };
+}
+
+function formatPrometheusMetrics(metrics) {
+  const lines = [];
+  lines.push("# HELP marketplace_http_requests_total Total HTTP requests handled by the marketplace service");
+  lines.push("# TYPE marketplace_http_requests_total counter");
+  for (const [key, count] of metrics.requests.entries()) {
+    const [method, route, status] = key.split(" ");
+    lines.push(`marketplace_http_requests_total{method="${method}",route="${route}",status="${status}"} ${count}`);
+  }
+  lines.push("# HELP marketplace_rate_limited_total Total requests rejected by rate limiting");
+  lines.push("# TYPE marketplace_rate_limited_total counter");
+  lines.push(`marketplace_rate_limited_total ${metrics.rateLimited}`);
+  return lines.join("\n") + "\n";
+}
+
+async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits: rateLimitOverrides = {} } = {}) {
   if (!dataDir) throw new Error("dataDir is required");
   const store = new MarketplaceStore({ dataDir });
   await store.init();
 
+  const logger = createLogger();
+  const metrics = {
+    requests: new Map(),
+    rateLimited: 0,
+  };
+
+  const rateLimits = {
+    publishPerPublisherPerMinute: 10,
+    searchPerIpPerMinute: 30,
+    getExtensionPerIpPerMinute: 60,
+    downloadPerIpPerMinute: 120,
+    ...rateLimitOverrides,
+  };
+
+  const publishLimiter = new TokenBucketRateLimiter({
+    capacity: rateLimits.publishPerPublisherPerMinute,
+    refillMs: 60_000,
+  });
+  const searchLimiter = new TokenBucketRateLimiter({
+    capacity: rateLimits.searchPerIpPerMinute,
+    refillMs: 60_000,
+  });
+  const getExtensionLimiter = new TokenBucketRateLimiter({
+    capacity: rateLimits.getExtensionPerIpPerMinute,
+    refillMs: 60_000,
+  });
+  const downloadLimiter = new TokenBucketRateLimiter({
+    capacity: rateLimits.downloadPerIpPerMinute,
+    refillMs: 60_000,
+  });
+
   const server = http.createServer(async (req, res) => {
+    const startedAt = process.hrtime.bigint();
+    const ip = getClientIp(req);
+    const method = req.method || "GET";
+    let route = "unknown";
+    let statusCode = 500;
+
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const segments = parsePath(url.pathname);
 
       if (req.method === "GET" && url.pathname === "/api/health") {
+        route = "/api/health";
+        statusCode = 200;
         return sendJson(res, 200, { ok: true });
       }
 
+      if (req.method === "GET" && (url.pathname === "/metrics" || url.pathname === "/api/internal/metrics")) {
+        route = url.pathname;
+        statusCode = 200;
+        const body = formatPrometheusMetrics(metrics);
+        res.writeHead(200, {
+          "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+          "Content-Length": Buffer.byteLength(body),
+        });
+        res.end(body);
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/search") {
+        route = "/api/search";
+        const limited = searchLimiter.take(ip);
+        if (!limited.ok) {
+          metrics.rateLimited += 1;
+          res.setHeader("Retry-After", String(Math.ceil(limited.retryAfterMs / 1000)));
+          statusCode = 429;
+          return sendJson(res, 429, { error: "Too Many Requests" });
+        }
+
         const q = url.searchParams.get("q") || "";
         const category = url.searchParams.get("category") || "";
+        const tag = url.searchParams.get("tag") || "";
+        const verified = parseBooleanParam(url.searchParams.get("verified"));
+        const featured = parseBooleanParam(url.searchParams.get("featured"));
+        const sort = url.searchParams.get("sort") || "relevance";
         const limit = Number(url.searchParams.get("limit") || "20");
         const offset = Number(url.searchParams.get("offset") || "0");
-        return sendJson(res, 200, store.search({ q, category, limit, offset }));
+        const cursor = url.searchParams.get("cursor");
+        statusCode = 200;
+        return sendJson(
+          res,
+          200,
+          await store.search({ q, category, tag, verified, featured, sort, limit, offset, cursor })
+        );
       }
 
       if (req.method === "GET" && segments[0] === "api" && segments[1] === "extensions" && segments.length === 3) {
+        route = "/api/extensions/:id";
+        const limited = getExtensionLimiter.take(ip);
+        if (!limited.ok) {
+          metrics.rateLimited += 1;
+          res.setHeader("Retry-After", String(Math.ceil(limited.retryAfterMs / 1000)));
+          statusCode = 429;
+          return sendJson(res, 429, { error: "Too Many Requests" });
+        }
+
         const id = segments[2];
-        const ext = store.getExtension(id);
-        if (!ext) return notFound(res);
+        const ext = await store.getExtension(id);
+        if (!ext) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Not found" });
+        }
+        statusCode = 200;
         return sendJson(res, 200, ext);
       }
 
@@ -91,11 +251,24 @@ async function createMarketplaceServer({ dataDir, adminToken = null } = {}) {
         segments.length === 5 &&
         segments[3] === "download"
       ) {
+        route = "/api/extensions/:id/download/:version";
+        const limited = downloadLimiter.take(ip);
+        if (!limited.ok) {
+          metrics.rateLimited += 1;
+          res.setHeader("Retry-After", String(Math.ceil(limited.retryAfterMs / 1000)));
+          statusCode = 429;
+          return sendJson(res, 429, { error: "Too Many Requests" });
+        }
+
         const id = segments[2];
         const version = segments[4];
         const pkg = await store.getPackage(id, version);
-        if (!pkg) return notFound(res);
+        if (!pkg) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Not found" });
+        }
 
+        statusCode = 200;
         res.writeHead(200, {
           "Content-Type": "application/vnd.formula.extension-package",
           "Content-Length": pkg.bytes.length,
@@ -108,14 +281,31 @@ async function createMarketplaceServer({ dataDir, adminToken = null } = {}) {
       }
 
       if (req.method === "POST" && url.pathname === "/api/publish") {
+        route = "/api/publish";
         const token = getBearerToken(req);
-        if (!token) return sendJson(res, 401, { error: "Missing Authorization token" });
+        if (!token) {
+          statusCode = 401;
+          return sendJson(res, 401, { error: "Missing Authorization token" });
+        }
 
-        const publisherRecord = store.getPublisherByTokenSha256(sha256Hex(token));
-        if (!publisherRecord) return sendJson(res, 403, { error: "Invalid token" });
+        const tokenSha = sha256Hex(token);
+        const publisherRate = publishLimiter.take(tokenSha);
+        if (!publisherRate.ok) {
+          metrics.rateLimited += 1;
+          res.setHeader("Retry-After", String(Math.ceil(publisherRate.retryAfterMs / 1000)));
+          statusCode = 429;
+          return sendJson(res, 429, { error: "Too Many Requests" });
+        }
 
-        const body = await readJsonBody(req);
+        const publisherRecord = await store.getPublisherByTokenSha256(tokenSha);
+        if (!publisherRecord) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Invalid token" });
+        }
+
+        const body = await readJsonBody(req, { limitBytes: 20 * 1024 * 1024 });
         if (!body?.packageBase64 || !body?.signatureBase64) {
+          statusCode = 400;
           return sendJson(res, 400, { error: "packageBase64 and signatureBase64 are required" });
         }
 
@@ -128,16 +318,25 @@ async function createMarketplaceServer({ dataDir, adminToken = null } = {}) {
           signatureBase64,
         });
 
+        statusCode = 200;
         return sendJson(res, 200, published);
       }
 
       if (req.method === "POST" && url.pathname === "/api/publishers/register") {
-        if (!adminToken) return sendJson(res, 404, { error: "Endpoint disabled" });
+        route = "/api/publishers/register";
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
         const token = getBearerToken(req);
-        if (token !== adminToken) return sendJson(res, 403, { error: "Forbidden" });
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
 
         const body = await readJsonBody(req);
         if (!body?.publisher || !body?.token || !body?.publicKeyPem) {
+          statusCode = 400;
           return sendJson(res, 400, { error: "publisher, token, publicKeyPem are required" });
         }
 
@@ -148,6 +347,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null } = {}) {
           verified: Boolean(body.verified),
         });
 
+        statusCode = 200;
         return sendJson(res, 200, { ok: true });
       }
 
@@ -158,22 +358,150 @@ async function createMarketplaceServer({ dataDir, adminToken = null } = {}) {
         segments[3] === "flags" &&
         segments.length === 4
       ) {
-        if (!adminToken) return sendJson(res, 404, { error: "Endpoint disabled" });
+        route = "/api/extensions/:id/flags";
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
         const token = getBearerToken(req);
-        if (token !== adminToken) return sendJson(res, 403, { error: "Forbidden" });
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
 
         const id = segments[2];
         const body = await readJsonBody(req);
-        const updated = await store.setExtensionFlags(id, {
-          verified: body?.verified,
-          featured: body?.featured,
-        });
-        return sendJson(res, 200, updated);
+        try {
+          const updated = await store.setExtensionFlags(
+            id,
+            {
+              verified: body?.verified,
+              featured: body?.featured,
+              deprecated: body?.deprecated,
+              blocked: body?.blocked,
+              malicious: body?.malicious,
+            },
+            { actor: "admin", ip }
+          );
+          statusCode = 200;
+          return sendJson(res, 200, updated);
+        } catch (error) {
+          if (String(error?.message || "").toLowerCase().includes("not found")) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Extension not found" });
+          }
+          throw error;
+        }
       }
 
-      return notFound(res);
+      if (
+        req.method === "PATCH" &&
+        segments[0] === "api" &&
+        segments[1] === "extensions" &&
+        segments[3] === "versions" &&
+        segments[5] === "flags" &&
+        segments.length === 6
+      ) {
+        route = "/api/extensions/:id/versions/:version/flags";
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const id = segments[2];
+        const version = segments[4];
+        const body = await readJsonBody(req);
+        try {
+          const updated = await store.setVersionFlags(id, version, { yanked: body?.yanked }, { actor: "admin", ip });
+          statusCode = 200;
+          return sendJson(res, 200, updated);
+        } catch (error) {
+          if (String(error?.message || "").toLowerCase().includes("not found")) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Extension version not found" });
+          }
+          throw error;
+        }
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/admin/audit") {
+        route = "/api/admin/audit";
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const limit = Number(url.searchParams.get("limit") || "50");
+        const offset = Number(url.searchParams.get("offset") || "0");
+        statusCode = 200;
+        return sendJson(res, 200, { entries: await store.listAuditLog({ limit, offset }) });
+      }
+
+      statusCode = 404;
+      return sendJson(res, 404, { error: "Not found" });
     } catch (error) {
-      return sendJson(res, 500, { error: error.message || String(error) });
+      if (error instanceof HttpError) {
+        statusCode = error.statusCode;
+        return sendJson(res, error.statusCode, { error: error.message || String(error) });
+      }
+
+      const message = String(error?.message || error);
+      const lower = message.toLowerCase();
+      if (lower.includes("request body too large")) {
+        statusCode = 413;
+        return sendJson(res, 413, { error: message });
+      }
+      if (
+        error instanceof SyntaxError ||
+        lower.includes("manifest") ||
+        lower.includes("package") ||
+        lower.includes("signature") ||
+        lower.includes("invalid") ||
+        lower.includes("disallowed") ||
+        lower.includes("too many files") ||
+        lower.includes("exceeds maximum")
+      ) {
+        statusCode = 400;
+        return sendJson(res, 400, { error: message });
+      }
+      if (message.includes("already published")) {
+        statusCode = 409;
+        return sendJson(res, 409, { error: message });
+      }
+      statusCode = 500;
+      return sendJson(res, 500, { error: message });
+    } finally {
+      const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+      const key = `${method} ${route} ${statusCode}`;
+      metrics.requests.set(key, (metrics.requests.get(key) || 0) + 1);
+
+      logger.info({
+        msg: "request",
+        method,
+        path: req.url || "/",
+        route,
+        status: statusCode,
+        ip,
+        durationMs: Math.round(elapsedMs * 100) / 100,
+      });
+    }
+  });
+
+  server.on("close", () => {
+    try {
+      store.close();
+    } catch {
+      // ignore
     }
   });
 

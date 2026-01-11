@@ -4,12 +4,27 @@ export class MarketplaceClient {
     this.baseUrl = baseUrl.replace(/\/$/, "");
   }
 
-  async search({ q = "", category = "", limit = 20, offset = 0 } = {}) {
+  async search({
+    q = "",
+    category = "",
+    tag = "",
+    verified = undefined,
+    featured = undefined,
+    sort = "",
+    limit = 20,
+    offset = 0,
+    cursor = "",
+  } = {}) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (category) params.set("category", category);
+    if (tag) params.set("tag", tag);
+    if (verified !== undefined) params.set("verified", String(verified));
+    if (featured !== undefined) params.set("featured", String(featured));
+    if (sort) params.set("sort", sort);
     params.set("limit", String(limit));
     params.set("offset", String(offset));
+    if (cursor) params.set("cursor", cursor);
 
     const response = await fetch(`${this.baseUrl}/api/search?${params}`);
     if (!response.ok) throw new Error(`Search failed (${response.status})`);

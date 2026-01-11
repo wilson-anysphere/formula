@@ -2,6 +2,8 @@
   "name": "@formula/marketplace",
   "private": true,
   "main": "src/server.js",
-  "type": "commonjs"
+  "type": "commonjs",
+  "dependencies": {
+    "sql.js": "^1.13.0"
+  }
 }
-

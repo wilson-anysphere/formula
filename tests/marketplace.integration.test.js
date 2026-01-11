@@ -232,3 +232,304 @@ test("client refuses install when signature verification fails", async () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
 });
+
+test("marketplace persists across restarts and supports concurrent publishes", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-concurrent-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server, store } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSourceV1 = path.join(tmpRoot, "ext-v1");
+    const extSourceV11 = path.join(tmpRoot, "ext-v1.1.0");
+    const extSourceV12 = path.join(tmpRoot, "ext-v1.2.0");
+    await copyDir(sampleExtensionSrc, extSourceV1);
+    await copyDir(sampleExtensionSrc, extSourceV11);
+    await copyDir(sampleExtensionSrc, extSourceV12);
+    await writeManifestVersion(extSourceV11, "1.1.0");
+    await writeManifestVersion(extSourceV12, "1.2.0");
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSourceV1, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    const results = await Promise.all([
+      publishExtension({ extensionDir: extSourceV1, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath }),
+      publishExtension({ extensionDir: extSourceV11, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath }),
+      publishExtension({ extensionDir: extSourceV12, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath }),
+    ]);
+    assert.deepEqual(
+      results.map((r) => r.version).sort(),
+      ["1.0.0", "1.1.0", "1.2.0"]
+    );
+
+    const client = new MarketplaceClient({ baseUrl });
+    const ext = await client.getExtension(extensionId);
+    assert.ok(ext);
+    assert.equal(ext.latestVersion, "1.2.0");
+    assert.equal(ext.versions.length, 3);
+
+    // Restart the server to ensure DB persistence.
+    await new Promise((resolve) => server.close(resolve));
+    store.close();
+
+    const restarted = await createMarketplaceServer({ dataDir, adminToken });
+    await new Promise((resolve) => restarted.server.listen(0, "127.0.0.1", resolve));
+    const port2 = restarted.server.address().port;
+    const baseUrl2 = `http://127.0.0.1:${port2}`;
+
+    const client2 = new MarketplaceClient({ baseUrl: baseUrl2 });
+    const search = await client2.search({ q: "sample" });
+    assert.ok(search.results.some((r) => r.id === extensionId));
+
+    await new Promise((resolve) => restarted.server.close(resolve));
+    restarted.store.close();
+  } finally {
+    try {
+      await new Promise((resolve) => server.close(resolve));
+    } catch {
+      // ignore
+    }
+    store.close();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("moderation: deprecated + yanked extensions are hidden from search", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-moderation-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSourceV1 = path.join(tmpRoot, "ext-v1");
+    await copyDir(sampleExtensionSrc, extSourceV1);
+    const manifest = JSON.parse(await fs.readFile(path.join(extSourceV1, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({
+      extensionDir: extSourceV1,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const client = new MarketplaceClient({ baseUrl });
+    const initial = await client.search({ q: "sample" });
+    assert.ok(initial.results.some((r) => r.id === extensionId));
+
+    const deprecateRes = await fetch(`${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/flags`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ deprecated: true }),
+    });
+    assert.equal(deprecateRes.status, 200);
+
+    const afterDeprecate = await client.search({ q: "sample" });
+    assert.ok(!afterDeprecate.results.some((r) => r.id === extensionId));
+
+    // Un-deprecate, then yank the only version.
+    const undeprecateRes = await fetch(`${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/flags`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ deprecated: false }),
+    });
+    assert.equal(undeprecateRes.status, 200);
+
+    const afterUndeprecate = await client.search({ q: "sample" });
+    assert.ok(afterUndeprecate.results.some((r) => r.id === extensionId));
+
+    const yankRes = await fetch(
+      `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/versions/${encodeURIComponent("1.0.0")}/flags`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ yanked: true }),
+      }
+    );
+    assert.equal(yankRes.status, 200);
+
+    const afterYank = await client.search({ q: "sample" });
+    assert.ok(!afterYank.results.some((r) => r.id === extensionId));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("rate limiting: /api/search enforces per-IP limits", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-ratelimit-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({
+    dataDir,
+    adminToken,
+    rateLimits: { searchPerIpPerMinute: 5 },
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    for (let i = 0; i < 5; i++) {
+      const res = await fetch(`${baseUrl}/api/search?q=test`, {
+        headers: { "X-Forwarded-For": "203.0.113.10" },
+      });
+      assert.equal(res.status, 200);
+    }
+
+    const limited = await fetch(`${baseUrl}/api/search?q=test`, {
+      headers: { "X-Forwarded-For": "203.0.113.10" },
+    });
+    assert.equal(limited.status, 429);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("download count increments atomically under concurrent downloads", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-downloads-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({
+    dataDir,
+    adminToken,
+    rateLimits: { downloadPerIpPerMinute: 0 },
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSourceV1 = path.join(tmpRoot, "ext-v1");
+    await copyDir(sampleExtensionSrc, extSourceV1);
+    const manifest = JSON.parse(await fs.readFile(path.join(extSourceV1, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({
+      extensionDir: extSourceV1,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const client = new MarketplaceClient({ baseUrl });
+    const before = await client.getExtension(extensionId);
+    assert.ok(before);
+    assert.equal(before.downloadCount, 0);
+
+    const downloads = 25;
+    await Promise.all(
+      Array.from({ length: downloads }, async (_v, idx) => {
+        const res = await fetch(
+          `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/download/${encodeURIComponent("1.0.0")}`,
+          { headers: { "X-Forwarded-For": `198.51.100.${idx}` } }
+        );
+        assert.equal(res.status, 200);
+        await res.arrayBuffer();
+      })
+    );
+
+    const after = await client.getExtension(extensionId);
+    assert.ok(after);
+    assert.equal(after.downloadCount, downloads);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
