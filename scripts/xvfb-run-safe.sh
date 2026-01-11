@@ -13,6 +13,16 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
+# when many agents build concurrently. Preserve any user/CI override.
+if [ -z "${CARGO_HOME:-}" ]; then
+  export CARGO_HOME="$REPO_ROOT/target/cargo-home"
+fi
+mkdir -p "$CARGO_HOME"
+
 # Find an available display number
 find_display() {
   for d in $(seq 99 199); do
