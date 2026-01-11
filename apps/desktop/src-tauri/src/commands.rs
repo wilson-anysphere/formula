@@ -372,6 +372,35 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStat {
+    pub mtime_ms: u64,
+}
+
+/// Stat a local file and return its modification time in milliseconds since the Unix epoch.
+///
+/// This is used by Power Query's cache validation logic to decide whether cached results can be
+/// reused when reading local sources (CSV/JSON/Parquet).
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn stat_file(path: String) -> Result<FileStat, String> {
+    use std::time::UNIX_EPOCH;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        let modified = metadata.modified().map_err(|e| e.to_string())?;
+        let duration = modified
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(FileStat {
+            mtime_ms: duration.as_millis() as u64,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Read a local file and return its contents as base64.
 ///
 /// The frontend decodes this into a `Uint8Array` for Parquet sources.

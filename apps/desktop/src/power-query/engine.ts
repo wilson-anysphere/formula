@@ -35,6 +35,10 @@ export type DesktopQueryEngineOptions = {
   fileAdapter?: {
     readText: (path: string) => Promise<string>;
     readBinary: (path: string) => Promise<Uint8Array>;
+    /**
+     * Optional stat adapter used for cache validation (mtime-based).
+     */
+    stat?: (path: string) => Promise<{ mtimeMs: number }>;
   };
   /**
    * Overrides for HTTP requests. Defaults to the global `fetch`.
@@ -100,15 +104,75 @@ function normalizeBinaryPayload(payload: unknown): Uint8Array {
   throw new Error("Unexpected binary payload returned from filesystem API");
 }
 
+function normalizeMtimeMs(payload: unknown): number {
+  if (payload == null) {
+    throw new Error("Unexpected stat payload returned from filesystem API");
+  }
+
+  if (payload instanceof Date) {
+    const ms = payload.getTime();
+    if (!Number.isNaN(ms)) return ms;
+    throw new Error("Unexpected Date payload returned from filesystem API");
+  }
+
+  if (typeof payload === "number") {
+    if (!Number.isFinite(payload)) throw new Error("Unexpected numeric mtime returned from filesystem API");
+    // Heuristic: treat small values as seconds-since-epoch.
+    return payload > 0 && payload < 100_000_000_000 ? payload * 1000 : payload;
+  }
+
+  if (typeof payload === "string") {
+    const numeric = Number(payload);
+    if (Number.isFinite(numeric)) {
+      return numeric > 0 && numeric < 100_000_000_000 ? numeric * 1000 : numeric;
+    }
+    const parsed = new Date(payload);
+    const ms = parsed.getTime();
+    if (!Number.isNaN(ms)) return ms;
+    throw new Error("Unexpected string mtime returned from filesystem API");
+  }
+
+  if (payload && typeof payload === "object") {
+    const obj = payload as any;
+
+    // Common shapes:
+    // - Tauri invoke: { mtimeMs: number }
+    // - Node fs.Stats: { mtimeMs: number, ... } or { mtime: Date }
+    // - Rust/SystemTime serialization: { secs, nanos }
+    if (typeof obj.secs === "number" && Number.isFinite(obj.secs)) {
+      const nanos = typeof obj.nanos === "number" && Number.isFinite(obj.nanos) ? obj.nanos : 0;
+      return obj.secs * 1000 + Math.floor(nanos / 1_000_000);
+    }
+
+    const candidate =
+      obj.mtimeMs ??
+      obj.mtime_ms ??
+      obj.mtime ??
+      obj.modifiedAtMs ??
+      obj.modifiedAt ??
+      obj.modified ??
+      obj.lastModified ??
+      null;
+    if (candidate != null) return normalizeMtimeMs(candidate);
+  }
+
+  throw new Error("Unexpected stat payload returned from filesystem API");
+}
+
 function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
   const fs = getTauriFs();
   const readTextFile = fs?.readTextFile;
   const readFile = fs?.readFile ?? fs?.readBinaryFile;
+  const statFile = fs?.stat ?? fs?.metadata;
 
   if (typeof readTextFile === "function" && typeof readFile === "function") {
     return {
       readText: async (path) => readTextFile(path),
       readBinary: async (path) => normalizeBinaryPayload(await readFile(path)),
+      stat:
+        typeof statFile === "function"
+          ? async (path) => ({ mtimeMs: normalizeMtimeMs(await statFile(path)) })
+          : undefined,
     };
   }
 
@@ -118,6 +182,7 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
   return {
     readText: async (path) => String(await invoke("read_text_file", { path })),
     readBinary: async (path) => normalizeBinaryPayload(await invoke("read_binary_file", { path })),
+    stat: async (path) => ({ mtimeMs: normalizeMtimeMs(await invoke("stat_file", { path })) }),
   };
 }
 
@@ -171,6 +236,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     fileAdapter: {
       readText: fileAdapter.readText,
       readBinary: fileAdapter.readBinary,
+      stat: fileAdapter.stat,
     },
     connectors: http ? { http } : undefined,
     onCredentialRequest: options.onCredentialRequest,

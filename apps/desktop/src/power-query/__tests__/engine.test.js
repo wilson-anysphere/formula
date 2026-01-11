@@ -14,6 +14,9 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
     core: {
       invoke: async (cmd, args) => {
         calls.push({ cmd, args });
+        if (cmd === "stat_file") {
+          return { mtimeMs: 123 };
+        }
         if (cmd === "read_text_file") {
           return ["A,B", "1,2"].join("\n");
         }
@@ -44,6 +47,50 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
 
     assert.ok(calls.some((c) => c.cmd === "read_text_file"));
     assert.ok(calls.some((c) => c.cmd === "read_binary_file"));
+    assert.ok(calls.some((c) => c.cmd === "stat_file"));
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});
+
+test("createDesktopQueryEngine uses file mtimes to validate cache entries", async () => {
+  const originalTauri = globalThis.__TAURI__;
+
+  let mtimeMs = 1_000;
+  let readCount = 0;
+
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd) => {
+        if (cmd === "stat_file") {
+          return { mtimeMs };
+        }
+        if (cmd === "read_text_file") {
+          readCount += 1;
+          return ["A,B", "1,2"].join("\n");
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const engine = createDesktopQueryEngine();
+
+    const query = {
+      id: "q_csv_cache",
+      name: "CSV Cache",
+      source: { type: "csv", path: "/tmp/test.csv", options: { hasHeaders: true } },
+      steps: [],
+    };
+
+    await engine.executeQuery(query, {}, {});
+    await engine.executeQuery(query, {}, {});
+    assert.equal(readCount, 1, "expected second execution to reuse cached result");
+
+    mtimeMs = 2_000;
+    await engine.executeQuery(query, {}, {});
+    assert.equal(readCount, 2, "expected cache to invalidate when mtime changes");
   } finally {
     globalThis.__TAURI__ = originalTauri;
   }

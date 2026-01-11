@@ -160,6 +160,24 @@ export function QueryEditorPanelContainer(props: Props) {
   useEffect(() => {
     return refreshManager.onEvent((evt) => {
       setRefreshEvent(evt);
+
+      if (evt?.type === "apply:completed" && typeof evt?.queryId === "string") {
+        const rows = evt?.result?.rows;
+        const cols = evt?.result?.cols;
+        if (typeof rows === "number" && typeof cols === "number") {
+          // Persist the last output size in local state so `clearExisting` can clear
+          // the prior output range across subsequent query edits / refreshes.
+          setQuery((prev) => {
+            if (prev.id !== evt.queryId) return prev;
+            const dest = isQuerySheetDestination(prev.destination) ? prev.destination : null;
+            if (!dest) return prev;
+            const existing = dest.lastOutputSize;
+            if (existing?.rows === rows && existing?.cols === cols) return prev;
+            return { ...prev, destination: { ...dest, lastOutputSize: { rows, cols } } };
+          });
+        }
+      }
+
       const refreshJobId = evt?.job?.id;
       if (typeof refreshJobId === "string" && (evt.type === "error" || evt.type === "cancelled")) {
         setActiveRefresh((prev) => (prev?.jobId === refreshJobId ? null : prev));
