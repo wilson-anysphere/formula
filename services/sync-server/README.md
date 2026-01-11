@@ -49,6 +49,34 @@ JWT payload must include:
 - `docId` (document id / room name)
 - `role` (`owner|admin|editor|commenter|viewer`)
 
+Optional claims:
+
+- `rangeRestrictions` (array) – when `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS=1` (default: `true` in
+  production), the sync-server validates that **incoming Yjs updates do not modify cells outside
+  the allowed edit permissions**.
+
+  Each entry must match the `@formula/collab-permissions` schema (see
+  `packages/collab/permissions/normalizeRestriction`), e.g.:
+
+  ```json
+  {
+    "rangeRestrictions": [
+      {
+        "sheetId": "Sheet1",
+        "startRow": 0,
+        "startCol": 0,
+        "endRow": 0,
+        "endCol": 0,
+        "editAllowlist": ["user-123"]
+      }
+    ]
+  }
+  ```
+
+  Notes:
+  - `sheetName` is also accepted as an alias for `sheetId`.
+  - Older clients may send `{ "range": { ... }, "editAllowlist": [...] }`, which is also accepted.
+
 ## Persistence backends
 
 Select with:
