@@ -530,3 +530,59 @@ fn wraprows_and_wrapcols_wrap_vectors_with_padding() {
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "I2"), Value::Number(0.0));
 }
+
+#[test]
+fn multithreaded_and_singlethreaded_recalc_match_for_dynamic_arrays() {
+    fn setup(engine: &mut Engine) {
+        // Data for SORT stability: sort by column B ascending, with ties.
+        engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+        engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+        engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+        engine.set_cell_value("Sheet1", "A4", 4.0).unwrap();
+
+        engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+        engine.set_cell_value("Sheet1", "B2", 1.0).unwrap();
+        engine.set_cell_value("Sheet1", "B3", 1.0).unwrap();
+        engine.set_cell_value("Sheet1", "B4", 3.0).unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "D1", "=SORT(A1:B4,2,1,FALSE)")
+            .unwrap();
+
+        // Data for UNIQUE.
+        engine.set_cell_value("Sheet1", "F1", 1.0).unwrap();
+        engine.set_cell_value("Sheet1", "F2", 1.0).unwrap();
+        engine.set_cell_value("Sheet1", "F3", 2.0).unwrap();
+        engine.set_cell_value("Sheet1", "F4", 3.0).unwrap();
+        engine.set_cell_value("Sheet1", "F5", 2.0).unwrap();
+        engine
+            .set_cell_formula("Sheet1", "H1", "=UNIQUE(F1:F5)")
+            .unwrap();
+    }
+
+    let mut single = Engine::new();
+    setup(&mut single);
+    single.recalculate_single_threaded();
+
+    let mut multi = Engine::new();
+    setup(&mut multi);
+    multi.recalculate_multi_threaded();
+
+    // SORT results should match across modes.
+    for addr in ["D1", "E1", "D2", "E2", "D3", "E3", "D4", "E4"] {
+        assert_eq!(
+            multi.get_cell_value("Sheet1", addr),
+            single.get_cell_value("Sheet1", addr),
+            "mismatch for {addr}"
+        );
+    }
+
+    // UNIQUE results should match across modes.
+    for addr in ["H1", "H2", "H3"] {
+        assert_eq!(
+            multi.get_cell_value("Sheet1", addr),
+            single.get_cell_value("Sheet1", addr),
+            "mismatch for {addr}"
+        );
+    }
+}
