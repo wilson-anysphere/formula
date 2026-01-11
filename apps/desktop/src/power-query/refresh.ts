@@ -103,6 +103,8 @@ export class DesktopPowerQueryRefreshManager {
   emitter = new Emitter<DesktopPowerQueryEvent>();
   queries = new Map<string, Query>();
   applyControllers = new Map<string, AbortController>();
+  applyQueryIds = new Map<string, string>();
+  applyQueue: Promise<void> = Promise.resolve();
   activeRefreshAll = new Set<{ cancel: () => void; promise: Promise<any> }>();
 
   manager: RefreshManager;
@@ -206,12 +208,23 @@ export class DesktopPowerQueryRefreshManager {
           if (jobId.startsWith(sessionPrefix)) controller.abort();
         }
       },
+      cancelQuery: (queryId: string) => {
+        // Cancel the refresh job (if it is still pending/running).
+        (handle as any).cancelQuery?.(queryId);
+        // Also cancel any apply phase that may already be in-flight for this query.
+        for (const [jobId, controller] of this.applyControllers) {
+          if (!jobId.startsWith(sessionPrefix)) continue;
+          if (this.applyQueryIds.get(jobId) !== queryId) continue;
+          controller.abort();
+        }
+      },
     };
   }
 
   dispose() {
     for (const controller of this.applyControllers.values()) controller.abort();
     this.applyControllers.clear();
+    this.applyQueryIds.clear();
     for (const handle of this.activeRefreshAll) handle.cancel();
     this.activeRefreshAll.clear();
     this.manager.dispose();
@@ -232,35 +245,44 @@ export class DesktopPowerQueryRefreshManager {
 
     const controller = new AbortController();
     this.applyControllers.set(jobId, controller);
+    this.applyQueryIds.set(jobId, queryId);
 
     this.emitter.emit({ type: "apply:started", jobId, queryId, destination });
 
-    try {
-      const result = await applyTableToDocument(this.doc, table, destination, {
-        batchSize: this.batchSize,
-        signal: controller.signal,
-        label: `Refresh query: ${query.name}`,
-        queryId,
-        onProgress: async (progress) => {
-          if (progress.type === "batch") {
-            this.emitter.emit({
-              type: "apply:progress",
-              jobId,
-              queryId,
-              rowsWritten: progress.totalRowsWritten,
-            });
+    // Serialize apply operations. The DocumentController batching model is global
+    // (single `activeBatch`), so overlapping apply operations can corrupt undo
+    // grouping and prevent cancellation from reverting partial writes.
+    this.applyQueue = this.applyQueue
+      .then(async () => {
+        try {
+          const result = await applyTableToDocument(this.doc, table, destination, {
+            batchSize: this.batchSize,
+            signal: controller.signal,
+            label: `Refresh query: ${query.name}`,
+            queryId,
+            onProgress: async (progress) => {
+              if (progress.type === "batch") {
+                this.emitter.emit({
+                  type: "apply:progress",
+                  jobId,
+                  queryId,
+                  rowsWritten: progress.totalRowsWritten,
+                });
+              }
+            },
+          });
+          this.emitter.emit({ type: "apply:completed", jobId, queryId, result });
+        } catch (error) {
+          if (controller.signal.aborted || isAbortError(error)) {
+            this.emitter.emit({ type: "apply:cancelled", jobId, queryId });
+          } else {
+            this.emitter.emit({ type: "apply:error", jobId, queryId, error });
           }
-        },
-      });
-      this.emitter.emit({ type: "apply:completed", jobId, queryId, result });
-    } catch (error) {
-      if (controller.signal.aborted || isAbortError(error)) {
-        this.emitter.emit({ type: "apply:cancelled", jobId, queryId });
-      } else {
-        this.emitter.emit({ type: "apply:error", jobId, queryId, error });
-      }
-    } finally {
-      this.applyControllers.delete(jobId);
-    }
+        } finally {
+          this.applyControllers.delete(jobId);
+          this.applyQueryIds.delete(jobId);
+        }
+      })
+      .catch(() => {});
   }
 }

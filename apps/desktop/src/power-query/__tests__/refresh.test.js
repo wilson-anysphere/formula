@@ -270,6 +270,75 @@ test("DesktopPowerQueryRefreshManager refreshAll updates lastRunAtMs in the refr
   mgr.dispose();
 });
 
+test("DesktopPowerQueryRefreshManager refreshAll cancelQuery aborts the apply phase for that query only", async () => {
+  const bigTable = DataTable.fromGrid([["A"], ...Array.from({ length: 50 }, (_, i) => [i + 1])], { hasHeaders: true, inferTypes: true });
+  const smallTable = DataTable.fromGrid([["B"], [1]], { hasHeaders: true, inferTypes: true });
+  const engine = new OrderedEngine({ q1: bigTable, q2: smallTable });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 2, batchSize: 1 });
+
+  mgr.registerQuery({
+    id: "q1",
+    name: "Q1",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  mgr.registerQuery({
+    id: "q2",
+    name: "Q2",
+    source: { type: "range", range: { values: [["X"], [2]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet2", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  const handle = mgr.refreshAll(["q1", "q2"]);
+
+  let cancelled = false;
+  let q1Cancelled = false;
+  let q2Completed = false;
+
+  const done = new Promise((resolve, reject) => {
+    const unsub = mgr.onEvent((evt) => {
+      if (evt.type === "apply:error") {
+        unsub();
+        reject(evt.error);
+        return;
+      }
+
+      if (evt.type === "apply:progress" && evt.queryId === "q1" && !cancelled) {
+        cancelled = true;
+        handle.cancelQuery?.("q1");
+      }
+
+      if (evt.type === "apply:cancelled" && evt.queryId === "q1") {
+        q1Cancelled = true;
+      }
+
+      if (evt.type === "apply:completed" && evt.queryId === "q2") {
+        q2Completed = true;
+      }
+
+      if (q1Cancelled && q2Completed) {
+        unsub();
+        resolve(undefined);
+      }
+    });
+  });
+
+  await handle.promise;
+  await done;
+
+  assert.equal(doc.getUsedRange("Sheet1"), null);
+  assert.equal(doc.getCell("Sheet2", { row: 0, col: 0 }).value, "B");
+
+  mgr.dispose();
+});
+
 test("DesktopPowerQueryRefreshManager dispose cancels in-flight refreshAll sessions", async () => {
   const engine = new ControlledEngine();
   const doc = new DocumentController({ engine: new MockEngine() });
