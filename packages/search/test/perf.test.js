@@ -134,3 +134,30 @@ test("perf: AbortSignal cancels long-running index builds quickly", async () => 
   assert.ok(idx.stats.cellsVisited < 1_000_000);
 });
 
+test("perf: AbortSignal cancels long-running scans quickly", async () => {
+  const needlePositions = new Set(["999,999"]);
+  const sheet = new SyntheticSheet("Sheet1", { rows: 1000, cols: 1000, needlePositions });
+  const wb = new SyntheticWorkbook(sheet);
+
+  const controller = new AbortController();
+  let yields = 0;
+  const scheduler = async () => {
+    yields++;
+    if (yields === 1) controller.abort();
+    await immediate();
+  };
+
+  const session = new SearchSession(wb, "needle", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    // Force scan path (no index).
+    timeBudgetMs: 0.5,
+    checkEvery: 1,
+    scheduler,
+  });
+
+  await assert.rejects(session.findNext({ signal: controller.signal }), (err) => err?.name === "AbortError");
+
+  assert.ok(session.stats.cellsScanned > 0);
+  assert.ok(session.stats.cellsScanned < 1_000_000);
+});
