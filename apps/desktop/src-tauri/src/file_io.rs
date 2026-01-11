@@ -1101,6 +1101,39 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_preserves_comments_when_unmodified() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/comments.xlsx"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read comments fixture workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("roundtrip.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        assert_eq!(report.count(Severity::Critical), 0, "unexpected diffs: {report:?}");
+    }
+
+    #[test]
+    fn roundtrip_preserves_conditional_formatting_when_unmodified() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/conditional-formatting/conditional-formatting.xlsx"
+        ));
+        let workbook =
+            read_xlsx_blocking(fixture_path).expect("read conditional formatting fixture workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("roundtrip.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        assert_eq!(report.count(Severity::Critical), 0, "unexpected diffs: {report:?}");
+    }
+
+    #[test]
     fn cell_edit_only_changes_worksheet_parts() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
