@@ -98,12 +98,30 @@ function parseODataPayload(payload, rowsPath) {
   if (payload && typeof payload === "object") {
     // @ts-ignore - OData metadata key
     const nextLinkRaw = payload["@odata.nextLink"] ?? payload["odata.nextLink"] ?? null;
-    const nextLink = typeof nextLinkRaw === "string" ? nextLinkRaw : null;
+    let nextLink = typeof nextLinkRaw === "string" ? nextLinkRaw : null;
 
     const selected = jsonPathSelect(payload, rowsPath);
     if (Array.isArray(selected)) return { rows: selected, nextLink };
-    if (selected == null) return { rows: [], nextLink };
-    return { rows: [selected], nextLink };
+    if (selected != null) return { rows: [selected], nextLink };
+
+    // Best-effort support for older (v2/v3-ish) payload shapes:
+    //   { d: { results: [...] , __next: "..." } }
+    // If `rowsPath` didn't resolve, fall back to `d.results` when present.
+    // @ts-ignore - runtime access
+    const d = payload.d;
+    if (d && typeof d === "object") {
+      // @ts-ignore - runtime access
+      const results = d.results;
+      if (Array.isArray(results)) {
+        // @ts-ignore - runtime access
+        const nextRaw = d.__next;
+        if (!nextLink && typeof nextRaw === "string") nextLink = nextRaw;
+        return { rows: results, nextLink };
+      }
+    }
+
+    // Fall back to treating the payload as a single row (e.g. entity-by-key responses).
+    return { rows: [payload], nextLink };
   }
 
   return { rows: [payload], nextLink: null };

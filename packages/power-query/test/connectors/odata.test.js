@@ -86,6 +86,32 @@ test("ODataConnector: respects $top for pagination short-circuiting", async () =
   ]);
 });
 
+test("ODataConnector: tolerates payloads that are a single object (no value wrapper)", async () => {
+  const connector = new ODataConnector({
+    fetch: async () => makeJsonResponse({ Id: 1, Name: "A" }),
+  });
+
+  const result = await connector.execute({ url: "https://example.com/odata/Products(1)" });
+  assert.deepEqual(result.table.toGrid(), [
+    ["Id", "Name"],
+    [1, "A"],
+  ]);
+});
+
+test("ODataConnector: supports legacy d.results payload shape", async () => {
+  const connector = new ODataConnector({
+    fetch: async () =>
+      makeJsonResponse({
+        d: {
+          results: [{ Id: 1 }, { Id: 2 }],
+        },
+      }),
+  });
+
+  const result = await connector.execute({ url: "https://example.com/odata/Products" });
+  assert.deepEqual(result.table.toGrid(), [["Id"], [1], [2]]);
+});
+
 test("privacy ids: OData sources map to stable http source ids", () => {
   const source = { type: "odata", url: "https://example.com/odata/Products" };
   const sourceId = getSourceIdForQuerySource(/** @type {any} */ (source));
