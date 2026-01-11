@@ -5,8 +5,16 @@ import { beforeEach, expect, test } from "vitest";
 import { LocalStorageBinaryStorage } from "../src/store/binaryStorage.js";
 import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
 
+function getTestLocalStorage(): Storage {
+  const jsdomStorage = (globalThis as any)?.jsdom?.window?.localStorage as Storage | undefined;
+  if (!jsdomStorage) {
+    throw new Error("Expected vitest jsdom environment to provide globalThis.jsdom.window.localStorage");
+  }
+  return jsdomStorage;
+}
+
 beforeEach(() => {
-  localStorage.clear();
+  getTestLocalStorage().clear();
 });
 
 let sqlJsAvailable = true;

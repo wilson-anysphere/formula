@@ -30,15 +30,44 @@ export class LocalStorageBinaryStorage {
   }
 
   async load() {
-    if (typeof localStorage === "undefined") return null;
-    const encoded = localStorage.getItem(this.key);
+    const storage = getLocalStorageOrNull();
+    if (!storage) return null;
+    const encoded = storage.getItem(this.key);
     if (!encoded) return null;
     return fromBase64(encoded);
   }
 
   async save(data) {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(this.key, toBase64(data));
+    const storage = getLocalStorageOrNull();
+    if (!storage) return;
+    storage.setItem(this.key, toBase64(data));
+  }
+}
+
+/**
+ * localStorage is not always available:
+ * - Node >=25 exposes an experimental `globalThis.localStorage` that throws unless
+ *   started with `--localstorage-file`.
+ * - Vitest's jsdom environment stores the real DOM window on `globalThis.jsdom.window`.
+ */
+function getLocalStorageOrNull() {
+  try {
+    // Prefer Vitest's jsdom window when present.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const jsdomStorage = globalThis?.jsdom?.window?.localStorage;
+    if (jsdomStorage) return jsdomStorage;
+  } catch {
+    // ignore
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const storage = globalThis?.localStorage;
+    if (!storage) return null;
+    if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
+    return storage;
+  } catch {
+    return null;
   }
 }
 
@@ -71,4 +100,3 @@ function fromBase64(encoded) {
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
-

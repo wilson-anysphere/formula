@@ -46,7 +46,7 @@ export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
           maxHeight: "100%",
           overflow: "auto",
           background: "var(--dialog-bg)",
-          border: "1px solid var(--border)",
+          border: "1px solid var(--dialog-border)",
           borderRadius: 8,
           boxShadow: "var(--dialog-shadow)",
         }}

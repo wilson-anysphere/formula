@@ -4,8 +4,19 @@ import { beforeEach, expect, test } from "vitest";
 
 import { LocalStorageBinaryStorage } from "../src/store/binaryStorage.js";
 
+function getTestLocalStorage(): Storage {
+  // Vitest's jsdom environment exposes the actual JSDOM instance on `globalThis.jsdom`.
+  // Node 25 also exposes an experimental `globalThis.localStorage` accessor that can
+  // throw unless Node is started with `--localstorage-file`, so we avoid it here.
+  const jsdomStorage = (globalThis as any)?.jsdom?.window?.localStorage as Storage | undefined;
+  if (!jsdomStorage) {
+    throw new Error("Expected vitest jsdom environment to provide globalThis.jsdom.window.localStorage");
+  }
+  return jsdomStorage;
+}
+
 beforeEach(() => {
-  localStorage.clear();
+  getTestLocalStorage().clear();
 });
 
 test("LocalStorageBinaryStorage round-trips bytes (key is namespaced per workbook)", async () => {
@@ -15,7 +26,7 @@ test("LocalStorageBinaryStorage round-trips bytes (key is namespaced per workboo
   const bytes = new Uint8Array([1, 2, 3, 4, 255]);
   await storage.save(bytes);
 
-  const raw = localStorage.getItem(storage.key);
+  const raw = getTestLocalStorage().getItem(storage.key);
   expect(raw).toBeTypeOf("string");
 
   const loaded = await storage.load();
@@ -27,4 +38,3 @@ test("LocalStorageBinaryStorage returns null when missing", async () => {
   const storage = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "missing" });
   expect(await storage.load()).toBeNull();
 });
-
