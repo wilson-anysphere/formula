@@ -1580,7 +1580,9 @@ export class QueryEngine {
         // the table may not have been produced by this engine instance. Ensure it
         // still carries a correct source set for privacy firewall enforcement.
         if (queryMeta?.sources) {
-          this.setTableSourceIds(table, this.collectSourceIdsFromMetas(queryMeta.sources));
+          const existingIds = this.getTableSourceIds(table);
+          const metaIds = this.collectSourceIdsFromMetas(queryMeta.sources);
+          this.setTableSourceIds(table, new Set([...existingIds, ...metaIds]));
         }
         const meta = {
           refreshedAt: queryMeta.refreshedAt,
@@ -1606,7 +1608,7 @@ export class QueryEngine {
       nextStack.add(target.id);
       const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
       const { table, meta: queryMeta } = await this.executeQueryInternal(target, context, depOptions, state, nextStack);
-      this.setTableSourceIds(table, this.collectSourceIdsFromMetas(queryMeta.sources));
+      this.setTableSourceIds(table, new Set([...this.getTableSourceIds(table), ...this.collectSourceIdsFromMetas(queryMeta.sources)]));
       const meta = {
         refreshedAt: queryMeta.refreshedAt,
         schema: queryMeta.outputSchema,
@@ -1910,7 +1912,7 @@ export class QueryEngine {
       right = existing.table;
       rightMeta = existing.meta;
       if (rightMeta?.sources) {
-        this.setTableSourceIds(right, this.collectSourceIdsFromMetas(rightMeta.sources));
+        this.setTableSourceIds(right, new Set([...this.getTableSourceIds(right), ...this.collectSourceIdsFromMetas(rightMeta.sources)]));
       }
     } else {
       const query = context.queries?.[op.rightQuery];
@@ -2069,7 +2071,10 @@ export class QueryEngine {
       if (existing) {
         sources.push(...existing.meta.sources);
         if (existing.meta?.sources) {
-          this.setTableSourceIds(existing.table, this.collectSourceIdsFromMetas(existing.meta.sources));
+          this.setTableSourceIds(
+            existing.table,
+            new Set([...this.getTableSourceIds(existing.table), ...this.collectSourceIdsFromMetas(existing.meta.sources)]),
+          );
         }
         for (const sourceId of this.getTableSourceIds(existing.table)) combinedSourceIds.add(sourceId);
         tables.push(existing.table);

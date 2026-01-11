@@ -783,6 +783,61 @@ test("QueryEngine: table source ids do not collide for DB sources without identi
   assert.notEqual(ids1[0], ids2[0]);
 });
 
+test("QueryEngine: queryResults preserve source ids for DB sources without identity", async () => {
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Id", "Target"],
+              [1, 10],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+  });
+
+  const rightQuery = {
+    id: "q_right_results_no_id",
+    name: "Right (queryResults)",
+    source: { type: "database", connection: {}, query: "SELECT * FROM targets" },
+    steps: [],
+  };
+  const rightResult = await engine.executeQueryWithMeta(rightQuery, { queries: {} }, { cache: { mode: "bypass" } });
+
+  const leftQuery = {
+    id: "q_left_merge_queryresults",
+    name: "Left",
+    source: {
+      type: "range",
+      range: {
+        values: [
+          ["Id", "Region"],
+          [1, "East"],
+        ],
+        hasHeaders: true,
+      },
+    },
+    steps: [
+      { id: "m1", name: "Merge", operation: { type: "merge", rightQuery: rightQuery.id, joinType: "left", leftKey: "Id", rightKey: "Id" } },
+    ],
+  };
+
+  const result = await engine.executeQueryWithMeta(
+    leftQuery,
+    { queryResults: { [rightQuery.id]: rightResult }, queries: {} },
+    { cache: { mode: "bypass" } },
+  );
+
+  // @ts-ignore - testing internal bookkeeping
+  const ids = Array.from(engine.getTableSourceIds(result.table));
+  assert.ok(ids.includes("workbook:range"));
+  assert.ok(ids.some((id) => String(id).startsWith("sql:obj:")));
+  assert.equal(ids.length, 2);
+});
+
 test("QueryEngine: source-state cache validation respects explicit database connectionId", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store, now: () => 0 });
