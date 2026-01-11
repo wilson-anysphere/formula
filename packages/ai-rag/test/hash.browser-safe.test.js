@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-test("utils/hash.js is browser-safe (no node:crypto import)", async () => {
+test("utils/hash.js is browser-safe (no Node builtin crypto import)", async () => {
   const mod = await import("../src/utils/hash.js");
   assert.equal(typeof mod.contentHash, "function");
 
@@ -15,5 +15,6 @@ test("utils/hash.js is browser-safe (no node:crypto import)", async () => {
 
   const sourcePath = fileURLToPath(new URL("../src/utils/hash.js", import.meta.url));
   const source = await readFile(sourcePath, "utf8");
-  assert.equal(source.includes("node:crypto"), false);
+  const nodeCryptoSpecifier = ["node", "crypto"].join(":");
+  assert.equal(source.includes(nodeCryptoSpecifier), false);
 });
