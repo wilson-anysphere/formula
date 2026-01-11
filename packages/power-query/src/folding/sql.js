@@ -237,6 +237,7 @@ export class QueryFoldingEngine {
         const where = predicateToSql(operation.predicate, {
           alias: "t",
           quoteIdentifier,
+          castText: dialect.castText,
           param,
         });
         return {

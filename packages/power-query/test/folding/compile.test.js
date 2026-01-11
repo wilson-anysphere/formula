@@ -54,7 +54,7 @@ test("compile: LIKE predicates escape wildcard characters + use ESCAPE clause", 
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT * FROM (SELECT * FROM items) AS t WHERE (LOWER(t."Name") LIKE LOWER(?) ESCAPE \'!\')',
+    sql: 'SELECT * FROM (SELECT * FROM items) AS t WHERE (LOWER(CAST(t."Name" AS TEXT)) LIKE LOWER(?) ESCAPE \'!\')',
     params: ["%50!%!_!!\\test%"],
   });
 });

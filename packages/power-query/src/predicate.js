@@ -152,6 +152,10 @@ export function sqlLiteral(value) {
  * @param {{
  *   alias?: string;
  *   quoteIdentifier?: (identifier: string) => string;
+ *   // Optional cast used by `contains`/`startsWith`/`endsWith` predicates to
+ *   // mimic local semantics (`valueToString`) and avoid type errors (e.g.
+ *   // Postgres does not support `LIKE` on numeric columns without casting).
+ *   castText?: (sqlExpr: string) => string;
  *   // Optional parameterizer used by the SQL folding engine.
  *   // When provided, this function should append `value` to a params array and
  *   // return a placeholder (e.g. `?`). When omitted, literals are inlined via
@@ -163,6 +167,7 @@ export function sqlLiteral(value) {
 export function predicateToSql(predicate, options = {}) {
   const alias = options.alias ?? "t";
   const quote = options.quoteIdentifier ?? quoteIdentifier;
+  const castText = options.castText ?? ((expr) => expr);
   const param = options.param ?? sqlLiteral;
   /**
    * @param {FilterPredicate} node
@@ -201,18 +206,21 @@ export function predicateToSql(predicate, options = {}) {
             return `(${colRef} <= ${param(node.value ?? null)})`;
           case "contains": {
             const pattern = `%${escapeLikePattern(valueToString(node.value))}%`;
-            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)} ESCAPE '!')`;
-            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
+            const textExpr = castText(colRef);
+            if (caseSensitive) return `(${textExpr} LIKE ${param(pattern)} ESCAPE '!')`;
+            return `(LOWER(${textExpr}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
           }
           case "startsWith": {
             const pattern = `${escapeLikePattern(valueToString(node.value))}%`;
-            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)} ESCAPE '!')`;
-            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
+            const textExpr = castText(colRef);
+            if (caseSensitive) return `(${textExpr} LIKE ${param(pattern)} ESCAPE '!')`;
+            return `(LOWER(${textExpr}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
           }
           case "endsWith": {
             const pattern = `%${escapeLikePattern(valueToString(node.value))}`;
-            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)} ESCAPE '!')`;
-            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
+            const textExpr = castText(colRef);
+            if (caseSensitive) return `(${textExpr} LIKE ${param(pattern)} ESCAPE '!')`;
+            return `(LOWER(${textExpr}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
           }
           default: {
             /** @type {never} */

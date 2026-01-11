@@ -48,14 +48,22 @@
  */
 
 /**
- * @typedef {{
- *   type: "database";
- *   connection: unknown;
- *   query: string;
+  * @typedef {{
+  *   type: "database";
+  *   connection: unknown;
+  *   query: string;
  *   /**
- *    * Optional column names for the query result.
+ *    * SQL dialect name used for query folding / compilation.
  *    *
- *    * Some folding operations (e.g. `renameColumn`, `changeType`) require an
+ *    * This is optional because some host apps might not know the exact backend
+ *    * dialect, but pushdown folding should only be enabled when the dialect is
+ *    * known to avoid generating incompatible SQL.
+ *    */
+ *   dialect?: "postgres" | "mysql" | "sqlite";
+  *   /**
+  *    * Optional column names for the query result.
+  *    *
+  *    * Some folding operations (e.g. `renameColumn`, `changeType`) require an
  *    * explicit projection list to avoid duplicate output columns. When this
  *    * metadata is available, the folding engine can push those operations down.
  *    */

@@ -18,6 +18,10 @@
  * @typedef {{
  *   name: SqlDialectName;
  *   quoteIdentifier: (identifier: string) => string;
+ *   // Cast an arbitrary SQL expression to text for string operations like
+ *   // `LIKE`/`LOWER`. This is used to emulate local predicate semantics which
+ *   // stringify values before applying `contains`/`startsWith`/`endsWith`.
+ *   castText: (sqlExpr: string) => string;
  *   // Format a JS Date into a string suitable for passing as a SQL parameter.
  *   // (We still parameterize the value; this only normalizes representation.)
  *   formatDateParam: (date: Date) => string;
@@ -87,6 +91,7 @@ export function getSqlDialect(name) {
 export const POSTGRES_DIALECT = {
   name: "postgres",
   quoteIdentifier: quoteDouble,
+  castText: (expr) => `CAST(${expr} AS TEXT)`,
   formatDateParam: formatIso,
   sortSpecToSql: (alias, spec) => {
     const colRef = `${alias}.${quoteDouble(spec.column)}`;
@@ -100,6 +105,7 @@ export const POSTGRES_DIALECT = {
 export const MYSQL_DIALECT = {
   name: "mysql",
   quoteIdentifier: quoteBacktick,
+  castText: (expr) => `CAST(${expr} AS CHAR)`,
   formatDateParam: formatMysqlDateTime,
   sortSpecToSql: (alias, spec) => {
     const colRef = `${alias}.${quoteBacktick(spec.column)}`;
@@ -114,6 +120,7 @@ export const MYSQL_DIALECT = {
 export const SQLITE_DIALECT = {
   name: "sqlite",
   quoteIdentifier: quoteDouble,
+  castText: (expr) => `CAST(${expr} AS TEXT)`,
   formatDateParam: formatIso,
   sortSpecToSql: (alias, spec) => {
     const colRef = `${alias}.${quoteDouble(spec.column)}`;
