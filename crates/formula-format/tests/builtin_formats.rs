@@ -174,3 +174,46 @@ fn builtin_formats_round_trip_through_formatter_under_locales() {
         "hello"
     );
 }
+
+#[test]
+fn builtin_num_fmt_id_placeholders_are_resolved_by_formatter() {
+    // formula-xlsx preserves unknown built-ins as `__builtin_numFmtId:<id>`.
+    // The format engine should treat these as references to Excel built-in
+    // number formats instead of rendering the placeholder literally.
+    let en_opts = FormatOptions {
+        locale: Locale::en_us(),
+        date_system: DateSystem::Excel1900,
+    };
+    let de_opts = FormatOptions {
+        locale: Locale::de_de(),
+        date_system: DateSystem::Excel1900,
+    };
+
+    // Date (id 14) should use locale-aware day/month ordering.
+    assert_eq!(
+        format_value(Value::Number(61.0), Some("__builtin_numFmtId:14"), &en_opts).text,
+        "3/1/1900"
+    );
+    assert_eq!(
+        format_value(Value::Number(61.0), Some("__builtin_numFmtId:14"), &de_opts).text,
+        "1.3.1900"
+    );
+
+    // Currency (id 7) should substitute symbol and separators based on locale.
+    assert_eq!(
+        format_value(Value::Number(1234.5), Some("__builtin_numFmtId:7"), &de_opts).text,
+        "€1.234,50 "
+    );
+
+    // Text (id 49).
+    assert_eq!(
+        format_value(Value::Text("hello"), Some("__builtin_numFmtId:49"), &en_opts).text,
+        "hello"
+    );
+
+    // Unknown ids fall back to General instead of showing the placeholder.
+    assert_eq!(
+        format_value(Value::Number(1.25), Some("__builtin_numFmtId:999"), &en_opts).text,
+        "1.25"
+    );
+}

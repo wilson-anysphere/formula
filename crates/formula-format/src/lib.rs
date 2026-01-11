@@ -176,6 +176,12 @@ pub fn format_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
     }
 }
 
+fn resolve_builtin_placeholder_format_code(code: &str, locale: Locale) -> Option<std::borrow::Cow<'static, str>> {
+    let rest = code.strip_prefix("__builtin_numFmtId:")?;
+    let id = rest.parse::<u16>().ok()?;
+    Some(crate::builtin_format_code_with_locale(id, locale).unwrap_or_else(|| "General".into()))
+}
+
 /// Render a value using an Excel number format code, returning additional render hints.
 ///
 /// This is the preferred API for UI rendering because it surfaces:
@@ -191,6 +197,8 @@ pub fn render_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
         code_str
     };
 
+    let resolved_placeholder = resolve_builtin_placeholder_format_code(code_str, options.locale);
+    let code_str = resolved_placeholder.as_deref().unwrap_or(code_str);
     let code = FormatCode::parse(code_str).unwrap_or_else(|_| FormatCode::general());
 
     match value {
