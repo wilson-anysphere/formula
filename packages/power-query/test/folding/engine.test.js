@@ -249,6 +249,71 @@ test("QueryEngine: folds merge into a single SQL query when both sides are folda
   ]);
 });
 
+test("QueryEngine: schema discovery enables folding merge without explicit projections", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined }[]} */
+  const calls = [];
+  let schemaCalls = 0;
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        getSchema: async (request) => {
+          schemaCalls += 1;
+          if (String(request.sql).includes("sales")) {
+            return { columns: ["Id", "Region"] };
+          }
+          if (String(request.sql).includes("targets")) {
+            return { columns: ["Id", "Target"] };
+          }
+          return { columns: [] };
+        },
+        querySql: async (_connection, sql, options) => {
+          calls.push({ sql, params: options?.params });
+          // Simulate the database applying the join.
+          return DataTable.fromGrid(
+            [
+              ["Id", "Region", "Target"],
+              [1, "East", 10],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const right = {
+    id: "q_right_schema",
+    name: "Targets",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM targets" },
+    steps: [],
+  };
+
+  const left = {
+    id: "q_left_schema",
+    name: "Sales",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      { id: "l1", name: "Merge", operation: { type: "merge", rightQuery: "q_right_schema", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+    ],
+  };
+
+  const first = await engine.executeQuery(left, { queries: { q_right_schema: right } }, {});
+  assert.equal(schemaCalls, 2, "expected schema discovery for both left and right queries");
+  assert.equal(left.source.columns, undefined, "schema discovery should not mutate the caller query");
+  assert.equal(right.source.columns, undefined, "schema discovery should not mutate referenced queries");
+  assert.equal(calls.length, 1, "expected a single SQL roundtrip when merge folds");
+  assert.match(calls[0].sql, /\bJOIN\b/);
+  assert.deepEqual(first.toGrid(), [
+    ["Id", "Region", "Target"],
+    [1, "East", 10],
+  ]);
+
+  // Schema discovery should be cached within the engine instance for both queries.
+  await engine.executeQuery(left, { queries: { q_right_schema: right } }, {});
+  assert.equal(schemaCalls, 2);
+});
+
 test("QueryEngine: folds append into a single SQL query when schemas are compatible", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined }[]} */
   const calls = [];

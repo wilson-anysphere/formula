@@ -696,56 +696,128 @@ export class QueryEngine {
           : undefined;
 
       let sourceForFolding = query.source;
-      if (dialect && query.source.columns == null && sqlConnector && typeof sqlConnector.getSchema === "function") {
-        const connectionId = resolveDatabaseConnectionId(query.source, sqlConnector);
-        const request = {
-          connectionId: connectionId ?? undefined,
-          connection: query.source.connection,
-          sql: query.source.query,
-        };
+      /** @type {Record<string, Query> | undefined} */
+      let queriesForFolding = context.queries ?? undefined;
 
-        /** @type {string | null} */
-        let schemaCacheKey = null;
-        /** @type {Promise<{ columns: string[], types?: Record<string, import("./model.js").DataType> }> | null} */
-        let schemaPromise = null;
-        try {
-          throwIfAborted(options.signal);
-          await this.assertPermission(sqlConnector.permissionKind, { source: query.source, request }, state);
-          const credentials = await this.getCredentials("sql", request, state);
-          const credentialId = extractCredentialId(credentials);
-          const schemaCacheable = credentials == null || credentialId != null;
+      if (dialect && sqlConnector && typeof sqlConnector.getSchema === "function") {
+        /**
+         * Best-effort schema discovery helper used to populate `source.columns` so
+         * folding can safely push down projection-dependent operations.
+         *
+         * @param {import("./model.js").DatabaseQuerySource} dbSource
+         */
+        const discoverSchema = async (dbSource) => {
+          const connectionId = resolveDatabaseConnectionId(dbSource, sqlConnector);
+          const request = {
+            connectionId: connectionId ?? undefined,
+            connection: dbSource.connection,
+            sql: dbSource.query,
+          };
 
-          if (connectionId && schemaCacheable) {
-            schemaCacheKey = `pq:schema:v2:${hashValue({
-              connectionId,
-              sql: query.source.query,
-              credentialsHash: credentialId ? hashValue(credentialId) : null,
-            })}`;
-            schemaPromise = this.databaseSchemaCache.get(schemaCacheKey) ?? null;
-          }
-
-          if (!schemaPromise) {
-            schemaPromise = Promise.resolve(sqlConnector.getSchema(request, { signal: options.signal, credentials }));
-            if (schemaCacheKey) {
-              schemaPromise = schemaPromise.catch((err) => {
-                this.databaseSchemaCache.delete(schemaCacheKey);
-                throw err;
-              });
-              this.databaseSchemaCache.set(schemaCacheKey, schemaPromise);
-            }
-          }
-        } catch {
-          schemaPromise = null;
-        }
-
-        if (schemaPromise) {
+          /** @type {string | null} */
+          let schemaCacheKey = null;
+          /** @type {Promise<{ columns: string[], types?: Record<string, import("./model.js").DataType> }> | null} */
+          let schemaPromise = null;
           try {
-            const schema = await schemaPromise;
-            if (schema && Array.isArray(schema.columns) && schema.columns.length > 0) {
-              sourceForFolding = { ...query.source, columns: schema.columns.slice() };
+            throwIfAborted(options.signal);
+            await this.assertPermission(sqlConnector.permissionKind, { source: dbSource, request }, state);
+            const credentials = await this.getCredentials("sql", request, state);
+            const credentialId = extractCredentialId(credentials);
+            const schemaCacheable = credentials == null || credentialId != null;
+
+            if (connectionId && schemaCacheable) {
+              schemaCacheKey = `pq:schema:v2:${hashValue({
+                connectionId,
+                sql: dbSource.query,
+                credentialsHash: credentialId ? hashValue(credentialId) : null,
+              })}`;
+              schemaPromise = this.databaseSchemaCache.get(schemaCacheKey) ?? null;
+            }
+
+            if (!schemaPromise) {
+              schemaPromise = Promise.resolve(sqlConnector.getSchema(request, { signal: options.signal, credentials }));
+              if (schemaCacheKey) {
+                schemaPromise = schemaPromise.catch((err) => {
+                  this.databaseSchemaCache.delete(schemaCacheKey);
+                  throw err;
+                });
+                this.databaseSchemaCache.set(schemaCacheKey, schemaPromise);
+              }
             }
           } catch {
-            // Schema discovery is best-effort; ignore failures and let folding fall back to hybrid/local execution.
+            schemaPromise = null;
+          }
+
+          if (!schemaPromise) return null;
+          try {
+            const schema = await schemaPromise;
+            return schema && Array.isArray(schema.columns) && schema.columns.length > 0 ? schema : null;
+          } catch {
+            return null;
+          }
+        };
+
+        // Populate schema for the root query source (when needed).
+        if (query.source.columns == null) {
+          const schema = await discoverSchema(query.source);
+          if (schema) {
+            sourceForFolding = { ...query.source, columns: schema.columns.slice() };
+          }
+        }
+
+        // Populate schema for any referenced queries used by merge/append/query-source folding.
+        if (queriesForFolding) {
+          /** @type {Set<string>} */
+          const deps = new Set();
+          /** @type {Set<string>} */
+          const visited = new Set();
+
+          /**
+           * @param {Query} q
+           * @param {import("./model.js").QueryStep[] | null} stepOverride
+           */
+          const visitQuery = (q, stepOverride = null) => {
+            if (visited.has(q.id)) return;
+            visited.add(q.id);
+
+            if (q.source.type === "query") {
+              deps.add(q.source.queryId);
+              const next = queriesForFolding?.[q.source.queryId];
+              if (next) visitQuery(next, null);
+            }
+
+            const qSteps = stepOverride ?? q.steps;
+            for (const step of qSteps) {
+              if (step.operation.type === "merge") {
+                deps.add(step.operation.rightQuery);
+                const next = queriesForFolding?.[step.operation.rightQuery];
+                if (next) visitQuery(next, null);
+              } else if (step.operation.type === "append") {
+                for (const id of step.operation.queries) {
+                  deps.add(id);
+                  const next = queriesForFolding?.[id];
+                  if (next) visitQuery(next, null);
+                }
+              }
+            }
+          };
+
+          visitQuery({ ...query, source: sourceForFolding, steps }, steps);
+
+          if (deps.size > 0) {
+            let nextQueries = queriesForFolding;
+            for (const id of deps) {
+              const q = queriesForFolding[id];
+              if (!q || q.source.type !== "database" || q.source.columns != null) continue;
+              const schema = await discoverSchema(q.source);
+              if (!schema) continue;
+              if (nextQueries === queriesForFolding) {
+                // Copy-on-write: only clone once we know we need modifications.
+                nextQueries = { ...queriesForFolding };
+              }
+              nextQueries[id] = { ...q, source: { ...q.source, columns: schema.columns.slice() } };
+            }
+            queriesForFolding = nextQueries;
           }
         }
       }
@@ -754,7 +826,7 @@ export class QueryEngine {
         { ...query, source: sourceForFolding, steps },
         {
           dialect: dialect ?? undefined,
-          queries: context.queries ?? undefined,
+          queries: queriesForFolding,
           getConnectionIdentity,
           privacyMode: this.privacyMode,
           privacyLevelsBySourceId: context.privacy?.levelsBySourceId,
