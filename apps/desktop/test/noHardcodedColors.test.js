@@ -30,6 +30,10 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     if (rel.startsWith("grid/text/rich-text/")) return false;
     // Conditional formatting colors are data-driven (cell formatting).
     if (rel.startsWith("grid/conditional-formatting/")) return false;
+    // Charts scene graph utilities build/parse CSS color strings and test fixtures
+    // intentionally include hex colors.
+    if (rel === "charts/scene/color.ts") return false;
+    if (rel === "charts/scene/demo.ts") return false;
     if (rel.includes("/demo/")) return false;
     if (rel.includes("/__tests__/")) return false;
     if (/\.(test|spec)\.[jt]sx?$/.test(rel)) return false;

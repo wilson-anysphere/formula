@@ -150,6 +150,54 @@ test("PresenceManager.subscribe eviction timer accounts for remote users on othe
   unsubscribe();
 });
 
+test("PresenceManager.subscribe schedules eviction even when now changes between snapshots", () => {
+  const scheduler = new FakeScheduler();
+  const hub = new InMemoryAwarenessHub();
+  const awarenessA = hub.createAwareness(1);
+  const awarenessB = hub.createAwareness(2);
+
+  const now = () => scheduler.nowMs++;
+
+  const presenceA = new PresenceManager(awarenessA, {
+    user: { id: "u1", name: "Ada", color: "#ff2d55" },
+    activeSheet: "Sheet1",
+    throttleMs: 0,
+    staleAfterMs: 0,
+    now,
+    setTimeout: scheduler.setTimeout.bind(scheduler),
+    clearTimeout: scheduler.clearTimeout.bind(scheduler),
+  });
+
+  awarenessB.setLocalStateField(
+    "presence",
+    serializePresenceState({
+      id: "u2",
+      name: "Grace",
+      color: "#4c8bf5",
+      activeSheet: "Sheet1",
+      cursor: null,
+      selections: [],
+      lastActive: 1,
+    }),
+  );
+
+  /** @type {string[][]} */
+  const updates = [];
+  const unsubscribe = presenceA.subscribe((presences) => {
+    updates.push(presences.map((presence) => presence.id));
+  });
+
+  assert.deepEqual(updates, [["u2"]]);
+
+  // `now` advances on each call; without using a single snapshot for both the
+  // subscription callback and eviction scheduling, the eviction timer might not
+  // be scheduled at all.
+  scheduler.advance(0);
+  assert.deepEqual(updates, [["u2"], []]);
+
+  unsubscribe();
+});
+
 test("PresenceManager.getRemotePresences can include users on other sheets", () => {
   const hub = new InMemoryAwarenessHub();
   const awarenessA = hub.createAwareness(1);
