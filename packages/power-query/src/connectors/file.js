@@ -170,6 +170,7 @@ function tableFromJson(json) {
  * @typedef {{
  *   readText?: (path: string) => Promise<string>;
  *   readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable>;
+ *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
  * }} FileConnectorOptions
  */
 
@@ -182,6 +183,35 @@ export class FileConnector {
     this.permissionKind = "file:read";
     this.readText = options.readText ?? null;
     this.readParquetTable = options.readParquetTable ?? null;
+    this.stat = options.stat ?? null;
+  }
+
+  /**
+   * Lightweight source-state probe for cache validation.
+   *
+   * @param {FileConnectorRequest} request
+   * @param {ConnectorExecuteOptions} [options]
+   * @returns {Promise<import("./types.js").SourceState>}
+   */
+  async getSourceState(request, options = {}) {
+    const signal = options.signal;
+    if (signal?.aborted) {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+
+    if (!this.stat) return {};
+    const result = await this.stat(request.path);
+    if (signal?.aborted) {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+
+    const mtimeMs = result?.mtimeMs;
+    if (typeof mtimeMs !== "number" || !Number.isFinite(mtimeMs)) return {};
+    return { sourceTimestamp: new Date(mtimeMs) };
   }
 
   /**

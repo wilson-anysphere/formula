@@ -112,6 +112,60 @@ export class HttpConnector {
   }
 
   /**
+   * Lightweight source-state probe for cache validation.
+   *
+   * Uses an HTTP HEAD request (when `fetch` is available) to capture `etag` and
+   * `last-modified` headers.
+   *
+   * @param {HttpConnectorRequest} request
+   * @param {ConnectorExecuteOptions} [options]
+   * @returns {Promise<import("./types.js").SourceState>}
+   */
+  async getSourceState(request, options = {}) {
+    const signal = options.signal;
+    if (signal?.aborted) {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+
+    if (!this.fetchFn) return {};
+
+    /** @type {Record<string, string>} */
+    const headers = { ...(request.headers ?? {}) };
+
+    const credentials = options.credentials;
+    if (credentials && typeof credentials === "object" && !Array.isArray(credentials)) {
+      // @ts-ignore - runtime merge
+      const extraHeaders = credentials.headers;
+      if (extraHeaders && typeof extraHeaders === "object") {
+        Object.assign(headers, extraHeaders);
+      }
+    }
+
+    let response;
+    try {
+      response = await this.fetchFn(request.url, { method: "HEAD", headers, signal });
+    } catch {
+      return {};
+    }
+
+    if (!response.ok) return {};
+
+    const etag = response.headers.get("etag") ?? undefined;
+
+    /** @type {Date | undefined} */
+    let sourceTimestamp;
+    const lastModified = response.headers.get("last-modified");
+    if (lastModified) {
+      const parsed = new Date(lastModified);
+      if (!Number.isNaN(parsed.getTime())) sourceTimestamp = parsed;
+    }
+
+    return { etag, sourceTimestamp };
+  }
+
+  /**
    * @param {HttpConnectorRequest} request
    * @returns {unknown}
    */

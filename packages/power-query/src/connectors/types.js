@@ -5,12 +5,12 @@
  * Host applications can provide their own connectors (or wrappers around native
  * capabilities) while relying on a stable request/response shape.
  */
- 
+
 /**
  * @typedef {import("../model.js").DataType} DataType
  * @typedef {import("../table.js").DataTable} DataTable
  */
- 
+
 /**
  * Schema information returned by connectors.
  *
@@ -22,7 +22,7 @@
  *   inferred?: boolean;
  * }} SchemaInfo
  */
- 
+
 /**
  * Common metadata returned by all connectors.
  *
@@ -31,24 +31,28 @@
  * @property {Date | undefined} [sourceTimestamp]
  *   Optional timestamp for when the underlying source last changed, if the
  *   connector can determine it (e.g. file mtime, HTTP Last-Modified).
+ * @property {string | undefined} [etag]
+ *   Optional strong/weak entity tag for the underlying source state (e.g. HTTP ETag).
+ * @property {string | undefined} [sourceKey]
+ *   Optional stable identifier for the source request (used for cache validation).
  * @property {SchemaInfo} schema Best-effort schema output.
  * @property {number} rowCount Exact row count for the returned table.
  * @property {number | undefined} [rowCountEstimate] Best-effort estimate for the total row count on the source.
  * @property {Record<string, unknown>} provenance Provenance information (URL/path/connection identifiers).
  */
- 
+
 /**
  * @typedef {Object} ConnectorResult
  * @property {DataTable} table
  * @property {ConnectorMeta} meta
  */
- 
- /**
-  * @typedef {Object} ConnectorExecuteOptions
-  * @property {AbortSignal | undefined} [signal]
-  * @property {unknown} [credentials]
-  * @property {(() => number) | undefined} [now]
-  */
+
+/**
+ * @typedef {Object} ConnectorExecuteOptions
+ * @property {AbortSignal | undefined} [signal]
+ * @property {unknown} [credentials]
+ * @property {(() => number) | undefined} [now]
+ */
 
 /**
  * OAuth2 configuration for HTTP requests.
@@ -77,24 +81,32 @@
  * @property {HttpConnectorOAuth2Config | undefined} [oauth2]
  */
 
- /**
-  * Base connector interface.
-  *
-  * @template Request
+/**
+ * Lightweight source state information used for cache validation.
+ *
+ * @typedef {{
+ *   sourceTimestamp?: Date;
+ *   etag?: string;
+ * }} SourceState
+ */
+
+/**
+ * Base connector interface.
+ *
+ * @template Request
  * @typedef {{
  *   id: string;
- *   /**
- *    * A permission kind to pass to `onPermissionRequest`. Host apps decide what
- *    * to do with it; the library only provides the hook.
- *    */
+ *   // A permission kind to pass to `onPermissionRequest`. Host apps decide what
+ *   // to do with it; the library only provides the hook.
  *   permissionKind: string;
- *   /**
- *    * Return a stable, JSON-serializable representation of the request to be
- *    * used as an input for cache-key generation.
- *    */
+ *   // Return a stable, JSON-serializable representation of the request to be
+ *   // used as an input for cache-key generation.
  *   getCacheKey: (request: Request) => unknown;
  *   execute: (request: Request, options?: ConnectorExecuteOptions) => Promise<ConnectorResult>;
+ *   // Optional hook used by the query engine to validate cached results against
+ *   // the current source state.
+ *   getSourceState?: (request: Request, options?: ConnectorExecuteOptions) => Promise<SourceState>;
  * }} Connector
  */
- 
+
 export {};

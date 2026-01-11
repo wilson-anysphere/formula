@@ -47,6 +47,13 @@ async function loadDataIoModule() {
  *   // primarily used by dependency-aware refresh orchestration ("Refresh All") to
  *   // avoid re-executing shared upstream queries.
  *   queryResults?: Record<string, QueryExecutionResult>;
+ *   // Optional host-provided version/signature per table name. When provided, table
+ *   // sources incorporate the signature into the query cache key so cached results
+ *   // reflect workbook edits.
+ *   tableSignatures?: Record<string, unknown>;
+ *   // Optional callback used to resolve a signature/version for a table name. If both
+ *   // `getTableSignature` and `tableSignatures` are supplied, the callback wins.
+ *   getTableSignature?: (tableName: string) => unknown;
  * }} QueryExecutionContext
  */
 
@@ -89,7 +96,7 @@ async function loadDataIoModule() {
  *   maxStepIndex?: number;
  *   signal?: AbortSignal;
  *   onProgress?: (event: EngineProgressEvent) => void;
- *   cache?: { mode?: "use" | "refresh" | "bypass"; ttlMs?: number };
+ *   cache?: { mode?: "use" | "refresh" | "bypass"; ttlMs?: number; validation?: "none" | "source-state" };
  * }} ExecuteOptions
  */
 
@@ -152,6 +159,7 @@ async function loadDataIoModule() {
  *   readText?: (path: string) => Promise<string>;
  *   readBinary?: (path: string) => Promise<Uint8Array>;
  *   readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable>;
+ *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
  * } | undefined} [fileAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `FileConnector`.
  * @property {Partial<{ file: FileConnector; http: HttpConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
@@ -176,13 +184,23 @@ function throwIfAborted(signal) {
 }
 
 /**
+ * @param {{ id: string, getCacheKey: (request: any) => unknown }} connector
+ * @param {any} request
+ */
+function buildConnectorSourceKey(connector, request) {
+  return `${connector.id}:${hashValue(connector.getCacheKey(request))}`;
+}
+
+/**
  * @param {ConnectorMeta} meta
- * @returns {{ refreshedAtMs: number, sourceTimestampMs?: number, schema: any, rowCount: number, rowCountEstimate?: number, provenance: any }}
+ * @returns {{ refreshedAtMs: number, sourceTimestampMs?: number, etag?: string, sourceKey?: string, schema: any, rowCount: number, rowCountEstimate?: number, provenance: any }}
  */
 function serializeConnectorMeta(meta) {
   return {
     refreshedAtMs: meta.refreshedAt.getTime(),
     sourceTimestampMs: meta.sourceTimestamp ? meta.sourceTimestamp.getTime() : undefined,
+    etag: meta.etag,
+    sourceKey: meta.sourceKey,
     schema: meta.schema,
     rowCount: meta.rowCount,
     rowCountEstimate: meta.rowCountEstimate,
@@ -198,6 +216,8 @@ function deserializeConnectorMeta(data) {
   return {
     refreshedAt: new Date(data.refreshedAtMs),
     sourceTimestamp: data.sourceTimestampMs != null ? new Date(data.sourceTimestampMs) : undefined,
+    etag: typeof data.etag === "string" ? data.etag : undefined,
+    sourceKey: typeof data.sourceKey === "string" ? data.sourceKey : undefined,
     schema: data.schema,
     rowCount: data.rowCount,
     rowCountEstimate: data.rowCountEstimate,
@@ -273,7 +293,11 @@ export class QueryEngine {
 
     const fileConnector =
       options.connectors?.file ??
-      new FileConnector({ readText: options.fileAdapter?.readText, readParquetTable: options.fileAdapter?.readParquetTable });
+      new FileConnector({
+        readText: options.fileAdapter?.readText,
+        readParquetTable: options.fileAdapter?.readParquetTable,
+        stat: options.fileAdapter?.stat,
+      });
     const httpConnector = options.connectors?.http ?? new HttpConnector({ fetchTable: options.apiAdapter?.fetchTable });
     const sqlConnector = options.connectors?.sql ?? new SqlConnector({ querySql: options.databaseAdapter?.querySql });
 
@@ -405,6 +429,7 @@ export class QueryEngine {
 
     const startedAt = new Date(state.now());
     const cacheMode = options.cache?.mode ?? "use";
+    const cacheValidation = options.cache?.validation ?? "source-state";
     const cacheTtlMs = options.cache?.ttlMs ?? this.defaultCacheTtlMs ?? undefined;
 
     /** @type {string | null} */
@@ -414,25 +439,29 @@ export class QueryEngine {
       if (cacheKey && cacheMode === "use") {
         const cached = await this.cache.getEntry(cacheKey);
         if (cached) {
-          const completedAt = new Date(state.now());
           const payload = /** @type {any} */ (cached.value);
-          try {
-            const table =
-              payload?.version === 2
-                ? deserializeAnyTable(payload.table)
-                : payload?.version === 1
-                  ? deserializeTable(payload.table)
-                  : payload?.table?.kind
-                    ? deserializeAnyTable(payload.table)
-                    : deserializeTable(payload.table);
-            const meta = deserializeQueryMeta(payload.meta, startedAt, completedAt, { key: cacheKey, hit: true });
-            options.onProgress?.({ type: "cache:hit", queryId: query.id, cacheKey });
-            return { table, meta };
-          } catch {
-            // Treat cache corruption as a miss so we can recover on the next refresh.
-            await this.cache.delete(cacheKey);
-            options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
+          const cacheHitValid =
+            cacheValidation === "none" ? true : await this.validateCacheEntry(query, context, options, state, callStack, payload?.meta);
+          if (cacheHitValid) {
+            const completedAt = new Date(state.now());
+            try {
+              const table =
+                payload?.version === 2
+                  ? deserializeAnyTable(payload.table)
+                  : payload?.version === 1
+                    ? deserializeTable(payload.table)
+                    : payload?.table?.kind
+                      ? deserializeAnyTable(payload.table)
+                      : deserializeTable(payload.table);
+              const meta = deserializeQueryMeta(payload.meta, startedAt, completedAt, { key: cacheKey, hit: true });
+              options.onProgress?.({ type: "cache:hit", queryId: query.id, cacheKey });
+              return { table, meta };
+            } catch {
+              // Treat cache corruption as a miss so we can recover on the next refresh.
+              await this.cache.delete(cacheKey);
+            }
           }
+          options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
         } else {
           options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
         }
@@ -603,10 +632,189 @@ export class QueryEngine {
     if (!this.cache) return null;
 
     const signature = await this.buildQuerySignature(query, context, options, state, callStack);
-    if (signature && typeof signature === "object" && signature.$cacheable === false) {
-      return null;
-    }
+    if (signature && typeof signature === "object" && signature.$cacheable === false) return null;
     return `pq:v1:${hashValue(signature)}`;
+  }
+
+  /**
+   * Validate a cached query result against the current state of its sources.
+   *
+   * @private
+   * @param {Query} query
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @param {Set<string>} callStack
+   * @param {any} cachedMeta
+   * @returns {Promise<boolean>}
+   */
+  async validateCacheEntry(query, context, options, state, callStack, cachedMeta) {
+    // No metadata -> can't validate; force refresh.
+    if (!cachedMeta || !Array.isArray(cachedMeta.sources)) return false;
+
+    /** @type {Map<string, { sourceTimestampMs?: number, etag?: string }>} */
+    const cachedStates = new Map();
+    for (const source of cachedMeta.sources) {
+      if (!source || typeof source !== "object") continue;
+      // @ts-ignore - runtime indexing
+      const key = source.sourceKey;
+      if (typeof key !== "string" || key === "") continue;
+      // @ts-ignore - runtime indexing
+      const ts = source.sourceTimestampMs;
+      // @ts-ignore - runtime indexing
+      const etag = source.etag;
+      cachedStates.set(key, {
+        sourceTimestampMs: typeof ts === "number" ? ts : undefined,
+        etag: typeof etag === "string" ? etag : undefined,
+      });
+    }
+
+    /** @type {Map<string, { connector: any, request: any, credentials: unknown }>} */
+    const targets = new Map();
+    await this.collectSourceStateTargets(query, context, options, state, callStack, targets);
+
+    if (targets.size === 0) return true;
+    if (cachedStates.size === 0) return false;
+
+    for (const [sourceKey, target] of targets.entries()) {
+      const cached = cachedStates.get(sourceKey);
+      if (!cached) return false;
+
+      const probe = target.connector?.getSourceState;
+      if (typeof probe !== "function") continue;
+
+      /** @type {import("./connectors/types.js").SourceState} */
+      let currentState = {};
+      try {
+        currentState = await probe.call(target.connector, target.request, {
+          signal: options.signal,
+          credentials: target.credentials,
+          now: state.now,
+        });
+      } catch {
+        // If the probe fails (offline / server doesn't support HEAD), fall back to the cached result.
+        continue;
+      }
+
+      const currentTimestamp = currentState?.sourceTimestamp;
+      const currentEtag = currentState?.etag;
+      const currentHasState =
+        (currentTimestamp instanceof Date && !Number.isNaN(currentTimestamp.getTime())) ||
+        (typeof currentEtag === "string" && currentEtag !== "");
+      const cachedHasState =
+        (typeof cached.sourceTimestampMs === "number" && Number.isFinite(cached.sourceTimestampMs)) ||
+        (typeof cached.etag === "string" && cached.etag !== "");
+
+      // If we can see state now but it wasn't captured in the cached entry, force a refresh so future hits can validate.
+      if (!cachedHasState && currentHasState) return false;
+
+      if (typeof cached.etag === "string" && typeof currentEtag === "string" && cached.etag !== currentEtag) return false;
+      if (typeof cached.sourceTimestampMs === "number" && currentTimestamp instanceof Date) {
+        const currentMs = currentTimestamp.getTime();
+        if (!Number.isNaN(currentMs) && cached.sourceTimestampMs !== currentMs) return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * @private
+   * @param {Query} query
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @param {Set<string>} callStack
+   * @param {Map<string, { connector: any, request: any, credentials: unknown }>} out
+   */
+  async collectSourceStateTargets(query, context, options, state, callStack, out) {
+    const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
+    const steps = query.steps.slice(0, maxStepIndex + 1);
+
+    await this.collectSourceStateTargetsFromSource(query.source, context, options, state, callStack, out);
+
+    for (const step of steps) {
+      if (step.operation.type === "merge") {
+        const dep = context.queries?.[step.operation.rightQuery];
+        if (!dep) continue;
+        if (callStack.has(dep.id)) continue;
+        const nextStack = new Set(callStack);
+        nextStack.add(dep.id);
+        const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+        await this.collectSourceStateTargets(dep, context, depOptions, state, nextStack, out);
+      } else if (step.operation.type === "append") {
+        for (const id of step.operation.queries) {
+          const dep = context.queries?.[id];
+          if (!dep) continue;
+          if (callStack.has(dep.id)) continue;
+          const nextStack = new Set(callStack);
+          nextStack.add(dep.id);
+          const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+          await this.collectSourceStateTargets(dep, context, depOptions, state, nextStack, out);
+        }
+      }
+    }
+  }
+
+  /**
+   * @private
+   * @param {QuerySource} source
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @param {Set<string>} callStack
+   * @param {Map<string, { connector: any, request: any, credentials: unknown }>} out
+   */
+  async collectSourceStateTargetsFromSource(source, context, options, state, callStack, out) {
+    if (source.type === "query") {
+      const target = context.queries?.[source.queryId];
+      if (!target) return;
+      if (callStack.has(target.id)) return;
+      const nextStack = new Set(callStack);
+      nextStack.add(target.id);
+      const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+      await this.collectSourceStateTargets(target, context, depOptions, state, nextStack, out);
+      return;
+    }
+
+    if (source.type === "csv" || source.type === "json" || source.type === "parquet") {
+      const connector = this.connectors.get("file");
+      if (!connector || typeof connector.getSourceState !== "function") return;
+      const request =
+        source.type === "csv"
+          ? { format: "csv", path: source.path, csv: source.options ?? {} }
+          : source.type === "json"
+            ? { format: "json", path: source.path, json: { jsonPath: source.jsonPath ?? "" } }
+            : { format: "parquet", path: source.path };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("file", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+      if (!out.has(sourceKey)) out.set(sourceKey, { connector, request, credentials });
+      return;
+    }
+
+    if (source.type === "api") {
+      const connector = this.connectors.get("http");
+      if (!connector || typeof connector.getSourceState !== "function") return;
+      const request = { url: source.url, method: source.method, headers: source.headers ?? {}, responseType: "auto" };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("http", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+      if (!out.has(sourceKey)) out.set(sourceKey, { connector, request, credentials });
+      return;
+    }
+
+    if (source.type === "database") {
+      const connector = this.connectors.get("sql");
+      if (!connector || typeof connector.getSourceState !== "function") return;
+      const request = { connection: source.connection, sql: source.query };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("sql", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+      if (!out.has(sourceKey)) out.set(sourceKey, { connector, request, credentials });
+      return;
+    }
   }
 
   /**
@@ -706,7 +914,16 @@ export class QueryEngine {
       return { type: "range", hasHeaders: source.range.hasHeaders ?? true, values: source.range.values, $cacheable: true };
     }
     if (source.type === "table") {
-      return { type: "table", table: source.table, $cacheable: true };
+      const signature =
+        typeof context.getTableSignature === "function"
+          ? context.getTableSignature(source.table)
+          : context.tableSignatures
+            ? context.tableSignatures[source.table]
+            : undefined;
+      if (signature === undefined) {
+        return { type: "table", table: source.table, missingSignature: true, $cacheable: false };
+      }
+      return { type: "table", table: source.table, signature, $cacheable: true };
     }
 
     if (source.type === "csv" || source.type === "json" || source.type === "parquet") {
@@ -956,6 +1173,19 @@ export class QueryEngine {
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("file", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+
+      const cacheMode = options.cache?.mode ?? "use";
+      const cacheValidation = options.cache?.validation ?? "source-state";
+      /** @type {import("./connectors/types.js").SourceState} */
+      let sourceState = {};
+      if (this.cache && cacheMode !== "bypass" && cacheValidation === "source-state" && typeof connector.getSourceState === "function") {
+        try {
+          sourceState = await connector.getSourceState(request, { signal: options.signal, credentials, now: state.now });
+        } catch {
+          sourceState = {};
+        }
+      }
 
       // Prefer the Arrow-backed Parquet path when the host can provide raw bytes.
       // This avoids materializing row arrays and lets downstream steps stay columnar.
@@ -967,6 +1197,9 @@ export class QueryEngine {
         const table = new ArrowTableAdapter(arrowTable);
         const meta = {
           refreshedAt: new Date(state.now()),
+          sourceTimestamp: sourceState.sourceTimestamp,
+          etag: sourceState.etag,
+          sourceKey,
           schema: { columns: table.columns, inferred: true },
           rowCount: table.rowCount,
           rowCountEstimate: table.rowCount,
@@ -977,8 +1210,14 @@ export class QueryEngine {
       }
 
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      const meta = {
+        ...result.meta,
+        sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
+        etag: sourceState.etag ?? result.meta.etag,
+        sourceKey,
+      };
       options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
-      return { ...result, sources: [result.meta] };
+      return { table: result.table, meta, sources: [meta] };
     }
 
     if (source.type === "api") {
@@ -988,9 +1227,29 @@ export class QueryEngine {
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("http", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+
+      const cacheMode = options.cache?.mode ?? "use";
+      const cacheValidation = options.cache?.validation ?? "source-state";
+      /** @type {import("./connectors/types.js").SourceState} */
+      let sourceState = {};
+      if (this.cache && cacheMode !== "bypass" && cacheValidation === "source-state" && typeof connector.getSourceState === "function") {
+        try {
+          sourceState = await connector.getSourceState(request, { signal: options.signal, credentials, now: state.now });
+        } catch {
+          sourceState = {};
+        }
+      }
+
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      const meta = {
+        ...result.meta,
+        sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
+        etag: sourceState.etag ?? result.meta.etag,
+        sourceKey,
+      };
       options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
-      return { ...result, sources: [result.meta] };
+      return { table: result.table, meta, sources: [meta] };
     }
 
     if (source.type === "database") {
@@ -1000,9 +1259,29 @@ export class QueryEngine {
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("sql", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+
+      const cacheMode = options.cache?.mode ?? "use";
+      const cacheValidation = options.cache?.validation ?? "source-state";
+      /** @type {import("./connectors/types.js").SourceState} */
+      let sourceState = {};
+      if (this.cache && cacheMode !== "bypass" && cacheValidation === "source-state" && typeof connector.getSourceState === "function") {
+        try {
+          sourceState = await connector.getSourceState(request, { signal: options.signal, credentials, now: state.now });
+        } catch {
+          sourceState = {};
+        }
+      }
+
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      const meta = {
+        ...result.meta,
+        sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
+        etag: sourceState.etag ?? result.meta.etag,
+        sourceKey,
+      };
       options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
-      return { ...result, sources: [result.meta] };
+      return { table: result.table, meta, sources: [meta] };
     }
 
     /** @type {never} */
@@ -1040,12 +1319,34 @@ export class QueryEngine {
       normalizedSql = normalizePostgresPlaceholders(sql, params.length);
     }
     const request = { connection: source.connection, sql: normalizedSql, params };
+    const signatureRequest = { connection: source.connection, sql: source.query };
     await this.assertPermission(connector.permissionKind, { source, request }, state);
     const credentials = await this.getCredentials("sql", request, state);
+
+    const sourceKey = buildConnectorSourceKey(connector, signatureRequest);
+
+    const cacheMode = options.cache?.mode ?? "use";
+    const cacheValidation = options.cache?.validation ?? "source-state";
+    /** @type {import("./connectors/types.js").SourceState} */
+    let sourceState = {};
+    if (this.cache && cacheMode !== "bypass" && cacheValidation === "source-state" && typeof connector.getSourceState === "function") {
+      try {
+        sourceState = await connector.getSourceState(signatureRequest, { signal: options.signal, credentials, now: state.now });
+      } catch {
+        sourceState = {};
+      }
+    }
+
     const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+    const meta = {
+      ...result.meta,
+      sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
+      etag: sourceState.etag ?? result.meta.etag,
+      sourceKey,
+    };
 
     options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: "database" });
-    return { ...result, sources: [result.meta] };
+    return { table: result.table, meta, sources: [meta] };
   }
 
   /**
