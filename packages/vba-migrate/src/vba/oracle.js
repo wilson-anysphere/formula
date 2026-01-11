@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -132,7 +132,12 @@ async function ensureBuilt({ repoRoot, binPath }) {
       return;
     } catch {
       // Build the oracle CLI once. Subsequent invocations will use the binary directly.
-      await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], { cwd: repoRoot });
+      const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
+      await mkdir(cargoHome, { recursive: true });
+      await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], {
+        cwd: repoRoot,
+        env: { ...process.env, CARGO_HOME: cargoHome },
+      });
     }
   })();
   return buildPromise;

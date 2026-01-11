@@ -10,6 +10,10 @@ const __dirname = path.dirname(__filename);
 // `packages/engine/scripts/*` → repo root
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
 
+const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
+await mkdir(cargoHome, { recursive: true });
+const childEnv = { ...process.env, CARGO_HOME: cargoHome };
+
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
 const coreDir = path.join(repoRoot, "crates", "formula-core");
 const engineDir = path.join(repoRoot, "crates", "formula-engine");
@@ -183,7 +187,7 @@ if (outputExists) {
 
 // Validate `wasm-pack` is installed (only required when we need to rebuild).
 {
-  const check = spawnSync(wasmPackBin, ["--version"], { encoding: "utf8" });
+  const check = spawnSync(wasmPackBin, ["--version"], { encoding: "utf8", env: childEnv });
   if (check.error) {
     fatal(
       [
@@ -236,7 +240,7 @@ const result = spawnSync(
     // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
     "--no-pack"
   ],
-  { cwd: repoRoot, stdio: "inherit" }
+  { cwd: repoRoot, stdio: "inherit", env: childEnv }
 );
 
 if (result.error) {

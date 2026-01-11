@@ -14,16 +14,21 @@ const outputJsonPath = path.join(repoRoot, "shared", "functionCatalog.json");
 const outputModulePath = path.join(repoRoot, "shared", "functionCatalog.mjs");
 const outputTypesPath = path.join(repoRoot, "shared", "functionCatalog.mjs.d.ts");
 
+const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
+await mkdir(cargoHome, { recursive: true });
+
 /**
  * @param {string} command
  * @param {string[]} args
+ * @param {{ env?: NodeJS.ProcessEnv }} [options]
  * @returns {Promise<string>}
  */
-function run(command, args) {
+function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "inherit"],
+      env: options.env ?? process.env,
     });
 
     /** @type {Buffer[]} */
@@ -59,7 +64,9 @@ const raw = await run("cargo", [
   "formula-engine",
   "--bin",
   "function_catalog",
-]);
+], {
+  env: { ...process.env, CARGO_HOME: cargoHome },
+});
 
 /** @type {any} */
 let parsed;

@@ -1,11 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
+const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
+mkdirSync(cargoHome, { recursive: true });
 
 const outDir = path.join(crateDir, "pkg-node");
 const outPackageJsonPath = path.join(outDir, "package.json");
@@ -129,6 +131,7 @@ function buildWithWasmPack() {
       cwd: crateDir,
       env: {
         ...process.env,
+        CARGO_HOME: cargoHome,
         RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
         RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
       },
