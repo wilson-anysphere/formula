@@ -42,7 +42,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   });
 
   const hexColor = /#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\b/gi;
-  const rgbColor = /\brgb(a)?\s*\(/gi;
+  // Only flag *hardcoded* rgb/rgba literals (e.g. `rgb(0,0,0)`), not references
+  // in parsing utilities (regexes) or template strings.
+  const rgbColor = /\brgb(a)?\s*\(\s*[\d.]/gi;
 
   /** @type {{ file: string, match: string }[]} */
   const violations = [];
