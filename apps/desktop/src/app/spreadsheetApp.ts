@@ -898,7 +898,11 @@ export class SpreadsheetApp {
     );
     this.ensureActiveCellVisible();
     const activeRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
-    const didScroll = activeRange ? this.scrollRangeIntoView(activeRange) : this.scrollCellIntoView(this.selection.active);
+    const didScrollRange = activeRange ? this.scrollRangeIntoView(activeRange) : false;
+    // Even if the range is too large to fit in the viewport, the active cell should never
+    // become "lost" offscreen.
+    const didScrollCell = this.scrollCellIntoView(this.selection.active);
+    const didScroll = didScrollRange || didScrollCell;
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
