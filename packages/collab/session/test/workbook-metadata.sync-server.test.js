@@ -7,7 +7,11 @@ import { randomUUID } from "node:crypto";
 
 import WebSocket from "ws";
 
-import { MetadataManager, NamedRangeManager, SheetManager } from "@formula/collab-workbook";
+import {
+  createMetadataManagerForSession,
+  createNamedRangeManagerForSession,
+  createSheetManagerForSession,
+} from "@formula/collab-workbook";
 
 import { createCollabSession } from "../src/index.ts";
 import {
@@ -82,12 +86,9 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
   });
   await sessionB.whenSynced();
 
-  const sheetsA = new SheetManager({ doc: sessionA.doc, transact: (fn) => sessionA.doc.transact(fn, sessionA.origin) });
-  const namedRangesA = new NamedRangeManager({
-    doc: sessionA.doc,
-    transact: (fn) => sessionA.doc.transact(fn, sessionA.origin),
-  });
-  const metadataA = new MetadataManager({ doc: sessionA.doc, transact: (fn) => sessionA.doc.transact(fn, sessionA.origin) });
+  const sheetsA = createSheetManagerForSession(sessionA);
+  const namedRangesA = createNamedRangeManagerForSession(sessionA);
+  const metadataA = createMetadataManagerForSession(sessionA);
 
   sheetsA.addSheet({ id: "Sheet2", name: "Budget" });
   sheetsA.moveSheet("Sheet2", 0);

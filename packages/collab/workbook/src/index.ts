@@ -192,3 +192,24 @@ export class MetadataManager {
     });
   }
 }
+
+export function createSheetManagerForSession(session: {
+  doc: Y.Doc;
+  transactLocal: (fn: () => void) => void;
+}): SheetManager {
+  return new SheetManager({ doc: session.doc, transact: (fn) => session.transactLocal(fn) });
+}
+
+export function createNamedRangeManagerForSession(session: {
+  doc: Y.Doc;
+  transactLocal: (fn: () => void) => void;
+}): NamedRangeManager {
+  return new NamedRangeManager({ doc: session.doc, transact: (fn) => session.transactLocal(fn) });
+}
+
+export function createMetadataManagerForSession(session: {
+  doc: Y.Doc;
+  transactLocal: (fn: () => void) => void;
+}): MetadataManager {
+  return new MetadataManager({ doc: session.doc, transact: (fn) => session.transactLocal(fn) });
+}

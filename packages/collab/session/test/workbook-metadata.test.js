@@ -4,7 +4,11 @@ import assert from "node:assert/strict";
 import * as Y from "yjs";
 
 import { REMOTE_ORIGIN } from "@formula/collab-undo";
-import { MetadataManager, NamedRangeManager, SheetManager } from "@formula/collab-workbook";
+import {
+  createMetadataManagerForSession,
+  createNamedRangeManagerForSession,
+  createSheetManagerForSession,
+} from "@formula/collab-workbook";
 
 import { createCollabSession } from "../src/index.ts";
 
@@ -52,9 +56,9 @@ test("CollabSession workbook metadata: sheets + namedRanges sync and local undo 
   const sessionA = createCollabSession({ doc: docA, undo: {} });
   const sessionB = createCollabSession({ doc: docB, undo: {} });
 
-  const sheetsA = new SheetManager({ doc: docA, transact: sessionA.undo?.transact });
-  const namedRangesA = new NamedRangeManager({ doc: docA, transact: sessionA.undo?.transact });
-  const metadataA = new MetadataManager({ doc: docA, transact: sessionA.undo?.transact });
+  const sheetsA = createSheetManagerForSession(sessionA);
+  const namedRangesA = createNamedRangeManagerForSession(sessionA);
+  const metadataA = createMetadataManagerForSession(sessionA);
 
   // Default schema initialization should ensure at least one sheet.
   assert.equal(sessionA.sheets.length >= 1, true);
