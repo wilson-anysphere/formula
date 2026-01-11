@@ -80,6 +80,7 @@ impl XlsxPackage {
         &self,
         part_name: &str,
     ) -> Result<Option<PivotCacheDefinition>, XlsxError> {
+        let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
         let Some(bytes) = self.part(part_name) else {
             return Ok(None);
         };
@@ -117,6 +118,7 @@ impl XlsxDocument {
         &self,
         part_name: &str,
     ) -> Result<Option<PivotCacheDefinition>, XlsxError> {
+        let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
         let Some(bytes) = self.parts().get(part_name) else {
             return Ok(None);
         };
@@ -203,6 +205,18 @@ fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<
                 name = Some(value);
             }
         }
+
+        // Some non-standard producers encode the sheet in the ref (e.g. `Sheet1!A1:C5`)
+        // instead of using the `sheet="..."` attribute.
+        if sheet.is_none() {
+            if let Some(ref_value) = reference.as_deref() {
+                if let Some((parsed_sheet, parsed_ref)) = split_sheet_ref(ref_value) {
+                    sheet = Some(parsed_sheet);
+                    reference = Some(parsed_ref);
+                }
+            }
+        }
+
         def.worksheet_source_sheet = sheet;
         def.worksheet_source_ref = reference.or(name);
     } else if tag.eq_ignore_ascii_case(b"cacheField") {
@@ -251,6 +265,22 @@ fn parse_bool(value: &str) -> Option<bool> {
         _ if value.eq_ignore_ascii_case("false") => Some(false),
         _ => None,
     }
+}
+
+fn split_sheet_ref(reference: &str) -> Option<(String, String)> {
+    let (sheet_part, ref_part) = reference.rsplit_once('!')?;
+    if ref_part.is_empty() {
+        return None;
+    }
+
+    let sheet_part = sheet_part.trim();
+    let sheet_part = if let Some(stripped) = sheet_part.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+        stripped.replace("''", "'")
+    } else {
+        sheet_part.to_string()
+    };
+
+    Some((sheet_part, ref_part.to_string()))
 }
 
 #[cfg(test)]
@@ -375,5 +405,20 @@ mod tests {
         let def = parse_pivot_cache_definition(xml).expect("parse");
         assert_eq!(def.cache_source_type, PivotCacheSourceType::External);
         assert_eq!(def.cache_source_connection_id, Some(42));
+    }
+
+    #[test]
+    fn parses_sheet_from_ref_when_sheet_attr_missing() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheSource type="worksheet">
+    <worksheetSource ref="'Sheet 1'!A1:C5"/>
+  </cacheSource>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
+        assert_eq!(def.worksheet_source_sheet.as_deref(), Some("Sheet 1"));
+        assert_eq!(def.worksheet_source_ref.as_deref(), Some("A1:C5"));
     }
 }
