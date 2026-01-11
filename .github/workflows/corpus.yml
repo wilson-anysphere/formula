@@ -47,7 +47,8 @@ jobs:
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/public \
             --out-dir tools/corpus/out/public \
-            --expectations tools/corpus/public/expectations.json
+            --expectations tools/corpus/public/expectations.json \
+            --leak-scan
       - name: Generate dashboard
         run: python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
       - name: Publish summary
