@@ -33,6 +33,10 @@ export type SelectionRect = {
   endCol: number;
 };
 
+function selectionKey(selection: SelectionRect): string {
+  return `${selection.sheetId}:${selection.startRow},${selection.startCol}-${selection.endRow},${selection.endCol}`;
+}
+
 type CellState = { value: unknown; formula: string | null };
 type CellDelta = {
   sheetId: string;
@@ -219,6 +223,7 @@ export class MacroEventBridge {
   private selectionChangeTimer: ReturnType<typeof setTimeout> | null = null;
 
   private pendingSheetChanges = new Map<string, SelectionRect>();
+  private pendingSheetContexts = new Map<string, SelectionRect>();
   private pendingSelection: SelectionRect | null = null;
   private lastSelectionKey: string | null = null;
 
@@ -252,6 +257,11 @@ export class MacroEventBridge {
 
   start(): void {
     if (this.unsubscribeDocChange) return;
+    try {
+      this.lastSelectionKey = selectionKey(this.getSelection());
+    } catch {
+      // Ignore selection lookup failures (tests/non-UI environments may stub this differently).
+    }
     this.unsubscribeDocChange = this.document.on("change", (payload: DocumentChangePayload) => {
       this.onDocumentChange(payload);
     });
@@ -274,12 +284,13 @@ export class MacroEventBridge {
     this.worksheetChangeTimer = null;
     this.selectionChangeTimer = null;
     this.pendingSheetChanges.clear();
+    this.pendingSheetContexts.clear();
     this.pendingSelection = null;
     this.lastSelectionKey = null;
   }
 
   notifySelectionChanged(selection: SelectionRect): void {
-    const key = `${selection.sheetId}:${selection.startRow},${selection.startCol}-${selection.endRow},${selection.endCol}`;
+    const key = selectionKey(selection);
     if (key === this.lastSelectionKey) return;
     this.lastSelectionKey = key;
 
@@ -354,6 +365,13 @@ export class MacroEventBridge {
     const deltas = Array.isArray(payload.deltas) ? payload.deltas : [];
     if (deltas.length === 0) return;
 
+    let selectionContext: SelectionRect | null = null;
+    try {
+      selectionContext = this.getSelection();
+    } catch {
+      selectionContext = null;
+    }
+
     for (const delta of deltas) {
       if (!delta || typeof delta !== "object") continue;
       if (inputEquals(delta.before, delta.after)) continue;
@@ -377,6 +395,9 @@ export class MacroEventBridge {
           }
         : { sheetId, startRow: row, startCol: col, endRow: row, endCol: col };
       this.pendingSheetChanges.set(sheetId, next);
+      if (selectionContext) {
+        this.pendingSheetContexts.set(sheetId, selectionContext);
+      }
     }
 
     if (this.pendingSheetChanges.size === 0) return;
@@ -385,11 +406,21 @@ export class MacroEventBridge {
     this.worksheetChangeTimer = globalThis.setTimeout(() => {
       this.worksheetChangeTimer = null;
       const batch = new Map(this.pendingSheetChanges);
+      const contexts = new Map(this.pendingSheetContexts);
       this.pendingSheetChanges.clear();
+      this.pendingSheetContexts.clear();
       if (batch.size === 0) return;
       this.enqueue(async () => {
         for (const rect of batch.values()) {
-          await this.fireWorksheetChange(rect);
+          let ctx = contexts.get(rect.sheetId) ?? null;
+          if (!ctx) {
+            try {
+              ctx = this.getSelection();
+            } catch {
+              ctx = rect;
+            }
+          }
+          await this.fireWorksheetChange(rect, ctx);
         }
       });
     }, this.debounceWorksheetMs);
@@ -424,8 +455,7 @@ export class MacroEventBridge {
     }
   }
 
-  private async fireWorksheetChange(rect: SelectionRect): Promise<void> {
-    const selection = this.getSelection();
+  private async fireWorksheetChange(rect: SelectionRect, selection: SelectionRect): Promise<void> {
     await this.fireMacroEvent({
       kind: "Worksheet_Change",
       cmd: "fire_worksheet_change",

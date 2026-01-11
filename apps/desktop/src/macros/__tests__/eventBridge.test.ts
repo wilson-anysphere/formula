@@ -19,18 +19,24 @@ describe("MacroEventBridge", () => {
     });
 
     const doc = new DocumentController();
+    let selection = { sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
     const bridge = new MacroEventBridge({
       workbookId: "local-workbook",
       document: doc,
       invoke,
       drainBackendSync: async () => {},
-      getSelection: () => ({ sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 }),
+      getSelection: () => selection,
       debounceWorksheetMs: 200,
     });
     bridge.start();
 
     doc.setCellValue("Sheet1", { row: 1, col: 2 }, 1);
     doc.setCellValue("Sheet1", { row: 3, col: 1 }, 2);
+
+    // Simulate the user changing selection after editing but before the debounced
+    // Worksheet_Change macro executes. We should still run with the selection context
+    // captured at edit time.
+    selection = { sheetId: "Sheet1", startRow: 9, startCol: 9, endRow: 9, endCol: 9 };
 
     await vi.advanceTimersByTimeAsync(250);
     await bridge.whenIdle();
@@ -43,6 +49,15 @@ describe("MacroEventBridge", () => {
       start_col: 1,
       end_row: 3,
       end_col: 2,
+    });
+
+    const ctxCalls = calls.filter((c) => c.cmd === "set_macro_ui_context");
+    expect(ctxCalls).toHaveLength(1);
+    expect(ctxCalls[0]?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      active_row: 0,
+      active_col: 0,
+      selection: { start_row: 0, start_col: 0, end_row: 0, end_col: 0 },
     });
 
     vi.useRealTimers();
