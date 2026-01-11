@@ -114,6 +114,33 @@ impl DataValidation {
             *formula2 = crate::rewrite_sheet_names_in_formula(formula2, old_name, new_name);
         }
     }
+
+    pub(crate) fn invalidate_deleted_sheet_references(
+        &mut self,
+        deleted_sheet: &str,
+        sheet_order: &[String],
+    ) {
+        // For list validations, `formula1` can contain a literal list (e.g. `"A,B,C"`). Preserve
+        // literal lists unchanged while still rewriting formula-like list sources.
+        let formula1_is_literal_list =
+            self.kind == DataValidationKind::List && parse_list_constant(&self.formula1).is_some();
+
+        if !formula1_is_literal_list && !self.formula1.is_empty() {
+            self.formula1 = crate::rewrite_deleted_sheet_references_in_formula(
+                &self.formula1,
+                deleted_sheet,
+                sheet_order,
+            );
+        }
+
+        if let Some(formula2) = self.formula2.as_mut() {
+            *formula2 = crate::rewrite_deleted_sheet_references_in_formula(
+                formula2,
+                deleted_sheet,
+                sheet_order,
+            );
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

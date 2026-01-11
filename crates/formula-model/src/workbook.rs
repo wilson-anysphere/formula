@@ -9,9 +9,10 @@ use crate::names::{
 };
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::{
-    rewrite_sheet_names_in_formula, CalcSettings, DateSystem, ManualPageBreaks, PageSetup,
-    PrintTitles, Range, SheetPrintSettings, SheetVisibility, Style, StyleTable, TabColor, Table,
-    ThemePalette, WorkbookPrintSettings, WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
+    rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula, CalcSettings,
+    DateSystem, ManualPageBreaks, PageSetup, PrintTitles, Range, SheetPrintSettings,
+    SheetVisibility, Style, StyleTable, TabColor, Table, ThemePalette, WorkbookPrintSettings,
+    WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
 };
 
 /// Identifier for a workbook.
@@ -103,6 +104,24 @@ impl From<SheetNameError> for RenameSheetError {
         RenameSheetError::InvalidName(err)
     }
 }
+
+/// Errors raised when deleting a worksheet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeleteSheetError {
+    SheetNotFound,
+    CannotDeleteLastSheet,
+}
+
+impl fmt::Display for DeleteSheetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeleteSheetError::SheetNotFound => f.write_str("sheet not found"),
+            DeleteSheetError::CannotDeleteLastSheet => f.write_str("cannot delete last sheet"),
+        }
+    }
+}
+
+impl std::error::Error for DeleteSheetError {}
 
 impl Default for Workbook {
     fn default() -> Self {
@@ -256,6 +275,91 @@ impl Workbook {
             if crate::formula_rewrite::sheet_name_eq_case_insensitive(&settings.sheet_name, &old_name) {
                 settings.sheet_name = new_name.to_string();
             }
+        }
+
+        Ok(())
+    }
+
+    /// Delete a worksheet, rewriting formulas that reference it (Excel-like).
+    ///
+    /// This preserves all remaining sheets' `xlsx_sheet_id` / `xlsx_rel_id` values; any
+    /// renumbering required for serialization is handled by the XLSX writer.
+    pub fn delete_sheet(&mut self, id: WorksheetId) -> Result<(), DeleteSheetError> {
+        let sheet_index = self
+            .sheets
+            .iter()
+            .position(|s| s.id == id)
+            .ok_or(DeleteSheetError::SheetNotFound)?;
+
+        if self.sheets.len() <= 1 {
+            return Err(DeleteSheetError::CannotDeleteLastSheet);
+        }
+
+        // Capture the pre-delete sheet order for 3D reference adjustment.
+        let sheet_order: Vec<String> = self.sheets.iter().map(|s| s.name.clone()).collect();
+        let deleted_name = self.sheets[sheet_index].name.clone();
+
+        // If the deleted sheet was active, Excel selects the nearest neighbor tab.
+        let new_active_sheet_id = if self.view.active_sheet_id == Some(id) {
+            if sheet_index + 1 < self.sheets.len() {
+                Some(self.sheets[sheet_index + 1].id)
+            } else if sheet_index > 0 {
+                Some(self.sheets[sheet_index - 1].id)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        self.sheets.remove(sheet_index);
+
+        if new_active_sheet_id.is_some() {
+            self.view.active_sheet_id = new_active_sheet_id;
+        }
+
+        // Drop any names scoped to the deleted worksheet (Excel removes them).
+        self.defined_names
+            .retain(|name| name.scope != DefinedNameScope::Sheet(id));
+
+        // Drop print settings for the deleted worksheet.
+        self.print_settings
+            .sheets
+            .retain(|s| !crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name));
+        self.sort_print_settings_by_sheet_order();
+
+        for sheet in &mut self.sheets {
+            for (_, cell) in sheet.iter_cells_mut() {
+                if let Some(formula) = cell.formula.as_mut() {
+                    *formula = rewrite_deleted_sheet_references_in_formula(
+                        formula,
+                        &deleted_name,
+                        &sheet_order,
+                    );
+                }
+            }
+
+            for table in &mut sheet.tables {
+                table.invalidate_deleted_sheet_references(&deleted_name, &sheet_order);
+            }
+
+            for rule in &mut sheet.conditional_formatting {
+                rule.invalidate_deleted_sheet_references(&deleted_name, &sheet_order);
+            }
+
+            for assignment in &mut sheet.data_validations {
+                assignment
+                    .validation
+                    .invalidate_deleted_sheet_references(&deleted_name, &sheet_order);
+            }
+        }
+
+        for name in &mut self.defined_names {
+            name.refers_to = rewrite_deleted_sheet_references_in_formula(
+                &name.refers_to,
+                &deleted_name,
+                &sheet_order,
+            );
         }
 
         Ok(())

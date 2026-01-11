@@ -75,6 +75,29 @@ impl Table {
         }
     }
 
+    pub(crate) fn invalidate_deleted_sheet_references(
+        &mut self,
+        deleted_sheet: &str,
+        sheet_order: &[String],
+    ) {
+        for column in &mut self.columns {
+            if let Some(formula) = column.formula.as_mut() {
+                *formula = crate::rewrite_deleted_sheet_references_in_formula(
+                    formula,
+                    deleted_sheet,
+                    sheet_order,
+                );
+            }
+            if let Some(formula) = column.totals_formula.as_mut() {
+                *formula = crate::rewrite_deleted_sheet_references_in_formula(
+                    formula,
+                    deleted_sheet,
+                    sheet_order,
+                );
+            }
+        }
+    }
+
     pub fn data_range(&self) -> Option<Range> {
         let r = self.range;
         let start_row = r.start.row + self.header_row_count;

@@ -48,7 +48,9 @@ pub use data_validation::*;
 pub use date_system::DateSystem;
 pub use display::{format_cell_display, format_cell_display_in_workbook, CellDisplay};
 pub use error::ErrorValue;
-pub use formula_rewrite::rewrite_sheet_names_in_formula;
+pub use formula_rewrite::{
+    rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
+};
 pub use formula_text::{display_formula_text, normalize_formula_text};
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};
 pub use sheet_name::{validate_sheet_name, SheetNameError, EXCEL_MAX_SHEET_NAME_LEN};
@@ -85,7 +87,7 @@ pub use view::{
     a1_to_cell, cell_to_a1, format_sqref, parse_sqref, SheetPane, SheetSelection, SheetView,
     SqrefParseError, WorkbookView, WorkbookWindow, WorkbookWindowState,
 };
-pub use workbook::{RenameSheetError, Workbook, WorkbookId};
+pub use workbook::{DeleteSheetError, RenameSheetError, Workbook, WorkbookId};
 pub use worksheet::{
     ColProperties, RangeBatch, RowProperties, SheetVisibility, TabColor, Worksheet, WorksheetId,
 };

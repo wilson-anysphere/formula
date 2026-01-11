@@ -53,6 +53,16 @@ impl Cfvo {
         };
         *value = crate::rewrite_sheet_names_in_formula(value, old_name, new_name);
     }
+
+    fn invalidate_deleted_sheet_references(&mut self, deleted_sheet: &str, sheet_order: &[String]) {
+        if self.type_ != CfvoType::Formula {
+            return;
+        }
+        let Some(value) = self.value.as_mut() else {
+            return;
+        };
+        *value = crate::rewrite_deleted_sheet_references_in_formula(value, deleted_sheet, sheet_order);
+    }
 }
 
 pub fn parse_argb_hex_color(s: &str) -> Option<Color> {
@@ -120,6 +130,13 @@ impl DataBarRule {
         self.min.rewrite_sheet_references(old_name, new_name);
         self.max.rewrite_sheet_references(old_name, new_name);
     }
+
+    fn invalidate_deleted_sheet_references(&mut self, deleted_sheet: &str, sheet_order: &[String]) {
+        self.min
+            .invalidate_deleted_sheet_references(deleted_sheet, sheet_order);
+        self.max
+            .invalidate_deleted_sheet_references(deleted_sheet, sheet_order);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -132,6 +149,12 @@ impl ColorScaleRule {
     fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         for cfvo in &mut self.cfvos {
             cfvo.rewrite_sheet_references(old_name, new_name);
+        }
+    }
+
+    fn invalidate_deleted_sheet_references(&mut self, deleted_sheet: &str, sheet_order: &[String]) {
+        for cfvo in &mut self.cfvos {
+            cfvo.invalidate_deleted_sheet_references(deleted_sheet, sheet_order);
         }
     }
 }
@@ -178,6 +201,12 @@ impl IconSetRule {
     fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         for cfvo in &mut self.cfvos {
             cfvo.rewrite_sheet_references(old_name, new_name);
+        }
+    }
+
+    fn invalidate_deleted_sheet_references(&mut self, deleted_sheet: &str, sheet_order: &[String]) {
+        for cfvo in &mut self.cfvos {
+            cfvo.invalidate_deleted_sheet_references(deleted_sheet, sheet_order);
         }
     }
 }
@@ -239,6 +268,41 @@ impl CfRuleKind {
             | CfRuleKind::Unsupported { .. } => {}
         }
     }
+
+    pub(crate) fn invalidate_deleted_sheet_references(
+        &mut self,
+        deleted_sheet: &str,
+        sheet_order: &[String],
+    ) {
+        match self {
+            CfRuleKind::CellIs { formulas, .. } => {
+                for formula in formulas {
+                    *formula = crate::rewrite_deleted_sheet_references_in_formula(
+                        formula,
+                        deleted_sheet,
+                        sheet_order,
+                    );
+                }
+            }
+            CfRuleKind::Expression { formula } => {
+                *formula = crate::rewrite_deleted_sheet_references_in_formula(
+                    formula,
+                    deleted_sheet,
+                    sheet_order,
+                );
+            }
+            CfRuleKind::DataBar(rule) => {
+                rule.invalidate_deleted_sheet_references(deleted_sheet, sheet_order)
+            }
+            CfRuleKind::ColorScale(rule) => {
+                rule.invalidate_deleted_sheet_references(deleted_sheet, sheet_order)
+            }
+            CfRuleKind::IconSet(rule) => rule.invalidate_deleted_sheet_references(deleted_sheet, sheet_order),
+            CfRuleKind::TopBottom(_)
+            | CfRuleKind::UniqueDuplicate(_)
+            | CfRuleKind::Unsupported { .. } => {}
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -261,6 +325,15 @@ impl CfRule {
 
     pub(crate) fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         self.kind.rewrite_sheet_references(old_name, new_name);
+    }
+
+    pub(crate) fn invalidate_deleted_sheet_references(
+        &mut self,
+        deleted_sheet: &str,
+        sheet_order: &[String],
+    ) {
+        self.kind
+            .invalidate_deleted_sheet_references(deleted_sheet, sheet_order);
     }
 }
 

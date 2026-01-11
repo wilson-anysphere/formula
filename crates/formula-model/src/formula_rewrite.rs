@@ -172,6 +172,92 @@ fn rewrite_sheet_spec(spec: &str, old_name: &str, new_name: &str) -> Option<Stri
     ))
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DeleteSheetSpecRewrite {
+    Unchanged,
+    Adjusted(String),
+    Invalidate,
+}
+
+fn sheet_index_in_order(sheet_order: &[String], name: &str) -> Option<usize> {
+    sheet_order
+        .iter()
+        .position(|sheet_name| sheet_name_eq_case_insensitive(sheet_name, name))
+}
+
+fn rewrite_sheet_spec_for_delete(
+    spec: &str,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> DeleteSheetSpecRewrite {
+    let (workbook_prefix, remainder) = split_workbook_prefix(spec);
+    let mut parts = remainder.splitn(2, ':');
+    let start = parts.next().unwrap_or_default();
+    let end = parts.next();
+
+    let Some(end) = end else {
+        return if sheet_name_eq_case_insensitive(start, deleted_sheet) {
+            DeleteSheetSpecRewrite::Invalidate
+        } else {
+            DeleteSheetSpecRewrite::Unchanged
+        };
+    };
+
+    let start_matches = sheet_name_eq_case_insensitive(start, deleted_sheet);
+    let end_matches = sheet_name_eq_case_insensitive(end, deleted_sheet);
+
+    if !start_matches && !end_matches {
+        return DeleteSheetSpecRewrite::Unchanged;
+    }
+
+    let Some(start_idx) = sheet_index_in_order(sheet_order, start) else {
+        return DeleteSheetSpecRewrite::Invalidate;
+    };
+    let Some(end_idx) = sheet_index_in_order(sheet_order, end) else {
+        return DeleteSheetSpecRewrite::Invalidate;
+    };
+
+    // The span references only the deleted sheet.
+    if start_idx == end_idx {
+        return DeleteSheetSpecRewrite::Invalidate;
+    }
+
+    let dir = if end_idx > start_idx { 1isize } else { -1isize };
+    let mut new_start_idx = start_idx as isize;
+    let mut new_end_idx = end_idx as isize;
+
+    // When deleting a 3D boundary, Excel shifts it one sheet toward the other boundary.
+    if start_matches {
+        new_start_idx += dir;
+    }
+    if end_matches {
+        new_end_idx -= dir;
+    }
+
+    let Some(new_start) = new_start_idx
+        .try_into()
+        .ok()
+        .and_then(|idx: usize| sheet_order.get(idx))
+    else {
+        return DeleteSheetSpecRewrite::Invalidate;
+    };
+    let Some(new_end) = new_end_idx
+        .try_into()
+        .ok()
+        .and_then(|idx: usize| sheet_order.get(idx))
+    else {
+        return DeleteSheetSpecRewrite::Invalidate;
+    };
+
+    let end = (!sheet_name_eq_case_insensitive(new_start, new_end)).then_some(new_end.as_str());
+
+    DeleteSheetSpecRewrite::Adjusted(format_sheet_reference(
+        workbook_prefix,
+        new_start.as_str(),
+        end,
+    ))
+}
+
 fn parse_quoted_sheet_spec(formula: &str, start: usize) -> Option<(usize, &str, String)> {
     let bytes = formula.as_bytes();
     if bytes.get(start) != Some(&b'\'') {
@@ -287,6 +373,86 @@ fn parse_error_literal(formula: &str, start: usize) -> Option<(usize, &str)> {
     Some((i, &formula[start..i]))
 }
 
+fn sheet_ref_tail_end(formula: &str, start: usize) -> usize {
+    let bytes = formula.as_bytes();
+    let mut i = start;
+    let mut bracket_depth: u32 = 0;
+    let mut paren_depth: u32 = 0;
+    let mut in_string = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if in_string {
+            if b == b'"' {
+                if bytes.get(i + 1) == Some(&b'"') {
+                    i += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'"' => {
+                in_string = true;
+                i += 1;
+            }
+            b'[' => {
+                bracket_depth = bracket_depth.saturating_add(1);
+                i += 1;
+            }
+            b']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                i += 1;
+            }
+            b'(' => {
+                paren_depth = paren_depth.saturating_add(1);
+                i += 1;
+            }
+            b')' => {
+                if paren_depth == 0 {
+                    break;
+                }
+                paren_depth = paren_depth.saturating_sub(1);
+                i += 1;
+            }
+            _ => {
+                if bracket_depth == 0
+                    && paren_depth == 0
+                    && matches!(
+                        b,
+                        b' ' | b'\t'
+                            | b'\n'
+                            | b'\r'
+                            | b','
+                            | b';'
+                            | b'+'
+                            | b'-'
+                            | b'*'
+                            | b'/'
+                            | b'^'
+                            | b'&'
+                            | b'='
+                            | b'<'
+                            | b'>'
+                            | b'{'
+                            | b'}'
+                            | b'%'
+                    )
+                {
+                    break;
+                }
+                i += 1;
+            }
+        }
+    }
+
+    i
+}
+
 /// Rewrite all sheet references inside a formula when a sheet is renamed.
 ///
 /// This is intentionally conservative: it only rewrites tokens that *parse* as
@@ -354,6 +520,113 @@ pub fn rewrite_sheet_names_in_formula(formula: &str, old_name: &str, new_name: &
             }
             i = next;
             continue;
+        }
+
+        let ch = formula[i..]
+            .chars()
+            .next()
+            .expect("i always at char boundary");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+
+    out
+}
+
+/// Rewrite sheet references inside `formula` when `deleted_sheet` is removed.
+///
+/// Excel treats direct references to a deleted sheet (`Sheet1!A1`) as `#REF!`.
+/// For 3D references (`Sheet1:Sheet3!A1`), the span is adjusted using the sheet
+/// order captured in `sheet_order`.
+///
+/// This routine is intentionally conservative: it only rewrites tokens that
+/// parse as sheet references and it does not touch string literals.
+pub fn rewrite_deleted_sheet_references_in_formula(
+    formula: &str,
+    deleted_sheet: &str,
+    sheet_order: &[String],
+) -> String {
+    let mut out = String::with_capacity(formula.len());
+    let mut i = 0;
+    let mut in_string = false;
+    let bytes = formula.as_bytes();
+
+    while i < bytes.len() {
+        if in_string {
+            let ch = formula[i..]
+                .chars()
+                .next()
+                .expect("i always at char boundary");
+            out.push(ch);
+            if ch == '"' {
+                if bytes.get(i + 1) == Some(&b'"') {
+                    out.push('"');
+                    i += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            i += ch.len_utf8();
+            continue;
+        }
+
+        if bytes[i] == b'"' {
+            in_string = true;
+            out.push('"');
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'#' {
+            if let Some((next, raw)) = parse_error_literal(formula, i) {
+                out.push_str(raw);
+                i = next;
+                continue;
+            }
+        }
+
+        if bytes[i] == b'\'' {
+            if let Some((next, raw, sheet_spec)) = parse_quoted_sheet_spec(formula, i) {
+                match rewrite_sheet_spec_for_delete(&sheet_spec, deleted_sheet, sheet_order) {
+                    DeleteSheetSpecRewrite::Unchanged => {
+                        out.push_str(raw);
+                        i = next;
+                        continue;
+                    }
+                    DeleteSheetSpecRewrite::Adjusted(rewritten) => {
+                        out.push_str(&rewritten);
+                        out.push('!');
+                        i = next;
+                        continue;
+                    }
+                    DeleteSheetSpecRewrite::Invalidate => {
+                        out.push_str("#REF!");
+                        i = sheet_ref_tail_end(formula, next);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        if let Some((next, raw, sheet_spec)) = parse_unquoted_sheet_spec(formula, i) {
+            match rewrite_sheet_spec_for_delete(sheet_spec, deleted_sheet, sheet_order) {
+                DeleteSheetSpecRewrite::Unchanged => {
+                    out.push_str(raw);
+                    i = next;
+                    continue;
+                }
+                DeleteSheetSpecRewrite::Adjusted(rewritten) => {
+                    out.push_str(&rewritten);
+                    out.push('!');
+                    i = next;
+                    continue;
+                }
+                DeleteSheetSpecRewrite::Invalidate => {
+                    out.push_str("#REF!");
+                    i = sheet_ref_tail_end(formula, next);
+                    continue;
+                }
+            }
         }
 
         let ch = formula[i..]
@@ -584,5 +857,31 @@ mod tests {
             let rewritten = rewrite_sheet_names_in_formula(&formula, &old_name, &new_name);
             assert_eq!(rewritten, expected);
         }
+    }
+
+    #[test]
+    fn delete_rewrites_simple_sheet_ref() {
+        let order = vec!["Sheet1".to_string(), "Sheet2".to_string()];
+        assert_eq!(
+            rewrite_deleted_sheet_references_in_formula("=Sheet1!A1", "Sheet1", &order),
+            "=#REF!"
+        );
+    }
+
+    #[test]
+    fn delete_adjusts_3d_boundary() {
+        let order = vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ];
+        assert_eq!(
+            rewrite_deleted_sheet_references_in_formula("=SUM(Sheet1:Sheet3!A1)", "Sheet1", &order),
+            "=SUM(Sheet2:Sheet3!A1)"
+        );
+        assert_eq!(
+            rewrite_deleted_sheet_references_in_formula("=SUM(Sheet1:Sheet3!A1)", "Sheet3", &order),
+            "=SUM(Sheet1:Sheet2!A1)"
+        );
     }
 }
