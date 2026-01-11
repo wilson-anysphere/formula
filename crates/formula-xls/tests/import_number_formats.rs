@@ -128,6 +128,21 @@ fn prefers_anchor_xf_when_merged_cells_have_conflicting_formats() {
 }
 
 #[test]
+fn warns_on_out_of_range_xf_indices() {
+    let bytes = xls_fixture_builder::build_out_of_range_xf_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("skipped 1 cells in sheet `OutOfRangeXF` with out-of-range XF indices")),
+        "missing out-of-range XF warning; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
 fn date_system_affects_rendered_dates() {
     fn render_a3(result: &formula_xls::XlsImportResult) -> String {
         let sheet = result
