@@ -33,12 +33,53 @@ async function main(): Promise<void> {
   const app = buildApp({ db: pool, config });
 
   if (config.retentionSweepIntervalMs) {
+    const syncServerInternalUrl = config.syncServerInternalUrl;
+    const syncServerInternalAdminToken = config.syncServerInternalAdminToken;
+    const onDocumentPurged =
+      syncServerInternalUrl && syncServerInternalAdminToken
+        ? async ({ orgId, docId }: { orgId: string; docId: string }) => {
+            const purgeUrl = new URL(
+              `/internal/docs/${encodeURIComponent(docId)}`,
+              syncServerInternalUrl
+            ).toString();
+
+            let res: Response;
+            try {
+              res = await fetch(purgeUrl, {
+                method: "DELETE",
+                headers: {
+                  "x-internal-admin-token": syncServerInternalAdminToken
+                },
+                signal: AbortSignal.timeout(5000)
+              });
+            } catch (err) {
+              app.log.warn({ err, orgId, docId }, "sync_server_purge_request_failed");
+              throw err;
+            }
+
+            if (!res.ok) {
+              app.log.warn({ orgId, docId, status: res.status }, "sync_server_purge_failed");
+              throw new Error(`sync-server purge failed (${res.status})`);
+            }
+          }
+        : undefined;
+
     // Fire-and-forget: we don't want retention issues to take down the API.
-    void runRetentionSweep(pool).catch((err) => {
+    const sweep = async () => {
+      const result = await runRetentionSweep(pool, { onDocumentPurged });
+      if (result.syncPurgesFailed && result.syncPurgesFailed > 0) {
+        app.log.warn(
+          { syncPurgesFailed: result.syncPurgesFailed },
+          "retention_sweep_sync_purge_failures"
+        );
+      }
+    };
+
+    void sweep().catch((err) => {
       app.log.error({ err }, "retention sweep failed");
     });
     setInterval(() => {
-      void runRetentionSweep(pool).catch((err) => {
+      void sweep().catch((err) => {
         app.log.error({ err }, "retention sweep failed");
       });
     }, config.retentionSweepIntervalMs);

@@ -111,6 +111,16 @@ Retention policies apply to:
 
 Legal holds override deletion when enabled in policy (`legalHoldOverridesRetention`).
 
+When a soft-deleted document is **hard-deleted** (purged) by the retention sweep, the API can optionally trigger deletion of any persisted CRDT/Yjs state in `services/sync-server` via its internal purge endpoint (`DELETE /internal/docs/:docId`). This closes the gap where database records are removed but sync persistence could otherwise remain on disk indefinitely.
+
+To enable sync-server state purge:
+
+- `services/api`:
+  - `SYNC_SERVER_INTERNAL_URL` (base HTTP URL for sync-server, e.g. `http://sync-server:1234`)
+  - `SYNC_SERVER_INTERNAL_ADMIN_TOKEN` (sent as `x-internal-admin-token`)
+- `services/sync-server`:
+  - `SYNC_SERVER_INTERNAL_ADMIN_TOKEN` (must match the API's `SYNC_SERVER_INTERNAL_ADMIN_TOKEN`) to authorize `DELETE /internal/docs/:docId` requests.
+
 Implementation:
 
 - `services/api/retention/retentionService.js`

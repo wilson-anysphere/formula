@@ -7,6 +7,21 @@ export interface AppConfig {
   syncTokenSecret: string;
   syncTokenTtlSeconds: number;
   /**
+   * Internal base URL for sync-server, used to purge persisted CRDT state when
+   * documents are hard-deleted by retention policy.
+   *
+   * If unset (or if `syncServerInternalAdminToken` is unset), sync purge
+   * integration is disabled.
+   */
+  syncServerInternalUrl?: string;
+  /**
+   * Shared secret for sync-server internal endpoints.
+   *
+   * If unset (or if `syncServerInternalUrl` is unset), sync purge integration is
+   * disabled.
+   */
+  syncServerInternalAdminToken?: string;
+  /**
    * If null, retention sweeps are disabled.
    */
   retentionSweepIntervalMs: number | null;
@@ -32,6 +47,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const cookieSecure = env.COOKIE_SECURE === "true";
   const syncTokenSecret = env.SYNC_TOKEN_SECRET ?? "dev-sync-token-secret-change-me";
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
+  const syncServerInternalUrl = env.SYNC_SERVER_INTERNAL_URL;
+  const syncServerInternalAdminToken = env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN;
   const retentionSweepIntervalMs =
     env.RETENTION_SWEEP_INTERVAL_MS === "0"
       ? null
@@ -46,8 +63,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieSecure,
     syncTokenSecret,
     syncTokenTtlSeconds,
+    syncServerInternalUrl,
+    syncServerInternalAdminToken,
     retentionSweepIntervalMs,
     internalAdminToken
   };
 }
-
