@@ -25,6 +25,21 @@ fn roundtrip_preserves_single_quoted_sheet_range_when_required() {
 }
 
 #[test]
+fn collapses_degenerate_sheet_range_refs_to_single_sheet() {
+    let ast = parse_formula("=SUM(Sheet1:Sheet1!A1)", ParseOptions::default()).unwrap();
+    let roundtrip = ast.to_string(SerializeOptions::default()).unwrap();
+    assert_eq!(roundtrip, "=SUM(Sheet1!A1)");
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 4.0).unwrap();
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet1!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(4.0));
+}
+
+#[test]
 fn evaluates_sum_over_sheet_range_cell_ref() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

@@ -648,6 +648,7 @@ impl SheetRef {
     pub fn as_single_sheet(&self) -> Option<&str> {
         match self {
             SheetRef::Sheet(name) => Some(name),
+            SheetRef::SheetRange { start, end } if start.eq_ignore_ascii_case(end) => Some(start),
             SheetRef::SheetRange { .. } => None,
         }
     }
@@ -915,7 +916,11 @@ fn fmt_ref_prefix(
                     out.push('!');
                 }
                 SheetRef::SheetRange { start, end } => {
-                    let combined = format!("[{book}]{start}:{end}");
+                    let combined = if start.eq_ignore_ascii_case(end) {
+                        format!("[{book}]{start}")
+                    } else {
+                        format!("[{book}]{start}:{end}")
+                    };
                     fmt_sheet_name(out, &combined, reference_style);
                     out.push('!');
                 }
@@ -927,7 +932,11 @@ fn fmt_ref_prefix(
                 out.push('!');
             }
             SheetRef::SheetRange { start, end } => {
-                fmt_sheet_range_name(out, start, end, reference_style);
+                if start.eq_ignore_ascii_case(end) {
+                    fmt_sheet_name(out, start, reference_style);
+                } else {
+                    fmt_sheet_range_name(out, start, end, reference_style);
+                }
                 out.push('!');
             }
         },

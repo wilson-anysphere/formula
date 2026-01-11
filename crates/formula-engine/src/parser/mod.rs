@@ -1633,12 +1633,14 @@ impl<'a> Parser<'a> {
                         self.next();
                         let (workbook, start) = split_external_sheet_name(&start_raw);
                         let (_wb2, end) = split_external_sheet_name(&end_raw);
+                        let sheet_ref = if start.eq_ignore_ascii_case(&end) {
+                            SheetRef::Sheet(start)
+                        } else {
+                            SheetRef::SheetRange { start, end }
+                        };
                         Some((
                             workbook,
-                            SheetRef::SheetRange {
-                                start,
-                                end,
-                            },
+                            sheet_ref,
                         ))
                     } else {
                         self.pos = save_pos;
@@ -2082,9 +2084,14 @@ impl<'a> Parser<'a> {
                             self.next();
                             let (workbook, start) = split_external_sheet_name(&start_raw);
                             let (_wb2, end) = split_external_sheet_name(&end_raw);
+                            let sheet_ref = if start.eq_ignore_ascii_case(&end) {
+                                SheetRef::Sheet(start)
+                            } else {
+                                SheetRef::SheetRange { start, end }
+                            };
                             (
                                 workbook,
-                                Some(SheetRef::SheetRange { start, end }),
+                                Some(sheet_ref),
                             )
                         }
                     }
@@ -2468,9 +2475,13 @@ impl<'a> Parser<'a> {
                 self.pos = save;
                 return self.parse_structured_ref(None, None, None);
             }
-            SheetRef::SheetRange {
-                start: start_sheet,
-                end: end_sheet,
+            if start_sheet.eq_ignore_ascii_case(&end_sheet) {
+                SheetRef::Sheet(start_sheet)
+            } else {
+                SheetRef::SheetRange {
+                    start: start_sheet,
+                    end: end_sheet,
+                }
             }
         } else {
             if !matches!(self.peek_kind(), TokenKind::Bang) {
@@ -2478,6 +2489,7 @@ impl<'a> Parser<'a> {
                 return self.parse_structured_ref(None, None, None);
             }
             match split_sheet_span_name(&start_sheet) {
+                Some((start, end)) if start.eq_ignore_ascii_case(&end) => SheetRef::Sheet(start),
                 Some((start, end)) => SheetRef::SheetRange { start, end },
                 None => SheetRef::Sheet(start_sheet),
             }
@@ -2725,6 +2737,7 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
 fn sheet_ref_from_raw_prefix(raw: &str) -> (Option<String>, SheetRef) {
     let (workbook, sheet) = split_external_sheet_name(raw);
     let sheet_ref = match split_sheet_span_name(&sheet) {
+        Some((start, end)) if start.eq_ignore_ascii_case(&end) => SheetRef::Sheet(start),
         Some((start, end)) => SheetRef::SheetRange { start, end },
         None => SheetRef::Sheet(sheet),
     };
