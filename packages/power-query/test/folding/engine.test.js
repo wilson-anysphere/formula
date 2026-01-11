@@ -136,6 +136,53 @@ test("QueryEngine: pushes ExecuteOptions.limit down for SQL Server via TOP", asy
   assert.deepEqual(observed.params, [10, "East"]);
 });
 
+test("QueryEngine: SQL Server sources with ORDER BY do not fold (derived table restriction)", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined } | null} */
+  let observed = null;
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async (_connection, sql, options) => {
+          observed = { sql, params: options?.params };
+          // Return unfiltered rows; local engine should filter them.
+          return DataTable.fromGrid(
+            [
+              ["Region", "Sales"],
+              ["East", 100],
+              ["West", 200],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const baseSql = "SELECT * FROM sales ORDER BY Sales";
+  const query = {
+    id: "q_sqlserver_orderby_source",
+    name: "SQL Server ORDER BY source",
+    source: { type: "database", connection: { id: "db1" }, query: baseSql, dialect: "sqlserver" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } },
+      },
+    ],
+  };
+
+  const result = await engine.executeQuery(query, { queries: {} }, {});
+  assert.ok(observed, "expected SQL connector to be invoked");
+  assert.equal(observed.sql, baseSql);
+  assert.equal(observed.params, undefined);
+  assert.deepEqual(result.toGrid(), [
+    ["Region", "Sales"],
+    ["East", 100],
+  ]);
+});
+
 test("QueryEngine: without a dialect, executes steps locally (no folding)", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined } | null} */
   let observed = null;

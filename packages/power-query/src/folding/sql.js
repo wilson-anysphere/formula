@@ -406,6 +406,9 @@ export class QueryFoldingEngine {
       case "database": {
         const columns = source.columns ? source.columns.slice() : null;
         const connectionId = resolveConnectionId(source, ctx.getConnectionIdentity);
+        if (ctx.dialect.name === "sqlserver" && !isSqlServerDerivedTableSafe(source.query)) {
+          return null;
+        }
         return {
           fragment: { sql: source.query, params: [] },
           columns,
@@ -1162,6 +1165,134 @@ function finalizeSqlForDialect(state, dialect) {
   if (!sortBy || sortBy.length === 0) return state.fragment.sql;
   if (state.sortInFragment) return state.fragment.sql;
   return `SELECT * FROM (${state.fragment.sql}) AS t ORDER BY ${sortSpecsToSql(dialect, sortBy)}`;
+}
+
+/**
+ * SQL Server forbids `ORDER BY` in derived tables unless paired with `TOP` or
+ * `OFFSET`. Because the folding engine wraps each step in a derived table, a
+ * source query containing a top-level `ORDER BY` (without `TOP`/`OFFSET`) would
+ * produce invalid SQL once folding begins.
+ *
+ * @param {string} sql
+ * @returns {boolean}
+ */
+function isSqlServerDerivedTableSafe(sql) {
+  let inSingle = false;
+  let inDouble = false;
+  let inBracket = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let parenDepth = 0;
+
+  /** @type {string[]} */
+  const prefixTokens = [];
+  /** @type {string | null} */
+  let prevToken = null;
+  let hasOrderBy = false;
+  let hasOffset = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const next = sql[i + 1] ?? "";
+
+    if (inLineComment) {
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        i += 1;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (inSingle) {
+      if (ch === "'") {
+        if (next === "'") i += 1;
+        else inSingle = false;
+      }
+      continue;
+    }
+
+    if (inDouble) {
+      if (ch === '"') {
+        if (next === '"') i += 1;
+        else inDouble = false;
+      }
+      continue;
+    }
+
+    if (inBracket) {
+      if (ch === "]") {
+        if (next === "]") i += 1;
+        else inBracket = false;
+      }
+      continue;
+    }
+
+    if (ch === "-" && next === "-") {
+      i += 1;
+      inLineComment = true;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      i += 1;
+      inBlockComment = true;
+      continue;
+    }
+
+    if (ch === "'") {
+      inSingle = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inDouble = true;
+      continue;
+    }
+
+    if (ch === "[") {
+      inBracket = true;
+      continue;
+    }
+
+    if (ch === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (ch === ")") {
+      if (parenDepth > 0) parenDepth -= 1;
+      continue;
+    }
+
+    if (parenDepth !== 0) continue;
+
+    if (/[A-Za-z_]/.test(ch)) {
+      let end = i + 1;
+      while (end < sql.length && /[A-Za-z0-9_]/.test(sql[end])) end += 1;
+      const token = sql.slice(i, end).toUpperCase();
+
+      if (prefixTokens.length < 3) prefixTokens.push(token);
+
+      if (prevToken === "ORDER" && token === "BY") hasOrderBy = true;
+      if (token === "OFFSET") hasOffset = true;
+
+      prevToken = token;
+      i = end - 1;
+    }
+  }
+
+  if (!hasOrderBy) return true;
+  if (hasOffset) return true;
+
+  const startsWithSelectTop =
+    prefixTokens[0] === "SELECT" &&
+    (prefixTokens[1] === "TOP" || ((prefixTokens[1] === "DISTINCT" || prefixTokens[1] === "ALL") && prefixTokens[2] === "TOP"));
+  return startsWithSelectTop;
 }
 
 /**
