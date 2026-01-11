@@ -53,6 +53,21 @@ function encodeUtf8(text) {
 }
 
 /**
+ * Canonicalize formula text for storage.
+ *
+ * Invariant: `CellState.formula` is either `null` or a string starting with "=".
+ *
+ * @param {string | null | undefined} formula
+ * @returns {string | null}
+ */
+function normalizeFormula(formula) {
+  if (formula == null) return null;
+  const trimmed = String(formula).trimStart();
+  if (trimmed === "") return null;
+  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+}
+
+/**
  * @typedef {{
  *   sheetId: string,
  *   row: number,
@@ -416,7 +431,7 @@ export class DocumentController {
   setCellFormula(sheetId, coord, formula, options = {}) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
     const before = this.model.getCell(sheetId, c.row, c.col);
-    const after = { value: null, formula: formula ?? null, styleId: before.styleId };
+    const after = { value: null, formula: normalizeFormula(formula), styleId: before.styleId };
     this.#applyUserDeltas([
       { sheetId, row: c.row, col: c.col, before, after: cloneCellState(after) },
     ], options);
@@ -632,11 +647,7 @@ export class DocumentController {
         if (!Number.isInteger(col) || col < 0) continue;
         const format = entry?.format ?? null;
         const styleId = format == null ? 0 : this.styleTable.intern(format);
-        const cell = {
-          value: entry?.value ?? null,
-          formula: entry?.formula ?? null,
-          styleId,
-        };
+        const cell = { value: entry?.value ?? null, formula: normalizeFormula(entry?.formula), styleId };
         cellMap.set(`${row},${col}`, cloneCellState(cell));
       }
       nextSheets.set(sheet.id, cellMap);
@@ -711,7 +722,7 @@ export class DocumentController {
       }
 
       if ("formula" in obj) {
-        const nextFormula = typeof obj.formula === "string" ? obj.formula : null;
+        const nextFormula = typeof obj.formula === "string" ? normalizeFormula(obj.formula) : null;
         formula = nextFormula;
         if (nextFormula != null) {
           value = null;
@@ -735,7 +746,7 @@ export class DocumentController {
 
       const trimmed = input.trimStart();
       if (trimmed.startsWith("=") && trimmed.length > 1) {
-        return { value: null, formula: input, styleId: before.styleId };
+        return { value: null, formula: normalizeFormula(trimmed), styleId: before.styleId };
       }
     }
 

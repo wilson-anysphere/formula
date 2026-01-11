@@ -83,8 +83,8 @@ test("setRangeValues + clearRange invert correctly via undo", () => {
 test("setCellFormula is undoable", () => {
   const doc = new DocumentController();
 
-  doc.setCellFormula("Sheet1", "A1", "SUM(B1:B3)");
-  assert.equal(doc.getCell("Sheet1", "A1").formula, "SUM(B1:B3)");
+  doc.setCellFormula("Sheet1", "A1", " SUM(B1:B3)");
+  assert.equal(doc.getCell("Sheet1", "A1").formula, "=SUM(B1:B3)");
   assert.equal(doc.getCell("Sheet1", "A1").value, null);
 
   doc.undo();
@@ -183,6 +183,9 @@ test("setCellInput interprets '=' as formula and apostrophe as literal text", ()
   assert.equal(doc.getCell("Sheet1", "A1").formula, "=1+2");
   assert.equal(doc.getCell("Sheet1", "A1").value, null);
 
+  doc.setCellInput("Sheet1", "A3", "   =1+2");
+  assert.equal(doc.getCell("Sheet1", "A3").formula, "=1+2");
+
   doc.setCellInput("Sheet1", "A2", "'=1+2");
   assert.equal(doc.getCell("Sheet1", "A2").formula, null);
   assert.equal(doc.getCell("Sheet1", "A2").value, "=1+2");
@@ -191,11 +194,12 @@ test("setCellInput interprets '=' as formula and apostrophe as literal text", ()
 test("setRangeValues treats strings starting with '=' as formulas", () => {
   const doc = new DocumentController();
 
-  doc.setRangeValues("Sheet1", "A1", [["=A2+1", "'=literal"]]);
+  doc.setRangeValues("Sheet1", "A1", [["=A2+1", "'=literal", { formula: "A1+1" }]]);
   assert.equal(doc.getCell("Sheet1", "A1").formula, "=A2+1");
   assert.equal(doc.getCell("Sheet1", "A1").value, null);
   assert.equal(doc.getCell("Sheet1", "B1").formula, null);
   assert.equal(doc.getCell("Sheet1", "B1").value, "=literal");
+  assert.equal(doc.getCell("Sheet1", "C1").formula, "=A1+1");
 });
 
 test("cancelBatch reverts uncommitted batch changes without affecting history", () => {

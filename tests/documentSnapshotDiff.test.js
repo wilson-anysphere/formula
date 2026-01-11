@@ -16,7 +16,7 @@ test("sheetStateFromDocumentSnapshot extracts a sheet into SheetState", () => {
   const state = sheetStateFromDocumentSnapshot(snapshot, { sheetId: "Sheet1" });
   assert.equal(state.cells.size, 2);
   assert.deepEqual(state.cells.get(cellKey(0, 0)), { value: 1, formula: null, format: { bold: true } });
-  assert.deepEqual(state.cells.get(cellKey(0, 1)), { value: null, formula: "SUM(A1:A3)", format: null });
+  assert.deepEqual(state.cells.get(cellKey(0, 1)), { value: null, formula: "=SUM(A1:A3)", format: null });
 });
 
 test("diffDocumentSnapshots computes semantic diffs between two snapshots", () => {
@@ -33,4 +33,3 @@ test("diffDocumentSnapshots computes semantic diffs between two snapshots", () =
   assert.equal(diff.added.length, 1);
   assert.equal(diff.removed.length, 0);
 });
-

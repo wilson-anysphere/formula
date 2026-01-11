@@ -113,14 +113,14 @@ class DocumentSheetAdapter {
       return;
     }
 
-    if (cell.formula != null && cell.formula !== "") {
-      const formula = String(cell.formula);
-      const normalized = normalizeFormula(formula);
-      // Keep the controller storage flexible: allow formulas with or without leading "=",
-      // but normalize for user-facing semantics.
-      this.document.setCellFormula(this.name, { row, col }, normalized);
-      return;
-    }
+      if (cell.formula != null && cell.formula !== "") {
+        const formula = String(cell.formula);
+        const normalized = normalizeFormula(formula);
+        // DocumentController stores formulas with a leading "=". Normalize here so callers
+        // can provide formula text with or without "=" (e.g. from user edits/search replace).
+        this.document.setCellFormula(this.name, { row, col }, normalized);
+        return;
+      }
 
     this.document.setCellValue(this.name, { row, col }, cell.value);
   }
@@ -171,4 +171,3 @@ class DocumentSheetAdapter {
     for (const entry of results) yield entry;
   }
 }
-

@@ -9,7 +9,7 @@
  * Canonical cell state owned by the DocumentController.
  *
  * `value` is the literal user-entered value (non-formula). For formula cells, `formula`
- * holds the raw formula string (without leading "=" normalization).
+ * holds the canonical formula string (including the leading "=").
  *
  * `styleId` references a deduplicated style table owned by the DocumentController.
  *

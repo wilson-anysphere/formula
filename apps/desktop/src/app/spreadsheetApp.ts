@@ -778,7 +778,7 @@ export class SpreadsheetApp {
         const rich = isRichTextValue(state.value)
           ? state.value
           : state.formula != null
-            ? { text: `=${state.formula}`, runs: [] }
+            ? { text: state.formula, runs: [] }
             : state.value != null
               ? { text: String(state.value), runs: [] }
               : null;
@@ -1397,7 +1397,7 @@ export class SpreadsheetApp {
   private getCellInputText(cell: CellCoord): string {
     const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
     if (state?.formula != null) {
-      return normalizeFormulaText(state.formula);
+      return state.formula;
     }
     if (isRichTextValue(state?.value)) return state.value.text;
     if (state?.value != null) return String(state.value);
@@ -1425,8 +1425,7 @@ export class SpreadsheetApp {
     let value: SpreadsheetValue;
 
     if (state?.formula != null) {
-      const formulaText = normalizeFormulaText(state.formula);
-      value = evaluateFormula(formulaText, (ref) => {
+      value = evaluateFormula(state.formula, (ref) => {
         const normalized = ref.replaceAll("$", "");
         const coord = parseA1(normalized);
         return this.computeCellValue(coord, memo, stack);
@@ -1594,10 +1593,4 @@ function parseA1(a1: string): CellCoord {
     col = col * 26 + (colName.charCodeAt(i) - 64);
   }
   return { row: Math.max(0, row), col: Math.max(0, col - 1) };
-}
-
-function normalizeFormulaText(formula: string): string {
-  const trimmed = formula.trimStart();
-  if (trimmed.startsWith("=")) return formula;
-  return `=${formula}`;
 }

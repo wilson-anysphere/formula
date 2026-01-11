@@ -40,7 +40,7 @@ test("Find/Replace controller batches replaceAll into a single undo step for Doc
   assert.equal(after, before + 1);
   assert.equal(doc.getCell("Sheet1", "A1").value, "bar");
   assert.equal(doc.getCell("Sheet1", "A2").value, "bar");
-  assert.equal(doc.getCell("Sheet1", "B1").formula, "SUM(1,2,3)");
+  assert.equal(doc.getCell("Sheet1", "B1").formula, "=SUM(1,2,3)");
 });
 
 test("ReplaceAll (look in formulas) rewrites formula text through DocumentWorkbookAdapter", async () => {
@@ -68,9 +68,7 @@ test("ReplaceAll (look in formulas) rewrites formula text through DocumentWorkbo
 
   await controller.replaceAll();
 
-  // Adapter normalizes formulas with a leading "=", but DocumentController storage may vary.
   const stored = doc.getCell("Sheet1", "A1").formula;
   assert.ok(stored?.includes("AVERAGE"), `expected formula to include AVERAGE, got: ${stored}`);
   assert.ok(!stored?.includes("SUM("), `expected SUM to be replaced, got: ${stored}`);
 });
-

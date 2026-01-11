@@ -25,7 +25,7 @@ test("encodeState/applyState roundtrip restores cell inputs and clears history",
   assert.equal(restored.getCell("Sheet1", "A1").value, 1);
   const a1 = restored.getCell("Sheet1", "A1");
   assert.deepEqual(restored.styleTable.get(a1.styleId), { bold: true });
-  assert.equal(restored.getCell("Sheet1", "B1").formula, "SUM(A1:A3)");
+  assert.equal(restored.getCell("Sheet1", "B1").formula, "=SUM(A1:A3)");
 });
 
 test("update event fires on edits and undo/redo", () => {
