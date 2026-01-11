@@ -300,6 +300,8 @@ export class SpreadsheetApp {
   private showFormulas = false;
 
   private dragState: { pointerId: number; mode: "normal" | "formula" } | null = null;
+  private dragPointerPos: { x: number; y: number } | null = null;
+  private dragAutoScrollRaf: number | null = null;
 
   private resizeObserver: ResizeObserver;
 
@@ -2169,6 +2171,87 @@ export class SpreadsheetApp {
     return { row, col };
   }
 
+  private maybeStartDragAutoScroll(): void {
+    if (!this.dragState || !this.dragPointerPos) return;
+
+    const margin = 8;
+    const { x, y } = this.dragPointerPos;
+    const left = this.rowHeaderWidth;
+    const top = this.colHeaderHeight;
+    const right = this.width;
+    const bottom = this.height;
+
+    const outside = x < left - margin || x > right + margin || y < top - margin || y > bottom + margin;
+    if (!outside) {
+      if (this.dragAutoScrollRaf != null) {
+        if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
+        else globalThis.clearTimeout(this.dragAutoScrollRaf);
+        this.dragAutoScrollRaf = null;
+      }
+      return;
+    }
+
+    if (this.dragAutoScrollRaf != null) return;
+
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) =>
+            globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 16);
+
+    const tick = () => {
+      this.dragAutoScrollRaf = null;
+      if (!this.dragState || !this.dragPointerPos) return;
+
+      const px = this.dragPointerPos.x;
+      const py = this.dragPointerPos.y;
+
+      let deltaX = 0;
+      let deltaY = 0;
+
+      if (px < left - margin) {
+        deltaX = -Math.min(this.cellWidth, left - margin - px);
+      } else if (px > right + margin) {
+        deltaX = Math.min(this.cellWidth, px - (right + margin));
+      }
+
+      if (py < top - margin) {
+        deltaY = -Math.min(this.cellHeight, top - margin - py);
+      } else if (py > bottom + margin) {
+        deltaY = Math.min(this.cellHeight, py - (bottom + margin));
+      }
+
+      if (deltaX === 0 && deltaY === 0) return;
+
+      const didScroll = this.setScroll(this.scrollX + deltaX, this.scrollY + deltaY);
+      if (!didScroll) return;
+
+      const cell = this.cellFromPoint(px, py);
+      this.selection = extendSelectionToCell(this.selection, cell, this.limits);
+
+      if (this.dragState.mode === "formula" && this.formulaBar) {
+        const r = this.selection.ranges[0];
+        if (r) {
+          this.formulaBar.updateRangeSelection({
+            start: { row: r.startRow, col: r.startCol },
+            end: { row: r.endRow, col: r.endCol }
+          });
+        }
+      }
+
+      // Repaint immediately (we're already in rAF / a timer tick).
+      this.renderGrid();
+      this.renderCharts(false);
+      this.renderReferencePreview();
+      this.renderSelection();
+      this.updateStatus();
+
+      this.dragAutoScrollRaf = schedule(tick) as unknown as number;
+    };
+
+    this.dragAutoScrollRaf = schedule(tick) as unknown as number;
+  }
+
   private onPointerDown(e: PointerEvent): void {
     if (this.editor.isOpen()) return;
 
@@ -2218,6 +2301,7 @@ export class SpreadsheetApp {
     if (this.formulaBar?.isFormulaEditing()) {
       e.preventDefault();
       this.dragState = { pointerId: e.pointerId, mode: "formula" };
+      this.dragPointerPos = { x, y };
       this.root.setPointerCapture(e.pointerId);
       this.selection = setActiveCell(this.selection, cell, this.limits);
       this.renderSelection();
@@ -2230,6 +2314,7 @@ export class SpreadsheetApp {
     }
 
     this.dragState = { pointerId: e.pointerId, mode: "normal" };
+    this.dragPointerPos = { x, y };
     this.root.setPointerCapture(e.pointerId);
     if (e.shiftKey) {
       this.selection = extendSelectionToCell(this.selection, cell, this.limits);
@@ -2253,6 +2338,10 @@ export class SpreadsheetApp {
     const rect = this.root.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    if (this.dragPointerPos) {
+      this.dragPointerPos.x = x;
+      this.dragPointerPos.y = y;
+    }
 
     if (this.dragState) {
       if (e.pointerId !== this.dragState.pointerId) return;
@@ -2270,6 +2359,8 @@ export class SpreadsheetApp {
           end: { row: r.endRow, col: r.endCol }
         });
       }
+
+      this.maybeStartDragAutoScroll();
       return;
     }
 
@@ -2319,6 +2410,12 @@ export class SpreadsheetApp {
     if (e.pointerId !== this.dragState.pointerId) return;
     const mode = this.dragState.mode;
     this.dragState = null;
+    this.dragPointerPos = null;
+    if (this.dragAutoScrollRaf != null) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
+      else globalThis.clearTimeout(this.dragAutoScrollRaf);
+    }
+    this.dragAutoScrollRaf = null;
 
     if (mode === "formula" && this.formulaBar) {
       this.formulaBar.endRangeSelection();
