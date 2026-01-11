@@ -367,10 +367,17 @@ fn compile_expr_inner(
         crate::Expr::Boolean(b) => Expr::Bool(*b),
         crate::Expr::Error(raw) => Expr::Error(parse_error_kind(raw)),
         crate::Expr::Missing => Expr::Blank,
-        crate::Expr::NameRef(r) => Expr::NameRef(NameRef {
-            sheet: compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet),
-            name: r.name.clone(),
-        }),
+        crate::Expr::NameRef(r) => {
+            let sheet = if r.workbook.is_none() && r.sheet.is_none() {
+                SheetReference::Current
+            } else {
+                compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet)
+            };
+            Expr::NameRef(NameRef {
+                sheet,
+                name: r.name.clone(),
+            })
+        }
         crate::Expr::CellRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);

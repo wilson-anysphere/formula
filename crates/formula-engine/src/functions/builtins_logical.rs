@@ -92,10 +92,15 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 }
                             }
                             // Text and blanks in arrays are ignored (same as references).
-                            Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
+                Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
@@ -117,7 +122,11 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                         }
                         // Text and blanks in references are ignored.
-                        Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Lambda(_)
+                        | Value::Spill { .. } => {}
                     }
                 }
             }
@@ -145,7 +154,11 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 }
                             }
                             // Text and blanks in references are ignored.
-                            Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
@@ -211,10 +224,15 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                     any_true = true;
                                 }
                             }
-                            Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
+                Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
@@ -235,7 +253,11 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 any_true = true;
                             }
                         }
-                        Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Lambda(_)
+                        | Value::Spill { .. } => {}
                     }
                 }
             }
@@ -258,11 +280,15 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                             Value::Bool(b) => {
                                 any = true;
-                                if b {
-                                    any_true = true;
-                                }
+                            if b {
+                                any_true = true;
                             }
-                            Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                            Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }

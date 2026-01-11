@@ -18,6 +18,7 @@ mod builtins_array;
 mod builtins_date_time;
 mod builtins_dynamic_arrays;
 mod builtins_information;
+mod builtins_lambda;
 mod builtins_logical;
 mod builtins_lookup;
 mod builtins_math;
@@ -113,6 +114,9 @@ pub enum ArgValue {
 pub trait FunctionContext {
     fn eval_arg(&self, expr: &CompiledExpr) -> ArgValue;
     fn eval_scalar(&self, expr: &CompiledExpr) -> Value;
+    fn eval_formula(&self, expr: &CompiledExpr) -> Value;
+    fn eval_formula_with_bindings(&self, expr: &CompiledExpr, bindings: &HashMap<String, Value>) -> Value;
+    fn capture_lexical_env(&self) -> HashMap<String, Value>;
     fn apply_implicit_intersection(&self, reference: Reference) -> Value;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
     fn iter_reference_cells(&self, reference: Reference)

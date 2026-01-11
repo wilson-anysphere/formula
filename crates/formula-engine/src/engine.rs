@@ -3523,6 +3523,7 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Text(s) => bytecode::Value::Text(Arc::from(s.as_str())),
         Value::Blank => bytecode::Value::Empty,
         Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
+        Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
         Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
     }
 }
@@ -3636,7 +3637,7 @@ impl BytecodeColumnCache {
             match value {
                 Value::Number(n) => seg.values[(row - seg.row_start) as usize] = *n,
                 Value::Blank => {}
-                Value::Error(_) | Value::Array(_) | Value::Spill { .. } => {
+                Value::Error(_) | Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => {
                     seg.blocked_rows_strict.push(row);
                     seg.blocked_rows_ignore_nonnumeric.push(row);
                 }
@@ -4257,7 +4258,7 @@ fn numeric_value(value: &Value) -> Option<f64> {
         Value::Number(n) => Some(*n),
         Value::Blank => Some(0.0),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Text(_) | Value::Error(_) | Value::Array(_) | Value::Spill { .. } => None,
+        Value::Text(_) | Value::Error(_) | Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => None,
     }
 }
 

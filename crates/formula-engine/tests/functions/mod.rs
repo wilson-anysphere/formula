@@ -8,6 +8,7 @@ mod financial_time_value;
 mod harness;
 mod information;
 mod information_worksheet;
+mod lambda_let;
 mod logical;
 mod lookup;
 mod math;

@@ -413,6 +413,16 @@ export default {
       ]
     },
     {
+      "name": "LAMBDA",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "LEFT",
       "min_args": 1,
       "max_args": 2,
@@ -431,6 +441,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "text"
+      ]
+    },
+    {
+      "name": "LET",
+      "min_args": 3,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
       ]
     },
     {

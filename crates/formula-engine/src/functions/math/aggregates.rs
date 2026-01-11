@@ -86,7 +86,7 @@ fn coerce_sumproduct_number(value: &Value) -> Result<f64, ErrorKind> {
         Value::Text(s) => Ok(s.trim().parse::<f64>().unwrap_or(0.0)),
         Value::Blank => Ok(0.0),
         Value::Error(e) => Err(*e),
-        Value::Array(_) | Value::Spill { .. } => Ok(0.0),
+        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Ok(0.0),
     }
 }
 

@@ -45,7 +45,7 @@ pub(crate) struct Criteria {
                     rhs: CriteriaRhs::Blank,
                 }),
                 Value::Text(s) => parse_criteria_string(s),
-                Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+                Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
             }
         }
 
@@ -174,7 +174,7 @@ fn coerce_to_number(value: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
         Value::Text(s) => s.trim().parse::<f64>().ok(),
-        Value::Error(_) | Value::Array(_) | Value::Spill { .. } => None,
+        Value::Error(_) | Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => None,
     }
 }
 
@@ -192,7 +192,7 @@ fn coerce_to_bool(value: &Value) -> Option<bool> {
             }
         }
         Value::Blank => Some(false),
-        Value::Error(_) | Value::Array(_) | Value::Spill { .. } => None,
+        Value::Error(_) | Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => None,
     }
 }
 
@@ -210,6 +210,7 @@ fn coerce_to_text(value: &Value) -> String {
         }
         Value::Error(e) => e.to_string(),
         Value::Array(arr) => arr.top_left().to_string(),
+        Value::Lambda(_) => "<LAMBDA>".to_string(),
         Value::Spill { .. } => ErrorKind::Spill.to_string(),
     }
 }

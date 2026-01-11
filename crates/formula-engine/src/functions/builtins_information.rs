@@ -226,7 +226,7 @@ fn n_value(v: &Value) -> Value {
         Value::Number(n) => Value::Number(*n),
         Value::Bool(b) => Value::Number(if *b { 1.0 } else { 0.0 }),
         Value::Blank | Value::Text(_) => Value::Number(0.0),
-        Value::Array(_) | Value::Spill { .. } => Value::Error(ErrorKind::Value),
+        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Value::Error(ErrorKind::Value),
     }
 }
 
@@ -252,7 +252,12 @@ fn t_value(v: &Value) -> Value {
     match v {
         Value::Error(e) => Value::Error(*e),
         Value::Text(s) => Value::Text(s.clone()),
-        Value::Number(_) | Value::Bool(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {
+        Value::Number(_)
+        | Value::Bool(_)
+        | Value::Blank
+        | Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => {
             Value::Text(String::new())
         }
     }
@@ -261,4 +266,3 @@ fn t_value(v: &Value) -> Value {
 fn t_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     map_arg(ctx, &args[0], t_value)
 }
-

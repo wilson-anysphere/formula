@@ -1703,10 +1703,16 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             match v {
                                 Value::Error(e) => return (Value::Error(*e), traces),
                                 Value::Number(n) => acc += n,
-                                Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                                Value::Bool(_)
+                                | Value::Text(_)
+                                | Value::Blank
+                                | Value::Array(_)
+                                | Value::Lambda(_)
+                                | Value::Spill { .. } => {}
                             }
                         }
                     }
+                    Value::Lambda(_) => return (Value::Error(ErrorKind::Value), traces),
                     Value::Spill { .. } => return (Value::Error(ErrorKind::Value), traces),
                 },
                 EvalValue::Reference(range) => {
@@ -1715,7 +1721,12 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         match v {
                             Value::Error(e) => return (Value::Error(e), traces),
                             Value::Number(n) => acc += n,
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
@@ -1851,7 +1862,7 @@ fn coerce_to_number(v: &Value) -> Result<f64, ErrorKind> {
         Value::Blank => Ok(0.0),
         Value::Text(s) => parse_number_from_text(s).ok_or(ErrorKind::Value),
         Value::Error(e) => Err(*e),
-        Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
     }
 }
 
@@ -1874,7 +1885,7 @@ fn coerce_to_bool(v: &Value) -> Result<bool, ErrorKind> {
             Err(ErrorKind::Value)
         }
         Value::Error(e) => Err(*e),
-        Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
     }
 }
 
@@ -1903,8 +1914,8 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
-    if matches!(left, Value::Array(_) | Value::Spill { .. })
-        || matches!(right, Value::Array(_) | Value::Spill { .. })
+    if matches!(left, Value::Array(_) | Value::Lambda(_) | Value::Spill { .. })
+        || matches!(right, Value::Array(_) | Value::Lambda(_) | Value::Spill { .. })
     {
         return Err(ErrorKind::Value);
     }
@@ -1937,6 +1948,8 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
         (Value::Array(_), _)
         | (_, Value::Array(_))
+        | (Value::Lambda(_), _)
+        | (_, Value::Lambda(_))
         | (Value::Spill { .. }, _)
         | (_, Value::Spill { .. }) => Ordering::Equal,
     })

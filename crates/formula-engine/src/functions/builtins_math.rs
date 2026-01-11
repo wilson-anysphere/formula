@@ -110,10 +110,16 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => acc += n,
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
+                Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
@@ -124,7 +130,12 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => acc += n,
                         // Excel quirk: logicals/text in references are ignored by SUM.
-                        Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Lambda(_)
+                        | Value::Spill { .. } => {}
                     }
                 }
             }
@@ -141,7 +152,12 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => acc += n,
                             // Excel quirk: logicals/text in references are ignored by SUM.
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
@@ -198,10 +214,16 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 acc += n;
                                 count += 1;
                             }
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
+                Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
@@ -215,7 +237,12 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             count += 1;
                         }
                         // Ignore logical/text/blank in references.
-                        Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Lambda(_)
+                        | Value::Spill { .. } => {}
                     }
                 }
             }
@@ -235,7 +262,12 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 count += 1;
                             }
                             // Ignore logical/text/blank in references.
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
@@ -274,7 +306,12 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => best = Some(best.map(|b| b.min(*n)).unwrap_or(*n)),
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
@@ -297,6 +334,7 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Lambda(_)
                         | Value::Spill { .. } => {}
                     }
                 }
@@ -313,7 +351,12 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
@@ -349,7 +392,12 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => best = Some(best.map(|b| b.max(*n)).unwrap_or(*n)),
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }
@@ -372,6 +420,7 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Lambda(_)
                         | Value::Spill { .. } => {}
                     }
                 }
@@ -388,7 +437,12 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
-                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. } => {}
                         }
                     }
                 }

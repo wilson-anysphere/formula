@@ -60,11 +60,13 @@ fn collect_npv_values_from_arg(
                         | Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Lambda(_)
                         | Value::Spill { .. } => out.push(0.0),
                     }
                 }
                 Ok(out)
             }
+            Value::Lambda(_) => Ok(vec![0.0]),
             Value::Spill { .. } => Ok(vec![0.0]),
         },
         ArgValue::Reference(r) => {
@@ -74,7 +76,12 @@ fn collect_npv_values_from_arg(
                 match v {
                     Value::Error(e) => return Err(e),
                     Value::Number(n) => out.push(n),
-                    Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Blank
+                    | Value::Array(_)
+                    | Value::Lambda(_)
+                    | Value::Spill { .. } => {
                         out.push(0.0)
                     }
                 }
@@ -89,7 +96,12 @@ fn collect_npv_values_from_arg(
                     match v {
                         Value::Error(e) => return Err(e),
                         Value::Number(n) => out.push(n),
-                        Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => out.push(0.0),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Lambda(_)
+                        | Value::Spill { .. } => out.push(0.0),
                     }
                 }
             }
@@ -109,7 +121,7 @@ fn collect_irr_values_from_arg(
         ArgValue::Scalar(v) => match v {
             Value::Error(e) => Err(e),
             Value::Number(n) => Ok(vec![n]),
-            Value::Bool(_) | Value::Text(_) | Value::Blank => Ok(vec![0.0]),
+            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Lambda(_) => Ok(vec![0.0]),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.rows.saturating_mul(arr.cols));
                 for v in arr.iter() {
@@ -120,6 +132,7 @@ fn collect_irr_values_from_arg(
                         | Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Lambda(_)
                         | Value::Spill { .. } => out.push(0.0),
                     }
                 }
@@ -134,7 +147,12 @@ fn collect_irr_values_from_arg(
                 match v {
                     Value::Error(e) => return Err(e),
                     Value::Number(n) => out.push(n),
-                    Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Blank
+                    | Value::Array(_)
+                    | Value::Lambda(_)
+                    | Value::Spill { .. } => {
                         out.push(0.0)
                     }
                 }
@@ -149,7 +167,12 @@ fn collect_irr_values_from_arg(
                     match v {
                         Value::Error(e) => return Err(e),
                         Value::Number(n) => out.push(n),
-                        Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => out.push(0.0),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Lambda(_)
+                        | Value::Spill { .. } => out.push(0.0),
                     }
                 }
             }

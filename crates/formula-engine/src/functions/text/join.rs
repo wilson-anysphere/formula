@@ -19,6 +19,7 @@ pub fn textjoin(delimiter: &str, ignore_empty: bool, values: &[Value]) -> Result
             }
             Value::Error(e) => return Err(*e),
             Value::Array(arr) => arr.top_left().to_string(),
+            Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Spill { .. } => return Err(ErrorKind::Spill),
         };
 

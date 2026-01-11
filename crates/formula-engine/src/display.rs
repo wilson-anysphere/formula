@@ -21,6 +21,7 @@ pub fn format_value_for_display(
             Value::Blank => FmtValue::Blank,
             Value::Error(e) => FmtValue::Error(e.as_code()),
             Value::Array(arr) => to_fmt_value(arr.get(0, 0).unwrap_or(&Value::Blank)),
+            Value::Lambda(_) => FmtValue::Error("#CALC!"),
             Value::Spill { .. } => FmtValue::Error("#SPILL!"),
         }
     }

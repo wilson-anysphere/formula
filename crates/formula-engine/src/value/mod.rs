@@ -1,6 +1,10 @@
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use formula_model::CellRef;
+
+use crate::eval::CompiledExpr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
@@ -70,6 +74,37 @@ impl Array {
     }
 }
 
+#[derive(Clone, PartialEq)]
+pub struct Lambda {
+    pub params: Arc<[String]>,
+    pub body: Arc<CompiledExpr>,
+    pub env: Arc<HashMap<String, Value>>,
+}
+
+impl fmt::Debug for Lambda {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct SortedEnv<'a>(&'a HashMap<String, Value>);
+
+        impl fmt::Debug for SortedEnv<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let mut entries: Vec<_> = self.0.iter().collect();
+                entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+                let mut map = f.debug_map();
+                for (k, v) in entries {
+                    map.entry(&k, v);
+                }
+                map.finish()
+            }
+        }
+
+        f.debug_struct("Lambda")
+            .field("params", &self.params)
+            .field("body", &self.body)
+            .field("env", &SortedEnv(&self.env))
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
@@ -79,6 +114,7 @@ pub enum Value {
     Error(ErrorKind),
     /// Dynamic array result.
     Array(Array),
+    Lambda(Lambda),
     /// Marker for a cell that belongs to a spilled range.
     ///
     /// The engine generally resolves spill markers to the concrete spilled value
@@ -99,7 +135,7 @@ impl Value {
             Value::Blank => Ok(0.0),
             Value::Text(s) => parse_number_from_text(s).ok_or(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+            Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 
@@ -127,7 +163,7 @@ impl Value {
                 Err(ErrorKind::Value)
             }
             Value::Error(e) => Err(*e),
-            Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+            Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 
@@ -138,7 +174,7 @@ impl Value {
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
             Value::Error(e) => Err(*e),
-            Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+            Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 }
@@ -199,6 +235,7 @@ impl fmt::Display for Value {
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
             Value::Array(arr) => write!(f, "{}", arr.top_left()),
+            Value::Lambda(_) => f.write_str("<LAMBDA>"),
             Value::Spill { .. } => f.write_str(ErrorKind::Spill.as_code()),
         }
     }

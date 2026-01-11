@@ -5,6 +5,7 @@ use crate::error::ExcelError;
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
 use crate::value::{Array, ErrorKind, Value};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -105,8 +106,21 @@ pub struct Evaluator<'a, R: ValueResolver> {
     ctx: EvalContext,
     recalc_ctx: &'a RecalcContext,
     name_stack: Rc<RefCell<Vec<(usize, String)>>>,
+    lexical_scopes: Rc<RefCell<Vec<HashMap<String, Value>>>>,
+    lambda_depth: Rc<Cell<u32>>,
     date_system: ExcelDateSystem,
     rng_counter: Rc<Cell<u64>>,
+}
+
+struct LexicalScopeGuard {
+    stack: Rc<RefCell<Vec<HashMap<String, Value>>>>,
+}
+
+impl Drop for LexicalScopeGuard {
+    fn drop(&mut self) {
+        let mut stack = self.stack.borrow_mut();
+        stack.pop();
+    }
 }
 
 impl<'a, R: ValueResolver> Evaluator<'a, R> {
@@ -125,6 +139,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             ctx,
             recalc_ctx,
             name_stack: Rc::new(RefCell::new(Vec::new())),
+            lexical_scopes: Rc::new(RefCell::new(Vec::new())),
+            lambda_depth: Rc::new(Cell::new(0)),
             date_system,
             rng_counter: Rc::new(Cell::new(0)),
         }
@@ -136,9 +152,53 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             ctx,
             recalc_ctx: self.recalc_ctx,
             name_stack: Rc::clone(&self.name_stack),
+            lexical_scopes: Rc::clone(&self.lexical_scopes),
+            lambda_depth: Rc::clone(&self.lambda_depth),
             date_system: self.date_system,
             rng_counter: Rc::clone(&self.rng_counter),
         }
+    }
+
+    fn with_lexical_scopes(&self, scopes: Vec<HashMap<String, Value>>) -> Self {
+        Self {
+            resolver: self.resolver,
+            ctx: self.ctx,
+            recalc_ctx: self.recalc_ctx,
+            name_stack: Rc::clone(&self.name_stack),
+            lexical_scopes: Rc::new(RefCell::new(scopes)),
+            lambda_depth: Rc::clone(&self.lambda_depth),
+            date_system: self.date_system,
+            rng_counter: Rc::clone(&self.rng_counter),
+        }
+    }
+
+    fn push_lexical_scope(&self, scope: HashMap<String, Value>) -> LexicalScopeGuard {
+        self.lexical_scopes.borrow_mut().push(scope);
+        LexicalScopeGuard {
+            stack: Rc::clone(&self.lexical_scopes),
+        }
+    }
+
+    fn lookup_lexical_value(&self, name: &str) -> Option<Value> {
+        let key = name.trim().to_ascii_uppercase();
+        let scopes = self.lexical_scopes.borrow();
+        for scope in scopes.iter().rev() {
+            if let Some(value) = scope.get(&key) {
+                return Some(value.clone());
+            }
+        }
+        None
+    }
+
+    fn capture_lexical_env_map(&self) -> HashMap<String, Value> {
+        let scopes = self.lexical_scopes.borrow();
+        let mut out = HashMap::new();
+        for scope in scopes.iter() {
+            for (k, v) in scope {
+                out.insert(k.clone(), v.clone());
+            }
+        }
+        out
     }
 
     /// Evaluate a compiled AST as a scalar formula result.
@@ -165,7 +225,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     };
 
                     let v = match v {
-                        Value::Array(_) | Value::Spill { .. } => Value::Error(ErrorKind::Value),
+                        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => {
+                            Value::Error(ErrorKind::Value)
+                        }
                         other => other,
                     };
                     out.push(v);
@@ -265,7 +327,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 EvalValue::Scalar(out)
             }
             Expr::FunctionCall { name, args, .. } => {
-                EvalValue::Scalar(crate::functions::call_function(self, name, args))
+                EvalValue::Scalar(self.eval_function_call(name, args))
             }
             Expr::ImplicitIntersection(inner) => {
                 let v = self.eval_value(inner);
@@ -277,6 +339,92 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
             }
         }
+    }
+
+    fn eval_function_call(&self, name: &str, args: &[CompiledExpr]) -> Value {
+        if let Some(spec) = crate::functions::lookup_function(name) {
+            if args.len() < spec.min_args || args.len() > spec.max_args {
+                return Value::Error(ErrorKind::Value);
+            }
+            return (spec.implementation)(self, args);
+        }
+
+        if let Some(value) = self.lookup_lexical_value(name) {
+            return self.call_value_as_function(name, value, args);
+        }
+
+        let nref = crate::eval::NameRef {
+            sheet: SheetReference::Current,
+            name: name.to_string(),
+        };
+        match self.eval_name_ref(&nref) {
+            EvalValue::Scalar(v) => self.call_value_as_function(name, v, args),
+            EvalValue::Reference(_) => Value::Error(ErrorKind::Value),
+        }
+    }
+
+    fn call_value_as_function(&self, call_name: &str, value: Value, args: &[CompiledExpr]) -> Value {
+        match value {
+            Value::Lambda(lambda) => self.call_lambda(call_name, lambda, args),
+            Value::Error(e) => Value::Error(e),
+            _ => Value::Error(ErrorKind::Value),
+        }
+    }
+
+    fn call_lambda(&self, call_name: &str, lambda: crate::value::Lambda, args: &[CompiledExpr]) -> Value {
+        const MAX_RECURSION_DEPTH: u32 = 256;
+
+        let depth = self.lambda_depth.get();
+        if depth >= MAX_RECURSION_DEPTH {
+            return Value::Error(ErrorKind::Calc);
+        }
+        self.lambda_depth.set(depth + 1);
+
+        struct DepthGuard {
+            counter: Rc<Cell<u32>>,
+        }
+
+        impl Drop for DepthGuard {
+            fn drop(&mut self) {
+                let depth = self.counter.get();
+                self.counter.set(depth.saturating_sub(1));
+            }
+        }
+
+        let _depth_guard = DepthGuard {
+            counter: Rc::clone(&self.lambda_depth),
+        };
+
+        if args.len() != lambda.params.len() {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let mut evaluated_args = Vec::with_capacity(args.len());
+        for arg in args {
+            let v = self.eval_formula(arg);
+            if let Value::Error(e) = v {
+                return Value::Error(e);
+            }
+            evaluated_args.push(v);
+        }
+
+        let mut call_scope = HashMap::with_capacity(lambda.params.len().saturating_add(1));
+        call_scope.insert(
+            call_name.trim().to_ascii_uppercase(),
+            Value::Lambda(lambda.clone()),
+        );
+        for (param, value) in lambda.params.iter().zip(evaluated_args) {
+            call_scope.insert(param.to_ascii_uppercase(), value);
+        }
+
+        let mut scopes = Vec::new();
+        if !lambda.env.is_empty() {
+            scopes.push((*lambda.env).clone());
+        }
+        scopes.push(call_scope);
+
+        let evaluator = self.with_lexical_scopes(scopes);
+        evaluator.eval_formula(lambda.body.as_ref())
     }
 
     fn deref_eval_value_dynamic(&self, value: EvalValue) -> Value {
@@ -292,6 +440,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         };
         if !self.resolver.sheet_exists(sheet_id) {
             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+        }
+
+        if matches!(nref.sheet, SheetReference::Current) {
+            if let Some(value) = self.lookup_lexical_value(&nref.name) {
+                return EvalValue::Scalar(value);
+            }
         }
 
         let Some(def) = self.resolver.resolve_name(sheet_id, &nref.name) else {
@@ -605,6 +759,27 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         Evaluator::eval_scalar(self, expr)
     }
 
+    fn eval_formula(&self, expr: &CompiledExpr) -> Value {
+        Evaluator::eval_formula(self, expr)
+    }
+
+    fn eval_formula_with_bindings(&self, expr: &CompiledExpr, bindings: &HashMap<String, Value>) -> Value {
+        if bindings.is_empty() {
+            return self.eval_formula(expr);
+        }
+
+        let mut scope = HashMap::with_capacity(bindings.len());
+        for (k, v) in bindings {
+            scope.insert(k.trim().to_ascii_uppercase(), v.clone());
+        }
+        let _guard = self.push_lexical_scope(scope);
+        self.eval_formula(expr)
+    }
+
+    fn capture_lexical_env(&self) -> HashMap<String, Value> {
+        self.capture_lexical_env_map()
+    }
+
     fn apply_implicit_intersection(&self, reference: FnReference) -> Value {
         Evaluator::apply_implicit_intersection(self, &[ResolvedRange {
             sheet_id: reference.sheet_id,
@@ -671,8 +846,8 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
-    if matches!(left, Value::Array(_) | Value::Spill { .. })
-        || matches!(right, Value::Array(_) | Value::Spill { .. })
+    if matches!(left, Value::Array(_) | Value::Lambda(_) | Value::Spill { .. })
+        || matches!(right, Value::Array(_) | Value::Lambda(_) | Value::Spill { .. })
     {
         return Err(ErrorKind::Value);
     }
@@ -707,9 +882,11 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (_, Value::Blank) => Ordering::Greater,
         // Errors are handled above.
         (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
-        // Arrays/spill markers are rejected above.
+        // Arrays/spill markers/lambdas are rejected above.
         (Value::Array(_), _)
         | (_, Value::Array(_))
+        | (Value::Lambda(_), _)
+        | (_, Value::Lambda(_))
         | (Value::Spill { .. }, _)
         | (_, Value::Spill { .. }) => Ordering::Equal,
     })
