@@ -759,10 +759,25 @@ impl Storage {
         }
 
         // Allocate deterministic worksheet ids for sheets that predate model import.
+        //
+        // Note: `model_sheet_id` is stored as an SQLite INTEGER (i64) but represents a `u32`
+        // worksheet id. We treat out-of-range values as missing and synthesize a stable id.
         let mut used_sheet_ids: HashSet<u32> = HashSet::new();
         let max_model_sheet_id: i64 = conn.query_row(
-            "SELECT COALESCE(MAX(model_sheet_id), 0) FROM sheets WHERE workbook_id = ?1",
-            params![workbook_id.to_string()],
+            r#"
+            SELECT COALESCE(
+              MAX(
+                CASE
+                  WHEN model_sheet_id >= 0 AND model_sheet_id <= ?2 THEN model_sheet_id
+                  ELSE NULL
+                END
+              ),
+              0
+            )
+            FROM sheets
+            WHERE workbook_id = ?1
+            "#,
+            params![workbook_id.to_string(), u32::MAX as i64],
             |r| r.get(0),
         )?;
 
@@ -806,7 +821,7 @@ impl Storage {
             let model_sheet_id: Option<i64> = row.get(11)?;
             let model_sheet_json: Option<serde_json::Value> = row.get(12)?;
 
-            let sheet_id = match model_sheet_id.map(|id| id.max(0) as u32) {
+            let sheet_id = match model_sheet_id.and_then(|id| u32::try_from(id).ok()) {
                 Some(explicit) if !used_sheet_ids.contains(&explicit) => explicit,
                 _ => {
                     while used_sheet_ids.contains(&next_generated_sheet_id) {
@@ -909,12 +924,25 @@ impl Storage {
             }
         }
 
-        let max_model_sheet_id: i64 = conn.query_row(
-            "SELECT COALESCE(MAX(model_sheet_id), 0) FROM sheets WHERE workbook_id = ?1",
-            params![&workbook_id_str],
-            |r| r.get(0),
-        )?;
-        let model_sheet_id = max_model_sheet_id.max(0).saturating_add(1);
+        let mut used_sheet_ids: HashSet<u32> = HashSet::new();
+        let mut max_sheet_id: u32 = 0;
+        {
+            let mut stmt = conn.prepare(
+                "SELECT model_sheet_id FROM sheets WHERE workbook_id = ?1 AND model_sheet_id IS NOT NULL",
+            )?;
+            let ids = stmt.query_map(params![&workbook_id_str], |row| row.get::<_, i64>(0))?;
+            for raw in ids {
+                let raw = raw?;
+                if let Ok(id) = u32::try_from(raw) {
+                    used_sheet_ids.insert(id);
+                    max_sheet_id = max_sheet_id.max(id);
+                }
+            }
+        }
+        let mut model_sheet_id: u32 = max_sheet_id.wrapping_add(1);
+        while used_sheet_ids.contains(&model_sheet_id) {
+            model_sheet_id = model_sheet_id.wrapping_add(1);
+        }
 
         let sheet = SheetMeta {
             id: Uuid::new_v4(),
@@ -962,7 +990,7 @@ impl Storage {
                 sheet.frozen_cols,
                 sheet.zoom,
                 sheet.metadata.clone(),
-                model_sheet_id
+                model_sheet_id as i64
             ],
         )?;
 

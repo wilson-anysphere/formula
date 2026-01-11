@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection, Transaction};
+use std::collections::HashSet;
 
 const LATEST_SCHEMA_VERSION: i64 = 8;
 
@@ -352,17 +353,35 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     // Backfill `model_sheet_id` for sheets that were created before we started assigning stable
     // model ids. This makes `export_model_workbook` deterministic even after sheet reordering.
     //
-    // We allocate ids monotonically per workbook, preserving the current sheet order.
+    // We allocate ids per workbook, preserving the current sheet order, and ensuring they fit
+    // within the `u32` domain used by `formula_model::WorksheetId`.
     let mut workbook_stmt = tx.prepare("SELECT id FROM workbooks")?;
     let workbook_ids = workbook_stmt.query_map([], |row| row.get::<_, String>(0))?;
     for workbook_id in workbook_ids {
         let workbook_id = workbook_id?;
-        let max_existing: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(model_sheet_id), 0) FROM sheets WHERE workbook_id = ?1",
-            params![&workbook_id],
-            |r| r.get(0),
+        // Treat out-of-range ids as unset so we can safely backfill them.
+        tx.execute(
+            "UPDATE sheets SET model_sheet_id = NULL WHERE workbook_id = ?1 AND (model_sheet_id < 0 OR model_sheet_id > ?2)",
+            params![&workbook_id, u32::MAX as i64],
         )?;
-        let mut next_id = max_existing.max(0).saturating_add(1);
+
+        let mut used: HashSet<u32> = HashSet::new();
+        let mut max_existing: u32 = 0;
+        {
+            let mut stmt = tx.prepare(
+                "SELECT model_sheet_id FROM sheets WHERE workbook_id = ?1 AND model_sheet_id IS NOT NULL",
+            )?;
+            let ids = stmt.query_map(params![&workbook_id], |row| row.get::<_, i64>(0))?;
+            for raw in ids {
+                let raw = raw?;
+                if let Ok(id) = u32::try_from(raw) {
+                    used.insert(id);
+                    max_existing = max_existing.max(id);
+                }
+            }
+        }
+
+        let mut next_id = max_existing.wrapping_add(1);
 
         let mut sheet_stmt = tx.prepare(
             r#"
@@ -375,11 +394,15 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         let sheet_ids = sheet_stmt.query_map(params![&workbook_id], |row| row.get::<_, String>(0))?;
         for sheet_id in sheet_ids {
             let sheet_id = sheet_id?;
+            while used.contains(&next_id) {
+                next_id = next_id.wrapping_add(1);
+            }
             tx.execute(
                 "UPDATE sheets SET model_sheet_id = ?1 WHERE id = ?2",
-                params![next_id, sheet_id],
+                params![next_id as i64, sheet_id],
             )?;
-            next_id = next_id.saturating_add(1);
+            used.insert(next_id);
+            next_id = next_id.wrapping_add(1);
         }
     }
 
