@@ -33,6 +33,9 @@ and formula-bar signature hints consume a **generated** catalog committed into t
 - `shared/functionCatalog.mjs` (ESM wrapper for runtime import compatibility)
 - `shared/functionCatalog.mjs.d.ts` (TypeScript typings for the wrapper)
 
+Each entry includes (at minimum): `name`, `min_args`, `max_args`, `volatility`, `return_type`, and a
+best-effort `arg_types` array derived from the Rust `FunctionSpec` metadata.
+
 To regenerate after adding/removing Rust functions (requires a Rust toolchain):
 
 ```bash
