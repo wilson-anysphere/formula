@@ -16,6 +16,7 @@ const FILE_FLAG_ENCRYPTED = 0b0000_0001;
 
 const AES_GCM_IV_BYTES = 12;
 const AES_GCM_TAG_BYTES = 16;
+const AES_256_GCM_ALGORITHM = "aes-256-gcm";
 const ENCRYPTED_RECORD_HEADER_BYTES = 4 + AES_GCM_IV_BYTES + AES_GCM_TAG_BYTES; // keyVersion + iv + tag
 
 const persistenceOrigin = Symbol("formula.sync-server.persistence");
@@ -87,6 +88,12 @@ function encodeEncryptedRecord(
     aadContext: opts.aadContext,
   });
 
+  if (encrypted.algorithm !== AES_256_GCM_ALGORITHM) {
+    throw new Error(
+      `Unsupported encryption algorithm for sync-server persistence: ${encrypted.algorithm}`
+    );
+  }
+
   if (encrypted.iv.byteLength !== AES_GCM_IV_BYTES) {
     throw new RangeError(
       `Invalid KeyRing iv length (expected ${AES_GCM_IV_BYTES}, got ${encrypted.iv.byteLength})`
@@ -144,6 +151,7 @@ function decodeEncryptedRecords(
     const plaintext = opts.keyRing.decryptBytes(
       {
         keyVersion,
+        algorithm: AES_256_GCM_ALGORITHM,
         iv: record.subarray(ivOffset, ivOffset + AES_GCM_IV_BYTES),
         tag: record.subarray(tagOffset, tagOffset + AES_GCM_TAG_BYTES),
         ciphertext: record.subarray(ciphertextOffset),

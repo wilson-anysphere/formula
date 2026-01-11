@@ -21,6 +21,10 @@ COPY services/sync-server/package-lock.json ./services/sync-server/package-lock.
 
 WORKDIR /app/services/sync-server
 
+# Optional: force native modules to compile from source (e.g. to validate node-gyp toolchain in CI):
+#   docker build --build-arg npm_config_build_from_source=true -f services/sync-server/Dockerfile .
+ARG npm_config_build_from_source
+
 RUN npm ci
 # y-leveldb is an optionalDependency (to keep local dev portable), but the Docker
 # image must include it so the default persistence backend (leveldb) works in

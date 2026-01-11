@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build sync-server image
-        run: docker build -f services/sync-server/Dockerfile . -t formula-sync-server:ci
+        run: docker build --build-arg npm_config_build_from_source=true -f services/sync-server/Dockerfile . -t formula-sync-server:ci
 
       - name: Smoke test container
         run: |
