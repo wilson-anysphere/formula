@@ -42,6 +42,13 @@ jobs:
         with:
           components: clippy
 
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so cargo installs and audits share the same cache.
+      - name: Use shared Cargo home for CI caching
+        shell: bash
+        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+
       - name: Install security tooling
         shell: bash
         run: |
