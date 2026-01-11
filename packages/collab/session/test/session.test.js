@@ -109,3 +109,15 @@ test("CollabSession integration: sync + presence (in-memory)", async () => {
   doc1.destroy();
   doc2.destroy();
 });
+
+test("CollabSession schema.defaultSheetId is used when normalizing cell keys without a sheet id", async () => {
+  const session = createCollabSession({
+    doc: new Y.Doc(),
+    schema: { defaultSheetId: "Main", defaultSheetName: "Main" },
+  });
+
+  // `r{row}c{col}` keys omit sheet id; they should resolve to schema.defaultSheetId.
+  const wrote = await session.safeSetCellValue("r0c0", 123);
+  assert.equal(wrote, true);
+  assert.equal(session.cells.has("Main:0:0"), true);
+});

@@ -311,7 +311,7 @@ export class CollabSession {
     const schemaAutoInit = options.schema?.autoInit ?? true;
     const schemaDefaultSheetId = options.schema?.defaultSheetId ?? options.defaultSheetId ?? "Sheet1";
     const schemaDefaultSheetName = options.schema?.defaultSheetName ?? schemaDefaultSheetId;
-    this.defaultSheetId = options.defaultSheetId ?? options.schema?.defaultSheetId ?? "Sheet1";
+    this.defaultSheetId = schemaDefaultSheetId;
 
     this.cells = this.doc.getMap<unknown>("cells");
     this.sheets = this.doc.getArray<Y.Map<unknown>>("sheets");
