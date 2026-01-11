@@ -371,11 +371,9 @@ export class CellStructuralConflictMonitor {
     const ours = [];
     this._ops.forEach((record, id) => {
       if (!record || typeof record !== "object") return;
-      if (!this._opRecords.has(id)) {
-        this._opRecords.set(id, record);
-      }
+      this._ingestOpRecord(record);
       if (record.userId !== this.localUserId) return;
-      ours.push({ id, createdAt: Number(record.createdAt ?? 0) });
+      ours.push({ id: String(record.id ?? id), createdAt: Number(record.createdAt ?? 0) });
     });
     ours.sort((a, b) => a.createdAt - b.createdAt);
 
