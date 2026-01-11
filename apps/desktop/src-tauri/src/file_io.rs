@@ -6,7 +6,10 @@ use formula_model::{
     import::{import_csv_to_columnar_table, CsvOptions},
     CellValue as ModelCellValue, DateSystem as WorkbookDateSystem, WorksheetId,
 };
-use formula_xlsb::{CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, XlsbWorkbook};
+use formula_xlsb::{
+    CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, OpenOptions as XlsbOpenOptions,
+    XlsbWorkbook,
+};
 use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
@@ -646,7 +649,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         origin_xlsx_bytes: None,
-        origin_xlsb_path: Some(path.to_string_lossy().to_string()),
+        origin_xlsb_path: None,
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
@@ -670,6 +673,12 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
 fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let wb = XlsbWorkbook::open(path).with_context(|| format!("open xlsb workbook {:?}", path))?;
 
+    let date_system = if wb.workbook_properties().date_system_1904 {
+        WorkbookDateSystem::Excel1904
+    } else {
+        WorkbookDateSystem::Excel1900
+    };
+
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
@@ -680,7 +689,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
         theme_palette: None,
-        date_system: WorkbookDateSystem::Excel1900,
+        date_system,
         defined_names: Vec::new(),
         tables: Vec::new(),
         sheets: Vec::new(),
@@ -1109,11 +1118,11 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 }
 
 fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
-    let origin_path = workbook
-        .origin_xlsb_path
-        .as_deref()
-        .or(workbook.origin_path.as_deref())
-        .ok_or_else(|| anyhow::anyhow!("cannot save as .xlsb: workbook has no origin xlsb path"))?;
+    let Some(origin_path) = workbook.origin_xlsb_path.as_deref() else {
+        return Err(anyhow::anyhow!(
+            "Saving as .xlsb is only supported for workbooks opened from an .xlsb file. Save As .xlsx instead."
+        ));
+    };
     let origin_path = Path::new(origin_path);
 
     let print_settings_changed = workbook.print_settings != workbook.original_print_settings;
@@ -1133,8 +1142,15 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
 
     let mut temp_paths: Vec<std::path::PathBuf> = Vec::new();
     let res = (|| -> anyhow::Result<()> {
-        let xlsb = XlsbWorkbook::open(origin_path)
-            .with_context(|| format!("open xlsb {:?}", origin_path))?;
+        let xlsb = XlsbWorkbook::open_with_options(
+            origin_path,
+            XlsbOpenOptions {
+                preserve_unknown_parts: false,
+                preserve_parsed_parts: false,
+                preserve_worksheets: false,
+            },
+        )
+        .with_context(|| format!("open xlsb {:?}", origin_path))?;
 
         // Avoid writing directly over the source workbook since `formula-xlsb` streams from
         // `origin_path` while writing the destination ZIP.
@@ -1259,10 +1275,13 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                             )
                             .map_err(|biff_err| {
                                 anyhow::anyhow!(
-                                    "failed to encode formula ({ctx_err}); fallback encoder also failed ({biff_err})"
-                                )
-                            }),
-                        };
+                                     "cannot save .xlsb: unsupported formula edit at {}!({}, {}): {ctx_err}; fallback encoder also failed ({biff_err}). Save As .xlsx instead",
+                                     sheet.name,
+                                     *row + 1,
+                                     *col + 1
+                                 )
+                             }),
+                         };
                         edit.with_context(|| {
                             format!("encode RGCE for formula cell at ({row}, {col})")
                         })?
@@ -1295,7 +1314,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             let has_text_edits = edits.iter().any(|edit| {
                 matches!(edit.new_value, XlsbCellValue::Text(_)) && edit.new_formula.is_none()
             });
-            let has_shared_strings = xlsb.preserved_parts().contains_key("xl/sharedStrings.bin");
+            let has_shared_strings = !xlsb.shared_strings().is_empty();
             if has_text_edits && has_shared_strings {
                 xlsb.save_with_cell_edits_shared_strings(&final_out_path, *sheet_index, edits)
                     .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
@@ -1334,12 +1353,19 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                 candidate
             };
 
-            let wb = XlsbWorkbook::open(&source_path)
-                .with_context(|| format!("open xlsb {:?}", source_path))?;
+            let wb = XlsbWorkbook::open_with_options(
+                &source_path,
+                XlsbOpenOptions {
+                    preserve_unknown_parts: false,
+                    preserve_parsed_parts: false,
+                    preserve_worksheets: false,
+                },
+            )
+            .with_context(|| format!("open xlsb {:?}", source_path))?;
             let has_text_edits = sheet_edits.iter().any(|edit| {
                 matches!(edit.new_value, XlsbCellValue::Text(_)) && edit.new_formula.is_none()
             });
-            let has_shared_strings = wb.preserved_parts().contains_key("xl/sharedStrings.bin");
+            let has_shared_strings = !wb.shared_strings().is_empty();
             if has_text_edits && has_shared_strings {
                 wb.save_with_cell_edits_shared_strings(&out_path, *sheet_index, sheet_edits)
                     .with_context(|| format!("save edited xlsb {:?}", out_path))?;
@@ -1585,6 +1611,17 @@ mod tests {
     }
 
     #[test]
+    fn reads_xlsb_date_system_1904_fixture() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/date1904.xlsb"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+        assert_eq!(workbook.date_system, WorkbookDateSystem::Excel1904);
+    }
+
+    #[test]
     fn xlsb_roundtrip_save_as_is_lossless() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -1630,6 +1667,16 @@ mod tests {
         let out_path = tmp.path().join("edited.xlsb");
         write_xlsx_blocking(&out_path, &workbook).expect("write xlsb workbook");
 
+        let out_archive = WorkbookArchive::open(&out_path).expect("open written archive");
+        assert!(
+            out_archive.get("xl/workbook.bin").is_some(),
+            "expected output to contain xl/workbook.bin"
+        );
+        assert!(
+            out_archive.get("xl/workbook.xml").is_none(),
+            "expected output .xlsb to not contain xl/workbook.xml"
+        );
+
         let report = diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
         let report_text = report
             .differences
@@ -1673,7 +1720,6 @@ mod tests {
                     .all(|d| !d.part.starts_with("xl/calcChain.")),
                 "did not expect calcChain changes for fixture without calcChain.bin; got:\n{report_text}",
             );
-            let out_archive = WorkbookArchive::open(&out_path).expect("open written archive");
             assert!(
                 out_archive.get("xl/calcChain.bin").is_none(),
                 "written workbook should not gain xl/calcChain.bin"
@@ -1847,6 +1893,37 @@ mod tests {
             shared_strings.len()
         );
         assert_eq!(shared_strings[isst], new_text);
+    }
+
+    #[test]
+    fn saves_xlsb_fixture_with_cleared_formula_cell() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+
+        let mut state = AppState::new();
+        let info = state.load_workbook(workbook);
+        let sheet_id = info.sheets[0].id.clone();
+        state
+            .set_cell(&sheet_id, 0, 2, None, None)
+            .expect("clear formula cell");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("cleared-formula.xlsb");
+        write_xlsx_blocking(&out_path, state.get_workbook().unwrap()).expect("write xlsb workbook");
+
+        let patched_wb = XlsbWorkbook::open(&out_path).expect("open patched workbook");
+        let patched_sheet = patched_wb.read_sheet(0).expect("read patched sheet");
+        let c1 = patched_sheet
+            .cells
+            .iter()
+            .find(|c| (c.row, c.col) == (0, 2))
+            .expect("C1 exists");
+        assert_eq!(c1.value, XlsbCellValue::Blank);
+        assert!(c1.formula.is_none(), "expected formula to be cleared");
     }
 
     #[test]

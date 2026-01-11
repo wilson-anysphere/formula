@@ -1393,6 +1393,12 @@ fn patch_fmla_num<W: io::Write>(
     style: u32,
     edit: &CellEdit,
 ) -> Result<(), Error> {
+    if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
+        // Allow clearing formula cells by rewriting the record as a plain blank cell while
+        // preserving the original `style` index.
+        return patch_value_cell(writer, col, style, edit);
+    }
+
     // BrtFmlaNum: [col: u32][style: u32][value: f64][flags: u16][cce: u32][rgce bytes...]
     let flags = read_u16(payload, 16)?;
     let cce = read_u32(payload, 18)? as usize;
@@ -1466,6 +1472,10 @@ fn patch_fmla_bool<W: io::Write>(
     style: u32,
     edit: &CellEdit,
 ) -> Result<(), Error> {
+    if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
+        return patch_value_cell(writer, col, style, edit);
+    }
+
     // BrtFmlaBool: [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
     let flags = read_u16(payload, 9)?;
     let cce = read_u32(payload, 11)? as usize;
@@ -1540,6 +1550,10 @@ fn patch_fmla_error<W: io::Write>(
     style: u32,
     edit: &CellEdit,
 ) -> Result<(), Error> {
+    if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
+        return patch_value_cell(writer, col, style, edit);
+    }
+
     // BrtFmlaError: [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
     let flags = read_u16(payload, 9)?;
     let cce = read_u32(payload, 11)? as usize;
@@ -1614,6 +1628,10 @@ fn patch_fmla_string<W: io::Write>(
     style: u32,
     edit: &CellEdit,
 ) -> Result<(), Error> {
+    if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
+        return patch_value_cell(writer, col, style, edit);
+    }
+
     // BrtFmlaString:
     //   [col: u32][style: u32]
     //   [cached value: XLWideString (cch + flags + utf16 + optional rich/phonetic blocks)]

@@ -265,6 +265,31 @@ impl XlsbWorkbook {
         )
     }
 
+    /// Read the raw worksheet `.bin` part bytes for the given sheet index.
+    ///
+    /// This is primarily intended for callers that want to patch a worksheet stream using
+    /// [`crate::patch_sheet_bin`] and then write the workbook using
+    /// [`XlsbWorkbook::save_with_part_overrides`], without forcing `preserve_worksheets=true` in
+    /// [`OpenOptions`].
+    pub fn worksheet_bin_bytes(&self, sheet_index: usize) -> Result<Vec<u8>, ParseError> {
+        let meta = self
+            .sheets
+            .get(sheet_index)
+            .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+        let sheet_part = meta.part_path.clone();
+
+        if let Some(bytes) = self.preserved_parts.get(&sheet_part) {
+            return Ok(bytes.clone());
+        }
+
+        let file = File::open(&self.path)?;
+        let mut zip = ZipArchive::new(file)?;
+        let mut entry = zip.by_name(&sheet_part)?;
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        entry.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
     /// Stream cells from a worksheet without materializing the whole sheet.
     pub fn for_each_cell<F>(&self, sheet_index: usize, mut f: F) -> Result<(), ParseError>
     where
