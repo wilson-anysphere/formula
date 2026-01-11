@@ -664,6 +664,38 @@ impl MutableColumnarTable {
         expected
     }
 
+    /// Delete rows in `[row_start, row_end)` (0-based, half-open).
+    ///
+    /// This operation currently rebuilds the table (similar to `compact()`), because deletions are
+    /// expected to be rare compared to appends/updates in Power Query refresh flows.
+    ///
+    /// Returns the number of rows deleted.
+    pub fn delete_rows(&mut self, row_start: usize, row_end: usize) -> usize {
+        let row_end = row_end.min(self.rows);
+        let row_start = row_start.min(row_end);
+        let delete_count = row_end - row_start;
+        if delete_count == 0 {
+            return 0;
+        }
+
+        let mut rebuilt = MutableColumnarTable::new(self.schema.clone(), self.options);
+        let mut row_buf: Vec<Value> = Vec::with_capacity(self.columns.len());
+        for row in 0..self.rows {
+            if row >= row_start && row < row_end {
+                continue;
+            }
+            row_buf.clear();
+            for col in 0..self.columns.len() {
+                row_buf.push(self.get_cell(row, col));
+            }
+            rebuilt.append_row(&row_buf);
+        }
+        rebuilt.flush_all();
+        *self = rebuilt;
+
+        delete_count
+    }
+
     fn flush_all(&mut self) {
         for column in &mut self.columns {
             column.flush();

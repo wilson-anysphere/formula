@@ -166,3 +166,45 @@ fn compact_clears_overlays_and_matches_reads() {
     }
 }
 
+#[test]
+fn delete_rows_rebuilds_and_shifts_indices() {
+    let schema = vec![
+        ColumnSchema {
+            name: "x".to_owned(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "cat".to_owned(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 4,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let mut table = MutableColumnarTable::new(schema, options);
+    for i in 0..8 {
+        table.append_row(&[
+            Value::Number(i as f64),
+            Value::String(Arc::<str>::from(if i % 2 == 0 { "A" } else { "B" })),
+        ]);
+    }
+
+    // Create an overlay update that should survive the delete via rebuild.
+    assert!(table.update_cell(5, 0, Value::Number(100.0)));
+    assert!(table.overlay_cell_count() > 0);
+
+    let deleted = table.delete_rows(2, 4);
+    assert_eq!(deleted, 2);
+    assert_eq!(table.row_count(), 6);
+    assert_eq!(table.overlay_cell_count(), 0);
+
+    // Rows 0..2 preserved, row indices after deletion shift down.
+    assert_eq!(table.get_cell(0, 0), Value::Number(0.0));
+    assert_eq!(table.get_cell(1, 0), Value::Number(1.0));
+    assert_eq!(table.get_cell(2, 0), Value::Number(4.0));
+    assert_eq!(table.get_cell(3, 0), Value::Number(100.0)); // old row 5
+    assert_eq!(table.get_cell(4, 0), Value::Number(6.0));
+    assert_eq!(table.get_cell(5, 0), Value::Number(7.0));
+}
