@@ -223,6 +223,22 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    #[derive(Clone, Copy)]
+    enum VectorOrientation {
+        Row,
+        Column,
+    }
+
+    let vector_orientation = |arr: &Array, len: usize| -> Option<VectorOrientation> {
+        if arr.rows == len && arr.cols == 1 {
+            Some(VectorOrientation::Column)
+        } else if arr.rows == 1 && arr.cols == len {
+            Some(VectorOrientation::Row)
+        } else {
+            None
+        }
+    };
+
     let mut key_arrays = Vec::new();
     let mut descending_flags = Vec::new();
 
@@ -279,66 +295,35 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     };
 
-    let sorts_rows = first_key.rows == array.rows && first_key.cols == 1;
-    let sorts_cols = first_key.rows == 1 && first_key.cols == array.cols;
-    if !sorts_rows && !sorts_cols {
+    // Prefer row sorting when ambiguous (e.g. square arrays with 1xN keys).
+    let sorts_rows = vector_orientation(first_key, array.rows).is_some();
+    let sorts_cols = vector_orientation(first_key, array.cols).is_some();
+    let sort_rows = if sorts_rows {
+        true
+    } else if sorts_cols {
+        false
+    } else {
         return Value::Error(ErrorKind::Value);
-    }
-
-    if sorts_rows {
-        for key in &key_arrays {
-            if key.rows != array.rows || key.cols != 1 {
-                return Value::Error(ErrorKind::Value);
-            }
-        }
-
-        let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(key_arrays.len());
-        for key in key_arrays {
-            let mut out = Vec::with_capacity(array.rows);
-            for row in 0..array.rows {
-                out.push(sort_key(key.get(row, 0).unwrap_or(&Value::Blank)));
-            }
-            keys.push(out);
-        }
-
-        let mut order: Vec<usize> = (0..array.rows).collect();
-        order.sort_by(|&a, &b| {
-            for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
-                let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
-                if ord != Ordering::Equal {
-                    return ord;
-                }
-            }
-            a.cmp(&b)
-        });
-
-        let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
-        for &row in &order {
-            for col in 0..array.cols {
-                values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
-            }
-        }
-
-        return Value::Array(Array::new(array.rows, array.cols, values));
-    }
-
-    // Sort columns.
-    for key in &key_arrays {
-        if key.rows != 1 || key.cols != array.cols {
-            return Value::Error(ErrorKind::Value);
-        }
-    }
+    };
+    let axis_len = if sort_rows { array.rows } else { array.cols };
 
     let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(key_arrays.len());
     for key in key_arrays {
-        let mut out = Vec::with_capacity(array.cols);
-        for col in 0..array.cols {
-            out.push(sort_key(key.get(0, col).unwrap_or(&Value::Blank)));
+        let Some(orientation) = vector_orientation(&key, axis_len) else {
+            return Value::Error(ErrorKind::Value);
+        };
+        let mut out = Vec::with_capacity(axis_len);
+        for idx in 0..axis_len {
+            let v = match orientation {
+                VectorOrientation::Row => key.get(0, idx).unwrap_or(&Value::Blank),
+                VectorOrientation::Column => key.get(idx, 0).unwrap_or(&Value::Blank),
+            };
+            out.push(sort_key(v));
         }
         keys.push(out);
     }
 
-    let mut order: Vec<usize> = (0..array.cols).collect();
+    let mut order: Vec<usize> = (0..axis_len).collect();
     order.sort_by(|&a, &b| {
         for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
             let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
@@ -350,9 +335,17 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     });
 
     let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
-    for row in 0..array.rows {
-        for &col in &order {
-            values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+    if sort_rows {
+        for &row in &order {
+            for col in 0..array.cols {
+                values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+            }
+        }
+    } else {
+        for row in 0..array.rows {
+            for &col in &order {
+                values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+            }
         }
     }
 
@@ -360,7 +353,7 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 }
 
 #[derive(Debug, Clone)]
-enum SortKeyValue {
+pub(super) enum SortKeyValue {
     Number(f64),
     Text(String),
     Bool(bool),
@@ -380,7 +373,7 @@ impl SortKeyValue {
     }
 }
 
-fn sort_key(value: &Value) -> SortKeyValue {
+pub(super) fn sort_key(value: &Value) -> SortKeyValue {
     match value {
         Value::Number(n) => SortKeyValue::Number(*n),
         Value::Text(s) => SortKeyValue::Text(s.to_lowercase()),
@@ -409,7 +402,7 @@ fn error_rank(error: ErrorKind) -> u8 {
     }
 }
 
-fn compare_sort_keys(a: &SortKeyValue, b: &SortKeyValue, descending: bool) -> Ordering {
+pub(super) fn compare_sort_keys(a: &SortKeyValue, b: &SortKeyValue, descending: bool) -> Ordering {
     let rank_cmp = a.kind_rank().cmp(&b.kind_rank());
     if rank_cmp != Ordering::Equal {
         // Excel keeps a fixed cross-type ordering (numbers, then text, then booleans, then errors,
@@ -1464,7 +1457,7 @@ fn eval_array_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Arra
     arg_value_to_array(ctx, ctx.eval_arg(expr))
 }
 
-fn arg_value_to_array(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Array, ErrorKind> {
+pub(super) fn arg_value_to_array(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Array, ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => match v {
             Value::Array(arr) => Ok(arr),

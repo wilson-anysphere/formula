@@ -4,6 +4,7 @@ mod datetime;
 mod dynamic_arrays;
 mod dynamic_arrays_shape;
 mod dynamic_arrays_stack;
+mod dynamic_arrays_sortby;
 mod financial_cashflows;
 mod financial_dates;
 mod financial_depreciation;
