@@ -24,7 +24,9 @@ impl WildcardPattern {
     }
 
     pub(crate) fn matches(&self, text: &str) -> bool {
-        let text: Vec<char> = text.chars().map(|c| c.to_ascii_uppercase()).collect();
+        // Excel wildcard matching is case-insensitive. Use Unicode uppercasing so patterns like
+        // "straße" match "STRASSE" (ß uppercases to SS).
+        let text: Vec<char> = text.chars().flat_map(|c| c.to_uppercase()).collect();
         wildcard_match_tokens(&self.tokens, &text)
     }
 
@@ -66,14 +68,18 @@ fn tokenize_pattern(pattern: &str) -> Vec<Token> {
 
                 if matches!(next, '*' | '?' | '~') {
                     let _ = chars.next();
-                    tokens.push(Token::Literal(next.to_ascii_uppercase()));
+                    tokens.push(Token::Literal(next));
                 } else {
                     tokens.push(Token::Literal('~'));
                 }
             }
             '*' => tokens.push(Token::Star),
             '?' => tokens.push(Token::QMark),
-            other => tokens.push(Token::Literal(other.to_ascii_uppercase())),
+            other => {
+                for uc in other.to_uppercase() {
+                    tokens.push(Token::Literal(uc));
+                }
+            }
         }
     }
     tokens

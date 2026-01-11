@@ -3,10 +3,16 @@ use crate::functions::wildcard::WildcardPattern;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
+fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
+    a.chars()
+        .flat_map(|c| c.to_uppercase())
+        .eq(b.chars().flat_map(|c| c.to_uppercase()))
+}
+
 fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
     match (lookup_value, candidate) {
         (Value::Number(a), Value::Number(b)) => a == b,
-        (Value::Text(a), Value::Text(b)) => a.eq_ignore_ascii_case(b),
+        (Value::Text(a), Value::Text(b)) => text_eq_case_insensitive(a, b),
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Error(a), Value::Error(b)) => a == b,
         (Value::Blank, Value::Blank) => true,
@@ -14,21 +20,17 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
     }
 }
 
-fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
-    // `str::cmp` operates on bytes; to match our prior `to_ascii_uppercase().cmp(...)` behavior
-    // without allocating, compare bytewise after ASCII uppercasing.
-    let mut a_iter = a.as_bytes().iter();
-    let mut b_iter = b.as_bytes().iter();
+fn cmp_case_insensitive(a: &str, b: &str) -> Ordering {
+    // Compare using Unicode-aware uppercasing so matches behave like Excel (e.g. ß -> SS).
+    // This intentionally uses the same `char::to_uppercase` logic as criteria matching.
+    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
+    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
     loop {
         match (a_iter.next(), b_iter.next()) {
-            (Some(&ac), Some(&bc)) => {
-                let ac = ac.to_ascii_uppercase();
-                let bc = bc.to_ascii_uppercase();
-                match ac.cmp(&bc) {
-                    Ordering::Equal => continue,
-                    ord => return ord,
-                }
-            }
+            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
+                Ordering::Equal => continue,
+                ord => return ord,
+            },
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (None, None) => return Ordering::Equal,
@@ -95,8 +97,8 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
         (Value::Number(x), Value::Blank) => return x.partial_cmp(&0.0_f64).unwrap_or(Ordering::Equal),
         (Value::Blank, Value::Bool(y)) => return false.cmp(y),
         (Value::Bool(x), Value::Blank) => return x.cmp(&false),
-        (Value::Blank, Value::Text(y)) => return cmp_ascii_case_insensitive("", y),
-        (Value::Text(x), Value::Blank) => return cmp_ascii_case_insensitive(x, ""),
+        (Value::Blank, Value::Text(y)) => return cmp_case_insensitive("", y),
+        (Value::Text(x), Value::Blank) => return cmp_case_insensitive(x, ""),
         _ => {}
     }
 
@@ -123,7 +125,7 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
 
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (Value::Text(x), Value::Text(y)) => cmp_ascii_case_insensitive(x, y),
+        (Value::Text(x), Value::Text(y)) => cmp_case_insensitive(x, y),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Error(x), Value::Error(y)) => x.as_code().cmp(y.as_code()),

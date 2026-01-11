@@ -16,6 +16,20 @@ fn xmatch_finds_case_insensitive_text() {
 }
 
 #[test]
+fn xmatch_and_xlookup_are_case_insensitive_for_unicode_text() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "Straße");
+    sheet.set("B1", 123.0);
+
+    // Uses Unicode-aware uppercasing: ß -> SS.
+    assert_eq!(sheet.eval("=XMATCH(\"STRASSE\", A1:A1)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=XLOOKUP(\"STRASSE\", A1:A1, B1:B1)"), Value::Number(123.0));
+
+    // Wildcard mode should also use Unicode-aware case folding.
+    assert_eq!(sheet.eval("=XMATCH(\"straß*\", A1:A1, 2)"), Value::Number(1.0));
+}
+
+#[test]
 fn xlookup_returns_if_not_found_when_provided() {
     let lookup_array = vec![Value::from("A"), Value::from("B")];
     let return_array = vec![Value::Number(10.0), Value::Number(20.0)];
