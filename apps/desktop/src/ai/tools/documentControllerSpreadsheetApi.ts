@@ -266,8 +266,16 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const snapshot = this.controller.encodeState();
     const cloned = new DocumentController();
     cloned.applyState(snapshot);
-    // Do not forward optional side-effectful capabilities (like chart creation)
-    // into clones used by preview/diff engines.
-    return new DocumentControllerSpreadsheetApi(cloned);
+    // `PreviewEngine` executes tool plans against clones. When charts are enabled
+    // we still want create_chart previews to succeed, but we must avoid mutating
+    // the live chart layer. Provide a throwaway chart implementation that only
+    // returns ids.
+    const createChart = this.createChart
+      ? (() => {
+          let counter = 0;
+          return () => ({ chart_id: `preview_chart_${++counter}` });
+        })()
+      : undefined;
+    return new DocumentControllerSpreadsheetApi(cloned, { createChart });
   }
 }

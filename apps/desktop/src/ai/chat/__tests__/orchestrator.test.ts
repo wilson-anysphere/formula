@@ -7,6 +7,7 @@ import { ContextManager } from "../../../../../../packages/ai-context/src/contex
 import { HashEmbedder, InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/index.js";
 
 import { createAiChatOrchestrator } from "../orchestrator.js";
+import { ChartStore } from "../../../charts/chartStore";
 
 function seed2x2(controller: DocumentController) {
   controller.setCellValue("Sheet1", "A1", 1);
@@ -36,6 +37,34 @@ function createMockLlmClient(params: { cell: string; value: unknown }) {
                   arguments: { cell: params.cell, value: params.value },
                 },
               ],
+            },
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }
+        return {
+          message: { role: "assistant", content: "ok" },
+          usage: { promptTokens: 5, completionTokens: 3 },
+        };
+      },
+    },
+  };
+}
+
+function createMockLlmClientWithToolCall(call: { name: string; arguments: unknown }) {
+  const requests: any[] = [];
+  let callCount = 0;
+  return {
+    requests,
+    client: {
+      async chat(request: any) {
+        requests.push(request);
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call_1", name: call.name, arguments: call.arguments }],
             },
             usage: { promptTokens: 10, completionTokens: 5 },
           };
@@ -200,5 +229,78 @@ describe("ai chat orchestrator", () => {
 
     const firstRequest = mock.requests[0];
     expect(firstRequest.messages?.[0]?.content).toContain("WORKBOOK_CONTEXT");
+  });
+
+  it("executes create_chart when chart host support is provided (no approval needed for zero-cell-change preview)", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", "Category");
+    controller.setCellValue("Sheet1", "B1", "Value");
+    controller.setCellValue("Sheet1", "A2", "A");
+    controller.setCellValue("Sheet1", "B2", 10);
+    controller.setCellValue("Sheet1", "A3", "B");
+    controller.setCellValue("Sheet1", "B3", 20);
+
+    const embedder = new HashEmbedder({ dimension: 64 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 },
+    });
+
+    const chartStore = new ChartStore({
+      defaultSheet: "Sheet1",
+      getCellValue: (sheetId, row, col) => {
+        const cell = controller.getCell(sheetId, { row, col }) as { value: unknown } | null;
+        return cell?.value ?? null;
+      },
+    });
+
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_chart" });
+    const mock = createMockLlmClientWithToolCall({
+      name: "create_chart",
+      arguments: { chart_type: "bar", data_range: "A1:B3", title: "Sales" },
+    });
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_chart",
+      llmClient: mock.client as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_chart",
+      contextManager,
+      previewOptions: { approval_cell_threshold: 0 },
+      createChart: chartStore.createChart.bind(chartStore),
+    });
+
+    const onToolCall = vi.fn();
+    const onToolResult = vi.fn();
+
+    const result = await orchestrator.sendMessage({
+      text: "Create a chart",
+      history: [],
+      onToolCall,
+      onToolResult,
+    });
+
+    expect(result.finalText).toBe("ok");
+    expect(result.toolResults.length).toBe(1);
+    expect(result.toolResults[0]?.ok).toBe(true);
+
+    expect(onToolCall).toHaveBeenCalledTimes(1);
+    expect(onToolCall.mock.calls[0]?.[0]).toMatchObject({ name: "create_chart" });
+    expect(onToolResult).toHaveBeenCalledTimes(1);
+    expect(onToolResult.mock.calls[0]?.[0]).toMatchObject({ name: "create_chart" });
+    expect(onToolResult.mock.calls[0]?.[1]).toMatchObject({ ok: true });
+
+    const charts = chartStore.listCharts();
+    expect(charts).toHaveLength(1);
+    expect(charts[0]?.title).toBe("Sales");
+    expect(charts[0]?.series[0]).toMatchObject({
+      name: "Value",
+      categories: "Sheet1!$A$2:$A$3",
+      values: "Sheet1!$B$2:$B$3",
+    });
   });
 });

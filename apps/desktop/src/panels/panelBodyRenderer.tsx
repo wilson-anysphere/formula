@@ -4,12 +4,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { PanelIds } from "./panelRegistry.js";
 import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
 import { createAIAuditPanel } from "./ai-audit/index.js";
+import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 
 export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
   getActiveSheetId?: () => string;
   workbookId?: string;
   renderMacrosPanel?: (body: HTMLDivElement) => void;
+  createChart?: SpreadsheetApi["createChart"];
 }
 
 export interface PanelBodyRenderer {
@@ -55,6 +57,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
           workbookId={options.workbookId}
+          createChart={options.createChart}
         />,
       );
       return;

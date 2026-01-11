@@ -8,6 +8,7 @@ import { ContextManager } from "../../../../../packages/ai-context/src/contextMa
 import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
 import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
+import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 
 import { AIChatPanel, type AIChatPanelSendMessage } from "./AIChatPanel.js";
 import { ApprovalModal } from "./ApprovalModal.js";
@@ -40,6 +41,7 @@ export interface AIChatPanelContainerProps {
   getDocumentController: () => unknown;
   getActiveSheetId?: () => string;
   workbookId?: string;
+  createChart?: SpreadsheetApi["createChart"];
 }
 
 export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
@@ -155,12 +157,13 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
       llmClient: client as any,
       model: (client as any).model ?? "gpt-4o-mini",
       getActiveSheetId: props.getActiveSheetId,
+      createChart: props.createChart,
       onApprovalRequired,
       previewOptions: { approval_cell_threshold: 0 },
       sessionId: `${workbookId}:${sessionId.current}`,
       contextManager,
     });
-  }, [client, contextManager, onApprovalRequired, props.getActiveSheetId, props.getDocumentController, workbookId]);
+  }, [client, contextManager, onApprovalRequired, props.createChart, props.getActiveSheetId, props.getDocumentController, workbookId]);
 
   const sendMessage: AIChatPanelSendMessage = useMemo(() => {
     return async (args) => {

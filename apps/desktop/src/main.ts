@@ -148,6 +148,7 @@ if (
     getDocumentController: () => app.getDocument(),
     getActiveSheetId: () => app.getCurrentSheetId(),
     workbookId,
+    createChart: (spec) => app.addChart(spec),
     renderMacrosPanel: (body) => {
       body.textContent = "Loading macros…";
       queueMicrotask(() => {

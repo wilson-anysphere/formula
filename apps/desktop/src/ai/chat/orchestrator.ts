@@ -18,6 +18,7 @@ import type {
 import { SpreadsheetLLMToolExecutor, createPreviewApprovalHandler } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
+import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 
 import type { DocumentController } from "../../document/documentController.js";
 
@@ -82,6 +83,12 @@ export interface AiChatOrchestratorOptions {
   model: string;
 
   getActiveSheetId?: () => string;
+  /**
+   * Optional chart host implementation. When provided, tool calls like
+   * `create_chart` will add a chart to the desktop UI (via SpreadsheetApi
+   * integration).
+   */
+  createChart?: SpreadsheetApi["createChart"];
 
   /**
    * If not provided, defaults to `LocalStorageAIAuditStore` (with in-memory
@@ -126,7 +133,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
   const auditStore = options.auditStore ?? new LocalStorageAIAuditStore();
   const sessionId = options.sessionId ?? createSessionId(options.workbookId);
 
-  const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController);
+  const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
 
   const contextManager = options.contextManager ?? createDefaultContextManager(options);
 
