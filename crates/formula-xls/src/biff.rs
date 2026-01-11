@@ -972,6 +972,72 @@ mod tests {
     }
 
     #[test]
+    fn boundsheet_scan_stops_at_next_bof_without_eof() {
+        // CODEPAGE=1251 (Windows Cyrillic).
+        let r_codepage = record(0x0042, &1251u16.to_le_bytes());
+
+        // BoundSheet8 with a compressed 8-bit name (fHighByte=0).
+        let mut bs_payload = Vec::new();
+        bs_payload.extend_from_slice(&0x1234u32.to_le_bytes()); // sheet offset
+        bs_payload.extend_from_slice(&[0, 0]); // visibility/type
+        bs_payload.push(1); // cch
+        bs_payload.push(0); // flags (compressed)
+        bs_payload.push(0x80); // "Ђ" in cp1251
+        let r_bs = record(0x0085, &bs_payload);
+
+        // BOF for the next substream (worksheet).
+        let r_sheet_bof = record(0x0809, &[0u8; 16]);
+
+        // No EOF record; should still stop at the worksheet BOF.
+        let stream = [r_codepage, r_bs, r_sheet_bof].concat();
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(sheets, vec![("Ђ".to_string(), 0x1234)]);
+    }
+
+    #[test]
+    fn globals_scan_stops_at_next_bof_without_eof() {
+        let r_bof_globals = record(0x0809, &[0u8; 16]);
+        // CODEPAGE=1251 (Windows Cyrillic).
+        let r_codepage = record(0x0042, &1251u16.to_le_bytes());
+
+        // FORMAT id=200, code = byte 0x80 in cp1251 => "Ђ".
+        let mut fmt_payload = Vec::new();
+        fmt_payload.extend_from_slice(&200u16.to_le_bytes());
+        fmt_payload.extend_from_slice(&1u16.to_le_bytes()); // cch
+        fmt_payload.push(0); // flags (compressed)
+        fmt_payload.push(0x80); // "Ђ" in cp1251
+        let r_fmt = record(0x041E, &fmt_payload);
+
+        let mut xf_payload = vec![0u8; 20];
+        xf_payload[2..4].copy_from_slice(&200u16.to_le_bytes());
+        let r_xf = record(0x00E0, &xf_payload);
+
+        // BOF for the next substream (worksheet).
+        let r_sheet_bof = record(0x0809, &[0u8; 16]);
+
+        // A 1904 record and another CODEPAGE after the worksheet BOF should be ignored.
+        let r_1904_after = record(0x0022, &[1, 0]);
+        let r_codepage_after = record(0x0042, &1252u16.to_le_bytes());
+
+        // No EOF for globals; parser should stop at the worksheet BOF.
+        let stream = [
+            r_bof_globals,
+            r_codepage,
+            r_fmt,
+            r_xf,
+            r_sheet_bof,
+            r_1904_after,
+            r_codepage_after,
+        ]
+        .concat();
+
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(globals.date_system, DateSystem::Excel1900);
+        assert_eq!(globals.xf_count(), 1);
+        assert_eq!(globals.resolve_number_format_code(0).as_deref(), Some("Ђ"));
+    }
+
+    #[test]
     fn parses_globals_date_system_formats_and_xfs_biff8() {
         // 1904 record payload: f1904 = 1.
         let r_1904 = record(0x0022, &[1, 0]);
