@@ -672,3 +672,55 @@ fn equals_sign_only_is_treated_as_literal_text_input() {
     let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
     assert_eq!(parsed["sheets"][DEFAULT_SHEET]["cells"]["A1"], json!("="));
 }
+
+#[wasm_bindgen_test]
+fn set_cells_bulk_updates_values_and_formulas() {
+    #[derive(serde::Serialize)]
+    struct Update {
+        address: String,
+        value: JsonValue,
+        sheet: Option<String>,
+    }
+
+    let mut wb = WasmWorkbook::new();
+    let updates = vec![
+        Update {
+            address: "A1".to_string(),
+            value: json!(1),
+            sheet: None,
+        },
+        Update {
+            address: "A2".to_string(),
+            value: json!("=A1*2"),
+            sheet: None,
+        },
+        Update {
+            address: "A1".to_string(),
+            value: json!(10),
+            sheet: Some("Sheet2".to_string()),
+        },
+        Update {
+            address: "A2".to_string(),
+            value: json!("=A1*2"),
+            sheet: Some("Sheet2".to_string()),
+        },
+    ];
+
+    wb.set_cells(serde_wasm_bindgen::to_value(&updates).unwrap())
+        .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0].sheet, "Sheet1");
+    assert_eq!(changes[0].address, "A2");
+    assert_json_number(&changes[0].value, 2.0);
+    assert_eq!(changes[1].sheet, "Sheet2");
+    assert_eq!(changes[1].address, "A2");
+    assert_json_number(&changes[1].value, 20.0);
+
+    let sheet1_a2_js = wb.get_cell("A2".to_string(), None).unwrap();
+    let sheet1_a2: CellData = serde_wasm_bindgen::from_value(sheet1_a2_js).unwrap();
+    assert_eq!(sheet1_a2.input, json!("=A1*2"));
+    assert_json_number(&sheet1_a2.value, 2.0);
+}
