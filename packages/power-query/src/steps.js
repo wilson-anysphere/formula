@@ -1217,6 +1217,9 @@ export const STREAMABLE_OPERATION_TYPES = new Set([
   "changeType",
   "transformColumns",
   "take",
+  "fillDown",
+  "replaceValues",
+  "removeRowsWithErrors",
 ]);
 
 /**
@@ -1387,6 +1390,51 @@ export function compileStreamingPipeline(operations, inputColumns) {
           seen += slice.length;
           return { rows: slice, done: seen >= limit };
         });
+        break;
+      }
+      case "fillDown": {
+        const indices = op.columns.map((name) => getColumnIndex(name));
+        /** @type {Map<number, unknown>} */
+        const last = new Map(indices.map((idx) => [idx, null]));
+        transforms.push((rows) => ({
+          rows: rows.map((row) => {
+            const next = row.slice();
+            for (const idx of indices) {
+              const value = next[idx];
+              if (value == null) {
+                next[idx] = last.get(idx);
+              } else {
+                last.set(idx, value);
+              }
+            }
+            return next;
+          }),
+          done: false,
+        }));
+        break;
+      }
+      case "replaceValues": {
+        const idx = getColumnIndex(op.column);
+        const findKey = valueKey(op.find);
+        transforms.push((rows) => ({
+          rows: rows.map((row) => {
+            const next = row.slice();
+            if (valueKey(next[idx]) === findKey) next[idx] = op.replace;
+            return next;
+          }),
+          done: false,
+        }));
+        break;
+      }
+      case "removeRowsWithErrors": {
+        const indices =
+          op.columns && op.columns.length > 0
+            ? op.columns.map((name) => getColumnIndex(name))
+            : columns.map((_c, idx) => idx);
+        transforms.push((rows) => ({
+          rows: rows.filter((row) => !indices.some((idx) => row?.[idx] instanceof Error)),
+          done: false,
+        }));
         break;
       }
       default: {

@@ -260,3 +260,38 @@ test("executeQueryStreaming(..., materialize:false) applies transforms after tak
   const expected = (await engine.executeQuery(query, {}, {})).toGrid();
   assert.deepEqual(streamed, expected);
 });
+
+test("executeQueryStreaming(..., materialize:false) streams fillDown/replaceValues/removeRowsWithErrors", async () => {
+  const engine = new QueryEngine();
+  const err = new Error("boom");
+
+  const query = {
+    id: "q_stream_fill_replace_errors",
+    name: "Fill/Replace/Errors",
+    source: {
+      type: "range",
+      range: {
+        values: [
+          ["A", "B"],
+          [null, 1],
+          [2, err],
+          [null, 3],
+          [4, 4],
+        ],
+        hasHeaders: true,
+      },
+    },
+    steps: [
+      { id: "s_fill", name: "Fill down", operation: { type: "fillDown", columns: ["A"] } },
+      { id: "s_replace", name: "Replace", operation: { type: "replaceValues", column: "A", find: 2, replace: 99 } },
+      { id: "s_clean", name: "Remove errors", operation: { type: "removeRowsWithErrors", columns: ["B"] } },
+    ],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, {}, { batchSize: 2, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
