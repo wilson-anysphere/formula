@@ -119,7 +119,9 @@ impl Workbook {
             .ok_or(RenameSheetError::SheetNotFound)?;
 
         for sheet in &self.sheets {
-            if sheet.id != id && sheet.name.eq_ignore_ascii_case(new_name) {
+            if sheet.id != id
+                && crate::formula_rewrite::sheet_name_eq_case_insensitive(&sheet.name, new_name)
+            {
                 return Err(RenameSheetError::DuplicateName);
             }
         }
