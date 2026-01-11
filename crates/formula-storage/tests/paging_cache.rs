@@ -395,7 +395,7 @@ fn load_viewport_with_margin_prefetches_neighbor_pages() {
     );
 
     // Load row 0 but prefetch an extra page of rows so row 10 is loaded too.
-    memory
+    let viewport = memory
         .load_viewport_with_margin(
             sheet.id,
             CellRange::new(0, 0, 0, 0),
@@ -403,6 +403,11 @@ fn load_viewport_with_margin_prefetches_neighbor_pages() {
             0,
         )
         .expect("load viewport with margin");
+
+    assert!(
+        viewport.get(rows_per_page as i64, 0).is_none(),
+        "prefetch margin should not change returned viewport contents"
+    );
 
     assert!(
         memory.get_cached_cell(sheet.id, rows_per_page as i64, 0).is_some(),
