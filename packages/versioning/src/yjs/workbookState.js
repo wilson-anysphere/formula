@@ -129,16 +129,52 @@ export function workbookStateFromYjsDoc(doc) {
 
   /** @type {Map<string, any>} */
   const namedRanges = new Map();
-  const namedRangesMap = doc.getMap("namedRanges");
-  for (const key of Array.from(namedRangesMap.keys()).sort()) {
-    namedRanges.set(key, yjsValueToJson(namedRangesMap.get(key)));
+  if (doc.share.has("namedRanges")) {
+    try {
+      const namedRangesMap = doc.getMap("namedRanges");
+      for (const key of Array.from(namedRangesMap.keys()).sort()) {
+        namedRanges.set(key, yjsValueToJson(namedRangesMap.get(key)));
+      }
+    } catch {
+      // Ignore: unsupported root type.
+    }
   }
 
   /** @type {Map<string, CommentSummary>} */
   const comments = new Map();
-  const commentsMap = doc.getMap("comments");
-  for (const key of Array.from(commentsMap.keys()).sort()) {
-    comments.set(key, commentSummaryFromValue(commentsMap.get(key), key));
+  if (doc.share.has("comments")) {
+    // Yjs root types are schema-defined: you must know whether a key is a Map or
+    // Array. When applying updates into a fresh Doc, root types can temporarily
+    // appear as a generic `AbstractType` until a constructor is chosen.
+    //
+    // Importantly, calling `doc.getMap("comments")` on an Array-backed root can
+    // *silently* define it as a Map and make the array content inaccessible.
+    // To support both historical schemas (Map or Array) we peek at the
+    // underlying state before choosing a constructor.
+    const placeholder = doc.share.get("comments");
+    const hasStart = placeholder?._start != null; // sequence item => likely array
+    const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+    const kind = hasStart && mapSize === 0 ? "array" : "map";
+
+    if (kind === "map") {
+      const commentsMap = doc.getMap("comments");
+      for (const key of Array.from(commentsMap.keys()).sort()) {
+        comments.set(key, commentSummaryFromValue(commentsMap.get(key), key));
+      }
+    } else {
+      const commentsArray = doc.getArray("comments");
+      /** @type {[string, CommentSummary][]} */
+      const entries = [];
+      for (const item of commentsArray.toArray()) {
+        const id = coerceString(readYMapOrObject(item, "id"));
+        if (!id) continue;
+        entries.push([id, commentSummaryFromValue(item, id)]);
+      }
+      entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      for (const [id, summary] of entries) {
+        comments.set(id, summary);
+      }
+    }
   }
 
   return { sheets, namedRanges, comments, cellsBySheet };

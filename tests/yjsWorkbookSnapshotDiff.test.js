@@ -110,3 +110,58 @@ test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
   assert.equal(diff.namedRanges.modified[0].key, "NR1");
 });
 
+test("diffYjsWorkbookSnapshots supports comments stored as a Y.Array", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+  const cells = doc.getMap("cells");
+  const comments = doc.getArray("comments");
+
+  const sheet = new Y.Map();
+  sheet.set("id", "sheet1");
+  sheet.set("name", "Sheet1");
+  sheets.push([sheet]);
+
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "move-me");
+    cell.set("formula", "=A1+B1");
+    cells.set("sheet1:0:0", cell);
+
+    const comment = new Y.Map();
+    comment.set("id", "c1");
+    comment.set("cellRef", "A1");
+    comment.set("content", "Original comment");
+    comment.set("resolved", false);
+    comment.set("replies", new Y.Array());
+    comments.push([comment]);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    cells.delete("sheet1:0:0");
+    const moved = new Y.Map();
+    moved.set("value", "move-me");
+    moved.set("formula", "=B1 + A1");
+    cells.set("sheet1:2:3", moved);
+
+    const comment = comments.get(0);
+    assert.ok(comment instanceof Y.Map);
+    comment.set("content", "Updated comment");
+    comment.set("resolved", true);
+    const replies = comment.get("replies");
+    assert.ok(replies instanceof Y.Array);
+    replies.push([{ id: "r1", content: "First reply" }]);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+
+  assert.equal(diff.comments.modified.length, 1);
+  assert.equal(diff.comments.modified[0].id, "c1");
+  assert.equal(diff.comments.modified[0].after.repliesLength, 1);
+
+  const sheet1Diff = diff.cellsBySheet.find((entry) => entry.sheetId === "sheet1")?.diff;
+  assert.ok(sheet1Diff);
+  assert.equal(sheet1Diff.moved.length, 1);
+});
