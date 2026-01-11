@@ -52,7 +52,10 @@ function sqlTypesForDialect(dialect) {
     case "postgres":
       return { boolean: "BOOLEAN", number: "DOUBLE PRECISION", date: "TIMESTAMPTZ" };
     case "mysql":
-      return { boolean: "BOOLEAN", number: "DOUBLE", date: "DATETIME" };
+      // MySQL's BOOLEAN is an alias for TINYINT(1), but CAST(... AS BOOLEAN)
+      // is not consistently supported across drivers/versions. Use a numeric
+      // cast to keep the generated SQL conservative.
+      return { boolean: "SIGNED", number: "DOUBLE", date: "DATETIME" };
     case "sqlite":
       return { boolean: "INTEGER", number: "REAL", date: "TEXT" };
     default: {
