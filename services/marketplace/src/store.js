@@ -1159,7 +1159,7 @@ class MarketplaceStore {
     const meta = await this.db.withRead((db) => {
       const stmt = db.prepare(
         `SELECT e.publisher, e.blocked, e.malicious,
-                v.signature_base64, v.sha256, v.package_bytes, v.package_path, v.yanked, v.format_version
+                v.signature_base64, v.sha256, v.package_path, v.yanked, v.format_version
          FROM extensions e
          JOIN extension_versions v ON v.extension_id = e.id
          WHERE e.id = ? AND v.version = ? LIMIT 1`
@@ -1176,13 +1176,29 @@ class MarketplaceStore {
         return null;
       }
 
+      const packagePath = row.package_path ? String(row.package_path) : null;
+      let packageBytes = null;
+      if (includeBytes && !packagePath) {
+        const bytesStmt = db.prepare(
+          `SELECT package_bytes FROM extension_versions WHERE extension_id = ? AND version = ? LIMIT 1`
+        );
+        bytesStmt.bind([id, version]);
+        if (!bytesStmt.step()) {
+          bytesStmt.free();
+          return null;
+        }
+        const bytesRow = bytesStmt.getAsObject();
+        bytesStmt.free();
+        packageBytes = bytesRow.package_bytes;
+      }
+
       return {
         publisher: String(row.publisher),
         signatureBase64: String(row.signature_base64),
         sha256: String(row.sha256),
         formatVersion: Number(row.format_version || 1),
-        packageBytes: row.package_bytes,
-        packagePath: row.package_path ? String(row.package_path) : null,
+        packageBytes,
+        packagePath,
       };
     });
 
