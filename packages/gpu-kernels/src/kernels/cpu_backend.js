@@ -726,6 +726,9 @@ export class CpuBackend {
       if (joinType === "left" && c === 0) c = 1;
       counts[i] = c;
       total += c;
+      if (total > 0xffff_ffff) {
+        throw new Error(`hashJoin output too large: ${total} pairs (exceeds Uint32Array limits)`);
+      }
     }
 
     if (total === 0) {
