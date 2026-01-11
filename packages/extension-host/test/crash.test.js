@@ -42,7 +42,7 @@ test("crash: worker crash marks extension inactive and next command spawns a fre
           // Trigger an unhandled exception on the worker event loop after responding.
           setTimeout(() => {
             Promise.reject(new Error("boom"));
-          }, 0);
+          }, 25);
           return "scheduled";
         });
       };
