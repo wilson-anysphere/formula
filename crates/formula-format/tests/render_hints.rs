@@ -95,8 +95,8 @@ fn datetime_month_only_formats_are_detected_and_bracket_tokens_ignored() {
     assert_eq!(rendered.text, "01");
     assert_eq!(rendered.color, Some(ColorOverride::Argb(0xFFFF0000)));
 
-    // Numeric formats containing `m` should remain numeric when placeholders are present.
-    let rendered = render_value(Value::Number(1.0), Some("0m"), &options);
+    // Literal text must be quoted in Excel format codes.
+    let rendered = render_value(Value::Number(1.0), Some("0\"m\""), &options);
     assert_eq!(rendered.text, "1m");
 }
 
@@ -107,4 +107,3 @@ fn non_finite_numbers_render_as_num_error() {
     assert_eq!(rendered.text, "#NUM!");
     assert_eq!(rendered.alignment, AlignmentHint::Center);
 }
-

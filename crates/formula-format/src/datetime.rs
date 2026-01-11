@@ -26,8 +26,6 @@ struct DateTimeParts {
 pub(crate) fn looks_like_datetime(section: &str) -> bool {
     let mut in_quotes = false;
     let mut escape = false;
-    let mut has_m = false;
-    let mut has_numeric = false;
     let mut chars = section.chars().peekable();
 
     while let Some(ch) = chars.next() {
@@ -55,13 +53,12 @@ pub(crate) fn looks_like_datetime(section: &str) -> bool {
                     content.push(c);
                 }
                 let lower = content.to_ascii_lowercase();
-                if matches!(lower.as_str(), "h" | "hh" | "m" | "mm" | "s" | "ss") {
+                if is_elapsed_time_token(&lower) {
                     return true;
                 }
             }
             'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S' => return true,
-            'm' | 'M' => has_m = true,
-            '0' | '#' | '?' | '@' => has_numeric = true,
+            'm' | 'M' => return true,
             'a' | 'A' => {
                 // AM/PM or A/P markers (case-insensitive).
                 let mut probe = String::new();
@@ -83,10 +80,31 @@ pub(crate) fn looks_like_datetime(section: &str) -> bool {
         }
     }
 
-    // If the format contains month tokens but no numeric placeholders, treat it as a date/time
-    // format (e.g. `mm` meaning "month"). If numeric placeholders are present, `m` is more likely
-    // a literal suffix (e.g. `0m`), so keep it as numeric.
-    has_m && !has_numeric
+    false
+}
+
+fn is_elapsed_time_token(lower: &str) -> bool {
+    if lower.is_empty() {
+        return false;
+    }
+    lower.chars().all(|c| c == 'h') || lower.chars().all(|c| c == 'm') || lower.chars().all(|c| c == 's')
+}
+
+fn parse_elapsed_bracket_token(lower: &str) -> Option<Token> {
+    if lower.is_empty() {
+        return None;
+    }
+    let count = lower.chars().count();
+    if lower.chars().all(|c| c == 'h') {
+        return Some(Token::ElapsedHours(count));
+    }
+    if lower.chars().all(|c| c == 'm') {
+        return Some(Token::ElapsedMinutes(count));
+    }
+    if lower.chars().all(|c| c == 's') {
+        return Some(Token::ElapsedSeconds(count));
+    }
+    None
 }
 
 pub(crate) fn format_datetime(serial: f64, pattern: &str, options: &FormatOptions) -> RenderedText {
@@ -240,9 +258,9 @@ enum Token {
     TimeSep,
     AmPmLong,
     AmPmShort,
-    ElapsedHours,
-    ElapsedMinutes,
-    ElapsedSeconds,
+    ElapsedHours(usize),
+    ElapsedMinutes(usize),
+    ElapsedSeconds(usize),
     Underscore(char),
     Fill(char),
 }
@@ -304,14 +322,8 @@ fn tokenize(pattern: &str) -> Vec<Token> {
                 }
                 let lower = content.to_ascii_lowercase();
                 flush_literal(&mut literal_buf, &mut tokens);
-                match lower.as_str() {
-                    "h" | "hh" => tokens.push(Token::ElapsedHours),
-                    "m" | "mm" => tokens.push(Token::ElapsedMinutes),
-                    "s" | "ss" => tokens.push(Token::ElapsedSeconds),
-                    _ => {
-                        // Other bracket tokens (colors/locales/conditions) are meta tokens and do
-                        // not contribute to display text.
-                    }
+                if let Some(token) = parse_elapsed_bracket_token(&lower) {
+                    tokens.push(token);
                 }
             }
             'a' | 'A' => {
@@ -427,8 +439,8 @@ fn disambiguate_minutes(tokens: &mut [Token]) {
 
         let prev = prev_non_literal(tokens, idx);
         let next = next_non_literal(tokens, idx);
-        let is_minute = matches!(prev, Some(Token::Hour(_)) | Some(Token::ElapsedHours))
-            || matches!(next, Some(Token::Second(_)) | Some(Token::ElapsedSeconds));
+        let is_minute = matches!(prev, Some(Token::Hour(_)) | Some(Token::ElapsedHours(_)))
+            || matches!(next, Some(Token::Second(_)) | Some(Token::ElapsedSeconds(_)));
 
         tokens[idx] = if is_minute {
             Token::Minute(count)
@@ -489,9 +501,9 @@ fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, option
             }
             Token::AmPmLong => out.push_str(if parts.hour < 12 { "AM" } else { "PM" }),
             Token::AmPmShort => out.push_str(if parts.hour < 12 { "A" } else { "P" }),
-            Token::ElapsedHours => out.push_str(&(parts.total_seconds / 3600).to_string()),
-            Token::ElapsedMinutes => out.push_str(&(parts.total_seconds / 60).to_string()),
-            Token::ElapsedSeconds => out.push_str(&parts.total_seconds.to_string()),
+            Token::ElapsedHours(width) => out.push_str(&format_elapsed(parts.total_seconds / 3600, *width)),
+            Token::ElapsedMinutes(width) => out.push_str(&format_elapsed(parts.total_seconds / 60, *width)),
+            Token::ElapsedSeconds(width) => out.push_str(&format_elapsed(parts.total_seconds, *width)),
             Token::Underscore(width_of) => {
                 out.push_layout_op(LiteralLayoutOp::Underscore {
                     byte_index: out.text.len(),
@@ -526,6 +538,14 @@ fn format_two(value: u32, count: usize) -> String {
         value.to_string()
     } else {
         format!("{:02}", value)
+    }
+}
+
+fn format_elapsed(value: i64, width: usize) -> String {
+    if width <= 1 {
+        value.to_string()
+    } else {
+        format!("{value:0width$}", width = width)
     }
 }
 

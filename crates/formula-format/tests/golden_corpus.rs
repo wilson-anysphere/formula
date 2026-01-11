@@ -34,6 +34,9 @@ fn golden_corpus_numbers_and_datetime() {
         (Value::Number(1.5), "h:mm", &en_1900, "12:00"),
         (Value::Number(1.75), "h:mm:ss", &en_1900, "18:00:00"),
         (Value::Number(1.5), "[h]:mm", &en_1900, "36:00"),
+        (Value::Number(1.0 / 24.0), "[hh]", &en_1900, "01"),
+        (Value::Number(1.0 / 1440.0), "[mm]", &en_1900, "01"),
+        (Value::Number(1.0 / 86_400.0), "[ss]", &en_1900, "01"),
         // Fractional seconds with more than 3 digits.
         (
             Value::Number(1.2345 / 86_400.0),
@@ -54,4 +57,3 @@ fn golden_corpus_numbers_and_datetime() {
         );
     }
 }
-

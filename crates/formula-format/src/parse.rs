@@ -262,7 +262,11 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
         // Do not strip elapsed time tokens `[h]`, `[m]`, `[s]` which are part of
         // date/time formatting.
         let lower = content.to_ascii_lowercase();
-        if matches!(lower.as_str(), "h" | "hh" | "m" | "mm" | "s" | "ss") {
+        if !lower.is_empty()
+            && (lower.chars().all(|c| c == 'h')
+                || lower.chars().all(|c| c == 'm')
+                || lower.chars().all(|c| c == 's'))
+        {
             break;
         }
 
