@@ -17,6 +17,23 @@
  */
 
 const WORKER_URL = new URL("./web-sandbox-worker.js", import.meta.url);
+const DEFAULT_TIMEOUT_MS = 5_000;
+
+function createRunToken() {
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
+
+  const bytes = new Uint8Array(16);
+  if (cryptoObj?.getRandomValues) {
+    cryptoObj.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export class ScriptRuntime {
   /**
@@ -28,8 +45,11 @@ export class ScriptRuntime {
 
   /**
    * @param {string} code
-   * @param {{ permissions?: ScriptPermissions }=} options
+   * @param {{ permissions?: ScriptPermissions, timeoutMs?: number }=} options
    * @returns {Promise<ScriptRunResult>}
+   *
+   * If execution exceeds `timeoutMs`, the worker is terminated and the promise
+   * resolves with a `ScriptRunResult` containing an error.
    */
   async run(code, options) {
     if (typeof Worker === "undefined") {
@@ -43,57 +63,104 @@ export class ScriptRuntime {
     const logs = [];
 
     const worker = new Worker(WORKER_URL, { type: "module" });
+    const token = createRunToken();
+    const timeoutMs =
+      Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
+
+    /** @type {MessagePort | null} */
+    let controlPort = null;
+    /** @type {MessagePort | null} */
+    let workerPort = null;
+    if (typeof MessageChannel !== "undefined") {
+      const channel = new MessageChannel();
+      controlPort = channel.port1;
+      workerPort = channel.port2;
+    }
 
     const completion = new Promise((resolve) => {
+      let timeoutId;
+      let settled = false;
+
       const cleanup = () => {
+        if (controlPort) {
+          controlPort.onmessage = null;
+          controlPort.close();
+        }
         worker.onmessage = null;
         worker.onerror = null;
         worker.terminate();
       };
 
-      worker.onmessage = async (event) => {
-        const message = event.data;
+      const settle = (result) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        cleanup();
+        resolve(result);
+      };
 
-        if (message?.type === "console") {
+      const onMessage = async (event) => {
+        if (settled) return;
+        const message = event.data;
+        if (!message || message.token !== token) return;
+
+        if (message.type === "console") {
           logs.push({ level: message.level, message: message.message });
           return;
         }
 
-        if (message?.type === "rpc") {
+        if (message.type === "rpc") {
           try {
             const result = await this.handleRpc(message.method, message.params);
-            worker.postMessage({ type: "rpcResult", id: message.id, result });
+            if (settled) return;
+            (controlPort ?? worker).postMessage({ type: "rpcResult", token, id: message.id, result });
           } catch (err) {
-            worker.postMessage({ type: "rpcError", id: message.id, error: serializeError(err) });
+            if (settled) return;
+            (controlPort ?? worker).postMessage({ type: "rpcError", token, id: message.id, error: serializeError(err) });
           }
           return;
         }
 
-        if (message?.type === "result") {
-          cleanup();
-          resolve({ logs });
+        if (message.type === "result") {
+          settle({ logs });
           return;
         }
 
-        if (message?.type === "error") {
-          cleanup();
-          resolve({ logs, error: message.error });
+        if (message.type === "error") {
+          settle({ logs, error: message.error });
         }
       };
 
+      if (controlPort) {
+        controlPort.onmessage = onMessage;
+      } else {
+        worker.onmessage = onMessage;
+      }
+
       worker.onerror = (event) => {
-        cleanup();
-        resolve({ logs, error: serializeError(event?.error ?? event?.message ?? "Worker error") });
+        settle({ logs, error: serializeError(event?.error ?? event?.message ?? "Worker error") });
       };
+
+      timeoutId = setTimeout(() => {
+        settle({
+          logs,
+          error: {
+            name: "ScriptTimeoutError",
+            message: `Script timed out after ${timeoutMs}ms`,
+          },
+        });
+      }, timeoutMs);
     });
 
     worker.postMessage({
       type: "run",
+      token,
       code,
       activeSheetName,
       selection,
       permissions: options?.permissions,
-    });
+      ...(workerPort ? { controlPort: workerPort } : null),
+    }, workerPort ? [workerPort] : undefined);
 
     return completion;
   }

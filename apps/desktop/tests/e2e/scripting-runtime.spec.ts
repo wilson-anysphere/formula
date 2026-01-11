@@ -115,3 +115,48 @@ export default async function main(ctx) {
   expect(result.allowlistDenied.error?.message).toContain("example.com");
   expect(result.allowlistWebSocketDenied.error?.message).toContain("example.com");
 });
+
+test("scripting: times out hung scripts and ignores spoofed worker messages", async ({ page }) => {
+  await page.goto("/scripting-test.html");
+  await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
+
+  const runInPage = async () => {
+    const { ScriptRuntime, Workbook } = (globalThis as any).__formulaScripting;
+
+    const workbook = new Workbook();
+    workbook.addSheet("Sheet1");
+    workbook.setActiveSheet("Sheet1");
+    const sheet = workbook.getActiveSheet();
+    sheet.setCellValue("A1", 10);
+
+    const runtime = new ScriptRuntime(workbook);
+
+    const simpleTimeout = await runtime.run(`await new Promise(() => {});`, { timeoutMs: 200 });
+
+    const spoofed = await runtime.run(
+      `
+// Attempt to spoof the host protocol: should be ignored without the per-run token.
+self.postMessage({
+  type: "rpc",
+  id: 123,
+  method: "range.setValue",
+  params: { sheetName: "Sheet1", address: "A1", value: 99 },
+});
+self.postMessage({ type: "result" });
+await new Promise(() => {});
+`,
+      { timeoutMs: 200 },
+    );
+
+    return {
+      simpleTimeout,
+      spoofed,
+      cellValue: sheet.getRange("A1").getValue(),
+    };
+  };
+
+  const result = await page.evaluate(runInPage);
+  expect(result.simpleTimeout.error?.message).toContain("timed out");
+  expect(result.spoofed.error?.message).toContain("timed out");
+  expect(result.cellValue).toBe(10);
+});

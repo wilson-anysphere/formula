@@ -7,6 +7,7 @@ import { Worker } from "node:worker_threads";
  */
 
 const WORKER_URL = new URL("./sandbox-worker.cjs", import.meta.url);
+const DEFAULT_TIMEOUT_MS = 5_000;
 
 export class ScriptRuntime {
   /**
@@ -18,8 +19,11 @@ export class ScriptRuntime {
 
   /**
    * @param {string} code
-   * @param {{ permissions?: any }=} options
+   * @param {{ permissions?: any, timeoutMs?: number }=} options
    * @returns {Promise<ScriptRunResult>}
+   *
+   * If execution exceeds `timeoutMs`, the worker is terminated and the promise
+   * resolves with a `ScriptRunResult` containing an error.
    */
   async run(code, options) {
     const activeSheetName = this.workbook.getActiveSheet().name;
@@ -36,13 +40,24 @@ export class ScriptRuntime {
       },
     });
 
+    const timeoutMs =
+      Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
+    let timeoutId;
+    let settled = false;
+
     const completion = new Promise((resolve) => {
-      const cleanup = async () => {
+      const settle = async (result) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
         worker.removeAllListeners();
         await worker.terminate();
+        resolve(result);
       };
 
       worker.on("message", async (message) => {
+        if (settled) return;
+
         if (message?.type === "console") {
           logs.push({ level: message.level, message: message.message });
           return;
@@ -51,30 +66,41 @@ export class ScriptRuntime {
         if (message?.type === "rpc") {
           try {
             const result = await this.handleRpc(message.method, message.params);
+            if (settled) return;
             worker.postMessage({ type: "rpcResult", id: message.id, result });
           } catch (err) {
             const serialized = serializeError(err);
+            if (settled) return;
             worker.postMessage({ type: "rpcError", id: message.id, error: serialized });
           }
           return;
         }
 
         if (message?.type === "result") {
-          await cleanup();
-          resolve({ logs });
+          await settle({ logs });
           return;
         }
 
         if (message?.type === "error") {
-          await cleanup();
-          resolve({ logs, error: message.error });
+          await settle({ logs, error: message.error });
         }
       });
 
       worker.on("error", async (err) => {
-        await cleanup();
-        resolve({ logs, error: serializeError(err) });
+        await settle({ logs, error: serializeError(err) });
       });
+
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          void settle({
+            logs,
+            error: {
+              name: "ScriptTimeoutError",
+              message: `Script timed out after ${timeoutMs}ms`,
+            },
+          });
+        }, timeoutMs);
+      }
     });
 
     worker.postMessage({ type: "run", code });

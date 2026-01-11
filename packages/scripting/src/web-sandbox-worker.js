@@ -12,15 +12,30 @@ import ts from "typescript";
 
 let nextRpcId = 1;
 const pendingRpc = new Map();
+let runToken = null;
+/** @type {MessagePort | null} */
+let controlPort = null;
+
+const postMessageToHost = self.postMessage.bind(self);
 
 const originalFetch = self.fetch?.bind(self);
 const OriginalWebSocket = self.WebSocket;
+
+function postControlMessage(message) {
+  if (!runToken) return;
+  const payload = { ...message, token: runToken };
+  if (controlPort) {
+    controlPort.postMessage(payload);
+  } else {
+    postMessageToHost(payload);
+  }
+}
 
 function rpc(method, params) {
   const id = nextRpcId++;
   return new Promise((resolve, reject) => {
     pendingRpc.set(id, { resolve, reject });
-    self.postMessage({ type: "rpc", id, method, params });
+    postControlMessage({ type: "rpc", id, method, params });
   });
 }
 
@@ -49,11 +64,7 @@ function formatConsoleArgs(args) {
 }
 
 function postConsole(level, args) {
-  self.postMessage({
-    type: "console",
-    level,
-    message: formatConsoleArgs(args),
-  });
+  postControlMessage({ type: "console", level, message: formatConsoleArgs(args) });
 }
 
 const safeConsole = {
@@ -242,20 +253,10 @@ async function runUserScript({ code, activeSheetName, selection, permissions }) 
   await result;
 }
 
-self.onmessage = async (event) => {
-  const message = event.data;
+function handleHostMessage(message) {
+  if (!message || message.token !== runToken) return;
 
-  if (message && message.type === "run") {
-    try {
-      await runUserScript(message);
-      self.postMessage({ type: "result" });
-    } catch (err) {
-      self.postMessage({ type: "error", error: serializeError(err) });
-    }
-    return;
-  }
-
-  if (message && message.type === "rpcResult") {
+  if (message.type === "rpcResult") {
     const pending = pendingRpc.get(message.id);
     if (pending) {
       pendingRpc.delete(message.id);
@@ -264,7 +265,7 @@ self.onmessage = async (event) => {
     return;
   }
 
-  if (message && message.type === "rpcError") {
+  if (message.type === "rpcError") {
     const pending = pendingRpc.get(message.id);
     if (pending) {
       pendingRpc.delete(message.id);
@@ -273,5 +274,29 @@ self.onmessage = async (event) => {
       error.stack = message.error?.stack || error.stack;
       pending.reject(error);
     }
+  }
+}
+
+self.onmessage = async (event) => {
+  const message = event.data;
+
+  if (message && message.type === "run") {
+    runToken = message.token;
+    controlPort = message.controlPort ?? event.ports?.[0] ?? null;
+    if (controlPort) {
+      controlPort.onmessage = (portEvent) => handleHostMessage(portEvent.data);
+    }
+
+    try {
+      await runUserScript(message);
+      postControlMessage({ type: "result" });
+    } catch (err) {
+      postControlMessage({ type: "error", error: serializeError(err) });
+    }
+    return;
+  }
+
+  if (!controlPort) {
+    handleHostMessage(message);
   }
 };
