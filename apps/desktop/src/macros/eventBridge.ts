@@ -134,6 +134,27 @@ function normalizeTauriMacroResult(raw: any): TauriMacroRunResult {
   return { ok: Boolean(raw?.ok), output, updates, error, permission_request };
 }
 
+function errorMessage(err: unknown): string {
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    try {
+      return String((err as any).message);
+    } catch {
+      return "Unknown error";
+    }
+  }
+  try {
+    return String(err);
+  } catch {
+    return "Unknown error";
+  }
+}
+
+function isNoWorkbookLoadedError(err: unknown): boolean {
+  return errorMessage(err).toLowerCase().includes("no workbook loaded");
+}
+
 function ensureBannerContainer(): HTMLElement | null {
   if (typeof document === "undefined") return null;
   const existing = document.getElementById("macro-event-banner-container");
@@ -463,6 +484,7 @@ export class MacroEventBridge {
         },
       });
     } catch (err) {
+      if (isNoWorkbookLoadedError(err)) return;
       // Older backends may not implement UI context sync; event macros should still run.
       console.warn("Failed to sync macro UI context:", err);
     }
@@ -526,63 +548,78 @@ export class MacroEventBridge {
 
     this.inEventDepth += 1;
     try {
-    // Allow microtask-batched edits to enqueue into the backend sync queue first.
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
-    await this.drainBackendSync();
+      // Allow microtask-batched edits to enqueue into the backend sync queue first.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      await this.drainBackendSync();
 
-    await this.setMacroUiContext(args.selection);
+      await this.setMacroUiContext(args.selection);
 
-    const raw = await this.invoke(args.cmd, {
-      ...args.args,
-      permissions: args.permissions,
-    });
-
-    const result = normalizeTauriMacroResult(raw);
-
-    if (result.permission_request) {
-      const req = result.permission_request;
-      const requestedList = req.requested.length > 0 ? req.requested.join(", ") : "additional permissions";
-      showBanner(
-        `macro-permission:${req.macro_id}:${args.kind}`,
-        `${args.kind} requested ${requestedList}.`,
-        [
-          {
-            label: "Allow & rerun",
-            onClick: () => {
-              removeBanner(`macro-permission:${req.macro_id}:${args.kind}`);
-              void this.enqueue(async () => {
-                await this.fireMacroEvent({
-                  ...args,
-                  permissions: req.requested,
-                });
-              });
-            },
-          },
-          { label: "Dismiss", onClick: () => removeBanner(`macro-permission:${req.macro_id}:${args.kind}`) },
-        ],
-      );
-      return result;
-    }
-
-    if (result.error?.code === "macro_blocked") {
-      const now = Date.now();
-      if (now - this.lastBlockedBannerAt > 10_000) {
-        this.lastBlockedBannerAt = now;
-        showBanner("macro-blocked", "Macros are blocked by Trust Center policy.", [], { autoDismissMs: 6_000 });
+      let result: TauriMacroRunResult;
+      try {
+        const raw = await this.invoke(args.cmd, {
+          ...args.args,
+          permissions: args.permissions,
+        });
+        result = normalizeTauriMacroResult(raw);
+      } catch (err) {
+        if (isNoWorkbookLoadedError(err)) {
+          // The desktop app can be opened before any backend workbook is created/loaded. In that
+          // state, automatic event macros should be a no-op rather than spamming errors.
+          return { ok: true, output: [] };
+        }
+        console.error(`Failed to invoke macro event (${args.kind}):`, err);
+        result = { ok: false, output: [], error: { message: errorMessage(err) } };
       }
+
+      if (result.permission_request) {
+        const req = result.permission_request;
+        const requestedList = req.requested.length > 0 ? req.requested.join(", ") : "additional permissions";
+        showBanner(
+          `macro-permission:${req.macro_id}:${args.kind}`,
+          `${args.kind} requested ${requestedList}.`,
+          [
+            {
+              label: "Allow & rerun",
+              onClick: () => {
+                removeBanner(`macro-permission:${req.macro_id}:${args.kind}`);
+                void this.enqueue(async () => {
+                  await this.fireMacroEvent({
+                    ...args,
+                    permissions: req.requested,
+                  });
+                });
+              },
+            },
+            { label: "Dismiss", onClick: () => removeBanner(`macro-permission:${req.macro_id}:${args.kind}`) },
+          ],
+        );
+        return result;
+      }
+
+      if (result.error?.code === "macro_blocked") {
+        const now = Date.now();
+        if (now - this.lastBlockedBannerAt > 10_000) {
+          this.lastBlockedBannerAt = now;
+          showBanner("macro-blocked", "Macros are blocked by Trust Center policy.", [], { autoDismissMs: 6_000 });
+        }
+        return result;
+      }
+
+      if (result.updates && result.updates.length > 0) {
+        this.applyMacroUpdates(result.updates, { label: `Macro event: ${args.kind}` });
+      }
+
+      if (!result.ok && result.error) {
+        console.error(`Macro event failed (${args.kind}):`, result.error.message);
+        showBanner(
+          `macro-error:${args.kind}`,
+          `Macro event ${args.kind} failed: ${result.error.message}`,
+          [],
+          { autoDismissMs: 8_000 },
+        );
+      }
+
       return result;
-    }
-
-    if (result.updates && result.updates.length > 0) {
-      this.applyMacroUpdates(result.updates, { label: `Macro event: ${args.kind}` });
-    }
-
-    if (!result.ok && result.error) {
-      console.error(`Macro event failed (${args.kind}):`, result.error.message);
-      showBanner(`macro-error:${args.kind}`, `Macro event ${args.kind} failed: ${result.error.message}`, [], { autoDismissMs: 8_000 });
-    }
-
-    return result;
     } finally {
       this.inEventDepth = Math.max(0, this.inEventDepth - 1);
     }

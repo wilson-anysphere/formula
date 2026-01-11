@@ -193,4 +193,22 @@ describe("MacroEventBridge", () => {
 
     vi.useRealTimers();
   });
+
+  it("silently ignores macro event invocations when no workbook is loaded", async () => {
+    const invoke = vi.fn(async () => {
+      throw "no workbook loaded";
+    });
+
+    const doc = new DocumentController();
+    const bridge = new MacroEventBridge({
+      workbookId: "local-workbook",
+      document: doc,
+      invoke,
+      drainBackendSync: async () => {},
+      getSelection: () => ({ sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 }),
+    });
+
+    await expect(bridge.fireWorkbookOpen()).resolves.toBeUndefined();
+    expect(document.getElementById("macro-event-banner-container")).toBeNull();
+  });
 });
