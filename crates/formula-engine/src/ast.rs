@@ -911,18 +911,62 @@ fn fmt_ref_prefix(
             // contains spaces/special characters.
             match sheet_ref {
                 SheetRef::Sheet(sheet) => {
-                    let combined = format!("[{book}]{sheet}");
-                    fmt_sheet_name(out, &combined, reference_style);
+                    // Workbook names inside `[...]` are permissive (Excel allows spaces, dashes,
+                    // etc), but the sheet name portion follows normal quoting rules.
+                    if sheet_name_needs_quotes(sheet, reference_style) {
+                        out.push('\'');
+                        out.push('[');
+                        fmt_sheet_name_escaped(out, book);
+                        out.push(']');
+                        fmt_sheet_name_escaped(out, sheet);
+                        out.push('\'');
+                    } else {
+                        out.push('[');
+                        out.push_str(book);
+                        out.push(']');
+                        out.push_str(sheet);
+                    }
                     out.push('!');
                 }
                 SheetRef::SheetRange { start, end } => {
-                    let combined = if start.eq_ignore_ascii_case(end) {
-                        format!("[{book}]{start}")
+                    if start.eq_ignore_ascii_case(end) {
+                        // Degenerate 3D span within an external workbook.
+                        if sheet_name_needs_quotes(start, reference_style) {
+                            out.push('\'');
+                            out.push('[');
+                            fmt_sheet_name_escaped(out, book);
+                            out.push(']');
+                            fmt_sheet_name_escaped(out, start);
+                            out.push('\'');
+                        } else {
+                            out.push('[');
+                            out.push_str(book);
+                            out.push(']');
+                            out.push_str(start);
+                        }
+                        out.push('!');
                     } else {
-                        format!("[{book}]{start}:{end}")
-                    };
-                    fmt_sheet_name(out, &combined, reference_style);
-                    out.push('!');
+                        let needs_quotes = sheet_name_needs_quotes(start, reference_style)
+                            || sheet_name_needs_quotes(end, reference_style);
+                        if needs_quotes {
+                            out.push('\'');
+                            out.push('[');
+                            fmt_sheet_name_escaped(out, book);
+                            out.push(']');
+                            fmt_sheet_name_escaped(out, start);
+                            out.push(':');
+                            fmt_sheet_name_escaped(out, end);
+                            out.push('\'');
+                        } else {
+                            out.push('[');
+                            out.push_str(book);
+                            out.push(']');
+                            out.push_str(start);
+                            out.push(':');
+                            out.push_str(end);
+                        }
+                        out.push('!');
+                    }
                 }
             }
         }
