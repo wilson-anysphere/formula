@@ -13,6 +13,7 @@ pub struct PivotCacheDefinition {
     pub created_version: Option<u32>,
     pub refreshed_version: Option<u32>,
     pub cache_source_type: PivotCacheSourceType,
+    pub cache_source_connection_id: Option<u32>,
     pub worksheet_source_sheet: Option<String>,
     pub worksheet_source_ref: Option<String>,
     pub cache_fields: Vec<PivotCacheField>,
@@ -171,19 +172,19 @@ fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<
             let attr = attr.map_err(quick_xml::Error::from)?;
             let key = attr.key.local_name();
             let key = key.as_ref();
-            if !key.eq_ignore_ascii_case(b"type") {
-                continue;
+            if key.eq_ignore_ascii_case(b"type") {
+                let raw_value = attr.unescape_value()?.to_string();
+                let value = raw_value.to_ascii_lowercase();
+                def.cache_source_type = match value.as_str() {
+                    "worksheet" => PivotCacheSourceType::Worksheet,
+                    "external" => PivotCacheSourceType::External,
+                    "consolidation" => PivotCacheSourceType::Consolidation,
+                    "scenario" => PivotCacheSourceType::Scenario,
+                    _ => PivotCacheSourceType::Unknown(raw_value),
+                };
+            } else if key.eq_ignore_ascii_case(b"connectionId") {
+                def.cache_source_connection_id = attr.unescape_value()?.parse::<u32>().ok();
             }
-            let raw_value = attr.unescape_value()?.to_string();
-            let value = raw_value.to_ascii_lowercase();
-            def.cache_source_type = match value.as_str() {
-                "worksheet" => PivotCacheSourceType::Worksheet,
-                "external" => PivotCacheSourceType::External,
-                "consolidation" => PivotCacheSourceType::Consolidation,
-                "scenario" => PivotCacheSourceType::Scenario,
-                _ => PivotCacheSourceType::Unknown(raw_value),
-            };
-            break;
         }
     } else if tag.eq_ignore_ascii_case(b"worksheetSource") {
         let mut sheet: Option<String> = None;
@@ -331,6 +332,7 @@ mod tests {
         let def = parse_pivot_cache_definition(xml).expect("parse");
         assert_eq!(def.record_count, Some(4));
         assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
+        assert_eq!(def.cache_source_connection_id, None);
         assert_eq!(def.worksheet_source_sheet.as_deref(), Some("Sheet1"));
         assert_eq!(def.worksheet_source_ref.as_deref(), Some("A1:B2"));
         assert_eq!(def.cache_fields.len(), 1);
@@ -361,5 +363,17 @@ mod tests {
         assert_eq!(field.hierarchy, Some(2));
         assert_eq!(field.level, Some(3));
         assert_eq!(field.mapping_count, Some(7));
+    }
+
+    #[test]
+    fn parses_cache_source_connection_id() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheSource type="external" connectionId="42"/>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.cache_source_type, PivotCacheSourceType::External);
+        assert_eq!(def.cache_source_connection_id, Some(42));
     }
 }
