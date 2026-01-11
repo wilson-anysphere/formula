@@ -154,7 +154,7 @@ export class TableSignatureRegistry {
     }
 
     this.#tablesByName = next;
-    this.rebuildSheetIndex();
+    this.rebuildIndices();
   }
 
   /**
@@ -168,6 +168,7 @@ export class TableSignatureRegistry {
       if (nextHash !== this.#workbookSignatureHash) {
         this.#workbookSignatureHash = nextHash;
         this.#tablesByName = new Map();
+        this.#tablesByLowerName = new Map();
         this.#tablesBySheetId = new Map();
       }
     }
