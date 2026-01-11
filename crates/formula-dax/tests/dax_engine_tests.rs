@@ -825,6 +825,43 @@ fn allexcept_keeps_only_listed_columns() {
 }
 
 #[test]
+fn calculate_all_and_values_can_reapply_original_column_filters() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Sales keeping region",
+            "CALCULATE([Total Sales], ALL(Customers), VALUES(Customers[Region]))",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Sales keeping region (reversed)",
+            "CALCULATE([Total Sales], VALUES(Customers[Region]), ALL(Customers))",
+        )
+        .unwrap();
+
+    let mut filter = FilterContext::empty();
+    filter.set_column_equals("Customers", "Region", "East".into());
+    filter.set_column_equals("Customers", "Name", "Alice".into());
+
+    assert_eq!(
+        model
+            .evaluate_measure("Sales keeping region", &filter)
+            .unwrap(),
+        38.0.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Sales keeping region (reversed)", &filter)
+            .unwrap(),
+        38.0.into()
+    );
+}
+
+#[test]
 fn calculatetable_can_be_used_as_table_filter_argument() {
     let model = build_model();
     let value = DaxEngine::new()
