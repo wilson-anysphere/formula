@@ -1,0 +1,112 @@
+// @vitest-environment jsdom
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CanvasGrid, type GridApi } from "../CanvasGrid";
+
+// React 18 relies on this flag to suppress act() warnings in test runners.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+describe("CanvasGrid zoom", () => {
+  const originalGetContext = HTMLCanvasElement.prototype.getContext;
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    );
+
+    // Avoid running full render frames; these tests only validate zoom API behavior.
+    vi.stubGlobal("requestAnimationFrame", vi.fn((_cb: FrameRequestCallback) => 0));
+
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 200,
+      width: 200,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    } as unknown as DOMRect);
+
+    const ctxStub: Partial<CanvasRenderingContext2D> = {
+      setTransform: vi.fn(),
+      measureText: (text: string) =>
+        ({
+          width: text.length * 6,
+          actualBoundingBoxAscent: 8,
+          actualBoundingBoxDescent: 2
+        }) as TextMetrics
+    };
+
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => ctxStub as any
+    );
+  });
+
+  afterEach(() => {
+    HTMLCanvasElement.prototype.getContext = originalGetContext;
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("calls onZoomChange when zoom is controlled and does not update until props change", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onZoomChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={100}
+          colCount={10}
+          apiRef={apiRef}
+          zoom={1}
+          onZoomChange={onZoomChange}
+        />
+      );
+    });
+
+    expect(apiRef.current?.getZoom()).toBe(1);
+
+    await act(async () => {
+      apiRef.current?.setZoom(2);
+    });
+
+    expect(onZoomChange).toHaveBeenCalledTimes(1);
+    expect(onZoomChange).toHaveBeenCalledWith(2);
+    expect(apiRef.current?.getZoom()).toBe(1);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={100}
+          colCount={10}
+          apiRef={apiRef}
+          zoom={2}
+          onZoomChange={onZoomChange}
+        />
+      );
+    });
+
+    expect(apiRef.current?.getZoom()).toBe(2);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+});

@@ -97,6 +97,7 @@ export interface CanvasGridProps {
   defaultRowHeight?: number;
   defaultColWidth?: number;
   zoom?: number;
+  onZoomChange?: (zoom: number) => void;
   enableResize?: boolean;
   /**
    * How many extra rows beyond the visible viewport to prefetch.
@@ -252,6 +253,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const onRequestCellEditRef = useRef(props.onRequestCellEdit);
   const onFillHandleChangeRef = useRef(props.onFillHandleChange);
   const onFillHandleCommitRef = useRef(props.onFillHandleCommit);
+  const onZoomChangeRef = useRef(props.onZoomChange);
 
   onSelectionChangeRef.current = props.onSelectionChange;
   onSelectionRangeChangeRef.current = props.onSelectionRangeChange;
@@ -261,6 +263,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   onRequestCellEditRef.current = props.onRequestCellEdit;
   onFillHandleChangeRef.current = props.onFillHandleChange;
   onFillHandleCommitRef.current = props.onFillHandleCommit;
+  onZoomChangeRef.current = props.onZoomChange;
 
   const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const keyboardAnchorRef = useRef<{ row: number; col: number } | null>(null);
@@ -414,8 +417,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
   const setZoomInternal = (nextZoom: number, options?: { anchorX?: number; anchorY?: number; force?: boolean }) => {
     const clamped = clampZoom(nextZoom);
-    if (zoomControlledRef.current && !options?.force) return;
+    if (zoomControlledRef.current && !options?.force) {
+      onZoomChangeRef.current?.(clamped);
+      return;
+    }
 
+    const prev = zoomRef.current;
     zoomRef.current = clamped;
     if (!zoomControlledRef.current) {
       setUncontrolledZoom(clamped);
@@ -427,6 +434,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         : undefined;
     rendererRef.current?.setZoom(clamped, anchor);
     syncScrollbars();
+    if (!options?.force && prev !== clamped) {
+      onZoomChangeRef.current?.(clamped);
+    }
   };
 
   useEffect(() => {

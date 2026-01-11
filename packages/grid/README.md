@@ -146,6 +146,7 @@ Notable helpers:
 
 - **Imperative:** use `GridApi.setZoom(zoom)` / `getZoom()`.
 - **Controlled prop:** pass `zoom?: number` to `CanvasGrid` (optional; when provided, the grid treats zoom as controlled).
+  - Use `onZoomChange?: (zoom) => void` to respond to user gestures (pinch / ctrl+wheel) in controlled mode.
 
 User interactions:
 
