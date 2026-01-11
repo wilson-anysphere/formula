@@ -60,6 +60,39 @@ describe("collab comments legacy array schema", () => {
     expect(doc.share.get("comments")).toBeInstanceOf(Y.Array);
   });
 
+  it("does not clobber legacy array comments when the root is an uninstantiated placeholder", () => {
+    const source = new Y.Doc();
+    const legacy = source.getArray<Y.Map<unknown>>("comments");
+    legacy.push([
+      createYComment({
+        id: "c1",
+        cellRef: "A1",
+        kind: "threaded",
+        author: { id: "u1", name: "Alice" },
+        now: 1,
+        content: "Hello",
+      }),
+    ]);
+
+    const snapshot = Y.encodeStateAsUpdate(source);
+
+    const target = new Y.Doc();
+    Y.applyUpdate(target, snapshot);
+
+    // Root exists but is not yet instantiated: this is the dangerous case where
+    // calling `doc.getMap("comments")` would silently choose the wrong
+    // constructor and make the legacy array content inaccessible.
+    expect(target.share.get("comments")).toBeInstanceOf(Y.AbstractType);
+    expect(target.share.get("comments")).not.toBeInstanceOf(Y.Array);
+    expect(target.share.get("comments")).not.toBeInstanceOf(Y.Map);
+
+    const mgr = new CommentManager(target);
+    expect(mgr.listAll().map((c) => c.id)).toEqual(["c1"]);
+
+    // Ensure we instantiated as an Array, not a Map.
+    expect(target.share.get("comments")).toBeInstanceOf(Y.Array);
+  });
+
   it("converges when resolving and replying concurrently (legacy array root)", () => {
     const doc1 = new Y.Doc();
     const doc2 = new Y.Doc();
@@ -135,4 +168,3 @@ describe("collab comments legacy array schema", () => {
     expect(after).toEqual(before);
   });
 });
-
