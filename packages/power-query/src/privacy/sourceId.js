@@ -58,8 +58,17 @@ export function getHttpSourceId(url) {
   const hostname = parsed.hostname.toLowerCase();
   const defaultPort = scheme === "https:" ? "443" : scheme === "http:" ? "80" : "";
   const port = parsed.port || defaultPort;
-  // Always include a port to keep the identifier stable and explicit.
-  return `${scheme}//${hostname}:${port}`;
+  const host = hostname.includes(":")
+    ? hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname
+      : `[${hostname}]`
+    : hostname;
+  if (port) {
+    // Always include a port (explicitly) for http/https to keep the identifier stable.
+    return `${scheme}//${host}:${port}`;
+  }
+  // Non-http(s) schemes may not have a port; omit the trailing ":".
+  return `${scheme}//${host}`;
 }
 
 /**

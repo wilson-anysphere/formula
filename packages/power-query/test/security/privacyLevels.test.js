@@ -493,3 +493,8 @@ test("privacy levels: cache keys incorporate privacy levels + mode", async () =>
   assert.notEqual(keyPublic, keyPrivate, "privacy level changes should change the cache key");
   assert.notEqual(keyPublic, keyEnforce, "privacy mode changes should change the cache key");
 });
+
+test("privacy source ids: http origins normalize IPv6 hosts with brackets", () => {
+  assert.equal(getHttpSourceId("http://[::1]/data"), "http://[::1]:80");
+  assert.equal(getHttpSourceId("https://[::1]/data"), "https://[::1]:443");
+});
