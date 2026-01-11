@@ -20,6 +20,19 @@ SHA-256( DER-encoded certificate bytes )
 
 and compares it to the configured `certificate_pins` (case-insensitive; colons are ignored).
 
+## Configuring pins
+
+Pins are stored per-org in `org_settings`. When using the API, update org settings with:
+
+```json
+{
+  "certificatePinningEnabled": true,
+  "certificatePins": [
+    "aa:bb:cc:... (64 hex chars total, colons optional)"
+  ]
+}
+```
+
 ## Computing a pin
 
 ### From a PEM certificate file
