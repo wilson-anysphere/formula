@@ -280,6 +280,8 @@ export class CollabSession {
       }
     | null;
   private readonly docIdForEncryption: string;
+  private sheetsSchemaObserver: (() => void) | null = null;
+  private ensuringSchema = false;
 
   constructor(options: CollabSessionOptions = {}) {
     // When connecting to a sync provider, use the provider document id as the
@@ -331,24 +333,36 @@ export class CollabSession {
     this.cellValueConflictMonitor = null;
 
     if (schemaAutoInit) {
-      const initSchema = () => {
-        ensureWorkbookSchema(this.doc, {
-          defaultSheetId: schemaDefaultSheetId,
-          defaultSheetName: schemaDefaultSheetName,
-        });
+      const ensureSchema = () => {
+        if (this.ensuringSchema) return;
+        this.ensuringSchema = true;
+        try {
+          ensureWorkbookSchema(this.doc, {
+            defaultSheetId: schemaDefaultSheetId,
+            defaultSheetName: schemaDefaultSheetName,
+          });
+        } finally {
+          this.ensuringSchema = false;
+        }
       };
+
+      // Keep the sheets array well-formed over time (e.g. remove duplicate ids).
+      // This primarily protects against concurrent schema initialization when two
+      // clients join a brand new document at the same time.
+      this.sheetsSchemaObserver = () => ensureSchema();
+      this.sheets.observe(this.sheetsSchemaObserver);
 
       const provider = this.provider;
       if (provider && !provider.synced && typeof provider.on === "function") {
         const handler = (isSynced: boolean) => {
           if (!isSynced) return;
           if (typeof provider.off === "function") provider.off("sync", handler);
-          initSchema();
+          ensureSchema();
         };
         provider.on("sync", handler);
         if (provider.synced) handler(true);
       } else {
-        initSchema();
+        ensureSchema();
       }
     }
 
@@ -431,6 +445,10 @@ export class CollabSession {
   }
 
   destroy(): void {
+    if (this.sheetsSchemaObserver) {
+      this.sheets.unobserve(this.sheetsSchemaObserver);
+      this.sheetsSchemaObserver = null;
+    }
     this.formulaConflictMonitor?.dispose();
     this.cellConflictMonitor?.dispose();
     this.cellValueConflictMonitor?.dispose();

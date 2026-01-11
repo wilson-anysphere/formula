@@ -21,13 +21,50 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
   const defaultSheetId = options.defaultSheetId ?? "Sheet1";
   const defaultSheetName = options.defaultSheetName ?? defaultSheetId;
 
-  if (sheets.length === 0) {
+  // `sheets` is a Y.Array of sheet metadata maps (with at least `{ id, name }`).
+  // In practice we may see duplicate sheet ids when two clients concurrently
+  // initialize an empty workbook. Treat ids as unique and prune duplicates so
+  // downstream sheet lookups remain deterministic.
+  const shouldNormalize = (() => {
+    const seen = new Set<string>();
+    let hasSheetWithId = false;
+    for (const entry of sheets.toArray()) {
+      const maybe = entry as any;
+      const id = coerceString(maybe?.get?.("id") ?? maybe?.id);
+      if (!id) continue;
+      hasSheetWithId = true;
+      if (seen.has(id)) return true;
+      seen.add(id);
+    }
+    return !hasSheetWithId;
+  })();
+
+  if (shouldNormalize) {
     doc.transact(() => {
-      if (sheets.length !== 0) return;
-      const sheet = new Y.Map<unknown>();
-      sheet.set("id", defaultSheetId);
-      sheet.set("name", defaultSheetName);
-      sheets.push([sheet]);
+      const seen = new Set<string>();
+      const duplicates: number[] = [];
+
+      for (let i = 0; i < sheets.length; i++) {
+        const entry = sheets.get(i) as any;
+        const id = coerceString(entry?.get?.("id") ?? entry?.id);
+        if (!id) continue;
+        if (seen.has(id)) {
+          duplicates.push(i);
+          continue;
+        }
+        seen.add(id);
+      }
+
+      for (let i = duplicates.length - 1; i >= 0; i--) {
+        sheets.delete(duplicates[i], 1);
+      }
+
+      if (seen.size === 0) {
+        const sheet = new Y.Map<unknown>();
+        sheet.set("id", defaultSheetId);
+        sheet.set("name", defaultSheetName);
+        sheets.push([sheet]);
+      }
     });
   }
 

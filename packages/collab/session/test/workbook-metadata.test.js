@@ -120,3 +120,86 @@ test("CollabSession workbook metadata: sheets + namedRanges sync and local undo 
   docA.destroy();
   docB.destroy();
 });
+
+test("CollabSession schema normalizes duplicate sheet ids when docs merge (in-memory)", () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+
+  // Each session initializes its local schema independently (offline).
+  const sessionA = createCollabSession({ doc: docA });
+  const sessionB = createCollabSession({ doc: docB });
+
+  assert.deepEqual(snapshotSheets(sessionA).map((s) => s.id), ["Sheet1"]);
+  assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet1"]);
+
+  // When the docs are later connected, we should not end up with duplicate Sheet1 entries.
+  const disconnect = connectDocs(docA, docB);
+  assert.deepEqual(snapshotSheets(sessionA).map((s) => s.id), ["Sheet1"]);
+  assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet1"]);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CollabSession workbook metadata undo never reverts other users' overwrites (in-memory)", () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  const disconnect = connectDocs(docA, docB);
+
+  const sessionA = createCollabSession({ doc: docA, undo: {} });
+  const sessionB = createCollabSession({ doc: docB, undo: {} });
+
+  const sheetsA = createSheetManagerForSession(sessionA);
+  const sheetsB = createSheetManagerForSession(sessionB);
+  const namedRangesA = createNamedRangeManagerForSession(sessionA);
+  const namedRangesB = createNamedRangeManagerForSession(sessionB);
+  const metadataA = createMetadataManagerForSession(sessionA);
+  const metadataB = createMetadataManagerForSession(sessionB);
+
+  // Setup a shared sheet and then have B overwrite A's rename. Undoing on A should
+  // *not* undo B's rename.
+  sheetsA.addSheet({ id: "Sheet2", name: "Sheet2" });
+  sessionA.undo?.stopCapturing();
+
+  sheetsA.renameSheet("Sheet2", "Budget A");
+  sessionA.undo?.stopCapturing();
+
+  sheetsB.renameSheet("Sheet2", "Budget B");
+  sessionB.undo?.stopCapturing();
+
+  assert.equal(snapshotSheets(sessionA).find((s) => s.id === "Sheet2")?.name, "Budget B");
+  sessionA.undo?.undo();
+  assert.equal(snapshotSheets(sessionA).find((s) => s.id === "Sheet2")?.name, "Budget B");
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.name, "Budget B");
+
+  // Named range overwrites.
+  namedRangesA.set("NR1", { range: "A1:B2" });
+  sessionA.undo?.stopCapturing();
+  namedRangesB.set("NR1", { range: "C1:D2" });
+  sessionB.undo?.stopCapturing();
+
+  assert.deepEqual(sessionA.namedRanges.get("NR1"), { range: "C1:D2" });
+  sessionA.undo?.undo();
+  assert.deepEqual(sessionA.namedRanges.get("NR1"), { range: "C1:D2" });
+  assert.deepEqual(sessionB.namedRanges.get("NR1"), { range: "C1:D2" });
+
+  // Metadata overwrites.
+  metadataA.set("title", "From A");
+  sessionA.undo?.stopCapturing();
+  metadataB.set("title", "From B");
+  sessionB.undo?.stopCapturing();
+
+  assert.equal(sessionA.metadata.get("title"), "From B");
+  sessionA.undo?.undo();
+  assert.equal(sessionA.metadata.get("title"), "From B");
+  assert.equal(sessionB.metadata.get("title"), "From B");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
