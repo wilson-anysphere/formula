@@ -1,7 +1,5 @@
-import manifestPkg from "../manifest.js";
 import { PermissionManager } from "./permission-manager.mjs";
-
-const { validateExtensionManifest } = manifestPkg;
+import { validateExtensionManifest } from "./manifest.mjs";
 
 const API_PERMISSIONS = {
   "workbook.getActiveWorkbook": [],
