@@ -306,6 +306,48 @@ function EngineDemoApp() {
         </select>
       </label>
 
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+        Import XLSX:
+        <input
+          type="file"
+          accept=".xlsx"
+          data-testid="xlsx-file-input"
+          disabled={!provider}
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            if (!file) return;
+            const engine = engineRef.current;
+            if (!engine) return;
+
+            setEngineStatus("importing xlsx…");
+            setProvider(null);
+            setActiveCell(null);
+
+            void file
+              .arrayBuffer()
+              .then(async (buffer) => {
+                const bytes = new Uint8Array(buffer);
+                await engine.loadWorkbookFromXlsxBytes(bytes);
+                // Ensure there's still a Sheet2 option available for the demo selector.
+                await engine.setCell("A1", "Hello from Sheet2", "Sheet2");
+                await engine.recalculate();
+                const b1 = await engine.getCell("B1");
+                setEngineStatus(`ready (imported xlsx; B1=${b1.value === null ? "" : String(b1.value)})`);
+                setActiveSheet("Sheet1");
+                previousSheetRef.current = null;
+                setProvider(new EngineCellProvider({ engine, rowCount, colCount, sheet: "Sheet1" }));
+              })
+              .catch((error) => {
+                setEngineStatus(`error: ${error instanceof Error ? error.message : String(error)}`);
+              })
+              .finally(() => {
+                // Allow uploading the same fixture again.
+                event.currentTarget.value = "";
+              });
+          }}
+        />
+      </label>
+
       <div style={{ marginTop: 16 }}>
         <label style={{ display: "block", fontSize: 12, color: "#64748b" }} htmlFor="formula-input">
           Formula

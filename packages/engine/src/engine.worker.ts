@@ -233,7 +233,9 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
           } else if (ArrayBuffer.isView(rawBytes) && rawBytes.buffer instanceof ArrayBuffer) {
             bytes = new Uint8Array(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
           } else {
-            throw new Error("loadFromXlsxBytes: expected params.bytes to be a Uint8Array/ArrayBuffer/ArrayBufferView");
+            throw new Error(
+              "loadFromXlsxBytes: expected params.bytes to be a Uint8Array/ArrayBuffer/ArrayBufferView"
+            );
           }
 
           const fromXlsxBytes = mod.WasmWorkbook.fromXlsxBytes;
