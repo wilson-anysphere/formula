@@ -322,6 +322,7 @@ export class IndexedDbOfflineAuditQueue {
 
           const events = records.map((record) => record.event);
           try {
+            await this._touchFlushLock(db);
             await exporter.sendBatch(events);
           } catch (error) {
             await this._releaseBatch(records);

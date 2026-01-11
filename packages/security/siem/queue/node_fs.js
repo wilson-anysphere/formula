@@ -499,6 +499,7 @@ export class NodeFsOfflineAuditQueue {
             const batch = events.slice(acked, acked + this.flushBatchSize);
             if (batch.length === 0) break;
 
+            await touchFile(this.lockPath);
             await exporter.sendBatch(batch);
             acked += batch.length;
             sent += batch.length;
