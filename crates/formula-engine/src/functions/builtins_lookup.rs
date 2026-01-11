@@ -448,12 +448,43 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
 
+    enum XlookupReturnArray {
+        Array(Array),
+        Reference(Reference),
+    }
+
+    impl XlookupReturnArray {
+        fn rows(&self) -> usize {
+            match self {
+                XlookupReturnArray::Array(arr) => arr.rows,
+                XlookupReturnArray::Reference(r) => (r.end.row - r.start.row + 1) as usize,
+            }
+        }
+
+        fn cols(&self) -> usize {
+            match self {
+                XlookupReturnArray::Array(arr) => arr.cols,
+                XlookupReturnArray::Reference(r) => (r.end.col - r.start.col + 1) as usize,
+            }
+        }
+
+        fn get(&self, ctx: &dyn FunctionContext, row: usize, col: usize) -> Value {
+            match self {
+                XlookupReturnArray::Array(arr) => arr.get(row, col).cloned().unwrap_or(Value::Blank),
+                XlookupReturnArray::Reference(r) => ctx.get_cell_value(
+                    r.sheet_id,
+                    crate::eval::CellAddr {
+                        row: r.start.row + row as u32,
+                        col: r.start.col + col as u32,
+                    },
+                ),
+            }
+        }
+    }
+
     let return_array = match ctx.eval_arg(&args[2]) {
-        ArgValue::Reference(r) => match reference_to_array(ctx, r.normalized()) {
-            Ok(arr) => arr,
-            Err(e) => return Value::Error(e),
-        },
-        ArgValue::Scalar(Value::Array(arr)) => arr,
+        ArgValue::Reference(r) => XlookupReturnArray::Reference(r.normalized()),
+        ArgValue::Scalar(Value::Array(arr)) => XlookupReturnArray::Array(arr),
         ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
         ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
@@ -471,12 +502,12 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // - horizontal lookup_array (1xN) requires return_array.cols == N; return spills vertically.
     match lookup_shape {
         XlookupVectorShape::Vertical => {
-            if return_array.rows != lookup_len {
+            if return_array.rows() != lookup_len {
                 return Value::Error(ErrorKind::Value);
             }
         }
         XlookupVectorShape::Horizontal => {
-            if return_array.cols != lookup_len {
+            if return_array.cols() != lookup_len {
                 return Value::Error(ErrorKind::Value);
             }
         }
@@ -501,31 +532,27 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match lookup_shape {
         XlookupVectorShape::Vertical => {
             // Return the matched row.
-            if return_array.cols == 1 {
-                return return_array
-                    .get(idx, 0)
-                    .cloned()
-                    .unwrap_or(Value::Blank);
+            let cols = return_array.cols();
+            if cols == 1 {
+                return return_array.get(ctx, idx, 0);
             }
-            let mut values = Vec::with_capacity(return_array.cols);
-            for col in 0..return_array.cols {
-                values.push(return_array.get(idx, col).cloned().unwrap_or(Value::Blank));
+            let mut values = Vec::with_capacity(cols);
+            for col in 0..cols {
+                values.push(return_array.get(ctx, idx, col));
             }
-            Value::Array(Array::new(1, return_array.cols, values))
+            Value::Array(Array::new(1, cols, values))
         }
         XlookupVectorShape::Horizontal => {
             // Return the matched column.
-            if return_array.rows == 1 {
-                return return_array
-                    .get(0, idx)
-                    .cloned()
-                    .unwrap_or(Value::Blank);
+            let rows = return_array.rows();
+            if rows == 1 {
+                return return_array.get(ctx, 0, idx);
             }
-            let mut values = Vec::with_capacity(return_array.rows);
-            for row in 0..return_array.rows {
-                values.push(return_array.get(row, idx).cloned().unwrap_or(Value::Blank));
+            let mut values = Vec::with_capacity(rows);
+            for row in 0..rows {
+                values.push(return_array.get(ctx, row, idx));
             }
-            Value::Array(Array::new(return_array.rows, 1, values))
+            Value::Array(Array::new(rows, 1, values))
         }
     }
 }
@@ -1025,20 +1052,6 @@ fn array_1d_with_shape(arr: Array) -> Result<(XlookupVectorShape, Vec<Value>), E
         return Ok((XlookupVectorShape::Vertical, arr.values));
     }
     Err(ErrorKind::Value)
-}
-
-fn reference_to_array(ctx: &dyn FunctionContext, r: Reference) -> Result<Array, ErrorKind> {
-    let rows = usize::try_from(r.end.row - r.start.row + 1).map_err(|_| ErrorKind::Value)?;
-    let cols = usize::try_from(r.end.col - r.start.col + 1).map_err(|_| ErrorKind::Value)?;
-
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
-    for row in r.start.row..=r.end.row {
-        for col in r.start.col..=r.end.col {
-            values.push(ctx.get_cell_value(r.sheet_id, crate::eval::CellAddr { row, col }));
-        }
-    }
-
-    Ok(Array::new(rows, cols, values))
 }
 
 fn exact_match_values(lookup: &Value, values: &[Value]) -> Option<usize> {
