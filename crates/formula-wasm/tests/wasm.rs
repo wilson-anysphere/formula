@@ -349,6 +349,57 @@ fn from_xlsx_bytes_loads_basic_fixture() {
 }
 
 #[wasm_bindgen_test]
+fn from_xlsx_bytes_loads_shared_strings_fixture() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/shared-strings.xlsx"
+    ));
+
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    // Should not error even though the fixture contains only shared strings.
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert!(changes.is_empty());
+
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_eq!(a1.input, json!("Hello"));
+    assert_eq!(a1.value, json!("Hello"));
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.input, json!("World"));
+    assert_eq!(b1.value, json!("World"));
+}
+
+#[wasm_bindgen_test]
+fn from_xlsx_bytes_loads_shared_formula_fixture() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/formulas/shared-formula.xlsx"
+    ));
+
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+    wb.recalculate(None).unwrap();
+
+    let a2_js = wb.get_cell("A2".to_string(), None).unwrap();
+    let a2: CellData = serde_wasm_bindgen::from_value(a2_js).unwrap();
+    assert_eq!(a2.input, json!("=B2*2"));
+    assert_json_number(&a2.value, 4.0);
+
+    // Ensure shared-formula cells behave like real formulas (not frozen literal cached values).
+    wb.set_cell("B2".to_string(), JsValue::from_f64(10.0), None)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let a2_js = wb.get_cell("A2".to_string(), None).unwrap();
+    let a2: CellData = serde_wasm_bindgen::from_value(a2_js).unwrap();
+    assert_eq!(a2.input, json!("=B2*2"));
+    assert_json_number(&a2.value, 20.0);
+}
+
+#[wasm_bindgen_test]
 fn from_xlsx_bytes_loads_multi_sheet_fixture() {
     let bytes = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
