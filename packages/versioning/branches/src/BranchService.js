@@ -1,5 +1,6 @@
 import { diffDocumentStates } from "./patch.js";
 import { applyConflictResolutions, mergeDocumentStates } from "./merge.js";
+import { normalizeDocumentState } from "./state.js";
 
 /**
  * @typedef {import("./types.js").Actor} Actor
@@ -34,6 +35,33 @@ function assertCanCommit(actor) {
   if (actor.role !== "owner" && actor.role !== "admin" && actor.role !== "editor") {
     throw new Error(`Commit requires edit permission (role=${actor.role})`);
   }
+}
+
+/**
+ * @param {any} value
+ * @returns {value is Record<string, any>}
+ */
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Backwards-compatible detection for the BranchService v0 state shape:
+ * `{ sheets: Record<sheetId, CellMap> }`.
+ *
+ * Old clients only know about cell edits; they should not be able to accidentally
+ * wipe workbook metadata (sheet names/order, namedRanges, comments) by omitting
+ * those fields from commits.
+ *
+ * @param {any} value
+ */
+function isLegacyCellsOnlyState(value) {
+  return (
+    isRecord(value) &&
+    value.schemaVersion !== 1 &&
+    !("cells" in value) &&
+    isRecord(value.sheets)
+  );
 }
 
 /**
@@ -190,8 +218,29 @@ export class BranchService {
   async commit(actor, { nextState, message }) {
     assertCanCommit(actor);
     const branch = await this.getCurrentBranch();
-    const currentState = await this.#store.getDocumentStateAtCommit(branch.headCommitId);
-    const patch = diffDocumentStates(currentState, nextState);
+    const currentState = normalizeDocumentState(
+      await this.#store.getDocumentStateAtCommit(branch.headCommitId)
+    );
+
+    let effectiveNextState = nextState;
+    if (isLegacyCellsOnlyState(nextState)) {
+      const legacy = normalizeDocumentState(nextState);
+
+      // Legacy commits only provide per-sheet cell maps. Treat them as an overlay
+      // on the current branch head so older callers cannot accidentally delete
+      // workbook metadata or unrelated sheets.
+      const merged = structuredClone(currentState);
+      for (const [sheetId, cellMap] of Object.entries(legacy.cells ?? {})) {
+        merged.cells[sheetId] = structuredClone(cellMap);
+        if (!merged.sheets.metaById[sheetId]) {
+          merged.sheets.metaById[sheetId] = { id: sheetId, name: sheetId };
+        }
+        if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
+      }
+      effectiveNextState = merged;
+    }
+
+    const patch = diffDocumentStates(currentState, effectiveNextState);
     const commit = await this.#store.createCommit({
       docId: this.#docId,
       parentCommitId: branch.headCommitId,
@@ -200,7 +249,7 @@ export class BranchService {
       createdAt: Date.now(),
       message: message ?? null,
       patch,
-      nextState,
+      nextState: effectiveNextState,
     });
     await this.#store.updateBranchHead(this.#docId, branch.name, commit.id);
     return commit;

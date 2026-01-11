@@ -66,3 +66,35 @@ test("commenter cannot commit", async () => {
     { message: "Commit requires edit permission (role=commenter)" }
   );
 });
+
+test("legacy commits preserve workbook metadata (sheets/namedRanges/comments)", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-legacy", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1", "Sheet2"],
+      metaById: {
+        Sheet1: { id: "Sheet1", name: "First" },
+        Sheet2: { id: "Sheet2", name: "Second" },
+      },
+    },
+    cells: { Sheet1: { A1: { value: 1 } }, Sheet2: {} },
+    namedRanges: { NR1: { sheetId: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } } },
+    comments: { c1: { id: "c1", cellRef: "A1", content: "hello", resolved: false, replies: [] } },
+  });
+
+  // Old clients only know how to write the legacy `{ sheets: Record<sheetId, CellMap> }` shape.
+  await service.commit(actor, { nextState: { sheets: { Sheet1: { A1: { value: 2 } } } } });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.sheets.metaById.Sheet1?.name, "First");
+  assert.equal(state.sheets.metaById.Sheet2?.name, "Second");
+  assert.deepEqual(state.cells.Sheet1, { A1: { value: 2 } });
+  assert.deepEqual(state.cells.Sheet2, {});
+  assert.ok(state.sheets.order.includes("Sheet2"));
+  assert.ok(state.namedRanges.NR1);
+  assert.equal(state.comments.c1?.content, "hello");
+});
