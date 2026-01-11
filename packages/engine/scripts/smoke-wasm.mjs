@@ -9,8 +9,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
 
 const outDir = path.join(repoRoot, "packages", "engine", "pkg");
-const wrapper = path.join(outDir, "formula_wasm.js");
-const wasm = path.join(outDir, "formula_wasm_bg.wasm");
+const runtimeIgnore = new Set([".gitignore", "package.json"]);
 
 const publicTargets = [
   path.join(repoRoot, "apps", "web", "public", "engine"),
@@ -27,12 +26,44 @@ function assertReadable(filePath) {
   }
 }
 
-assertReadable(wrapper);
-assertReadable(wasm);
+async function collectRuntimeFiles(dir, relativeDir = "") {
+  const { readdir } = await import("node:fs/promises");
+  const entries = await readdir(dir, { withFileTypes: true });
+
+  /** @type {string[]} */
+  const out = [];
+  for (const entry of entries) {
+    if (runtimeIgnore.has(entry.name)) continue;
+    if (entry.name.endsWith(".d.ts")) continue;
+
+    const rel = relativeDir ? path.join(relativeDir, entry.name) : entry.name;
+    const abs = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      out.push(...(await collectRuntimeFiles(abs, rel)));
+      continue;
+    }
+
+    if (!entry.isFile()) continue;
+    out.push(rel);
+  }
+  return out;
+}
+
+const runtimeFiles = await collectRuntimeFiles(outDir);
+if (runtimeFiles.length === 0) {
+  console.error("[formula] No WASM runtime files found. Run `pnpm build:wasm` first.");
+  process.exit(1);
+}
+
+for (const relPath of runtimeFiles) {
+  assertReadable(path.join(outDir, relPath));
+}
 
 for (const dir of publicTargets) {
-  assertReadable(path.join(dir, "formula_wasm.js"));
-  assertReadable(path.join(dir, "formula_wasm_bg.wasm"));
+  for (const relPath of runtimeFiles) {
+    assertReadable(path.join(dir, relPath));
+  }
 }
 
 console.log("[formula] WASM artifacts present.");

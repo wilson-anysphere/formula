@@ -49,11 +49,31 @@ async function latestMtime(entryPath) {
   return latest;
 }
 
+async function copyRuntimeAssets(sourceDir, destDir) {
+  await mkdir(destDir, { recursive: true });
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (entry.name === ".gitignore") continue;
+    if (entry.name === "package.json") continue;
+    if (entry.name.endsWith(".d.ts")) continue;
+
+    const from = path.join(sourceDir, entry.name);
+    const to = path.join(destDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyRuntimeAssets(from, to);
+      continue;
+    }
+
+    if (!entry.isFile()) continue;
+    await copyFile(from, to);
+  }
+}
+
 async function copyToPublic() {
   for (const targetDir of targets) {
-    await mkdir(targetDir, { recursive: true });
-    await copyFile(wrapper, path.join(targetDir, "formula_wasm.js"));
-    await copyFile(wasm, path.join(targetDir, "formula_wasm_bg.wasm"));
+    await copyRuntimeAssets(outDir, targetDir);
   }
 }
 
