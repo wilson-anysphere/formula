@@ -5,13 +5,15 @@ use std::sync::Arc;
 
 use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
-use crate::functions::Reference;
+use crate::functions::{FunctionContext, Reference};
+use crate::locale::ValueLocaleConfig;
 use formula_model::CellRef;
 
 mod number_parse;
 
 pub use number_parse::NumberLocale;
 pub(crate) use number_parse::parse_number;
+use crate::date::ExcelDateSystem;
 
 pub(crate) fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
     let mut a_iter = a.as_bytes().iter();
@@ -195,8 +197,39 @@ impl Value {
         matches!(self, Value::Error(_))
     }
 
+    pub fn coerce_to_number_with_ctx(&self, ctx: &dyn FunctionContext) -> Result<f64, ErrorKind> {
+        match self {
+            Value::Number(n) => Ok(*n),
+            Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+            Value::Blank => Ok(0.0),
+            Value::Text(s) => coerce_text_to_number(s, ctx.value_locale(), ctx.now_utc(), ctx.date_system()),
+            Value::Error(e) => Err(*e),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
+        }
+    }
+
     pub fn coerce_to_number(&self) -> Result<f64, ErrorKind> {
-        self.coerce_to_number_with_locale(NumberLocale::en_us())
+        match self {
+            Value::Number(n) => Ok(*n),
+            Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+            Value::Blank => Ok(0.0),
+            Value::Text(s) => coerce_text_to_number(
+                s,
+                ValueLocaleConfig::en_us(),
+                chrono::Utc::now(),
+                ExcelDateSystem::EXCEL_1900,
+            ),
+            Value::Error(e) => Err(*e),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
+        }
     }
 
     pub fn coerce_to_number_with_locale(&self, locale: NumberLocale) -> Result<f64, ErrorKind> {
@@ -214,13 +247,73 @@ impl Value {
         }
     }
 
+    pub fn coerce_to_i64_with_ctx(&self, ctx: &dyn FunctionContext) -> Result<i64, ErrorKind> {
+        let n = self.coerce_to_number_with_ctx(ctx)?;
+        Ok(n.trunc() as i64)
+    }
+
     pub fn coerce_to_i64(&self) -> Result<i64, ErrorKind> {
         let n = self.coerce_to_number()?;
         Ok(n.trunc() as i64)
     }
 
+    pub fn coerce_to_bool_with_ctx(&self, ctx: &dyn FunctionContext) -> Result<bool, ErrorKind> {
+        match self {
+            Value::Bool(b) => Ok(*b),
+            Value::Number(n) => Ok(*n != 0.0),
+            Value::Blank => Ok(false),
+            Value::Text(s) => {
+                let t = s.trim();
+                if t.is_empty() {
+                    return Ok(false);
+                }
+                if t.eq_ignore_ascii_case("TRUE") {
+                    return Ok(true);
+                }
+                if t.eq_ignore_ascii_case("FALSE") {
+                    return Ok(false);
+                }
+                Ok(self.coerce_to_number_with_ctx(ctx)? != 0.0)
+            }
+            Value::Error(e) => Err(*e),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
+        }
+    }
+
     pub fn coerce_to_bool(&self) -> Result<bool, ErrorKind> {
-        self.coerce_to_bool_with_locale(NumberLocale::en_us())
+        match self {
+            Value::Bool(b) => Ok(*b),
+            Value::Number(n) => Ok(*n != 0.0),
+            Value::Blank => Ok(false),
+            Value::Text(s) => {
+                let t = s.trim();
+                if t.is_empty() {
+                    return Ok(false);
+                }
+                if t.eq_ignore_ascii_case("TRUE") {
+                    return Ok(true);
+                }
+                if t.eq_ignore_ascii_case("FALSE") {
+                    return Ok(false);
+                }
+                Ok(coerce_text_to_number(
+                    s,
+                    ValueLocaleConfig::en_us(),
+                    chrono::Utc::now(),
+                    ExcelDateSystem::EXCEL_1900,
+                )? != 0.0)
+            }
+            Value::Error(e) => Err(*e),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
+        }
     }
 
     pub fn coerce_to_bool_with_locale(&self, locale: NumberLocale) -> Result<bool, ErrorKind> {
@@ -230,6 +323,9 @@ impl Value {
             Value::Blank => Ok(false),
             Value::Text(s) => {
                 let t = s.trim();
+                if t.is_empty() {
+                    return Ok(false);
+                }
                 if t.eq_ignore_ascii_case("TRUE") {
                     return Ok(true);
                 }
@@ -270,6 +366,20 @@ fn map_excel_error(error: ExcelError) -> ErrorKind {
         ExcelError::Value => ErrorKind::Value,
         ExcelError::Num => ErrorKind::Num,
     }
+}
+
+fn coerce_text_to_number(
+    text: &str,
+    cfg: ValueLocaleConfig,
+    now_utc: chrono::DateTime<chrono::Utc>,
+    system: ExcelDateSystem,
+) -> Result<f64, ErrorKind> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(0.0);
+    }
+
+    crate::coercion::datetime::parse_value_text(trimmed, cfg, now_utc, system).map_err(map_excel_error)
 }
 
 fn format_number_general(n: f64) -> String {

@@ -21,7 +21,7 @@ fn eval_number_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<f64
     let v = ctx.eval_scalar(expr);
     match v {
         Value::Error(e) => Err(e),
-        other => other.coerce_to_number(),
+        other => other.coerce_to_number_with_ctx(ctx),
     }
 }
 
@@ -208,11 +208,11 @@ fn collect_numbers_strict_from_arg(
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.rows.saturating_mul(arr.cols));
                 for v in arr.iter() {
-                    out.push(v.coerce_to_number()?);
+                    out.push(v.coerce_to_number_with_ctx(ctx)?);
                 }
                 Ok(out)
             }
-            other => Ok(vec![other.coerce_to_number()?]),
+            other => Ok(vec![other.coerce_to_number_with_ctx(ctx)?]),
         },
         ArgValue::Reference(r) => {
             let r = r.normalized();
@@ -220,7 +220,7 @@ fn collect_numbers_strict_from_arg(
             let mut out = Vec::new();
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
-                out.push(v.coerce_to_number()?);
+                out.push(v.coerce_to_number_with_ctx(ctx)?);
             }
             Ok(out)
         }
@@ -231,7 +231,7 @@ fn collect_numbers_strict_from_arg(
                 ctx.record_reference(&r);
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
-                    out.push(v.coerce_to_number()?);
+                    out.push(v.coerce_to_number_with_ctx(ctx)?);
                 }
             }
             Ok(out)

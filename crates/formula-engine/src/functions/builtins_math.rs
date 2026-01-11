@@ -40,11 +40,11 @@ inventory::submit! {
 }
 
 fn randbetween_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let bottom = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
+    let bottom = match eval_scalar_arg(ctx, &args[0]).coerce_to_number_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let top = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+    let top = match eval_scalar_arg(ctx, &args[1]).coerce_to_number_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -102,7 +102,7 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Value::Number(n) => acc += n,
                 Value::Bool(b) => acc += if b { 1.0 } else { 0.0 },
                 Value::Blank => {}
-                Value::Text(s) => match Value::Text(s).coerce_to_number() {
+                Value::Text(s) => match Value::Text(s).coerce_to_number_with_ctx(ctx) {
                     Ok(n) => acc += n,
                     Err(e) => return Value::Error(e),
                 },
@@ -207,7 +207,7 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     count += 1;
                 }
                 Value::Blank => {}
-                Value::Text(s) => match Value::Text(s).coerce_to_number() {
+                Value::Text(s) => match Value::Text(s).coerce_to_number_with_ctx(ctx) {
                     Ok(n) => {
                         acc += n;
                         count += 1;
@@ -321,19 +321,19 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => best = Some(best.map(|b| b.min(*n)).unwrap_or(*n)),
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Blank
-                             | Value::Array(_)
-                             | Value::Lambda(_)
-                             | Value::Spill { .. }
-                             | Value::Reference(_)
-                             | Value::ReferenceUnion(_) => {}
-                         }
-                     }
-                 }
-                 other => {
-                     let n = match other.coerce_to_number() {
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+                other => {
+                    let n = match other.coerce_to_number_with_ctx(ctx) {
                         Ok(n) => n,
                         Err(e) => return Value::Error(e),
                     };
@@ -411,19 +411,19 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => best = Some(best.map(|b| b.max(*n)).unwrap_or(*n)),
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Blank
-                             | Value::Array(_)
-                             | Value::Lambda(_)
-                             | Value::Spill { .. }
-                             | Value::Reference(_)
-                             | Value::ReferenceUnion(_) => {}
-                         }
-                     }
-                 }
-                 other => {
-                     let n = match other.coerce_to_number() {
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Lambda(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+                other => {
+                    let n = match other.coerce_to_number_with_ctx(ctx) {
                         Ok(n) => n,
                         Err(e) => return Value::Error(e),
                     };
@@ -1887,8 +1887,8 @@ fn trunc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Value::Number(0.0)
     };
     array_lift::lift2(number, digits, |number, digits| {
-        let number = number.coerce_to_number()?;
-        let digits = digits.coerce_to_i64()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let digits = digits.coerce_to_i64_with_ctx(ctx)?;
         Ok(Value::Number(round_with_mode(
             number,
             digits as i32,
@@ -1901,8 +1901,8 @@ fn round_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], mode: RoundMode)
     let number = array_lift::eval_arg(ctx, &args[0]);
     let digits = array_lift::eval_arg(ctx, &args[1]);
     array_lift::lift2(number, digits, |number, digits| {
-        let number = number.coerce_to_number()?;
-        let digits = digits.coerce_to_i64()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let digits = digits.coerce_to_i64_with_ctx(ctx)?;
         Ok(Value::Number(round_with_mode(number, digits as i32, mode)))
     })
 }
@@ -1923,7 +1923,7 @@ inventory::submit! {
 
 fn int_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let value = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(value, |v| Ok(Value::Number(v.coerce_to_number()?.floor())))
+    array_lift::lift1(value, |v| Ok(Value::Number(v.coerce_to_number_with_ctx(ctx)?.floor())))
 }
 
 inventory::submit! {
@@ -1942,7 +1942,7 @@ inventory::submit! {
 
 fn abs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let value = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(value, |v| Ok(Value::Number(v.coerce_to_number()?.abs())))
+    array_lift::lift1(value, |v| Ok(Value::Number(v.coerce_to_number_with_ctx(ctx)?.abs())))
 }
 
 inventory::submit! {
@@ -1963,8 +1963,8 @@ fn mod_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let n = array_lift::eval_arg(ctx, &args[0]);
     let d = array_lift::eval_arg(ctx, &args[1]);
     array_lift::lift2(n, d, |n, d| {
-        let n = n.coerce_to_number()?;
-        let d = d.coerce_to_number()?;
+        let n = n.coerce_to_number_with_ctx(ctx)?;
+        let d = d.coerce_to_number_with_ctx(ctx)?;
         if d == 0.0 {
             return Err(ErrorKind::Div0);
         }
@@ -2030,7 +2030,7 @@ inventory::submit! {
 fn sign_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let number = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(number, |number| {
-        let number = number.coerce_to_number()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
         if !number.is_finite() {
             return Err(ErrorKind::Num);
         }

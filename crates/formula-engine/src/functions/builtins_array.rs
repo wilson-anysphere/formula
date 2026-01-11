@@ -67,12 +67,12 @@ inventory::submit! {
 }
 
 fn sequence_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let rows = match eval_scalar_arg(ctx, &args[0]).coerce_to_i64() {
+    let rows = match eval_scalar_arg(ctx, &args[0]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
     let cols = if args.len() >= 2 {
-        match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+        match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
@@ -80,7 +80,7 @@ fn sequence_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         1
     };
     let start = if args.len() >= 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_number() {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_number_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
@@ -88,7 +88,7 @@ fn sequence_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         1.0
     };
     let step = if args.len() >= 4 {
-        match eval_scalar_arg(ctx, &args[3]).coerce_to_number() {
+        match eval_scalar_arg(ctx, &args[3]).coerce_to_number_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }

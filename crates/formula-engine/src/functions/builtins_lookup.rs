@@ -30,7 +30,7 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let col_index = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
+    let col_index = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
@@ -38,7 +38,7 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
     let approx = if args.len() == 4 {
-        match eval_scalar_arg(ctx, &args[3]).coerce_to_bool() {
+        match eval_scalar_arg(ctx, &args[3]).coerce_to_bool_with_ctx(ctx) {
             Ok(b) => b,
             Err(e) => return Value::Error(e),
         }
@@ -122,7 +122,7 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let row_index = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
+    let row_index = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
@@ -130,7 +130,7 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
     let approx = if args.len() == 4 {
-        match eval_scalar_arg(ctx, &args[3]).coerce_to_bool() {
+        match eval_scalar_arg(ctx, &args[3]).coerce_to_bool_with_ctx(ctx) {
             Ok(b) => b,
             Err(e) => return Value::Error(e),
         }
@@ -306,12 +306,12 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    let row = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let row = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
     let col = match args.get(2) {
-        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         },
@@ -324,7 +324,7 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => {
             let area_num = match args.get(3) {
-                Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+                Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
                     Ok(n) => n,
                     Err(e) => return Value::Error(e),
                 },
@@ -344,7 +344,7 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
         ArgValue::ReferenceUnion(ranges) => {
             let area_num = match args.get(3) {
-                Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+                Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
                     Ok(n) => n,
                     Err(e) => return Value::Error(e),
                 },
@@ -402,7 +402,7 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let match_type = if args.len() == 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         }
@@ -468,7 +468,7 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
     let match_mode = match args.get(2) {
         Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::MatchMode::Exact,
-        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(n) => match lookup::MatchMode::try_from(n) {
                 Ok(m) => m,
                 Err(e) => return Value::Error(e),
@@ -479,7 +479,7 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
     let search_mode = match args.get(3) {
         Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::SearchMode::FirstToLast,
-        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(n) => match lookup::SearchMode::try_from(n) {
                 Ok(m) => m,
                 Err(e) => return Value::Error(e),
@@ -581,7 +581,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let match_mode = match args.get(4) {
         Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::MatchMode::Exact,
-        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(n) => match lookup::MatchMode::try_from(n) {
                 Ok(m) => m,
                 Err(e) => return Value::Error(e),
@@ -592,7 +592,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
     let search_mode = match args.get(5) {
         Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::SearchMode::FirstToLast,
-        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(n) => match lookup::SearchMode::try_from(n) {
                 Ok(m) => m,
                 Err(e) => return Value::Error(e),

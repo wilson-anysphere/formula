@@ -27,7 +27,7 @@ fn if_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let mut needs_true = false;
             let mut needs_false = false;
             for el in arr.iter() {
-                match el.coerce_to_bool() {
+                match el.coerce_to_bool_with_ctx(ctx) {
                     Ok(true) => needs_true = true,
                     Ok(false) => needs_false = true,
                     Err(_) => {}
@@ -45,7 +45,7 @@ fn if_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     Value::Bool(false)
                 };
                 return array_lift::lift3(cond_val, true_val, false_val, |cond, t, f| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         Ok(t.clone())
                     } else {
                         Ok(f.clone())
@@ -56,7 +56,7 @@ fn if_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             if needs_true {
                 let true_val = array_lift::eval_arg(ctx, &args[1]);
                 return array_lift::lift2(cond_val, true_val, |cond, t| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         Ok(t.clone())
                     } else {
                         // `needs_false` is false, so this branch is unreachable unless the
@@ -73,7 +73,7 @@ fn if_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     Value::Bool(false)
                 };
                 return array_lift::lift2(cond_val, false_val, |cond, f| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         // `needs_true` is false, so this branch is unreachable unless the
                         // condition array contains values that coerce differently on a second pass.
                         Ok(Value::Bool(false))
@@ -86,7 +86,7 @@ fn if_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             // The condition array contains only errors / invalid values, so map the coercion
             // error for each element without forcing evaluation of either branch.
             array_lift::lift1(cond_val, |cond| {
-                let _ = cond.coerce_to_bool()?;
+                let _ = cond.coerce_to_bool_with_ctx(ctx)?;
                 Ok(Value::Bool(false))
             })
         }
@@ -95,7 +95,7 @@ fn if_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Error(e);
             }
 
-            let cond = match other.coerce_to_bool() {
+            let cond = match other.coerce_to_bool_with_ctx(ctx) {
                 Ok(b) => b,
                 Err(e) => return Value::Error(e),
             };
@@ -404,7 +404,7 @@ inventory::submit! {
 
 fn not_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let value = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(value, |v| Ok(Value::Bool(!v.coerce_to_bool()?)))
+    array_lift::lift1(value, |v| Ok(Value::Bool(!v.coerce_to_bool_with_ctx(ctx)?)))
 }
 
 inventory::submit! {

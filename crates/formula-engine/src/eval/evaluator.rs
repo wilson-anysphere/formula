@@ -449,14 +449,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             Expr::Unary { op, expr } => {
                 let v = self.eval_value(expr);
                 let v = self.deref_eval_value_dynamic(v);
-                let locale = self.recalc_ctx.number_locale;
-                EvalValue::Scalar(elementwise_unary(&v, |elem| numeric_unary(*op, elem, locale)))
+                EvalValue::Scalar(elementwise_unary(&v, |elem| numeric_unary(self, *op, elem)))
             }
             Expr::Postfix { op, expr } => match op {
                 PostfixOp::Percent => {
                     let v = self.deref_eval_value_dynamic(self.eval_value(expr));
-                    let locale = self.recalc_ctx.number_locale;
-                    EvalValue::Scalar(elementwise_unary(&v, |elem| numeric_percent(elem, locale)))
+                    EvalValue::Scalar(elementwise_unary(&v, |elem| numeric_percent(self, elem)))
                 }
             },
             Expr::Binary { op, left, right } => match *op {
@@ -472,8 +470,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 BinaryOp::Pow | BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                     let l = self.deref_eval_value_dynamic(self.eval_value(left));
                     let r = self.deref_eval_value_dynamic(self.eval_value(right));
-                    let locale = self.recalc_ctx.number_locale;
-                    let out = elementwise_binary(&l, &r, |a, b| numeric_binary(*op, a, b, locale));
+                    let out = elementwise_binary(&l, &r, |a, b| numeric_binary(self, *op, a, b));
                     EvalValue::Scalar(out)
                 }
             },
@@ -1404,11 +1401,11 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     })
 }
 
-fn numeric_unary(op: UnaryOp, value: &Value, locale: NumberLocale) -> Value {
+fn numeric_unary(ctx: &dyn FunctionContext, op: UnaryOp, value: &Value) -> Value {
     match value {
         Value::Error(e) => return Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number_with_locale(locale) {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -1421,11 +1418,11 @@ fn numeric_unary(op: UnaryOp, value: &Value, locale: NumberLocale) -> Value {
     }
 }
 
-fn numeric_percent(value: &Value, locale: NumberLocale) -> Value {
+fn numeric_percent(ctx: &dyn FunctionContext, value: &Value) -> Value {
     match value {
         Value::Error(e) => return Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number_with_locale(locale) {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -1454,7 +1451,7 @@ fn concat_binary(left: &Value, right: &Value) -> Value {
     Value::Text(format!("{ls}{rs}"))
 }
 
-fn numeric_binary(op: BinaryOp, left: &Value, right: &Value, locale: NumberLocale) -> Value {
+fn numeric_binary(ctx: &dyn FunctionContext, op: BinaryOp, left: &Value, right: &Value) -> Value {
     if let Value::Error(e) = left {
         return Value::Error(*e);
     }
@@ -1462,11 +1459,11 @@ fn numeric_binary(op: BinaryOp, left: &Value, right: &Value, locale: NumberLocal
         return Value::Error(*e);
     }
 
-    let ln = match left.coerce_to_number_with_locale(locale) {
+    let ln = match left.coerce_to_number_with_ctx(ctx) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let rn = match right.coerce_to_number_with_locale(locale) {
+    let rn = match right.coerce_to_number_with_ctx(ctx) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };

@@ -1,6 +1,7 @@
 mod criteria;
 mod date_time;
 mod datetime;
+mod coercion;
 mod dynamic_arrays;
 mod dynamic_arrays_randarray;
 mod dynamic_arrays_shape;

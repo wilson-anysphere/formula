@@ -29,19 +29,25 @@ fn date_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let month = eval_scalar_arg(ctx, &args[1]);
     let day = eval_scalar_arg(ctx, &args[2]);
     let system = ctx.date_system();
-    broadcast_map3(year, month, day, |y, m, d| date_from_parts(&y, &m, &d, system))
+    broadcast_map3(year, month, day, |y, m, d| date_from_parts(ctx, &y, &m, &d, system))
 }
 
-fn date_from_parts(year: &Value, month: &Value, day: &Value, system: ExcelDateSystem) -> Value {
-    let year = match coerce_to_i64_trunc(year) {
+fn date_from_parts(
+    ctx: &dyn FunctionContext,
+    year: &Value,
+    month: &Value,
+    day: &Value,
+    system: ExcelDateSystem,
+) -> Value {
+    let year = match coerce_to_i64_trunc(ctx, year) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let month = match coerce_to_i64_trunc(month) {
+    let month = match coerce_to_i64_trunc(ctx, month) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let day = match coerce_to_i64_trunc(day) {
+    let day = match coerce_to_i64_trunc(ctx, day) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -147,6 +153,7 @@ inventory::submit! {
 
 fn year_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     map_serial_arg(
+        ctx,
         array_lift::eval_arg(ctx, &args[0]),
         ctx.date_system(),
         |(y, _, _)| y as f64,
@@ -169,6 +176,7 @@ inventory::submit! {
 
 fn month_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     map_serial_arg(
+        ctx,
         array_lift::eval_arg(ctx, &args[0]),
         ctx.date_system(),
         |(_, m, _)| m as f64,
@@ -191,6 +199,7 @@ inventory::submit! {
 
 fn day_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     map_serial_arg(
+        ctx,
         array_lift::eval_arg(ctx, &args[0]),
         ctx.date_system(),
         |(_, _, d)| d as f64,
@@ -215,7 +224,7 @@ fn time_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let hour = eval_scalar_arg(ctx, &args[0]);
     let minute = eval_scalar_arg(ctx, &args[1]);
     let second = eval_scalar_arg(ctx, &args[2]);
-    broadcast_map3(hour, minute, second, |h, m, s| match time_from_parts(&h, &m, &s) {
+    broadcast_map3(hour, minute, second, |h, m, s| match time_from_parts(ctx, &h, &m, &s) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     })
@@ -237,9 +246,11 @@ inventory::submit! {
 
 fn hour_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
-        Ok((h, _, _)) => Value::Number(h as f64),
-        Err(e) => Value::Error(e),
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| {
+        match time_components_from_value(ctx, &v, cfg) {
+            Ok((h, _, _)) => Value::Number(h as f64),
+            Err(e) => Value::Error(e),
+        }
     })
 }
 
@@ -259,9 +270,11 @@ inventory::submit! {
 
 fn minute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
-        Ok((_, m, _)) => Value::Number(m as f64),
-        Err(e) => Value::Error(e),
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| {
+        match time_components_from_value(ctx, &v, cfg) {
+            Ok((_, m, _)) => Value::Number(m as f64),
+            Err(e) => Value::Error(e),
+        }
     })
 }
 
@@ -281,9 +294,11 @@ inventory::submit! {
 
 fn second_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
-        Ok((_, _, s)) => Value::Number(s as f64),
-        Err(e) => Value::Error(e),
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| {
+        match time_components_from_value(ctx, &v, cfg) {
+            Ok((_, _, s)) => Value::Number(s as f64),
+            Err(e) => Value::Error(e),
+        }
     })
 }
 
@@ -303,7 +318,7 @@ inventory::submit! {
 
 fn timevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match timevalue_from_value(&v, cfg) {
+    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match timevalue_from_value(ctx, &v, cfg) {
         Ok(n) => Value::Number(n),
         Err(e) => Value::Error(e),
     })
@@ -327,9 +342,11 @@ fn datevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
     let cfg = ctx.value_locale();
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match datevalue_from_value(&v, system, cfg, now_utc) {
-        Ok(n) => Value::Number(n as f64),
-        Err(e) => Value::Error(e),
+    map_unary(eval_scalar_arg(ctx, &args[0]), |v| {
+        match datevalue_from_value(ctx, &v, system, cfg, now_utc) {
+            Ok(n) => Value::Number(n as f64),
+            Err(e) => Value::Error(e),
+        }
     })
 }
 
@@ -354,11 +371,11 @@ fn days_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let now_utc = ctx.now_utc();
     let cfg = ctx.value_locale();
     broadcast_map2(end_date, start_date, |end_date, start_date| {
-        let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
+        let end_serial = match datevalue_from_value(ctx, &end_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
+        let start_serial = match datevalue_from_value(ctx, &start_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -393,15 +410,15 @@ fn days360_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
 
     broadcast_map3(start_date, end_date, method, |start_date, end_date, method| {
-        let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
+        let start_serial = match datevalue_from_value(ctx, &start_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
+        let end_serial = match datevalue_from_value(ctx, &end_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let method = match coerce_to_bool_finite(&method) {
+        let method = match coerce_to_bool_finite(ctx, &method) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -439,11 +456,11 @@ fn yearfrac_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
 
     broadcast_map3(start_date, end_date, basis, |start_date, end_date, basis| {
-        let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
+        let start_serial = match datevalue_from_value(ctx, &start_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
+        let end_serial = match datevalue_from_value(ctx, &end_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -451,7 +468,7 @@ fn yearfrac_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let basis = if matches!(basis, Value::Blank) {
             0
         } else {
-            match coerce_to_i32_trunc(&basis) {
+            match coerce_to_i32_trunc(ctx, &basis) {
                 Ok(v) => v,
                 Err(e) => return Value::Error(e),
             }
@@ -487,11 +504,11 @@ fn datedif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
 
     broadcast_map3(start_date, end_date, unit, |start_date, end_date, unit| {
-        let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
+        let start_serial = match datevalue_from_value(ctx, &start_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
+        let end_serial = match datevalue_from_value(ctx, &end_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -532,11 +549,11 @@ fn eomonth_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let months = eval_scalar_arg(ctx, &args[1]);
     let system = ctx.date_system();
     broadcast_map2(start_date, months, |start, months| {
-        let start_serial = match coerce_to_serial_floor(&start) {
+        let start_serial = match coerce_to_serial_floor(ctx, &start) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let months = match coerce_to_i32_trunc(&months) {
+        let months = match coerce_to_i32_trunc(ctx, &months) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -566,11 +583,11 @@ fn edate_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let months = eval_scalar_arg(ctx, &args[1]);
     let system = ctx.date_system();
     broadcast_map2(start_date, months, |start, months| {
-        let start_serial = match coerce_to_serial_floor(&start) {
+        let start_serial = match coerce_to_serial_floor(ctx, &start) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let months = match coerce_to_i32_trunc(&months) {
+        let months = match coerce_to_i32_trunc(ctx, &months) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -605,19 +622,24 @@ fn weekday_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     match return_type {
-        None => map_unary(serial, |serial| weekday_scalar(&serial, None, system)),
+        None => map_unary(serial, |serial| weekday_scalar(ctx, &serial, None, system)),
         Some(rt) => broadcast_map2(serial, rt, |serial, rt| {
-            let rt = match coerce_to_i32_trunc(&rt) {
+            let rt = match coerce_to_i32_trunc(ctx, &rt) {
                 Ok(v) => Some(v),
                 Err(e) => return Value::Error(e),
             };
-            weekday_scalar(&serial, rt, system)
+            weekday_scalar(ctx, &serial, rt, system)
         }),
     }
 }
 
-fn weekday_scalar(serial: &Value, return_type: Option<i32>, system: ExcelDateSystem) -> Value {
-    let serial = match coerce_to_serial_floor(serial) {
+fn weekday_scalar(
+    ctx: &dyn FunctionContext,
+    serial: &Value,
+    return_type: Option<i32>,
+    system: ExcelDateSystem,
+) -> Value {
+    let serial = match coerce_to_serial_floor(ctx, serial) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -651,19 +673,24 @@ fn weeknum_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     match return_type {
-        None => map_unary(serial, |serial| weeknum_scalar(&serial, None, system)),
+        None => map_unary(serial, |serial| weeknum_scalar(ctx, &serial, None, system)),
         Some(rt) => broadcast_map2(serial, rt, |serial, rt| {
-            let rt = match coerce_to_i32_trunc(&rt) {
+            let rt = match coerce_to_i32_trunc(ctx, &rt) {
                 Ok(v) => Some(v),
                 Err(e) => return Value::Error(e),
             };
-            weeknum_scalar(&serial, rt, system)
+            weeknum_scalar(ctx, &serial, rt, system)
         }),
     }
 }
 
-fn weeknum_scalar(serial: &Value, return_type: Option<i32>, system: ExcelDateSystem) -> Value {
-    let serial = match coerce_to_serial_floor(serial) {
+fn weeknum_scalar(
+    ctx: &dyn FunctionContext,
+    serial: &Value,
+    return_type: Option<i32>,
+    system: ExcelDateSystem,
+) -> Value {
+    let serial = match coerce_to_serial_floor(ctx, serial) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -707,7 +734,7 @@ fn isoweeknum_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let serial = eval_scalar_arg(ctx, &args[0]);
     let system = ctx.date_system();
     map_unary(serial, |serial| {
-        let serial = match coerce_to_serial_floor(&serial) {
+        let serial = match coerce_to_serial_floor(ctx, &serial) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -747,11 +774,11 @@ fn workday_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let holidays_ref = holidays.as_deref();
 
     broadcast_map2(start_date, days, |start, days| {
-        let start = match coerce_to_serial_floor(&start) {
+        let start = match coerce_to_serial_floor(ctx, &start) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let days = match coerce_to_i32_trunc(&days) {
+        let days = match coerce_to_i32_trunc(ctx, &days) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -791,11 +818,11 @@ fn networkdays_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let holidays_ref = holidays.as_deref();
 
     broadcast_map2(start_date, end_date, |start, end| {
-        let start = match coerce_to_serial_floor(&start) {
+        let start = match coerce_to_serial_floor(ctx, &start) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let end = match coerce_to_serial_floor(&end) {
+        let end = match coerce_to_serial_floor(ctx, &end) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -829,7 +856,7 @@ fn workday_intl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     } else {
         Value::Blank
     };
-    let weekend_mask = match parse_weekend_mask(&weekend) {
+    let weekend_mask = match parse_weekend_mask(ctx, &weekend) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -844,11 +871,11 @@ fn workday_intl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let holidays_ref = holidays.as_deref();
 
     broadcast_map2(start_date, days, |start, days| {
-        let start = match coerce_to_serial_floor(&start) {
+        let start = match coerce_to_serial_floor(ctx, &start) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let days = match coerce_to_i32_trunc(&days) {
+        let days = match coerce_to_i32_trunc(ctx, &days) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -882,7 +909,7 @@ fn networkdays_intl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Valu
     } else {
         Value::Blank
     };
-    let weekend_mask = match parse_weekend_mask(&weekend) {
+    let weekend_mask = match parse_weekend_mask(ctx, &weekend) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -897,11 +924,11 @@ fn networkdays_intl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Valu
     let holidays_ref = holidays.as_deref();
 
     broadcast_map2(start_date, end_date, |start, end| {
-        let start = match coerce_to_serial_floor(&start) {
+        let start = match coerce_to_serial_floor(ctx, &start) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let end = match coerce_to_serial_floor(&end) {
+        let end = match coerce_to_serial_floor(ctx, &end) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -912,14 +939,23 @@ fn networkdays_intl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Valu
     })
 }
 
-fn serial_to_components(v: &Value, system: ExcelDateSystem) -> Result<(i32, i32, i32), ErrorKind> {
-    let serial_i32 = coerce_to_serial_floor(v)?;
+fn serial_to_components(
+    ctx: &dyn FunctionContext,
+    v: &Value,
+    system: ExcelDateSystem,
+) -> Result<(i32, i32, i32), ErrorKind> {
+    let serial_i32 = coerce_to_serial_floor(ctx, v)?;
     let date = serial_to_ymd(serial_i32, system).map_err(|_| ErrorKind::Num)?;
     Ok((date.year, date.month as i32, date.day as i32))
 }
 
-fn map_serial_arg(v: Value, system: ExcelDateSystem, f: impl Fn((i32, i32, i32)) -> f64 + Copy) -> Value {
-    map_unary(v, |v| match serial_to_components(&v, system) {
+fn map_serial_arg(
+    ctx: &dyn FunctionContext,
+    v: Value,
+    system: ExcelDateSystem,
+    f: impl Fn((i32, i32, i32)) -> f64 + Copy,
+) -> Value {
+    map_unary(v, |v| match serial_to_components(ctx, &v, system) {
         Ok(parts) => Value::Number(f(parts)),
         Err(e) => Value::Error(e),
     })
@@ -1044,10 +1080,15 @@ fn broadcast_get(v: &Value, row: usize, col: usize) -> Value {
     }
 }
 
-fn time_from_parts(hour: &Value, minute: &Value, second: &Value) -> Result<f64, ErrorKind> {
-    let hour_num = coerce_to_finite_number(hour)?;
-    let minute_num = coerce_to_finite_number(minute)?;
-    let second_num = coerce_to_finite_number(second)?;
+fn time_from_parts(
+    ctx: &dyn FunctionContext,
+    hour: &Value,
+    minute: &Value,
+    second: &Value,
+) -> Result<f64, ErrorKind> {
+    let hour_num = coerce_to_finite_number(ctx, hour)?;
+    let minute_num = coerce_to_finite_number(ctx, minute)?;
+    let second_num = coerce_to_finite_number(ctx, second)?;
     if hour_num < 0.0 || minute_num < 0.0 || second_num < 0.0 {
         return Err(ErrorKind::Num);
     }
@@ -1059,42 +1100,55 @@ fn time_from_parts(hour: &Value, minute: &Value, second: &Value) -> Result<f64, 
     date_time::time(hour_i32, minute_i32, second_i32).map_err(excel_error_kind)
 }
 
-fn timevalue_from_value(value: &Value, cfg: ValueLocaleConfig) -> Result<f64, ErrorKind> {
-    if let Ok(n) = value.coerce_to_number() {
-        if !n.is_finite() {
-            return Err(ErrorKind::Num);
+fn timevalue_from_value(
+    ctx: &dyn FunctionContext,
+    value: &Value,
+    cfg: ValueLocaleConfig,
+) -> Result<f64, ErrorKind> {
+    match value {
+        Value::Text(s) => {
+            let n = date_time::timevalue(s, cfg).map_err(excel_error_kind)?;
+            Ok(n.rem_euclid(1.0))
         }
-        return Ok(n.rem_euclid(1.0));
+        _ => {
+            let n = value.coerce_to_number_with_ctx(ctx)?;
+            if !n.is_finite() {
+                return Err(ErrorKind::Num);
+            }
+            Ok(n.rem_euclid(1.0))
+        }
     }
-
-    let s = value.coerce_to_string()?;
-    let n = date_time::timevalue(&s, cfg).map_err(excel_error_kind)?;
-    Ok(n.rem_euclid(1.0))
 }
 
 fn datevalue_from_value(
+    ctx: &dyn FunctionContext,
     value: &Value,
     system: ExcelDateSystem,
     cfg: ValueLocaleConfig,
     now_utc: DateTime<Utc>,
 ) -> Result<i32, ErrorKind> {
-    if let Ok(n) = value.coerce_to_number() {
-        if !n.is_finite() {
-            return Err(ErrorKind::Num);
+    match value {
+        Value::Text(s) => date_time::datevalue(s, cfg, now_utc, system).map_err(excel_error_kind),
+        _ => {
+            let n = value.coerce_to_number_with_ctx(ctx)?;
+            if !n.is_finite() {
+                return Err(ErrorKind::Num);
+            }
+            let serial = n.floor();
+            if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
+                return Err(ErrorKind::Num);
+            }
+            Ok(serial as i32)
         }
-        let serial = n.floor();
-        if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
-            return Err(ErrorKind::Num);
-        }
-        return Ok(serial as i32);
     }
-
-    let s = value.coerce_to_string()?;
-    date_time::datevalue(&s, cfg, now_utc, system).map_err(excel_error_kind)
 }
 
-fn time_components_from_value(value: &Value, cfg: ValueLocaleConfig) -> Result<(i32, i32, i32), ErrorKind> {
-    let mut fraction = timevalue_from_value(value, cfg)?;
+fn time_components_from_value(
+    ctx: &dyn FunctionContext,
+    value: &Value,
+    cfg: ValueLocaleConfig,
+) -> Result<(i32, i32, i32), ErrorKind> {
+    let mut fraction = timevalue_from_value(ctx, value, cfg)?;
     fraction = fraction.rem_euclid(1.0);
     let mut total = (fraction * 86_400.0).floor();
     if total >= 86_400.0 {
@@ -1107,15 +1161,15 @@ fn time_components_from_value(value: &Value, cfg: ValueLocaleConfig) -> Result<(
     Ok((hour, minute, second))
 }
 
-fn coerce_to_finite_number(v: &Value) -> Result<f64, ErrorKind> {
-    let n = v.coerce_to_number()?;
+fn coerce_to_finite_number(ctx: &dyn FunctionContext, v: &Value) -> Result<f64, ErrorKind> {
+    let n = v.coerce_to_number_with_ctx(ctx)?;
     if !n.is_finite() {
         return Err(ErrorKind::Num);
     }
     Ok(n)
 }
 
-fn coerce_to_bool_finite(v: &Value) -> Result<bool, ErrorKind> {
+fn coerce_to_bool_finite(ctx: &dyn FunctionContext, v: &Value) -> Result<bool, ErrorKind> {
     match v {
         Value::Number(n) => {
             if !n.is_finite() {
@@ -1123,7 +1177,7 @@ fn coerce_to_bool_finite(v: &Value) -> Result<bool, ErrorKind> {
             }
             Ok(*n != 0.0)
         }
-        _ => v.coerce_to_bool(),
+        _ => v.coerce_to_bool_with_ctx(ctx),
     }
 }
 
@@ -1135,13 +1189,13 @@ fn coerce_number_to_i32_trunc(n: f64) -> Result<i32, ErrorKind> {
     Ok(t as i32)
 }
 
-fn coerce_to_i32_trunc(v: &Value) -> Result<i32, ErrorKind> {
-    let n = coerce_to_finite_number(v)?;
+fn coerce_to_i32_trunc(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
+    let n = coerce_to_finite_number(ctx, v)?;
     coerce_number_to_i32_trunc(n)
 }
 
-fn coerce_to_i64_trunc(v: &Value) -> Result<i64, ErrorKind> {
-    let n = coerce_to_finite_number(v)?;
+fn coerce_to_i64_trunc(ctx: &dyn FunctionContext, v: &Value) -> Result<i64, ErrorKind> {
+    let n = coerce_to_finite_number(ctx, v)?;
     let t = n.trunc();
     if t < (i64::MIN as f64) || t > (i64::MAX as f64) {
         return Err(ErrorKind::Num);
@@ -1149,8 +1203,8 @@ fn coerce_to_i64_trunc(v: &Value) -> Result<i64, ErrorKind> {
     Ok(t as i64)
 }
 
-fn coerce_to_serial_floor(v: &Value) -> Result<i32, ErrorKind> {
-    let n = coerce_to_finite_number(v)?;
+fn coerce_to_serial_floor(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
+    let n = coerce_to_finite_number(ctx, v)?;
     let serial = n.floor();
     if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
         return Err(ErrorKind::Num);
@@ -1163,18 +1217,22 @@ fn collect_holidays(
     expr: &CompiledExpr,
     _system: ExcelDateSystem,
 ) -> Result<Vec<i32>, ErrorKind> {
-    fn push_value(out: &mut Vec<i32>, v: Value) -> Result<(), ErrorKind> {
+    fn push_value(
+        ctx: &dyn FunctionContext,
+        out: &mut Vec<i32>,
+        v: Value,
+    ) -> Result<(), ErrorKind> {
         match v {
             Value::Blank => Ok(()),
             Value::Error(e) => Err(e),
             Value::Array(arr) => {
                 for el in arr.values {
-                    push_value(out, el)?;
+                    push_value(ctx, out, el)?;
                 }
                 Ok(())
             }
             other => {
-                out.push(coerce_to_serial_floor(&other)?);
+                out.push(coerce_to_serial_floor(ctx, &other)?);
                 Ok(())
             }
         }
@@ -1182,18 +1240,18 @@ fn collect_holidays(
 
     let mut out = Vec::new();
     match ctx.eval_arg(expr) {
-        ArgValue::Scalar(v) => push_value(&mut out, v)?,
+        ArgValue::Scalar(v) => push_value(ctx, &mut out, v)?,
         ArgValue::Reference(r) => {
             for addr in ctx.iter_reference_cells(&r) {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
-                push_value(&mut out, v)?;
+                push_value(ctx, &mut out, v)?;
             }
         }
         ArgValue::ReferenceUnion(ranges) => {
             for r in ranges {
                 for addr in ctx.iter_reference_cells(&r) {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
-                    push_value(&mut out, v)?;
+                    push_value(ctx, &mut out, v)?;
                 }
             }
         }
@@ -1201,7 +1259,7 @@ fn collect_holidays(
     Ok(out)
 }
 
-fn parse_weekend_mask(v: &Value) -> Result<u8, ErrorKind> {
+fn parse_weekend_mask(ctx: &dyn FunctionContext, v: &Value) -> Result<u8, ErrorKind> {
     // Excel defaults to Saturday/Sunday when the weekend argument is omitted or blank.
     if matches!(v, Value::Blank) {
         return Ok((1 << 5) | (1 << 6));
@@ -1231,7 +1289,7 @@ fn parse_weekend_mask(v: &Value) -> Result<u8, ErrorKind> {
         }
     }
 
-    let code = coerce_to_i32_trunc(v)?;
+    let code = coerce_to_i32_trunc(ctx, v)?;
     let mask = match code {
         1 => (1 << 5) | (1 << 6),
         2 => (1 << 6) | (1 << 0),

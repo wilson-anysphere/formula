@@ -117,7 +117,7 @@ fn left_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
     array_lift::lift2(text, n, |text, n| {
         let text = text.coerce_to_string()?;
-        let n = n.coerce_to_i64()?;
+        let n = n.coerce_to_i64_with_ctx(ctx)?;
         if n < 0 {
             return Err(ErrorKind::Value);
         }
@@ -148,7 +148,7 @@ fn right_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
     array_lift::lift2(text, n, |text, n| {
         let text = text.coerce_to_string()?;
-        let n = n.coerce_to_i64()?;
+        let n = n.coerce_to_i64_with_ctx(ctx)?;
         if n < 0 {
             return Err(ErrorKind::Value);
         }
@@ -179,8 +179,8 @@ fn mid_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let len = array_lift::eval_arg(ctx, &args[2]);
     array_lift::lift3(text, start, len, |text, start, len| {
         let text = text.coerce_to_string()?;
-        let start = start.coerce_to_i64()?;
-        let len = len.coerce_to_i64()?;
+        let start = start.coerce_to_i64_with_ctx(ctx)?;
+        let len = len.coerce_to_i64_with_ctx(ctx)?;
         if start < 1 || len < 0 {
             return Err(ErrorKind::Value);
         }
@@ -300,7 +300,7 @@ fn find_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     array_lift::lift3(needle, haystack, start, |needle, haystack, start| {
         let needle = needle.coerce_to_string()?;
         let haystack = haystack.coerce_to_string()?;
-        let start = start.coerce_to_i64()?;
+        let start = start.coerce_to_i64_with_ctx(ctx)?;
         Ok(find_impl(&needle, &haystack, start, false))
     })
 }
@@ -330,7 +330,7 @@ fn search_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     array_lift::lift3(needle, haystack, start, |needle, haystack, start| {
         let needle = needle.coerce_to_string()?;
         let haystack = haystack.coerce_to_string()?;
-        let start = start.coerce_to_i64()?;
+        let start = start.coerce_to_i64_with_ctx(ctx)?;
         Ok(find_impl(&needle, &haystack, start, true))
     })
 }
@@ -365,7 +365,7 @@ fn substitute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 let text = text.coerce_to_string()?;
                 let old_text = old_text.coerce_to_string()?;
                 let new_text = new_text.coerce_to_string()?;
-                let raw = instance_num.coerce_to_i64()?;
+                let raw = instance_num.coerce_to_i64_with_ctx(ctx)?;
                 let instance_num = i32::try_from(raw).map_err(|_| ErrorKind::Value)?;
 
                 match crate::functions::text::substitute(
@@ -582,7 +582,7 @@ fn dollar_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     elementwise_binary(number, decimals, |number, decimals| {
-        let number = match number.coerce_to_number() {
+        let number = match number.coerce_to_number_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         };
@@ -590,7 +590,7 @@ fn dollar_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             return Value::Error(ErrorKind::Num);
         }
 
-        let decimals_raw = match decimals.coerce_to_i64() {
+        let decimals_raw = match decimals.coerce_to_i64_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         };
@@ -625,7 +625,7 @@ fn textjoin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
-    let ignore_empty = match eval_scalar_arg(ctx, &args[1]).coerce_to_bool() {
+    let ignore_empty = match eval_scalar_arg(ctx, &args[1]).coerce_to_bool_with_ctx(ctx) {
         Ok(b) => b,
         Err(e) => return Value::Error(e),
     };
@@ -785,14 +785,14 @@ fn replace_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Err(e) => return Value::Error(e),
             };
             let start = match start
-                .coerce_to_i64()
+                .coerce_to_i64_with_ctx(ctx)
                 .and_then(|n| i32::try_from(n).map_err(|_| ErrorKind::Value))
             {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
             let num = match num
-                .coerce_to_i64()
+                .coerce_to_i64_with_ctx(ctx)
                 .and_then(|n| i32::try_from(n).map_err(|_| ErrorKind::Value))
             {
                 Ok(n) => n,

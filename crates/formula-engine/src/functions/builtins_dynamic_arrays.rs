@@ -41,7 +41,7 @@ fn filter_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let mut keep = Vec::with_capacity(array.rows);
         for row in 0..array.rows {
             let v = include.get(row, 0).cloned().unwrap_or(Value::Blank);
-            match v.coerce_to_bool() {
+            match v.coerce_to_bool_with_ctx(ctx) {
                 Ok(b) => keep.push(b),
                 Err(e) => return Value::Error(e),
             }
@@ -69,7 +69,7 @@ fn filter_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut keep = Vec::with_capacity(array.cols);
     for col in 0..array.cols {
         let v = include.get(0, col).cloned().unwrap_or(Value::Blank);
-        match v.coerce_to_bool() {
+        match v.coerce_to_bool_with_ctx(ctx) {
             Ok(b) => keep.push(b),
             Err(e) => return Value::Error(e),
         }
@@ -137,6 +137,7 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
+
     let descending_flags = match sort_vector_orders(ctx, args.get(2), sort_indices.len()) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -279,7 +280,7 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
             };
             if !order_is_blank {
-                desc = match sort_descending_from_value(&order_value) {
+                desc = match sort_descending_from_value(ctx, &order_value) {
                     Ok(v) => v,
                     Err(e) => return Value::Error(e),
                 };
@@ -447,7 +448,7 @@ fn unique_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let by_col = if args.len() >= 2 {
-        match eval_scalar_arg(ctx, &args[1]).coerce_to_bool() {
+        match eval_scalar_arg(ctx, &args[1]).coerce_to_bool_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
@@ -456,7 +457,7 @@ fn unique_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let exactly_once = if args.len() >= 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_bool() {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_bool_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
@@ -724,7 +725,7 @@ fn choosecols_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let mut cols = Vec::with_capacity(args.len().saturating_sub(1));
     for expr in &args[1..] {
-        let idx = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+        let idx = match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -766,7 +767,7 @@ fn chooserows_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let mut rows = Vec::with_capacity(args.len().saturating_sub(1));
     for expr in &args[1..] {
-        let idx = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+        let idx = match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -1077,7 +1078,7 @@ fn expand_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1298,11 +1299,11 @@ inventory::submit! {
 }
 
 fn makearray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let rows = match eval_scalar_arg(ctx, &args[0]).coerce_to_i64() {
+    let rows = match eval_scalar_arg(ctx, &args[0]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let cols = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let cols = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1639,7 +1640,7 @@ fn sort_vector_indices(
     let max_index = i64::try_from(key_count).unwrap_or(i64::MAX);
     let mut indices = Vec::with_capacity(arr.values.len());
     for v in &arr.values {
-        let idx = v.coerce_to_i64()?;
+        let idx = v.coerce_to_i64_with_ctx(ctx)?;
         if idx < 1 || idx > max_index {
             return Err(ErrorKind::Value);
         }
@@ -1670,7 +1671,7 @@ fn sort_vector_orders(
 
     let mut orders = Vec::with_capacity(arr.values.len());
     for v in &arr.values {
-        orders.push(sort_descending_from_value(v)?);
+        orders.push(sort_descending_from_value(ctx, v)?);
     }
 
     if orders.len() == 1 {
@@ -1696,7 +1697,7 @@ fn eval_optional_i64(
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Error(e) => Err(e),
-        other => other.coerce_to_i64(),
+        other => other.coerce_to_i64_with_ctx(ctx),
     }
 }
 
@@ -1714,7 +1715,7 @@ fn eval_optional_number(
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Error(e) => Err(e),
-        other => other.coerce_to_number(),
+        other => other.coerce_to_number_with_ctx(ctx),
     }
 }
 
@@ -1732,15 +1733,15 @@ fn eval_optional_bool(
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Error(e) => Err(e),
-        other => other.coerce_to_bool(),
+        other => other.coerce_to_bool_with_ctx(ctx),
     }
 }
 
-fn sort_descending_from_value(value: &Value) -> Result<bool, ErrorKind> {
+fn sort_descending_from_value(ctx: &dyn FunctionContext, value: &Value) -> Result<bool, ErrorKind> {
     match value {
         Value::Error(e) => Err(*e),
         Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
-        other => match other.coerce_to_i64() {
+        other => match other.coerce_to_i64_with_ctx(ctx) {
             Ok(1) => Ok(false),
             Ok(-1) => Ok(true),
             Ok(_) => Err(ErrorKind::Value),
@@ -1879,7 +1880,7 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
         Err(e) => return Value::Error(e),
     };
 
-    let wrap_count = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let wrap_count = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
