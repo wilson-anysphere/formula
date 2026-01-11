@@ -80,3 +80,44 @@ test("parquet query source supports executeQueryStreaming", { skip: !parquetAvai
   assert.deepEqual(grid[1], [1, "Alice"]);
   assert.deepEqual(grid[3], [3, "Carla"]);
 });
+
+test("parquet query source supports non-materializing executeQueryStreaming via readBinary", { skip: !parquetAvailable }, async () => {
+  const parquetPath = path.join(__dirname, "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readBinary: async (p) => new Uint8Array(await readFile(p)),
+    },
+  });
+  // Ensure we don't fall back to `executeQuery()` (which would materialize the parquet source).
+  engineStreaming.executeQuery = async () => {
+    throw new Error("executeQuery should not be called in non-materializing streaming mode");
+  };
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readBinary: async (p) => new Uint8Array(await readFile(p)),
+    },
+  });
+
+  const query = {
+    id: "q_parquet_stream_non_materialize",
+    name: "Parquet stream non-materialize",
+    source: { type: "parquet", path: parquetPath, options: { batchSize: 2 } },
+    steps: [{ id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id", "name"] } }],
+  };
+
+  const grid = [];
+  await engineStreaming.executeQueryStreaming(query, {}, {
+    batchSize: 2,
+    materialize: false,
+    onBatch: (batch) => {
+      for (let i = 0; i < batch.values.length; i++) {
+        grid[batch.rowOffset + i] = batch.values[i];
+      }
+    },
+  });
+
+  const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(grid, expected);
+});

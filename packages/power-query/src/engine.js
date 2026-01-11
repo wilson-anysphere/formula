@@ -2863,7 +2863,7 @@ export class QueryEngine {
       query.source.type === "query" ||
       (query.source.type === "csv" &&
         Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText || fileConnector?.readBinary)) ||
-      (query.source.type === "parquet" && Boolean(fileConnector?.openFile));
+      (query.source.type === "parquet" && Boolean(fileConnector?.openFile || fileConnector?.readBinary));
 
     if (!canStreamSteps || !canStreamSource) {
       // Fall back to the existing execution strategy when we can't safely stream.
@@ -3238,15 +3238,19 @@ export class QueryEngine {
     if (source.type === "parquet") {
       const connector = this.connectors.get("file");
       if (!connector) throw new Error("Parquet source requires a FileConnector");
-      if (!connector.openFile) {
-        throw new Error("Parquet streaming requires a FileConnector openFile adapter");
-      }
       const request = { format: "parquet", path: source.path };
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       await this.getCredentials("file", request, state);
 
-      const handle = await connector.openFile(source.path, { signal: options.signal });
+      const handle = connector.openFile
+        ? await connector.openFile(source.path, { signal: options.signal })
+        : connector.readBinary
+          ? new Blob([await connector.readBinary(source.path)])
+          : null;
+      if (!handle) {
+        throw new Error("Parquet streaming requires a FileConnector openFile or readBinary adapter");
+      }
       throwIfAborted(options.signal);
 
       const { parquetFileToGridBatches } = await loadDataIoModule();
@@ -3324,7 +3328,7 @@ export class QueryEngine {
       query.source.type === "query" ||
       (query.source.type === "csv" &&
         Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText || fileConnector?.readBinary)) ||
-      (query.source.type === "parquet" && Boolean(fileConnector?.openFile));
+      (query.source.type === "parquet" && Boolean(fileConnector?.openFile || fileConnector?.readBinary));
 
     if (!canStreamSteps || !canStreamSource) {
       // Fall back to materializing the referenced query when it can't be streamed.
