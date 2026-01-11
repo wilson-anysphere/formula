@@ -139,7 +139,9 @@ impl AutoSaveManager {
     }
 
     pub fn notify_change(&self) {
-        let _ = self.tx.send(Command::Touch);
+        if self.tx.send(Command::Touch).is_err() {
+            let _ = flush_dirty_pages(&self.memory, &self.save_count);
+        }
     }
 
     pub async fn flush(&self) -> StorageResult<()> {

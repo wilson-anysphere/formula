@@ -257,9 +257,41 @@ impl MemoryManager {
     /// - This call may trigger eviction (and therefore dirty-page writeback) if
     ///   the cache exceeds the configured memory watermark.
     pub fn load_viewport(&self, sheet_id: Uuid, viewport: CellRange) -> StorageResult<ViewportData> {
+        self.load_viewport_internal(sheet_id, viewport, viewport)
+    }
+
+    /// Load a viewport and prefetch additional rows/cols around it.
+    ///
+    /// This is useful for smooth scrolling: callers can load the visible
+    /// viewport while also priming the cache for nearby pages. Only the original
+    /// `viewport` cells are returned in the resulting [`ViewportData`].
+    pub fn load_viewport_with_margin(
+        &self,
+        sheet_id: Uuid,
+        viewport: CellRange,
+        margin_rows: i64,
+        margin_cols: i64,
+    ) -> StorageResult<ViewportData> {
+        let margin_rows = margin_rows.max(0);
+        let margin_cols = margin_cols.max(0);
+        let page_load_range = CellRange::new(
+            viewport.row_start.saturating_sub(margin_rows),
+            viewport.row_end.saturating_add(margin_rows),
+            viewport.col_start.saturating_sub(margin_cols),
+            viewport.col_end.saturating_add(margin_cols),
+        );
+        self.load_viewport_internal(sheet_id, viewport, page_load_range)
+    }
+
+    fn load_viewport_internal(
+        &self,
+        sheet_id: Uuid,
+        viewport: CellRange,
+        page_load_range: CellRange,
+    ) -> StorageResult<ViewportData> {
         self.get_sheet(sheet_id)?;
 
-        let page_keys = self.page_keys_for_range(sheet_id, viewport);
+        let page_keys = self.page_keys_for_range(sheet_id, page_load_range);
 
         let mut cells = HashMap::new();
         let mut missing = Vec::new();

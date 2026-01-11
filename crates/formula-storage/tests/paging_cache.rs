@@ -342,3 +342,85 @@ fn eviction_flush_preserves_global_change_order() {
         ]
     );
 }
+
+#[test]
+fn load_viewport_with_margin_prefetches_neighbor_pages() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet", 0, None)
+        .expect("create sheet");
+
+    let rows_per_page = 10usize;
+    let cols_per_page = 10usize;
+
+    storage
+        .apply_cell_changes(&[
+            CellChange {
+                sheet_id: sheet.id,
+                row: 0,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Number(1.0),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+            CellChange {
+                sheet_id: sheet.id,
+                row: rows_per_page as i64,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Number(2.0),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+        ])
+        .expect("seed cells");
+
+    let memory = MemoryManager::new(
+        storage,
+        MemoryManagerConfig {
+            max_memory_bytes: 1024 * 1024,
+            max_pages: 64,
+            eviction_watermark: 1.0,
+            rows_per_page,
+            cols_per_page,
+        },
+    );
+
+    // Load row 0 but prefetch an extra page of rows so row 10 is loaded too.
+    memory
+        .load_viewport_with_margin(
+            sheet.id,
+            CellRange::new(0, 0, 0, 0),
+            rows_per_page as i64,
+            0,
+        )
+        .expect("load viewport with margin");
+
+    assert!(
+        memory.get_cached_cell(sheet.id, rows_per_page as i64, 0).is_some(),
+        "expected neighboring page to be prefetched into cache"
+    );
+
+    let before = memory.stats_snapshot();
+    memory
+        .load_viewport(sheet.id, CellRange::new(rows_per_page as i64, rows_per_page as i64, 0, 0))
+        .expect("load second viewport");
+    let after = memory.stats_snapshot();
+
+    assert!(
+        after.page_hits > before.page_hits,
+        "expected adjacent viewport to be a cache hit after prefetch"
+    );
+    assert_eq!(
+        after.page_misses, before.page_misses,
+        "expected no cache miss after prefetch"
+    );
+}
