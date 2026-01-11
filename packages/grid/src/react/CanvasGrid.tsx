@@ -1459,10 +1459,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         if (drag.kind === "col") {
           const delta = event.clientX - drag.startClient;
-          renderer.setColWidth(drag.index, Math.max(MIN_COL_WIDTH, drag.startSize + delta));
+          const minWidth = MIN_COL_WIDTH * zoomRef.current;
+          renderer.setColWidth(drag.index, Math.max(minWidth, drag.startSize + delta));
         } else {
           const delta = event.clientY - drag.startClient;
-          renderer.setRowHeight(drag.index, Math.max(MIN_ROW_HEIGHT, drag.startSize + delta));
+          const minHeight = MIN_ROW_HEIGHT * zoomRef.current;
+          renderer.setRowHeight(drag.index, Math.max(minHeight, drag.startSize + delta));
         }
 
         syncScrollbars();

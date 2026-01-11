@@ -925,9 +925,9 @@ export class CanvasGridRenderer {
     this.assertColIndex(col);
     const viewport = this.scroll.getViewportState();
 
-    const maxWidth = options?.maxWidth ?? 500;
-    const minWidth = 24;
     const zoom = this.zoom;
+    const maxWidth = (options?.maxWidth ?? 500) * zoom;
+    const minWidth = 24 * zoom;
     const paddingX = 4 * zoom;
     const extraPadding = 8 * zoom;
 
@@ -980,8 +980,8 @@ export class CanvasGridRenderer {
     this.assertRowIndex(row);
     const viewport = this.scroll.getViewportState();
 
-    const maxHeight = options?.maxHeight ?? 500;
     const zoom = this.zoom;
+    const maxHeight = (options?.maxHeight ?? 500) * zoom;
     const paddingX = 4 * zoom;
     const paddingY = 2 * zoom;
 
