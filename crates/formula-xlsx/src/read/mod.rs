@@ -78,7 +78,7 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
     let workbook_rels = read_zip_part_required(&mut archive, WORKBOOK_RELS_PART)?;
 
     let rels_info = parse_relationships(&workbook_rels)?;
-    let (_date_system, _calc_pr, sheets) =
+    let (_date_system, _calc_pr, sheets, defined_names) =
         parse_workbook_metadata(&workbook_xml, &rels_info.id_to_target)?;
 
     let mut workbook = Workbook::new();
@@ -102,8 +102,10 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
         None => Vec::new(),
     };
 
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
     for sheet in sheets {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
+        worksheet_ids_by_index.push(ws_id);
         let ws = workbook
             .sheet_mut(ws_id)
             .expect("sheet just inserted must exist");
@@ -161,6 +163,25 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
             &styles_part,
             None,
         )?;
+    }
+
+    for defined in defined_names {
+        let scope = match defined
+            .local_sheet_id
+            .and_then(|idx| worksheet_ids_by_index.get(idx as usize).copied())
+        {
+            Some(sheet_id) => DefinedNameScope::Sheet(sheet_id),
+            None => DefinedNameScope::Workbook,
+        };
+        // Best-effort: ignore invalid/duplicate names so we can still load the workbook.
+        let _ = workbook.create_defined_name(
+            scope,
+            defined.name,
+            defined.value,
+            defined.comment,
+            defined.hidden,
+            defined.local_sheet_id,
+        );
     }
 
     Ok(workbook)
@@ -611,6 +632,8 @@ fn parse_worksheet_into_model(
 
     let mut in_sheet_data = false;
     let mut in_cols = false;
+    let mut in_sheet_views = false;
+    let mut in_sheet_view = false;
 
     // When we don't retain the full `cell_meta` map (fast reader), we still want to materialize
     // shared-formula followers into the worksheet model so formulas match the full reader.
@@ -639,6 +662,7 @@ fn parse_worksheet_into_model(
                 let mut min: Option<u32> = None;
                 let mut max: Option<u32> = None;
                 let mut width: Option<f32> = None;
+                let mut custom_width: Option<bool> = None;
                 let mut hidden = false;
 
                 for attr in e.attributes() {
@@ -667,9 +691,13 @@ fn parse_worksheet_into_model(
                                 .parse::<f32>()
                                 .ok();
                         }
+                        b"customWidth" => {
+                            let v = attr.unescape_value()?.into_owned();
+                            custom_width = Some(parse_xml_bool(&v));
+                        }
                         b"hidden" => {
                             let v = attr.unescape_value()?.into_owned();
-                            hidden = v == "1" || v.eq_ignore_ascii_case("true");
+                            hidden = parse_xml_bool(&v);
                         }
                         _ => {}
                     }
@@ -685,8 +713,10 @@ fn parse_worksheet_into_model(
 
                 for col_1_based in min..=max {
                     let col = col_1_based - 1;
-                    if let Some(width) = width {
-                        worksheet.set_col_width(col, Some(width));
+                    if custom_width != Some(false) {
+                        if let Some(width) = width {
+                            worksheet.set_col_width(col, Some(width));
+                        }
                     }
                     if hidden {
                         worksheet.set_col_hidden(col, true);
@@ -701,9 +731,68 @@ fn parse_worksheet_into_model(
                 drop(e);
             }
 
+            Event::Start(e) if e.name().as_ref() == b"sheetViews" => in_sheet_views = true,
+            Event::End(e) if e.name().as_ref() == b"sheetViews" => {
+                in_sheet_views = false;
+                in_sheet_view = false;
+                drop(e);
+            }
+            Event::Empty(e) if e.name().as_ref() == b"sheetViews" => {
+                in_sheet_views = false;
+                in_sheet_view = false;
+                drop(e);
+            }
+
+            Event::Start(e) if in_sheet_views && e.name().as_ref() == b"sheetView" => {
+                in_sheet_view = true;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"zoomScale" {
+                        if let Ok(scale) = attr.unescape_value()?.into_owned().parse::<f32>() {
+                            worksheet.zoom = scale / 100.0;
+                        }
+                    }
+                }
+            }
+            Event::Empty(e) if in_sheet_views && e.name().as_ref() == b"sheetView" => {
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"zoomScale" {
+                        if let Ok(scale) = attr.unescape_value()?.into_owned().parse::<f32>() {
+                            worksheet.zoom = scale / 100.0;
+                        }
+                    }
+                }
+            }
+            Event::End(e) if in_sheet_view && e.name().as_ref() == b"sheetView" => {
+                in_sheet_view = false;
+                drop(e);
+            }
+
+            Event::Start(e) | Event::Empty(e) if in_sheet_view && e.name().as_ref() == b"pane" => {
+                let mut state: Option<String> = None;
+                let mut x_split: Option<u32> = None;
+                let mut y_split: Option<u32> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"state" => state = Some(val),
+                        b"xSplit" => x_split = val.parse().ok(),
+                        b"ySplit" => y_split = val.parse().ok(),
+                        _ => {}
+                    }
+                }
+                if matches!(state.as_deref(), Some("frozen") | Some("frozenSplit")) {
+                    worksheet.frozen_cols = x_split.unwrap_or(0);
+                    worksheet.frozen_rows = y_split.unwrap_or(0);
+                }
+            }
+
             Event::Start(e) | Event::Empty(e) if in_sheet_data && e.name().as_ref() == b"row" => {
                 let mut row_1_based: Option<u32> = None;
                 let mut height: Option<f32> = None;
+                let mut custom_height: Option<bool> = None;
                 let mut hidden = false;
 
                 for attr in e.attributes() {
@@ -724,9 +813,13 @@ fn parse_worksheet_into_model(
                                 .parse::<f32>()
                                 .ok();
                         }
+                        b"customHeight" => {
+                            let v = attr.unescape_value()?.into_owned();
+                            custom_height = Some(parse_xml_bool(&v));
+                        }
                         b"hidden" => {
                             let v = attr.unescape_value()?.into_owned();
-                            hidden = v == "1" || v.eq_ignore_ascii_case("true");
+                            hidden = parse_xml_bool(&v);
                         }
                         _ => {}
                     }
@@ -735,8 +828,10 @@ fn parse_worksheet_into_model(
                 if let Some(row_1_based) = row_1_based {
                     if row_1_based > 0 && row_1_based <= formula_model::EXCEL_MAX_ROWS {
                         let row = row_1_based - 1;
-                        if let Some(height) = height {
-                            worksheet.set_row_height(row, Some(height));
+                        if custom_height != Some(false) {
+                            if let Some(height) = height {
+                                worksheet.set_row_height(row, Some(height));
+                            }
                         }
                         if hidden {
                             worksheet.set_row_hidden(row, true);
@@ -1085,6 +1180,10 @@ fn expand_shared_formulas(
             worksheet.set_formula(cell_ref, Some(display));
         }
     }
+}
+
+fn parse_xml_bool(val: &str) -> bool {
+    val == "1" || val.eq_ignore_ascii_case("true")
 }
 
 fn interpret_cell_value(

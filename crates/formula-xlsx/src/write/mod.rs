@@ -496,11 +496,19 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         let rels_part = rels_for_part(&sheet_meta.path);
         let orig_rels = parts.get(&rels_part).map(|b| b.as_slice());
 
-        let (orig_tab_color, orig_merges, orig_hyperlinks) = if let Some(orig) = orig {
+        let rels_xml = orig_rels
+            .map(std::str::from_utf8)
+            .transpose()
+            .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+
+        let (orig_tab_color, orig_merges, orig_hyperlinks, orig_views, orig_cols) = if let Some(orig) = orig {
             let orig_xml = std::str::from_utf8(orig).map_err(|e| {
                 WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
             let orig_tab_color = parse_sheet_tab_color(orig_xml)?;
+
+            let orig_views = parse_sheet_view_settings(orig_xml)?;
+            let orig_cols = parse_col_properties(orig_xml)?;
 
             let orig_merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(orig_xml)
                 .map_err(|err| match err {
@@ -516,15 +524,17 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
                     crate::merge_cells::MergeCellsError::Io(e) => WriteError::Io(e),
                 })?;
 
-            let rels_xml = orig_rels
-                .map(std::str::from_utf8)
-                .transpose()
-                .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
             let orig_hyperlinks = crate::parse_worksheet_hyperlinks(orig_xml, rels_xml)?;
 
-            (orig_tab_color, orig_merges, orig_hyperlinks)
+            (orig_tab_color, orig_merges, orig_hyperlinks, orig_views, orig_cols)
         } else {
-            (None, Vec::new(), Vec::new())
+            (
+                None,
+                Vec::new(),
+                Vec::new(),
+                SheetViewSettings::default(),
+                BTreeMap::new(),
+            )
         };
 
         let current_merges = normalize_merge_ranges(sheet.merged_regions.iter().map(|r| r.range));
@@ -532,9 +542,16 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         let merges_changed = current_merges != orig_merges;
         let tab_color_changed = sheet.tab_color != orig_tab_color;
 
-        let current_hyperlinks = normalize_hyperlinks(&sheet.hyperlinks);
+        let current_hyperlinks =
+            normalize_hyperlinks(&assign_hyperlink_rel_ids(&sheet.hyperlinks, rels_xml));
         let orig_hyperlinks = normalize_hyperlinks(&orig_hyperlinks);
         let hyperlinks_changed = current_hyperlinks != orig_hyperlinks;
+
+        let desired_views = SheetViewSettings::from_sheet(sheet);
+        let views_changed = desired_views != orig_views;
+
+        let cols_xml = render_cols(sheet);
+        let cols_changed = &sheet.col_properties != &orig_cols;
 
         let sheet_xml_bytes = write_worksheet_xml(
             doc,
@@ -545,7 +562,13 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
             &style_to_xf,
             &sheet_plan.cell_meta_sheet_ids,
         )?;
-        if orig.is_some() && !tab_color_changed && !merges_changed && !hyperlinks_changed {
+        if orig.is_some()
+            && !tab_color_changed
+            && !merges_changed
+            && !hyperlinks_changed
+            && !views_changed
+            && !cols_changed
+        {
             parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
             continue;
         }
@@ -557,16 +580,18 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         if orig.is_none() || tab_color_changed {
             sheet_xml = write_sheet_tab_color(&sheet_xml, sheet.tab_color.as_ref())?;
         }
+        if orig.is_none() || views_changed {
+            sheet_xml = update_sheet_views_xml(&sheet_xml, desired_views)?;
+        }
+        if orig.is_none() || cols_changed {
+            sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
+        }
         if orig.is_none() || merges_changed {
             sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;
         }
         if orig.is_none() || hyperlinks_changed {
             sheet_xml = crate::update_worksheet_xml(&sheet_xml, &current_hyperlinks)?;
 
-            let rels_xml = orig_rels
-                .map(std::str::from_utf8)
-                .transpose()
-                .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
             let updated_rels = crate::update_worksheet_relationships(rels_xml, &current_hyperlinks)?;
             match updated_rels {
                 Some(xml) => {
@@ -594,6 +619,383 @@ fn normalize_hyperlinks(links: &[Hyperlink]) -> Vec<Hyperlink> {
     let mut out = links.to_vec();
     out.sort_by(cmp_hyperlink);
     out
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SheetViewSettings {
+    /// Zoom scale as an integer percentage (100 = 100%).
+    zoom_scale: u32,
+    frozen_rows: u32,
+    frozen_cols: u32,
+}
+
+impl Default for SheetViewSettings {
+    fn default() -> Self {
+        Self {
+            zoom_scale: 100,
+            frozen_rows: 0,
+            frozen_cols: 0,
+        }
+    }
+}
+
+impl SheetViewSettings {
+    fn from_sheet(sheet: &Worksheet) -> Self {
+        // Excel stores this as an integer percentage (`zoomScale="120"`).
+        let mut zoom_scale = (sheet.zoom * 100.0).round() as i64;
+        zoom_scale = zoom_scale.max(10).min(400);
+        Self {
+            zoom_scale: zoom_scale as u32,
+            frozen_rows: sheet.frozen_rows,
+            frozen_cols: sheet.frozen_cols,
+        }
+    }
+
+    fn is_default(self) -> bool {
+        self.zoom_scale == 100 && self.frozen_rows == 0 && self.frozen_cols == 0
+    }
+}
+
+fn parse_sheet_view_settings(xml: &str) -> Result<SheetViewSettings, WriteError> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut settings = SheetViewSettings::default();
+    let mut in_sheet_view = false;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) if e.local_name().as_ref() == b"sheetView" => {
+                in_sheet_view = true;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"zoomScale" {
+                        if let Ok(scale) = attr.unescape_value()?.parse::<u32>() {
+                            settings.zoom_scale = scale;
+                        }
+                    }
+                }
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"sheetView" => {
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"zoomScale" {
+                        if let Ok(scale) = attr.unescape_value()?.parse::<u32>() {
+                            settings.zoom_scale = scale;
+                        }
+                    }
+                }
+            }
+            Event::End(e) if e.local_name().as_ref() == b"sheetView" => {
+                in_sheet_view = false;
+                drop(e);
+            }
+            Event::Start(e) | Event::Empty(e) if in_sheet_view && e.local_name().as_ref() == b"pane" => {
+                let mut state: Option<String> = None;
+                let mut x_split: Option<u32> = None;
+                let mut y_split: Option<u32> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"state" => state = Some(val),
+                        b"xSplit" => x_split = val.parse().ok(),
+                        b"ySplit" => y_split = val.parse().ok(),
+                        _ => {}
+                    }
+                }
+                if matches!(state.as_deref(), Some("frozen") | Some("frozenSplit")) {
+                    settings.frozen_cols = x_split.unwrap_or(0);
+                    settings.frozen_rows = y_split.unwrap_or(0);
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(settings)
+}
+
+fn render_sheet_views_section(views: SheetViewSettings) -> String {
+    if views.is_default() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("<sheetViews><sheetView workbookViewId=\"0\"");
+    if views.zoom_scale != 100 {
+        out.push_str(&format!(r#" zoomScale="{}""#, views.zoom_scale));
+    }
+
+    if views.frozen_rows == 0 && views.frozen_cols == 0 {
+        out.push_str("/></sheetViews>");
+        return out;
+    }
+
+    out.push('>');
+    out.push_str("<pane");
+    if views.frozen_cols > 0 {
+        out.push_str(&format!(r#" xSplit="{}""#, views.frozen_cols));
+    }
+    if views.frozen_rows > 0 {
+        out.push_str(&format!(r#" ySplit="{}""#, views.frozen_rows));
+    }
+    let top_left = CellRef::new(views.frozen_rows, views.frozen_cols).to_a1();
+    out.push_str(&format!(r#" topLeftCell="{}""#, escape_attr(&top_left)));
+
+    let active_pane = if views.frozen_rows > 0 && views.frozen_cols > 0 {
+        "bottomRight"
+    } else if views.frozen_rows > 0 {
+        "bottomLeft"
+    } else {
+        "topRight"
+    };
+    out.push_str(&format!(
+        r#" activePane="{active_pane}" state="frozen"/>"#
+    ));
+    out.push_str("</sheetView></sheetViews>");
+    out
+}
+
+fn update_sheet_views_xml(sheet_xml: &str, views: SheetViewSettings) -> Result<String, WriteError> {
+    let new_section = render_sheet_views_section(views);
+
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut skip_depth: usize = 0;
+    let mut replaced = false;
+    let mut inserted = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => {
+                match event {
+                    Event::Start(_) => skip_depth += 1,
+                    Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                    Event::Empty(_) => {}
+                    _ => {}
+                }
+            }
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheetViews" => {
+                replaced = true;
+                if !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                }
+                skip_depth = 1;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetViews" => {
+                replaced = true;
+                if !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                }
+            }
+            Event::Start(ref e)
+                if e.local_name().as_ref() == b"sheetFormatPr"
+                    || e.local_name().as_ref() == b"cols"
+                    || e.local_name().as_ref() == b"sheetData" =>
+            {
+                if !replaced && !inserted && !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                    inserted = true;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e)
+                if e.local_name().as_ref() == b"sheetFormatPr"
+                    || e.local_name().as_ref() == b"cols"
+                    || e.local_name().as_ref() == b"sheetData" =>
+            {
+                if !replaced && !inserted && !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                    inserted = true;
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            _ => {
+                writer.write_event(event.to_owned())?;
+            }
+        }
+        buf.clear();
+    }
+
+    String::from_utf8(writer.into_inner()).map_err(|e| {
+        WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    })
+}
+
+fn parse_xml_bool(val: &str) -> bool {
+    val == "1" || val.eq_ignore_ascii_case("true")
+}
+
+fn parse_col_properties(xml: &str) -> Result<BTreeMap<u32, formula_model::ColProperties>, WriteError> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut in_cols = false;
+    let mut map: BTreeMap<u32, formula_model::ColProperties> = BTreeMap::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) if e.local_name().as_ref() == b"cols" => in_cols = true,
+            Event::End(e) if e.local_name().as_ref() == b"cols" => {
+                in_cols = false;
+                drop(e);
+            }
+            Event::Start(e) | Event::Empty(e) if in_cols && e.local_name().as_ref() == b"col" => {
+                let mut min: Option<u32> = None;
+                let mut max: Option<u32> = None;
+                let mut width: Option<f32> = None;
+                let mut custom_width: Option<bool> = None;
+                let mut hidden = false;
+
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"min" => min = val.parse().ok(),
+                        b"max" => max = val.parse().ok(),
+                        b"width" => width = val.parse().ok(),
+                        b"customWidth" => custom_width = Some(parse_xml_bool(&val)),
+                        b"hidden" => hidden = parse_xml_bool(&val),
+                        _ => {}
+                    }
+                }
+
+                let Some(min) = min else { continue };
+                let max = max.unwrap_or(min).min(formula_model::EXCEL_MAX_COLS);
+                if min == 0 || max == 0 || min > formula_model::EXCEL_MAX_COLS {
+                    continue;
+                }
+
+                let width = if custom_width == Some(false) { None } else { width };
+
+                for idx_1_based in min..=max {
+                    let col = idx_1_based - 1;
+                    if col >= formula_model::EXCEL_MAX_COLS {
+                        continue;
+                    }
+                    if width.is_none() && !hidden {
+                        continue;
+                    }
+                    let entry = map.entry(col).or_default();
+                    if let Some(width) = width {
+                        entry.width = Some(width);
+                    }
+                    if hidden {
+                        entry.hidden = true;
+                    }
+                    if entry.width.is_none() && !entry.hidden {
+                        map.remove(&col);
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(map)
+}
+
+fn update_cols_xml(sheet_xml: &str, cols_section: &str) -> Result<String, WriteError> {
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut skip_depth: usize = 0;
+    let mut replaced = false;
+    let mut inserted = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => {
+                match event {
+                    Event::Start(_) => skip_depth += 1,
+                    Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                    Event::Empty(_) => {}
+                    _ => {}
+                }
+            }
+            Event::Start(ref e) if e.local_name().as_ref() == b"cols" => {
+                replaced = true;
+                if !cols_section.is_empty() {
+                    writer.get_mut().extend_from_slice(cols_section.as_bytes());
+                }
+                skip_depth = 1;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"cols" => {
+                replaced = true;
+                if !cols_section.is_empty() {
+                    writer.get_mut().extend_from_slice(cols_section.as_bytes());
+                }
+            }
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheetData" => {
+                if !replaced && !inserted && !cols_section.is_empty() {
+                    writer.get_mut().extend_from_slice(cols_section.as_bytes());
+                    inserted = true;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetData" => {
+                if !replaced && !inserted && !cols_section.is_empty() {
+                    writer.get_mut().extend_from_slice(cols_section.as_bytes());
+                    inserted = true;
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            _ => {
+                writer.write_event(event.to_owned())?;
+            }
+        }
+        buf.clear();
+    }
+
+    String::from_utf8(writer.into_inner()).map_err(|e| {
+        WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    })
+}
+
+fn assign_hyperlink_rel_ids(hyperlinks: &[Hyperlink], rels_xml: Option<&str>) -> Vec<Hyperlink> {
+    let mut next_id = rels_xml.map(next_relationship_id_in_xml).unwrap_or(1);
+    let mut used: HashSet<String> = hyperlinks.iter().filter_map(|l| l.rel_id.clone()).collect();
+
+    hyperlinks
+        .iter()
+        .cloned()
+        .map(|mut link| {
+            match link.target {
+                HyperlinkTarget::ExternalUrl { .. } | HyperlinkTarget::Email { .. } => {
+                    if link.rel_id.is_none() {
+                        loop {
+                            let id = format!("rId{next_id}");
+                            next_id += 1;
+                            if used.insert(id.clone()) {
+                                link.rel_id = Some(id);
+                                break;
+                            }
+                        }
+                    }
+                }
+                HyperlinkTarget::Internal { .. } => {}
+            }
+            link
+        })
+        .collect()
 }
 
 fn cmp_hyperlink(a: &Hyperlink, b: &Hyperlink) -> std::cmp::Ordering {
