@@ -72,14 +72,54 @@ function init(data) {
   });
 }
 
+function findPrototypeWithOwnProperty(obj, prop) {
+  let current = Object.getPrototypeOf(obj);
+  while (current) {
+    if (Object.prototype.hasOwnProperty.call(current, prop)) return current;
+    current = Object.getPrototypeOf(current);
+  }
+  return null;
+}
+
+function defineReadOnlyProperty(target, prop, value) {
+  try {
+    Object.defineProperty(target, prop, {
+      value,
+      writable: false,
+      configurable: false,
+      enumerable: true
+    });
+    return true;
+  } catch {
+    try {
+      // Fall back to assignment when defineProperty is not allowed.
+      target[prop] = value;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function lockDownGlobal(prop, value) {
+  defineReadOnlyProperty(globalThis, prop, value);
+
+  const protoOwner = findPrototypeWithOwnProperty(globalThis, prop);
+  if (protoOwner) {
+    defineReadOnlyProperty(protoOwner, prop, value);
+  }
+}
+
 if (typeof globalThis.fetch === "function") {
-  globalThis.fetch = async (input, init) => {
+  const permissionedFetch = async (input, init) => {
     return formulaApi.network.fetch(String(input), init);
   };
+  lockDownGlobal("fetch", permissionedFetch);
 }
 
 if (typeof globalThis.WebSocket === "function") {
   const NativeWebSocket = globalThis.WebSocket;
+  const nativeInstances = new WeakMap();
 
   class PermissionedWebSocket {
     static CONNECTING = 0;
@@ -95,7 +135,6 @@ if (typeof globalThis.WebSocket === "function") {
     constructor(url, protocols) {
       this._url = String(url ?? "");
       this._protocols = protocols;
-      this._ws = null;
       this._readyState = PermissionedWebSocket.CONNECTING;
       this._binaryType = "blob";
       this._protocol = "";
@@ -114,32 +153,39 @@ if (typeof globalThis.WebSocket === "function") {
     }
 
     get url() {
-      return this._ws ? this._ws.url : this._url;
+      const ws = nativeInstances.get(this);
+      return ws ? ws.url : this._url;
     }
 
     get readyState() {
-      return this._ws ? this._ws.readyState : this._readyState;
+      const ws = nativeInstances.get(this);
+      return ws ? ws.readyState : this._readyState;
     }
 
     get bufferedAmount() {
-      return this._ws ? this._ws.bufferedAmount : this._bufferedAmount;
+      const ws = nativeInstances.get(this);
+      return ws ? ws.bufferedAmount : this._bufferedAmount;
     }
 
     get extensions() {
-      return this._ws ? this._ws.extensions : this._extensions;
+      const ws = nativeInstances.get(this);
+      return ws ? ws.extensions : this._extensions;
     }
 
     get protocol() {
-      return this._ws ? this._ws.protocol : this._protocol;
+      const ws = nativeInstances.get(this);
+      return ws ? ws.protocol : this._protocol;
     }
 
     get binaryType() {
-      return this._ws ? this._ws.binaryType : this._binaryType;
+      const ws = nativeInstances.get(this);
+      return ws ? ws.binaryType : this._binaryType;
     }
 
     set binaryType(value) {
       this._binaryType = value;
-      if (this._ws) this._ws.binaryType = value;
+      const ws = nativeInstances.get(this);
+      if (ws) ws.binaryType = value;
     }
 
     addEventListener(type, listener) {
@@ -167,20 +213,22 @@ if (typeof globalThis.WebSocket === "function") {
     }
 
     send(data) {
-      if (this.readyState !== PermissionedWebSocket.OPEN || !this._ws) {
+      const ws = nativeInstances.get(this);
+      if (this.readyState !== PermissionedWebSocket.OPEN || !ws) {
         throw new Error("WebSocket is not open");
       }
 
-      this._ws.send(data);
+      ws.send(data);
     }
 
     close(code, reason) {
-      if (!this._ws) {
+      const ws = nativeInstances.get(this);
+      if (!ws) {
         this._pendingClose = { code, reason };
         this._readyState = PermissionedWebSocket.CLOSING;
         return;
       }
-      this._ws.close(code, reason);
+      ws.close(code, reason);
     }
 
     async _start() {
@@ -200,7 +248,7 @@ if (typeof globalThis.WebSocket === "function") {
         return;
       }
 
-      this._ws = ws;
+      nativeInstances.set(this, ws);
       try {
         ws.binaryType = this._binaryType;
       } catch {
@@ -234,6 +282,7 @@ if (typeof globalThis.WebSocket === "function") {
 
       ws.addEventListener("close", (event) => {
         this._readyState = PermissionedWebSocket.CLOSED;
+        nativeInstances.delete(this);
         this._emit("close", {
           type: "close",
           code: event.code,
@@ -273,7 +322,19 @@ if (typeof globalThis.WebSocket === "function") {
     }
   }
 
-  globalThis.WebSocket = PermissionedWebSocket;
+  lockDownGlobal("WebSocket", PermissionedWebSocket);
+}
+
+// Prevent bypassing network permission checks via XHR. Extensions should use `fetch()`
+// (which is replaced with a permission-gated wrapper above).
+if (typeof globalThis.XMLHttpRequest === "function") {
+  class PermissionedXMLHttpRequest {
+    constructor() {
+      throw new Error("XMLHttpRequest is not allowed in extensions; use fetch()");
+    }
+  }
+
+  lockDownGlobal("XMLHttpRequest", PermissionedXMLHttpRequest);
 }
 
 async function activateExtension() {
