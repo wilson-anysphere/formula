@@ -20,6 +20,18 @@ pub struct PivotTableDefinition {
     pub cache_id: Option<u32>,
     /// Styling hints from `<pivotTableStyleInfo>`.
     pub style_info: Option<PivotTableStyleInfo>,
+    /// `pivotTableDefinition@applyNumberFormats` (if present).
+    pub apply_number_formats: Option<bool>,
+    /// `pivotTableDefinition@applyBorderFormats` (if present).
+    pub apply_border_formats: Option<bool>,
+    /// `pivotTableDefinition@applyFontFormats` (if present).
+    pub apply_font_formats: Option<bool>,
+    /// `pivotTableDefinition@applyPatternFormats` (if present).
+    pub apply_pattern_formats: Option<bool>,
+    /// `pivotTableDefinition@applyAlignmentFormats` (if present).
+    pub apply_alignment_formats: Option<bool>,
+    /// `pivotTableDefinition@applyWidthHeightFormats` (if present).
+    pub apply_width_height_formats: Option<bool>,
     /// Output range on the destination worksheet (A1-style range).
     pub location_ref: Option<String>,
     pub first_header_row: Option<u32>,
@@ -60,6 +72,12 @@ impl PivotTableDefinition {
             name: None,
             cache_id: None,
             style_info: None,
+            apply_number_formats: None,
+            apply_border_formats: None,
+            apply_font_formats: None,
+            apply_pattern_formats: None,
+            apply_alignment_formats: None,
+            apply_width_height_formats: None,
             location_ref: None,
             first_header_row: None,
             first_data_row: None,
@@ -354,6 +372,18 @@ fn parse_start_element(
                 if let Some(v) = parse_bool(&value) {
                     def.data_on_rows = v;
                 }
+            } else if key.eq_ignore_ascii_case(b"applyNumberFormats") {
+                def.apply_number_formats = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"applyBorderFormats") {
+                def.apply_border_formats = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"applyFontFormats") {
+                def.apply_font_formats = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"applyPatternFormats") {
+                def.apply_pattern_formats = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"applyAlignmentFormats") {
+                def.apply_alignment_formats = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"applyWidthHeightFormats") {
+                def.apply_width_height_formats = parse_bool(&value);
             } else if key.eq_ignore_ascii_case(b"rowGrandTotals") {
                 if let Some(v) = parse_bool(&value) {
                     def.row_grand_totals = v;
@@ -438,6 +468,30 @@ mod tests {
         assert_eq!(parsed.outline, Some(true));
         assert_eq!(parsed.compact, Some(false));
         assert_eq!(parsed.compact_data, Some(true));
+    }
+
+    #[test]
+    fn parses_apply_format_flags() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  name="PivotTable1"
+  cacheId="1"
+  applyNumberFormats="1"
+  applyBorderFormats="0"
+  applyFontFormats="true"
+  applyPatternFormats="false"
+  applyAlignmentFormats="1"
+  applyWidthHeightFormats="0"/>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+
+        assert_eq!(parsed.apply_number_formats, Some(true));
+        assert_eq!(parsed.apply_border_formats, Some(false));
+        assert_eq!(parsed.apply_font_formats, Some(true));
+        assert_eq!(parsed.apply_pattern_formats, Some(false));
+        assert_eq!(parsed.apply_alignment_formats, Some(true));
+        assert_eq!(parsed.apply_width_height_formats, Some(false));
     }
 
     #[test]
