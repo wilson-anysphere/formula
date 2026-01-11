@@ -338,12 +338,12 @@ This document tracks every Excel feature and our implementation status. Features
 | SKEW.P | ⬜ | |
 | SLOPE | ✅ | |
 | SMALL | ✅ | P0 |
-| STANDARDIZE | ⬜ | |
+| STANDARDIZE | ✅ | |
 | STDEV.P | ✅ | |
 | STDEV.S | ✅ | |
 | STDEVA | ✅ | |
 | STDEVPA | ✅ | |
-| STEYX | ⬜ | |
+| STEYX | ✅ | |
 | T.DIST | ⬜ | |
 | T.DIST.2T | ⬜ | |
 | T.DIST.RT | ⬜ | |

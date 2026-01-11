@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::eval::CompiledExpr;
+use crate::functions::array_lift;
 use crate::functions::statistical::{RankMethod, RankOrder};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
@@ -451,6 +452,34 @@ fn trimmean_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "STANDARDIZE",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number],
+        implementation: standardize_fn,
+    }
+}
+
+fn standardize_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let x = array_lift::eval_arg(ctx, &args[0]);
+    let mean = array_lift::eval_arg(ctx, &args[1]);
+    let std_dev = array_lift::eval_arg(ctx, &args[2]);
+    array_lift::lift3(x, mean, std_dev, |x, mean, std_dev| {
+        let x = x.coerce_to_number()?;
+        let mean = mean.coerce_to_number()?;
+        let std_dev = std_dev.coerce_to_number()?;
+        Ok(Value::Number(crate::functions::statistical::standardize(
+            x, mean, std_dev,
+        )?))
+    })
 }
 
 fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<Option<f64>>, ErrorKind> {
@@ -1411,6 +1440,32 @@ fn intercept_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
     match crate::functions::statistical::intercept(&xs, &ys) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "STEYX",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: steyx_fn,
+    }
+}
+
+fn steyx_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    // Excel signature: STEYX(known_y's, known_x's)
+    let (xs, ys) = match collect_numeric_pairs(ctx, &args[1], &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::steyx(&xs, &ys) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }

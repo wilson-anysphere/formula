@@ -141,6 +141,21 @@ fn percentrank_errors_on_out_of_range_x_and_invalid_significance() {
 }
 
 #[test]
+fn standardize_returns_expected_z_score() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=STANDARDIZE(4,2,2)"), 1.0);
+}
+
+#[test]
+fn standardize_rejects_non_positive_standard_dev() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=STANDARDIZE(1,1,0)"),
+        Value::Error(ErrorKind::Num)
+    );
+}
+
+#[test]
 fn correl_matches_perfect_positive_relationship() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=CORREL({1,2,3},{1,2,3})"), 1.0);
@@ -158,6 +173,25 @@ fn rsq_slope_and_intercept_match_simple_regression() {
     assert_number(&sheet.eval("=RSQ({1,2,3},{1,2,3})"), 1.0);
     assert_number(&sheet.eval("=SLOPE({1,2,3},{1,2,3})"), 1.0);
     assert_number(&sheet.eval("=INTERCEPT({1,2,3},{1,2,3})"), 0.0);
+}
+
+#[test]
+fn steyx_is_zero_for_perfect_fit() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=STEYX({1,2,3},{1,2,3})"), 0.0);
+}
+
+#[test]
+fn steyx_requires_at_least_three_points() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=STEYX({1,2},{1,2})"),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval("=STEYX({1,2,3},{1,2})"),
+        Value::Error(ErrorKind::NA)
+    );
 }
 
 #[test]

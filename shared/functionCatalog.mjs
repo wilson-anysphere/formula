@@ -1854,6 +1854,18 @@ export default {
       ]
     },
     {
+      "name": "STANDARDIZE",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "STDEV",
       "min_args": 1,
       "max_args": 255,
@@ -1910,6 +1922,17 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "STEYX",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
         "any"
       ]
     },

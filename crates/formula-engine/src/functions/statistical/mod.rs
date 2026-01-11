@@ -744,3 +744,66 @@ pub fn intercept(xs: &[f64], ys: &[f64]) -> Result<f64, ErrorKind> {
         Err(ErrorKind::Num)
     }
 }
+
+pub fn standardize(x: f64, mean: f64, standard_dev: f64) -> Result<f64, ErrorKind> {
+    if !x.is_finite() || !mean.is_finite() || !standard_dev.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+    if standard_dev <= 0.0 {
+        return Err(ErrorKind::Num);
+    }
+    let out = (x - mean) / standard_dev;
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
+pub fn steyx(xs: &[f64], ys: &[f64]) -> Result<f64, ErrorKind> {
+    if xs.len() != ys.len() {
+        return Err(ErrorKind::NA);
+    }
+    if xs.len() < 3 {
+        return Err(ErrorKind::Div0);
+    }
+
+    let (mean_x, mean_y) = paired_means(xs, ys)?;
+    let var_x = var_s(xs)?;
+    if var_x == 0.0 {
+        return Err(ErrorKind::Div0);
+    }
+    let cov_xy = covariance_s(xs, ys)?;
+    let slope = cov_xy / var_x;
+    if !slope.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+    let intercept = mean_y - slope * mean_x;
+    if !intercept.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut sum = 0.0;
+    let mut c = 0.0;
+    for (&x, &y) in xs.iter().zip(ys.iter()) {
+        let predicted = intercept + slope * x;
+        let resid = y - predicted;
+        let term = resid * resid;
+        let yk = term - c;
+        let t = sum + yk;
+        c = (t - sum) - yk;
+        sum = t;
+    }
+
+    let denom = (xs.len() as f64) - 2.0;
+    if denom <= 0.0 {
+        return Err(ErrorKind::Div0);
+    }
+    let mse = sum.max(0.0) / denom;
+    let out = mse.sqrt();
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
