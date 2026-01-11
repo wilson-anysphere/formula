@@ -132,6 +132,8 @@ describe("API e2e: auth + RBAC + sync token", () => {
           secret: config.syncTokenSecret,
           audience: "formula-sync"
         },
+        internalAdminToken: null,
+        retention: { ttlMs: 0, sweepIntervalMs: 0 },
         limits: {
           maxConnections: 100,
           maxConnectionsPerIp: 100,
@@ -334,6 +336,40 @@ describe("API e2e: auth + RBAC + sync token", () => {
     expect(publicRedeem.statusCode).toBe(200);
     expect((publicRedeem.json() as any).role).toBe("viewer");
 
+    const invalidRangePermEndRow = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/range-permissions`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        sheetName: "Sheet1",
+        startRow: 1,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        permissionType: "read",
+        allowedUserEmail: "public-user@example.com"
+      }
+    });
+    expect(invalidRangePermEndRow.statusCode).toBe(400);
+    expect((invalidRangePermEndRow.json() as any).error).toBe("invalid_request");
+
+    const invalidRangePermEndCol = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/range-permissions`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        sheetName: "Sheet1",
+        startRow: 0,
+        startCol: 1,
+        endRow: 0,
+        endCol: 0,
+        permissionType: "read",
+        allowedUserEmail: "public-user@example.com"
+      }
+    });
+    expect(invalidRangePermEndCol.statusCode).toBe(400);
+    expect((invalidRangePermEndCol.json() as any).error).toBe("invalid_request");
+
     const rangePerm = await app.inject({
       method: "POST",
       url: `/docs/${docId}/range-permissions`,
@@ -349,6 +385,8 @@ describe("API e2e: auth + RBAC + sync token", () => {
       }
     });
     expect(rangePerm.statusCode).toBe(200);
+    const rangePermissionId = (rangePerm.json() as any).id as string;
+    expect(rangePermissionId).toBeTypeOf("string");
 
     const permissions = await app.inject({
       method: "GET",
@@ -367,6 +405,23 @@ describe("API e2e: auth + RBAC + sync token", () => {
       endCol: 0
     });
     expect(body.permissions.rangeRestrictions[0].readAllowlist).toContain(publicUserId);
+
+    const deleteRangePerm = await app.inject({
+      method: "DELETE",
+      url: `/docs/${docId}/range-permissions/${rangePermissionId}`,
+      headers: { cookie: ownerCookie }
+    });
+    expect(deleteRangePerm.statusCode).toBe(200);
+
+    const permissionsAfterDelete = await app.inject({
+      method: "GET",
+      url: `/docs/${docId}/permissions`,
+      headers: { cookie: publicUserCookie }
+    });
+    expect(permissionsAfterDelete.statusCode).toBe(200);
+    const afterBody = permissionsAfterDelete.json() as any;
+    expect(afterBody.permissions.role).toBe("viewer");
+    expect(afterBody.permissions.rangeRestrictions).toHaveLength(0);
   });
 
   it("creates, lists, fetches, deletes document versions and enforces RBAC", async () => {

@@ -742,15 +742,18 @@ export function registerDocRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true, documentId: docId, role: nextRole });
   });
 
-  const RangePermissionBody = z.object({
-    sheetName: z.string().min(1),
-    startRow: z.number().int().nonnegative(),
-    startCol: z.number().int().nonnegative(),
-    endRow: z.number().int().nonnegative(),
-    endCol: z.number().int().nonnegative(),
-    permissionType: z.enum(["read", "edit"]),
-    allowedUserEmail: z.string().email()
-  });
+  const RangePermissionBody = z
+    .object({
+      sheetName: z.string().min(1),
+      startRow: z.number().int().nonnegative(),
+      startCol: z.number().int().nonnegative(),
+      endRow: z.number().int().nonnegative(),
+      endCol: z.number().int().nonnegative(),
+      permissionType: z.enum(["read", "edit"]),
+      allowedUserEmail: z.string().email()
+    })
+    .refine((value) => value.endRow >= value.startRow)
+    .refine((value) => value.endCol >= value.startCol);
 
   app.post("/docs/:docId/range-permissions", { preHandler: requireAuth }, async (request, reply) => {
     const docId = (request.params as { docId: string }).docId;
@@ -823,6 +826,36 @@ export function registerDocRoutes(app: FastifyInstance): void {
       [docId]
     );
     return { rangePermissions: rows.rows };
+  });
+
+  app.delete("/docs/:docId/range-permissions/:permissionId", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string; permissionId: string }).docId;
+    const permissionId = (request.params as { docId: string; permissionId: string }).permissionId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
+
+    const res = await app.db.query(
+      "DELETE FROM document_range_permissions WHERE document_id = $1 AND id = $2 RETURNING id",
+      [docId, permissionId]
+    );
+    if (res.rowCount !== 1) return reply.code(404).send({ error: "not_found" });
+
+    await writeAuditEvent(app.db, {
+      orgId: membership.orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "sharing.modified",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { type: "range-permission", action: "deleted", id: permissionId },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({ ok: true });
   });
 
   app.get("/docs/:docId/permissions", { preHandler: requireAuth }, async (request, reply) => {
