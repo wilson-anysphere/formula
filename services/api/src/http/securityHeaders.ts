@@ -9,8 +9,10 @@ export function registerSecurityHeaders(app: FastifyInstance): void {
 
     // Only set headers when missing so individual endpoints can deliberately override them.
     if (!reply.hasHeader("x-dns-prefetch-control")) reply.header("x-dns-prefetch-control", "off");
+    if (!reply.hasHeader("x-download-options")) reply.header("x-download-options", "noopen");
     if (!reply.hasHeader("x-content-type-options")) reply.header("x-content-type-options", "nosniff");
     if (!reply.hasHeader("x-frame-options")) reply.header("x-frame-options", "DENY");
+    if (!reply.hasHeader("x-robots-tag")) reply.header("x-robots-tag", "noindex");
     if (!reply.hasHeader("referrer-policy")) reply.header("referrer-policy", "no-referrer");
     if (!reply.hasHeader("x-permitted-cross-domain-policies")) {
       reply.header("x-permitted-cross-domain-policies", "none");
