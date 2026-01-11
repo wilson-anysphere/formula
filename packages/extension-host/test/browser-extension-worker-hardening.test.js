@@ -124,6 +124,8 @@ if (!nativeFetch) {
   throw new Error("Test worker runtime requires fetch()");
 }
 
+let aliasBigBytes = null;
+
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input?.url ?? String(input);
   if (url.endsWith("/redirect-outside.mjs")) {
@@ -134,6 +136,35 @@ globalThis.fetch = async (input, init) => {
       url: "https://evil.invalid/evil.mjs",
       async arrayBuffer() {
         return new ArrayBuffer(0);
+      }
+    };
+  }
+  if (/\\/alias-big\\d+\\.mjs$/.test(url)) {
+    const targetUrl = url.replace(/\\/alias-big\\d+\\.mjs$/, "/target-big.mjs");
+    if (!aliasBigBytes) {
+      const bigComment = "a".repeat(240 * 1024);
+      aliasBigBytes = new TextEncoder().encode(\`/*\${bigComment}*/\\nexport const value = 1;\\n\`);
+    }
+    return {
+      ok: true,
+      status: 200,
+      redirected: true,
+      url: targetUrl,
+      async arrayBuffer() {
+        return aliasBigBytes.buffer.slice(aliasBigBytes.byteOffset, aliasBigBytes.byteOffset + aliasBigBytes.byteLength);
+      }
+    };
+  }
+  if (/\\/alias\\d+\\.mjs$/.test(url)) {
+    const targetUrl = url.replace(/\\/alias\\d+\\.mjs$/, "/target.mjs");
+    const bytes = new TextEncoder().encode("export const value = 1;\\n");
+    return {
+      ok: true,
+      status: 200,
+      redirected: true,
+      url: targetUrl,
+      async arrayBuffer() {
+        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
       }
     };
   }
@@ -450,6 +481,31 @@ test("extension-worker: rejects module graphs that exceed maxTotalBytes", async 
       const next = i === 22 ? "" : `import "./mod${i + 1}.mjs";\n`;
       files[`mod${i}.mjs`] = `/*${bigComment}*/\n${next}export const value = ${i};\n`;
     }
+
+    await writeFiles(dir, files);
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /graph too large/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: maxTotalBytes counts redirected duplicates", async () => {
+  const dir = await createTempDir("formula-ext-worker-maxtotalbytes-redirected-");
+  try {
+    /** @type {Record<string, string>} */
+    const files = {};
+    let imports = "";
+    for (let i = 1; i <= 30; i++) {
+      imports += `import "./alias-big${i}.mjs";\n`;
+      files[`alias-big${i}.mjs`] = `export const value = ${i};\n`;
+    }
+    files["main.mjs"] = `${imports}export async function activate() {}\n`;
 
     await writeFiles(dir, files);
     const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;

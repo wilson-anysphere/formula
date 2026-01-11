@@ -980,28 +980,24 @@ async function validateModuleGraph(entryUrl, extensionRootUrl, limits = IMPORT_P
   /** @type {string[]} */
   const queue = [entry];
   const visited = new Set();
+  const requested = new Set();
+  let fetchCount = 0;
   let totalBytes = 0;
 
   while (queue.length > 0) {
     const requestedUrl = queue.shift();
     if (!requestedUrl) continue;
-    if (visited.has(requestedUrl)) continue;
+    if (requested.has(requestedUrl)) continue;
+    requested.add(requestedUrl);
 
-    if (visited.size >= limits.maxModules) {
+    if (fetchCount >= limits.maxModules) {
       throw new Error(
         `Extension module graph exceeded limit of ${limits.maxModules} modules (starting from ${entryUrl})`
       );
     }
 
     const { source, size, url } = await fetchModuleSource(requestedUrl, root);
-    if (visited.has(url)) continue;
-    if (visited.size >= limits.maxModules) {
-      throw new Error(
-        `Extension module graph exceeded limit of ${limits.maxModules} modules (starting from ${entryUrl})`
-      );
-    }
-
-    visited.add(url);
+    fetchCount += 1;
 
     if (size > limits.maxModuleBytes) {
       throw new Error(
@@ -1014,6 +1010,10 @@ async function validateModuleGraph(entryUrl, extensionRootUrl, limits = IMPORT_P
         `Extension module graph too large: exceeded ${limits.maxTotalBytes} bytes (starting from ${entryUrl})`
       );
     }
+
+    if (visited.has(url)) continue;
+
+    visited.add(url);
 
     const imports = scanModuleImports(source, url);
     for (const specifier of imports) {
