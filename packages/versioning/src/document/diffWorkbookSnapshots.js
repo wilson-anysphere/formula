@@ -46,9 +46,16 @@ import { workbookStateFromDocumentSnapshot } from "./workbookState.js";
  * }} NamedRangesDiff
  *
  * @typedef {{
+ *   added: { key: string, value: any }[];
+ *   removed: { key: string, value: any }[];
+ *   modified: { key: string, before: any, after: any }[];
+ * }} MetadataDiff
+ *
+ * @typedef {{
  *   sheets: SheetsDiff;
  *   cellsBySheet: SheetDiffEntry[];
  *   comments: CommentsDiff;
+ *   metadata: MetadataDiff;
  *   namedRanges: NamedRangesDiff;
  * }} WorkbookDiff
  */
@@ -238,6 +245,30 @@ export function diffDocumentWorkbookSnapshots(opts) {
   comments.removed.sort((a, b) => compareStrings(a.id, b.id));
   comments.modified.sort((a, b) => compareStrings(a.id, b.id));
 
+  /** @type {MetadataDiff} */
+  const metadata = { added: [], removed: [], modified: [] };
+  for (const [key, value] of after.metadata) {
+    if (!before.metadata.has(key)) {
+      metadata.added.push({ key, value });
+    }
+  }
+  for (const [key, value] of before.metadata) {
+    if (!after.metadata.has(key)) {
+      metadata.removed.push({ key, value });
+    }
+  }
+  for (const [key, afterValue] of after.metadata) {
+    const beforeValue = before.metadata.get(key);
+    if (beforeValue === undefined) continue;
+    if (!isDeepStrictEqual(beforeValue, afterValue)) {
+      metadata.modified.push({ key, before: beforeValue, after: afterValue });
+    }
+  }
+
+  metadata.added.sort((a, b) => compareStrings(a.key, b.key));
+  metadata.removed.sort((a, b) => compareStrings(a.key, b.key));
+  metadata.modified.sort((a, b) => compareStrings(a.key, b.key));
+
   /** @type {NamedRangesDiff} */
   const namedRanges = { added: [], removed: [], modified: [] };
   for (const [key, value] of after.namedRanges) {
@@ -258,5 +289,5 @@ export function diffDocumentWorkbookSnapshots(opts) {
   namedRanges.removed.sort((a, b) => compareStrings(a.key, b.key));
   namedRanges.modified.sort((a, b) => compareStrings(a.key, b.key));
 
-  return { sheets, cellsBySheet, comments, namedRanges };
+  return { sheets, cellsBySheet, comments, metadata, namedRanges };
 }

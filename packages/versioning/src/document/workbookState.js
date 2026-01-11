@@ -9,6 +9,7 @@ const decoder = new TextDecoder();
  * @typedef {{
  *   sheets: SheetMeta[];
  *   sheetOrder: string[];
+ *   metadata: Map<string, any>;
  *   namedRanges: Map<string, any>;
  *   comments: Map<string, CommentSummary>;
  *   cellsBySheet: Map<string, { cells: Map<string, any> }>;
@@ -104,6 +105,24 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
   sheets.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   /** @type {Map<string, any>} */
+  const metadata = new Map();
+  const rawMetadata = parsed?.metadata;
+  if (rawMetadata && typeof rawMetadata === "object") {
+    if (Array.isArray(rawMetadata)) {
+      for (const entry of rawMetadata) {
+        const key = coerceString(entry?.key ?? entry?.name ?? entry?.id);
+        if (!key) continue;
+        metadata.set(key, structuredClone(entry?.value ?? entry));
+      }
+    } else {
+      const keys = Object.keys(rawMetadata).sort();
+      for (const key of keys) {
+        metadata.set(key, structuredClone(rawMetadata[key]));
+      }
+    }
+  }
+
+  /** @type {Map<string, any>} */
   const namedRanges = new Map();
   const rawNamedRanges = parsed?.namedRanges;
   if (rawNamedRanges && typeof rawNamedRanges === "object") {
@@ -139,5 +158,5 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
     }
   }
 
-  return { sheets, sheetOrder, namedRanges, comments, cellsBySheet };
+  return { sheets, sheetOrder, metadata, namedRanges, comments, cellsBySheet };
 }

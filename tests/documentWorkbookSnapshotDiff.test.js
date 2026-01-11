@@ -26,6 +26,10 @@ test("diffDocumentWorkbookSnapshots reports workbook-level metadata changes (JSO
     comments: {
       c1: { id: "c1", cellRef: "A1", content: "Original comment", resolved: false, replies: [] },
     },
+    metadata: {
+      title: "Budget",
+      owner: "u1",
+    },
     namedRanges: {
       NR1: { sheetId: "sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } },
     },
@@ -49,6 +53,10 @@ test("diffDocumentWorkbookSnapshots reports workbook-level metadata changes (JSO
         resolved: true,
         replies: [{ id: "r1", content: "First reply" }],
       },
+    },
+    metadata: {
+      title: "Budget (edited)",
+      theme: { name: "dark" },
     },
     namedRanges: {
       NR1: { sheetId: "sheet1", rect: { r0: 0, c0: 0, r1: 3, c1: 3 } },
@@ -80,4 +88,9 @@ test("diffDocumentWorkbookSnapshots reports workbook-level metadata changes (JSO
   assert.deepEqual(diff.namedRanges.added.map((r) => r.key), ["NR2"]);
   assert.equal(diff.namedRanges.modified.length, 1);
   assert.equal(diff.namedRanges.modified[0].key, "NR1");
+
+  assert.deepEqual(diff.metadata.added.map((r) => r.key), ["theme"]);
+  assert.deepEqual(diff.metadata.removed.map((r) => r.key), ["owner"]);
+  assert.equal(diff.metadata.modified.length, 1);
+  assert.equal(diff.metadata.modified[0].key, "title");
 });
