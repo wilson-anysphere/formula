@@ -66,6 +66,30 @@ test("computeParquetProjectionColumns supports addColumn and does not request de
   assert.deepEqual(new Set(cols), new Set(["a", "b"]));
 });
 
+test("computeParquetProjectionColumns supports fillDown and replaceValues", () => {
+  const steps = [
+    { id: "s_fill", name: "Fill", operation: { type: "fillDown", columns: ["a"] } },
+    { id: "s_replace", name: "Replace", operation: { type: "replaceValues", column: "a", find: null, replace: 0 } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a"]));
+});
+
+test("computeParquetProjectionColumns maps renamed columns through replaceValues", () => {
+  const steps = [
+    { id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "a", newName: "A" } },
+    { id: "s_replace", name: "Replace", operation: { type: "replaceValues", column: "A", find: "x", replace: "y" } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["A"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a"]));
+});
+
 test("computeParquetProjectionColumns returns null when unsupported operations are present", () => {
   const steps = [
     { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id"] } },

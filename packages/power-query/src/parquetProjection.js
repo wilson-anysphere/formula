@@ -23,6 +23,8 @@ const SUPPORTED_OPS = new Set([
   "addColumn",
   "renameColumn",
   "take",
+  "fillDown",
+  "replaceValues",
 ]);
 
 /**
@@ -143,6 +145,12 @@ export function computeParquetProjectionColumns(steps) {
         break;
       case "renameColumn":
         requireColumn(op.oldName);
+        break;
+      case "fillDown":
+        op.columns.forEach(requireColumn);
+        break;
+      case "replaceValues":
+        requireColumn(op.column);
         break;
       case "take":
         break;
