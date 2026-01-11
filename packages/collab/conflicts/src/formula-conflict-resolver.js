@@ -1,4 +1,5 @@
-import { normalizeFormula, parseFormula } from "../../../versioning/src/index.js";
+import { normalizeFormula } from "../../../versioning/src/formula/normalize.js";
+import { parseFormula } from "../../../versioning/src/formula/parse.js";
 
 /**
  * @typedef {object} FormulaConflictDecision

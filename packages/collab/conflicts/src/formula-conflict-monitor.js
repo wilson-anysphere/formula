@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { normalizeFormula } from "../../../versioning/src/index.js";
+import { normalizeFormula } from "../../../versioning/src/formula/normalize.js";
 import { resolveFormulaConflict } from "./formula-conflict-resolver.js";
 import { cellRefFromKey } from "./cell-ref.js";
 import { tryEvaluateFormula } from "./formula-eval.js";
