@@ -31,6 +31,20 @@ describe("extractFormulaReferences", () => {
     expect(references[0]?.range).toEqual({ sheet: "My Sheet", startRow: 0, startCol: 0, endRow: 1, endCol: 1 });
   });
 
+  it("parses sheet-qualified refs with escaped apostrophes", () => {
+    const { references } = extractFormulaReferences("=SUM('O''Brien'!A1)", 0, 0);
+    expect(references).toHaveLength(1);
+    expect(references[0]?.text).toBe("'O''Brien'!A1");
+    expect(references[0]?.range).toEqual({ sheet: "O'Brien", startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
+  });
+
+  it("does not treat invalid unquoted sheet names with spaces as sheet-qualified references", () => {
+    const { references } = extractFormulaReferences("=My Sheet!A1", 0, 0);
+    expect(references).toHaveLength(1);
+    expect(references[0]?.text).toBe("A1");
+    expect(references[0]?.range).toEqual({ sheet: undefined, startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
+  });
+
   it("detects the active reference at the caret (including token end)", () => {
     // =A1+B1, caret after final "1" should count as being in B1.
     const input = "=A1+B1";
@@ -63,4 +77,3 @@ describe("assignFormulaReferenceColors", () => {
     ]);
   });
 });
-

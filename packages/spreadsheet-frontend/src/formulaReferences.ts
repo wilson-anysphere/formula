@@ -211,18 +211,36 @@ function tryReadNumber(input: string, start: number): { text: string; end: numbe
 
 function tryReadSheetPrefix(input: string, start: number): { text: string; end: number } | null {
   if (input[start] === "'") {
+    // Excel escapes apostrophes inside sheet names using doubled quotes: ''.
     let i = start + 1;
-    while (i < input.length && input[i] !== "'") i += 1;
-    if (input[i] === "'" && input[i + 1] === "!") {
-      return { text: input.slice(start, i + 2), end: i + 2 };
+    while (i < input.length) {
+      if (input[i] === "'") {
+        if (input[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        if (input[i + 1] === "!") {
+          return { text: input.slice(start, i + 2), end: i + 2 };
+        }
+        return null;
+      }
+      i += 1;
     }
     return null;
   }
 
+  // Only treat `Sheet!A1` as a sheet-qualified ref when the `Sheet` token starts
+  // at a natural boundary. This avoids incorrectly highlighting the tail of an
+  // invalid unquoted sheet name that contains spaces (e.g. `My Sheet!A1` should
+  // not be tokenized as `Sheet!A1`).
+  let prev = start - 1;
+  while (prev >= 0 && isWhitespace(input[prev]!)) prev -= 1;
+  if (prev >= 0 && isIdentifierPart(input[prev]!)) return null;
+
   if (!isIdentifierStart(input[start] ?? "")) return null;
 
   let i = start + 1;
-  while (i < input.length && (isIdentifierPart(input[i]) || input[i] === " ")) i += 1;
+  while (i < input.length && isIdentifierPart(input[i]!)) i += 1;
   if (input[i] === "!") {
     return { text: input.slice(start, i + 1), end: i + 1 };
   }
@@ -309,11 +327,27 @@ function tokenizeFormula(input: string): FormulaToken[] {
       continue;
     }
 
-    const ref = tryReadReference(input, i);
-    if (ref) {
-      tokens.push({ type: "reference", text: ref.text, start: i, end: ref.end });
-      i = ref.end;
-      continue;
+    // Disambiguation: `My Sheet!A1` is an invalid unquoted sheet-qualified reference
+    // (sheet names containing spaces must be quoted as `'My Sheet'!A1`). When users
+    // type it anyway, highlight just the cell reference (`A1`) rather than treating
+    // `Sheet!A1` as a sheet-qualified reference and ignoring the `My ` prefix.
+    const lastToken = tokens[tokens.length - 1];
+    const precededByWhitespace = lastToken?.type === "whitespace";
+    const prevNonWhitespace = (() => {
+      for (let j = tokens.length - 1; j >= 0; j--) {
+        if (tokens[j]?.type !== "whitespace") return tokens[j] ?? null;
+      }
+      return null;
+    })();
+    const possibleSheetPrefix = input[i] !== "'" && precededByWhitespace ? tryReadSheetPrefix(input, i) : null;
+
+    if (!(possibleSheetPrefix && prevNonWhitespace?.type === "identifier")) {
+      const ref = tryReadReference(input, i);
+      if (ref) {
+        tokens.push({ type: "reference", text: ref.text, start: i, end: ref.end });
+        i = ref.end;
+        continue;
+      }
     }
 
     if (isIdentifierStart(ch)) {
@@ -399,4 +433,3 @@ function parseA1RangeWithSheet(rangeRef: string): FormulaReferenceRange | null {
     endRow: Math.max(start.row, end.row)
   };
 }
-
