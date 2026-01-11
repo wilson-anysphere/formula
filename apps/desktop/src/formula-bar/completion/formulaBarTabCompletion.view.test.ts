@@ -50,6 +50,41 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("treats formulas that evaluate to blank as non-empty when suggesting ranges", async () => {
+    const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      // Formula that evaluates to empty string, but should still count as "non-empty"
+      // for used-range detection in tab completion.
+      doc.setCellFormula("Sheet1", { row, col: 0 }, '=""');
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "B11", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(A";
+    view.textarea.setSelectionRange(6, 6);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=SUM(A1:A10)");
+    expect(view.model.aiGhostText()).toBe("1:A10)");
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("suggests function name completion (=VLO → VLOOKUP()", async () => {
     const doc = new DocumentController();
     const host = document.createElement("div");
