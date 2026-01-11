@@ -492,7 +492,15 @@ export function createSyncServer(
             ? createEncryptedLevelAdapter({
                 keyRing: config.persistence.encryption.keyRing,
                 strict: config.persistence.encryption.strict,
-              })(require("level") as any)
+              })(
+                // `level` is a transitive dependency of `y-leveldb` and won't be
+                // resolvable from the sync-server package when using pnpm's
+                // isolated node_modules layout. Resolve it relative to y-leveldb
+                // to ensure the adapter works in production installs.
+                createRequire(require.resolve("y-leveldb/package.json"))(
+                  "level"
+                ) as any
+              )
             : undefined;
 
         const ldb = new LeveldbPersistenceCtor(
