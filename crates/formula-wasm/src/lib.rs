@@ -132,6 +132,14 @@ struct WorkbookState {
     /// `recalculate()` call can return `CellChange[]` entries that blank out any now-stale spill
     /// outputs in the JS cache.
     pending_spill_clears: BTreeSet<FormulaCellKey>,
+    /// Formula cells that were edited since the last recalc, keyed by their previous visible value.
+    ///
+    /// The JS frontend applies `directChange` updates for literal edits but not for formulas; the
+    /// WASM bridge resets formula cells to blank until the next `recalculate()` so `getCell` matches
+    /// the existing `formula-core` semantics. This can hide "value cleared" edits when the new
+    /// formula result is also blank, so we keep the previous value here and explicitly diff it
+    /// against the post-recalc value.
+    pending_formula_baselines: BTreeMap<FormulaCellKey, JsonValue>,
 }
 
 impl WorkbookState {
@@ -141,6 +149,7 @@ impl WorkbookState {
             sheets: BTreeMap::new(),
             sheet_lookup: HashMap::new(),
             pending_spill_clears: BTreeSet::new(),
+            pending_formula_baselines: BTreeMap::new(),
         }
     }
 
@@ -233,12 +242,21 @@ impl WorkbookState {
             // don't report direct input edits as recalc changes.
             self.pending_spill_clears
                 .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+            self.pending_formula_baselines
+                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
             return Ok(());
         }
 
         if is_formula_input(&input) {
             let raw = input.as_str().expect("formula input must be string");
             let canonical = raw.trim_start().to_string();
+
+            let key = FormulaCellKey::new(sheet.clone(), cell_ref);
+            self.pending_formula_baselines
+                .entry(key)
+                .or_insert_with(|| {
+                    engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
+                });
 
             // Reset the stored value to blank so `getCell` returns null until the next recalc,
             // matching the existing `formula-core` semantics.
@@ -263,6 +281,8 @@ impl WorkbookState {
         // paste over a spill range), drop it so we don't report direct input edits as recalc
         // changes.
         self.pending_spill_clears
+            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+        self.pending_formula_baselines
             .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
         Ok(())
     }
@@ -341,6 +361,42 @@ impl WorkbookState {
                 let address = key.address();
                 let value = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
                 by_cell.insert(key, value);
+            }
+        }
+
+        if let Some(filter) = &sheet_filter {
+            let keys: Vec<FormulaCellKey> = self
+                .pending_formula_baselines
+                .keys()
+                .filter(|k| &k.sheet == filter)
+                .cloned()
+                .collect();
+            for key in keys {
+                let Some(before) = self.pending_formula_baselines.remove(&key) else {
+                    continue;
+                };
+                if by_cell.contains_key(&key) {
+                    continue;
+                }
+                let address = key.address();
+                let after =
+                    engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
+                if after != before {
+                    by_cell.insert(key, after);
+                }
+            }
+        } else {
+            let pending = std::mem::take(&mut self.pending_formula_baselines);
+            for (key, before) in pending {
+                if by_cell.contains_key(&key) {
+                    continue;
+                }
+                let address = key.address();
+                let after =
+                    engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
+                if after != before {
+                    by_cell.insert(key, after);
+                }
             }
         }
 
@@ -773,6 +829,24 @@ mod tests {
                     value: JsonValue::Null,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn recalculate_reports_formula_edit_to_blank_value() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=1")).unwrap();
+        let _ = wb.recalculate_internal(None).unwrap();
+
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=A2")).unwrap();
+        let changes = wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            changes,
+            vec![CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "A1".to_string(),
+                value: JsonValue::Null,
+            }]
         );
     }
 
