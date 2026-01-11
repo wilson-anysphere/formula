@@ -127,10 +127,10 @@ export class CellConflictMonitor {
 
       const cellMap = /** @type {Y.Map<any>} */ (event.target);
       const modifiedByChange = event.changes.keys.get("modifiedBy");
-      const oldModifiedBy = (modifiedByChange?.oldValue ?? "").toString();
       const oldValue = change.oldValue ?? null;
       const newValue = cellMap.get("value") ?? null;
       const remoteUserId = (cellMap.get("modifiedBy") ?? "").toString();
+      const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : remoteUserId;
       const action = change.action;
       const itemId = getItemId(cellMap, "value");
       const newItemOriginId = getItemOriginId(cellMap, "value");

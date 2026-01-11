@@ -488,6 +488,36 @@ test("sequential overwrites do not surface conflicts after restarting the monito
   assert.equal(bob.conflicts.length, 0);
 });
 
+test("restart fallback still detects conflicts when remote updates omit modifiedBy", () => {
+  // Alice uses the conflict monitor; Bob is a legacy client that overwrites the
+  // formula without updating `modifiedBy`. We should still detect the concurrent
+  // overwrite after restarting the monitor (using Item.origin + left-neighbor ids).
+  const alice = createClient("alice", { clientID: 1 });
+  const bobDoc = new Y.Doc();
+  bobDoc.clientID = 2;
+  const bobCells = bobDoc.getMap("cells");
+
+  // Establish a shared base cell map.
+  alice.monitor.setLocalFormula("s:0:0", "=0");
+  syncDocs(alice.doc, bobDoc);
+
+  const bobCell = /** @type {Y.Map<any>} */ (bobCells.get("s:0:0"));
+  assert.ok(bobCell);
+
+  // Offline concurrent edits.
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  restartMonitor(alice);
+  bobDoc.transact(() => {
+    bobCell.set("formula", "=2");
+    bobCell.set("modified", Date.now());
+    // Intentionally do not update `modifiedBy`.
+  });
+
+  syncDocs(alice.doc, bobDoc);
+
+  assert.ok(alice.conflicts.length >= 1, "expected a conflict after restart");
+});
+
 test("content conflicts (value vs formula) are still detected after restarting the monitor", () => {
   // Ensure deterministic tie-breaking for concurrent map-entry overwrites.
   const alice = createClient("alice", { clientID: 2, mode: "formula+value" });

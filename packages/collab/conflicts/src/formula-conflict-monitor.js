@@ -289,8 +289,8 @@ export class FormulaConflictMonitor {
 
       const cellMap = /** @type {Y.Map<any>} */ (event.target);
       const modifiedByChange = event.changes.keys.get("modifiedBy");
-      const oldModifiedBy = (modifiedByChange?.oldValue ?? "").toString();
       const remoteUserId = (cellMap.get("modifiedBy") ?? "").toString();
+      const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : remoteUserId;
 
       const valueChange = event.changes.keys.get("value");
       const formulaChange = event.changes.keys.get("formula");
