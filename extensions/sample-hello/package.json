@@ -55,6 +55,27 @@
         "title": "Sample Hello Panel"
       }
     ],
+    "keybindings": [
+      {
+        "command": "sampleHello.sumSelection",
+        "key": "ctrl+shift+y",
+        "mac": "cmd+shift+y",
+        "when": "hasSelection"
+      }
+    ],
+    "menus": {
+      "cell/context": [
+        {
+          "command": "sampleHello.sumSelection",
+          "when": "hasSelection",
+          "group": "extensions@1"
+        },
+        {
+          "command": "sampleHello.openPanel",
+          "group": "extensions@2"
+        }
+      ]
+    },
     "configuration": {
       "title": "Sample Hello",
       "properties": {

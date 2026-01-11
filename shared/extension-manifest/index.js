@@ -132,6 +132,7 @@ function validateKeybindings(keybindings) {
     assertString(kb.command, `contributes.keybindings[${idx}].command`);
     assertString(kb.key, `contributes.keybindings[${idx}].key`);
     assertOptionalString(kb.mac, `contributes.keybindings[${idx}].mac`);
+    assertOptionalString(kb.when, `contributes.keybindings[${idx}].when`);
   }
   return list;
 }

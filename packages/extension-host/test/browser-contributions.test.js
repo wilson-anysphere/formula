@@ -77,7 +77,7 @@ test("BrowserExtensionHost: exposes manifest contributions for UI integration", 
   ]);
 
   assert.deepEqual(host.getContributedKeybindings(), [
-    { extensionId, command: "test.cmd", key: "ctrl+shift+t", mac: "cmd+shift+t" }
+    { extensionId, command: "test.cmd", key: "ctrl+shift+t", mac: "cmd+shift+t", when: null }
   ]);
 
   host._contextMenus.set("runtime", {

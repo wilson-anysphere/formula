@@ -3,10 +3,12 @@ export type ContributedKeybinding = {
   command: string;
   key: string;
   mac: string | null;
+  when: string | null;
 };
 
 export type ParsedKeybinding = {
   command: string;
+  when: string | null;
   ctrl: boolean;
   alt: boolean;
   shift: boolean;
@@ -18,7 +20,7 @@ function normalizeKeyToken(token: string): string {
   return token.trim().toLowerCase();
 }
 
-export function parseKeybinding(command: string, binding: string): ParsedKeybinding | null {
+export function parseKeybinding(command: string, binding: string, when: string | null = null): ParsedKeybinding | null {
   const raw = String(binding ?? "").trim();
   if (!raw) return null;
 
@@ -31,6 +33,7 @@ export function parseKeybinding(command: string, binding: string): ParsedKeybind
 
   const out: ParsedKeybinding = {
     command,
+    when: when ?? null,
     ctrl: false,
     alt: false,
     shift: false,
@@ -68,4 +71,3 @@ export function platformKeybinding(binding: ContributedKeybinding, platform: "ma
   if (platform === "mac" && binding.mac) return binding.mac;
   return binding.key;
 }
-

@@ -156,7 +156,8 @@ The desktop app wires marketplace installs into the Node extension host runtime:
       {
         "command": "myExtension.run",
         "key": "ctrl+shift+m",
-        "mac": "cmd+shift+m"
+        "mac": "cmd+shift+m",
+        "when": "hasSelection"
       }
     ],
     

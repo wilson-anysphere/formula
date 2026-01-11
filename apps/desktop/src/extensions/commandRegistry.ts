@@ -73,10 +73,16 @@ export class CommandRegistry {
     return [...this.commands.values()].map(({ run: _run, ...rest }) => rest);
   }
 
+  getCommand(commandId: string): CommandContribution | undefined {
+    const entry = this.commands.get(String(commandId));
+    if (!entry) return undefined;
+    const { run: _run, ...rest } = entry;
+    return rest;
+  }
+
   async executeCommand(commandId: string, ...args: any[]): Promise<any> {
     const entry = this.commands.get(String(commandId));
     if (!entry) throw new Error(`Unknown command: ${commandId}`);
     return entry.run(...args);
   }
 }
-

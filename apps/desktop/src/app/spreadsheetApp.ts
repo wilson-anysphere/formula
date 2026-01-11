@@ -2691,6 +2691,14 @@ export class SpreadsheetApp {
   private onPointerDown(e: PointerEvent): void {
     if (this.editor.isOpen()) return;
 
+    // Right/middle clicks should not mutate selection. This keeps the current selection stable
+    // for context menus (and matches typical spreadsheet behavior where the context menu applies
+    // to the existing selection).
+    if (e.pointerType === "mouse" && e.button !== 0) {
+      this.focus();
+      return;
+    }
+
     const rect = this.root.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;

@@ -556,7 +556,8 @@ class ExtensionHost {
           extensionId: extension.id,
           command: kb.command,
           key: kb.key,
-          mac: kb.mac ?? null
+          mac: kb.mac ?? null,
+          when: kb.when ?? null
         });
       }
     }

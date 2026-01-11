@@ -43,6 +43,7 @@ import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
 import { resolveMenuItems } from "./extensions/contextMenus.js";
 import { matchesKeybinding, parseKeybinding, platformKeybinding, type ContributedKeybinding } from "./extensions/keybindings.js";
+import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
@@ -594,7 +595,7 @@ if (
     const contributed = extensionHostManager.getContributedKeybindings() as ContributedKeybinding[];
     for (const kb of contributed) {
       const binding = platformKeybinding(kb, platform);
-      const parsed = parseKeybinding(kb.command, binding);
+      const parsed = parseKeybinding(kb.command, binding, kb.when ?? null);
       if (parsed) parsedKeybindings.push(parsed);
     }
   };
@@ -639,6 +640,7 @@ if (
       for (const binding of parsedKeybindings) {
         if (!binding) continue;
         if (!matchesKeybinding(binding, e)) continue;
+        if (!evaluateWhenClause(binding.when, contextKeys.asLookup())) continue;
         e.preventDefault();
         executeExtensionCommand(binding.command);
         return;
@@ -678,7 +680,8 @@ if (
     for (const item of items) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = item.command;
+      const command = commandRegistry.getCommand(item.command);
+      btn.textContent = command ? (command.category ? `${command.category}: ${command.title}` : command.title) : item.command;
       btn.disabled = !item.enabled;
       btn.style.display = "block";
       btn.style.width = "100%";

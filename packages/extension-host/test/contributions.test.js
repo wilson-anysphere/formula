@@ -34,6 +34,18 @@ test("contributions: host exposes manifest contributes data for UI integration",
   assert.ok(customFunctions.includes("SAMPLEHELLO_DOUBLE"));
 
   const menuItems = host.getContributedMenu("cell/context");
-  assert.deepEqual(menuItems, []);
+  assert.deepEqual(menuItems, [
+    {
+      extensionId: "formula.sample-hello",
+      command: "sampleHello.sumSelection",
+      when: "hasSelection",
+      group: "extensions@1"
+    },
+    {
+      extensionId: "formula.sample-hello",
+      command: "sampleHello.openPanel",
+      when: null,
+      group: "extensions@2"
+    }
+  ]);
 });
-
