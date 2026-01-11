@@ -697,6 +697,16 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
       },
       /browser entrypoint is missing/i
     );
+
+    await publishInvalidManifest(
+      {
+        permissions: manifest.permissions ?? [],
+        activationEvents: [],
+        contributes: { commands: [] },
+        module: "./dist/missing-module.mjs",
+      },
+      /module entrypoint is missing/i
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });
