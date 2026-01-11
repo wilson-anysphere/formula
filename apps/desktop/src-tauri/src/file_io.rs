@@ -730,7 +730,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
         let mut pkg =
             XlsxPackage::from_bytes(origin_bytes).context("parse original workbook package")?;
-
         let mut patches = WorkbookCellPatches::default();
         for sheet in &workbook.sheets {
             for (row, col) in &sheet.dirty_cells {
@@ -772,24 +771,24 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             }
         }
 
-        let wants_drop_vba = matches!(extension.as_deref(), Some("xlsx")) && pkg.vba_project_bin().is_some();
+        let wants_drop_vba =
+            matches!(extension.as_deref(), Some("xlsx")) && pkg.vba_project_bin().is_some();
 
         if patches.is_empty() && !print_settings_changed && !wants_drop_vba {
-            std::fs::write(path, origin_bytes).with_context(|| format!("write workbook {:?}", path))?;
+            std::fs::write(path, origin_bytes)
+                .with_context(|| format!("write workbook {:?}", path))?;
             return Ok(workbook
                 .origin_xlsx_bytes
                 .as_ref()
                 .expect("origin_xlsx_bytes should be Some when origin_bytes is Some")
                 .clone());
         }
-
         if !patches.is_empty() {
             pkg.apply_cell_patches(&patches)
                 .context("apply worksheet cell patches")?;
         }
 
-        // Drop macros when saving as `.xlsx`.
-        if matches!(extension.as_deref(), Some("xlsx")) && pkg.vba_project_bin().is_some() {
+        if wants_drop_vba {
             pkg.remove_vba_project().context("remove VBA parts for .xlsx")?;
         }
 
@@ -1156,6 +1155,40 @@ mod tests {
         let _ = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
 
         assert_no_critical_diffs(fixture_path, &out_path);
+    }
+
+    #[test]
+    fn saving_unmodified_workbook_preserves_original_bytes() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/styles/styles.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("roundtrip.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written workbook");
+        assert_eq!(original_bytes, written_bytes);
+    }
+
+    #[test]
+    fn saving_unmodified_xlsm_preserves_original_bytes() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("roundtrip.xlsm");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written workbook");
+        assert_eq!(original_bytes, written_bytes);
     }
 
     #[test]
