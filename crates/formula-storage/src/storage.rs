@@ -846,12 +846,12 @@ impl Storage {
             let visibility_raw: String = row.get(3)?;
             let tab_color_fast: Option<String> = row.get(4).ok().flatten();
             let tab_color_json: Option<String> = row.get(5).ok().flatten();
-            let xlsx_sheet_id: Option<i64> = row.get(6)?;
-            let xlsx_rel_id: Option<String> = row.get(7)?;
-            let frozen_rows: i64 = row.get(8)?;
-            let frozen_cols: i64 = row.get(9)?;
-            let zoom: f64 = row.get(10)?;
-            let model_sheet_id: Option<i64> = row.get(11)?;
+            let xlsx_sheet_id: Option<i64> = row.get::<_, Option<i64>>(6).ok().flatten();
+            let xlsx_rel_id: Option<String> = row.get::<_, Option<String>>(7).ok().flatten();
+            let frozen_rows: i64 = row.get(8).unwrap_or(0);
+            let frozen_cols: i64 = row.get(9).unwrap_or(0);
+            let zoom: f64 = row.get(10).unwrap_or(1.0);
+            let model_sheet_id: Option<i64> = row.get::<_, Option<i64>>(11).ok().flatten();
             let model_sheet_json: Option<String> = row.get(12).ok().flatten();
 
             let sheet_id = match model_sheet_id.and_then(|id| u32::try_from(id).ok()) {

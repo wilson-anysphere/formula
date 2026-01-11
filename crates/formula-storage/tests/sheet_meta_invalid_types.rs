@@ -48,6 +48,18 @@ fn sheet_metadata_uses_defaults_when_view_fields_have_invalid_types() {
     assert_eq!(sheets[0].id, sheet.id);
     assert_eq!(sheets[0].zoom, 1.0);
 
+    let exported = storage
+        .export_model_workbook(workbook.id)
+        .expect("export workbook");
+    let exported_sheet = exported
+        .sheets
+        .iter()
+        .find(|s| s.name == "Sheet1")
+        .expect("sheet exists");
+    assert_eq!(exported_sheet.zoom, 1.0);
+    assert!(exported_sheet.xlsx_sheet_id.is_none());
+    assert!(exported_sheet.xlsx_rel_id.is_none());
+
     // `create_sheet` relies on the transactional `list_sheets_tx` helper; ensure it still works.
     storage
         .create_sheet(workbook.id, "Sheet2", 1, None)
