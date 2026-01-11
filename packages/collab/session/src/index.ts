@@ -426,7 +426,10 @@ export class CollabSession {
         providerSynced = Boolean(provider.synced);
       }
 
-      const shouldWaitForOffline = this.offline && (offlineAutoLoad || offlineAutoConnectAfterLoad);
+      // When offline persistence is enabled, schema initialization must wait for
+      // offline state to load to avoid creating default sheets that race with
+      // persisted document state.
+      const shouldWaitForOffline = this.offline != null;
       let offlineReady = !shouldWaitForOffline;
 
       const ensureSchema = () => {
