@@ -54,7 +54,13 @@ const engine = new TextLayoutEngine(measurer);
 ```
 
 ## Caching
-- Text metrics are cached by `(fontKey, text)`.
-- Full layout results are cached by `(text/runs, font(s), width, wrapMode, lineHeight, maxLines, ellipsis, direction, align)`.
+- Text metrics are cached by `(measurerKey, fontKey, text)`.
+- Full layout results are cached by `(measurerKey, text/runs, font(s), width, wrapMode, lineHeight, maxLines, ellipsis, direction, align)`.
+
+If a `TextMeasurer` exposes `cacheKey`, the engine will automatically include it in its cache keys. This is used by the HarfBuzz backend to invalidate cached measurements/layouts when fonts or fallback settings change.
+
+## Segmentation & line breaking
+- `wrapMode: "char"` wraps at grapheme cluster boundaries (UAX #29).
+- `wrapMode: "word"` uses the Unicode Line Breaking Algorithm (UAX #14) and trims breakable whitespace at line boundaries.
 
 Consumers should keep a single `TextLayoutEngine` instance alive for the lifetime of the renderer.
