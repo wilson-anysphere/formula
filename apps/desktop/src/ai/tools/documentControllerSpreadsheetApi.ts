@@ -8,7 +8,10 @@ type DocumentControllerStyle = Record<string, any>;
 
 function cloneCellValue(value: any): any {
   if (value == null || typeof value !== "object") return value;
-  const structuredCloneFn = typeof globalThis.structuredClone === "function" ? globalThis.structuredClone : null;
+  // `structuredClone` is available in modern browsers + Node, but TypeScript's DOM libs
+  // don't always include it on `globalThis` depending on configuration.
+  const structuredCloneFn =
+    typeof (globalThis as any).structuredClone === "function" ? ((globalThis as any).structuredClone as any) : null;
   return structuredCloneFn ? structuredCloneFn(value) : JSON.parse(JSON.stringify(value));
 }
 
