@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -40,6 +41,33 @@ async function waitForWsClose(ws: WebSocket): Promise<{ code: number; reason: st
   });
 }
 
+async function waitForWsCloseWithTimeout(
+  ws: WebSocket,
+  timeoutMs: number
+): Promise<{ code: number; reason: string }> {
+  return await new Promise<{ code: number; reason: string }>((resolve, reject) => {
+    let timer: NodeJS.Timeout | null = null;
+    const onClose = (code: number, reason: Buffer) => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      const reasonStr =
+        typeof reason === "string"
+          ? reason
+          : Buffer.isBuffer(reason)
+            ? reason.toString("utf8")
+            : String(reason);
+      resolve({ code, reason: reasonStr });
+    };
+
+    timer = setTimeout(() => {
+      ws.off("close", onClose);
+      reject(new Error("Timed out waiting for websocket close"));
+    }, timeoutMs);
+
+    ws.once("close", onClose);
+  });
+}
+
 async function expectConditionToStayFalse(
   condition: () => boolean,
   timeoutMs: number
@@ -63,6 +91,63 @@ function getCellModifiedBy(doc: Y.Doc, cellKey: string): unknown {
   if (!cell || typeof cell !== "object") return null;
   if (typeof cell.get !== "function") return null;
   return cell.get("modifiedBy") ?? null;
+}
+
+function setCellValue(doc: Y.Doc, cellKey: string, value: unknown): void {
+  doc.transact(() => {
+    const cells = doc.getMap<unknown>("cells");
+    let cell = cells.get(cellKey);
+    if (!(cell instanceof Y.Map)) {
+      cell = new Y.Map();
+      cells.set(cellKey, cell);
+    }
+    (cell as Y.Map<unknown>).set("value", value);
+  });
+}
+
+function getCellsMap(doc: Y.Doc): Y.Map<unknown> {
+  return doc.getMap<unknown>("cells");
+}
+
+function restrictionForB1(allowedEditorUserId: string) {
+  return [
+    {
+      sheetId: "Sheet1",
+      startRow: 0,
+      startCol: 1,
+      endRow: 0,
+      endCol: 1,
+      editAllowlist: [allowedEditorUserId],
+    },
+  ];
+}
+
+function persistedDocPath(dataDir: string, docName: string): string {
+  const docHash = createHash("sha256").update(docName).digest("hex");
+  return path.join(dataDir, `${docHash}.yjs`);
+}
+
+function decodeLegacyRecords(data: Buffer): Uint8Array[] {
+  const out: Uint8Array[] = [];
+  let offset = 0;
+  while (offset + 4 <= data.length) {
+    const len = data.readUInt32BE(offset);
+    offset += 4;
+    if (offset + len > data.length) break;
+    out.push(new Uint8Array(data.subarray(offset, offset + len)));
+    offset += len;
+  }
+  return out;
+}
+
+async function loadPersistedDoc(dataDir: string, docName: string): Promise<Y.Doc> {
+  const filePath = persistedDocPath(dataDir, docName);
+  const data = await readFile(filePath);
+  const doc = new Y.Doc();
+  for (const update of decodeLegacyRecords(data)) {
+    Y.applyUpdate(doc, update);
+  }
+  return doc;
 }
 
 test("forbidden cell write is rejected and connection closed", async (t) => {
@@ -433,4 +518,265 @@ test("strict mode rejects updates when cell keys cannot be parsed", async (t) =>
     1_000
   );
   assert.equal(docObserver.getMap("cells").has("not-a-cell-key"), false);
+});
+
+test("rangeRestrictions: allows edits outside protected ranges", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  let server = await startSyncServer({
+    dataDir,
+    auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
+    env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = `doc-${Math.random().toString(16).slice(2)}`;
+
+  const ownerToken = signJwt({ sub: "owner", docId: docName, role: "editor" });
+  const restrictedToken = signJwt({
+    sub: "restricted",
+    docId: docName,
+    role: "editor",
+    rangeRestrictions: restrictionForB1("owner"),
+  });
+
+  const seedDoc = new Y.Doc();
+  const seedProvider = new WebsocketProvider(server.wsUrl, docName, seedDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: ownerToken },
+  });
+
+  const restrictedDoc = new Y.Doc();
+  const restrictedProvider = new WebsocketProvider(server.wsUrl, docName, restrictedDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: restrictedToken },
+  });
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    seedProvider.destroy();
+    restrictedProvider.destroy();
+    seedDoc.destroy();
+    restrictedDoc.destroy();
+  };
+  t.after(cleanup);
+
+  await waitForProviderSync(seedProvider);
+
+  // Seed initial cells so subsequent writes are nested map updates (not new keys).
+  setCellValue(seedDoc, "Sheet1:0:0", "initA");
+  setCellValue(seedDoc, "Sheet1:0:1", "initB");
+
+  await waitForProviderSync(restrictedProvider);
+  await waitForCondition(() => getCellValue(restrictedDoc, "Sheet1:0:1") === "initB", 10_000);
+
+  // A1 is outside the protected range (B1), so it should be accepted.
+  setCellValue(restrictedDoc, "Sheet1:0:0", "allowedA");
+  await waitForCondition(() => getCellValue(seedDoc, "Sheet1:0:0") === "allowedA", 10_000);
+
+  cleanup();
+
+  await waitForCondition(async () => {
+    try {
+      const persisted = await loadPersistedDoc(dataDir, docName);
+      const ok = getCellValue(persisted, "Sheet1:0:0") === "allowedA";
+      persisted.destroy();
+      return ok;
+    } catch {
+      return false;
+    }
+  }, 10_000);
+
+  const persisted = await loadPersistedDoc(dataDir, docName);
+  t.after(() => persisted.destroy());
+
+  assert.equal(getCellValue(persisted, "Sheet1:0:0"), "allowedA");
+  assert.equal(getCellValue(persisted, "Sheet1:0:1"), "initB");
+});
+
+test("rangeRestrictions: blocks edits to protected cells and does not persist them", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  let server = await startSyncServer({
+    dataDir,
+    auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
+    env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = `doc-${Math.random().toString(16).slice(2)}`;
+
+  const ownerToken = signJwt({ sub: "owner", docId: docName, role: "editor" });
+  const restrictedToken = signJwt({
+    sub: "restricted",
+    docId: docName,
+    role: "editor",
+    rangeRestrictions: restrictionForB1("owner"),
+  });
+
+  const seedDoc = new Y.Doc();
+  const seedProvider = new WebsocketProvider(server.wsUrl, docName, seedDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: ownerToken },
+  });
+
+  const restrictedDoc = new Y.Doc();
+  const restrictedProvider = new WebsocketProvider(server.wsUrl, docName, restrictedDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: restrictedToken },
+  });
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    seedProvider.destroy();
+    restrictedProvider.destroy();
+    seedDoc.destroy();
+    restrictedDoc.destroy();
+  };
+  t.after(cleanup);
+
+  await waitForProviderSync(seedProvider);
+  setCellValue(seedDoc, "Sheet1:0:1", "initB");
+
+  await waitForProviderSync(restrictedProvider);
+  await waitForCondition(() => getCellValue(restrictedDoc, "Sheet1:0:1") === "initB", 10_000);
+
+  const ws = (restrictedProvider as any).ws as WebSocket | undefined;
+  assert.ok(ws, "expected restricted provider to have a ws");
+  const closePromise = waitForWsCloseWithTimeout(ws, 10_000);
+
+  // Edit B1 (existing cell); should be rejected and close the websocket.
+  setCellValue(restrictedDoc, "Sheet1:0:1", "evilB");
+
+  assert.equal((await closePromise).code, 1008);
+
+  // Give the server a moment to (not) broadcast the forbidden update.
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(getCellValue(seedDoc, "Sheet1:0:1"), "initB");
+
+  cleanup();
+
+  await waitForCondition(async () => {
+    try {
+      const persisted = await loadPersistedDoc(dataDir, docName);
+      const ok = getCellValue(persisted, "Sheet1:0:1") === "initB";
+      persisted.destroy();
+      return ok;
+    } catch {
+      return false;
+    }
+  }, 10_000);
+
+  const persisted = await loadPersistedDoc(dataDir, docName);
+  t.after(() => persisted.destroy());
+
+  assert.equal(getCellValue(persisted, "Sheet1:0:1"), "initB");
+});
+
+test("rangeRestrictions: legacy cell key formats cannot bypass protected ranges", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  let server = await startSyncServer({
+    dataDir,
+    auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
+    env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = `doc-${Math.random().toString(16).slice(2)}`;
+
+  const ownerToken = signJwt({ sub: "owner", docId: docName, role: "editor" });
+  const restrictedToken = signJwt({
+    sub: "restricted",
+    docId: docName,
+    role: "editor",
+    rangeRestrictions: restrictionForB1("owner"),
+  });
+
+  const seedDoc = new Y.Doc();
+  const seedProvider = new WebsocketProvider(server.wsUrl, docName, seedDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: ownerToken },
+  });
+  await waitForProviderSync(seedProvider);
+  setCellValue(seedDoc, "Sheet1:0:1", "initB");
+
+  const restrictedDoc = new Y.Doc();
+  const restrictedProvider = new WebsocketProvider(server.wsUrl, docName, restrictedDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: restrictedToken },
+  });
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    seedProvider.destroy();
+    restrictedProvider.destroy();
+    seedDoc.destroy();
+    restrictedDoc.destroy();
+  };
+  t.after(cleanup);
+
+  await waitForProviderSync(restrictedProvider);
+  await waitForCondition(() => getCellValue(restrictedDoc, "Sheet1:0:1") === "initB", 10_000);
+
+  const ws = (restrictedProvider as any).ws as WebSocket | undefined;
+  assert.ok(ws, "expected restricted provider to have a ws");
+  const closePromise = waitForWsCloseWithTimeout(ws, 10_000);
+
+  // Attempt to write B1 using a legacy key format (`r0c1`), which must normalize
+  // to Sheet1:0:1 and still be rejected.
+  setCellValue(restrictedDoc, "r0c1", "evilLegacy");
+
+  assert.equal((await closePromise).code, 1008);
+
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(getCellValue(seedDoc, "Sheet1:0:1"), "initB");
+
+  cleanup();
+
+  await waitForCondition(async () => {
+    try {
+      const persisted = await loadPersistedDoc(dataDir, docName);
+      const ok =
+        getCellValue(persisted, "Sheet1:0:1") === "initB" &&
+        getCellsMap(persisted).has("r0c1") === false;
+      persisted.destroy();
+      return ok;
+    } catch {
+      return false;
+    }
+  }, 10_000);
+
+  const persisted = await loadPersistedDoc(dataDir, docName);
+  t.after(() => persisted.destroy());
+
+  assert.equal(getCellValue(persisted, "Sheet1:0:1"), "initB");
+  assert.equal(getCellsMap(persisted).has("r0c1"), false);
 });
