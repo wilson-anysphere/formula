@@ -174,6 +174,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
+    let mut cell_xf_parse_failed: Option<Vec<bool>> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let biff_version = biff::detect_biff_version(workbook_stream);
@@ -255,6 +256,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             if let Some(mask) = xf_has_number_format.as_deref() {
                 if mask.iter().any(|v| *v) {
                     let mut cell_xfs_by_sheet = Vec::with_capacity(sheets.len());
+                    let mut parse_failed_by_sheet = Vec::with_capacity(sheets.len());
                     for sheet in sheets {
                         if sheet.offset >= workbook_stream.len() {
                             warnings.push(ImportWarning::new(format!(
@@ -264,6 +266,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                                 sheet.offset
                             )));
                             cell_xfs_by_sheet.push(HashMap::new());
+                            parse_failed_by_sheet.push(true);
                             continue;
                         }
 
@@ -272,7 +275,10 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                             sheet.offset,
                             Some(mask),
                         ) {
-                            Ok(xfs) => cell_xfs_by_sheet.push(xfs),
+                            Ok(xfs) => {
+                                cell_xfs_by_sheet.push(xfs);
+                                parse_failed_by_sheet.push(false);
+                            }
                             Err(parse_err) => {
                                 warnings.push(ImportWarning::new(format!(
                                     "failed to import `.xls` cell styles for BIFF sheet index {} (`{}`): {parse_err}",
@@ -280,13 +286,13 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                                     sheet.name
                                 )));
                                 cell_xfs_by_sheet.push(HashMap::new());
+                                parse_failed_by_sheet.push(true);
                             }
                         }
                     }
 
-                    if cell_xfs_by_sheet.iter().any(|m| !m.is_empty()) {
-                        cell_xf_indices = Some(cell_xfs_by_sheet);
-                    }
+                    cell_xf_indices = Some(cell_xfs_by_sheet);
+                    cell_xf_parse_failed = Some(parse_failed_by_sheet);
                 }
             }
         }
@@ -321,8 +327,15 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             _ => false,
         };
 
-        let sheet_needs_datetime_fallback =
-            xf_style_ids.is_none() || sheet_cell_xfs_raw.is_none() || sheet_has_out_of_range_xf;
+        let sheet_xf_parse_failed = biff_idx
+            .and_then(|biff_idx| cell_xf_parse_failed.as_ref().and_then(|v| v.get(biff_idx)))
+            .copied()
+            .unwrap_or(false);
+
+        let sheet_needs_datetime_fallback = xf_style_ids.is_none()
+            || sheet_cell_xfs_raw.is_none()
+            || sheet_has_out_of_range_xf
+            || sheet_xf_parse_failed;
 
         let value_range = match workbook.worksheet_range(&sheet_name) {
             Ok(range) => Some(range),
