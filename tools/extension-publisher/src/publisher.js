@@ -39,6 +39,29 @@ function validateManifest(manifest) {
 async function packageExtension(extensionDir) {
   const manifest = await loadExtensionManifest(extensionDir);
   validateManifest(manifest);
+
+  // Ensure the declared entrypoint exists before packaging. This prevents publishing
+  // broken extensions when build output (e.g. dist/extension.js) is missing.
+  const root = path.resolve(extensionDir);
+  const mainRel = String(manifest.main);
+  const mainPath = path.resolve(root, mainRel);
+  if (!mainPath.startsWith(root + path.sep)) {
+    throw new Error(`Manifest main must resolve inside extensionDir (got ${manifest.main})`);
+  }
+  try {
+    const stat = await fs.stat(mainPath);
+    if (!stat.isFile()) {
+      throw new Error(`Manifest main is not a file: ${manifest.main}`);
+    }
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      throw new Error(
+        `Manifest main entrypoint is missing: ${manifest.main}. Did you forget to build the extension?`
+      );
+    }
+    throw error;
+  }
+
   const packageBytes = await createExtensionPackage(extensionDir);
   return { manifest, packageBytes };
 }
