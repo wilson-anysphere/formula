@@ -172,6 +172,11 @@ impl ColumnarTable {
         self.columns.len()
     }
 
+    /// Return the dictionary backing a string column (if the column is dictionary encoded).
+    pub fn dictionary(&self, col: usize) -> Option<Arc<Vec<Arc<str>>>> {
+        self.columns.get(col)?.dictionary.clone()
+    }
+
     pub fn get_cell(&self, row: usize, col: usize) -> Value {
         let Some(column) = self.columns.get(col) else {
             return Value::Null;

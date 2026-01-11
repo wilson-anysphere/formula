@@ -1,11 +1,12 @@
 use ordered_float::OrderedFloat;
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Value {
     Blank,
     Number(OrderedFloat<f64>),
-    Text(String),
+    Text(Arc<str>),
     Boolean(bool),
 }
 
@@ -68,12 +69,18 @@ impl From<bool> for Value {
 
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
-        Value::Text(value.to_string())
+        Value::Text(Arc::<str>::from(value))
     }
 }
 
 impl From<String> for Value {
     fn from(value: String) -> Self {
+        Value::Text(Arc::<str>::from(value))
+    }
+}
+
+impl From<Arc<str>> for Value {
+    fn from(value: Arc<str>) -> Self {
         Value::Text(value)
     }
 }

@@ -1,8 +1,10 @@
 use formula_dax::{
-    Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext, Relationship,
-    RowContext, Table, Value,
+    pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext,
+    GroupByColumn, PivotMeasure, Relationship, RowContext, Table, Value,
 };
+use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use pretty_assertions::assert_eq;
+use std::sync::Arc;
 
 fn build_model() -> DataModel {
     let mut model = DataModel::new();
@@ -90,7 +92,7 @@ fn calculated_column_can_use_related() {
 
     let orders = model.table("Orders").unwrap();
     let values: Vec<Value> = (0..orders.row_count())
-        .map(|row| orders.value(row, "CustomerName").unwrap().clone())
+        .map(|row| orders.value(row, "CustomerName").unwrap())
         .collect();
 
     assert_eq!(
@@ -113,7 +115,7 @@ fn bracket_identifier_resolves_to_column_in_row_context() {
 
     let orders = model.table("Orders").unwrap();
     let values: Vec<Value> = (0..orders.row_count())
-        .map(|row| orders.value(row, "Double Amount").unwrap().clone())
+        .map(|row| orders.value(row, "Double Amount").unwrap())
         .collect();
 
     assert_eq!(
@@ -172,7 +174,7 @@ fn relatedtable_supports_iterators() {
 
     let customers = model.table("Customers").unwrap();
     let values: Vec<Value> = (0..customers.row_count())
-        .map(|row| customers.value(row, "Customer Sales").unwrap().clone())
+        .map(|row| customers.value(row, "Customer Sales").unwrap())
         .collect();
 
     assert_eq!(values, vec![30.0.into(), 5.0.into(), 8.0.into()]);
@@ -195,7 +197,7 @@ fn calculate_transitions_row_context_to_filter_context_for_measures() {
 
     let customers = model.table("Customers").unwrap();
     let values: Vec<Value> = (0..customers.row_count())
-        .map(|row| customers.value(row, "Sales via CALCULATE").unwrap().clone())
+        .map(|row| customers.value(row, "Sales via CALCULATE").unwrap())
         .collect();
 
     assert_eq!(values, vec![30.0.into(), 5.0.into(), 8.0.into()]);
@@ -255,7 +257,7 @@ fn insert_row_computes_calculated_columns() {
     assert_eq!(orders.row_count(), 5);
     assert_eq!(
         orders.value(4, "CustomerName").unwrap(),
-        &Value::from("Alice")
+        Value::from("Alice")
     );
 }
 
@@ -278,7 +280,7 @@ fn insert_row_updates_relationship_key_index() {
     assert_eq!(orders.row_count(), 5);
     assert_eq!(
         orders.value(4, "CustomerName").unwrap(),
-        &Value::from("Dan")
+        Value::from("Dan")
     );
 }
 
@@ -295,7 +297,7 @@ fn countrows_counts_relatedtable_rows() {
 
     let customers = model.table("Customers").unwrap();
     let values: Vec<Value> = (0..customers.row_count())
-        .map(|row| customers.value(row, "Order Count").unwrap().clone())
+        .map(|row| customers.value(row, "Order Count").unwrap())
         .collect();
 
     assert_eq!(values, vec![2.into(), 1.into(), 1.into()]);
@@ -334,7 +336,7 @@ fn maxx_iterates_relatedtable() {
 
     let customers = model.table("Customers").unwrap();
     let values: Vec<Value> = (0..customers.row_count())
-        .map(|row| customers.value(row, "Max Order Amount").unwrap().clone())
+        .map(|row| customers.value(row, "Max Order Amount").unwrap())
         .collect();
 
     assert_eq!(values, vec![20.0.into(), 5.0.into(), 8.0.into()]);
@@ -397,7 +399,7 @@ fn if_works_in_calculated_columns() {
 
     let customers = model.table("Customers").unwrap();
     let values: Vec<Value> = (0..customers.row_count())
-        .map(|row| customers.value(row, "IsEast").unwrap().clone())
+        .map(|row| customers.value(row, "IsEast").unwrap())
         .collect();
 
     assert_eq!(values, vec![1.into(), 0.into(), 1.into()]);
@@ -538,5 +540,230 @@ fn selectedvalue_and_hasonevalue_use_filter_context() {
             .evaluate_measure("Region Count", &empty_filter)
             .unwrap(),
         Value::from(0)
+    );
+}
+
+#[test]
+fn values_and_summarize_support_basic_grouping() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    let regions = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(VALUES(Customers[Region]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(regions, 2.into());
+
+    let customers = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZE(Orders, Orders[CustomerId]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(customers, 3.into());
+}
+
+#[test]
+fn calculate_all_can_remove_column_filters() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "All Region Sales",
+            "CALCULATE([Total Sales], ALL(Customers[Region]))",
+        )
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    let value = model.evaluate_measure("All Region Sales", &east_filter).unwrap();
+    assert_eq!(value, 43.0.into());
+}
+
+#[test]
+fn pivot_api_groups_and_evaluates_measures() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
+    let group_by = vec![GroupByColumn::new("Customers", "Region")];
+
+    let result = pivot(&model, "Orders", &group_by, &measures, &FilterContext::empty()).unwrap();
+    assert_eq!(
+        result.columns,
+        vec!["Customers[Region]".to_string(), "Total Sales".to_string()]
+    );
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("East"), Value::from(38.0)],
+            vec![Value::from("West"), Value::from(5.0)]
+        ]
+    );
+}
+
+#[test]
+fn large_synthetic_pivot_is_linearish() {
+    let mut model = DataModel::new();
+    let mut fact = Table::new("Fact", vec!["Group", "Amount"]);
+
+    let groups = ["A", "B", "C", "D"];
+    let mut expected_total = 0.0f64;
+    let mut expected_by_group = [0.0f64; 4];
+
+    for i in 0..20_000 {
+        let g = groups[i % groups.len()];
+        let amount = (i % 100) as f64;
+        expected_total += amount;
+        expected_by_group[i % groups.len()] += amount;
+        fact.push_row(vec![g.into(), amount.into()]).unwrap();
+    }
+    model.add_table(fact).unwrap();
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+
+    assert_eq!(
+        model.evaluate_measure("Total", &FilterContext::empty()).unwrap(),
+        expected_total.into()
+    );
+
+    let measures = vec![PivotMeasure::new("Total", "SUM(Fact[Amount])").unwrap()];
+    let group_by = vec![GroupByColumn::new("Fact", "Group")];
+    let result = pivot(&model, "Fact", &group_by, &measures, &FilterContext::empty()).unwrap();
+    assert_eq!(result.rows.len(), groups.len());
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::from("A"), expected_by_group[0].into()],
+            vec![Value::from("B"), expected_by_group[1].into()],
+            vec![Value::from("C"), expected_by_group[2].into()],
+            vec![Value::from("D"), expected_by_group[3].into()],
+        ]
+    );
+}
+
+#[test]
+fn columnar_tables_support_measures_and_filter_propagation() {
+    let mut model = DataModel::new();
+
+    let customers_schema = vec![
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Name".to_string(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "Region".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut customers = ColumnarTableBuilder::new(customers_schema, options);
+    customers.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("Alice")),
+        formula_columnar::Value::String(Arc::<str>::from("East")),
+    ]);
+    customers.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::String(Arc::<str>::from("Bob")),
+        formula_columnar::Value::String(Arc::<str>::from("West")),
+    ]);
+    customers.append_row(&[
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::String(Arc::<str>::from("Carol")),
+        formula_columnar::Value::String(Arc::<str>::from("East")),
+    ]);
+    model
+        .add_table(Table::from_columnar("Customers", customers.finalize()))
+        .unwrap();
+
+    let orders_schema = vec![
+        ColumnSchema {
+            name: "OrderId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut orders = ColumnarTableBuilder::new(orders_schema, options);
+    orders.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(20.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(102.0),
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(5.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(103.0),
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Number(8.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Orders", orders.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders_Customers".into(),
+            from_table: "Orders".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    assert_eq!(
+        model
+            .evaluate_measure("Total Sales", &FilterContext::empty())
+            .unwrap(),
+        43.0.into()
+    );
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    assert_eq!(
+        model.evaluate_measure("Total Sales", &east_filter).unwrap(),
+        38.0.into()
     );
 }

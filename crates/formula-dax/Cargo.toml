@@ -6,6 +6,12 @@ edition = "2021"
 [dependencies]
 ordered-float = "4.2.0"
 thiserror = "2"
+formula-columnar = { path = "../formula-columnar" }
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
+criterion = "0.5"
+
+[[bench]]
+name = "columnar_vs_vec"
+harness = false

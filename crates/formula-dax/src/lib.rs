@@ -1,12 +1,45 @@
+//! A small (but growing) DAX engine intended to back Formula's Power Pivot / data model features.
+//!
+//! The core entry points are:
+//! - [`DataModel`] to store tables, relationships, measures, and calculated columns
+//! - [`DaxEngine`] to evaluate arbitrary DAX expressions
+//! - [`pivot`] to produce grouped results (group keys + measures) for pivot tables
+//!
+//! ## Columnar storage
+//! For large models, use [`Table::from_columnar`] to attach a
+//! [`formula_columnar::ColumnarTable`] as the storage backend. The engine can use column
+//! statistics and dictionary encoding to speed up common aggregations.
+//!
+//! ## Quick example
+//! ```rust
+//! use formula_dax::{pivot, DataModel, FilterContext, GroupByColumn, PivotMeasure, Table, Value};
+//!
+//! let mut model = DataModel::new();
+//! let mut fact = Table::new("Fact", vec!["Category", "Amount"]);
+//! fact.push_row(vec![Value::from("A"), Value::from(10.0)]).unwrap();
+//! fact.push_row(vec![Value::from("B"), Value::from(5.0)]).unwrap();
+//! model.add_table(fact).unwrap();
+//! model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+//!
+//! let measures = vec![PivotMeasure::new("Total", "[Total]").unwrap()];
+//! let group_by = vec![GroupByColumn::new("Fact", "Category")];
+//! let result = pivot(&model, "Fact", &group_by, &measures, &FilterContext::empty()).unwrap();
+//! assert_eq!(result.rows.len(), 2);
+//! ```
+
+mod backend;
 mod engine;
 mod model;
 mod parser;
+mod pivot;
 mod value;
 
+pub use crate::backend::{ColumnarTableBackend, InMemoryTableBackend, TableBackend};
 pub use crate::engine::DaxEngine;
 pub use crate::model::{
     Cardinality, CrossFilterDirection, DataModel, Measure, Relationship, Table,
 };
+pub use crate::pivot::{pivot, GroupByColumn, PivotMeasure, PivotResult};
 pub use crate::value::Value;
 
 pub use crate::engine::{FilterContext, RowContext};

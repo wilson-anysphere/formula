@@ -1,3 +1,4 @@
+use crate::backend::{ColumnarTableBackend, InMemoryTableBackend, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::parser::Expr;
 use crate::value::Value;
@@ -47,26 +48,23 @@ pub struct CalculatedColumn {
 #[derive(Clone, Debug)]
 pub struct Table {
     name: String,
-    columns: Vec<String>,
-    column_index: HashMap<String, usize>,
-    rows: Vec<Vec<Value>>,
+    storage: TableStorage,
 }
 
 impl Table {
     pub fn new(name: impl Into<String>, columns: Vec<impl Into<String>>) -> Self {
         let name = name.into();
         let columns: Vec<String> = columns.into_iter().map(Into::into).collect();
-        let column_index = columns
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| (c.clone(), idx))
-            .collect();
-
         Self {
             name,
-            columns,
-            column_index,
-            rows: Vec::new(),
+            storage: TableStorage::InMemory(InMemoryTableBackend::new(columns)),
+        }
+    }
+
+    pub fn from_columnar(name: impl Into<String>, table: formula_columnar::ColumnarTable) -> Self {
+        Self {
+            name: name.into(),
+            storage: TableStorage::Columnar(ColumnarTableBackend::new(table)),
         }
     }
 
@@ -75,37 +73,34 @@ impl Table {
     }
 
     pub fn columns(&self) -> &[String] {
-        &self.columns
+        self.backend().columns()
     }
 
     pub fn row_count(&self) -> usize {
-        self.rows.len()
+        self.backend().row_count()
     }
 
     pub fn push_row(&mut self, row: Vec<Value>) -> DaxResult<()> {
-        if row.len() != self.columns.len() {
-            return Err(DaxError::SchemaMismatch {
-                table: self.name.clone(),
-                expected: self.columns.len(),
-                actual: row.len(),
-            });
+        match &mut self.storage {
+            TableStorage::InMemory(backend) => backend.push_row(&self.name, row),
+            TableStorage::Columnar(_) => Err(DaxError::Eval(format!(
+                "cannot push rows into columnar table {}",
+                self.name
+            ))),
         }
-
-        self.rows.push(row);
-        Ok(())
     }
 
     pub(crate) fn column_idx(&self, column: &str) -> Option<usize> {
-        self.column_index.get(column).copied()
+        self.backend().column_index(column)
     }
 
-    pub fn value(&self, row: usize, column: &str) -> Option<&Value> {
+    pub fn value(&self, row: usize, column: &str) -> Option<Value> {
         let idx = self.column_idx(column)?;
-        self.rows.get(row)?.get(idx)
+        self.value_by_idx(row, idx)
     }
 
-    pub(crate) fn value_by_idx(&self, row: usize, idx: usize) -> Option<&Value> {
-        self.rows.get(row)?.get(idx)
+    pub(crate) fn value_by_idx(&self, row: usize, idx: usize) -> Option<Value> {
+        self.backend().value_by_idx(row, idx)
     }
 
     pub(crate) fn add_column(
@@ -114,29 +109,94 @@ impl Table {
         values: Vec<Value>,
     ) -> DaxResult<()> {
         let name = name.into();
-        if self.column_index.contains_key(&name) {
-            return Err(DaxError::DuplicateColumn {
-                table: self.name.clone(),
-                column: name,
-            });
+        match &mut self.storage {
+            TableStorage::InMemory(backend) => backend.add_column(&self.name, name, values),
+            TableStorage::Columnar(_) => Err(DaxError::Eval(format!(
+                "cannot add calculated columns to columnar table {}",
+                self.name
+            ))),
         }
-        if values.len() != self.rows.len() {
-            return Err(DaxError::ColumnLengthMismatch {
-                table: self.name.clone(),
-                column: name,
-                expected: self.rows.len(),
-                actual: values.len(),
-            });
-        }
-
-        let idx = self.columns.len();
-        self.columns.push(name.clone());
-        self.column_index.insert(name, idx);
-        for (row, value) in self.rows.iter_mut().zip(values) {
-            row.push(value);
-        }
-        Ok(())
     }
+
+    pub(crate) fn set_value_by_idx(&mut self, row: usize, idx: usize, value: Value) -> DaxResult<()> {
+        match &mut self.storage {
+            TableStorage::InMemory(backend) => backend.set_value_by_idx(row, idx, value),
+            TableStorage::Columnar(_) => Err(DaxError::Eval(format!(
+                "cannot mutate columnar table {}",
+                self.name
+            ))),
+        }
+    }
+
+    pub(crate) fn pop_row(&mut self) -> Option<Vec<Value>> {
+        match &mut self.storage {
+            TableStorage::InMemory(backend) => backend.rows.pop(),
+            TableStorage::Columnar(_) => None,
+        }
+    }
+
+    fn backend(&self) -> &dyn TableBackend {
+        match &self.storage {
+            TableStorage::InMemory(backend) => backend,
+            TableStorage::Columnar(backend) => backend,
+        }
+    }
+}
+
+impl TableBackend for Table {
+    fn columns(&self) -> &[String] {
+        self.backend().columns()
+    }
+
+    fn row_count(&self) -> usize {
+        self.backend().row_count()
+    }
+
+    fn column_index(&self, column: &str) -> Option<usize> {
+        self.backend().column_index(column)
+    }
+
+    fn value_by_idx(&self, row: usize, idx: usize) -> Option<Value> {
+        self.backend().value_by_idx(row, idx)
+    }
+
+    fn stats_sum(&self, idx: usize) -> Option<f64> {
+        self.backend().stats_sum(idx)
+    }
+
+    fn stats_non_blank_count(&self, idx: usize) -> Option<usize> {
+        self.backend().stats_non_blank_count(idx)
+    }
+
+    fn stats_min(&self, idx: usize) -> Option<Value> {
+        self.backend().stats_min(idx)
+    }
+
+    fn stats_max(&self, idx: usize) -> Option<Value> {
+        self.backend().stats_max(idx)
+    }
+
+    fn stats_distinct_count(&self, idx: usize) -> Option<u64> {
+        self.backend().stats_distinct_count(idx)
+    }
+
+    fn stats_has_blank(&self, idx: usize) -> Option<bool> {
+        self.backend().stats_has_blank(idx)
+    }
+
+    fn dictionary_values(&self, idx: usize) -> Option<Vec<Value>> {
+        self.backend().dictionary_values(idx)
+    }
+
+    fn filter_eq(&self, idx: usize, value: &Value) -> Option<Vec<usize>> {
+        self.backend().filter_eq(idx, value)
+    }
+}
+
+#[derive(Clone, Debug)]
+enum TableStorage {
+    InMemory(InMemoryTableBackend),
+    Columnar(ColumnarTableBackend),
 }
 
 #[derive(Clone, Debug)]
@@ -151,6 +211,7 @@ pub struct DataModel {
 pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
     pub(crate) to_index: HashMap<Value, usize>,
+    pub(crate) from_index: HashMap<Value, Vec<usize>>,
 }
 
 impl DataModel {
@@ -188,7 +249,7 @@ impl DataModel {
             .filter(|c| c.table == table)
             .count();
 
-        let total_columns = table_ref.columns.len();
+        let total_columns = table_ref.columns().len();
         let base_columns = total_columns.saturating_sub(calc_count);
 
         let mut full_row = match row.len() {
@@ -212,8 +273,8 @@ impl DataModel {
                 .tables
                 .get_mut(table)
                 .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
-            table_mut.rows.push(full_row.clone());
-            table_mut.row_count() - 1
+            table_mut.push_row(full_row.clone())?;
+            table_mut.row_count().saturating_sub(1)
         };
 
         if calc_count > 0 {
@@ -252,13 +313,17 @@ impl DataModel {
                     .tables
                     .get_mut(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
-                table_mut.rows[row_index][col_idx] = value;
+                table_mut.set_value_by_idx(row_index, col_idx, value)?;
             }
 
             full_row = self
                 .tables
                 .get(table)
-                .and_then(|t| t.rows.get(row_index).cloned())
+                .map(|t| {
+                    (0..t.columns().len())
+                        .map(|idx| t.value_by_idx(row_index, idx).unwrap_or(Value::Blank))
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or(full_row);
         }
 
@@ -281,8 +346,7 @@ impl DataModel {
                     self.tables
                         .get_mut(table)
                         .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
-                        .rows
-                        .pop();
+                        .pop_row();
                     return Err(DaxError::NonUniqueKey {
                         table: rel.to_table.clone(),
                         column: rel.to_column.clone(),
@@ -311,8 +375,7 @@ impl DataModel {
                     self.tables
                         .get_mut(table)
                         .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
-                        .rows
-                        .pop();
+                        .pop_row();
                     return Err(DaxError::ReferentialIntegrityViolation {
                         relationship: rel.name.clone(),
                         from_table: rel.from_table.clone(),
@@ -327,6 +390,26 @@ impl DataModel {
 
         for (rel_idx, key) in to_index_updates {
             self.relationships[rel_idx].to_index.insert(key, row_index);
+        }
+
+        for rel_info in &mut self.relationships {
+            let rel = &rel_info.rel;
+            if rel.from_table == table {
+                let table_ref = self
+                    .tables
+                    .get(table)
+                    .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                let from_idx = table_ref.column_idx(&rel.from_column).ok_or_else(|| {
+                    DaxError::UnknownColumn {
+                        table: rel.from_table.clone(),
+                        column: rel.from_column.clone(),
+                    }
+                })?;
+                let key = table_ref
+                    .value_by_idx(row_index, from_idx)
+                    .unwrap_or(Value::Blank);
+                rel_info.from_index.entry(key).or_default().push(row_index);
+            }
         }
 
         Ok(())
@@ -367,9 +450,7 @@ impl DataModel {
 
         let mut to_index = HashMap::<Value, usize>::new();
         for row in 0..to_table.row_count() {
-            let Some(value) = to_table.value_by_idx(row, to_idx) else {
-                continue;
-            };
+            let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
             if to_index.insert(value.clone(), row).is_some() {
                 return Err(DaxError::NonUniqueKey {
                     table: relationship.to_table.clone(),
@@ -379,16 +460,20 @@ impl DataModel {
             }
         }
 
+        let mut from_index: HashMap<Value, Vec<usize>> = HashMap::new();
+        for row in 0..from_table.row_count() {
+            let value = from_table.value_by_idx(row, from_idx).unwrap_or(Value::Blank);
+            from_index.entry(value).or_default().push(row);
+        }
+
         if relationship.enforce_referential_integrity {
             let to_values: HashSet<Value> = to_index.keys().cloned().collect();
             for row in 0..from_table.row_count() {
-                let Some(value) = from_table.value_by_idx(row, from_idx) else {
-                    continue;
-                };
+                let value = from_table.value_by_idx(row, from_idx).unwrap_or(Value::Blank);
                 if value.is_blank() {
                     continue;
                 }
-                if !to_values.contains(value) {
+                if !to_values.contains(&value) {
                     return Err(DaxError::ReferentialIntegrityViolation {
                         relationship: relationship.name.clone(),
                         from_table: relationship.from_table.clone(),
@@ -404,6 +489,7 @@ impl DataModel {
         self.relationships.push(RelationshipInfo {
             rel: relationship,
             to_index,
+            from_index,
         });
         Ok(())
     }
@@ -452,6 +538,16 @@ impl DataModel {
             let Some(table_ref) = self.tables.get(&table) else {
                 return Err(DaxError::UnknownTable(table.clone()));
             };
+
+            // Columnar tables are immutable; calculated columns are computed eagerly into
+            // the stored table in Power Pivot. For now we support calculated columns only
+            // for the in-memory backend used in tests.
+            if !matches!(table_ref.storage, TableStorage::InMemory(_)) {
+                return Err(DaxError::Eval(format!(
+                    "calculated columns are only supported for in-memory tables ({} is columnar)",
+                    table_ref.name
+                )));
+            }
 
             let mut results = Vec::with_capacity(table_ref.row_count());
             for row in 0..table_ref.row_count() {
