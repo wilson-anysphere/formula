@@ -224,9 +224,11 @@ class MarketplaceStore {
       return;
     }
 
-    const db = await this.db.getDb();
-    const hasPublishers = db.exec("SELECT publisher FROM publishers LIMIT 1")[0]?.values?.length > 0;
-    const hasExtensions = db.exec("SELECT id FROM extensions LIMIT 1")[0]?.values?.length > 0;
+    const { hasPublishers, hasExtensions } = await this.db.withRead((db) => {
+      const publishers = db.exec("SELECT publisher FROM publishers LIMIT 1")[0]?.values?.length > 0;
+      const extensions = db.exec("SELECT id FROM extensions LIMIT 1")[0]?.values?.length > 0;
+      return { hasPublishers: publishers, hasExtensions: extensions };
+    });
     if (hasPublishers || hasExtensions) return;
 
     const legacy = JSON.parse(legacyRaw);
@@ -372,47 +374,49 @@ class MarketplaceStore {
   }
 
   async getPublisherByTokenSha256(tokenSha256) {
-    const db = await this.db.getDb();
-    const stmt = db.prepare(
-      `SELECT publisher, token_sha256, public_key_pem, verified, created_at
-       FROM publishers WHERE token_sha256 = ? LIMIT 1`
-    );
-    stmt.bind([tokenSha256]);
-    if (!stmt.step()) {
+    return this.db.withRead((db) => {
+      const stmt = db.prepare(
+        `SELECT publisher, token_sha256, public_key_pem, verified, created_at
+         FROM publishers WHERE token_sha256 = ? LIMIT 1`
+      );
+      stmt.bind([tokenSha256]);
+      if (!stmt.step()) {
+        stmt.free();
+        return null;
+      }
+      const row = stmt.getAsObject();
       stmt.free();
-      return null;
-    }
-    const row = stmt.getAsObject();
-    stmt.free();
-    return {
-      publisher: row.publisher,
-      tokenSha256: row.token_sha256,
-      publicKeyPem: row.public_key_pem,
-      verified: Boolean(row.verified),
-      createdAt: row.created_at,
-    };
+      return {
+        publisher: row.publisher,
+        tokenSha256: row.token_sha256,
+        publicKeyPem: row.public_key_pem,
+        verified: Boolean(row.verified),
+        createdAt: row.created_at,
+      };
+    });
   }
 
   async getPublisher(publisher) {
-    const db = await this.db.getDb();
-    const stmt = db.prepare(
-      `SELECT publisher, token_sha256, public_key_pem, verified, created_at
-       FROM publishers WHERE publisher = ? LIMIT 1`
-    );
-    stmt.bind([publisher]);
-    if (!stmt.step()) {
+    return this.db.withRead((db) => {
+      const stmt = db.prepare(
+        `SELECT publisher, token_sha256, public_key_pem, verified, created_at
+         FROM publishers WHERE publisher = ? LIMIT 1`
+      );
+      stmt.bind([publisher]);
+      if (!stmt.step()) {
+        stmt.free();
+        return null;
+      }
+      const row = stmt.getAsObject();
       stmt.free();
-      return null;
-    }
-    const row = stmt.getAsObject();
-    stmt.free();
-    return {
-      publisher: row.publisher,
-      tokenSha256: row.token_sha256,
-      publicKeyPem: row.public_key_pem,
-      verified: Boolean(row.verified),
-      createdAt: row.created_at,
-    };
+      return {
+        publisher: row.publisher,
+        tokenSha256: row.token_sha256,
+        publicKeyPem: row.public_key_pem,
+        verified: Boolean(row.verified),
+        createdAt: row.created_at,
+      };
+    });
   }
 
   async setExtensionFlags(id, { verified, featured, deprecated, blocked, malicious }, { actor = "admin", ip = null } = {}) {
@@ -673,30 +677,31 @@ class MarketplaceStore {
     const normalizedCategory = category ? String(category).toLowerCase() : null;
     const normalizedTag = tag ? String(tag).toLowerCase() : null;
 
-    const db = await this.db.getDb();
+    const { extRows, versionMap } = await this.db.withRead((db) => {
+      // Pull extensions + versions into memory for flexible semver + cursor pagination.
+      const rows =
+        db.exec(
+          `SELECT id, name, display_name, publisher, description, categories_json, tags_json, screenshots_json,
+                  verified, featured, deprecated, blocked, malicious, download_count, updated_at
+           FROM extensions`
+        )[0]?.values || [];
 
-    // Pull extensions + versions into memory for flexible semver + cursor pagination.
-    const extRows = db.exec(
-      `SELECT id, name, display_name, publisher, description, categories_json, tags_json, screenshots_json,
-              verified, featured, deprecated, blocked, malicious, download_count, updated_at
-       FROM extensions`
-    )[0]?.values;
-
-    /** @type {Record<string, string[]>} */
-    const versionMap = {};
-    const versionRows = db.exec(
-      `SELECT extension_id, version, yanked FROM extension_versions`
-    )[0]?.values;
-    if (versionRows) {
-      for (const [extensionId, version, yanked] of versionRows) {
-        if (yanked) continue;
-        const key = String(extensionId);
-        versionMap[key] = versionMap[key] || [];
-        versionMap[key].push(String(version));
+      /** @type {Record<string, string[]>} */
+      const versions = {};
+      const versionRows = db.exec(`SELECT extension_id, version, yanked FROM extension_versions`)[0]?.values;
+      if (versionRows) {
+        for (const [extensionId, version, yanked] of versionRows) {
+          if (yanked) continue;
+          const key = String(extensionId);
+          versions[key] = versions[key] || [];
+          versions[key].push(String(version));
+        }
       }
-    }
 
-    const entries = (extRows || [])
+      return { extRows: rows, versionMap: versions };
+    });
+
+    const entries = extRows
       .map((row) => {
         const [
           id,
@@ -878,80 +883,81 @@ class MarketplaceStore {
   }
 
   async getExtension(id, { includeHidden = false } = {}) {
-    const db = await this.db.getDb();
-    const stmt = db.prepare(
-      `SELECT id, name, display_name, publisher, description, categories_json, tags_json, screenshots_json,
-              verified, featured, deprecated, blocked, malicious, download_count, created_at, updated_at
-       FROM extensions WHERE id = ? LIMIT 1`
-    );
-    stmt.bind([id]);
-    if (!stmt.step()) {
+    return this.db.withRead((db) => {
+      const stmt = db.prepare(
+        `SELECT id, name, display_name, publisher, description, categories_json, tags_json, screenshots_json,
+                verified, featured, deprecated, blocked, malicious, download_count, created_at, updated_at
+         FROM extensions WHERE id = ? LIMIT 1`
+      );
+      stmt.bind([id]);
+      if (!stmt.step()) {
+        stmt.free();
+        return null;
+      }
+      const row = stmt.getAsObject();
       stmt.free();
-      return null;
-    }
-    const row = stmt.getAsObject();
-    stmt.free();
 
-    const hidden = Boolean(row.blocked) || Boolean(row.malicious);
-    if (hidden && !includeHidden) return null;
+      const hidden = Boolean(row.blocked) || Boolean(row.malicious);
+      if (hidden && !includeHidden) return null;
 
-    const versionsStmt = db.prepare(
-      `SELECT version, sha256, uploaded_at, yanked, readme
-       FROM extension_versions WHERE extension_id = ?`
-    );
-    versionsStmt.bind([id]);
+      const versionsStmt = db.prepare(
+        `SELECT version, sha256, uploaded_at, yanked, readme
+         FROM extension_versions WHERE extension_id = ?`
+      );
+      versionsStmt.bind([id]);
 
-    const versions = [];
-    const unyanked = [];
-    /** @type {Record<string, { readme: string }>} */
-    const versionMeta = {};
-    while (versionsStmt.step()) {
-      const v = versionsStmt.getAsObject();
-      const ver = String(v.version);
-      const yanked = Boolean(v.yanked);
-      versions.push({
-        version: ver,
-        sha256: String(v.sha256),
-        uploadedAt: String(v.uploaded_at),
-        yanked,
-      });
-      versionMeta[ver] = { readme: String(v.readme || "") };
-      if (!yanked) unyanked.push(ver);
-    }
-    versionsStmt.free();
+      const versions = [];
+      const unyanked = [];
+      /** @type {Record<string, { readme: string }>} */
+      const versionMeta = {};
+      while (versionsStmt.step()) {
+        const v = versionsStmt.getAsObject();
+        const ver = String(v.version);
+        const yanked = Boolean(v.yanked);
+        versions.push({
+          version: ver,
+          sha256: String(v.sha256),
+          uploadedAt: String(v.uploaded_at),
+          yanked,
+        });
+        versionMeta[ver] = { readme: String(v.readme || "") };
+        if (!yanked) unyanked.push(ver);
+      }
+      versionsStmt.free();
 
-    versions.sort((a, b) => compareSemver(b.version, a.version));
-    const latestVersion = maxSemver(unyanked) || null;
-    const readme = latestVersion ? versionMeta[latestVersion]?.readme || "" : "";
+      versions.sort((a, b) => compareSemver(b.version, a.version));
+      const latestVersion = maxSemver(unyanked) || null;
+      const readme = latestVersion ? versionMeta[latestVersion]?.readme || "" : "";
 
-    const publisherStmt = db.prepare(`SELECT public_key_pem FROM publishers WHERE publisher = ? LIMIT 1`);
-    publisherStmt.bind([row.publisher]);
-    const hasPublisher = publisherStmt.step();
-    const publisherRow = hasPublisher ? publisherStmt.getAsObject() : null;
-    publisherStmt.free();
+      const publisherStmt = db.prepare(`SELECT public_key_pem FROM publishers WHERE publisher = ? LIMIT 1`);
+      publisherStmt.bind([row.publisher]);
+      const hasPublisher = publisherStmt.step();
+      const publisherRow = hasPublisher ? publisherStmt.getAsObject() : null;
+      publisherStmt.free();
 
-    return {
-      id: String(row.id),
-      name: String(row.name),
-      displayName: String(row.display_name),
-      publisher: String(row.publisher),
-      description: String(row.description || ""),
-      categories: normalizeStringArray(parseJsonArray(row.categories_json)),
-      tags: normalizeStringArray(parseJsonArray(row.tags_json)),
-      screenshots: normalizeStringArray(parseJsonArray(row.screenshots_json)),
-      verified: Boolean(row.verified),
-      featured: Boolean(row.featured),
-      deprecated: Boolean(row.deprecated),
-      blocked: Boolean(row.blocked),
-      malicious: Boolean(row.malicious),
-      downloadCount: Number(row.download_count || 0),
-      latestVersion,
-      versions,
-      readme,
-      publisherPublicKeyPem: publisherRow ? String(publisherRow.public_key_pem) : null,
-      updatedAt: String(row.updated_at || ""),
-      createdAt: String(row.created_at || ""),
-    };
+      return {
+        id: String(row.id),
+        name: String(row.name),
+        displayName: String(row.display_name),
+        publisher: String(row.publisher),
+        description: String(row.description || ""),
+        categories: normalizeStringArray(parseJsonArray(row.categories_json)),
+        tags: normalizeStringArray(parseJsonArray(row.tags_json)),
+        screenshots: normalizeStringArray(parseJsonArray(row.screenshots_json)),
+        verified: Boolean(row.verified),
+        featured: Boolean(row.featured),
+        deprecated: Boolean(row.deprecated),
+        blocked: Boolean(row.blocked),
+        malicious: Boolean(row.malicious),
+        downloadCount: Number(row.download_count || 0),
+        latestVersion,
+        versions,
+        readme,
+        publisherPublicKeyPem: publisherRow ? String(publisherRow.public_key_pem) : null,
+        updatedAt: String(row.updated_at || ""),
+        createdAt: String(row.created_at || ""),
+      };
+    });
   }
 
   async getPackage(id, version) {
@@ -1033,39 +1039,40 @@ class MarketplaceStore {
   }
 
   async listAuditLog({ limit = 50, offset = 0 } = {}) {
-    const db = await this.db.getDb();
     const boundedLimit = Math.max(1, Math.min(200, Number(limit) || 50));
     const boundedOffset = Math.max(0, Number(offset) || 0);
 
-    const stmt = db.prepare(
-      `SELECT id, actor, action, extension_id, version, ip, details_json, created_at
-       FROM audit_log
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`
-    );
-    stmt.bind([boundedLimit, boundedOffset]);
-    const out = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      out.push({
-        id: String(row.id),
-        actor: String(row.actor),
-        action: String(row.action),
-        extensionId: row.extension_id ? String(row.extension_id) : null,
-        version: row.version ? String(row.version) : null,
-        ip: row.ip ? String(row.ip) : null,
-        details: (() => {
-          try {
-            return JSON.parse(String(row.details_json || "{}"));
-          } catch {
-            return {};
-          }
-        })(),
-        createdAt: String(row.created_at),
-      });
-    }
-    stmt.free();
-    return out;
+    return this.db.withRead((db) => {
+      const stmt = db.prepare(
+        `SELECT id, actor, action, extension_id, version, ip, details_json, created_at
+         FROM audit_log
+         ORDER BY created_at DESC
+         LIMIT ? OFFSET ?`
+      );
+      stmt.bind([boundedLimit, boundedOffset]);
+      const out = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        out.push({
+          id: String(row.id),
+          actor: String(row.actor),
+          action: String(row.action),
+          extensionId: row.extension_id ? String(row.extension_id) : null,
+          version: row.version ? String(row.version) : null,
+          ip: row.ip ? String(row.ip) : null,
+          details: (() => {
+            try {
+              return JSON.parse(String(row.details_json || "{}"));
+            } catch {
+              return {};
+            }
+          })(),
+          createdAt: String(row.created_at),
+        });
+      }
+      stmt.free();
+      return out;
+    });
   }
 
   close() {

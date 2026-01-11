@@ -77,11 +77,31 @@ function parseBooleanParam(value) {
 }
 
 class TokenBucketRateLimiter {
-  constructor({ capacity, refillMs }) {
+  constructor({ capacity, refillMs, maxEntries = 10_000 }) {
     this.capacity = capacity;
     this.refillMs = refillMs;
+    this.maxEntries = maxEntries;
     /** @type {Map<string, { tokens: number, updatedAt: number }>} */
     this.state = new Map();
+    this._lastPrunedAt = 0;
+  }
+
+  _prune(now) {
+    const pruneEveryMs = this.refillMs;
+    const maxAgeMs = this.refillMs * 10;
+    if (this.state.size <= this.maxEntries && now - this._lastPrunedAt < pruneEveryMs) return;
+    this._lastPrunedAt = now;
+
+    for (const [key, entry] of this.state.entries()) {
+      if (now - entry.updatedAt > maxAgeMs) {
+        this.state.delete(key);
+      }
+    }
+
+    // Hard cap: if still too big (e.g. many unique abusive keys), drop everything.
+    if (this.state.size > this.maxEntries * 2) {
+      this.state.clear();
+    }
   }
 
   take(key) {
@@ -90,6 +110,7 @@ class TokenBucketRateLimiter {
     }
 
     const now = Date.now();
+    this._prune(now);
     const existing = this.state.get(key) || { tokens: this.capacity, updatedAt: now };
     const elapsed = now - existing.updatedAt;
     const refill = (elapsed / this.refillMs) * this.capacity;

@@ -109,7 +109,7 @@ class SqliteFileDb {
     await fs.rename(tmp, this.filePath);
   }
 
-  async _withWriteLock(fn) {
+  async _withLock(fn) {
     let release = null;
     const next = new Promise((resolve) => {
       release = resolve;
@@ -124,8 +124,25 @@ class SqliteFileDb {
     }
   }
 
+  /**
+   * Execute a read-only critical section.
+   *
+   * We still serialize reads behind writes so readers never observe changes that
+   * have been committed to the in-memory DB but not yet flushed to disk.
+   *
+   * @template T
+   * @param {(db: any) => T | Promise<T>} fn
+   * @returns {Promise<T>}
+   */
+  async withRead(fn) {
+    return this._withLock(async () => {
+      const db = await this._open();
+      return fn(db);
+    });
+  }
+
   async withTransaction(fn) {
-    return this._withWriteLock(async () => {
+    return this._withLock(async () => {
       const db = await this._open();
       db.run("BEGIN");
       try {
@@ -155,4 +172,3 @@ class SqliteFileDb {
 module.exports = {
   SqliteFileDb,
 };
-
