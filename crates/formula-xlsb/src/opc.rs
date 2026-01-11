@@ -1,15 +1,16 @@
+use crate::parser::Error as ParseError;
 use crate::parser::{
     parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook_sheets, Cell, SheetData,
     SheetMeta,
 };
-use crate::parser::Error as ParseError;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{Cursor, Read, Seek};
+use std::io::{Cursor, Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use zip::ZipArchive;
+use zip::write::FileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 /// Controls how much of the original package we keep around for round-trip preservation.
 #[derive(Debug, Clone)]
@@ -57,7 +58,10 @@ impl XlsbWorkbook {
         Self::open_with_options(path, OpenOptions::default())
     }
 
-    pub fn open_with_options(path: impl AsRef<Path>, options: OpenOptions) -> Result<Self, ParseError> {
+    pub fn open_with_options(
+        path: impl AsRef<Path>,
+        options: OpenOptions,
+    ) -> Result<Self, ParseError> {
         let path = path.as_ref().to_path_buf();
         let file = File::open(&path)?;
         let mut zip = ZipArchive::new(file)?;
@@ -70,7 +74,10 @@ impl XlsbWorkbook {
 
         let workbook_rels_bytes = read_zip_entry(&mut zip, "xl/_rels/workbook.bin.rels")?
             .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
-        preserved_parts.insert("xl/_rels/workbook.bin.rels".to_string(), workbook_rels_bytes.clone());
+        preserved_parts.insert(
+            "xl/_rels/workbook.bin.rels".to_string(),
+            workbook_rels_bytes.clone(),
+        );
         let workbook_rels = parse_relationships(&workbook_rels_bytes)?;
 
         // Styles are required for round-trip, but we don't parse them yet.
@@ -118,7 +125,8 @@ impl XlsbWorkbook {
         let worksheet_paths: HashSet<String> = sheets.iter().map(|s| s.part_path.clone()).collect();
         if options.preserve_unknown_parts {
             for name in zip.file_names().map(str::to_string).collect::<Vec<_>>() {
-                let is_known = known_parts.contains(name.as_str()) || worksheet_paths.contains(&name);
+                let is_known =
+                    known_parts.contains(name.as_str()) || worksheet_paths.contains(&name);
                 if is_known {
                     continue;
                 }
@@ -206,6 +214,59 @@ impl XlsbWorkbook {
         parse_sheet_stream(&mut sheet, &self.shared_strings, |cell| f(cell))?;
         Ok(())
     }
+
+    /// Save the workbook as a new `.xlsb` file.
+    ///
+    /// This is currently a *lossless* package writer: it repackages the original XLSB ZIP
+    /// container by copying every entry's uncompressed payload byte-for-byte.
+    ///
+    /// The writer always reads entries from the source workbook at `self.path`. If an entry name
+    /// exists in [`XlsbWorkbook::preserved_parts`], that byte payload is used as an override. This
+    /// provides a forward-compatible hook for future code to patch individual parts (for example
+    /// to write modified worksheets) while keeping the rest of the package intact.
+    ///
+    /// How [`OpenOptions`] affects `save_as`:
+    /// - `preserve_unknown_parts`: stores raw bytes for unknown ZIP entries in `preserved_parts`,
+    ///   but `save_as` will still copy them from the source file even when this is `false`.
+    /// - `preserve_parsed_parts`: stores raw bytes for `xl/workbook.bin` and `xl/sharedStrings.bin`
+    ///   so they can be re-emitted without re-reading those ZIP entries.
+    /// - `preserve_worksheets`: stores raw bytes for worksheet `.bin` parts (can be large). When
+    ///   `false`, worksheets are streamed from the source ZIP during `save_as`.
+    pub fn save_as(&self, dest: impl AsRef<Path>) -> Result<(), crate::Error> {
+        let dest = dest.as_ref();
+
+        let file = File::open(&self.path)?;
+        let mut zip = ZipArchive::new(file)?;
+
+        let out = File::create(dest)?;
+        let mut writer = ZipWriter::new(out);
+
+        // Use a consistent compression method for output. This does *not* affect payload
+        // preservation: we always copy/write the uncompressed part bytes.
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i)?;
+            let name = entry.name().to_string();
+
+            if entry.is_dir() {
+                // Directory entries are optional in ZIPs, but we recreate them when present to
+                // preserve the package layout more closely.
+                writer.add_directory(name, options)?;
+                continue;
+            }
+
+            writer.start_file(name.as_str(), options)?;
+            if let Some(bytes) = self.preserved_parts.get(&name) {
+                writer.write_all(bytes)?;
+            } else {
+                std::io::copy(&mut entry, &mut writer)?;
+            }
+        }
+
+        writer.finish()?;
+        Ok(())
+    }
 }
 
 fn parse_relationships(xml_bytes: &[u8]) -> Result<HashMap<String, String>, ParseError> {
@@ -216,13 +277,17 @@ fn parse_relationships(xml_bytes: &[u8]) -> Result<HashMap<String, String>, Pars
     let mut out = HashMap::new();
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.name().as_ref().ends_with(b"Relationship") => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.name().as_ref().ends_with(b"Relationship") =>
+            {
                 let mut id = None;
                 let mut target = None;
                 for attr in e.attributes().flatten() {
                     match attr.key.as_ref() {
                         b"Id" => id = Some(attr.decode_and_unescape_value(&reader)?.into_owned()),
-                        b"Target" => target = Some(attr.decode_and_unescape_value(&reader)?.into_owned()),
+                        b"Target" => {
+                            target = Some(attr.decode_and_unescape_value(&reader)?.into_owned())
+                        }
                         _ => {}
                     }
                 }
