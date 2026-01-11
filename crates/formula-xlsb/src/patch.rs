@@ -30,6 +30,11 @@ pub struct CellEdit {
     pub new_value: CellValue,
     /// If set, replaces the raw formula token stream (`rgce`) for formula cells.
     pub new_formula: Option<Vec<u8>>,
+    /// If set, replaces the trailing BIFF12 `rgcb` payload (a.k.a. `Formula.extra`) that appears
+    /// after the `rgce` token stream for some formulas (e.g. array constants / `PtgArray`).
+    ///
+    /// If `None`, the existing bytes are preserved.
+    pub new_rgcb: Option<Vec<u8>>,
     /// Optional shared string table index (`isst`) to use when writing `CellValue::Text`.
     ///
     /// XLSB can store text cells either as inline strings (`BrtCellSt`, record id `0x0006`)
@@ -40,6 +45,37 @@ pub struct CellEdit {
     /// falls back to writing an inline string because it has no access to (or ability to update)
     /// `xl/sharedStrings.bin`.
     pub shared_string_index: Option<u32>,
+}
+
+impl CellEdit {
+    /// Convenience helper for updating a formula cell from Excel formula text using workbook
+    /// context.
+    ///
+    /// This uses [`crate::rgce::encode_rgce_with_context`] which can produce both `rgce` and any
+    /// required trailing `rgcb` bytes.
+    ///
+    /// `formula` may include a leading `=`.
+    pub fn with_formula_text_with_context(
+        row: u32,
+        col: u32,
+        new_value: CellValue,
+        formula: &str,
+        ctx: &crate::workbook_context::WorkbookContext,
+    ) -> Result<Self, crate::rgce::EncodeError> {
+        let encoded = crate::rgce::encode_rgce_with_context(
+            formula,
+            ctx,
+            crate::rgce::CellCoord::new(row, col),
+        )?;
+        Ok(Self {
+            row,
+            col,
+            new_value,
+            new_formula: Some(encoded.rgce),
+            new_rgcb: Some(encoded.rgcb),
+            shared_string_index: None,
+        })
+    }
 }
 
 #[cfg(feature = "write")]
@@ -59,6 +95,7 @@ impl CellEdit {
             col,
             new_value,
             new_formula: Some(rgce),
+            new_rgcb: None,
             shared_string_index: None,
         })
     }
@@ -290,14 +327,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_float(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
                             patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
@@ -305,14 +335,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_rk(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
                             patch_rk_cell(&mut writer, col, style, payload, edit)?;
                         }
                     }
@@ -320,14 +343,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_inline_string(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
                             patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
@@ -337,14 +353,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         } else if let (CellValue::Text(_), Some(isst)) =
                             (&edit.new_value, edit.shared_string_index)
                         {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
 
                             // BrtCellIsst: [col: u32][style: u32][isst: u32]
                             let mut patched = [0u8; 12];
@@ -360,14 +369,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             // into `BrtCellSt` (inline string) when writing a text value. Use the
                             // shared-strings-aware workbook API (`XlsbWorkbook::save_with_cell_edits_shared_strings`)
                             // to keep shared-string semantics.
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
                             patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
@@ -375,14 +377,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_bool(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
                             patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
@@ -390,14 +385,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_error(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
                             patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
@@ -405,26 +393,12 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_blank(edit) {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
                             patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
                     _ => {
-                        if edit.new_formula.is_some() {
-                            return Err(Error::Io(io::Error::new(
-                                io::ErrorKind::InvalidInput,
-                                format!(
-                                    "attempted to set formula for non-formula cell at ({row}, {col})"
-                                ),
-                            )));
-                        }
+                        reject_formula_payload_edit(edit, row, col)?;
                         patch_value_cell(&mut writer, col, style, edit)?;
                     }
                 }
@@ -544,7 +518,9 @@ fn advance_insert_cursor(ordered: &[usize], applied: &[bool], cursor: &mut usize
 }
 
 fn insertion_is_noop(edit: &CellEdit) -> bool {
-    edit.new_formula.is_none() && matches!(edit.new_value, CellValue::Blank)
+    edit.new_formula.is_none()
+        && edit.new_rgcb.is_none()
+        && matches!(edit.new_value, CellValue::Blank)
 }
 
 fn flush_missing_rows_before<W: io::Write>(
@@ -837,11 +813,12 @@ fn write_new_cell_record<W: io::Write>(
     edit: &CellEdit,
 ) -> Result<(), Error> {
     let style = 0u32;
+    let rgcb = edit.new_rgcb.as_deref().unwrap_or(&[]);
     match (&edit.new_formula, &edit.new_value) {
-        (Some(rgce), CellValue::Number(v)) => write_new_fmla_num(writer, col, style, *v, rgce),
-        (Some(rgce), CellValue::Bool(v)) => write_new_fmla_bool(writer, col, style, *v, rgce),
-        (Some(rgce), CellValue::Error(v)) => write_new_fmla_error(writer, col, style, *v, rgce),
-        (Some(rgce), CellValue::Text(s)) => write_new_fmla_string(writer, col, style, s, rgce),
+        (Some(rgce), CellValue::Number(v)) => write_new_fmla_num(writer, col, style, *v, rgce, rgcb),
+        (Some(rgce), CellValue::Bool(v)) => write_new_fmla_bool(writer, col, style, *v, rgce, rgcb),
+        (Some(rgce), CellValue::Error(v)) => write_new_fmla_error(writer, col, style, *v, rgce, rgcb),
+        (Some(rgce), CellValue::Text(s)) => write_new_fmla_string(writer, col, style, s, rgce, rgcb),
         (Some(_), CellValue::Blank) => Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
@@ -859,6 +836,7 @@ fn write_new_fmla_num<W: io::Write>(
     style: u32,
     cached: f64,
     rgce: &[u8],
+    rgcb: &[u8],
 ) -> Result<(), Error> {
     let rgce_len = u32::try_from(rgce.len()).map_err(|_| {
         Error::Io(io::Error::new(
@@ -866,7 +844,16 @@ fn write_new_fmla_num<W: io::Write>(
             "formula token stream is too large",
         ))
     })?;
-    let payload_len = 22u32.checked_add(rgce_len).ok_or(Error::UnexpectedEof)?;
+    let rgcb_len = u32::try_from(rgcb.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula trailing payload is too large",
+        ))
+    })?;
+    let payload_len = 22u32
+        .checked_add(rgce_len)
+        .and_then(|v| v.checked_add(rgcb_len))
+        .ok_or(Error::UnexpectedEof)?;
     writer.write_record_header(biff12::FORMULA_FLOAT, payload_len)?;
     writer.write_u32(col)?;
     writer.write_u32(style)?;
@@ -874,6 +861,7 @@ fn write_new_fmla_num<W: io::Write>(
     writer.write_u16(0)?; // flags
     writer.write_u32(rgce_len)?;
     writer.write_raw(rgce)?;
+    writer.write_raw(rgcb)?;
     Ok(())
 }
 
@@ -883,6 +871,7 @@ fn write_new_fmla_bool<W: io::Write>(
     style: u32,
     cached: bool,
     rgce: &[u8],
+    rgcb: &[u8],
 ) -> Result<(), Error> {
     let rgce_len = u32::try_from(rgce.len()).map_err(|_| {
         Error::Io(io::Error::new(
@@ -890,7 +879,16 @@ fn write_new_fmla_bool<W: io::Write>(
             "formula token stream is too large",
         ))
     })?;
-    let payload_len = 15u32.checked_add(rgce_len).ok_or(Error::UnexpectedEof)?;
+    let rgcb_len = u32::try_from(rgcb.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula trailing payload is too large",
+        ))
+    })?;
+    let payload_len = 15u32
+        .checked_add(rgce_len)
+        .and_then(|v| v.checked_add(rgcb_len))
+        .ok_or(Error::UnexpectedEof)?;
     writer.write_record_header(biff12::FORMULA_BOOL, payload_len)?;
     writer.write_u32(col)?;
     writer.write_u32(style)?;
@@ -898,6 +896,7 @@ fn write_new_fmla_bool<W: io::Write>(
     writer.write_u16(0)?; // flags
     writer.write_u32(rgce_len)?;
     writer.write_raw(rgce)?;
+    writer.write_raw(rgcb)?;
     Ok(())
 }
 
@@ -907,6 +906,7 @@ fn write_new_fmla_error<W: io::Write>(
     style: u32,
     cached: u8,
     rgce: &[u8],
+    rgcb: &[u8],
 ) -> Result<(), Error> {
     let rgce_len = u32::try_from(rgce.len()).map_err(|_| {
         Error::Io(io::Error::new(
@@ -914,7 +914,16 @@ fn write_new_fmla_error<W: io::Write>(
             "formula token stream is too large",
         ))
     })?;
-    let payload_len = 15u32.checked_add(rgce_len).ok_or(Error::UnexpectedEof)?;
+    let rgcb_len = u32::try_from(rgcb.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula trailing payload is too large",
+        ))
+    })?;
+    let payload_len = 15u32
+        .checked_add(rgce_len)
+        .and_then(|v| v.checked_add(rgcb_len))
+        .ok_or(Error::UnexpectedEof)?;
     writer.write_record_header(biff12::FORMULA_BOOLERR, payload_len)?;
     writer.write_u32(col)?;
     writer.write_u32(style)?;
@@ -922,6 +931,7 @@ fn write_new_fmla_error<W: io::Write>(
     writer.write_u16(0)?; // flags
     writer.write_u32(rgce_len)?;
     writer.write_raw(rgce)?;
+    writer.write_raw(rgcb)?;
     Ok(())
 }
 
@@ -931,11 +941,18 @@ fn write_new_fmla_string<W: io::Write>(
     style: u32,
     cached: &str,
     rgce: &[u8],
+    rgcb: &[u8],
 ) -> Result<(), Error> {
     let rgce_len = u32::try_from(rgce.len()).map_err(|_| {
         Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "formula token stream is too large",
+        ))
+    })?;
+    let rgcb_len = u32::try_from(rgcb.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula trailing payload is too large",
         ))
     })?;
 
@@ -950,6 +967,7 @@ fn write_new_fmla_string<W: io::Write>(
         .checked_add(cached_len)
         .and_then(|v| v.checked_add(4)) // cce
         .and_then(|v| v.checked_add(rgce_len))
+        .and_then(|v| v.checked_add(rgcb_len))
         .ok_or(Error::UnexpectedEof)?;
 
     writer.write_record_header(biff12::FORMULA_STRING, payload_len)?;
@@ -962,6 +980,7 @@ fn write_new_fmla_string<W: io::Write>(
     }
     writer.write_u32(rgce_len)?;
     writer.write_raw(rgce)?;
+    writer.write_raw(rgcb)?;
     Ok(())
 }
 
@@ -1031,6 +1050,24 @@ fn parse_wide_string_offsets(
     })
 }
 
+fn reject_formula_payload_edit(edit: &CellEdit, row: u32, col: u32) -> Result<(), Error> {
+    if edit.new_formula.is_none() && edit.new_rgcb.is_none() {
+        return Ok(());
+    }
+
+    let kind = match (edit.new_formula.is_some(), edit.new_rgcb.is_some()) {
+        (true, true) => "formula (rgce + rgcb)",
+        (true, false) => "formula",
+        (false, true) => "formula rgcb",
+        (false, false) => unreachable!(),
+    };
+
+    Err(Error::Io(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("attempted to set {kind} for non-formula cell at ({row}, {col})"),
+    )))
+}
+
 fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
     let existing_cached = read_f64(payload, 8)?;
     let flags = read_u16(payload, 16)?;
@@ -1041,6 +1078,7 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
     let rgce = payload
         .get(rgce_offset..rgce_end)
         .ok_or(Error::UnexpectedEof)?;
+    let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let desired_cached = match &edit.new_value {
         CellValue::Number(v) => *v,
@@ -1048,8 +1086,11 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
     };
 
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
+    let desired_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
 
-    Ok(existing_cached.to_bits() == desired_cached.to_bits() && rgce == desired_rgce)
+    Ok(existing_cached.to_bits() == desired_cached.to_bits()
+        && rgce == desired_rgce
+        && extra == desired_extra)
 }
 
 fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
@@ -1082,9 +1123,11 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
     let rgce = payload
         .get(rgce_offset..rgce_end)
         .ok_or(Error::UnexpectedEof)?;
+    let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
-    Ok(rgce == desired_rgce)
+    let desired_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
+    Ok(rgce == desired_rgce && extra == desired_extra)
 }
 
 fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
@@ -1100,8 +1143,10 @@ fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Er
     let rgce = payload
         .get(rgce_offset..rgce_end)
         .ok_or(Error::UnexpectedEof)?;
+    let extra = payload.get(rgce_end..).unwrap_or(&[]);
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
-    Ok(existing_cached == desired_cached && rgce == desired_rgce)
+    let desired_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
+    Ok(existing_cached == desired_cached && rgce == desired_rgce && extra == desired_extra)
 }
 
 fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
@@ -1117,11 +1162,16 @@ fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, E
     let rgce = payload
         .get(rgce_offset..rgce_end)
         .ok_or(Error::UnexpectedEof)?;
+    let extra = payload.get(rgce_end..).unwrap_or(&[]);
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
-    Ok(existing_cached == desired_cached && rgce == desired_rgce)
+    let desired_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
+    Ok(existing_cached == desired_cached && rgce == desired_rgce && extra == desired_extra)
 }
 
 fn value_edit_is_noop_float(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+        return Ok(false);
+    }
     let existing = read_f64(payload, 8)?;
     let desired = match &edit.new_value {
         CellValue::Number(v) => *v,
@@ -1131,6 +1181,9 @@ fn value_edit_is_noop_float(payload: &[u8], edit: &CellEdit) -> Result<bool, Err
 }
 
 fn value_edit_is_noop_rk(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+        return Ok(false);
+    }
     let existing_rk = read_u32(payload, 8)?;
     let desired = match &edit.new_value {
         CellValue::Number(v) => *v,
@@ -1141,6 +1194,9 @@ fn value_edit_is_noop_rk(payload: &[u8], edit: &CellEdit) -> Result<bool, Error>
 }
 
 fn value_edit_is_noop_shared_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+        return Ok(false);
+    }
     let Some(isst) = edit.shared_string_index else {
         return Ok(false);
     };
@@ -1151,6 +1207,9 @@ fn value_edit_is_noop_shared_string(payload: &[u8], edit: &CellEdit) -> Result<b
 }
 
 fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+        return Ok(false);
+    }
     let desired = match &edit.new_value {
         CellValue::Text(s) => s,
         _ => return Ok(false),
@@ -1185,6 +1244,9 @@ fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<b
 }
 
 fn value_edit_is_noop_bool(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+        return Ok(false);
+    }
     let desired = match &edit.new_value {
         CellValue::Bool(v) => *v,
         _ => return Ok(false),
@@ -1194,6 +1256,9 @@ fn value_edit_is_noop_bool(payload: &[u8], edit: &CellEdit) -> Result<bool, Erro
 }
 
 fn value_edit_is_noop_error(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+        return Ok(false);
+    }
     let desired = match &edit.new_value {
         CellValue::Error(v) => *v,
         _ => return Ok(false),
@@ -1202,7 +1267,9 @@ fn value_edit_is_noop_error(payload: &[u8], edit: &CellEdit) -> Result<bool, Err
 }
 
 fn value_edit_is_noop_blank(edit: &CellEdit) -> bool {
-    matches!(edit.new_value, CellValue::Blank)
+    edit.new_formula.is_none()
+        && edit.new_rgcb.is_none()
+        && matches!(edit.new_value, CellValue::Blank)
 }
 
 fn patch_value_cell<W: io::Write>(
@@ -1211,6 +1278,7 @@ fn patch_value_cell<W: io::Write>(
     style: u32,
     edit: &CellEdit,
 ) -> Result<(), Error> {
+    reject_formula_payload_edit(edit, edit.row, edit.col)?;
     match &edit.new_value {
         CellValue::Blank => {
             let mut payload = [0u8; 8];
@@ -1312,11 +1380,16 @@ fn patch_fmla_num<W: io::Write>(
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
-    if edit.new_formula.is_some() && !extra.is_empty() && new_rgce != rgce {
+    let new_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
+    if edit.new_formula.is_some()
+        && new_rgce != rgce
+        && !extra.is_empty()
+        && edit.new_rgcb.is_none()
+    {
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "cannot replace formula rgce for BrtFmlaNum at ({}, {}) with trailing rgcb bytes",
+                "cannot replace formula rgce for BrtFmlaNum at ({}, {}) with existing trailing rgcb bytes; provide CellEdit.new_rgcb (even empty) to replace them",
                 edit.row, edit.col
             ),
         )));
@@ -1340,7 +1413,7 @@ fn patch_fmla_num<W: io::Write>(
             "formula token stream is too large",
         ))
     })?;
-    let extra_len = u32::try_from(extra.len()).map_err(|_| {
+    let extra_len = u32::try_from(new_extra.len()).map_err(|_| {
         Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "formula trailing payload is too large",
@@ -1358,7 +1431,7 @@ fn patch_fmla_num<W: io::Write>(
     writer.write_u16(flags)?;
     writer.write_u32(new_rgce_len)?;
     writer.write_raw(new_rgce)?;
-    writer.write_raw(extra)?;
+    writer.write_raw(new_extra)?;
     Ok(())
 }
 
@@ -1380,11 +1453,16 @@ fn patch_fmla_bool<W: io::Write>(
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
-    if edit.new_formula.is_some() && !extra.is_empty() && new_rgce != rgce {
+    let new_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
+    if edit.new_formula.is_some()
+        && new_rgce != rgce
+        && !extra.is_empty()
+        && edit.new_rgcb.is_none()
+    {
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "cannot replace formula rgce for BrtFmlaBool at ({}, {}) with trailing rgcb bytes",
+                "cannot replace formula rgce for BrtFmlaBool at ({}, {}) with existing trailing rgcb bytes; provide CellEdit.new_rgcb (even empty) to replace them",
                 edit.row, edit.col
             ),
         )));
@@ -1409,7 +1487,7 @@ fn patch_fmla_bool<W: io::Write>(
             "formula token stream is too large",
         ))
     })?;
-    let extra_len = u32::try_from(extra.len()).map_err(|_| {
+    let extra_len = u32::try_from(new_extra.len()).map_err(|_| {
         Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "formula trailing payload is too large",
@@ -1427,7 +1505,7 @@ fn patch_fmla_bool<W: io::Write>(
     writer.write_u16(flags)?;
     writer.write_u32(new_rgce_len)?;
     writer.write_raw(new_rgce)?;
-    writer.write_raw(extra)?;
+    writer.write_raw(new_extra)?;
     Ok(())
 }
 
@@ -1449,11 +1527,16 @@ fn patch_fmla_error<W: io::Write>(
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
-    if edit.new_formula.is_some() && !extra.is_empty() && new_rgce != rgce {
+    let new_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
+    if edit.new_formula.is_some()
+        && new_rgce != rgce
+        && !extra.is_empty()
+        && edit.new_rgcb.is_none()
+    {
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "cannot replace formula rgce for BrtFmlaError at ({}, {}) with trailing rgcb bytes",
+                "cannot replace formula rgce for BrtFmlaError at ({}, {}) with existing trailing rgcb bytes; provide CellEdit.new_rgcb (even empty) to replace them",
                 edit.row, edit.col
             ),
         )));
@@ -1478,7 +1561,7 @@ fn patch_fmla_error<W: io::Write>(
             "formula token stream is too large",
         ))
     })?;
-    let extra_len = u32::try_from(extra.len()).map_err(|_| {
+    let extra_len = u32::try_from(new_extra.len()).map_err(|_| {
         Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "formula trailing payload is too large",
@@ -1496,7 +1579,7 @@ fn patch_fmla_error<W: io::Write>(
     writer.write_u16(flags)?;
     writer.write_u32(new_rgce_len)?;
     writer.write_raw(new_rgce)?;
-    writer.write_raw(extra)?;
+    writer.write_raw(new_extra)?;
     Ok(())
 }
 
@@ -1523,11 +1606,16 @@ fn patch_fmla_string<W: io::Write>(
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
-    if edit.new_formula.is_some() && !extra.is_empty() && new_rgce != rgce {
+    let new_extra: &[u8] = edit.new_rgcb.as_deref().unwrap_or(extra);
+    if edit.new_formula.is_some()
+        && new_rgce != rgce
+        && !extra.is_empty()
+        && edit.new_rgcb.is_none()
+    {
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "cannot replace formula rgce for BrtFmlaString at ({}, {}) with trailing rgcb bytes",
+                "cannot replace formula rgce for BrtFmlaString at ({}, {}) with existing trailing rgcb bytes; provide CellEdit.new_rgcb (even empty) to replace them",
                 edit.row, edit.col
             ),
         )));
@@ -1592,7 +1680,7 @@ fn patch_fmla_string<W: io::Write>(
             "formula token stream is too large",
         ))
     })?;
-    let extra_len = u32::try_from(extra.len()).map_err(|_| {
+    let extra_len = u32::try_from(new_extra.len()).map_err(|_| {
         Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "formula trailing payload is too large",
@@ -1624,7 +1712,7 @@ fn patch_fmla_string<W: io::Write>(
     }
     writer.write_u32(new_rgce_len)?;
     writer.write_raw(new_rgce)?;
-    writer.write_raw(extra)?;
+    writer.write_raw(new_extra)?;
     Ok(())
 }
 

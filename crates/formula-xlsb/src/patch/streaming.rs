@@ -275,14 +275,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_value_cell(&mut writer, col, style, edit)?;
                         }
@@ -292,14 +285,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_rk_cell(&mut writer, col, style, &payload, edit)?;
                         }
@@ -311,14 +297,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                         } else if let (CellValue::Text(_), Some(isst)) =
                             (&edit.new_value, edit.shared_string_index)
                         {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
 
                             changed = true;
                             // BrtCellIsst: [col: u32][style: u32][isst: u32]
@@ -330,14 +309,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                         } else {
                             // No shared-string index provided: fall back to the generic writer
                             // (FLOAT / inline string).
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_value_cell(&mut writer, col, style, edit)?;
                         }
@@ -347,14 +319,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_value_cell(&mut writer, col, style, edit)?;
                         }
@@ -364,14 +329,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_value_cell(&mut writer, col, style, edit)?;
                         }
@@ -381,14 +339,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_value_cell(&mut writer, col, style, edit)?;
                         }
@@ -398,27 +349,13 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                return Err(Error::Io(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "attempted to set formula for non-formula cell at ({row}, {col})"
-                                    ),
-                                )));
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
                     _ => {
-                        if edit.new_formula.is_some() {
-                            return Err(Error::Io(io::Error::new(
-                                io::ErrorKind::InvalidInput,
-                                format!(
-                                    "attempted to set formula for non-formula cell at ({row}, {col})"
-                                ),
-                            )));
-                        }
+                        super::reject_formula_payload_edit(edit, row, col)?;
                         changed = true;
                         super::patch_value_cell(&mut writer, col, style, edit)?;
                     }

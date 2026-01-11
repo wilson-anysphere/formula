@@ -187,6 +187,7 @@ fn patcher_updates_cached_value_without_changing_flags() {
         col: 0,
         new_value: CellValue::Number(99.5),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
@@ -235,6 +236,7 @@ fn patcher_updates_cached_bool_without_changing_flags() {
         col: 0,
         new_value: CellValue::Bool(false),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
@@ -281,6 +283,7 @@ fn patcher_updates_cached_error_without_changing_flags() {
         col: 0,
         new_value: CellValue::Error(0x2A),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
@@ -318,8 +321,9 @@ fn parses_and_preserves_brt_fmla_string_flags() {
 
 #[test]
 fn patcher_updates_cached_string_without_changing_flags() {
-    // Keep low bits clear: for BrtFmlaString the cached XLWideString `flags` field encodes
-    // rich-text / phonetic presence, so setting those bits would require additional payload.
+    // BrtFmlaString reuses the BIFF12 wide-string flag bits (0x0001 rich runs, 0x0002 phonetic)
+    // to signal the presence of cached formatting payloads. Use a value that avoids those bits so
+    // the synthetic record layout stays valid.
     let flags = 0x2220;
     let extra = [0xAA, 0xBB, 0xCC];
     let sheet_bin = synthetic_sheet_brt_fmla_string(flags, "Hello", &extra);
@@ -329,6 +333,7 @@ fn patcher_updates_cached_string_without_changing_flags() {
         col: 0,
         new_value: CellValue::Text("World".to_string()),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
@@ -356,6 +361,7 @@ fn patcher_updates_cached_string_with_reserved_flags_and_4byte_extra() {
         col: 0,
         new_value: CellValue::Text("World".to_string()),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");

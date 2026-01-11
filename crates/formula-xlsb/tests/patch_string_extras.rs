@@ -146,6 +146,7 @@ fn patcher_preserves_flagged_inline_string_record_for_noop_edits() {
         col: 0,
         new_value: CellValue::Text(inline_text),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     };
 
@@ -163,6 +164,7 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         col: 1,
         new_value: CellValue::Text(rich_text.clone()),
         new_formula: Some(new_rgce.clone()),
+        new_rgcb: None,
         shared_string_index: None,
     };
     let patched_rich = patch_sheet_bin(&sheet_bin, &[edit_rich]).expect("patch rich formula");
@@ -191,6 +193,7 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         col: 2,
         new_value: CellValue::Text(pho_text.clone()),
         new_formula: Some(new_rgce.clone()),
+        new_rgcb: None,
         shared_string_index: None,
     };
     let patched_pho = patch_sheet_bin(&sheet_bin, &[edit_pho]).expect("patch phonetic formula");
@@ -223,6 +226,7 @@ fn patcher_clears_rich_phonetic_flags_when_rewriting_cached_string_value() {
         col: 1,
         new_value: CellValue::Text("New".to_string()),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     };
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch cached string");
