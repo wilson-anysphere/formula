@@ -307,6 +307,12 @@ export class ContextManager {
 
             let safeText = rawText;
             if (decision.decision !== DLP_DECISION.ALLOW) {
+              if (decision.decision === DLP_DECISION.BLOCK) {
+                // If the policy blocks cloud AI processing for this chunk, do not send any
+                // workbook content to the embedder. Persist only a minimal placeholder so
+                // the vector store cannot contain raw restricted data.
+                safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+              } else {
               // If DLP redaction is required due to explicit document/sheet/range classification,
               // redact the entire content; pattern-based redaction isn't sufficient in that case.
               if (recordDecision.decision !== DLP_DECISION.ALLOW) {
@@ -316,6 +322,7 @@ export class ContextManager {
               }
               if (!includeRestrictedContent && classifyText(safeText).level === "sensitive") {
                 safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+              }
               }
             }
 

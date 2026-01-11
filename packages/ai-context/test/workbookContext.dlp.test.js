@@ -151,6 +151,7 @@ test("buildWorkbookContext: does not send raw sensitive workbook text to embedde
   );
 
   const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /\bAlice\b/);
   assert.doesNotMatch(joined, /alice@example\.com/);
   assert.doesNotMatch(joined, /123-45-6789/);
 });
