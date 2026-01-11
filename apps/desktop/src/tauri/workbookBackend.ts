@@ -33,6 +33,21 @@ export type SheetUsedRange = {
   end_col: number;
 };
 
+export type WorkbookThemePalette = {
+  dk1: string;
+  lt1: string;
+  dk2: string;
+  lt2: string;
+  accent1: string;
+  accent2: string;
+  accent3: string;
+  accent4: string;
+  accent5: string;
+  accent6: string;
+  hlink: string;
+  followedHlink: string;
+};
+
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 function getTauriInvoke(): TauriInvoke {
@@ -58,6 +73,11 @@ export class TauriWorkbookBackend {
   async newWorkbook(): Promise<WorkbookInfo> {
     const info = await this.invoke("new_workbook");
     return info as WorkbookInfo;
+  }
+
+  async getWorkbookThemePalette(): Promise<WorkbookThemePalette | null> {
+    const palette = await this.invoke("get_workbook_theme_palette");
+    return (palette as WorkbookThemePalette | null) ?? null;
   }
 
   async saveWorkbook(path?: string): Promise<void> {

@@ -17,6 +17,7 @@ import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/fi
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend, type WorkbookInfo } from "./tauri/workbookBackend";
+import { chartThemeFromWorkbookPalette } from "./charts/theme";
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -813,6 +814,14 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
   await app.restoreDocumentState(snapshot);
+
+  // Update chart series colors to reflect the workbook's theme palette (if available).
+  try {
+    const palette = await tauriBackend.getWorkbookThemePalette();
+    app.setChartTheme(chartThemeFromWorkbookPalette(palette));
+  } catch {
+    app.setChartTheme(chartThemeFromWorkbookPalette(null));
+  }
 
   // Ensure sheets exist even if they were empty (DocumentController lazily creates models).
   for (const sheet of sheets) {

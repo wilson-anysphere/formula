@@ -6,6 +6,7 @@ import { parseA1Range } from "../charts/a1.js";
 import { anchorToRectPx } from "../charts/overlay.js";
 import { renderChartSvg } from "../charts/renderSvg.js";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
+import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
@@ -284,6 +285,7 @@ export class SpreadsheetApp {
   private stopCommentPersistence: (() => void) | null = null;
 
   private readonly chartStore: ChartStore;
+  private chartTheme: ChartTheme = FALLBACK_CHART_THEME;
 
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
@@ -572,6 +574,11 @@ export class SpreadsheetApp {
 
   addChart(spec: CreateChartSpec): CreateChartResult {
     return this.chartStore.createChart(spec);
+  }
+
+  setChartTheme(theme: ChartTheme): void {
+    this.chartTheme = theme;
+    this.renderCharts();
   }
 
   listCharts(): readonly ChartRecord[] {
@@ -1224,7 +1231,11 @@ export class SpreadsheetApp {
       host.style.pointerEvents = "none";
       host.style.overflow = "hidden";
 
-      host.innerHTML = renderChartSvg(chart, provider, { width: rect.width, height: rect.height });
+      host.innerHTML = renderChartSvg(chart, provider, {
+        width: rect.width,
+        height: rect.height,
+        theme: this.chartTheme,
+      });
       this.chartLayer.appendChild(host);
     }
   }
