@@ -1007,7 +1007,11 @@ impl Engine {
     fn compile_name_expr(&mut self, expr: &Expr<String>) -> CompiledExpr {
         let mut map = |sref: &SheetReference<String>| match sref {
             SheetReference::Current => SheetReference::Current,
-            SheetReference::Sheet(name) => SheetReference::Sheet(self.workbook.ensure_sheet(name)),
+            SheetReference::Sheet(name) => self
+                .workbook
+                .sheet_id(name)
+                .map(SheetReference::Sheet)
+                .unwrap_or_else(|| SheetReference::External(name.clone())),
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
         expr.map_sheets(&mut map)

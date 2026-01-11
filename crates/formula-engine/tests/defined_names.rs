@@ -1,4 +1,4 @@
-use formula_engine::{Engine, NameDefinition, NameScope, Value};
+use formula_engine::{EditError, EditOp, Engine, ErrorKind, NameDefinition, NameScope, Value};
 
 #[test]
 fn workbook_scoped_name_can_be_used_in_other_cells() {
@@ -110,3 +110,30 @@ fn changing_name_definition_marks_dependents_dirty_and_updates_dependencies() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(100.0));
 }
 
+#[test]
+fn name_definitions_do_not_implicitly_create_missing_sheets() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "BadRef",
+            NameScope::Workbook,
+            NameDefinition::Reference("NoSuchSheet!A1".to_string()),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=BadRef").unwrap();
+    engine.recalculate();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
+
+    // Ensure the missing sheet wasn't created as a side effect of defining the name.
+    let err = engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "NoSuchSheet".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap_err();
+    assert_eq!(err, EditError::SheetNotFound("NoSuchSheet".to_string()));
+}
