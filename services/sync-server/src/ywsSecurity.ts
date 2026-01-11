@@ -149,6 +149,7 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
 
   const parseIndex = (value: string): number | null => {
     if (value.length === 0) return null;
+    if (value.length > 32) return null;
 
     // Short-circuit extremely large values to avoid `Number("9".repeat(400))` -> Infinity
     // surprises and to keep parsing work bounded for hostile keys.
