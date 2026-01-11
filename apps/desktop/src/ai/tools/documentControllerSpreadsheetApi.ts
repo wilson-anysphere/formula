@@ -12,6 +12,10 @@ function cloneCellValue(value: any): any {
   return structuredCloneFn ? structuredCloneFn(value) : JSON.parse(JSON.stringify(value));
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function normalizeFormula(raw: string): string {
   const trimmed = raw.trimStart();
   if (!trimmed) return "=";
@@ -114,6 +118,90 @@ function cellFormatToStylePatch(format: Partial<CellFormat> | null | undefined):
   }
 
   return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function styleForWrite(baseStyle: DocumentControllerStyle, format: CellFormat | null | undefined): DocumentControllerStyle {
+  const style = (isPlainObject(baseStyle) ? cloneCellValue(baseStyle) : {}) as DocumentControllerStyle;
+
+  // Remove supported keys before applying the next format, so writeRange can move
+  // formatting without "contaminating" target cells with stale attributes.
+  if (isPlainObject(style.font)) {
+    delete style.font.bold;
+    delete style.font.italic;
+    delete style.font.size;
+    delete style.font.color;
+    if (Object.keys(style.font).length === 0) delete style.font;
+  } else {
+    delete style.font;
+  }
+
+  if (isPlainObject(style.fill)) {
+    delete style.fill.fgColor;
+    delete style.fill.background;
+    delete style.fill.pattern;
+    if (Object.keys(style.fill).length === 0) delete style.fill;
+  } else {
+    delete style.fill;
+  }
+
+  delete style.numberFormat;
+
+  if (isPlainObject(style.alignment)) {
+    delete style.alignment.horizontal;
+    if (Object.keys(style.alignment).length === 0) delete style.alignment;
+  } else {
+    delete style.alignment;
+  }
+
+  // Legacy flat keys from older adapters/snapshots.
+  delete (style as any).bold;
+  delete (style as any).italic;
+  delete (style as any).font_size;
+  delete (style as any).fontSize;
+  delete (style as any).font_color;
+  delete (style as any).fontColor;
+  delete (style as any).background_color;
+  delete (style as any).backgroundColor;
+  delete (style as any).number_format;
+  delete (style as any).numberFormat;
+  delete (style as any).horizontal_align;
+  delete (style as any).horizontalAlign;
+
+  if (!format || Object.keys(format).length === 0) return style;
+
+  if (typeof format.bold === "boolean") {
+    style.font ??= {};
+    style.font.bold = format.bold;
+  }
+  if (typeof format.italic === "boolean") {
+    style.font ??= {};
+    style.font.italic = format.italic;
+  }
+  if (typeof format.font_size === "number") {
+    style.font ??= {};
+    style.font.size = format.font_size;
+  }
+  if (typeof format.font_color === "string") {
+    style.font ??= {};
+    style.font.color = format.font_color;
+  }
+
+  if (typeof format.background_color === "string") {
+    style.fill ??= {};
+    style.fill.pattern = "solid";
+    style.fill.fgColor = format.background_color;
+  }
+
+  if (typeof format.number_format === "string") {
+    style.numberFormat = format.number_format;
+  }
+
+  if (format.horizontal_align === "left" || format.horizontal_align === "center" || format.horizontal_align === "right") {
+    style.alignment ??= {};
+    style.alignment.horizontal = format.horizontal_align;
+  }
+
+  return style;
 }
 
 function toCellData(controller: DocumentController, cellState: any): CellData {
@@ -259,24 +347,37 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       }
     }
 
+    const hasAnyFormat = cells.some((row) => row.some((cell) => Boolean(cell?.format && Object.keys(cell.format).length > 0)));
+
     this.controller.beginBatch({ label: "AI set_range" });
     try {
-      const values = cells.map((row) =>
-        row.map((cell) => (cell?.formula ? { formula: cell.formula } : cell?.value ?? null))
-      );
-      this.controller.setRangeValues(range.sheet, toControllerRange(range), values, { label: "AI set_range" });
-
-      for (let r = 0; r < rowCount; r++) {
-        const row = cells[r] ?? [];
-        for (let c = 0; c < colCount; c++) {
-          const format = row[c]?.format;
-          if (!format || Object.keys(format).length === 0) continue;
-          const patch = cellFormatToStylePatch(format);
-          if (!patch) continue;
-          const coord = { row: range.startRow - 1 + r, col: range.startCol - 1 + c };
-          this.controller.setRangeFormat(range.sheet, { start: coord, end: coord }, patch, { label: "AI apply_formatting" });
-        }
+      if (!hasAnyFormat) {
+        const values = cells.map((row) =>
+          row.map((cell) => (cell?.formula ? { formula: cell.formula } : cell?.value ?? null))
+        );
+        this.controller.setRangeValues(range.sheet, toControllerRange(range), values, { label: "AI set_range" });
+        return;
       }
+
+      const inputs: any[][] = [];
+      for (let r = 0; r < rowCount; r++) {
+        const srcRow = cells[r] ?? [];
+        const outRow: any[] = [];
+        for (let c = 0; c < colCount; c++) {
+          const cell = srcRow[c] ?? { value: null };
+          const coord = { row: range.startRow - 1 + r, col: range.startCol - 1 + c };
+          const before = this.controller.getCell(range.sheet, coord);
+          const baseStyle = before.styleId === 0 ? {} : this.controller.styleTable.get(before.styleId);
+          const nextStyle = styleForWrite(baseStyle, cell.format);
+          const input: any = { format: nextStyle };
+          if (cell.formula) input.formula = cell.formula;
+          else input.value = cell.value ?? null;
+          outRow.push(input);
+        }
+        inputs.push(outRow);
+      }
+
+      this.controller.setRangeValues(range.sheet, toControllerRange(range), inputs, { label: "AI set_range" });
     } finally {
       this.controller.endBatch();
     }

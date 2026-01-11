@@ -184,6 +184,22 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(controller.getCell("Sheet1", "B1").styleId).toBe(0);
   });
 
+  it("clears stale formatting when writeRange moves formatted cells (no contamination)", () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1:B1", [[1, 2]]);
+    controller.setRangeFormat("Sheet1", "A1", { font: { bold: true } }, { label: "Bold A1" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    // Move bold formatting from A1 -> B1 by writing a new matrix where only B1 has format.
+    api.writeRange(
+      { sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 1, endCol: 2 },
+      [[{ value: 1 }, { value: 2, format: { bold: true } }]]
+    );
+
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toBeUndefined();
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 2 }).format).toEqual({ bold: true });
+  });
+
   it("validates writeRange dimensions like the ai-tools InMemoryWorkbook", () => {
     const controller = new DocumentController();
     const api = new DocumentControllerSpreadsheetApi(controller);
