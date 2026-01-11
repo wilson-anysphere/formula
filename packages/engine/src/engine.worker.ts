@@ -206,10 +206,10 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
   wasmModuleUrl = msg.wasmModuleUrl;
   wasmBinaryUrl = msg.wasmBinaryUrl ?? null;
 
-  port.start?.();
   port.addEventListener("message", (inner: MessageEvent<unknown>) => {
     void handleRequest(inner.data as WorkerInboundMessage);
   });
+  port.start?.();
 
   postMessageToMain({ type: "ready" });
 });
