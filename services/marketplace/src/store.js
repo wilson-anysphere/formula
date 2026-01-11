@@ -582,6 +582,7 @@ class MarketplaceStore {
       if (malicious !== undefined) add("malicious", malicious ? 1 : 0);
 
       if (patch.length > 0) {
+        add("updated_at", now);
         params.push(id);
         db.run(`UPDATE extensions SET ${patch.join(", ")} WHERE id = ?`, params);
       }
@@ -1217,6 +1218,7 @@ class MarketplaceStore {
           `UPDATE extension_versions SET yanked = ?, yanked_at = ? WHERE extension_id = ? AND version = ?`,
           [yanked ? 1 : 0, yanked ? now : null, id, version]
         );
+        db.run(`UPDATE extensions SET updated_at = ? WHERE id = ?`, [now, id]);
       }
 
       const audit = db.prepare(

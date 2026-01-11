@@ -799,6 +799,9 @@ extensions.
 
 ## Extension Marketplace
 
+Marketplace implementation details (HTTP endpoints, publish/download headers, caching) are documented in
+[`docs/marketplace.md`](./marketplace.md).
+
 ### Extension Discovery
 
 ```typescript

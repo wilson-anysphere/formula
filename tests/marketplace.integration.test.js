@@ -391,7 +391,7 @@ test("tampered marketplace download does not clobber an existing install", async
     tampered[Math.floor(tampered.length / 2)] ^= 0x01;
     await fs.writeFile(packagePath, tampered);
 
-    await assert.rejects(() => manager.update(extensionId), /signature|checksum|tar checksum/i);
+    await assert.rejects(() => manager.update(extensionId), /signature|checksum|sha256 mismatch|tar checksum/i);
 
     // The failed update should not have removed or partially overwritten the existing install.
     const installedAfter = await manager.getInstalled(extensionId);
@@ -408,7 +408,7 @@ test("tampered marketplace download does not clobber an existing install", async
   }
 });
 
-test("publish accepts v2 extension packages without signatureBase64", async () => {
+test("publish-bin accepts v2 extension packages without X-Package-Signature", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-v2-nosig-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");
 
@@ -450,15 +450,13 @@ test("publish accepts v2 extension packages without signatureBase64", async () =
 
     const packaged = await packageExtension(extSource, { privateKeyPem });
 
-    const publishRes = await fetch(`${baseUrl}/api/publish`, {
+    const publishRes = await fetch(`${baseUrl}/api/publish-bin`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${publisherToken}`,
-        "Content-Type": "application/json",
+        "Content-Type": "application/vnd.formula.extension-package",
       },
-      body: JSON.stringify({
-        packageBase64: packaged.packageBytes.toString("base64"),
-      }),
+      body: packaged.packageBytes,
     });
     assert.equal(publishRes.status, 200);
     const published = await publishRes.json();
@@ -537,6 +535,144 @@ test("publish accepts v1 extension packages with detached signatureBase64", asyn
 
     const downloadedBytes = Buffer.from(await downloadRes.arrayBuffer());
     assert.ok(verifyBytesSignature(downloadedBytes, downloadedSignature, publicKeyPem));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("desktop client rejects downloads when X-Package-Sha256 mismatches bytes", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-sha-mismatch-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server, store } = await createMarketplaceServer({ dataDir, adminToken, rateLimits: { downloadPerIpPerMinute: 0 } });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({ extensionDir: extSource, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath });
+
+    const bogusSha = "0".repeat(64);
+    await store.db.withTransaction((db) => {
+      db.run(`UPDATE extension_versions SET sha256 = ? WHERE extension_id = ? AND version = ?`, [
+        bogusSha,
+        extensionId,
+        manifest.version,
+      ]);
+    });
+
+    const client = new MarketplaceClient({ baseUrl });
+    await assert.rejects(() => client.downloadPackage(extensionId, manifest.version), /sha256 mismatch/i);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    store.close();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("marketplace responses include ETag and honor If-None-Match (304)", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-etag-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken, rateLimits: { downloadPerIpPerMinute: 0 } });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({ extensionDir: extSource, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath });
+
+    const extUrl = `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}`;
+    const extRes = await fetch(extUrl);
+    assert.equal(extRes.status, 200);
+    const extEtag = extRes.headers.get("etag");
+    assert.ok(extEtag);
+    await extRes.text();
+
+    const extRes304 = await fetch(extUrl, { headers: { "If-None-Match": extEtag } });
+    assert.equal(extRes304.status, 304);
+    assert.equal(extRes304.headers.get("etag"), extEtag);
+    assert.equal(await extRes304.text(), "");
+
+    const dlUrl = `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/download/${encodeURIComponent(manifest.version)}`;
+    const dlRes = await fetch(dlUrl);
+    assert.equal(dlRes.status, 200);
+    const pkgEtag = dlRes.headers.get("etag");
+    const pkgSha = dlRes.headers.get("x-package-sha256");
+    assert.ok(pkgEtag);
+    assert.ok(pkgSha);
+    await dlRes.arrayBuffer();
+
+    const dlRes304 = await fetch(dlUrl, { headers: { "If-None-Match": pkgEtag } });
+    assert.equal(dlRes304.status, 304);
+    assert.equal(dlRes304.headers.get("etag"), pkgEtag);
+    assert.equal(dlRes304.headers.get("x-package-sha256"), pkgSha);
+    assert.equal(await dlRes304.arrayBuffer().then((b) => b.byteLength), 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });

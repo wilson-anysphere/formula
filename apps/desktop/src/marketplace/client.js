@@ -1,7 +1,44 @@
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+function sha256Hex(bytes) {
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
+function safePathComponent(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+async function readJsonIfExists(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error && (error.code === "ENOENT" || error.code === "ENOTDIR")) return null;
+    throw error;
+  }
+}
+
+async function atomicWriteJson(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(value, null, 2));
+  await fs.rename(tmp, filePath);
+}
+
+async function atomicWriteFile(filePath, bytes) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp`;
+  await fs.writeFile(tmp, bytes);
+  await fs.rename(tmp, filePath);
+}
+
 export class MarketplaceClient {
-  constructor({ baseUrl }) {
+  constructor({ baseUrl, cacheDir = null }) {
     if (!baseUrl) throw new Error("baseUrl is required");
     this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.cacheDir = cacheDir ? path.resolve(cacheDir) : null;
   }
 
   async search({
@@ -40,16 +77,90 @@ export class MarketplaceClient {
 
   async downloadPackage(id, version) {
     const url = `${this.baseUrl}/api/extensions/${encodeURIComponent(id)}/download/${encodeURIComponent(version)}`;
-    const response = await fetch(url);
+
+    let cached = null;
+    let cachedBytes = null;
+    if (this.cacheDir) {
+      const safeId = safePathComponent(id);
+      const safeVersion = safePathComponent(version);
+      const cacheBase = path.join(this.cacheDir, "packages", safeId, safeVersion);
+      const indexPath = path.join(cacheBase, "index.json");
+      cached = await readJsonIfExists(indexPath);
+      if (cached?.sha256) {
+        const cachedPath = path.join(cacheBase, `${safePathComponent(cached.sha256)}.fextpkg`);
+        try {
+          cachedBytes = await fs.readFile(cachedPath);
+          const cachedSha = sha256Hex(cachedBytes);
+          if (cachedSha !== String(cached.sha256).toLowerCase()) {
+            cached = null;
+            cachedBytes = null;
+          }
+        } catch {
+          cached = null;
+          cachedBytes = null;
+        }
+      } else {
+        cached = null;
+        cachedBytes = null;
+      }
+    }
+
+    const headers = cached?.etag ? { "If-None-Match": cached.etag } : undefined;
+    let response = await fetch(url, { headers });
+    if (response.status === 404) return null;
+    if (response.status === 304) {
+      if (cached && cachedBytes) {
+        const headerSha = response.headers.get("x-package-sha256");
+        if (headerSha && String(headerSha).toLowerCase() !== String(cached.sha256).toLowerCase()) {
+          response = await fetch(url);
+        } else {
+          return {
+            bytes: Buffer.from(cachedBytes),
+            signatureBase64: cached.signatureBase64 || null,
+            sha256: cached.sha256,
+            formatVersion: Number(cached.formatVersion || 1),
+            publisher: cached.publisher || null,
+          };
+        }
+      } else {
+        response = await fetch(url);
+      }
+    }
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`Download failed (${response.status})`);
 
     const signatureBase64 = response.headers.get("x-package-signature");
     const sha256 = response.headers.get("x-package-sha256");
+    if (!sha256) {
+      throw new Error("Marketplace download missing x-package-sha256 (mandatory)");
+    }
+    const expectedSha = String(sha256).toLowerCase();
     const formatVersion = Number(response.headers.get("x-package-format-version") || "1");
     const publisher = response.headers.get("x-publisher");
     const bytes = Buffer.from(await response.arrayBuffer());
 
-    return { bytes, signatureBase64, sha256, formatVersion, publisher };
+    const computedSha = sha256Hex(bytes);
+    if (computedSha !== expectedSha) {
+      throw new Error(`Marketplace download sha256 mismatch: expected ${sha256} but got ${computedSha}`);
+    }
+
+    if (this.cacheDir) {
+      const safeId = safePathComponent(id);
+      const safeVersion = safePathComponent(version);
+      const cacheBase = path.join(this.cacheDir, "packages", safeId, safeVersion);
+      const etag = response.headers.get("etag");
+      const entry = {
+        sha256: computedSha,
+        etag: etag || null,
+        signatureBase64: signatureBase64 || null,
+        formatVersion,
+        publisher: publisher || null,
+      };
+      const bytesPath = path.join(cacheBase, `${safePathComponent(computedSha)}.fextpkg`);
+      await atomicWriteFile(bytesPath, bytes);
+      await atomicWriteJson(path.join(cacheBase, "index.json"), entry);
+    }
+
+    return { bytes, signatureBase64, sha256: expectedSha, formatVersion, publisher };
   }
 }

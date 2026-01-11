@@ -43,7 +43,7 @@ function validateManifest(manifest) {
   return true;
 }
 
-async function packageExtension(extensionDir, { privateKeyPem } = {}) {
+async function packageExtension(extensionDir, { privateKeyPem, formatVersion = 2 } = {}) {
   const manifest = await loadExtensionManifest(extensionDir);
   validateManifest(manifest);
 
@@ -80,14 +80,20 @@ async function packageExtension(extensionDir, { privateKeyPem } = {}) {
   }
 
   const packageBytes = await createExtensionPackage(extensionDir, {
-    formatVersion: 2,
-    privateKeyPem,
+    formatVersion,
+    privateKeyPem: formatVersion === 2 ? privateKeyPem : undefined,
   });
 
-  const parsed = readExtensionPackage(packageBytes);
-  const signatureBase64 = parsed?.signature?.signatureBase64 || null;
+  let signatureBase64 = null;
+  if (formatVersion === 1) {
+    if (!privateKeyPem) throw new Error("privateKeyPem is required to sign v1 extension packages");
+    signatureBase64 = signBytes(packageBytes, privateKeyPem);
+  } else {
+    const parsed = readExtensionPackage(packageBytes);
+    signatureBase64 = parsed?.signature?.signatureBase64 || null;
+  }
 
-  return { manifest, packageBytes, signatureBase64 };
+  return { manifest, packageBytes, signatureBase64, formatVersion };
 }
 
 async function signExtensionPackage(packageBytes, privateKeyPemOrPath) {
@@ -98,7 +104,7 @@ async function signExtensionPackage(packageBytes, privateKeyPemOrPath) {
   return signBytes(packageBytes, privateKeyPem);
 }
 
-async function publishExtension({ extensionDir, marketplaceUrl, token, privateKeyPemOrPath }) {
+async function publishExtension({ extensionDir, marketplaceUrl, token, privateKeyPemOrPath, formatVersion = 2 }) {
   if (!extensionDir) throw new Error("extensionDir is required");
   if (!marketplaceUrl) throw new Error("marketplaceUrl is required");
   if (!token) throw new Error("token is required");
@@ -109,19 +115,33 @@ async function publishExtension({ extensionDir, marketplaceUrl, token, privateKe
     privateKeyPem = await fs.readFile(privateKeyPemOrPath, "utf8");
   }
 
-  const { manifest, packageBytes, signatureBase64 } = await packageExtension(extensionDir, { privateKeyPem });
+  const { manifest, packageBytes, signatureBase64 } = await packageExtension(extensionDir, { privateKeyPem, formatVersion });
 
-  const response = await fetch(`${marketplaceUrl.replace(/\/$/, "")}/api/publish`, {
+  const base = marketplaceUrl.replace(/\/$/, "");
+  let response = await fetch(`${base}/api/publish-bin`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+      "Content-Type": "application/vnd.formula.extension-package",
+      ...(formatVersion === 1 ? { "X-Package-Signature": signatureBase64 } : {}),
     },
-    body: JSON.stringify({
-      packageBase64: packageBytes.toString("base64"),
-      signatureBase64,
-    }),
+    body: packageBytes,
   });
+
+  if (response.status === 404) {
+    // Backward compatibility: older marketplace servers only support JSON+base64 publishing.
+    response = await fetch(`${base}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packageBytes.toString("base64"),
+        ...(formatVersion === 1 ? { signatureBase64 } : {}),
+      }),
+    });
+  }
 
   if (!response.ok) {
     const text = await response.text();

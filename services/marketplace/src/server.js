@@ -10,20 +10,22 @@ class HttpError extends Error {
   }
 }
 
-function sendJson(res, statusCode, body) {
+function sendJson(res, statusCode, body, extraHeaders = {}) {
   const bytes = Buffer.from(JSON.stringify(body, null, 2));
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": bytes.length,
+    ...extraHeaders,
   });
   res.end(bytes);
 }
 
-function sendText(res, statusCode, text) {
+function sendText(res, statusCode, text, extraHeaders = {}) {
   const bytes = Buffer.from(String(text));
   res.writeHead(statusCode, {
     "Content-Type": "text/plain; charset=utf-8",
     "Content-Length": bytes.length,
+    ...extraHeaders,
   });
   res.end(bytes);
 }
@@ -47,6 +49,21 @@ async function readJsonBody(req, { limitBytes = 5 * 1024 * 1024 } = {}) {
   return JSON.parse(raw);
 }
 
+async function readBinaryBody(req, { limitBytes = 20 * 1024 * 1024 } = {}) {
+  const chunks = [];
+  let size = 0;
+  const hash = crypto.createHash("sha256");
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limitBytes) {
+      throw new Error("Request body too large");
+    }
+    hash.update(chunk);
+    chunks.push(chunk);
+  }
+  return { bytes: Buffer.concat(chunks), sha256: hash.digest("hex") };
+}
+
 function getBearerToken(req) {
   const auth = req.headers.authorization;
   if (!auth) return null;
@@ -56,6 +73,29 @@ function getBearerToken(req) {
 
 function sha256Hex(input) {
   return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+function normalizeEtag(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  let tag = raw;
+  if (tag.startsWith("W/")) tag = tag.slice(2).trim();
+  if (tag.startsWith('"') && tag.endsWith('"')) tag = tag.slice(1, -1);
+  return tag;
+}
+
+function etagMatches(ifNoneMatch, etag) {
+  if (!ifNoneMatch || !etag) return false;
+  const target = normalizeEtag(etag);
+  if (!target) return false;
+  return String(ifNoneMatch)
+    .split(",")
+    .map((part) => part.trim())
+    .some((part) => {
+      if (!part) return false;
+      if (part === "*") return true;
+      return normalizeEtag(part) === target;
+    });
 }
 
 function parsePath(pathname) {
@@ -265,8 +305,15 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           statusCode = 404;
           return sendJson(res, 404, { error: "Not found" });
         }
+        const etag = `"${sha256Hex(`${ext.id}|${ext.updatedAt || ""}`)}"`;
+        if (etagMatches(req.headers["if-none-match"], etag)) {
+          statusCode = 304;
+          res.writeHead(304, { ETag: etag });
+          res.end();
+          return;
+        }
         statusCode = 200;
-        return sendJson(res, 200, ext);
+        return sendJson(res, 200, ext, { ETag: etag });
       }
 
       if (
@@ -293,10 +340,25 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           return sendJson(res, 404, { error: "Not found" });
         }
 
+        const etag = `"${pkg.sha256}"`;
+        if (etagMatches(req.headers["if-none-match"], etag)) {
+          statusCode = 304;
+          res.writeHead(304, {
+            ETag: etag,
+            "X-Package-Signature": pkg.signatureBase64,
+            "X-Package-Sha256": pkg.sha256,
+            "X-Package-Format-Version": String(pkg.formatVersion ?? 1),
+            "X-Publisher": pkg.publisher,
+          });
+          res.end();
+          return;
+        }
+
         statusCode = 200;
         res.writeHead(200, {
           "Content-Type": "application/vnd.formula.extension-package",
           "Content-Length": pkg.bytes.length,
+          ETag: etag,
           "X-Package-Signature": pkg.signatureBase64,
           "X-Package-Sha256": pkg.sha256,
           "X-Package-Format-Version": String(pkg.formatVersion ?? 1),
@@ -304,6 +366,61 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         });
         res.end(pkg.bytes);
         return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/publish-bin") {
+        route = "/api/publish-bin";
+        const token = getBearerToken(req);
+        if (!token) {
+          statusCode = 401;
+          return sendJson(res, 401, { error: "Missing Authorization token" });
+        }
+
+        const tokenSha = sha256Hex(token);
+        const publisherRecord = await store.getPublisherByTokenSha256(tokenSha);
+        if (!publisherRecord) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Invalid token" });
+        }
+
+        const publisherRate = publishLimiter.take(tokenSha);
+        if (!publisherRate.ok) {
+          metrics.rateLimited += 1;
+          res.setHeader("Retry-After", String(Math.ceil(publisherRate.retryAfterMs / 1000)));
+          statusCode = 429;
+          return sendJson(res, 429, { error: "Too Many Requests" });
+        }
+
+        const contentType = String(req.headers["content-type"] || "").toLowerCase();
+        if (!contentType.startsWith("application/vnd.formula.extension-package")) {
+          statusCode = 415;
+          return sendJson(res, 415, {
+            error: "Unsupported Content-Type (expected application/vnd.formula.extension-package)",
+          });
+        }
+
+        const { bytes: packageBytes } = await readBinaryBody(req, { limitBytes: 20 * 1024 * 1024 });
+        const isV1 = packageBytes.length >= 2 && packageBytes[0] === 0x1f && packageBytes[1] === 0x8b;
+        const signatureHeader = req.headers["x-package-signature"];
+        const signatureBase64 =
+          typeof signatureHeader === "string"
+            ? signatureHeader
+            : Array.isArray(signatureHeader)
+              ? signatureHeader[0] || null
+              : null;
+        if (isV1 && !signatureBase64) {
+          statusCode = 400;
+          return sendJson(res, 400, { error: "X-Package-Signature is required for v1 packages" });
+        }
+
+        const published = await store.publishExtension({
+          publisher: publisherRecord.publisher,
+          packageBytes,
+          signatureBase64,
+        });
+
+        statusCode = 200;
+        return sendJson(res, 200, published);
       }
 
       if (req.method === "POST" && url.pathname === "/api/publish") {
