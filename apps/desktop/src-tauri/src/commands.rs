@@ -554,12 +554,15 @@ pub async fn save_workbook(
     path: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
-    let (save_path, workbook, storage, workbook_id, autosave) = {
+    let (save_path, workbook, storage, memory, workbook_id, autosave) = {
         let state = state.inner().lock().unwrap();
         let workbook = state.get_workbook().map_err(app_error)?.clone();
         let storage = state
             .persistent_storage()
             .ok_or_else(|| "no persistent storage available".to_string())?;
+        let memory = state
+            .persistent_memory_manager()
+            .ok_or_else(|| "no memory manager available".to_string())?;
         let workbook_id = state
             .persistent_workbook_id()
             .ok_or_else(|| "no persistent workbook id available".to_string())?;
@@ -568,13 +571,17 @@ pub async fn save_workbook(
             .clone()
             .or_else(|| workbook.path.clone())
             .ok_or_else(|| "no save path provided".to_string())?;
-        (save_path, workbook, storage, workbook_id, autosave)
+        (save_path, workbook, storage, memory, workbook_id, autosave)
     };
 
     let save_path = coerce_save_path_to_xlsx(&save_path);
 
     if let Some(autosave) = autosave.as_ref() {
         autosave.flush().await.map_err(|e| e.to_string())?;
+    } else {
+        memory
+            .flush_dirty_pages()
+            .map_err(|e| e.to_string())?;
     }
 
     let save_path_clone = save_path.clone();

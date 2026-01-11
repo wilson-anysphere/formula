@@ -586,6 +586,10 @@ impl AppState {
         self.persistent.as_ref().map(|p| p.storage.clone())
     }
 
+    pub fn persistent_memory_manager(&self) -> Option<formula_storage::MemoryManager> {
+        self.persistent.as_ref().map(|p| p.memory.clone())
+    }
+
     pub fn mark_saved(
         &mut self,
         new_path: Option<String>,
