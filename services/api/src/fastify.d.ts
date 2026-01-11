@@ -18,5 +18,6 @@ declare module "fastify" {
     apiKey?: ApiKeyInfo;
     authMethod?: "session" | "api_key";
     authOrgId?: string;
+    scim?: { orgId: string };
   }
 }

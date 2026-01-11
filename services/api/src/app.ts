@@ -14,6 +14,8 @@ import { registerDocRoutes } from "./routes/docs";
 import { registerDlpRoutes } from "./routes/dlp";
 import { registerInternalRoutes } from "./routes/internal";
 import { registerOrgRoutes } from "./routes/orgs";
+import { registerScimAdminRoutes } from "./routes/scimAdmin";
+import { registerScimRoutes } from "./routes/scim";
 import { registerSiemRoutes } from "./routes/siem";
 
 export interface BuildAppOptions {
@@ -70,6 +72,8 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerAuthRoutes(app);
   registerOrgRoutes(app);
   registerApiKeyRoutes(app);
+  registerScimAdminRoutes(app);
+  registerScimRoutes(app);
   registerDocRoutes(app);
   registerDlpRoutes(app);
   registerAuditRoutes(app);
