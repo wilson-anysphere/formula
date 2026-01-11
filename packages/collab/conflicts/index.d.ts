@@ -30,3 +30,36 @@ export class FormulaConflictMonitor {
   resolveConflict(conflictId: string, chosenFormula: string): boolean;
 }
 
+export interface CellStructuralConflict {
+  id: string;
+  type: "move" | "cell";
+  reason: "move-destination" | "delete-vs-edit" | "content" | "format";
+  sheetId: string;
+  cell: string;
+  cellKey: string;
+  local: any;
+  remote: any;
+  remoteUserId: string;
+  detectedAt: number;
+}
+
+export type CellStructuralConflictResolution = {
+  choice: "ours" | "theirs" | "manual";
+  to?: string;
+  cell?: { value?: unknown; formula?: string; format?: Record<string, unknown> | null } | null;
+};
+
+export class CellStructuralConflictMonitor {
+  constructor(opts: {
+    doc: Y.Doc;
+    localUserId: string;
+    cells?: Y.Map<any>;
+    origin?: any;
+    localOrigins?: Set<any>;
+    onConflict: (conflict: CellStructuralConflict) => void;
+  });
+
+  dispose(): void;
+  listConflicts(): Array<CellStructuralConflict>;
+  resolveConflict(conflictId: string, resolution: CellStructuralConflictResolution): boolean;
+}

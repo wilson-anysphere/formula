@@ -2,7 +2,12 @@ import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
-import { FormulaConflictMonitor, type FormulaConflict } from "@formula/collab-conflicts";
+import {
+  CellStructuralConflictMonitor,
+  FormulaConflictMonitor,
+  type CellStructuralConflict,
+  type FormulaConflict,
+} from "@formula/collab-conflicts";
 import { ensureWorkbookSchema } from "@formula/collab-workbook";
 import {
   decryptCellPlaintext,
@@ -125,6 +130,14 @@ export interface CollabSessionOptions {
     concurrencyWindowMs?: number;
   };
   /**
+   * When enabled, the session monitors structural operations (moves / deletes)
+   * for true offline conflicts and surfaces them via `onConflict`.
+   */
+  cellConflicts?: {
+    localUserId: string;
+    onConflict: (conflict: CellStructuralConflict) => void;
+  };
+  /**
    * Optional end-to-end encryption configuration for protecting specific cells.
    *
    * When enabled, cell values/formulas are encrypted *before* they are written
@@ -219,6 +232,10 @@ export class CollabSession {
    * Formula conflict monitor. Only present when `options.formulaConflicts` is provided.
    */
   readonly formulaConflictMonitor: FormulaConflictMonitor | null;
+  /**
+   * Structural cell conflict monitor. Only present when `options.cellConflicts` is provided.
+   */
+  readonly cellConflictMonitor: CellStructuralConflictMonitor | null;
 
   private permissions: SessionPermissions | null = null;
   private readonly defaultSheetId: string;
@@ -276,6 +293,7 @@ export class CollabSession {
     this.localOrigins = new Set([this.origin]);
     this.undo = null;
     this.formulaConflictMonitor = null;
+    this.cellConflictMonitor = null;
 
     if (schemaAutoInit) {
       const initSchema = () => {
@@ -345,6 +363,17 @@ export class CollabSession {
       });
     }
 
+    if (options.cellConflicts) {
+      this.cellConflictMonitor = new CellStructuralConflictMonitor({
+        doc: this.doc,
+        cells: this.cells,
+        localUserId: options.cellConflicts.localUserId,
+        origin: this.origin,
+        localOrigins: this.localOrigins,
+        onConflict: options.cellConflicts.onConflict,
+      });
+    }
+
     if (options.presence) {
       if (!this.awareness) {
         throw new Error("CollabSession presence requires an awareness instance (options.awareness or provider.awareness)");
@@ -357,6 +386,7 @@ export class CollabSession {
 
   destroy(): void {
     this.formulaConflictMonitor?.dispose();
+    this.cellConflictMonitor?.dispose();
     this.presence?.destroy();
     this.provider?.destroy?.();
   }
