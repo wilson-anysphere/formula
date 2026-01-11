@@ -145,17 +145,24 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ]);
       };
 
-      const runner: AIChatPanelSendMessage = props.sendMessage
-        ? props.sendMessage
-        : async ({ messages, onToolCall, onToolResult }: AIChatPanelSendMessageArgs) =>
-            runChatWithTools({
-              client: props.client,
-              toolExecutor: props.toolExecutor,
-              messages,
-              onToolCall,
-              onToolResult,
-              requireApproval: props.onRequestToolApproval ?? (async () => true),
-            });
+      // NOTE: `props` is a discriminated union. Keep narrowing outside of closures
+      // so TypeScript doesn't lose the refinement when capturing variables.
+      let runner: AIChatPanelSendMessage;
+      if (props.sendMessage) {
+        runner = props.sendMessage;
+      } else {
+        const { client, toolExecutor } = props;
+        const requireApproval = props.onRequestToolApproval ?? (async () => true);
+        runner = async ({ messages, onToolCall, onToolResult }: AIChatPanelSendMessageArgs) =>
+          runChatWithTools({
+            client,
+            toolExecutor,
+            messages,
+            onToolCall,
+            onToolResult,
+            requireApproval,
+          });
+      }
 
       const result = await runner({
         messages: requestMessages,
