@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::io::{Cursor, Write};
 use std::path::Path;
 
 use formula_model::{CellRef, CellValue};
@@ -40,6 +41,45 @@ fn worksheet_dimension_ref(sheet_xml: &[u8]) -> Result<String, Box<dyn std::erro
         .and_then(|n| n.attribute("ref"))
         .unwrap_or("A1")
         .to_string())
+}
+
+fn build_sheetpr_no_dimension_fixture() -> Vec<u8> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr/>
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
 }
 
 #[test]
@@ -218,6 +258,88 @@ fn apply_cell_patches_drops_calc_chain_when_formulas_change(
         "patched <f> text must not include a leading '=' (got {formula:?})"
     );
     assert_eq!(formula, "1+1");
+
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_inserts_dimension_and_updates_row_spans(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/row-col-attrs.xlsx");
+    let bytes = std::fs::read(&fixture)?;
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("C1")?,
+        CellPatch::set_value(CellValue::Number(42.0)),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let sheet_xml = pkg
+        .part("xl/worksheets/sheet1.xml")
+        .expect("worksheet part exists");
+    assert_eq!(worksheet_dimension_ref(sheet_xml)?, "A1:C3");
+
+    let xml = std::str::from_utf8(sheet_xml)?;
+    let doc = roxmltree::Document::parse(xml)?;
+    let row1 = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("1"))
+        .expect("row r=1 exists");
+    assert_eq!(row1.attribute("spans"), Some("1:3"));
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("B4")?,
+        CellPatch::set_value(CellValue::Number(4.0)),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let sheet_xml = pkg
+        .part("xl/worksheets/sheet1.xml")
+        .expect("worksheet part exists");
+    let xml = std::str::from_utf8(sheet_xml)?;
+    let doc = roxmltree::Document::parse(xml)?;
+    let row4 = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("4"))
+        .expect("row r=4 should be inserted");
+    assert_eq!(row4.attribute("spans"), Some("2:2"));
+
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_inserts_dimension_after_sheetpr_when_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_sheetpr_no_dimension_fixture();
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("B2")?,
+        CellPatch::set_value(CellValue::Number(2.0)),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let sheet_xml = pkg
+        .part("xl/worksheets/sheet1.xml")
+        .expect("worksheet part exists");
+    assert_eq!(worksheet_dimension_ref(sheet_xml)?, "A1:B2");
+
+    let xml = std::str::from_utf8(sheet_xml)?;
+    let pos_sheet_pr = xml.find("<sheetPr").expect("sheetPr exists");
+    let pos_dimension = xml.find("<dimension").expect("dimension inserted");
+    let pos_sheet_data = xml.find("<sheetData").expect("sheetData exists");
+    assert!(
+        pos_sheet_pr < pos_dimension && pos_dimension < pos_sheet_data,
+        "expected dimension to be inserted after sheetPr and before sheetData: {xml}"
+    );
 
     Ok(())
 }

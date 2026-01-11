@@ -511,12 +511,120 @@ fn collect_style_id_overrides(patches: &WorkbookCellPatches) -> Vec<u32> {
     out
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct WorksheetXmlScan {
+    has_dimension: bool,
+    has_sheet_pr: bool,
+    sheet_uses_row_spans: bool,
+    /// Best-effort used-range bounds derived from `c/@r` inside `<sheetData>`.
+    existing_used_range: Option<(u32, u32, u32, u32)>,
+}
+
+fn scan_worksheet_xml(original: &[u8]) -> Result<WorksheetXmlScan, XlsxError> {
+    let mut reader = Reader::from_reader(original);
+    reader.config_mut().trim_text(true);
+
+    let mut scan = WorksheetXmlScan::default();
+    let mut in_sheet_data = false;
+    let mut buf = Vec::new();
+
+    let mut min_row = u32::MAX;
+    let mut min_col = u32::MAX;
+    let mut max_row = 0u32;
+    let mut max_col = 0u32;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) => match local_name(e.name().as_ref()) {
+                b"dimension" => scan.has_dimension = true,
+                b"sheetPr" => scan.has_sheet_pr = true,
+                b"sheetData" => in_sheet_data = true,
+                b"row" if in_sheet_data => {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if local_name(attr.key.as_ref()) == b"spans" {
+                            scan.sheet_uses_row_spans = true;
+                            break;
+                        }
+                    }
+                }
+                b"c" if in_sheet_data => {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if local_name(attr.key.as_ref()) != b"r" {
+                            continue;
+                        }
+                        let a1 = attr.unescape_value()?.into_owned();
+                        if let Ok(cell_ref) = CellRef::from_a1(&a1) {
+                            let row_1 = cell_ref.row + 1;
+                            let col_1 = cell_ref.col + 1;
+                            min_row = min_row.min(row_1);
+                            min_col = min_col.min(col_1);
+                            max_row = max_row.max(row_1);
+                            max_col = max_col.max(col_1);
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            },
+            Event::Empty(e) => match local_name(e.name().as_ref()) {
+                b"dimension" => scan.has_dimension = true,
+                b"sheetPr" => scan.has_sheet_pr = true,
+                // `<sheetData/>` has no children.
+                b"row" if in_sheet_data => {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if local_name(attr.key.as_ref()) == b"spans" {
+                            scan.sheet_uses_row_spans = true;
+                            break;
+                        }
+                    }
+                }
+                b"c" if in_sheet_data => {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if local_name(attr.key.as_ref()) != b"r" {
+                            continue;
+                        }
+                        let a1 = attr.unescape_value()?.into_owned();
+                        if let Ok(cell_ref) = CellRef::from_a1(&a1) {
+                            let row_1 = cell_ref.row + 1;
+                            let col_1 = cell_ref.col + 1;
+                            min_row = min_row.min(row_1);
+                            min_col = min_col.min(col_1);
+                            max_row = max_row.max(row_1);
+                            max_col = max_col.max(col_1);
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            },
+            Event::End(e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                in_sheet_data = false;
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if min_row != u32::MAX {
+        scan.existing_used_range = Some((min_row, min_col, max_row, max_col));
+    }
+
+    Ok(scan)
+}
+
 fn patch_worksheet_xml(
     original: &[u8],
     patches: &WorksheetCellPatches,
     mut shared_strings: Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<(Vec<u8>, bool), XlsxError> {
+    let scan = scan_worksheet_xml(original)?;
+
     // Track whether any formulas actually changed (added/removed/updated) so we can apply the
     // workbook recalculation policy. This is computed while patching so no-op patches don't churn
     // calc state.
@@ -527,6 +635,25 @@ fn patch_worksheet_xml(
     //
     // We don't shrink dimensions (clears), mirroring Excel's typical behavior.
     let patch_bounds = patch_bounds(patches);
+
+    let dimension_ref_to_insert = (!scan.has_dimension).then(|| {
+        let merged = match (scan.existing_used_range, patch_bounds) {
+            (Some((min_r, min_c, max_r, max_c)), Some((p_min_r, p_min_c, p_max_r, p_max_c))) => {
+                Some((
+                    min_r.min(p_min_r),
+                    min_c.min(p_min_c),
+                    max_r.max(p_max_r),
+                    max_c.max(p_max_c),
+                ))
+            }
+            (Some(existing), None) => Some(existing),
+            (None, Some(patch)) => Some(patch),
+            (None, None) => None,
+        };
+        merged
+            .map(|(min_r, min_c, max_r, max_c)| format_dimension(min_r, min_c, max_r, max_c))
+            .unwrap_or_else(|| "A1".to_string())
+    });
 
     let row_patches = patches.by_row();
     let mut remaining_patch_rows: Vec<u32> = row_patches.keys().copied().collect();
@@ -542,6 +669,7 @@ fn patch_worksheet_xml(
     let mut worksheet_prefix: Option<String> = None;
     let mut worksheet_has_default_ns = false;
     let mut saw_sheet_data = false;
+    let mut inserted_dimension = false;
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if local_name(e.name().as_ref()) == b"worksheet" => {
@@ -552,6 +680,55 @@ fn patch_worksheet_xml(
                     worksheet_has_default_ns = worksheet_has_default_spreadsheetml_ns(&e)?;
                 }
                 writer.write_event(Event::Start(e.into_owned()))?;
+
+                if !inserted_dimension && !scan.has_sheet_pr {
+                    if let Some(ref_str) = dimension_ref_to_insert.as_deref() {
+                        let dim_prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        let dim_tag = prefixed_tag(dim_prefix, "dimension");
+                        let mut dim = BytesStart::new(dim_tag.as_str());
+                        dim.push_attribute(("ref", ref_str));
+                        writer.write_event(Event::Empty(dim))?;
+                        inserted_dimension = true;
+                    }
+                }
+            }
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetPr" => {
+                writer.write_event(Event::Empty(e.into_owned()))?;
+                if !inserted_dimension && scan.has_sheet_pr {
+                    if let Some(ref_str) = dimension_ref_to_insert.as_deref() {
+                        let dim_prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        let dim_tag = prefixed_tag(dim_prefix, "dimension");
+                        let mut dim = BytesStart::new(dim_tag.as_str());
+                        dim.push_attribute(("ref", ref_str));
+                        writer.write_event(Event::Empty(dim))?;
+                        inserted_dimension = true;
+                    }
+                }
+            }
+            Event::End(e) if local_name(e.name().as_ref()) == b"sheetPr" => {
+                writer.write_event(Event::End(e.into_owned()))?;
+                if !inserted_dimension && scan.has_sheet_pr {
+                    if let Some(ref_str) = dimension_ref_to_insert.as_deref() {
+                        let dim_prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        let dim_tag = prefixed_tag(dim_prefix, "dimension");
+                        let mut dim = BytesStart::new(dim_tag.as_str());
+                        dim.push_attribute(("ref", ref_str));
+                        writer.write_event(Event::Empty(dim))?;
+                        inserted_dimension = true;
+                    }
+                }
             }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"dimension" => {
                 if let Some(bounds) = patch_bounds {
@@ -579,6 +756,7 @@ fn patch_worksheet_xml(
                     &row_patches,
                     &mut remaining_patch_rows,
                     &mut patch_row_idx,
+                    scan.sheet_uses_row_spans,
                     &mut shared_strings,
                     style_id_to_xf,
                     sheet_prefix.as_deref(),
@@ -603,6 +781,7 @@ fn patch_worksheet_xml(
                             &mut writer,
                             row,
                             cells,
+                            scan.sheet_uses_row_spans,
                             &mut shared_strings,
                             style_id_to_xf,
                             sheet_prefix.as_deref(),
@@ -629,6 +808,7 @@ fn patch_worksheet_xml(
                             &mut writer,
                             row,
                             cells,
+                            scan.sheet_uses_row_spans,
                             &mut shared_strings,
                             style_id_to_xf,
                             sheet_prefix,
@@ -654,6 +834,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
     row_patches: &BTreeMap<u32, Vec<(u32, &CellPatch)>>,
     remaining_patch_rows: &mut [u32],
     patch_row_idx: &mut usize,
+    sheet_uses_row_spans: bool,
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     sheet_prefix: Option<&str>,
@@ -676,7 +857,15 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
                     formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
-                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf, sheet_prefix)?;
+                    write_new_row(
+                        writer,
+                        row,
+                        cells,
+                        sheet_uses_row_spans,
+                        shared_strings,
+                        style_id_to_xf,
+                        sheet_prefix,
+                    )?;
                     *patch_row_idx += 1;
                 }
 
@@ -693,7 +882,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         .map(|s| s.to_string());
                     let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix);
 
-                    writer.write_event(Event::Start(row_start.clone()))?;
+                    writer.write_event(Event::Start(rewrite_row_spans(&row_start, cells)?))?;
                     let changed = patch_row(
                         reader,
                         writer,
@@ -722,7 +911,15 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
                     formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
-                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf, sheet_prefix)?;
+                    write_new_row(
+                        writer,
+                        row,
+                        cells,
+                        sheet_uses_row_spans,
+                        shared_strings,
+                        style_id_to_xf,
+                        sheet_prefix,
+                    )?;
                     *patch_row_idx += 1;
                 }
 
@@ -739,7 +936,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         .and_then(|p| std::str::from_utf8(p).ok())
                         .map(|s| s.to_string());
                     let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix);
-                    writer.write_event(Event::Start(row_empty.clone()))?;
+                    writer.write_event(Event::Start(rewrite_row_spans(&row_empty, cells)?))?;
                     for (col, patch) in cells {
                         formula_changed |= patch_has_formula(patch);
                         write_cell_patch(
@@ -765,7 +962,15 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
                     formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
-                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf, sheet_prefix)?;
+                    write_new_row(
+                        writer,
+                        row,
+                        cells,
+                        sheet_uses_row_spans,
+                        shared_strings,
+                        style_id_to_xf,
+                        sheet_prefix,
+                    )?;
                     *patch_row_idx += 1;
                 }
                 writer.write_event(Event::End(e.into_owned()))?;
@@ -782,6 +987,66 @@ fn patch_sheet_data<R: std::io::BufRead>(
     }
 
     Ok(formula_changed)
+}
+
+fn patch_cols_bounds(patches: &[(u32, &CellPatch)]) -> Option<(u32, u32)> {
+    let mut min_c = u32::MAX;
+    let mut max_c = 0u32;
+    for (col_0, _) in patches {
+        let col_1 = col_0.saturating_add(1);
+        min_c = min_c.min(col_1);
+        max_c = max_c.max(col_1);
+    }
+    (min_c != u32::MAX).then_some((min_c, max_c))
+}
+
+fn parse_row_spans(spans: &str) -> Option<(u32, u32)> {
+    let s = spans.trim();
+    let (a, b) = s.split_once(':').unwrap_or((s, s));
+    let min = a.parse::<u32>().ok()?;
+    let max = b.parse::<u32>().ok()?;
+    Some((min, max))
+}
+
+fn rewrite_row_spans(
+    row: &BytesStart<'_>,
+    patches: &[(u32, &CellPatch)],
+) -> Result<BytesStart<'static>, XlsxError> {
+    let Some((p_min_c, p_max_c)) = patch_cols_bounds(patches) else {
+        return Ok(row.to_owned());
+    };
+
+    let mut existing_spans: Option<(u32, u32)> = None;
+    for attr in row.attributes() {
+        let attr = attr?;
+        if local_name(attr.key.as_ref()) == b"spans" {
+            existing_spans = parse_row_spans(&attr.unescape_value()?.into_owned());
+            break;
+        }
+    }
+    let Some((min_c, max_c)) = existing_spans else {
+        return Ok(row.to_owned());
+    };
+
+    let new_min = min_c.min(p_min_c);
+    let new_max = max_c.max(p_max_c);
+    if new_min == min_c && new_max == max_c {
+        return Ok(row.to_owned());
+    }
+
+    let new_spans = format!("{new_min}:{new_max}");
+    let name = row.name();
+    let name = std::str::from_utf8(name.as_ref()).unwrap_or("row");
+    let mut updated = BytesStart::new(name);
+    for attr in row.attributes() {
+        let attr = attr?;
+        if local_name(attr.key.as_ref()) == b"spans" {
+            updated.push_attribute((attr.key.as_ref(), new_spans.as_bytes()));
+        } else {
+            updated.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+        }
+    }
+    Ok(updated.into_owned())
 }
 
 fn patch_row<R: std::io::BufRead>(
@@ -1044,13 +1309,23 @@ fn write_new_row(
     writer: &mut Writer<Vec<u8>>,
     row_num: u32,
     patches: &[(u32, &CellPatch)],
+    sheet_uses_row_spans: bool,
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
     let row_tag = prefixed_tag(prefix, "row");
     let mut row = BytesStart::new(row_tag.as_str());
-    row.push_attribute(("r", row_num.to_string().as_str()));
+    let row_num_str = row_num.to_string();
+    row.push_attribute(("r", row_num_str.as_str()));
+
+    let spans_str = sheet_uses_row_spans
+        .then(|| patch_cols_bounds(patches))
+        .flatten()
+        .map(|(min_c, max_c)| format!("{min_c}:{max_c}"));
+    if let Some(spans_str) = &spans_str {
+        row.push_attribute(("spans", spans_str.as_str()));
+    }
     writer.write_event(Event::Start(row))?;
     for (col, patch) in patches {
         write_cell_patch(
