@@ -223,17 +223,18 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             ))),
         }
 
-        if let (Some(sheet_offsets), Some(mask)) = (sheet_offsets.as_ref(), xf_has_number_format.as_deref()) {
+        if let (Some(sheet_offsets), Some(mask)) =
+            (sheet_offsets.as_ref(), xf_has_number_format.as_deref())
+        {
             if mask.iter().any(|v| *v) {
                 let mut out_map = HashMap::new();
-                let mut err = None;
 
                 for (sheet_name, offset) in sheet_offsets {
                     if *offset >= workbook_stream.len() {
-                        err = Some(format!(
-                            "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
-                        ));
-                        break;
+                        warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` cell styles for sheet `{sheet_name}`: out-of-bounds stream offset {offset}"
+                        )));
+                        continue;
                     }
 
                     match biff::parse_biff_sheet_cell_xf_indices_filtered(
@@ -242,20 +243,17 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         Some(mask),
                     ) {
                         Ok(xfs) => {
-                            out_map.insert(sheet_name.clone(), xfs);
+                            if !xfs.is_empty() {
+                                out_map.insert(sheet_name.clone(), xfs);
+                            }
                         }
-                        Err(parse_err) => {
-                            err = Some(parse_err);
-                            break;
-                        }
+                        Err(parse_err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` cell styles for sheet `{sheet_name}`: {parse_err}"
+                        ))),
                     }
                 }
 
-                if let Some(err) = err {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` cell styles: {err}"
-                    )));
-                } else {
+                if !out_map.is_empty() {
                     cell_xf_indices = Some(out_map);
                 }
             }
@@ -264,42 +262,34 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     let date_time_styles = DateTimeStyleIds::new(&mut out);
 
-    let row_col_props = if let (Some(workbook_stream), Some(sheet_offsets)) =
-        (workbook_stream.as_deref(), sheet_offsets.as_ref())
-    {
-        let mut out_map = HashMap::new();
-        let mut err = None;
-
-        for (sheet_name, offset) in sheet_offsets {
-            if *offset >= workbook_stream.len() {
-                err = Some(format!(
-                    "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
-                ));
-                break;
-            }
-
-            match biff::parse_biff_sheet_row_col_properties(workbook_stream, *offset) {
-                Ok(props) => {
-                    out_map.insert(sheet_name.clone(), props);
+    let row_col_props =
+        if let (Some(workbook_stream), Some(sheet_offsets)) =
+            (workbook_stream.as_deref(), sheet_offsets.as_ref())
+        {
+            let mut out_map = HashMap::new();
+            for (sheet_name, offset) in sheet_offsets {
+                if *offset >= workbook_stream.len() {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` row/column properties for sheet `{sheet_name}`: out-of-bounds stream offset {offset}"
+                    )));
+                    continue;
                 }
-                Err(parse_err) => {
-                    err = Some(parse_err);
-                    break;
+
+                match biff::parse_biff_sheet_row_col_properties(workbook_stream, *offset) {
+                    Ok(props) => {
+                        if !props.rows.is_empty() || !props.cols.is_empty() {
+                            out_map.insert(sheet_name.clone(), props);
+                        }
+                    }
+                    Err(parse_err) => warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` row/column properties for sheet `{sheet_name}`: {parse_err}"
+                    ))),
                 }
             }
-        }
-
-        if let Some(err) = err {
-            warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` row/column properties: {err}"
-            )));
-            HashMap::new()
-        } else {
             out_map
-        }
-    } else {
-        HashMap::new()
-    };
+        } else {
+            HashMap::new()
+        };
 
     for sheet_meta in sheets {
         let sheet_name = sheet_meta.name.clone();
