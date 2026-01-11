@@ -153,6 +153,30 @@ test.describe("grid scrolling + virtualization", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
   });
 
+  test("scrollbar thumb drag scrolls without changing the selection", async ({ page }) => {
+    await page.goto("/");
+    const grid = page.locator("#grid");
+
+    await grid.click({ position: { x: 60, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(scrollBefore).toBe(0);
+
+    const thumb = page.getByTestId("scrollbar-thumb-y");
+    const box = await thumb.boundingBox();
+    expect(box).toBeTruthy();
+
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2 + 60);
+    await page.mouse.up();
+
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(scrollAfter).toBeGreaterThan(scrollBefore);
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+  });
+
   test("charts remain anchored to sheet coordinates while scrolling", async ({ page }) => {
     await page.goto("/");
 
