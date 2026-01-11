@@ -5,7 +5,12 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runMigrations } from "../db/migrations";
-import { getEffectiveClassificationForSelector, normalizeSelectorColumns, selectorKey } from "../dlp/classificationResolver";
+import {
+  getAggregateClassificationForRange,
+  getEffectiveClassificationForSelector,
+  normalizeSelectorColumns,
+  selectorKey
+} from "../dlp/classificationResolver";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -184,5 +189,57 @@ describe("classificationResolver: selector precedence", () => {
     expect(resolved.classification).toEqual({ level: "Confidential", labels: ["A", "B"] });
     expect(resolved.source).toEqual({ scope: "range", selectorKey: keyB });
   });
-});
 
+  it("merges labels across equally-specific Restricted ranges deterministically", async () => {
+    const rangeA = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 0 }, end: { row: 1, col: 1 } }
+    };
+    const keyA = await insertClassification(rangeA, { level: "Restricted", labels: ["A"] });
+
+    const rangeB = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 1, col: 0 }, end: { row: 2, col: 1 } }
+    };
+    const keyB = await insertClassification(rangeB, { level: "Restricted", labels: ["B"] });
+
+    const cellSelector = {
+      scope: "cell",
+      documentId: docId,
+      sheetId: "Sheet1",
+      row: 1,
+      col: 1
+    };
+
+    const resolved = await getEffectiveClassificationForSelector(db, docId, cellSelector);
+    expect(resolved.classification).toEqual({ level: "Restricted", labels: ["A", "B"] });
+    expect(resolved.source).toEqual({
+      scope: "range",
+      selectorKey: [keyA, keyB].sort()[0]
+    });
+  });
+
+  it("aggregate classification unions labels across all intersecting selectors", async () => {
+    await insertClassification({ scope: "document", documentId: docId }, { level: "Internal", labels: ["Doc"] });
+
+    const rangeSelector = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 0 }, end: { row: 1, col: 1 } }
+    };
+    await insertClassification(rangeSelector, { level: "Restricted", labels: ["PII"] });
+
+    await insertClassification(
+      { scope: "cell", documentId: docId, sheetId: "Sheet1", row: 0, col: 0 },
+      { level: "Confidential", labels: ["Cell"] }
+    );
+
+    const aggregate = await getAggregateClassificationForRange(db, docId, "Sheet1", 0, 0, 0, 0);
+    expect(aggregate).toEqual({ level: "Restricted", labels: ["Cell", "Doc", "PII"] });
+  });
+});

@@ -203,7 +203,6 @@ function resolveFromExactRows(rows: Array<{ selector_key: string; classification
       bestKey = row.selector_key;
       bestScope = row.scope;
     }
-    if (best.level === "Restricted") break;
   }
 
   return {
@@ -237,7 +236,6 @@ function resolveFromContainingRanges(rows: RangeRow[]): ClassificationResolution
       bestRankValue = rank;
       bestKey = row.selector_key;
     }
-    if (best.level === "Restricted") break;
   }
 
   if (!bestKey) {
@@ -528,9 +526,7 @@ export async function getAggregateClassificationForRange(
   const applyRows = (rows: Array<{ classification: unknown }>) => {
     for (const row of rows) {
       result = maxClassification(result, normalizeClassification(row.classification));
-      if (result.level === "Restricted") return true;
     }
-    return false;
   };
 
   const docRes = await db.query(
@@ -541,7 +537,7 @@ export async function getAggregateClassificationForRange(
     `,
     [docId]
   );
-  if (applyRows(docRes.rows as any)) return result;
+  applyRows(docRes.rows as any);
 
   const sheetRes = await db.query(
     `
@@ -551,7 +547,7 @@ export async function getAggregateClassificationForRange(
     `,
     [docId, sheetId]
   );
-  if (applyRows(sheetRes.rows as any)) return result;
+  applyRows(sheetRes.rows as any);
 
   const colRes = await db.query(
     `
@@ -566,7 +562,7 @@ export async function getAggregateClassificationForRange(
     `,
     [docId, sheetId, range.start.col, range.end.col]
   );
-  if (applyRows(colRes.rows as any)) return result;
+  applyRows(colRes.rows as any);
 
   const rangeRes = await db.query(
     `
@@ -581,7 +577,7 @@ export async function getAggregateClassificationForRange(
     `,
     [docId, sheetId, range.end.row, range.start.row, range.end.col, range.start.col]
   );
-  if (applyRows(rangeRes.rows as any)) return result;
+  applyRows(rangeRes.rows as any);
 
   const cellRes = await db.query(
     `
