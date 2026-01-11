@@ -267,6 +267,8 @@ export class ExtensionHostManager {
           console.warn(`Failed to sync installed extensions: ${String(error?.message ?? error)}`);
         });
       }, debounce);
+      // Avoid keeping the Node process alive purely because a debounce timer exists.
+      this._stateWatchTimer?.unref?.();
     };
 
     try {
@@ -280,11 +282,10 @@ export class ExtensionHostManager {
           scheduleSync();
           return;
         }
-        // Some platforms return a full path (or other non-basename strings) here. Be permissive
-        // and sync whenever the reported filename appears to refer to the state file.
-        if (changed === base || changed.endsWith(`/${base}`) || changed.endsWith(`\\${base}`) || changed.endsWith(base)) {
-          scheduleSync();
-        }
+        // Some platforms return a full path here. Normalize to a basename check so we only
+        // sync when the state file itself changed.
+        const basename = path.posix.basename(changed.replace(/\\/g, "/"));
+        if (basename === base) scheduleSync();
       });
     } catch (error) {
       throw new Error(`Failed to watch extension state file: ${error?.message ?? String(error)}`);
@@ -294,6 +295,9 @@ export class ExtensionHostManager {
       // eslint-disable-next-line no-console
       console.warn(`Extension state file watcher error: ${String(error?.message ?? error)}`);
     });
+
+    // Like timers, avoid preventing process exit when running in Node tooling/tests.
+    this._stateWatcher.unref?.();
   }
 
   unwatchStateFile() {
