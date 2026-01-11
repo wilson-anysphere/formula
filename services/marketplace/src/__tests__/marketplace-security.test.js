@@ -37,6 +37,10 @@ async function updateManifestVersion(dir, nextVersion) {
   await fs.writeFile(packageJsonPath, JSON.stringify(pkg, null, 2));
 }
 
+async function updateJsSource(dir, jsSource) {
+  await fs.writeFile(path.join(dir, "dist", "extension.js"), jsSource, "utf8");
+}
+
 test("publishing triggers a package scan record", async (t) => {
   try {
     requireFromHere.resolve("sql.js");
@@ -75,6 +79,58 @@ test("publishing triggers a package scan record", async (t) => {
     assert.ok(scan, "scan record should exist");
     assert.equal(scan.status, "passed");
     assert.ok(scan.scannedAt);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("scan failed versions are not advertised as latestVersion", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-scan-latest-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const publisher = "temp-pub";
+  const name = "latest-ext";
+
+  const { dir } = await createTempExtensionDir({
+    publisher,
+    name,
+    version: "1.0.0",
+    jsSource: "module.exports = { activate() {} };\n",
+  });
+
+  try {
+    const keys = generateEd25519KeyPair();
+    const store = new MarketplaceStore({ dataDir });
+    await store.init();
+    await store.registerPublisher({
+      publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgV100 = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+    const published100 = await store.publishExtension({ publisher, packageBytes: pkgV100, signatureBase64: null });
+    assert.equal(published100.version, "1.0.0");
+
+    await updateManifestVersion(dir, "1.0.1");
+    await updateJsSource(
+      dir,
+      'const cp = require("child_process");\nmodule.exports = { activate() { return cp; } };\n'
+    );
+    const pkgV101 = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+    await store.publishExtension({ publisher, packageBytes: pkgV101, signatureBase64: null });
+
+    const ext = await store.getExtension(published100.id);
+    assert.ok(ext);
+    assert.equal(ext.latestVersion, "1.0.0");
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });
     await fs.rm(dir, { recursive: true, force: true });

@@ -1648,6 +1648,10 @@ class MarketplaceStore {
          WHERE extension_id = ? AND version = ?`,
         [status, findingsJson, scannedAt, extensionId, version]
       );
+
+      // Scan results can change which versions are safe to advertise/serve. Bump the extension's
+      // updated_at so client caches (ETag) revalidate and see the new provenance state.
+      db.run(`UPDATE extensions SET updated_at = ? WHERE id = ?`, [scannedAt, extensionId]);
     });
 
     return { extensionId, version, status, scannedAt, findings: mergedFindings };
@@ -1822,10 +1826,17 @@ class MarketplaceStore {
 
       /** @type {Record<string, string[]>} */
       const versions = {};
-      const versionRows = db.exec(`SELECT extension_id, version, yanked FROM extension_versions`)[0]?.values;
+      const versionRows = db.exec(
+        `SELECT v.extension_id, v.version, v.yanked, s.status AS scan_status
+         FROM extension_versions v
+         LEFT JOIN package_scans s ON s.extension_id = v.extension_id AND s.version = v.version`
+      )[0]?.values;
       if (versionRows) {
-        for (const [extensionId, version, yanked] of versionRows) {
+        for (const [extensionId, version, yanked, scanStatus] of versionRows) {
           if (yanked) continue;
+          const scanStatusRaw = scanStatus ? String(scanStatus) : null;
+          if (scanStatusRaw === PACKAGE_SCAN_STATUS.FAILED) continue;
+          if (this.requireScanPassedForDownload && scanStatusRaw !== PACKAGE_SCAN_STATUS.PASSED) continue;
           const key = String(extensionId);
           versions[key] = versions[key] || [];
           versions[key].push(String(version));
@@ -2035,8 +2046,11 @@ class MarketplaceStore {
       if (hidden && !includeHidden) return null;
 
       const versionsStmt = db.prepare(
-        `SELECT version, sha256, uploaded_at, yanked, readme
-         FROM extension_versions WHERE extension_id = ?`
+        `SELECT v.version, v.sha256, v.uploaded_at, v.yanked, v.readme,
+                s.status AS scan_status
+         FROM extension_versions v
+         LEFT JOIN package_scans s ON s.extension_id = v.extension_id AND s.version = v.version
+         WHERE v.extension_id = ?`
       );
       versionsStmt.bind([id]);
 
@@ -2048,6 +2062,10 @@ class MarketplaceStore {
         const v = versionsStmt.getAsObject();
         const ver = String(v.version);
         const yanked = Boolean(v.yanked);
+        const scanStatusRaw = v.scan_status ? String(v.scan_status) : null;
+        const blockedByScan =
+          scanStatusRaw === PACKAGE_SCAN_STATUS.FAILED ||
+          (this.requireScanPassedForDownload && scanStatusRaw !== PACKAGE_SCAN_STATUS.PASSED);
         versions.push({
           version: ver,
           sha256: String(v.sha256),
@@ -2055,7 +2073,7 @@ class MarketplaceStore {
           yanked,
         });
         versionMeta[ver] = { readme: String(v.readme || "") };
-        if (!yanked) unyanked.push(ver);
+        if (!yanked && !blockedByScan) unyanked.push(ver);
       }
       versionsStmt.free();
 
