@@ -180,8 +180,55 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         renderer.setFrozen(rows, cols);
         syncScrollbars();
       },
-      setSelection: (row, col) => rendererRef.current?.setSelection({ row, col }),
-      setSelectionRange: (range) => rendererRef.current?.setSelectionRange(range),
+      setSelection: (row, col) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+
+        const prevSelection = renderer.getSelection();
+        const prevRange = renderer.getSelectionRange();
+        renderer.setSelection({ row, col });
+
+        if (!prevSelection || prevSelection.row !== row || prevSelection.col !== col) {
+          onSelectionChangeRef.current?.({ row, col });
+        }
+
+        const nextRange: CellRange = { startRow: row, endRow: row + 1, startCol: col, endCol: col + 1 };
+        if (
+          !prevRange ||
+          prevRange.startRow !== nextRange.startRow ||
+          prevRange.endRow !== nextRange.endRow ||
+          prevRange.startCol !== nextRange.startCol ||
+          prevRange.endCol !== nextRange.endCol
+        ) {
+          onSelectionRangeChangeRef.current?.(nextRange);
+        }
+      },
+      setSelectionRange: (range) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+
+        const prevSelection = renderer.getSelection();
+        const prevRange = renderer.getSelectionRange();
+        renderer.setSelectionRange(range);
+        const nextSelection = renderer.getSelection();
+        const nextRange = renderer.getSelectionRange();
+
+        if (
+          (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+          (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+        ) {
+          onSelectionChangeRef.current?.(nextSelection);
+        }
+
+        if (
+          (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+          (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+          (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+          (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+        ) {
+          onSelectionRangeChangeRef.current?.(nextRange);
+        }
+      },
       getSelectionRange: () => rendererRef.current?.getSelectionRange() ?? null,
       clearSelection: () => {
         const renderer = rendererRef.current;
@@ -537,10 +584,22 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   };
 
   return (
-    <div ref={containerRef} style={containerStyle}>
-      <canvas ref={gridCanvasRef} style={{ ...canvasStyle, pointerEvents: "none" }} />
-      <canvas ref={contentCanvasRef} style={{ ...canvasStyle, pointerEvents: "none" }} />
-      <canvas ref={selectionCanvasRef} style={{ ...canvasStyle, pointerEvents: "auto" }} />
+    <div ref={containerRef} style={containerStyle} data-testid="canvas-grid">
+      <canvas
+        ref={gridCanvasRef}
+        style={{ ...canvasStyle, pointerEvents: "none" }}
+        data-testid="canvas-grid-background"
+      />
+      <canvas
+        ref={contentCanvasRef}
+        style={{ ...canvasStyle, pointerEvents: "none" }}
+        data-testid="canvas-grid-content"
+      />
+      <canvas
+        ref={selectionCanvasRef}
+        style={{ ...canvasStyle, pointerEvents: "auto" }}
+        data-testid="canvas-grid-selection"
+      />
 
       <div
         ref={vTrackRef}

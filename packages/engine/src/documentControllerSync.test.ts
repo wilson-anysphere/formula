@@ -51,7 +51,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     await engineHydrateFromDocument(engine, doc);
 
     expect(engine.loadWorkbookFromJson).toHaveBeenCalledTimes(1);
-    const [serialized] = engine.loadWorkbookFromJson.mock.calls[0] ?? [];
+    const serialized = engine.loadWorkbookFromJson.mock.calls[0]?.[0];
     expect(JSON.parse(String(serialized))).toEqual(exportDocumentToEngineWorkbookJson(doc));
 
     expect(engine.recalculate).toHaveBeenCalledTimes(1);

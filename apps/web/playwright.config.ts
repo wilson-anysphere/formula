@@ -9,8 +9,9 @@ export default defineConfig({
     headless: true
   },
   webServer: {
-    command: "pnpm build && pnpm preview",
+    command: "pnpm build && pnpm preview --port 4173 --strictPort",
     port: 4173,
+    timeout: 120_000,
     reuseExistingServer: !process.env.CI
   }
 });

@@ -25,13 +25,11 @@ export interface EngineClient {
    * Useful when applying large delta batches (paste, imports) without creating
    * per-cell promises.
    */
-  setCells(updates: Array<{ address: string; value: CellScalar; sheet?: string }>, options?: RpcOptions): Promise<void>;
-  setRange(
-    range: string,
-    values: CellScalar[][],
-    sheet?: string,
+  setCells(
+    updates: Array<{ address: string; value: CellScalar; sheet?: string }>,
     options?: RpcOptions
   ): Promise<void>;
+  setRange(range: string, values: CellScalar[][], sheet?: string, options?: RpcOptions): Promise<void>;
   recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]>;
   terminate(): void;
 }
@@ -41,38 +39,63 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     throw new Error("createEngineClient() requires a Worker-capable environment");
   }
 
-  // Vite supports Worker construction via `new URL(..., import.meta.url)` and will
-  // bundle the Worker entrypoint correctly for both dev and production builds.
-  const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
-    type: "module"
-  });
-
   const wasmModuleUrl = options?.wasmModuleUrl ?? defaultWasmModuleUrl();
   const wasmBinaryUrl = options?.wasmBinaryUrl ?? defaultWasmBinaryUrl();
 
-  let enginePromise: Promise<EngineWorker> | null = null;
+  // Vite supports Worker construction via `new URL(..., import.meta.url)` and will
+  // bundle the Worker entrypoint correctly for both dev and production builds.
+  //
+  // In React 18 StrictMode (dev-only), effects intentionally run twice
+  // (setup → cleanup → setup). Callers may `terminate()` between setups, so we
+  // support tearing down the worker and reconnecting on-demand.
+  let worker: Worker | null = null;
   let engine: EngineWorker | null = null;
-  let terminated = false;
+  let enginePromise: Promise<EngineWorker> | null = null;
+  let generation = 0;
+
+  const ensureWorker = () => {
+    if (worker) return worker;
+    worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
+      type: "module"
+    });
+    return worker;
+  };
 
   const connect = () => {
     if (enginePromise) {
       return enginePromise;
     }
+
+    const connectGeneration = ++generation;
+    const activeWorker = ensureWorker();
+
     enginePromise = EngineWorker.connect({
-      worker,
+      worker: activeWorker,
       wasmModuleUrl,
       wasmBinaryUrl
     });
+
     void enginePromise
       .then((connected) => {
-        engine = connected;
-        if (terminated) {
+        // If the caller terminated/restarted while we were connecting, immediately
+        // dispose the stale connection.
+        if (connectGeneration !== generation) {
           connected.terminate();
+          return;
         }
+        engine = connected;
       })
       .catch(() => {
-        // Callers awaiting `connect()` will observe the rejection.
+        // Allow retries on the next call.
+        if (connectGeneration !== generation) {
+          return;
+        }
+        enginePromise = null;
+        engine = null;
+        worker?.terminate();
+        worker = null;
       });
+
     return enginePromise;
   };
 
@@ -86,27 +109,24 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await connect();
     },
     newWorkbook: async () => await withEngine((connected) => connected.newWorkbook()),
-    loadWorkbookFromJson: async (json) =>
-      await withEngine((connected) => connected.loadWorkbookFromJson(json)),
+    loadWorkbookFromJson: async (json) => await withEngine((connected) => connected.loadWorkbookFromJson(json)),
     toJson: async () => await withEngine((connected) => connected.toJson()),
     getCell: async (address, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getCell(address, sheet, rpcOptions)),
     getRange: async (range, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getRange(range, sheet, rpcOptions)),
-    setCell: async (address, value, sheet) =>
-      await withEngine((connected) => connected.setCell(address, value, sheet)),
-    setCells: async (updates, rpcOptions) =>
-      await withEngine((connected) => connected.setCells(updates, rpcOptions)),
+    setCell: async (address, value, sheet) => await withEngine((connected) => connected.setCell(address, value, sheet)),
+    setCells: async (updates, rpcOptions) => await withEngine((connected) => connected.setCells(updates, rpcOptions)),
     setRange: async (range, values, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
-    recalculate: async (sheet, rpcOptions) =>
-      await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
+    recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
     terminate: () => {
-      terminated = true;
+      generation++;
+      enginePromise = null;
       engine?.terminate();
-      if (!engine) {
-        worker.terminate();
-      }
+      engine = null;
+      worker?.terminate();
+      worker = null;
     }
   };
 }

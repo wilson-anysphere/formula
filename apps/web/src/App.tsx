@@ -1,11 +1,37 @@
-import { createEngineClient } from "@formula/engine";
+import { createEngineClient, type CellChange, type CellScalar } from "@formula/engine";
 import type { CellRange } from "@formula/grid";
-import { CanvasGrid, GridPlaceholder } from "@formula/grid";
+import { CanvasGrid, GridPlaceholder, type GridApi } from "@formula/grid";
+import { range0ToA1, toA1 } from "@formula/spreadsheet-frontend";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { range0ToA1 } from "@formula/spreadsheet-frontend";
 
 import { EngineCellProvider } from "./EngineCellProvider";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
+
+function scalarToDisplayString(value: CellScalar): string {
+  if (value === null) return "";
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  return String(value);
+}
+
+function parseFormulaBarInput(raw: string): CellScalar {
+  if (raw.startsWith("=") && raw.length > 1) return raw;
+
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+
+  if (/^(true|false)$/i.test(trimmed)) return trimmed.toLowerCase() === "true";
+  if (/^null$/i.test(trimmed)) return null;
+
+  if (/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  return raw;
+}
+
+function isFormulaInput(value: CellScalar): value is string {
+  return typeof value === "string" && value.startsWith("=") && value.length > 1;
+}
 
 export function App() {
   const [engineStatus, setEngineStatus] = useState("starting…");
@@ -28,10 +54,24 @@ export function App() {
   const cursorRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   const rangeInsertionRef = useRef<{ start: number; end: number } | null>(null);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const cellSyncTokenRef = useRef(0);
 
   const isFormulaEditing = formulaFocused && draft.trim().startsWith("=");
   const headerRowOffset = frozenRows > 0 ? 1 : 0;
   const headerColOffset = frozenCols > 0 ? 1 : 0;
+
+  const gridApiRef = useRef<GridApi | null>(null);
+  const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
+
+  const activeAddress = (() => {
+    if (!activeCell) return null;
+    const row0 = activeCell.row - headerRowOffset;
+    const col0 = activeCell.col - headerColOffset;
+    if (row0 < 0 || col0 < 0) return null;
+    return toA1(row0, col0);
+  })();
+
+  const [activeValue, setActiveValue] = useState<CellScalar>(null);
 
   useEffect(() => {
     draftRef.current = draft;
@@ -130,6 +170,7 @@ export function App() {
 
     setEngineStatus("starting…");
     setProvider(null);
+    setActiveCell(null);
 
     let cancelled = false;
 
@@ -147,9 +188,7 @@ export function App() {
         }
       } catch (error) {
         if (!cancelled) {
-          setEngineStatus(
-            `error: ${error instanceof Error ? error.message : String(error)}`
-          );
+          setEngineStatus(`error: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     }
@@ -175,6 +214,72 @@ export function App() {
     }
   }, [provider, activeSheet]);
 
+  useEffect(() => {
+    if (!provider) return;
+    const id = requestAnimationFrame(() => {
+      gridApiRef.current?.setSelection(headerRowOffset, headerColOffset);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [provider, headerRowOffset, headerColOffset]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    if (!provider || !activeAddress) {
+      rangeInsertionRef.current = null;
+      draftRef.current = "";
+      setDraft("");
+      setActiveValue(null);
+      return;
+    }
+
+    if (isFormulaEditing) {
+      return;
+    }
+
+    const token = ++cellSyncTokenRef.current;
+    void engine
+      .getCell(activeAddress, activeSheet)
+      .then((cell) => {
+        if (cellSyncTokenRef.current !== token) return;
+        const inputText = scalarToDisplayString(cell.input as CellScalar);
+        rangeInsertionRef.current = null;
+        draftRef.current = inputText;
+        setDraft(inputText);
+        setActiveValue(cell.value as CellScalar);
+      })
+      .catch(() => {
+        // Ignore selection reads while the engine is initializing/tearing down.
+      });
+  }, [provider, activeAddress, activeSheet, isFormulaEditing]);
+
+  const commitDraft = async () => {
+    const engine = engineRef.current;
+    if (!engine || !provider || !activeAddress) return;
+
+    const nextValue = parseFormulaBarInput(draftRef.current);
+    await engine.setCell(activeAddress, nextValue, activeSheet);
+    const changes = await engine.recalculate(activeSheet);
+
+    const directChange: CellChange | null = isFormulaInput(nextValue)
+      ? null
+      : { sheet: activeSheet, address: activeAddress, value: nextValue };
+    provider.applyRecalcChanges(directChange ? [...changes, directChange] : changes);
+
+    const updated = await engine.getCell(activeAddress, activeSheet);
+    const inputText = scalarToDisplayString(updated.input as CellScalar);
+    rangeInsertionRef.current = null;
+    draftRef.current = inputText;
+    setDraft(inputText);
+    setActiveValue(updated.value as CellScalar);
+  };
+
+  const onSelectionChange = (cell: { row: number; col: number } | null) => {
+    if (isFormulaEditing) return;
+    setActiveCell(cell);
+  };
+
   return (
     <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ margin: 0 }}>Formula (Web Preview)</h1>
@@ -199,43 +304,70 @@ export function App() {
         <label style={{ display: "block", fontSize: 12, color: "#64748b" }} htmlFor="formula-input">
           Formula
         </label>
-        <input
-          ref={inputRef}
-          id="formula-input"
-          data-testid="formula-input"
-          spellCheck={false}
-          value={draft}
-          onFocus={() => {
-            setFormulaFocused(true);
-            syncCursorFromInput();
-          }}
-          onBlur={() => {
-            setFormulaFocused(false);
-            rangeInsertionRef.current = null;
-          }}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            setDraft(value);
-            draftRef.current = value;
-            rangeInsertionRef.current = null;
-            cursorRef.current = {
-              start: event.currentTarget.selectionStart ?? value.length,
-              end: event.currentTarget.selectionEnd ?? value.length
-            };
-          }}
-          onClick={syncCursorFromInput}
-          onKeyUp={syncCursorFromInput}
-          onSelect={syncCursorFromInput}
-          style={{
-            marginTop: 4,
-            width: "100%",
-            padding: "8px 10px",
-            border: "1px solid #cbd5e1",
-            borderRadius: 6,
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-            fontSize: 14
-          }}
-        />
+        <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            style={{
+              width: 64,
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              fontSize: 12,
+              color: "#0f172a"
+            }}
+            data-testid="active-address"
+          >
+            {activeAddress ?? ""}
+          </div>
+          <input
+            ref={inputRef}
+            id="formula-input"
+            data-testid="formula-input"
+            spellCheck={false}
+            value={draft}
+            onFocus={(event) => {
+              setFormulaFocused(true);
+              cellSyncTokenRef.current++;
+              const input = event.currentTarget;
+              queueMicrotask(() => {
+                input.select();
+                syncCursorFromInput();
+              });
+            }}
+            onBlur={() => {
+              setFormulaFocused(false);
+              rangeInsertionRef.current = null;
+            }}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setDraft(value);
+              draftRef.current = value;
+              cellSyncTokenRef.current++;
+              rangeInsertionRef.current = null;
+              cursorRef.current = {
+                start: event.currentTarget.selectionStart ?? value.length,
+                end: event.currentTarget.selectionEnd ?? value.length
+              };
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              void commitDraft();
+            }}
+            onClick={syncCursorFromInput}
+            onKeyUp={syncCursorFromInput}
+            onSelect={syncCursorFromInput}
+            disabled={!provider || !activeAddress}
+            style={{
+              flex: 1,
+              padding: "8px 10px",
+              border: "1px solid #cbd5e1",
+              borderRadius: 6,
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              fontSize: 14
+            }}
+          />
+          <div style={{ minWidth: 120, fontSize: 12, color: "#475569" }}>
+            Value: <span data-testid="formula-bar-value">{scalarToDisplayString(activeValue)}</span>
+          </div>
+        </div>
       </div>
 
       <div data-testid="grid" style={{ marginTop: 16, height: 560 }}>
@@ -246,6 +378,10 @@ export function App() {
             colCount={colCount}
             frozenRows={frozenRows}
             frozenCols={frozenCols}
+            apiRef={(api) => {
+              gridApiRef.current = api;
+            }}
+            onSelectionChange={onSelectionChange}
             interactionMode={isFormulaEditing ? "rangeSelection" : "default"}
             onRangeSelectionStart={beginRangeSelection}
             onRangeSelectionChange={updateRangeSelection}
