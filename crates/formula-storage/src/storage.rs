@@ -717,25 +717,39 @@ impl Storage {
             model_workbook.id = id;
         }
         if let Some(date_system) = date_system {
-            model_workbook.date_system = parse_date_system(&date_system)?;
+            if let Ok(date_system) = parse_date_system(&date_system) {
+                model_workbook.date_system = date_system;
+            }
         }
         if let Some(calc_settings) = calc_settings {
-            model_workbook.calc_settings = serde_json::from_value(calc_settings)?;
+            if let Ok(calc_settings) = serde_json::from_value(calc_settings) {
+                model_workbook.calc_settings = calc_settings;
+            }
         }
         if let Some(theme) = theme {
-            model_workbook.theme = serde_json::from_value(theme)?;
+            if let Ok(theme) = serde_json::from_value(theme) {
+                model_workbook.theme = theme;
+            }
         }
         if let Some(workbook_protection) = workbook_protection {
-            model_workbook.workbook_protection = serde_json::from_value(workbook_protection)?;
+            if let Ok(workbook_protection) = serde_json::from_value(workbook_protection) {
+                model_workbook.workbook_protection = workbook_protection;
+            }
         }
         if let Some(defined_names) = defined_names {
-            model_workbook.defined_names = serde_json::from_value(defined_names)?;
+            if let Ok(defined_names) = serde_json::from_value(defined_names) {
+                model_workbook.defined_names = defined_names;
+            }
         }
         if let Some(print_settings) = print_settings {
-            model_workbook.print_settings = serde_json::from_value(print_settings)?;
+            if let Ok(print_settings) = serde_json::from_value(print_settings) {
+                model_workbook.print_settings = print_settings;
+            }
         }
         if let Some(view) = view {
-            model_workbook.view = serde_json::from_value(view)?;
+            if let Ok(view) = serde_json::from_value(view) {
+                model_workbook.view = view;
+            }
         }
         model_workbook.styles = styles;
 
@@ -859,11 +873,9 @@ impl Storage {
             sheet.view.pane.frozen_cols = sheet.frozen_cols;
             sheet.view.zoom = sheet.zoom;
 
-            sheet.tab_color = if let Some(raw) = tab_color_json {
-                Some(serde_json::from_value(raw)?)
-            } else {
-                tab_color_fast.map(formula_model::TabColor::rgb)
-            };
+            sheet.tab_color = tab_color_json
+                .and_then(|raw| serde_json::from_value::<formula_model::TabColor>(raw).ok())
+                .or_else(|| tab_color_fast.map(formula_model::TabColor::rgb));
 
             // Load sheet drawing objects.
             {
