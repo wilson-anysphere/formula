@@ -27,7 +27,10 @@ import { cellRefFromKey, numberToCol } from "./cell-ref.js";
  * @typedef {object} CellStructuralConflictResolution
  * @property {"ours" | "theirs" | "manual"} choice
  * @property {string} [to] Destination cellKey for resolving move conflicts.
- * @property {NormalizedCell | null} [cell] Cell value for manual cell resolutions.
+ * @property {NormalizedCell | null} [cell] Optional manual cell contents.
+ *   - For `type: "cell"` conflicts, this is the final cell value.
+ *   - For `type: "move"` conflicts, this overrides the moved cell content when
+ *     `choice: "manual"` is used (in addition to selecting `to`).
  */
  
 /**
