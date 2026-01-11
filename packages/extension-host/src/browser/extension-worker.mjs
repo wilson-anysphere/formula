@@ -926,6 +926,21 @@ function scanModuleImports(source, url) {
 function assertAllowedStaticImport(specifier, parentUrl) {
   const request = String(specifier ?? "");
   if (request === "@formula/extension-api" || request === "formula") return { type: "virtual" };
+
+  // In-memory extension loaders (eg: web marketplace installs) may rewrite module specifiers to
+  // `data:`/`blob:` URLs that contain already-verified code. Allow these, but only when they are
+  // imported from an in-memory module as well (prevents remote/network-loaded extensions from
+  // smuggling additional code via URL imports).
+  if (request.startsWith("data:") || request.startsWith("blob:")) {
+    const parent = String(parentUrl ?? "");
+    if (parent.startsWith("data:") || parent.startsWith("blob:")) {
+      return { type: "inline" };
+    }
+    throw new Error(
+      `Disallowed import specifier '${request}' in ${parentUrl}: URL/protocol imports are not allowed; data/blob URL imports are only allowed from in-memory modules`
+    );
+  }
+
   if (request.startsWith("./") || request.startsWith("../")) return { type: "relative" };
 
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(request) || request.startsWith("//")) {
@@ -970,8 +985,14 @@ async function fetchModuleSource(url, rootUrl) {
 }
 
 async function validateModuleGraph(entryUrl, extensionRootUrl, limits = IMPORT_PREFLIGHT_LIMITS) {
-  const root = extensionRootUrl ? new URL("./", extensionRootUrl).href : null;
   const entry = String(entryUrl ?? "");
+
+  // `data:` and `blob:` module URLs are not hierarchical, so we cannot meaningfully apply the
+  // extensionRootUrl prefix check (and `new URL("./", entry)` would throw). These entrypoints are
+  // expected to be fully self-contained (no relative imports) and to only import other in-memory
+  // modules.
+  const enforceRoot = Boolean(extensionRootUrl) && !(entry.startsWith("data:") || entry.startsWith("blob:"));
+  const root = enforceRoot ? new URL("./", extensionRootUrl).href : null;
   if (root && entry && !entry.startsWith(root)) {
     throw new Error(
       `Extension entrypoint must resolve inside the extension base URL: '${entry}' is outside '${root}'`
@@ -1018,9 +1039,20 @@ async function validateModuleGraph(entryUrl, extensionRootUrl, limits = IMPORT_P
     const imports = scanModuleImports(source, url);
     for (const specifier of imports) {
       const kind = assertAllowedStaticImport(specifier, url);
+      if (kind.type === "inline") {
+        queue.push(String(specifier));
+        continue;
+      }
       if (kind.type !== "relative") continue;
 
-      const resolved = new URL(specifier, url).href;
+      let resolved = "";
+      try {
+        resolved = new URL(specifier, url).href;
+      } catch (error) {
+        throw new Error(
+          `Failed to resolve import specifier '${specifier}' in ${url}: ${String(error?.message ?? error)}`
+        );
+      }
       if (root && !resolved.startsWith(root)) {
         throw new Error(
           `Disallowed import specifier '${specifier}' in ${url}: resolved outside the extension base URL (${resolved})`

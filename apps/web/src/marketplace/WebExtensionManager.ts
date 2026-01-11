@@ -1,5 +1,3 @@
-import extensionApiSource from "@formula/extension-api?raw";
-
 import type {
   ReadExtensionPackageV2Result,
   VerifiedExtensionPackageV2
@@ -10,6 +8,16 @@ import {
 } from "../../../../shared/extension-package/v2-browser.mjs";
 
 import { MarketplaceClient } from "./MarketplaceClient";
+
+// The extension worker (`packages/extension-host/src/browser/extension-worker.mjs`) eagerly imports
+// `@formula/extension-api`, which initializes the runtime and installs the API object on
+// `globalThis[Symbol.for("formula.extensionApi.api")]`.
+//
+// Browser-loaded extensions cannot reliably import `@formula/extension-api` by bare specifier (no
+// import maps in workers), and we also cannot import the package entrypoint via `data:`/`blob:`
+// because it has relative imports. Instead we provide a tiny, self-contained ESM shim that
+// re-exports the already-initialized API object.
+const EXTENSION_API_SHIM_SOURCE = `const api = globalThis[Symbol.for(\"formula.extensionApi.api\")];\nif (!api) { throw new Error(\"@formula/extension-api runtime failed to initialize\"); }\nexport const workbook = api.workbook;\nexport const sheets = api.sheets;\nexport const cells = api.cells;\nexport const commands = api.commands;\nexport const functions = api.functions;\nexport const dataConnectors = api.dataConnectors;\nexport const network = api.network;\nexport const clipboard = api.clipboard;\nexport const ui = api.ui;\nexport const storage = api.storage;\nexport const config = api.config;\nexport const events = api.events;\nexport const context = api.context;\nexport const __setTransport = api.__setTransport;\nexport const __setContext = api.__setContext;\nexport const __handleMessage = api.__handleMessage;\nexport default api;\n`;
 
 export interface InstalledExtensionRecord {
   id: string;
@@ -200,7 +208,9 @@ function extractEntrypointPath(manifest: Record<string, any>): string {
 function rewriteEntrypointSource(source: string, { extensionApiUrl }: { extensionApiUrl: string }): string {
   const rewritten = source
     .replace(/from\s+["']@formula\/extension-api["']/g, `from "${extensionApiUrl}"`)
-    .replace(/import\s+["']@formula\/extension-api["']/g, `import "${extensionApiUrl}"`);
+    .replace(/import\s+["']@formula\/extension-api["']/g, `import "${extensionApiUrl}"`)
+    .replace(/from\s+["']formula["']/g, `from "${extensionApiUrl}"`)
+    .replace(/import\s+["']formula["']/g, `import "${extensionApiUrl}"`);
 
   const specifiers = new Set<string>();
   const importRe = /\bimport\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']/g;
@@ -470,7 +480,7 @@ export class WebExtensionManager {
     }
 
     if (!this._extensionApiModule) {
-      this._extensionApiModule = createModuleUrlFromText(extensionApiSource);
+      this._extensionApiModule = createModuleUrlFromText(EXTENSION_API_SHIM_SOURCE);
     }
 
     const { mainUrl, revoke } = await this._createMainModuleUrl(pkg, this._extensionApiModule.url);

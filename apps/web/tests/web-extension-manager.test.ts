@@ -398,3 +398,105 @@ test("install supports publisher signing key rotation via publisherKeys + per-ve
   await host.dispose();
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
+
+test("supports importing extension API via the \"formula\" alias", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-alias-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "alias-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.mjs",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onCommand:test.alias"],
+    permissions: ["ui.commands"],
+    contributes: { commands: [{ command: "test.alias", title: "Alias" }] }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(
+    path.join(extDir, "dist", "extension.mjs"),
+    `import * as formula from "formula";\nexport async function activate() {\n  await formula.commands.registerCommand("test.alias", () => "ok");\n}\n`
+  );
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.alias-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  await manager.install("test.alias-ext");
+  await manager.loadInstalled("test.alias-ext");
+  expect(await host.executeCommand("test.alias")).toBe("ok");
+
+  await manager.dispose();
+  await host.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
+test("rejects browser entrypoints that contain dynamic import()", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-dynamic-import-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "dynamic-import-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.mjs",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onCommand:test.dynamic"],
+    permissions: ["ui.commands"],
+    contributes: { commands: [{ command: "test.dynamic", title: "Dynamic" }] }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(
+    path.join(extDir, "dist", "extension.mjs"),
+    `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  await import("data:text/javascript,export default 123");\n  await formula.commands.registerCommand("test.dynamic", () => "ok");\n}\n`
+  );
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.dynamic-import-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  await manager.install("test.dynamic-import-ext");
+  await manager.loadInstalled("test.dynamic-import-ext");
+  await expect(host.executeCommand("test.dynamic")).rejects.toThrow(/dynamic import/i);
+  expect(manager.isLoaded("test.dynamic-import-ext")).toBe(true);
+  const loaded = host.listExtensions().find((e: any) => e.id === "test.dynamic-import-ext");
+  expect(Boolean(loaded)).toBe(true);
+  expect(loaded?.active).toBe(false);
+
+  await manager.dispose();
+  await host.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
