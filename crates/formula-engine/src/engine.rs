@@ -3309,6 +3309,7 @@ fn slice_mode_for_program(program: &bytecode::Program) -> ColumnSliceMode {
 
 #[derive(Debug, Clone)]
 struct BytecodeColumn {
+    row_start: i32,
     values: Vec<f64>,
     blocked_rows_strict: Vec<i32>,
     blocked_rows_ignore_nonnumeric: Vec<i32>,
@@ -3325,7 +3326,10 @@ impl BytecodeColumnCache {
         snapshot: &Snapshot,
         tasks: &[(CellKey, CompiledFormula)],
     ) -> Self {
-        let mut max_row_by_col: Vec<HashMap<i32, i32>> = vec![HashMap::new(); sheet_count];
+        // Track the minimum and maximum row index needed for each column. This avoids allocating
+        // and scanning from row 0 when formulas reference small windows far down the sheet
+        // (e.g. `A900000:A900010`).
+        let mut row_bounds_by_col: Vec<HashMap<i32, (i32, i32)>> = vec![HashMap::new(); sheet_count];
 
         for (key, compiled) in tasks {
             let CompiledFormula::Bytecode(bc) = compiled else {
@@ -3342,9 +3346,21 @@ impl BytecodeColumnCache {
             };
             for range in &bc.program.range_refs {
                 let resolved = range.resolve(base);
+                if resolved.row_start < 0
+                    || resolved.col_start < 0
+                    || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                    || resolved.col_end >= EXCEL_MAX_COLS_I32
+                {
+                    // Out-of-bounds ranges must evaluate via per-cell access so `#REF!` can be
+                    // surfaced. Don't build a cache that would otherwise treat them as empty/NaN.
+                    continue;
+                }
                 for col in resolved.col_start..=resolved.col_end {
-                    let entry = max_row_by_col[key.sheet].entry(col).or_insert(resolved.row_end);
-                    *entry = (*entry).max(resolved.row_end);
+                    let entry = row_bounds_by_col[key.sheet]
+                        .entry(col)
+                        .or_insert((resolved.row_start, resolved.row_end));
+                    entry.0 = entry.0.min(resolved.row_start);
+                    entry.1 = entry.1.max(resolved.row_end);
                 }
             }
         }
@@ -3352,11 +3368,13 @@ impl BytecodeColumnCache {
         let mut by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::with_capacity(sheet_count);
         for sheet_id in 0..sheet_count {
             let mut cols: HashMap<i32, BytecodeColumn> = HashMap::new();
-            for (col, max_row) in max_row_by_col[sheet_id].iter() {
-                if *max_row < 0 {
-                    continue;
-                }
-                let len = (*max_row as usize).saturating_add(1);
+            for (col, (min_row, max_row)) in row_bounds_by_col[sheet_id].iter() {
+                debug_assert!(*min_row >= 0);
+                debug_assert!(*max_row >= 0);
+                debug_assert!(*max_row >= *min_row);
+                let row_start = *min_row;
+                let row_end = *max_row;
+                let len = (row_end - row_start + 1) as usize;
                 let mut values: Vec<f64> = vec![f64::NAN; len];
                 let mut blocked_rows_strict: Vec<i32> = Vec::new();
                 let mut blocked_rows_ignore_nonnumeric: Vec<i32> = Vec::new();
@@ -3365,7 +3383,7 @@ impl BytecodeColumnCache {
                 let provider = snapshot.external_value_provider.as_ref();
 
                 let mut apply_value = |value: &Value, row: i32| match value {
-                    Value::Number(n) => values[row as usize] = *n,
+                    Value::Number(n) => values[(row - row_start) as usize] = *n,
                     Value::Blank => {}
                     Value::Error(_) | Value::Array(_) | Value::Spill { .. } => {
                         blocked_rows_strict.push(row);
@@ -3374,7 +3392,7 @@ impl BytecodeColumnCache {
                     Value::Bool(_) | Value::Text(_) => blocked_rows_strict.push(row),
                 };
 
-                for row in 0..=*max_row {
+                for row in row_start..=row_end {
                     let addr = CellAddr {
                         row: row as u32,
                         col: (*col) as u32,
@@ -3400,6 +3418,7 @@ impl BytecodeColumnCache {
                 cols.insert(
                     *col,
                     BytecodeColumn {
+                        row_start,
                         values,
                         blocked_rows_strict,
                         blocked_rows_ignore_nonnumeric,
@@ -3460,10 +3479,16 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
-        let data = self.cols.get(&col)?;
-        if row_start < 0 || row_end < 0 || row_start > row_end {
+        if col < 0
+            || col >= EXCEL_MAX_COLS_I32
+            || row_start < 0
+            || row_end < 0
+            || row_start > row_end
+            || row_end >= EXCEL_MAX_ROWS_I32
+        {
             return None;
         }
+        let data = self.cols.get(&col)?;
         let blocked_rows = match self.slice_mode {
             ColumnSliceMode::StrictNumeric => &data.blocked_rows_strict,
             ColumnSliceMode::IgnoreNonNumeric => &data.blocked_rows_ignore_nonnumeric,
@@ -3471,8 +3496,11 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         if has_blocked_row(blocked_rows, row_start, row_end) {
             return None;
         }
-        let start = row_start as usize;
-        let end = row_end as usize;
+        if row_start < data.row_start {
+            return None;
+        }
+        let start = (row_start - data.row_start) as usize;
+        let end = (row_end - data.row_start) as usize;
         if end >= data.values.len() {
             return None;
         }
@@ -3984,5 +4012,105 @@ mod tests {
                 "mismatch at {addr}"
             );
         }
+    }
+
+    #[test]
+    fn bytecode_column_cache_uses_range_min_row() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(A900000:A900010)")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: parse_a1("B1").unwrap(),
+        };
+        let compiled = engine
+            .workbook
+            .get_cell(key)
+            .and_then(|c| c.compiled.clone())
+            .expect("compiled formula stored");
+
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            engine.external_value_provider.clone(),
+        );
+        let column_cache = BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+
+        let col = column_cache.by_sheet[sheet_id]
+            .get(&0)
+            .expect("column A is cached");
+        assert_eq!(col.row_start, 899_999);
+        assert_eq!(col.values.len(), 11);
+    }
+
+    #[test]
+    fn bytecode_column_cache_ignores_out_of_bounds_ranges() {
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+
+        let addr = parse_a1("A1").unwrap();
+        let origin = bytecode::CellCoord {
+            row: addr.row as i32,
+            col: addr.col as i32,
+        };
+        let expr = bytecode::parse_formula("=SUM(XFE1:XFE2)", origin).expect("bytecode parse");
+        let program = engine.bytecode_cache.get_or_compile(&expr);
+
+        // The bytecode column cache ignores out-of-bounds ranges, but still needs a dummy AST
+        // payload to satisfy the `CompiledFormula::Bytecode` wrapper.
+        let parsed = crate::parse_formula("=1", crate::ParseOptions::default()).unwrap();
+        let mut resolve_sheet = |name: &str| engine.workbook.sheet_id(name);
+        let ast = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet);
+
+        let key = CellKey { sheet: sheet_id, addr };
+        let compiled = CompiledFormula::Bytecode(BytecodeFormula { ast, program });
+
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            engine.external_value_provider.clone(),
+        );
+        let column_cache = BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+
+        assert!(column_cache.by_sheet[sheet_id].is_empty());
+    }
+
+    #[test]
+    fn engine_bytecode_grid_column_slice_rejects_out_of_bounds_columns() {
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            engine.external_value_provider.clone(),
+        );
+
+        let mut cols = HashMap::new();
+        cols.insert(
+            EXCEL_MAX_COLS_I32,
+            BytecodeColumn {
+                row_start: 0,
+                values: vec![1.0],
+                blocked_rows_strict: Vec::new(),
+                blocked_rows_ignore_nonnumeric: Vec::new(),
+            },
+        );
+
+        let grid = EngineBytecodeGrid {
+            snapshot: &snapshot,
+            sheet: 0,
+            cols: &cols,
+            slice_mode: ColumnSliceMode::IgnoreNonNumeric,
+        };
+
+        assert!(
+            bytecode::grid::Grid::column_slice(&grid, EXCEL_MAX_COLS_I32, 0, 0).is_none(),
+            "out-of-bounds columns should never be eligible for SIMD slicing"
+        );
     }
 }
