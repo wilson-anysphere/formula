@@ -601,8 +601,31 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     const onWheel = (event: WheelEvent) => {
       if (!rendererRef.current) return;
+      let deltaX = event.deltaX;
+      let deltaY = event.deltaY;
+
+      if (event.deltaMode === 1) {
+        // DOM_DELTA_LINE: browsers use a "line" abstraction; normalize to CSS pixels.
+        const line = 16;
+        deltaX *= line;
+        deltaY *= line;
+      } else if (event.deltaMode === 2) {
+        // DOM_DELTA_PAGE.
+        const viewport = rendererRef.current.scroll.getViewportState();
+        deltaX *= viewport.width;
+        deltaY *= viewport.height;
+      }
+
+      // Common UX: shift+wheel scrolls horizontally.
+      if (event.shiftKey && deltaX === 0) {
+        deltaX = deltaY;
+        deltaY = 0;
+      }
+
+      if (deltaX === 0 && deltaY === 0) return;
+
       event.preventDefault();
-      rendererRef.current.scrollBy(event.deltaX, event.deltaY);
+      rendererRef.current.scrollBy(deltaX, deltaY);
       syncScrollbars();
     };
 
