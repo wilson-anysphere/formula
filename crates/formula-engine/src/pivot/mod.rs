@@ -211,7 +211,9 @@ impl PivotKeyPart {
     fn display_string(&self) -> String {
         match self {
             PivotKeyPart::Blank => "(blank)".to_string(),
-            PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)).display_string(),
+            PivotKeyPart::Number(bits) => {
+                PivotValue::Number(f64::from_bits(*bits)).display_string()
+            }
             PivotKeyPart::Date(d) => d.to_string(),
             PivotKeyPart::Text(s) => s.clone(),
             PivotKeyPart::Bool(b) => b.to_string(),
@@ -600,11 +602,7 @@ pub struct CreatePivotTableRequest {
 impl CreatePivotTableRequest {
     pub fn into_config(self) -> PivotConfig {
         PivotConfig {
-            row_fields: self
-                .row_fields
-                .into_iter()
-                .map(PivotField::new)
-                .collect(),
+            row_fields: self.row_fields.into_iter().map(PivotField::new).collect(),
             column_fields: self
                 .column_fields
                 .into_iter()
@@ -908,8 +906,13 @@ impl PivotEngine {
         match cfg.subtotals {
             SubtotalPosition::Top if subtotal_levels > 0 => {
                 // For top subtotals we need the totals up front, so we precompute them per prefix.
-                let group_totals =
-                    Self::precompute_group_totals(&cube, &row_keys, &col_keys, cfg, subtotal_levels);
+                let group_totals = Self::precompute_group_totals(
+                    &cube,
+                    &row_keys,
+                    &col_keys,
+                    cfg,
+                    subtotal_levels,
+                );
 
                 let mut prev_row_key: Option<PivotKey> = None;
                 for row_key in &row_keys {
@@ -923,11 +926,7 @@ impl PivotEngine {
                         let prefix_key = PivotKey(row_key.0[..=level].to_vec());
                         if let Some(totals) = group_totals[level].get(&prefix_key) {
                             data.push(Self::render_subtotal_row(
-                                level,
-                                &row_key.0,
-                                totals,
-                                &col_keys,
-                                cfg,
+                                level, &row_key.0, totals, &col_keys, cfg,
                             ));
                             row_kinds.push(PivotRowKind::Subtotal);
                         }
@@ -935,11 +934,7 @@ impl PivotEngine {
 
                     let row_map = cube.get(row_key);
                     data.push(Self::render_row(
-                        row_key,
-                        row_map,
-                        &col_keys,
-                        cfg,
-                        /*label*/ None,
+                        row_key, row_map, &col_keys, cfg, /*label*/ None,
                     ));
                     row_kinds.push(PivotRowKind::Leaf);
 
@@ -980,11 +975,7 @@ impl PivotEngine {
 
                     let row_map = cube.get(row_key);
                     data.push(Self::render_row(
-                        row_key,
-                        row_map,
-                        &col_keys,
-                        cfg,
-                        /*label*/ None,
+                        row_key, row_map, &col_keys, cfg, /*label*/ None,
                     ));
                     row_kinds.push(PivotRowKind::Leaf);
 
@@ -1019,11 +1010,7 @@ impl PivotEngine {
                 for row_key in &row_keys {
                     let row_map = cube.get(row_key);
                     data.push(Self::render_row(
-                        row_key,
-                        row_map,
-                        &col_keys,
-                        cfg,
-                        /*label*/ None,
+                        row_key, row_map, &col_keys, cfg, /*label*/ None,
                     ));
                     row_kinds.push(PivotRowKind::Leaf);
                     if let Some(acc) = grand_acc.as_mut() {
@@ -1244,7 +1231,10 @@ impl PivotEngine {
         col_keys: &[PivotKey],
         cfg: &PivotConfig,
     ) -> Vec<PivotValue> {
-        let base = row_key_parts.get(level).map(|p| p.display_string()).unwrap_or_default();
+        let base = row_key_parts
+            .get(level)
+            .map(|p| p.display_string())
+            .unwrap_or_default();
         let label = if base.is_empty() {
             PivotValue::Text("Total".to_string())
         } else {
@@ -1261,13 +1251,16 @@ impl PivotEngine {
         cfg: &PivotConfig,
         subtotal_levels: usize,
     ) -> Vec<HashMap<PivotKey, GroupAccumulator>> {
-        let mut out: Vec<HashMap<PivotKey, GroupAccumulator>> = (0..subtotal_levels).map(|_| HashMap::new()).collect();
+        let mut out: Vec<HashMap<PivotKey, GroupAccumulator>> =
+            (0..subtotal_levels).map(|_| HashMap::new()).collect();
 
         for row_key in row_keys {
             let row_map = cube.get(row_key);
             for level in 0..subtotal_levels {
                 let prefix_key = PivotKey(row_key.0[..=level].to_vec());
-                let entry = out[level].entry(prefix_key).or_insert_with(GroupAccumulator::new);
+                let entry = out[level]
+                    .entry(prefix_key)
+                    .or_insert_with(GroupAccumulator::new);
                 entry.merge_row(row_map, col_keys, cfg.value_fields.len());
             }
         }
@@ -1749,7 +1742,11 @@ fn compare_key_parts_ascending(left: &PivotKeyPart, right: &PivotKeyPart) -> Ord
     left.cmp(right)
 }
 
-fn compare_key_parts_for_field(left: &PivotKeyPart, right: &PivotKeyPart, spec: &KeySortSpec) -> Ordering {
+fn compare_key_parts_for_field(
+    left: &PivotKeyPart,
+    right: &PivotKeyPart,
+    spec: &KeySortSpec,
+) -> Ordering {
     // Blank values always sort last, regardless of ascending/descending/manual.
     match (left, right) {
         (PivotKeyPart::Blank, PivotKeyPart::Blank) => return Ordering::Equal,
@@ -2092,7 +2089,11 @@ mod tests {
         assert_eq!(
             result.data,
             vec![
-                vec!["Region".into(), "B - Sum of Sales".into(), "A - Sum of Sales".into()],
+                vec![
+                    "Region".into(),
+                    "B - Sum of Sales".into(),
+                    "A - Sum of Sales".into()
+                ],
                 vec!["East".into(), 150.into(), 100.into()],
                 vec!["West".into(), 250.into(), 200.into()],
             ]
@@ -2270,10 +2271,7 @@ mod tests {
         let cache = PivotCache::from_range(&data).unwrap();
 
         let cfg = PivotConfig {
-            row_fields: vec![
-                PivotField::new("Region"),
-                PivotField::new("Product"),
-            ],
+            row_fields: vec![PivotField::new("Region"), PivotField::new("Product")],
             column_fields: vec![],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
@@ -2413,7 +2411,12 @@ mod tests {
     #[test]
     fn places_nested_subtotal_labels_in_correct_row_field_column() {
         let data = vec![
-            pv_row(&["Region".into(), "Product".into(), "Month".into(), "Sales".into()]),
+            pv_row(&[
+                "Region".into(),
+                "Product".into(),
+                "Month".into(),
+                "Sales".into(),
+            ]),
             pv_row(&["East".into(), "A".into(), "1".into(), 100.into()]),
             pv_row(&["East".into(), "A".into(), "2".into(), 150.into()]),
             pv_row(&["East".into(), "B".into(), "1".into(), 200.into()]),
@@ -2461,14 +2464,44 @@ mod tests {
                 ],
                 vec!["East".into(), "A".into(), "1".into(), 100.into()],
                 vec!["East".into(), "A".into(), "2".into(), 150.into()],
-                vec!["East".into(), "A Total".into(), PivotValue::Blank, 250.into()],
+                vec![
+                    "East".into(),
+                    "A Total".into(),
+                    PivotValue::Blank,
+                    250.into()
+                ],
                 vec!["East".into(), "B".into(), "1".into(), 200.into()],
-                vec!["East".into(), "B Total".into(), PivotValue::Blank, 200.into()],
-                vec!["East Total".into(), PivotValue::Blank, PivotValue::Blank, 450.into()],
+                vec![
+                    "East".into(),
+                    "B Total".into(),
+                    PivotValue::Blank,
+                    200.into()
+                ],
+                vec![
+                    "East Total".into(),
+                    PivotValue::Blank,
+                    PivotValue::Blank,
+                    450.into()
+                ],
                 vec!["West".into(), "A".into(), "1".into(), 250.into()],
-                vec!["West".into(), "A Total".into(), PivotValue::Blank, 250.into()],
-                vec!["West Total".into(), PivotValue::Blank, PivotValue::Blank, 250.into()],
-                vec!["Grand Total".into(), PivotValue::Blank, PivotValue::Blank, 700.into()],
+                vec![
+                    "West".into(),
+                    "A Total".into(),
+                    PivotValue::Blank,
+                    250.into()
+                ],
+                vec![
+                    "West Total".into(),
+                    PivotValue::Blank,
+                    PivotValue::Blank,
+                    250.into()
+                ],
+                vec![
+                    "Grand Total".into(),
+                    PivotValue::Blank,
+                    PivotValue::Blank,
+                    700.into()
+                ],
             ]
         );
     }
@@ -2798,7 +2831,11 @@ mod tests {
 
     #[test]
     fn unique_values_are_type_aware_and_collision_free() {
-        let data = vec![pv_row(&["Key".into()]), pv_row(&[1.into()]), pv_row(&["1".into()])];
+        let data = vec![
+            pv_row(&["Key".into()]),
+            pv_row(&[1.into()]),
+            pv_row(&["1".into()]),
+        ];
 
         let cache = PivotCache::from_range(&data).unwrap();
 

@@ -32,6 +32,16 @@ export default {
       ]
     },
     {
+      "name": "CLEAN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
       "name": "CONCAT",
       "min_args": 1,
       "max_args": 255,
@@ -125,6 +135,17 @@ export default {
       ]
     },
     {
+      "name": "DOLLAR",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "ERROR.TYPE",
       "min_args": 1,
       "max_args": 1,
@@ -132,6 +153,17 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "EXACT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "text",
+        "text"
       ]
     },
     {
@@ -492,6 +524,18 @@ export default {
       ]
     },
     {
+      "name": "NUMBERVALUE",
+      "min_args": 1,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text",
+        "text",
+        "text"
+      ]
+    },
+    {
       "name": "OR",
       "min_args": 1,
       "max_args": 255,
@@ -519,6 +563,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "PROPER",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
       ]
     },
     {
@@ -558,6 +612,19 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "REPLACE",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number",
+        "number",
+        "text"
       ]
     },
     {
@@ -704,6 +771,29 @@ export default {
       ]
     },
     {
+      "name": "TEXT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "any",
+        "text"
+      ]
+    },
+    {
+      "name": "TEXTJOIN",
+      "min_args": 3,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "bool",
+        "any"
+      ]
+    },
+    {
       "name": "TODAY",
       "min_args": 0,
       "max_args": 0,
@@ -747,6 +837,16 @@ export default {
       "max_args": 1,
       "volatility": "non_volatile",
       "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "VALUE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
       "arg_types": [
         "text"
       ]
