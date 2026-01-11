@@ -9,6 +9,9 @@ use crate::XlsxError;
 pub mod cache_definition;
 pub mod pivot_charts;
 pub mod slicers;
+pub mod graph;
+
+pub use graph::{PivotTableInstance, XlsxPivotGraph};
 
 pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
 
