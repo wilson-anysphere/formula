@@ -251,8 +251,9 @@ function extract(value) {
 
 ```typescript
 interface ChatMessage {
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
+  toolCallId?: string;
   attachments?: Attachment[];
 }
 
@@ -313,11 +314,15 @@ class ChatPanelEngine {
     if (response.toolCalls) {
       const results = await this.executeToolCalls(response.toolCalls);
       
-      // Add tool results to conversation
+      // IMPORTANT: Tool results are part of the model's context on the next turn.
+      // They should be appended as `role: "tool"` messages (matching the provider
+      // tool-calling protocol), and must be DLP-redacted/blocked *at tool execution*
+      // time (not only during prompt context construction).
       for (const result of results) {
         this.conversation.push({
-          role: "assistant",
-          content: `Executed: ${result.tool}\nResult: ${result.result}`
+          role: "tool",
+          toolCallId: result.id,
+          content: JSON.stringify(result, null, 2)
         });
       }
       
