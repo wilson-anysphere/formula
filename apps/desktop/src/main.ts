@@ -76,14 +76,18 @@ function currentSelectionRect(): SelectionRect {
   const sheetId = app.getCurrentSheetId();
   const active = app.getActiveCell();
   const ranges = app.getSelectionRanges();
-  const first = ranges[0];
-  if (first) {
+  const containing =
+    ranges.find(
+      (r) =>
+        active.row >= r.startRow && active.row <= r.endRow && active.col >= r.startCol && active.col <= r.endCol
+    ) ?? ranges[0];
+  if (containing) {
     return {
       sheetId,
-      startRow: first.startRow,
-      startCol: first.startCol,
-      endRow: first.endRow,
-      endCol: first.endCol,
+      startRow: containing.startRow,
+      startCol: containing.startCol,
+      endRow: containing.endRow,
+      endCol: containing.endCol,
       activeRow: active.row,
       activeCol: active.col,
     };
@@ -400,20 +404,16 @@ if (
               const tauriBackend = wrapTauriMacroBackendWithUiContext(
                 baseBackend,
                 () => {
-                  const sheetId = app.getCurrentSheetId();
-                  const active = app.getActiveCell();
-                  const ranges = app.getSelectionRanges();
-                  const first =
-                    ranges[0] ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
+                  const selection = currentSelectionRect();
                   return {
-                    sheetId,
-                    activeRow: active.row,
-                    activeCol: active.col,
+                    sheetId: selection.sheetId,
+                    activeRow: selection.activeRow ?? selection.startRow,
+                    activeCol: selection.activeCol ?? selection.startCol,
                     selection: {
-                      startRow: first.startRow,
-                      startCol: first.startCol,
-                      endRow: first.endRow,
-                      endCol: first.endCol,
+                      startRow: selection.startRow,
+                      startCol: selection.startCol,
+                      endRow: selection.endRow,
+                      endCol: selection.endCol,
                     },
                   };
                 },
