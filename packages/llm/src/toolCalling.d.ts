@@ -42,8 +42,14 @@ export function runChatWithTools(params: {
   onToolCall?: (call: ToolCall, meta: { requiresApproval: boolean }) => void;
   onToolResult?: (call: ToolCall, result: unknown) => void;
   requireApproval?: (call: ToolCall) => Promise<boolean>;
+  /**
+   * When true, approval denials are returned to the model as a tool result
+   * (ok:false) and the loop continues, allowing the model to re-plan.
+   *
+   * Default is false (throw on denial).
+   */
+  continueOnApprovalDenied?: boolean;
   model?: string;
   temperature?: number;
   maxTokens?: number;
 }): Promise<{ messages: LLMMessage[]; final: string }>;
-
