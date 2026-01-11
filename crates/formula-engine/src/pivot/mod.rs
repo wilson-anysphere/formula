@@ -2193,7 +2193,58 @@ mod tests {
                 vec!["Flag".into(), "Sum of Sales".into()],
                 vec!["true".into(), 2.into()],
                 vec!["false".into(), 1.into()],
-                vec![PivotValue::Text(String::new()), 3.into()],
+                vec!["(blank)".into(), 3.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn sorts_dates_descending_and_keeps_blanks_last() {
+        let jan_01 = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+        let jan_02 = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+
+        let data = vec![
+            pv_row(&["Date".into(), "Sales".into()]),
+            pv_row(&[jan_01.into(), 10.into()]),
+            pv_row(&[jan_02.into(), 20.into()]),
+            pv_row(&[PivotValue::Blank, 5.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                sort_order: SortOrder::Descending,
+                ..PivotField::new("Date")
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        // Descending: newest date first. Blank is always last.
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Date".into(), "Sum of Sales".into()],
+                vec!["2024-01-02".into(), 20.into()],
+                vec!["2024-01-01".into(), 10.into()],
+                vec!["(blank)".into(), 5.into()],
             ]
         );
     }
