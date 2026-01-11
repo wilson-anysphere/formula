@@ -192,6 +192,10 @@ importers:
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
+    devDependencies:
+      '@formula/collab-workbook':
+        specifier: workspace:*
+        version: link:../workbook
 
   packages/collab/permissions: {}
 
