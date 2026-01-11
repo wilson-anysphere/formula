@@ -137,7 +137,20 @@ Notable helpers:
   - If a merge crosses frozen boundaries (frozen vs scrollable quadrants), the merged bounds cannot be represented as a single viewport rect; in that case this falls back to the merged anchor cell rect.
 - `getViewportState()` returns the current scroll/viewport metrics (useful for overlay positioning without extra DOM reads).
 - `getFillHandleRect()` returns the active selection fill-handle rect (also in viewport coordinates).
+- `setZoom(zoom)` / `getZoom()` control the grid zoom level (scales cell sizes + text rendering).
 - Multi-range selection helpers: `setSelectionRanges`, `getSelectionRanges`, `getActiveSelectionRangeIndex`.
+
+## Zoom
+
+`CanvasGrid` supports scaling the grid UI (cell sizes + text rendering) via a zoom factor.
+
+- **Imperative:** use `GridApi.setZoom(zoom)` / `getZoom()`.
+- **Controlled prop:** pass `zoom?: number` to `CanvasGrid` (optional; when provided, the grid treats zoom as controlled).
+
+User interactions:
+
+- **Touch devices:** two-finger pinch-to-zoom.
+- **Trackpads / browsers:** `ctrl+wheel` (trackpad pinch often surfaces as `ctrl+wheel`).
 
 ## Merged cells
 
