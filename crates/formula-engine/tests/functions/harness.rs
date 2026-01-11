@@ -32,10 +32,18 @@ impl TestSheet {
             .expect("set cell formula");
     }
 
+    pub fn recalc(&mut self) {
+        self.engine.recalculate();
+    }
+
+    pub fn get(&self, addr: &str) -> Value {
+        self.engine.get_cell_value(self.sheet, addr)
+    }
+
     pub fn eval(&mut self, formula: &str) -> Value {
         self.set_formula(self.scratch_cell, formula);
-        self.engine.recalculate();
-        self.engine.get_cell_value(self.sheet, self.scratch_cell)
+        self.recalc();
+        self.get(self.scratch_cell)
     }
 }
 

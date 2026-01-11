@@ -73,3 +73,98 @@ fn lotus_bug_can_be_disabled() {
     assert_number(&sheet.eval("=MONTH(60)"), 3.0);
     assert_number(&sheet.eval("=DAY(60)"), 1.0);
 }
+
+#[test]
+fn time_and_timevalue_conversions() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=TIME(1,30,0)"), 0.0625);
+    assert_number(&sheet.eval("=TIME(24,0,0)"), 1.0);
+    assert_eq!(sheet.eval("=TIME(-1,0,0)"), Value::Error(ErrorKind::Num));
+    sheet.set("A1", Value::Number(f64::INFINITY));
+    assert_eq!(sheet.eval("=TIME(A1,0,0)"), Value::Error(ErrorKind::Num));
+
+    assert_number(&sheet.eval("=TIMEVALUE(\"1:30\")"), 0.0625);
+    assert_number(&sheet.eval("=TIMEVALUE(\"1:30 PM\")"), 0.5625);
+    assert_eq!(sheet.eval("=TIMEVALUE(\"nope\")"), Value::Error(ErrorKind::Value));
+}
+
+#[test]
+fn datevalue_edate_and_eomonth() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=DATEVALUE(\"2020-01-01\")"),
+        sheet.eval("=DATE(2020,1,1)")
+    );
+    assert_eq!(sheet.eval("=DATEVALUE(\"nope\")"), Value::Error(ErrorKind::Value));
+
+    assert_number(&sheet.eval("=DAY(EOMONTH(DATE(2020,1,15),0))"), 31.0);
+    assert_number(&sheet.eval("=DAY(EOMONTH(DATE(2020,1,15),1))"), 29.0);
+
+    assert_number(&sheet.eval("=MONTH(EDATE(DATE(2020,1,31),1))"), 2.0);
+    assert_number(&sheet.eval("=DAY(EDATE(DATE(2020,1,31),1))"), 29.0);
+}
+
+#[test]
+fn hour_minute_second_extract_time_components() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=HOUR(TIME(1,2,3))"), 1.0);
+    assert_number(&sheet.eval("=MINUTE(TIME(1,2,3))"), 2.0);
+    assert_number(&sheet.eval("=SECOND(TIME(1,2,3))"), 3.0);
+}
+
+#[test]
+fn weekday_and_weeknum_return_types() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=WEEKDAY(1)"), 2.0);
+    assert_number(&sheet.eval("=WEEKDAY(1,2)"), 1.0);
+    assert_number(&sheet.eval("=WEEKDAY(1,3)"), 0.0);
+    assert_eq!(sheet.eval("=WEEKDAY(1,0)"), Value::Error(ErrorKind::Num));
+
+    assert_number(&sheet.eval("=WEEKNUM(DATE(2020,1,1),1)"), 1.0);
+    assert_number(&sheet.eval("=WEEKNUM(DATE(2020,1,5),1)"), 2.0);
+    assert_number(&sheet.eval("=WEEKNUM(DATE(2020,1,5),2)"), 1.0);
+    assert_number(&sheet.eval("=WEEKNUM(DATE(2020,1,6),2)"), 2.0);
+    assert_number(&sheet.eval("=WEEKNUM(DATE(2021,1,1),21)"), 53.0);
+    assert_eq!(sheet.eval("=WEEKNUM(1,9)"), Value::Error(ErrorKind::Num));
+}
+
+#[test]
+fn workday_and_networkdays_skip_weekends_and_holidays() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=WORKDAY(DATE(2020,1,1),1)"),
+        sheet.eval("=DATE(2020,1,2)")
+    );
+    assert_eq!(
+        sheet.eval("=WORKDAY(DATE(2020,1,1),1,DATE(2020,1,2))"),
+        sheet.eval("=DATE(2020,1,3)")
+    );
+
+    assert_number(&sheet.eval("=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10))"), 8.0);
+    assert_number(
+        &sheet.eval("=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10),{DATE(2020,1,2),DATE(2020,1,3)})"),
+        6.0,
+    );
+
+    assert_eq!(
+        sheet.eval("=WORKDAY.INTL(DATE(2020,1,3),1,11)"),
+        sheet.eval("=DATE(2020,1,4)")
+    );
+    assert_eq!(
+        sheet.eval("=WORKDAY.INTL(DATE(2020,1,3),1,99)"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval("=WORKDAY.INTL(DATE(2020,1,3),1,\"abc\")"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn year_spills_over_array_inputs() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=YEAR({DATE(2019,1,1);DATE(2020,1,1)})");
+    sheet.recalc();
+    assert_number(&sheet.get("A1"), 2019.0);
+    assert_number(&sheet.get("A2"), 2020.0);
+}

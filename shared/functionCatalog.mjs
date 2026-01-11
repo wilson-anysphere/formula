@@ -115,6 +115,16 @@ export default {
       ]
     },
     {
+      "name": "DATEVALUE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "DAY",
       "min_args": 1,
       "max_args": 1,
@@ -140,6 +150,28 @@ export default {
       "max_args": 2,
       "volatility": "non_volatile",
       "return_type": "text",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "EDATE",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "EOMONTH",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
       "arg_types": [
         "number",
         "number"
@@ -208,6 +240,16 @@ export default {
         "any",
         "any",
         "number",
+        "any"
+      ]
+    },
+    {
+      "name": "HOUR",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "any"
       ]
     },
@@ -434,6 +476,16 @@ export default {
       ]
     },
     {
+      "name": "MINUTE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "MIRR",
       "min_args": 3,
       "max_args": 3,
@@ -483,6 +535,31 @@ export default {
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": []
+    },
+    {
+      "name": "NETWORKDAYS",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "any"
+      ]
+    },
+    {
+      "name": "NETWORKDAYS.INTL",
+      "min_args": 2,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "any",
+        "any"
+      ]
     },
     {
       "name": "NOT",
@@ -684,6 +761,16 @@ export default {
       ]
     },
     {
+      "name": "SECOND",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "SEQUENCE",
       "min_args": 1,
       "max_args": 4,
@@ -794,6 +881,28 @@ export default {
       ]
     },
     {
+      "name": "TIME",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "TIMEVALUE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "TODAY",
       "min_args": 0,
       "max_args": 0,
@@ -861,6 +970,53 @@ export default {
         "any",
         "any",
         "number",
+        "any"
+      ]
+    },
+    {
+      "name": "WEEKDAY",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "WEEKNUM",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "WORKDAY",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "any"
+      ]
+    },
+    {
+      "name": "WORKDAY.INTL",
+      "min_args": 2,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "any",
         "any"
       ]
     },

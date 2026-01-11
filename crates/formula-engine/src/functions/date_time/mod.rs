@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::{ExcelError, ExcelResult};
 
+const DEFAULT_WEEKEND_MASK: u8 = (1 << 5) | (1 << 6); // Saturday + Sunday (Mon=0..Sun=6)
+
 /// TIME(hour, minute, second)
 pub fn time(hour: i32, minute: i32, second: i32) -> ExcelResult<f64> {
     if hour < 0 || minute < 0 || second < 0 {
@@ -152,6 +154,23 @@ fn add_months(year: i32, month: u8, offset: i32) -> (i32, u8) {
     (new_year, new_month)
 }
 
+/// EDATE(start_date, months)
+pub fn edate(start_date: i32, months: i32, system: ExcelDateSystem) -> ExcelResult<i32> {
+    let start = crate::date::serial_to_ymd(start_date, system)?;
+    let (year, month) = add_months(start.year, start.month, months);
+
+    // Preserve day-of-month where possible, otherwise clamp to the end of month.
+    let mut day = start.day;
+    while day > 0 {
+        match ymd_to_serial(ExcelDate::new(year, month, day), system) {
+            Ok(serial) => return Ok(serial),
+            Err(ExcelError::Num) => day = day.saturating_sub(1),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(ExcelError::Num)
+}
+
 /// WEEKDAY(serial_number, [return_type])
 pub fn weekday(serial_number: i32, return_type: Option<i32>, system: ExcelDateSystem) -> ExcelResult<i32> {
     // Validate serial number is representable as a date in this system.
@@ -184,9 +203,9 @@ fn weekday_monday0(serial_number: i32, system: ExcelDateSystem) -> i32 {
     }
 }
 
-fn is_weekend(serial_number: i32, system: ExcelDateSystem) -> bool {
-    let monday0 = weekday_monday0(serial_number, system);
-    monday0 >= 5
+fn is_weekend_mask(serial_number: i32, system: ExcelDateSystem, weekend_mask: u8) -> bool {
+    let monday0 = weekday_monday0(serial_number, system) as u8;
+    weekend_mask & (1 << monday0) != 0
 }
 
 fn make_holiday_set(holidays: Option<&[i32]>) -> HashSet<i32> {
@@ -197,12 +216,37 @@ fn make_holiday_set(holidays: Option<&[i32]>) -> HashSet<i32> {
         .collect::<HashSet<_>>()
 }
 
-fn is_workday(serial_number: i32, system: ExcelDateSystem, holidays: &HashSet<i32>) -> bool {
-    !is_weekend(serial_number, system) && !holidays.contains(&serial_number)
+fn is_workday_with_weekend(
+    serial_number: i32,
+    system: ExcelDateSystem,
+    weekend_mask: u8,
+    holidays: &HashSet<i32>,
+) -> bool {
+    !is_weekend_mask(serial_number, system, weekend_mask) && !holidays.contains(&serial_number)
 }
 
 /// WORKDAY(start_date, days, [holidays])
 pub fn workday(start_date: i32, days: i32, holidays: Option<&[i32]>, system: ExcelDateSystem) -> ExcelResult<i32> {
+    workday_intl(start_date, days, DEFAULT_WEEKEND_MASK, holidays, system)
+}
+
+/// NETWORKDAYS(start_date, end_date, [holidays])
+pub fn networkdays(start_date: i32, end_date: i32, holidays: Option<&[i32]>, system: ExcelDateSystem) -> ExcelResult<i32> {
+    networkdays_intl(start_date, end_date, DEFAULT_WEEKEND_MASK, holidays, system)
+}
+
+/// WORKDAY.INTL(start_date, days, weekend_mask, [holidays])
+pub fn workday_intl(
+    start_date: i32,
+    days: i32,
+    weekend_mask: u8,
+    holidays: Option<&[i32]>,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    if weekend_mask == 0b111_1111 {
+        return Err(ExcelError::Num);
+    }
+
     let _ = crate::date::serial_to_ymd(start_date, system)?;
     let holiday_set = make_holiday_set(holidays);
 
@@ -211,7 +255,7 @@ pub fn workday(start_date: i32, days: i32, holidays: Option<&[i32]>, system: Exc
     let mut current = start_date;
 
     if remaining == 0 {
-        while !is_workday(current, system, &holiday_set) {
+        while !is_workday_with_weekend(current, system, weekend_mask, &holiday_set) {
             current += direction;
         }
         return Ok(current);
@@ -219,7 +263,7 @@ pub fn workday(start_date: i32, days: i32, holidays: Option<&[i32]>, system: Exc
 
     while remaining > 0 {
         current += direction;
-        if is_workday(current, system, &holiday_set) {
+        if is_workday_with_weekend(current, system, weekend_mask, &holiday_set) {
             remaining -= 1;
         }
     }
@@ -227,8 +271,18 @@ pub fn workday(start_date: i32, days: i32, holidays: Option<&[i32]>, system: Exc
     Ok(current)
 }
 
-/// NETWORKDAYS(start_date, end_date, [holidays])
-pub fn networkdays(start_date: i32, end_date: i32, holidays: Option<&[i32]>, system: ExcelDateSystem) -> ExcelResult<i32> {
+/// NETWORKDAYS.INTL(start_date, end_date, weekend_mask, [holidays])
+pub fn networkdays_intl(
+    start_date: i32,
+    end_date: i32,
+    weekend_mask: u8,
+    holidays: Option<&[i32]>,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    if weekend_mask == 0b111_1111 {
+        return Err(ExcelError::Num);
+    }
+
     let _ = crate::date::serial_to_ymd(start_date, system)?;
     let _ = crate::date::serial_to_ymd(end_date, system)?;
     let holiday_set = make_holiday_set(holidays);
@@ -236,7 +290,7 @@ pub fn networkdays(start_date: i32, end_date: i32, holidays: Option<&[i32]>, sys
     if start_date <= end_date {
         let mut count = 0i32;
         for serial in start_date..=end_date {
-            if is_workday(serial, system, &holiday_set) {
+            if is_workday_with_weekend(serial, system, weekend_mask, &holiday_set) {
                 count += 1;
             }
         }
@@ -244,10 +298,52 @@ pub fn networkdays(start_date: i32, end_date: i32, holidays: Option<&[i32]>, sys
     } else {
         let mut count = 0i32;
         for serial in end_date..=start_date {
-            if is_workday(serial, system, &holiday_set) {
+            if is_workday_with_weekend(serial, system, weekend_mask, &holiday_set) {
                 count += 1;
             }
         }
         Ok(-count)
     }
+}
+
+/// WEEKNUM(serial_number, [return_type])
+pub fn weeknum(serial_number: i32, return_type: Option<i32>, system: ExcelDateSystem) -> ExcelResult<i32> {
+    let date = crate::date::serial_to_ymd(serial_number, system)?;
+    let return_type = return_type.unwrap_or(1);
+
+    if return_type == 21 {
+        return weeknum_iso(serial_number, system);
+    }
+
+    let week_start_monday0: i32 = match return_type {
+        1 => 6,      // Sunday
+        2 | 11 => 0, // Monday
+        12 => 1,     // Tuesday
+        13 => 2,     // Wednesday
+        14 => 3,     // Thursday
+        15 => 4,     // Friday
+        16 => 5,     // Saturday
+        17 => 6,     // Sunday
+        _ => return Err(ExcelError::Num),
+    };
+
+    let year_start = ymd_to_serial(ExcelDate::new(date.year, 1, 1), system)?;
+    let day_offset = serial_number - year_start;
+    let start_weekday_monday0 = weekday_monday0(year_start, system);
+    let start_index = (start_weekday_monday0 - week_start_monday0).rem_euclid(7);
+    Ok(((day_offset + start_index) / 7) + 1)
+}
+
+fn weeknum_iso(serial_number: i32, system: ExcelDateSystem) -> ExcelResult<i32> {
+    let monday0 = weekday_monday0(serial_number, system);
+    let thursday_serial = i64::from(serial_number) + i64::from(3 - monday0);
+    let thursday_serial = i32::try_from(thursday_serial).map_err(|_| ExcelError::Num)?;
+    let thursday_date = crate::date::serial_to_ymd(thursday_serial, system)?;
+    let iso_year = thursday_date.year;
+
+    let jan4_serial = ymd_to_serial(ExcelDate::new(iso_year, 1, 4), system)?;
+    let jan4_weekday = weekday_monday0(jan4_serial, system);
+    let week1_start = i64::from(jan4_serial) - i64::from(jan4_weekday);
+    let week_start = i64::from(serial_number) - i64::from(monday0);
+    Ok(((week_start - week1_start).div_euclid(7) + 1) as i32)
 }
