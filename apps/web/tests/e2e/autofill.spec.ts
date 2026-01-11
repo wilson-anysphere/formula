@@ -67,8 +67,13 @@ test("dragging the fill handle repeats values and shifts formulas", async ({ pag
   // Formula shifting: B1 = A1*2 -> fill down to B3 shifts the referenced row.
   await page.mouse.click(cellCenter(0, 1).x, cellCenter(0, 1).y);
   await expect(page.getByTestId("active-address")).toHaveText("B1");
+  // Ensure the formula bar has synced to B1 before starting to edit. Under heavy
+  // Playwright parallelism, the async cell sync can race with `fill()` and
+  // append the new formula onto the old one (e.g. `=A1+A2=A1*2`).
+  await expect(input).toHaveValue("=A1+A2");
   await input.fill("=A1*2");
   await input.press("Enter");
+  await expect(input).toHaveValue("=A1*2");
 
   // Exit formula editing mode so grid interactions are in "default" mode.
   await page.getByTestId("engine-status").click();

@@ -610,6 +610,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const detachDark = attachMediaListener(mqlDark);
     const detachContrast = attachMediaListener(mqlContrast);
 
+    // Apply the CSS-driven theme immediately (important when the grid mounts under a non-default
+    // prefers-color-scheme/contrast setting).
+    refreshTheme();
+
     return () => {
       for (const observer of observers) observer.disconnect();
       detachDark();
