@@ -242,6 +242,16 @@ console.log("[formula] Building WASM artifacts via wasm-pack…");
 // `wasm-pack` refuses to overwrite some files if the output already exists.
 await rm(outDir, { recursive: true, force: true });
 
+// Some environments configure Cargo to use `sccache` via `build.rustc-wrapper` or
+// other wrapper settings. When the wrapper is unavailable/misconfigured, wasm-pack
+// builds can fail even for `cargo metadata`/`rustc -vV`. Default to disabling any
+// configured wrapper unless the user explicitly overrides it in the environment.
+const wasmPackEnv = {
+  ...childEnv,
+  RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
+  RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+};
+
 const result = spawnSync(
   wasmPackBin,
   [
@@ -258,7 +268,7 @@ const result = spawnSync(
     // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
     "--no-pack"
   ],
-  { cwd: repoRoot, stdio: "inherit", env: childEnv }
+  { cwd: repoRoot, stdio: "inherit", env: wasmPackEnv }
 );
 
 if (result.error) {
