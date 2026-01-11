@@ -266,6 +266,63 @@ test("permissions: sheets.createSheet requires sheets.manage", async (t) => {
   await assert.rejects(() => host.executeCommand(commandId), /Permission denied: sheets\.manage/);
 });
 
+test("api surface: sheets.deleteSheet removes sheets and cannot delete last sheet", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sheets-delete-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "sheetExt.delete";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "sheet-delete-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Sheet Delete" }] },
+      permissions: ["ui.commands", "sheets.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          await formula.sheets.createSheet("Temp");
+          await formula.sheets.deleteSheet("Temp");
+          const missing = await formula.sheets.getSheet("Temp");
+          let lastSheetError = null;
+          try {
+            await formula.sheets.deleteSheet("Sheet1");
+          } catch (err) {
+            lastSheetError = String(err && err.message ? err.message : err);
+          }
+          return { missing, lastSheetError };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.equal(result.missing, undefined);
+  assert.match(result.lastSheetError, /Cannot delete the last remaining sheet/);
+});
+
 test("events: sheets.createSheet emits sheetActivated with stable payload", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sheet-activated-"));
   const extDir = path.join(dir, "ext");

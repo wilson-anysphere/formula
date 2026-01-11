@@ -24,6 +24,7 @@ const API_PERMISSIONS = {
   "sheets.getSheet": ["sheets.manage"],
   "sheets.createSheet": ["sheets.manage"],
   "sheets.renameSheet": ["sheets.manage"],
+  "sheets.deleteSheet": ["sheets.manage"],
 
   "commands.registerCommand": ["ui.commands"],
   "commands.unregisterCommand": ["ui.commands"],
@@ -705,6 +706,9 @@ class ExtensionHost {
         return this._spreadsheet.createSheet(args[0]);
       case "sheets.renameSheet":
         this._spreadsheet.renameSheet(args[0], args[1]);
+        return null;
+      case "sheets.deleteSheet":
+        this._spreadsheet.deleteSheet(args[0]);
         return null;
 
       case "cells.getSelection":

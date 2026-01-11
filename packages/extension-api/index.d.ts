@@ -51,6 +51,7 @@ export namespace sheets {
   function getSheet(name: string): Promise<Sheet | undefined>;
   function createSheet(name: string): Promise<Sheet>;
   function renameSheet(oldName: string, newName: string): Promise<void>;
+  function deleteSheet(name: string): Promise<void>;
 }
 
 export namespace cells {

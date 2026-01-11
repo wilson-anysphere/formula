@@ -112,6 +112,26 @@ class InMemorySpreadsheet {
     return { id: sheet.id, name: sheet.name };
   }
 
+  deleteSheet(name) {
+    const sheetName = String(name);
+    const idx = this._sheets.findIndex((s) => s.name === sheetName);
+    if (idx === -1) throw new Error(`Unknown sheet: ${sheetName}`);
+    if (this._sheets.length === 1) {
+      throw new Error("Cannot delete the last remaining sheet");
+    }
+
+    const sheet = this._sheets[idx];
+    const wasActive = sheet.id === this._activeSheetId;
+    this._sheets.splice(idx, 1);
+
+    if (wasActive) {
+      // Mirror typical spreadsheet behavior: deleting the active sheet activates another.
+      this._activeSheetId = this._sheets[0].id;
+      const payload = { sheet: this.getActiveSheet() };
+      for (const listener of this._sheetListeners) listener(payload);
+    }
+  }
+
   activateSheet(name) {
     const sheetName = String(name);
     const sheet = this._sheets.find((s) => s.name === sheetName);

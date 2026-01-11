@@ -292,6 +292,10 @@ const sheets = {
 
   async renameSheet(oldName, newName) {
     await rpcCall("sheets", "renameSheet", [String(oldName), String(newName)]);
+  },
+
+  async deleteSheet(name) {
+    await rpcCall("sheets", "deleteSheet", [String(name)]);
   }
 };
 
