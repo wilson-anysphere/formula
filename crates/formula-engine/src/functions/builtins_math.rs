@@ -1,4 +1,4 @@
-use crate::eval::CompiledExpr;
+use crate::eval::{CellAddr, CompiledExpr};
 use crate::functions::array_lift;
 use crate::functions::math::criteria::Criteria;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
@@ -559,68 +559,166 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    fn reference_cell_count(reference: &crate::functions::Reference) -> u64 {
-        let r = reference.normalized();
-        let rows = (u64::from(r.end.row)).saturating_sub(u64::from(r.start.row)) + 1;
-        let cols = (u64::from(r.end.col)).saturating_sub(u64::from(r.start.col)) + 1;
-        rows.saturating_mul(cols)
-    }
-
     // `iter_reference_cells` is sparse when the backend supports it. COUNTIF must still account
     // for implicit blanks, but only when the criteria can actually match blank cells.
     let blank_matches = criteria.matches(&Value::Blank);
 
-    let mut count = 0u64;
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => {
-            let mut seen = 0u64;
+            let mut count: u64 = 0;
+            let mut seen_count: u64 = 0;
             for addr in ctx.iter_reference_cells(&r) {
-                seen += 1;
+                seen_count += 1;
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
                 if criteria.matches(&v) {
                     count += 1;
                 }
             }
+
             if blank_matches {
-                count += reference_cell_count(&r).saturating_sub(seen);
+                count += r.size().saturating_sub(seen_count);
             }
+            Value::Number(count as f64)
         }
         ArgValue::ReferenceUnion(ranges) => {
+            let union_size = blank_matches.then(|| reference_union_size(&ranges));
+            let mut count: u64 = 0;
+            let mut seen_count: u64 = 0;
             let mut seen = std::collections::HashSet::new();
             for r in ranges {
-                if blank_matches {
-                    for addr in r.iter_cells() {
-                        if !seen.insert((r.sheet_id.clone(), addr)) {
-                            continue;
-                        }
-                        let v = ctx.get_cell_value(&r.sheet_id, addr);
-                        if criteria.matches(&v) {
-                            count += 1;
-                        }
+                for addr in ctx.iter_reference_cells(&r) {
+                    if !seen.insert((r.sheet_id.clone(), addr)) {
+                        continue;
                     }
-                } else {
-                    for addr in ctx.iter_reference_cells(&r) {
-                        if !seen.insert((r.sheet_id.clone(), addr)) {
-                            continue;
-                        }
-                        let v = ctx.get_cell_value(&r.sheet_id, addr);
-                        if criteria.matches(&v) {
-                            count += 1;
-                        }
+                    seen_count += 1;
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
+                    if criteria.matches(&v) {
+                        count += 1;
                     }
                 }
             }
+
+            if let Some(union_size) = union_size {
+                count += union_size.saturating_sub(seen_count);
+            }
+            Value::Number(count as f64)
         }
         ArgValue::Scalar(Value::Array(arr)) => {
+            let mut count: u64 = 0;
             for v in arr.iter() {
                 if criteria.matches(v) {
                     count += 1;
                 }
             }
+            Value::Number(count as f64)
         }
-        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
-        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+        ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
     }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COUNTIFS",
+        min_args: 2,
+        max_args: 254,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: countifs_fn,
+    }
+}
+
+fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 2 || args.len() % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    #[derive(Debug, Clone)]
+    enum CriteriaRange {
+        Reference(crate::functions::Reference),
+        Array(crate::value::Array),
+    }
+
+    impl CriteriaRange {
+        fn shape(&self) -> (usize, usize) {
+            match self {
+                CriteriaRange::Reference(r) => {
+                    let r = r.normalized();
+                    (
+                        (r.end.row - r.start.row + 1) as usize,
+                        (r.end.col - r.start.col + 1) as usize,
+                    )
+                }
+                CriteriaRange::Array(arr) => (arr.rows, arr.cols),
+            }
+        }
+
+        fn value_at(&self, ctx: &dyn FunctionContext, idx: usize, cols: usize) -> Value {
+            match self {
+                CriteriaRange::Reference(r) => {
+                    let row_off = idx / cols;
+                    let col_off = idx % cols;
+                    let addr = CellAddr {
+                        row: r.start.row + row_off as u32,
+                        col: r.start.col + col_off as u32,
+                    };
+                    ctx.get_cell_value(&r.sheet_id, addr)
+                }
+                CriteriaRange::Array(arr) => arr.values.get(idx).cloned().unwrap_or(Value::Blank),
+            }
+        }
+    }
+
+    let mut ranges: Vec<CriteriaRange> = Vec::with_capacity(args.len() / 2);
+    let mut criteria: Vec<Criteria> = Vec::with_capacity(args.len() / 2);
+    let mut shape: Option<(usize, usize)> = None;
+    let date_system = ctx.date_system();
+
+    for pair in args.chunks_exact(2) {
+        let criteria_range = match ctx.eval_arg(&pair[0]) {
+            ArgValue::Reference(r) => CriteriaRange::Reference(r.normalized()),
+            ArgValue::Scalar(Value::Array(arr)) => CriteriaRange::Array(arr),
+            ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+        };
+
+        let (rows, cols) = criteria_range.shape();
+        match shape {
+            None => shape = Some((rows, cols)),
+            Some(expected) if expected != (rows, cols) => return Value::Error(ErrorKind::Value),
+            Some(_) => {}
+        }
+        ranges.push(criteria_range);
+
+        let criteria_value = eval_scalar_arg(ctx, &pair[1]);
+        if let Value::Error(e) = criteria_value {
+            return Value::Error(e);
+        }
+        let compiled = match Criteria::parse_with_date_system(&criteria_value, date_system) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+        criteria.push(compiled);
+    }
+
+    let (rows, cols) = shape.unwrap_or((0, 0));
+    let len = rows.saturating_mul(cols);
+    if len == 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut count: u64 = 0;
+    'row: for idx in 0..len {
+        for (range, crit) in ranges.iter().zip(criteria.iter()) {
+            let v = range.value_at(ctx, idx, cols);
+            if !crit.matches(&v) {
+                continue 'row;
+            }
+        }
+        count += 1;
+    }
+
     Value::Number(count as f64)
 }
 
@@ -815,57 +913,80 @@ fn countblank_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 }
 
 fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
-    let rects: Vec<crate::functions::Reference> = ranges.iter().map(|r| r.normalized()).collect();
-    if rects.is_empty() {
+    fn size_for_rects(rects: &[crate::functions::Reference]) -> u64 {
+        if rects.is_empty() {
+            return 0;
+        }
+
+        // Convert to half-open row slabs: [start, end+1)
+        let mut row_bounds: Vec<u32> = Vec::with_capacity(rects.len() * 2);
+        for r in rects {
+            row_bounds.push(r.start.row);
+            row_bounds.push(r.end.row.saturating_add(1));
+        }
+        row_bounds.sort_unstable();
+        row_bounds.dedup();
+
+        let mut total: u64 = 0;
+        for rows in row_bounds.windows(2) {
+            let y0 = rows[0];
+            let y1 = rows[1];
+            if y1 <= y0 {
+                continue;
+            }
+
+            let mut intervals: Vec<(u32, u32)> = Vec::new();
+            for r in rects {
+                let r_end = r.end.row.saturating_add(1);
+                if r.start.row <= y0 && r_end >= y1 {
+                    intervals.push((r.start.col, r.end.col.saturating_add(1)));
+                }
+            }
+
+            if intervals.is_empty() {
+                continue;
+            }
+
+            intervals.sort_by_key(|(s, _e)| *s);
+
+            let mut cur_s = intervals[0].0;
+            let mut cur_e = intervals[0].1;
+            let mut len: u64 = 0;
+            for (s, e) in intervals.into_iter().skip(1) {
+                if s > cur_e {
+                    len += (cur_e - cur_s) as u64;
+                    cur_s = s;
+                    cur_e = e;
+                } else {
+                    cur_e = cur_e.max(e);
+                }
+            }
+            len += (cur_e - cur_s) as u64;
+
+            total += (y1 - y0) as u64 * len;
+        }
+
+        total
+    }
+
+    if ranges.is_empty() {
         return 0;
     }
 
-    // Convert to half-open row slabs: [start, end+1)
-    let mut row_bounds: Vec<u32> = Vec::with_capacity(rects.len() * 2);
-    for r in &rects {
-        row_bounds.push(r.start.row);
-        row_bounds.push(r.end.row.saturating_add(1));
-    }
-    row_bounds.sort_unstable();
-    row_bounds.dedup();
-
     let mut total: u64 = 0;
-    for rows in row_bounds.windows(2) {
-        let y0 = rows[0];
-        let y1 = rows[1];
-        if y1 <= y0 {
-            continue;
-        }
+    let mut by_sheet: std::collections::HashMap<
+        crate::functions::SheetId,
+        Vec<crate::functions::Reference>,
+    > = std::collections::HashMap::new();
+    for r in ranges {
+        by_sheet
+            .entry(r.sheet_id.clone())
+            .or_default()
+            .push(r.normalized());
+    }
 
-        let mut intervals: Vec<(u32, u32)> = Vec::new();
-        for r in &rects {
-            let r_end = r.end.row.saturating_add(1);
-            if r.start.row <= y0 && r_end >= y1 {
-                intervals.push((r.start.col, r.end.col.saturating_add(1)));
-            }
-        }
-
-        if intervals.is_empty() {
-            continue;
-        }
-
-        intervals.sort_by_key(|(s, _e)| *s);
-
-        let mut cur_s = intervals[0].0;
-        let mut cur_e = intervals[0].1;
-        let mut len: u64 = 0;
-        for (s, e) in intervals.into_iter().skip(1) {
-            if s > cur_e {
-                len += (cur_e - cur_s) as u64;
-                cur_s = s;
-                cur_e = e;
-            } else {
-                cur_e = cur_e.max(e);
-            }
-        }
-        len += (cur_e - cur_s) as u64;
-
-        total += (y1 - y0) as u64 * len;
+    for rects in by_sheet.into_values() {
+        total += size_for_rects(&rects);
     }
 
     total

@@ -4334,7 +4334,6 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
         }
         crate::value::parse_number(rhs, crate::value::NumberLocale::en_us()).is_ok()
     }
-
     match expr {
         bytecode::Expr::Literal(v) => match v {
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
@@ -4376,7 +4375,10 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                 if args.len() != 2 {
                     return false;
                 }
-                let range_ok = matches!(args[0], bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_));
+                let range_ok = matches!(
+                    args[0],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                );
 
                 // The bytecode runtime currently supports numeric COUNTIF criteria only. Reject
                 // unsupported criteria shapes here so the engine falls back to the full evaluator
