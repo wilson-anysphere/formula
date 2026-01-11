@@ -1,16 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { evaluateFormula } from "./evaluateFormula.js";
 import { AI_CELL_DLP_ERROR, AI_CELL_PLACEHOLDER, AiCellFunctionEngine } from "./AiCellFunctionEngine.js";
 
 import { MemoryAIAuditStore } from "../../../../packages/ai-audit/src/memory-store.js";
 
-import { InMemoryAuditLogger } from "../../../../packages/security/dlp/src/audit.js";
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
 import { CLASSIFICATION_LEVEL } from "../../../../packages/security/dlp/src/classification.js";
+import { LocalClassificationStore } from "../../../../packages/security/dlp/src/classificationStore.js";
 import { createDefaultOrgPolicy } from "../../../../packages/security/dlp/src/policy.js";
-import { LocalClassificationStore, createMemoryStorage } from "../../../../packages/security/dlp/src/classificationStore.js";
-import { CLASSIFICATION_SCOPE } from "../../../../packages/security/dlp/src/selectors.js";
+import { LocalPolicyStore } from "../../../../packages/security/dlp/src/policyStore.js";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -28,7 +27,33 @@ function defer<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+function markCellRestricted(params: { workbookId: string; sheetId: string; row: number; col: number }): void {
+  const storage = globalThis.localStorage as any;
+  const classificationStore = new LocalClassificationStore({ storage });
+  classificationStore.upsert(
+    params.workbookId,
+    { scope: "cell", documentId: params.workbookId, sheetId: params.sheetId, row: params.row, col: params.col },
+    { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+  );
+}
+
+function setBlockPolicy(workbookId: string): void {
+  const storage = globalThis.localStorage as any;
+  const policy = createDefaultOrgPolicy();
+  policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
+    ...(policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] as any),
+    // Force strict behavior: block instead of redacting.
+    redactDisallowed: false,
+  };
+  const policyStore = new LocalPolicyStore({ storage });
+  policyStore.setDocumentPolicy(workbookId, policy);
+}
+
 describe("AiCellFunctionEngine", () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear();
+  });
+
   it("returns #GETTING_DATA while pending and resolves via cache", async () => {
     const deferred = defer<any>();
     const llmClient = {
@@ -129,78 +154,46 @@ describe("AiCellFunctionEngine", () => {
     expect(evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" })).toBe("second");
   });
 
-  it("DLP blocks disallowed inputs and emits a deterministic cell error", () => {
-    const llmClient = { chat: vi.fn() };
-    const dlpAudit = new InMemoryAuditLogger();
-
-    const policy = createDefaultOrgPolicy();
-    // Force strict behavior: block instead of redacting.
-    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
-      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
-      redactDisallowed: false,
-    };
-
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
-    );
-
-    const engine = new AiCellFunctionEngine({
-      llmClient: llmClient as any,
-      auditStore: new MemoryAIAuditStore(),
-      dlp: {
-        policy,
-        auditLogger: dlpAudit,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
-    });
-
-    const value = evaluateFormula('=AI("summarize", A1)', (ref) => (ref === "A1" ? "top secret" : null), {
-      ai: engine,
-      cellAddress: "Sheet1!B1",
-    });
-    expect(value).toBe(AI_CELL_DLP_ERROR);
-    expect(llmClient.chat).not.toHaveBeenCalled();
-
-    const events = dlpAudit.list();
-    expect(events.some((e: any) => e.details?.type === "ai.cell_function")).toBe(true);
-  });
-
-  it("does not persist restricted prompt text in audit logs for blocked runs", async () => {
+  it("DLP blocks disallowed inputs, avoids the LLM call, and records a blocked audit entry", async () => {
+    const workbookId = "dlp-block-workbook";
     const llmClient = { chat: vi.fn() };
 
-    const policy = createDefaultOrgPolicy();
-    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
-      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
-      redactDisallowed: false,
-    };
-
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
-    );
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
+    setBlockPolicy(workbookId);
 
     const auditStore = new MemoryAIAuditStore();
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore,
-      sessionId: "test-session-blocked",
-      dlp: {
-        policy,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
+      workbookId,
+      sessionId: "dlp-block-session",
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "top secret" : null);
+    const value = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(value).toBe(AI_CELL_DLP_ERROR);
+    expect(llmClient.chat).not.toHaveBeenCalled();
+
+    await engine.waitForIdle();
+    const entries = await auditStore.listEntries({ session_id: "dlp-block-session" });
+    expect(entries).toHaveLength(1);
+    expect((entries[0]?.input as any)?.blocked).toBe(true);
+  });
+
+  it("does not persist restricted prompt text in audit logs for blocked runs", async () => {
+    const llmClient = { chat: vi.fn() };
+    const workbookId = "dlp-blocked-prompt-workbook";
+    const sessionId = "dlp-blocked-prompt-session";
+
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
+    setBlockPolicy(workbookId);
+
+    const auditStore = new MemoryAIAuditStore();
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore,
+      workbookId,
+      sessionId,
     });
 
     const value = evaluateFormula('=AI(A1, "hello")', (ref) => (ref === "A1" ? "top secret" : null), {
@@ -211,43 +204,28 @@ describe("AiCellFunctionEngine", () => {
     expect(llmClient.chat).not.toHaveBeenCalled();
 
     await engine.waitForIdle();
-    const entries = await auditStore.listEntries({ session_id: "test-session-blocked" });
+    const entries = await auditStore.listEntries({ session_id: sessionId });
     expect(entries).toHaveLength(1);
     const input = entries[0]?.input as any;
     expect(input?.prompt).toBe("[REDACTED]");
     expect(input?.prompt).not.toContain("top secret");
-    expect(input?.inputs_preview).toBeUndefined();
+    expect(input?.prompt_hash).toMatch(/^[0-9a-f]{8}$/);
     expect(input?.inputs_hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(input?.inputs_compaction).toBeDefined();
     expect(input?.blocked).toBe(true);
   });
 
   it("DLP does not allow restricted cells to be smuggled via nested formulas (e.g. IF)", () => {
+    const workbookId = "dlp-smuggle-if";
     const llmClient = { chat: vi.fn() };
 
-    const policy = createDefaultOrgPolicy();
-    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
-      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
-      redactDisallowed: false,
-    };
-
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
-    );
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
+    setBlockPolicy(workbookId);
 
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
-      dlp: {
-        policy,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
+      workbookId,
     });
 
     const value = evaluateFormula('=AI("summarize", IF(TRUE, A1, "x"))', (ref) => (ref === "A1" ? "top secret" : null), {
@@ -259,32 +237,16 @@ describe("AiCellFunctionEngine", () => {
   });
 
   it("DLP does not allow restricted cells to be smuggled via conditional outputs (e.g. IF(A1,\"Y\",\"N\"))", () => {
+    const workbookId = "dlp-smuggle-conditional";
     const llmClient = { chat: vi.fn() };
 
-    const policy = createDefaultOrgPolicy();
-    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
-      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
-      redactDisallowed: false,
-    };
-
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
-    );
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
+    setBlockPolicy(workbookId);
 
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
-      dlp: {
-        policy,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
+      workbookId,
     });
 
     const value = evaluateFormula('=AI("summarize", IF(A1, "Y", "N"))', (ref) => (ref === "A1" ? 1 : null), {
@@ -296,32 +258,16 @@ describe("AiCellFunctionEngine", () => {
   });
 
   it("DLP does not allow restricted cells to be smuggled via arithmetic coercion (e.g. A1+0)", () => {
+    const workbookId = "dlp-smuggle-arithmetic";
     const llmClient = { chat: vi.fn() };
 
-    const policy = createDefaultOrgPolicy();
-    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
-      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
-      redactDisallowed: false,
-    };
-
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
-    );
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
+    setBlockPolicy(workbookId);
 
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
-      dlp: {
-        policy,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
+      workbookId,
     });
 
     const value = evaluateFormula('=AI("summarize", A1+0)', (ref) => (ref === "A1" ? 123 : null), {
@@ -333,32 +279,16 @@ describe("AiCellFunctionEngine", () => {
   });
 
   it("DLP does not allow restricted cells to be smuggled via derived aggregations (e.g. SUM(range))", () => {
+    const workbookId = "dlp-smuggle-sum";
     const llmClient = { chat: vi.fn() };
 
-    const policy = createDefaultOrgPolicy();
-    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
-      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
-      redactDisallowed: false,
-    };
-
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
-    );
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
+    setBlockPolicy(workbookId);
 
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
-      dlp: {
-        policy,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
+      workbookId,
     });
 
     const value = evaluateFormula(
@@ -374,32 +304,16 @@ describe("AiCellFunctionEngine", () => {
   });
 
   it("resolves DLP classifications for quoted sheet names containing semicolons", () => {
+    const workbookId = "dlp-sheet-semicolons";
     const llmClient = { chat: vi.fn() };
 
-    const policy = createDefaultOrgPolicy();
-    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
-      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
-      redactDisallowed: false,
-    };
-
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "A;B", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
-    );
+    markCellRestricted({ workbookId, sheetId: "A;B", row: 0, col: 0 }); // A1 on A;B
+    setBlockPolicy(workbookId);
 
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
-      dlp: {
-        policy,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
+      workbookId,
     });
 
     const value = evaluateFormula('=AI("summarize", \'A;B\'!A1)', (ref) => (ref === "A;B!A1" ? "top secret" : null), {
@@ -411,6 +325,7 @@ describe("AiCellFunctionEngine", () => {
   });
 
   it("DLP redacts inputs before sending to the LLM", async () => {
+    const workbookId = "dlp-redact-workbook";
     const llmClient = {
       chat: vi.fn(async () => ({
         message: { role: "assistant", content: "ok" },
@@ -418,31 +333,16 @@ describe("AiCellFunctionEngine", () => {
       })),
     };
 
-    const policy = createDefaultOrgPolicy();
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] },
-    );
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
 
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
-      dlp: {
-        policy,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
+      workbookId,
     });
 
-    const pending = evaluateFormula('=AI("summarize", A1)', (ref) => (ref === "A1" ? "secret payload" : null), {
-      ai: engine,
-      cellAddress: "Sheet1!B1",
-    });
+    const getCellValue = (addr: string) => (addr === "A1" ? "secret payload" : null);
+    const pending = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
     expect(pending).toBe(AI_CELL_PLACEHOLDER);
     await engine.waitForIdle();
 
@@ -453,6 +353,7 @@ describe("AiCellFunctionEngine", () => {
   });
 
   it("DLP redacts only disallowed cells within a mixed-classification range", async () => {
+    const workbookId = "dlp-redact-range-workbook";
     const llmClient = {
       chat: vi.fn(async () => ({
         message: { role: "assistant", content: "ok" },
@@ -460,25 +361,12 @@ describe("AiCellFunctionEngine", () => {
       })),
     };
 
-    const policy = createDefaultOrgPolicy();
-    const documentId = "unit-test-doc";
-    const storage = createMemoryStorage();
-    const classificationStore = new LocalClassificationStore({ storage });
-    classificationStore.upsert(
-      documentId,
-      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
-      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] },
-    );
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
 
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
-      dlp: {
-        policy,
-        documentId,
-        classificationStore,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
-      },
+      workbookId,
     });
 
     const pending = evaluateFormula(
@@ -514,7 +402,8 @@ describe("AiCellFunctionEngine", () => {
     expect(llmClient.chat).not.toHaveBeenCalled();
   });
 
-  it("truncates large range inputs before sending to the LLM", async () => {
+  it("budgeting compacts large ranges in the prompt", async () => {
+    const workbookId = "budget-workbook";
     const llmClient = {
       chat: vi.fn(async () => ({
         message: { role: "assistant", content: "ok" },
@@ -525,24 +414,27 @@ describe("AiCellFunctionEngine", () => {
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
-      limits: { maxInputCells: 50 },
+      workbookId,
     });
 
     const getCellValue = (addr: string) => {
-      const idx = Number(addr.slice(1));
-      return `CELL_${String(idx).padStart(4, "0")}`;
+      const match = /^A(\d+)$/.exec(addr);
+      if (!match) return null;
+      const n = Number(match[1]);
+      return `CELL_${String(n).padStart(4, "0")}`;
     };
 
-    const pending = evaluateFormula('=AI("summarize", A1:A200)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    const pending = evaluateFormula('=AI("summarize", A1:A1000)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
     expect(pending).toBe(AI_CELL_PLACEHOLDER);
     await engine.waitForIdle();
 
     const call = llmClient.chat.mock.calls[0]?.[0];
     const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
-    expect(userMessage).toContain('"truncated":true');
-    expect(userMessage).toContain('"total_cells":200');
-    expect(userMessage).toContain('"sampled_cells":50');
-    expect(userMessage).toContain("CELL_0001");
-    expect(userMessage).not.toContain("CELL_0200");
+    expect(userMessage.length).toBeLessThan(8_000);
+    expect(userMessage).toContain('"total_cells":1000');
+
+    const occurrences = userMessage.match(/CELL_\d{4}/g)?.length ?? 0;
+    expect(occurrences).toBeGreaterThan(0);
+    expect(occurrences).toBeLessThan(200);
   });
 });

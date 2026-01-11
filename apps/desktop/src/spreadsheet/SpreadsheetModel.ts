@@ -3,7 +3,6 @@ import { evaluateFormula, type SpreadsheetValue } from "./evaluateFormula.js";
 import { AiCellFunctionEngine } from "./AiCellFunctionEngine.js";
 import { normalizeRange, parseA1, rangeToA1, toA1, type CellAddress, type RangeAddress } from "./a1.js";
 import { TabCompletionEngine } from "@formula/ai-completion";
-import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 
 export type Cell = { input: string; value: SpreadsheetValue };
 
@@ -22,17 +21,9 @@ export class SpreadsheetModel {
 
   constructor(initial?: Record<string, string | number>) {
     const workbookId = "local-workbook";
-    const dlp = createDesktopDlpContext({ documentId: workbookId });
     this.#aiCellFunctions = new AiCellFunctionEngine({
       onUpdate: () => this.#recomputeAiCells(),
       workbookId,
-      dlp: {
-        policy: dlp.policy,
-        auditLogger: dlp.auditLogger,
-        documentId: dlp.documentId,
-        classificationStore: dlp.classificationStore,
-        classify: () => ({ level: "Public", labels: [] }),
-      },
     });
 
     if (initial) {

@@ -698,13 +698,6 @@ export class SpreadsheetApp {
       onUpdate: () => this.refresh(),
       workbookId,
       cache: { persistKey: "formula:ai_cell_cache" },
-      dlp: {
-        policy: dlp.policy,
-        auditLogger: dlp.auditLogger,
-        documentId: dlp.documentId,
-        classificationStore: dlp.classificationStore,
-        classify: () => ({ level: "Public", labels: [] }),
-      },
     });
 
     // Initial layout + render.

@@ -6,8 +6,30 @@ export const PROVENANCE_REF_SEPARATOR = "\u001f";
 export type ProvenanceCellValue = { __cellRef: string; value: SpreadsheetValue };
 export type CellValue = SpreadsheetValue | SpreadsheetValue[] | ProvenanceCellValue | ProvenanceCellValue[];
 
+export type AiFunctionArgumentProvenance = {
+  /**
+   * Canonical cell references referenced while evaluating the argument expression.
+   *
+   * These may be sheet-qualified (e.g. `Sheet1!A1`) depending on the caller's
+   * `cellAddress` and the formula text.
+   */
+  cells: string[];
+  /**
+   * Canonical rectangular range references referenced while evaluating the argument expression.
+   *
+   * These may be sheet-qualified (e.g. `Sheet1!A1:B2`) depending on the caller's
+   * `cellAddress` and the formula text.
+   */
+  ranges: string[];
+};
+
 export interface AiFunctionEvaluator {
-  evaluateAiFunction(params: { name: string; args: CellValue[]; cellAddress?: string }): SpreadsheetValue;
+  evaluateAiFunction(params: {
+    name: string;
+    args: CellValue[];
+    cellAddress?: string;
+    argProvenance?: AiFunctionArgumentProvenance[];
+  }): SpreadsheetValue;
   /**
    * Optional range sampling limit for direct AI() range arguments.
    *
@@ -235,11 +257,14 @@ function evalFunction(
   args: CellValue[],
   getCellValue: GetCellValue,
   options: EvaluateFormulaOptions,
-  context: EvalContext
+  context: EvalContext,
+  argProvenance?: AiFunctionArgumentProvenance[],
 ): CellValue {
   const upper = name.toUpperCase();
   if (upper === "AI" || upper === "AI.EXTRACT" || upper === "AI.CLASSIFY" || upper === "AI.TRANSLATE") {
-    return options.ai ? options.ai.evaluateAiFunction({ name: upper, args, cellAddress: options.cellAddress }) : "#NAME?";
+    return options.ai
+      ? options.ai.evaluateAiFunction({ name: upper, args, cellAddress: options.cellAddress, argProvenance })
+      : "#NAME?";
   }
   if (upper === "SUM") {
     const nums: number[] = [];
@@ -355,11 +380,33 @@ function isAiFunctionName(name: string): boolean {
   return upper === "AI" || upper === "AI.EXTRACT" || upper === "AI.CLASSIFY" || upper === "AI.TRANSLATE";
 }
 
+function aiFunctionArgumentProvenance(value: CellValue): AiFunctionArgumentProvenance {
+  const cells = new Set<string>();
+  const ranges = new Set<string>();
+
+  for (const refText of provenanceRefs(value)) {
+    const cleaned = String(refText).replaceAll("$", "").trim();
+    if (!cleaned) continue;
+    const { sheetName, ref } = splitSheetQualifier(cleaned);
+    const parsed = parseA1Range(ref);
+    if (!parsed) continue;
+
+    const start = toA1(parsed.start);
+    const end = toA1(parsed.end);
+    const prefix = sheetName ? `${sheetName}!` : "";
+
+    if (start === end) cells.add(`${prefix}${start}`);
+    else ranges.add(`${prefix}${start}:${end}`);
+  }
+
+  return { cells: Array.from(cells).sort(), ranges: Array.from(ranges).sort() };
+}
+
 function parsePrimary(
   parser: Parser,
   getCellValue: GetCellValue,
   options: EvaluateFormulaOptions,
-  context: EvalContext
+  context: EvalContext,
 ): CellValue {
   const tok = parser.peek();
   if (!tok) return null;
@@ -405,16 +452,20 @@ function parsePrimary(
           ),
         }
       : { ...context, sampleRangeReferences: false };
+    const argProvenance: AiFunctionArgumentProvenance[] = [];
+    const isAiFn = isAiFunctionName(name) && Boolean(options.ai);
     if (!parser.match("paren", ")")) {
       while (true) {
-        args.push(parseExpression(parser, getCellValue, options, argContext));
+        const argValue = parseExpression(parser, getCellValue, options, argContext);
+        args.push(argValue);
+        if (isAiFn) argProvenance.push(aiFunctionArgumentProvenance(argValue));
         if (parser.match("comma", ",")) continue;
         if (parser.match("paren", ")")) break;
         return "#VALUE!";
       }
     }
 
-    return evalFunction(name, args, getCellValue, options, context);
+    return evalFunction(name, args, getCellValue, options, context, isAiFn ? argProvenance : undefined);
   }
 
   if (tok.type === "paren" && tok.value === "(") {
@@ -431,7 +482,7 @@ function parseUnary(
   parser: Parser,
   getCellValue: GetCellValue,
   options: EvaluateFormulaOptions,
-  context: EvalContext
+  context: EvalContext,
 ): CellValue {
   const tok = parser.peek();
   if (tok?.type === "operator" && (tok.value === "+" || tok.value === "-")) {
@@ -453,7 +504,7 @@ function parseTerm(
   parser: Parser,
   getCellValue: GetCellValue,
   options: EvaluateFormulaOptions,
-  context: EvalContext
+  context: EvalContext,
 ): CellValue {
   let left = parseUnary(parser, getCellValue, options, context);
   while (true) {
@@ -486,7 +537,7 @@ function parseExpression(
   parser: Parser,
   getCellValue: GetCellValue,
   options: EvaluateFormulaOptions,
-  context: EvalContext
+  context: EvalContext,
 ): CellValue {
   let left = parseTerm(parser, getCellValue, options, context);
   while (true) {
