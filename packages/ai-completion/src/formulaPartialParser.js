@@ -37,6 +37,7 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
   /** @type {number[]} */
   const openParens = [];
   let inString = false;
+  let inSheetQuote = false;
   for (let i = 0; i < prefix.length; i++) {
     const ch = prefix[i];
     if (inString) {
@@ -50,8 +51,23 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
       }
       continue;
     }
+    if (inSheetQuote) {
+      if (ch === "'") {
+        // Excel escapes apostrophes inside sheet names via doubled quotes: ''.
+        if (prefix[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      continue;
+    }
     if (ch === '"') {
       inString = true;
+      continue;
+    }
+    if (ch === "'") {
+      inSheetQuote = true;
       continue;
     }
     if (ch === "(") {
@@ -127,6 +143,7 @@ function getArgContext(input, openParenIndex, cursorPosition) {
   let argIndex = 0;
   let lastCommaIndex = -1;
   let inString = false;
+  let inSheetQuote = false;
 
   for (let i = openParenIndex + 1; i < cursorPosition; i++) {
     const ch = input[i];
@@ -140,8 +157,22 @@ function getArgContext(input, openParenIndex, cursorPosition) {
       }
       continue;
     }
+    if (inSheetQuote) {
+      if (ch === "'") {
+        if (input[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
+        inSheetQuote = false;
+      }
+      continue;
+    }
     if (ch === '"') {
       inString = true;
+      continue;
+    }
+    if (ch === "'") {
+      inSheetQuote = true;
       continue;
     }
     if (ch === "(") depth++;

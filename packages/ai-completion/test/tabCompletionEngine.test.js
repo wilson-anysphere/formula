@@ -565,6 +565,40 @@ test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   );
 });
 
+test("Sheet-qualified ranges work when the quoted sheet name contains a comma", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Jan,2024!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Jan,2024"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM('Jan,2024'!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('Jan,2024'!A1:A10)"),
+    `Expected a sheet-qualified range suggestion for a comma-containing sheet, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified ranges preserve absolute column prefixes (Sheet2!$A → Sheet2!$A1:$A10)", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
