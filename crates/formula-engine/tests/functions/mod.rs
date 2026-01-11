@@ -10,6 +10,7 @@ mod information;
 mod information_worksheet;
 mod lambda_let;
 mod logical;
+mod logical_extended;
 mod lookup;
 mod math;
 mod math_aggregates;

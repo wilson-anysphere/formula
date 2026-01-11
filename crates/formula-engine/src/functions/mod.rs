@@ -22,6 +22,7 @@ mod builtins_dynamic_arrays;
 mod builtins_information;
 mod builtins_lambda;
 mod builtins_logical;
+mod builtins_logical_extended;
 mod builtins_lookup;
 mod builtins_math;
 mod builtins_math_extended;

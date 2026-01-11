@@ -3,22 +3,22 @@ use crate::functions::{ArgValue, FunctionContext, Reference};
 use crate::value::{Array, ErrorKind, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Shape {
-    rows: usize,
-    cols: usize,
+pub(crate) struct Shape {
+    pub(crate) rows: usize,
+    pub(crate) cols: usize,
 }
 
 impl Shape {
-    fn is_1x1(self) -> bool {
+    pub(crate) fn is_1x1(self) -> bool {
         self.rows == 1 && self.cols == 1
     }
 
-    fn len(self) -> usize {
+    pub(crate) fn len(self) -> usize {
         self.rows.saturating_mul(self.cols)
     }
 }
 
-fn value_shape(value: &Value) -> Option<Shape> {
+pub(crate) fn value_shape(value: &Value) -> Option<Shape> {
     match value {
         Value::Array(arr) => Some(Shape {
             rows: arr.rows,
@@ -28,7 +28,7 @@ fn value_shape(value: &Value) -> Option<Shape> {
     }
 }
 
-fn dominant_shape(values: &[&Value]) -> Result<Option<Shape>, ErrorKind> {
+pub(crate) fn dominant_shape(values: &[&Value]) -> Result<Option<Shape>, ErrorKind> {
     let mut dominant: Option<Shape> = None;
     let mut saw_array = false;
 
@@ -60,7 +60,7 @@ fn dominant_shape(values: &[&Value]) -> Result<Option<Shape>, ErrorKind> {
     Ok(None)
 }
 
-fn broadcast_compatible(value: &Value, target: Shape) -> bool {
+pub(crate) fn broadcast_compatible(value: &Value, target: Shape) -> bool {
     match value {
         Value::Array(arr) => {
             (arr.rows == target.rows && arr.cols == target.cols) || (arr.rows == 1 && arr.cols == 1)
@@ -69,7 +69,7 @@ fn broadcast_compatible(value: &Value, target: Shape) -> bool {
     }
 }
 
-fn element_at<'a>(value: &'a Value, target: Shape, idx: usize) -> &'a Value {
+pub(crate) fn element_at<'a>(value: &'a Value, target: Shape, idx: usize) -> &'a Value {
     match value {
         Value::Array(arr) => {
             if arr.rows == 1 && arr.cols == 1 {

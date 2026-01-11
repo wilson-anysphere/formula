@@ -1866,6 +1866,16 @@ export default {
       ]
     },
     {
+      "name": "XOR",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "YEAR",
       "min_args": 1,
       "max_args": 1,
