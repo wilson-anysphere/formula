@@ -49,6 +49,7 @@ import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
 import { parseGoTo } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
+import { shiftA1References } from "@formula/spreadsheet-frontend";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 
@@ -3600,129 +3601,6 @@ function coerceNumber(value: unknown): number | null {
     return Number.isFinite(num) ? num : null;
   }
   return null;
-}
-
-const A1_REF_PATTERN =
-  /^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_. ]*)!)?(\$?[A-Za-z]{1,3}\$?[1-9]\d*)(?::(\$?[A-Za-z]{1,3}\$?[1-9]\d*))?/;
-
-function shiftA1References(formula: string, deltaRow: number, deltaCol: number): string {
-  if (deltaRow === 0 && deltaCol === 0) return formula;
-
-  let out = "";
-  let i = 0;
-  let inString = false;
-
-  while (i < formula.length) {
-    const ch = formula[i] ?? "";
-
-    if (inString) {
-      out += ch;
-      if (ch === '"') {
-        if (formula[i + 1] === '"') {
-          out += '"';
-          i += 2;
-          continue;
-        }
-        inString = false;
-      }
-      i += 1;
-      continue;
-    }
-
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      i += 1;
-      continue;
-    }
-
-    // Don't start a reference in the middle of an identifier (e.g. "FOOA1").
-    if (i > 0 && isIdentifierPart(formula[i - 1] ?? "")) {
-      out += ch;
-      i += 1;
-      continue;
-    }
-
-    const match = A1_REF_PATTERN.exec(formula.slice(i));
-    if (!match) {
-      out += ch;
-      i += 1;
-      continue;
-    }
-
-    const full = match[0] ?? "";
-    const prefix = match[1] ?? "";
-    const first = match[2] ?? "";
-    const second = match[3] ?? "";
-
-    // Some function names look like cell references (e.g. LOG10). If a token is
-    // immediately followed by a "(", assume it's a function call and leave it
-    // untouched.
-    let lookahead = i + full.length;
-    while (lookahead < formula.length && isWhitespace(formula[lookahead] ?? "")) lookahead += 1;
-    if (formula[lookahead] === "(") {
-      out += full;
-      i += full.length;
-      continue;
-    }
-
-    out += prefix;
-    out += shiftA1CellRef(first, deltaRow, deltaCol);
-    if (second) {
-      out += ":";
-      out += shiftA1CellRef(second, deltaRow, deltaCol);
-    }
-    i += full.length;
-  }
-
-  return out;
-}
-
-function shiftA1CellRef(ref: string, deltaRow: number, deltaCol: number): string {
-  const match = /^(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d*)$/.exec(ref);
-  if (!match) return ref;
-
-  const absCol = match[1] === "$";
-  const colLetters = match[2]?.toUpperCase() ?? "";
-  const absRow = match[3] === "$";
-  const row1 = Number.parseInt(match[4] ?? "", 10);
-  if (!Number.isFinite(row1) || row1 <= 0) return ref;
-
-  const col0 = colNameToIndex(colLetters);
-  if (col0 == null) return ref;
-
-  const row0 = row1 - 1;
-  const nextRow0 = absRow ? row0 : row0 + deltaRow;
-  const nextCol0 = absCol ? col0 : col0 + deltaCol;
-
-  if (nextRow0 < 0 || nextCol0 < 0) return "#REF!";
-
-  return `${absCol ? "$" : ""}${colToNameA1(nextCol0)}${absRow ? "$" : ""}${nextRow0 + 1}`;
-}
-
-function colNameToIndex(label: string): number | null {
-  if (!label) return null;
-  let n = 0;
-  for (const ch of label.toUpperCase()) {
-    const code = ch.charCodeAt(0);
-    if (code < 65 || code > 90) return null;
-    n = n * 26 + (code - 64);
-  }
-  return n - 1;
-}
-
-function isWhitespace(ch: string): boolean {
-  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
-}
-
-function isIdentifierPart(ch: string): boolean {
-  return (
-    (ch >= "A" && ch <= "Z") ||
-    (ch >= "a" && ch <= "z") ||
-    (ch >= "0" && ch <= "9") ||
-    ch === "_" ||
-    ch === "."
-  );
 }
 
 function colToName(col: number): string {
