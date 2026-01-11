@@ -1,0 +1,614 @@
+import type { FastifyReply, FastifyRequest } from "fastify";
+import crypto from "node:crypto";
+import jwt from "jsonwebtoken";
+import { z } from "zod";
+import { createAuditEvent, writeAuditEvent } from "../../audit/audit";
+import { createSession } from "../sessions";
+import { withTransaction } from "../../db/tx";
+import { getClientIp, getUserAgent } from "../../http/request-meta";
+import { getSecret } from "../../secrets/secretStore";
+import { getOidcDiscovery } from "./discovery";
+import { getJwksKeys, jwkToPublicKey, type Jwk } from "./jwks";
+import { randomBase64Url, sha256Base64Url } from "./pkce";
+
+type OrgOidcProviderRow = {
+  org_id: string;
+  provider_id: string;
+  issuer_url: string;
+  client_id: string;
+  scopes: unknown;
+  enabled: boolean;
+};
+
+type OidcAuthStateRow = {
+  state: string;
+  org_id: string;
+  provider_id: string;
+  nonce: string;
+  pkce_verifier: string;
+  redirect_uri: string;
+  created_at: Date;
+};
+
+type OrgAuthSettingsRow = {
+  allowed_auth_methods: unknown;
+  require_mfa: boolean;
+};
+
+const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+function parseStringArray(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter((v) => typeof v === "string");
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === "string");
+    } catch {
+      // fall through
+    }
+  }
+  return [];
+}
+
+function ensureOpenIdScope(scopes: string[]): string[] {
+  const normalized = scopes.map((s) => s.trim()).filter((s) => s.length > 0);
+  if (!normalized.includes("openid")) normalized.unshift("openid");
+  return Array.from(new Set(normalized));
+}
+
+function extractEmail(claims: Record<string, unknown>): string | null {
+  const candidates = [claims.email, claims.preferred_username, claims.upn];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim().toLowerCase();
+  }
+  return null;
+}
+
+function extractName(claims: Record<string, unknown>, email: string): string {
+  const name = claims.name;
+  if (typeof name === "string" && name.trim().length > 0) return name.trim();
+  const local = email.split("@")[0];
+  return local && local.length > 0 ? local : "User";
+}
+
+function extractHost(request: FastifyRequest): string {
+  const xfHost = request.headers["x-forwarded-host"];
+  const hostValue =
+    typeof xfHost === "string" && xfHost.length > 0
+      ? xfHost.split(",")[0]!.trim()
+      : typeof request.headers.host === "string"
+        ? request.headers.host
+        : "localhost";
+  return hostValue.length > 0 ? hostValue : "localhost";
+}
+
+function extractProto(request: FastifyRequest): string {
+  const xfProto = request.headers["x-forwarded-proto"];
+  const proto =
+    typeof xfProto === "string" && xfProto.length > 0 ? xfProto.split(",")[0]!.trim() : request.protocol;
+  return proto === "https" ? "https" : "http";
+}
+
+function externalBaseUrl(request: FastifyRequest): string {
+  return `${extractProto(request)}://${extractHost(request)}`;
+}
+
+async function loadOrgSettings(
+  request: FastifyRequest,
+  orgId: string
+): Promise<{ allowedAuthMethods: string[]; requireMfa: boolean } | null> {
+  const res = await request.server.db.query<OrgAuthSettingsRow>(
+    "SELECT allowed_auth_methods, require_mfa FROM org_settings WHERE org_id = $1",
+    [orgId]
+  );
+  if (res.rowCount !== 1) return null;
+  const row = res.rows[0] as OrgAuthSettingsRow;
+  return {
+    allowedAuthMethods: parseStringArray(row.allowed_auth_methods),
+    requireMfa: Boolean(row.require_mfa)
+  };
+}
+
+async function loadOrgProvider(
+  request: FastifyRequest,
+  orgId: string,
+  providerId: string
+): Promise<{
+  issuerUrl: string;
+  clientId: string;
+  scopes: string[];
+  enabled: boolean;
+} | null> {
+  const res = await request.server.db.query<OrgOidcProviderRow>(
+    `
+      SELECT org_id, provider_id, issuer_url, client_id, scopes, enabled
+      FROM org_oidc_providers
+      WHERE org_id = $1 AND provider_id = $2
+      LIMIT 1
+    `,
+    [orgId, providerId]
+  );
+  if (res.rowCount !== 1) return null;
+  const row = res.rows[0] as OrgOidcProviderRow;
+  return {
+    issuerUrl: String(row.issuer_url),
+    clientId: String(row.client_id),
+    scopes: parseStringArray(row.scopes),
+    enabled: Boolean(row.enabled)
+  };
+}
+
+function tokenClaimsIndicateMfa(claims: Record<string, unknown>): boolean {
+  const amr = claims.amr;
+  if (Array.isArray(amr)) {
+    const normalized = amr.filter((v) => typeof v === "string").map((v) => v.toLowerCase());
+    if (normalized.includes("mfa")) return true;
+    if (normalized.includes("otp")) return true;
+    if (normalized.includes("totp")) return true;
+  }
+
+  const acr = claims.acr;
+  if (typeof acr === "string" && acr.toLowerCase().includes("mfa")) return true;
+  return false;
+}
+
+async function exchangeCodeForTokens(options: {
+  tokenEndpoint: string;
+  code: string;
+  redirectUri: string;
+  clientId: string;
+  clientSecret: string;
+  codeVerifier: string;
+}): Promise<{ idToken: string }> {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: options.code,
+    redirect_uri: options.redirectUri,
+    client_id: options.clientId,
+    client_secret: options.clientSecret,
+    code_verifier: options.codeVerifier
+  }).toString();
+
+  const res = await fetch(options.tokenEndpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+    signal: AbortSignal.timeout(5000)
+  });
+
+  if (!res.ok) {
+    throw new Error(`OIDC token exchange failed (${res.status})`);
+  }
+
+  const json = (await res.json()) as Record<string, unknown>;
+  const idToken = json.id_token;
+  if (typeof idToken !== "string" || idToken.length === 0) {
+    throw new Error("OIDC token response missing id_token");
+  }
+
+  return { idToken };
+}
+
+async function verifyIdToken(options: {
+  idToken: string;
+  issuer: string;
+  audience: string;
+  jwksUri: string;
+  expectedNonce: string;
+}): Promise<Record<string, unknown>> {
+  const allowedAlgorithms = ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"] as const;
+  const decoded = jwt.decode(options.idToken, { complete: true }) as
+    | { header?: Record<string, unknown> }
+    | null;
+  const header = decoded?.header ?? null;
+  const kid = typeof header?.kid === "string" ? header.kid : undefined;
+  const alg = typeof header?.alg === "string" ? header.alg : undefined;
+  if (!alg) throw new Error("OIDC id_token missing alg");
+  if (!allowedAlgorithms.includes(alg as (typeof allowedAlgorithms)[number])) {
+    throw new Error(`OIDC id_token alg not allowed: ${alg}`);
+  }
+
+  const keys = await getJwksKeys(options.jwksUri);
+  let jwk: Jwk | undefined;
+  if (kid) jwk = keys.find((k) => k.kid === kid);
+  if (!jwk && keys.length === 1) jwk = keys[0];
+  if (!jwk) throw new Error("OIDC signing key not found");
+
+  const publicKey = jwkToPublicKey(jwk);
+  const claims = jwt.verify(options.idToken, publicKey, {
+    algorithms: allowedAlgorithms as unknown as string[],
+    issuer: options.issuer,
+    audience: options.audience
+  }) as unknown;
+
+  if (!claims || typeof claims !== "object") throw new Error("OIDC id_token invalid");
+  const record = claims as Record<string, unknown>;
+
+  if (record.nonce !== options.expectedNonce) throw new Error("OIDC nonce mismatch");
+  return record;
+}
+
+async function writeOidcFailureAudit(options: {
+  request: FastifyRequest;
+  orgId: string | null;
+  providerId: string | null;
+  userId?: string | null;
+  userEmail?: string | null;
+  errorCode: string;
+  errorMessage?: string;
+}): Promise<void> {
+  const actor = options.userId
+    ? { type: "user", id: options.userId }
+    : options.userEmail
+      ? { type: "anonymous", id: options.userEmail }
+      : { type: "anonymous", id: `oidc:${options.providerId ?? "unknown"}` };
+
+  const event = createAuditEvent({
+    eventType: "auth.login_failed",
+    actor,
+    context: {
+      orgId: options.orgId,
+      userId: options.userId ?? null,
+      userEmail: options.userEmail ?? null,
+      ipAddress: getClientIp(options.request),
+      userAgent: getUserAgent(options.request)
+    },
+    resource: { type: "user", id: options.userId ?? null },
+    success: false,
+    error: { code: options.errorCode, message: options.errorMessage },
+    details: { method: "oidc", provider: options.providerId }
+  });
+
+  try {
+    await writeAuditEvent(options.request.server.db, event);
+  } catch (err) {
+    // The audit log has a FK to organizations; if the org id is invalid, we still
+    // want a best-effort record of the failed login attempt.
+    if (options.orgId) {
+      try {
+        await writeAuditEvent(
+          options.request.server.db,
+          createAuditEvent({
+            ...event,
+            // Overwrite just the context.orgId; preserve other auto-generated fields.
+            context: { ...event.context, orgId: null }
+          })
+        );
+      } catch {
+        // Ignore audit failures; authentication code paths must not fail closed
+        // due to observability plumbing.
+      }
+      return;
+    }
+    // If orgId was already null, ignore the failure.
+  }
+}
+
+export async function oidcStart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const params = request.params as { orgId: string; provider: string };
+  const orgId = params.orgId;
+  const providerId = params.provider;
+
+  const provider = await loadOrgProvider(request, orgId, providerId);
+  if (!provider) {
+    reply.code(404).send({ error: "provider_not_found" });
+    return;
+  }
+  if (!provider.enabled) {
+    reply.code(403).send({ error: "provider_disabled" });
+    return;
+  }
+
+  const settings = await loadOrgSettings(request, orgId);
+  if (!settings) {
+    reply.code(404).send({ error: "org_not_found" });
+    return;
+  }
+  if (!settings.allowedAuthMethods.includes("oidc")) {
+    reply.code(403).send({ error: "auth_method_not_allowed" });
+    return;
+  }
+
+  const discovery = await getOidcDiscovery(provider.issuerUrl);
+
+  const state = randomBase64Url(32);
+  const nonce = randomBase64Url(32);
+  const pkceVerifier = randomBase64Url(32);
+  const pkceChallenge = sha256Base64Url(pkceVerifier);
+
+  const redirectUri = `${externalBaseUrl(request)}/auth/oidc/${encodeURIComponent(
+    orgId
+  )}/${encodeURIComponent(providerId)}/callback`;
+
+  await request.server.db.query(
+    `
+      INSERT INTO oidc_auth_states (state, org_id, provider_id, nonce, pkce_verifier, redirect_uri)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [state, orgId, providerId, nonce, pkceVerifier, redirectUri]
+  );
+
+  const authUrl = new URL(discovery.authorization_endpoint);
+  authUrl.search = new URLSearchParams({
+    response_type: "code",
+    client_id: provider.clientId,
+    redirect_uri: redirectUri,
+    scope: ensureOpenIdScope(provider.scopes).join(" "),
+    state,
+    nonce,
+    code_challenge: pkceChallenge,
+    code_challenge_method: "S256"
+  }).toString();
+
+  reply.redirect(authUrl.toString());
+}
+
+const CallbackQuery = z.object({
+  code: z.string().min(1),
+  state: z.string().min(1),
+  error: z.string().optional(),
+  error_description: z.string().optional()
+});
+
+export async function oidcCallback(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const params = request.params as { orgId: string; provider: string };
+  const orgId = params.orgId;
+  const providerId = params.provider;
+
+  const parsed = CallbackQuery.safeParse(request.query);
+  if (!parsed.success) {
+    reply.code(400).send({ error: "invalid_request" });
+    return;
+  }
+
+  if (parsed.data.error) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "oidc_error" });
+    await writeOidcFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: "oidc_error",
+      errorMessage: parsed.data.error_description ?? parsed.data.error
+    });
+    reply.code(401).send({ error: "oidc_error" });
+    return;
+  }
+
+  const authRes = await request.server.db.query<OidcAuthStateRow>(
+    `
+      DELETE FROM oidc_auth_states
+      WHERE state = $1
+      RETURNING state, org_id, provider_id, nonce, pkce_verifier, redirect_uri, created_at
+    `,
+    [parsed.data.state]
+  );
+
+  if (authRes.rowCount !== 1) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_state" });
+    await writeOidcFailureAudit({ request, orgId, providerId, errorCode: "invalid_state" });
+    reply.code(401).send({ error: "invalid_state" });
+    return;
+  }
+
+  const authState = authRes.rows[0] as OidcAuthStateRow;
+  if (authState.org_id !== orgId || authState.provider_id !== providerId) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_state" });
+    await writeOidcFailureAudit({ request, orgId, providerId, errorCode: "invalid_state" });
+    reply.code(401).send({ error: "invalid_state" });
+    return;
+  }
+
+  const ageMs = Date.now() - new Date(authState.created_at).getTime();
+  if (!Number.isFinite(ageMs) || ageMs > AUTH_STATE_TTL_MS) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "state_expired" });
+    await writeOidcFailureAudit({ request, orgId, providerId, errorCode: "state_expired" });
+    reply.code(401).send({ error: "invalid_state" });
+    return;
+  }
+
+  const provider = await loadOrgProvider(request, orgId, providerId);
+  if (!provider) {
+    reply.code(404).send({ error: "provider_not_found" });
+    return;
+  }
+  if (!provider.enabled) {
+    reply.code(403).send({ error: "provider_disabled" });
+    return;
+  }
+
+  const settings = await loadOrgSettings(request, orgId);
+  if (!settings) {
+    reply.code(404).send({ error: "org_not_found" });
+    return;
+  }
+  if (!settings.allowedAuthMethods.includes("oidc")) {
+    reply.code(403).send({ error: "auth_method_not_allowed" });
+    return;
+  }
+
+  const secretName = `oidc:${orgId}:${providerId}`;
+  const clientSecret = await getSecret(request.server.db, request.server.config.secretStoreKey, secretName);
+  if (!clientSecret) {
+    reply.code(500).send({ error: "oidc_not_configured" });
+    return;
+  }
+
+  let discovery;
+  try {
+    discovery = await getOidcDiscovery(provider.issuerUrl);
+  } catch (err) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "oidc_discovery_failed" });
+    await writeOidcFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: "oidc_discovery_failed",
+      errorMessage: err instanceof Error ? err.message : undefined
+    });
+    reply.code(502).send({ error: "oidc_discovery_failed" });
+    return;
+  }
+
+  let idToken: string;
+  try {
+    const tokens = await exchangeCodeForTokens({
+      tokenEndpoint: discovery.token_endpoint,
+      code: parsed.data.code,
+      redirectUri: authState.redirect_uri,
+      clientId: provider.clientId,
+      clientSecret,
+      codeVerifier: authState.pkce_verifier
+    });
+    idToken = tokens.idToken;
+  } catch (err) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "oidc_token_exchange_failed" });
+    await writeOidcFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: "oidc_token_exchange_failed",
+      errorMessage: err instanceof Error ? err.message : undefined
+    });
+    reply.code(401).send({ error: "oidc_token_exchange_failed" });
+    return;
+  }
+
+  let claims: Record<string, unknown>;
+  try {
+    claims = await verifyIdToken({
+      idToken,
+      issuer: discovery.issuer,
+      audience: provider.clientId,
+      jwksUri: discovery.jwks_uri,
+      expectedNonce: authState.nonce
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "OIDC token invalid";
+    const errorCode = message.includes("nonce") ? "invalid_nonce" : "invalid_id_token";
+    request.server.metrics.authFailuresTotal.inc({ reason: errorCode });
+    await writeOidcFailureAudit({ request, orgId, providerId, errorCode, errorMessage: message });
+    reply.code(401).send({ error: errorCode });
+    return;
+  }
+
+  if (settings.requireMfa && !tokenClaimsIndicateMfa(claims)) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "mfa_required" });
+    await writeOidcFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: "mfa_required",
+      errorMessage: "Organization requires MFA"
+    });
+    reply.code(401).send({ error: "mfa_required" });
+    return;
+  }
+
+  const subject = typeof claims.sub === "string" && claims.sub.length > 0 ? claims.sub : null;
+  const email = extractEmail(claims);
+  if (!subject || !email) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_claims" });
+    await writeOidcFailureAudit({ request, orgId, providerId, errorCode: "invalid_claims" });
+    reply.code(401).send({ error: "invalid_claims" });
+    return;
+  }
+
+  const name = extractName(claims, email);
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + request.server.config.sessionTtlSeconds * 1000);
+
+  const { userId, sessionId, token } = await withTransaction(request.server.db, async (client) => {
+    const existingIdentity = await client.query<{ user_id: string }>(
+      `
+        SELECT user_id
+        FROM user_identities
+        WHERE org_id = $1 AND provider = $2 AND subject = $3
+        LIMIT 1
+      `,
+      [orgId, providerId, subject]
+    );
+
+    let userId: string;
+
+    if (existingIdentity.rowCount === 1) {
+      userId = String((existingIdentity.rows[0] as any).user_id);
+      await client.query(
+        `
+          UPDATE user_identities
+          SET email = $4
+          WHERE org_id = $1 AND provider = $2 AND subject = $3
+        `,
+        [orgId, providerId, subject, email]
+      );
+    } else {
+      const existingUser = await client.query<{ id: string }>(
+        "SELECT id FROM users WHERE email = $1 LIMIT 1",
+        [email]
+      );
+
+      if (existingUser.rowCount === 1) {
+        userId = String((existingUser.rows[0] as any).id);
+      } else {
+        userId = crypto.randomUUID();
+        await client.query("INSERT INTO users (id, email, name) VALUES ($1, $2, $3)", [userId, email, name]);
+      }
+
+      await client.query(
+        `
+          INSERT INTO user_identities (user_id, provider, subject, email, org_id)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (org_id, provider, subject)
+          DO UPDATE SET email = EXCLUDED.email
+        `,
+        [userId, providerId, subject, email, orgId]
+      );
+    }
+
+    await client.query(
+      `
+        INSERT INTO org_members (org_id, user_id, role)
+        VALUES ($1, $2, 'member')
+        ON CONFLICT (org_id, user_id) DO NOTHING
+      `,
+      [orgId, userId]
+    );
+
+    const session = await createSession(client, {
+      userId,
+      expiresAt,
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+    return { userId, sessionId: session.sessionId, token: session.token };
+  });
+
+  reply.setCookie(request.server.config.sessionCookieName, token, {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: request.server.config.cookieSecure
+  });
+
+  await writeAuditEvent(
+    request.server.db,
+    createAuditEvent({
+      eventType: "auth.login",
+      actor: { type: "user", id: userId },
+      context: {
+        orgId,
+        userId,
+        userEmail: email,
+        sessionId,
+        ipAddress: getClientIp(request),
+        userAgent: getUserAgent(request)
+      },
+      resource: { type: "session", id: sessionId },
+      success: true,
+      details: { method: "oidc", provider: providerId }
+    })
+  );
+
+  reply.send({ user: { id: userId, email, name }, orgId });
+}

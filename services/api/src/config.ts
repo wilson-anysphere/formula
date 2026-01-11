@@ -7,6 +7,13 @@ export interface AppConfig {
   syncTokenSecret: string;
   syncTokenTtlSeconds: number;
   /**
+   * Symmetric secret used to encrypt values stored in the database-backed secret
+   * store (`secrets` table).
+   *
+   * Production deployments should set `SECRET_STORE_KEY` to a strong random value.
+   */
+  secretStoreKey: string;
+  /**
    * Internal base URL for sync-server, used to purge persisted CRDT state when
    * documents are hard-deleted by retention policy.
    *
@@ -62,6 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const cookieSecure = env.COOKIE_SECURE === "true";
   const syncTokenSecret = env.SYNC_TOKEN_SECRET ?? "dev-sync-token-secret-change-me";
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
+  const secretStoreKey = env.SECRET_STORE_KEY ?? "dev-secret-store-key-change-me";
   const syncServerInternalUrl = env.SYNC_SERVER_INTERNAL_URL;
   const syncServerInternalAdminToken = env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN;
   const localKmsMasterKey = env.LOCAL_KMS_MASTER_KEY ?? "dev-local-kms-master-key-change-me";
@@ -81,6 +89,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieSecure,
     syncTokenSecret,
     syncTokenTtlSeconds,
+    secretStoreKey,
     syncServerInternalUrl,
     syncServerInternalAdminToken,
     localKmsMasterKey,

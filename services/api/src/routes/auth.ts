@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { authenticateApiKey } from "../auth/apiKeys";
 import { generateTotpSecret, buildOtpAuthUrl, verifyTotpCode } from "../auth/mfa";
+import { oidcCallback, oidcStart } from "../auth/oidc/oidc";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { createSession, lookupSessionByToken, revokeSession } from "../auth/sessions";
 import { withTransaction } from "../db/tx";
@@ -503,22 +504,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true });
   });
 
-  // OIDC / SSO hooks (scaffolding). Production code should implement provider-specific flows and callback verification.
-  app.get("/auth/oidc/:provider/start", async (request, reply) => {
-    const provider = (request.params as { provider: string }).provider;
-    return reply.code(501).send({
-      error: "not_implemented",
-      message: `OIDC start not implemented for provider "${provider}" yet`
-    });
-  });
-
-  app.get("/auth/oidc/:provider/callback", async (request, reply) => {
-    const provider = (request.params as { provider: string }).provider;
-    return reply.code(501).send({
-      error: "not_implemented",
-      message: `OIDC callback not implemented for provider "${provider}" yet`
-    });
-  });
+  // OIDC / SSO: per-organization providers.
+  app.get("/auth/oidc/:orgId/:provider/start", oidcStart);
+  app.get("/auth/oidc/:orgId/:provider/callback", oidcCallback);
 }
 
 export { requireAuth };

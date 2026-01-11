@@ -45,6 +45,7 @@ describe("API e2e: auth + RBAC + sync token", () => {
       cookieSecure: false,
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
+      secretStoreKey: "test-secret-store-key",
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null

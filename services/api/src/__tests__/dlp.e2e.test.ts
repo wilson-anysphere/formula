@@ -56,6 +56,7 @@ describe("API e2e: DLP policy + classification endpoints", () => {
       cookieSecure: false,
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
+      secretStoreKey: "test-secret-store-key",
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null
