@@ -134,13 +134,14 @@ fn plan_sheet_structure(
         .map(|(_, meta)| meta.clone())
         .collect();
 
+    // Excel allocates new `sheetId` values as `max(existing)+1`. We intentionally consider the
+    // entire original workbook sheet list (including sheets that may be deleted in this edit)
+    // to avoid reusing sheetIds that other preserved/orphaned parts might still reference.
     let mut next_sheet_id = doc
         .meta
         .sheets
         .iter()
-        .enumerate()
-        .filter(|(idx, _)| matched_meta_idxs.contains(idx))
-        .map(|(_, meta)| meta.sheet_id)
+        .map(|meta| meta.sheet_id)
         .max()
         .unwrap_or(0)
         + 1;
