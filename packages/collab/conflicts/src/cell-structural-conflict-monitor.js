@@ -68,7 +68,13 @@ export class CellStructuralConflictMonitor {
  
     /** @type {Map<string, any>} */
     this._opRecords = new Map();
- 
+
+    /** @type {Array<{ id: string, createdAt: number }>} */
+    this._localOpQueue = [];
+    /** @type {Set<string>} */
+    this._localOpIds = new Set();
+    this._localOpQueueInitialized = false;
+
     this._isApplyingResolution = false;
  
     this._onCellsDeepEvent = this._onCellsDeepEvent.bind(this);
@@ -225,6 +231,21 @@ export class CellStructuralConflictMonitor {
 
     if (records.length === 0) return;
 
+    // Track local op ids eagerly so pruning can avoid scanning the entire shared
+    // log on every write.
+    this._ensureLocalOpQueueInitialized();
+    const lastCreatedAt = this._localOpQueue.length ? this._localOpQueue[this._localOpQueue.length - 1].createdAt : -Infinity;
+    let outOfOrder = false;
+    for (const record of records) {
+      if (this._localOpIds.has(record.id)) continue;
+      this._localOpIds.add(record.id);
+      this._localOpQueue.push({ id: record.id, createdAt: Number(record.createdAt ?? 0) });
+      if (record.createdAt < lastCreatedAt) outOfOrder = true;
+    }
+    if (outOfOrder) {
+      this._localOpQueue.sort((a, b) => a.createdAt - b.createdAt);
+    }
+
     // `transaction.afterState` only advances when a transaction inserts new
     // structs. Pure deletions (DeleteSet-only transactions) leave the state
     // vector unchanged, which would make delete-vs-edit conflicts look
@@ -263,6 +284,12 @@ export class CellStructuralConflictMonitor {
     for (const [opId, change] of event.changes.keys.entries()) {
       if (change.action === "delete") {
         this._opRecords.delete(opId);
+        if (this._localOpIds.has(opId)) {
+          this._localOpIds.delete(opId);
+          if (this._localOpQueue.length > 0) {
+            this._localOpQueue = this._localOpQueue.filter((entry) => entry.id !== opId);
+          }
+        }
         continue;
       }
  
@@ -304,6 +331,28 @@ export class CellStructuralConflictMonitor {
     const limit = Number(this._maxOpRecordsPerUser);
     if (!Number.isFinite(limit) || limit <= 0) return;
 
+    this._ensureLocalOpQueueInitialized();
+    if (this._localOpQueue.length <= limit) return;
+
+    const toDelete = this._localOpQueue.slice(0, this._localOpQueue.length - limit);
+    if (toDelete.length === 0) return;
+
+    this._localOpQueue = this._localOpQueue.slice(this._localOpQueue.length - limit);
+    for (const entry of toDelete) {
+      this._localOpIds.delete(entry.id);
+    }
+
+    this.doc.transact(() => {
+      for (const entry of toDelete) {
+        this._ops.delete(entry.id);
+      }
+    }, this.origin);
+  }
+
+  _ensureLocalOpQueueInitialized() {
+    if (this._localOpQueueInitialized) return;
+    this._localOpQueueInitialized = true;
+
     /** @type {Array<{ id: string, createdAt: number }>} */
     const ours = [];
     this._ops.forEach((record, id) => {
@@ -311,18 +360,10 @@ export class CellStructuralConflictMonitor {
       if (record.userId !== this.localUserId) return;
       ours.push({ id, createdAt: Number(record.createdAt ?? 0) });
     });
-
-    if (ours.length <= limit) return;
-
     ours.sort((a, b) => a.createdAt - b.createdAt);
-    const toDelete = ours.slice(0, ours.length - limit);
-    if (toDelete.length === 0) return;
 
-    this.doc.transact(() => {
-      for (const entry of toDelete) {
-        this._ops.delete(entry.id);
-      }
-    }, this.origin);
+    this._localOpQueue = ours;
+    this._localOpIds = new Set(ours.map((entry) => entry.id));
   }
   
   /**
