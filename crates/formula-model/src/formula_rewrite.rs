@@ -681,6 +681,99 @@ pub fn rewrite_deleted_sheet_references_in_formula(
     out
 }
 
+fn is_name_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'.'
+}
+
+fn bytes_eq_ignore_ascii_case(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+}
+
+/// Rewrite table names in structured references inside a formula.
+///
+/// This is intentionally conservative: it only rewrites occurrences that look like
+/// a structured reference token (`TableName[...]`) and it does not touch string
+/// literals.
+pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)]) -> String {
+    if renames.is_empty() {
+        return formula.to_string();
+    }
+
+    let mut out = String::with_capacity(formula.len());
+    let mut i = 0;
+    let mut in_string = false;
+    let bytes = formula.as_bytes();
+
+    while i < bytes.len() {
+        if in_string {
+            let ch = formula[i..]
+                .chars()
+                .next()
+                .expect("i always at char boundary");
+            out.push(ch);
+            if ch == '"' {
+                if bytes.get(i + 1) == Some(&b'"') {
+                    out.push('"');
+                    i += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            i += ch.len_utf8();
+            continue;
+        }
+
+        if bytes[i] == b'"' {
+            in_string = true;
+            out.push('"');
+            i += 1;
+            continue;
+        }
+
+        // Structured reference token: `TableName[...]`
+        //
+        // We treat `.` and `_` as identifier characters, and we require the match
+        // to be token-boundary aligned to avoid rewriting substrings.
+        if i == 0 || !is_name_char(bytes[i - 1]) {
+            let mut matched = false;
+            for (old, new) in renames {
+                let old_bytes = old.as_bytes();
+                let Some(window) = bytes.get(i..i + old_bytes.len()) else {
+                    continue;
+                };
+                if !bytes_eq_ignore_ascii_case(window, old_bytes) {
+                    continue;
+                }
+                if bytes.get(i + old_bytes.len()) != Some(&b'[') {
+                    continue;
+                }
+
+                out.push_str(new);
+                i += old_bytes.len();
+                matched = true;
+                break;
+            }
+            if matched {
+                continue;
+            }
+        }
+
+        let ch = formula[i..]
+            .chars()
+            .next()
+            .expect("i always at char boundary");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -801,6 +894,33 @@ mod tests {
         assert_eq!(
             rewrite_sheet_names_in_formula("='C:\\[foo]\\[Book1.xlsx]Sheet1'!A1", "Sheet1", "Data",),
             "='C:\\[foo]\\[Book1.xlsx]Data'!A1"
+        );
+    }
+
+    #[test]
+    fn rewrite_structured_refs_for_renamed_table() {
+        let renames = vec![("Table1".to_string(), "Table1_1".to_string())];
+        assert_eq!(
+            rewrite_table_names_in_formula("=SUM(Table1[Amount])", &renames),
+            "=SUM(Table1_1[Amount])"
+        );
+    }
+
+    #[test]
+    fn rewrite_structured_refs_avoids_string_literals() {
+        let renames = vec![("Table1".to_string(), "Table1_1".to_string())];
+        assert_eq!(
+            rewrite_table_names_in_formula("=\"Table1[Amount]\"", &renames),
+            "=\"Table1[Amount]\""
+        );
+    }
+
+    #[test]
+    fn rewrite_structured_refs_does_not_match_substrings() {
+        let renames = vec![("Table1".to_string(), "Table1_1".to_string())];
+        assert_eq!(
+            rewrite_table_names_in_formula("=SUM(MyTable1[Amount])", &renames),
+            "=SUM(MyTable1[Amount])"
         );
     }
 

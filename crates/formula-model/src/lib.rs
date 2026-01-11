@@ -21,17 +21,17 @@ mod formula_rewrite;
 mod formula_text;
 mod hyperlinks;
 pub mod import;
-mod sheet_name;
 mod merge;
 mod names;
 mod outline;
 pub mod pivots;
-pub mod rich_text;
 mod protection;
 mod print_settings;
+pub mod rich_text;
+mod sheet_name;
 mod style;
-mod theme;
 pub mod table;
+mod theme;
 mod value;
 mod view;
 mod workbook;
@@ -50,10 +50,10 @@ pub use display::{format_cell_display, format_cell_display_in_workbook, CellDisp
 pub use error::ErrorValue;
 pub use formula_rewrite::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
+    rewrite_table_names_in_formula,
 };
 pub use formula_text::{display_formula_text, normalize_formula_text};
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};
-pub use sheet_name::{validate_sheet_name, SheetNameError, EXCEL_MAX_SHEET_NAME_LEN};
 pub use merge::{MergeError, MergedRegion, MergedRegions};
 pub use names::{
     validate_defined_name, DefinedName, DefinedNameError, DefinedNameId, DefinedNameScope,
@@ -69,25 +69,28 @@ pub use print_settings::{
     ColRange, ManualPageBreaks, Orientation, PageMargins, PageSetup, PaperSize, PrintTitles,
     RowRange, Scaling, SheetPrintSettings, WorkbookPrintSettings,
 };
+pub use sheet_name::{validate_sheet_name, SheetNameError, EXCEL_MAX_SHEET_NAME_LEN};
 pub use style::{
     Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,
     HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,
+};
+pub use table::{
+    AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea, TableColumn,
+    TableStyleInfo,
 };
 pub use theme::{
     indexed_color_argb, number_format_color, parse_number_format_color_token, resolve_color,
     resolve_color_in_context, resolve_number_format_color, ArgbColor, ColorContext, ThemeColorSlot,
     ThemePalette,
 };
-pub use table::{
-    AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea, TableColumn,
-    TableStyleInfo,
-};
 pub use value::{ArrayValue, CellValue, RichText, SpillValue};
 pub use view::{
     a1_to_cell, cell_to_a1, format_sqref, parse_sqref, SheetPane, SheetSelection, SheetView,
     SqrefParseError, WorkbookView, WorkbookWindow, WorkbookWindowState,
 };
-pub use workbook::{DeleteSheetError, RenameSheetError, Workbook, WorkbookId};
+pub use workbook::{
+    DeleteSheetError, DuplicateSheetError, RenameSheetError, Workbook, WorkbookId,
+};
 pub use worksheet::{
     ColProperties, RangeBatch, RowProperties, SheetVisibility, TabColor, Worksheet, WorksheetId,
 };

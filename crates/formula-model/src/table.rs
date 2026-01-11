@@ -75,6 +75,17 @@ impl Table {
         }
     }
 
+    pub(crate) fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
+        for column in &mut self.columns {
+            if let Some(formula) = column.formula.as_mut() {
+                *formula = crate::rewrite_table_names_in_formula(formula, renames);
+            }
+            if let Some(formula) = column.totals_formula.as_mut() {
+                *formula = crate::rewrite_table_names_in_formula(formula, renames);
+            }
+        }
+    }
+
     pub(crate) fn invalidate_deleted_sheet_references(
         &mut self,
         deleted_sheet: &str,

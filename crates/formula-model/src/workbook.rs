@@ -1,5 +1,7 @@
 use core::fmt;
 
+use std::collections::HashSet;
+
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 
@@ -10,9 +12,9 @@ use crate::names::{
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula, CalcSettings,
-    DateSystem, ManualPageBreaks, PageSetup, PrintTitles, Range, SheetPrintSettings,
-    SheetVisibility, Style, StyleTable, TabColor, Table, ThemePalette, WorkbookPrintSettings,
-    WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
+    rewrite_table_names_in_formula, DateSystem, ManualPageBreaks, PageSetup, PrintTitles, Range,
+    SheetPrintSettings, SheetVisibility, Style, StyleTable, TabColor, Table, ThemePalette,
+    WorkbookPrintSettings, WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
 };
 
 /// Identifier for a workbook.
@@ -122,6 +124,37 @@ impl fmt::Display for DeleteSheetError {
 }
 
 impl std::error::Error for DeleteSheetError {}
+
+/// Errors raised when duplicating a worksheet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DuplicateSheetError {
+    SheetNotFound,
+    InvalidName(SheetNameError),
+}
+
+impl fmt::Display for DuplicateSheetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DuplicateSheetError::SheetNotFound => f.write_str("sheet not found"),
+            DuplicateSheetError::InvalidName(err) => err.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for DuplicateSheetError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            DuplicateSheetError::InvalidName(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<SheetNameError> for DuplicateSheetError {
+    fn from(err: SheetNameError) -> Self {
+        DuplicateSheetError::InvalidName(err)
+    }
+}
 
 impl Default for Workbook {
     fn default() -> Self {
@@ -240,6 +273,154 @@ impl Workbook {
         }
         self.view.active_sheet_id = Some(id);
         true
+    }
+
+    /// Duplicate a worksheet using Excel-like semantics.
+    ///
+    /// - If `new_name` is `None`, the new sheet is named like Excel would: `Sheet1` → `Sheet1 (2)`.
+    /// - Tables are deep-copied and renamed to maintain workbook-wide table name uniqueness.
+    /// - Formulas within the duplicated sheet are rewritten so any explicit reference to the
+    ///   source sheet name points at the new sheet, and structured references to duplicated
+    ///   tables refer to the renamed copies.
+    pub fn duplicate_sheet(
+        &mut self,
+        source_id: WorksheetId,
+        new_name: Option<&str>,
+    ) -> Result<WorksheetId, DuplicateSheetError> {
+        let source_index = self
+            .sheets
+            .iter()
+            .position(|s| s.id == source_id)
+            .ok_or(DuplicateSheetError::SheetNotFound)?;
+
+        let source_name = self.sheets[source_index].name.clone();
+
+        let target_name = match new_name {
+            Some(name) => {
+                validate_sheet_name(name)?;
+                self.validate_unique_sheet_name(name, None)?;
+                name.to_string()
+            }
+            None => generate_duplicate_sheet_name(&source_name, &self.sheets),
+        };
+
+        let new_sheet_id = self.next_sheet_id;
+        self.next_sheet_id = self.next_sheet_id.wrapping_add(1);
+
+        let mut new_sheet = self.sheets[source_index].clone();
+        new_sheet.id = new_sheet_id;
+        new_sheet.name = target_name.clone();
+
+        // A duplicated sheet is a new runtime object, so it should not inherit
+        // XLSX relationship identifiers.
+        new_sheet.xlsx_sheet_id = None;
+        new_sheet.xlsx_rel_id = None;
+
+        let mut used_table_names = collect_table_names(&self.sheets);
+        let mut next_table_id = next_table_id(&self.sheets);
+        let mut table_renames: Vec<(String, String)> = Vec::new();
+
+        for table in &mut new_sheet.tables {
+            let old_name = table.name.clone();
+            let old_display_name = table.display_name.clone();
+            let new_table_name =
+                generate_duplicate_table_name(&old_display_name, &mut used_table_names);
+            let add_display_name_mapping = !old_display_name.eq_ignore_ascii_case(&old_name);
+            table.id = next_table_id;
+            next_table_id = next_table_id.wrapping_add(1);
+            table.name = new_table_name.clone();
+            table.display_name = new_table_name.clone();
+            table.relationship_id = None;
+            table.part_path = None;
+
+            table_renames.push((old_name, new_table_name.clone()));
+            if add_display_name_mapping {
+                table_renames.push((old_display_name, new_table_name));
+            }
+        }
+
+        // Rewrite formulas within the duplicated sheet only.
+        for (_, cell) in new_sheet.iter_cells_mut() {
+            let Some(formula) = cell.formula.as_mut() else {
+                continue;
+            };
+            let rewritten = rewrite_sheet_names_in_formula(formula, &source_name, &target_name);
+            *formula = rewrite_table_names_in_formula(&rewritten, &table_renames);
+        }
+
+        for table in &mut new_sheet.tables {
+            table.rewrite_sheet_references(&source_name, &target_name);
+            table.rewrite_table_references(&table_renames);
+        }
+
+        for rule in &mut new_sheet.conditional_formatting_rules {
+            rule.rewrite_sheet_references(&source_name, &target_name);
+            rule.rewrite_table_references(&table_renames);
+        }
+
+        for link in &mut new_sheet.hyperlinks {
+            link.target
+                .rewrite_sheet_references(&source_name, &target_name);
+        }
+
+        for assignment in &mut new_sheet.data_validations {
+            assignment
+                .validation
+                .rewrite_sheet_references(&source_name, &target_name);
+            assignment
+                .validation
+                .rewrite_table_references(&table_renames);
+        }
+
+        let scoped_names: Vec<DefinedName> = self
+            .defined_names
+            .iter()
+            .filter(|n| n.scope == DefinedNameScope::Sheet(source_id))
+            .cloned()
+            .collect();
+        if !scoped_names.is_empty() {
+            let mut next_id = self.next_defined_name_id;
+            let mut duplicated = Vec::with_capacity(scoped_names.len());
+            for mut name in scoped_names {
+                name.id = next_id;
+                next_id = next_id.wrapping_add(1);
+                name.scope = DefinedNameScope::Sheet(new_sheet_id);
+                name.xlsx_local_sheet_id = None;
+                name.refers_to =
+                    rewrite_sheet_names_in_formula(&name.refers_to, &source_name, &target_name);
+                name.refers_to = rewrite_table_names_in_formula(&name.refers_to, &table_renames);
+                duplicated.push(name);
+            }
+            self.next_defined_name_id = next_id;
+            self.defined_names.extend(duplicated);
+        }
+
+        // Excel inserts the copy immediately after the source sheet.
+        self.sheets.insert(source_index + 1, new_sheet);
+
+        // Copy print settings (print area/titles, page setup, manual breaks) if present.
+        if let Some(settings) = self
+            .print_settings
+            .sheets
+            .iter()
+            .find(|s| {
+                crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, &source_name)
+            })
+            .cloned()
+        {
+            let mut copied_settings = settings;
+            copied_settings.sheet_name = target_name.clone();
+            if !copied_settings.is_default() {
+                self.print_settings.sheets.push(copied_settings);
+            }
+        }
+
+        self.sort_print_settings_by_sheet_order();
+
+        // Excel activates the newly inserted sheet.
+        self.view.active_sheet_id = Some(new_sheet_id);
+
+        Ok(new_sheet_id)
     }
 
     /// Rename a worksheet and rewrite formulas that reference it.
@@ -719,6 +900,57 @@ impl Workbook {
 fn normalize_refers_to(refers_to: String) -> String {
     let trimmed = refers_to.trim();
     trimmed.strip_prefix('=').unwrap_or(trimmed).to_string()
+}
+
+fn generate_duplicate_sheet_name(base: &str, sheets: &[Worksheet]) -> String {
+    for i in 2u32.. {
+        let suffix = format!(" ({i})");
+        let suffix_len = suffix.chars().count();
+        let max_base_len = crate::sheet_name::EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
+        let truncated: String = base.chars().take(max_base_len).collect();
+        let candidate = format!("{truncated}{suffix}");
+        if sheets
+            .iter()
+            .all(|s| !crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.name, &candidate))
+        {
+            return candidate;
+        }
+    }
+
+    unreachable!("monotonic counter must eventually produce an unused sheet name")
+}
+
+fn collect_table_names(sheets: &[Worksheet]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for sheet in sheets {
+        for table in &sheet.tables {
+            out.insert(table.name.to_ascii_lowercase());
+            out.insert(table.display_name.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+fn next_table_id(sheets: &[Worksheet]) -> u32 {
+    sheets
+        .iter()
+        .flat_map(|s| s.tables.iter())
+        .map(|t| t.id)
+        .max()
+        .unwrap_or(0)
+        .wrapping_add(1)
+}
+
+fn generate_duplicate_table_name(base: &str, used_names: &mut HashSet<String>) -> String {
+    // Excel renames duplicated tables by appending `_1`, `_2`, … to the existing name.
+    for i in 1u32.. {
+        let candidate = format!("{base}_{i}");
+        if used_names.insert(candidate.to_ascii_lowercase()) {
+            return candidate;
+        }
+    }
+
+    unreachable!("monotonic counter must eventually produce an unused table name")
 }
 
 impl<'de> Deserialize<'de> for Workbook {

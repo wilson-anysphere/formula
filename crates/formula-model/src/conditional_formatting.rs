@@ -57,6 +57,16 @@ impl Cfvo {
         *value = crate::rewrite_sheet_names_in_formula(value, old_name, new_name);
     }
 
+    fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
+        if self.type_ != CfvoType::Formula {
+            return;
+        }
+        let Some(value) = self.value.as_mut() else {
+            return;
+        };
+        *value = crate::rewrite_table_names_in_formula(value, renames);
+    }
+
     fn invalidate_deleted_sheet_references(&mut self, deleted_sheet: &str, sheet_order: &[String]) {
         if self.type_ != CfvoType::Formula {
             return;
@@ -134,6 +144,11 @@ impl DataBarRule {
         self.max.rewrite_sheet_references(old_name, new_name);
     }
 
+    fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
+        self.min.rewrite_table_references(renames);
+        self.max.rewrite_table_references(renames);
+    }
+
     fn invalidate_deleted_sheet_references(&mut self, deleted_sheet: &str, sheet_order: &[String]) {
         self.min
             .invalidate_deleted_sheet_references(deleted_sheet, sheet_order);
@@ -152,6 +167,12 @@ impl ColorScaleRule {
     fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         for cfvo in &mut self.cfvos {
             cfvo.rewrite_sheet_references(old_name, new_name);
+        }
+    }
+
+    fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
+        for cfvo in &mut self.cfvos {
+            cfvo.rewrite_table_references(renames);
         }
     }
 
@@ -204,6 +225,12 @@ impl IconSetRule {
     fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         for cfvo in &mut self.cfvos {
             cfvo.rewrite_sheet_references(old_name, new_name);
+        }
+    }
+
+    fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
+        for cfvo in &mut self.cfvos {
+            cfvo.rewrite_table_references(renames);
         }
     }
 
@@ -272,6 +299,25 @@ impl CfRuleKind {
         }
     }
 
+    pub(crate) fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
+        match self {
+            CfRuleKind::CellIs { formulas, .. } => {
+                for formula in formulas {
+                    *formula = crate::rewrite_table_names_in_formula(formula, renames);
+                }
+            }
+            CfRuleKind::Expression { formula } => {
+                *formula = crate::rewrite_table_names_in_formula(formula, renames);
+            }
+            CfRuleKind::DataBar(rule) => rule.rewrite_table_references(renames),
+            CfRuleKind::ColorScale(rule) => rule.rewrite_table_references(renames),
+            CfRuleKind::IconSet(rule) => rule.rewrite_table_references(renames),
+            CfRuleKind::TopBottom(_)
+            | CfRuleKind::UniqueDuplicate(_)
+            | CfRuleKind::Unsupported { .. } => {}
+        }
+    }
+
     pub(crate) fn invalidate_deleted_sheet_references(
         &mut self,
         deleted_sheet: &str,
@@ -328,6 +374,10 @@ impl CfRule {
 
     pub(crate) fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         self.kind.rewrite_sheet_references(old_name, new_name);
+    }
+
+    pub(crate) fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
+        self.kind.rewrite_table_references(renames);
     }
 
     pub(crate) fn invalidate_deleted_sheet_references(

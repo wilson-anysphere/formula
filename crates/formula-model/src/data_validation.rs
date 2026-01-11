@@ -115,6 +115,19 @@ impl DataValidation {
         }
     }
 
+    pub(crate) fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
+        let formula1_is_literal_list =
+            self.kind == DataValidationKind::List && parse_list_constant(&self.formula1).is_some();
+
+        if !formula1_is_literal_list && !self.formula1.is_empty() {
+            self.formula1 = crate::rewrite_table_names_in_formula(&self.formula1, renames);
+        }
+
+        if let Some(formula2) = self.formula2.as_mut() {
+            *formula2 = crate::rewrite_table_names_in_formula(formula2, renames);
+        }
+    }
+
     pub(crate) fn invalidate_deleted_sheet_references(
         &mut self,
         deleted_sheet: &str,
