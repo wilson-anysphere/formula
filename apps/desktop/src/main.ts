@@ -380,6 +380,33 @@ if (
               doc: app.getDocument(),
               container,
               getActiveSheetId: () => app.getCurrentSheetId(),
+              getSelection: () => {
+                const ranges = app.getSelectionRanges();
+                const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+                return {
+                  sheet_id: app.getCurrentSheetId(),
+                  start_row: first.startRow,
+                  start_col: first.startCol,
+                  end_row: first.endRow,
+                  end_col: first.endCol,
+                };
+              },
+              setSelection: (selection) => {
+                if (!selection || !selection.sheet_id) return;
+                if (selection.start_row === selection.end_row && selection.start_col === selection.end_col) {
+                  app.activateCell({ sheetId: selection.sheet_id, row: selection.start_row, col: selection.start_col });
+                  return;
+                }
+                app.selectRange({
+                  sheetId: selection.sheet_id,
+                  range: {
+                    startRow: selection.start_row,
+                    startCol: selection.start_col,
+                    endRow: selection.end_row,
+                    endCol: selection.end_col,
+                  },
+                });
+              },
             });
             mount!.dispose = mounted.dispose;
           })

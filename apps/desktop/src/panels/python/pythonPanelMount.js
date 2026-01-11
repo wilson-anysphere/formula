@@ -8,11 +8,58 @@ const PYODIDE_INDEX_URL = globalThis.__pyodideIndexURL || "/pyodide/v0.25.1/full
  *   doc: import("../../document/documentController.js").DocumentController,
  *   container: HTMLElement,
  *   getActiveSheetId?: () => string,
+ *   getSelection?: () => { sheet_id: string, start_row: number, start_col: number, end_row: number, end_col: number },
+ *   setSelection?: (selection: { sheet_id: string, start_row: number, start_col: number, end_row: number, end_col: number }) => void,
  * }} params
  * @returns {{ dispose: () => void }}
  */
-export function mountPythonPanel({ doc, container, getActiveSheetId }) {
-  const bridge = new DocumentControllerBridge(doc, { activeSheetId: getActiveSheetId?.() ?? "Sheet1" });
+export function mountPythonPanel({ doc, container, getActiveSheetId, getSelection, setSelection }) {
+  class PanelBridge extends DocumentControllerBridge {
+    constructor(doc, options) {
+      super(doc, options);
+      this._getActiveSheetId = options.getActiveSheetId;
+      this._getSelection = options.getSelection;
+      this._setSelection = options.setSelection;
+    }
+
+    get_active_sheet_id() {
+      const sheetId = this._getActiveSheetId?.();
+      if (sheetId) {
+        this.activeSheetId = sheetId;
+        this.sheetIds.add(sheetId);
+        if (this.selection) this.selection.sheet_id = sheetId;
+      }
+      return this.activeSheetId;
+    }
+
+    get_selection() {
+      const selection = this._getSelection?.();
+      if (selection && selection.sheet_id) {
+        this.activeSheetId = selection.sheet_id;
+        this.sheetIds.add(selection.sheet_id);
+        this.selection = { ...selection };
+      }
+      return { ...this.selection };
+    }
+
+    set_selection({ selection }) {
+      if (selection && selection.sheet_id) {
+        try {
+          this._setSelection?.(selection);
+        } catch {
+          // ignore
+        }
+      }
+      return super.set_selection({ selection });
+    }
+  }
+
+  const bridge = new PanelBridge(doc, {
+    activeSheetId: getActiveSheetId?.() ?? "Sheet1",
+    getActiveSheetId,
+    getSelection,
+    setSelection,
+  });
 
   const runtime = new PyodideRuntime({
     api: bridge,
@@ -117,6 +164,8 @@ export function mountPythonPanel({ doc, container, getActiveSheetId }) {
 
     try {
       bridge.activeSheetId = getActiveSheetId?.() ?? bridge.activeSheetId;
+      bridge.sheetIds.add(bridge.activeSheetId);
+      if (bridge.selection) bridge.selection.sheet_id = bridge.activeSheetId;
 
       await ensureInitialized();
       const result = await runtime.execute(editor.value);
