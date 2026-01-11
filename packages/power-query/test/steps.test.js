@@ -5,6 +5,13 @@ import { DataTable } from "../src/table.js";
 import { applyOperation } from "../src/steps.js";
 import { MS_PER_DAY, PqDecimal, PqDuration, PqTime } from "../src/values.js";
 
+/**
+ * @param {unknown[][]} grid
+ */
+function gridDatesToIso(grid) {
+  return grid.map((row) => row.map((cell) => (cell instanceof Date ? cell.toISOString() : cell)));
+}
+
 function sampleTable() {
   return DataTable.fromGrid(
     [
@@ -137,6 +144,36 @@ test("changeType coerces values", () => {
 
   const result = applyOperation(table, { type: "changeType", column: "Value", newType: "number" });
   assert.deepEqual(result.toGrid(), [["Value"], [1], [2.5], [null], [null]]);
+});
+
+test("distinctRows removes duplicates (including Dates)", () => {
+  const d1 = new Date("2020-01-01T00:00:00.000Z");
+  const d1b = new Date("2020-01-01T00:00:00.000Z");
+  const d2 = new Date("2020-01-02T00:00:00.000Z");
+  const d2b = new Date("2020-01-02T00:00:00.000Z");
+
+  const table = DataTable.fromGrid(
+    [
+      ["Id", "When"],
+      [1, d1],
+      [1, d1b],
+      [1, d2],
+      [1, d2b],
+      [2, d1b],
+      [2, d1],
+    ],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const op = { type: "distinctRows", columns: null };
+  const expectedIso = [
+    ["Id", "When"],
+    [1, d1.toISOString()],
+    [1, d2.toISOString()],
+    [2, d1.toISOString()],
+  ];
+
+  assert.deepEqual(gridDatesToIso(applyOperation(table, op).toGrid()), expectedIso);
 });
 
 test("replaceValues matches Date values by timestamp (not identity)", () => {

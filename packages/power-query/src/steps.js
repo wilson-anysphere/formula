@@ -420,7 +420,6 @@ function base64ToBytes(encoded) {
   }
   return out;
 }
-
 /**
  * @param {ITable} table
  * @param {string[]} groupColumns
