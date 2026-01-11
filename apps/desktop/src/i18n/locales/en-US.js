@@ -120,7 +120,7 @@ export const enUS = {
   "branchMerge.chooseTheirs": "Choose theirs",
   "branchMerge.manual": "Manual…",
   "branchMerge.prompt.moveDestination": "Move destination",
-  "branchMerge.prompt.manualJson": "Manual JSON cell value",
+  "branchMerge.prompt.manualJson": "Manual JSON value",
   "branchMerge.cancel": "Cancel",
   "branchMerge.applyMerge": "Apply merge",
   "filterDropdown.filtered": "(filtered)",

@@ -94,6 +94,7 @@ export function documentControllerToBranchState(doc) {
     schemaVersion: 1,
     sheets: { order: sheetIds, metaById },
     cells,
+    metadata: {},
     namedRanges: {},
     comments: {},
   };
