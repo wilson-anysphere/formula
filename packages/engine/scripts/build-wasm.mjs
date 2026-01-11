@@ -14,6 +14,9 @@ const crateDir = path.join(repoRoot, "crates", "formula-wasm");
 const coreDir = path.join(repoRoot, "crates", "formula-core");
 
 const outDir = path.join(repoRoot, "packages", "engine", "pkg");
+// Note: `wasm-pack build --out-dir` is documented as a *relative* path and is
+// resolved from the crate directory, not `cwd`. Use an absolute path to ensure
+// output always lands in this repo's deterministic location.
 const wrapper = path.join(outDir, "formula_wasm.js");
 const wasm = path.join(outDir, "formula_wasm_bg.wasm");
 
