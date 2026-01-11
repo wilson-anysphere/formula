@@ -190,6 +190,10 @@ pub struct Workbook {
     /// Stable identifier used for macro trust decisions (hash of workbook identity + `vbaProject.bin`).
     pub macro_fingerprint: Option<String>,
     pub preserved_drawing_parts: Option<PreservedDrawingParts>,
+    /// Preserved pivot tables/caches/slicers/timelines for regeneration-based XLSX round-trips.
+    ///
+    /// Pivot attachments are currently re-applied by sheet name. If a sheet is renamed in-app,
+    /// we may fail to reconnect its pivot table relationships.
     pub preserved_pivot_parts: Option<PreservedPivotParts>,
     pub theme_palette: Option<formula_xlsx::theme::ThemePalette>,
     pub sheets: Vec<Sheet>,
@@ -1183,6 +1187,54 @@ mod tests {
         assert_eq!(src_charts[0].rel_id, dst_charts[0].rel_id);
         assert_eq!(src_charts[0].chart_part, dst_charts[0].chart_part);
         assert_eq!(src_charts[0].drawing_part, dst_charts[0].drawing_part);
+    }
+
+    #[test]
+    fn preserves_pivot_slicer_and_timeline_parts_when_saving_xlsx() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsx/tests/fixtures/pivot_slicers_and_chart.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read pivot fixture");
+        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse pivot fixture");
+
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read workbook");
+        assert!(
+            workbook.preserved_pivot_parts.is_some(),
+            "expected pivot slicer/timeline parts to be captured for preservation"
+        );
+
+        // `read_xlsx_blocking` stores the original XLSX bytes, which means `write_xlsx_blocking`
+        // will typically patch the existing package in-place. Clear it here so we exercise the
+        // rust_xlsxwriter regeneration path + `apply_preserved_pivot_parts`.
+        workbook.origin_xlsx_bytes = None;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let dst_path = tmp.path().join("pivot-roundtrip.xlsx");
+        write_xlsx_blocking(&dst_path, &workbook).expect("write workbook");
+
+        let roundtrip_bytes = std::fs::read(&dst_path).expect("read written workbook");
+        let roundtrip_pkg = XlsxPackage::from_bytes(&roundtrip_bytes).expect("parse roundtrip pkg");
+
+        for part in [
+            "xl/pivotTables/pivotTable1.xml",
+            "xl/slicers/slicer1.xml",
+            "xl/slicers/_rels/slicer1.xml.rels",
+            "xl/slicerCaches/slicerCache1.xml",
+            "xl/slicerCaches/_rels/slicerCache1.xml.rels",
+            "xl/timelines/timeline1.xml",
+            "xl/timelines/_rels/timeline1.xml.rels",
+            "xl/timelineCaches/timelineCacheDefinition1.xml",
+            "xl/timelineCaches/_rels/timelineCacheDefinition1.xml.rels",
+        ] {
+            let original_part = original_pkg
+                .part(part)
+                .unwrap_or_else(|| panic!("fixture missing required part {part}"));
+            let roundtrip_part = roundtrip_pkg
+                .part(part)
+                .unwrap_or_else(|| panic!("roundtrip missing required part {part}"));
+            assert_eq!(original_part, roundtrip_part, "part {part} differs");
+        }
     }
 
     #[test]
