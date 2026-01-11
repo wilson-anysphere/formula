@@ -108,6 +108,11 @@ impl ViewportData {
         self.cells.iter()
     }
 
+    /// Iterate over the sparse cell entries contained in this viewport.
+    pub fn iter_cells(&self) -> impl Iterator<Item = (&(i64, i64), &CellSnapshot)> {
+        self.cells.iter()
+    }
+
     /// Consume the viewport into its sparse cell map.
     pub fn into_cells(self) -> HashMap<(i64, i64), CellSnapshot> {
         self.cells
