@@ -96,7 +96,8 @@ impl From<Value> for EncodedValue {
     fn from(value: Value) -> Self {
         match value {
             Value::Blank => EncodedValue::Blank,
-            Value::Number(v) => EncodedValue::Number { v },
+            Value::Number(v) if v.is_finite() => EncodedValue::Number { v },
+            Value::Number(v) => EncodedValue::engine_error(format!("non-finite numeric result: {v}")),
             Value::Text(v) => EncodedValue::String { v },
             Value::Bool(v) => EncodedValue::Bool { v },
             Value::Error(kind) => EncodedValue::Error {
@@ -284,9 +285,21 @@ fn main() -> Result<()> {
 
         let display_text = match &value {
             Value::Blank => "".to_string(),
-            Value::Number(n) => n.to_string(),
+            Value::Number(n) => {
+                if n.is_finite() {
+                    n.to_string()
+                } else {
+                    "#ENGINE!".to_string()
+                }
+            }
             Value::Text(s) => s.clone(),
-            Value::Bool(b) => b.to_string(),
+            Value::Bool(b) => {
+                if *b {
+                    "TRUE".to_string()
+                } else {
+                    "FALSE".to_string()
+                }
+            }
             Value::Error(e) => e.as_code().to_string(),
         };
 

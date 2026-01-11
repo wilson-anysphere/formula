@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,25 @@ def _pretty_input(cell_input: dict[str, Any]) -> dict[str, Any]:
     if "formula" in cell_input:
         return {"cell": cell_input.get("cell"), "formula": cell_input.get("formula")}
     return {"cell": cell_input.get("cell"), "value": cell_input.get("value")}
+
+
+_FUNC_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")
+
+
+def _extract_function_names(formula: str | None) -> list[str]:
+    if not formula:
+        return []
+    raw = formula.strip()
+    if raw.startswith("="):
+        raw = raw[1:]
+
+    out: list[str] = []
+    for match in _FUNC_RE.finditer(raw):
+        name = match.group(1).upper()
+        if name.startswith("_XLFN."):
+            name = name[len("_XLFN.") :]
+        out.append(name)
+    return out
 
 
 @dataclass(frozen=True)
@@ -135,6 +155,12 @@ def main() -> int:
         default=[],
         help="Exclude cases that contain this tag (can be repeated).",
     )
+    parser.add_argument(
+        "--max-cases",
+        type=int,
+        default=0,
+        help="Optional cap (after tag filtering): compare only the first N cases (0 = all).",
+    )
     parser.add_argument("--abs-tol", type=float, default=1e-9)
     parser.add_argument("--rel-tol", type=float, default=1e-9)
     parser.add_argument(
@@ -193,6 +219,8 @@ def main() -> int:
 
     mismatches: list[dict[str, Any]] = []
     reason_counts: dict[str, int] = {}
+    tag_totals: dict[str, int] = {}
+    tag_fails: dict[str, int] = {}
 
     include_tags = set(args.include_tag)
     exclude_tags = set(args.exclude_tag)
@@ -215,56 +243,110 @@ def main() -> int:
 
         included_cases.append(case)
 
+    if args.max_cases and args.max_cases > 0:
+        included_cases = included_cases[: args.max_cases]
+
     for case in included_cases:
         case_id = case["id"]
+        tags = case.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+        tag_set = {t for t in tags if isinstance(t, str)}
 
         exp = expected_index.get(case_id)
         act = actual_index.get(case_id)
 
+        mismatch_reason: str | None = None
         if exp is None:
-            reason = "missing-expected"
+            mismatch_reason = "missing-expected"
             mismatches.append(
                 {
                     "caseId": case_id,
-                    "reason": reason,
+                    "reason": mismatch_reason,
                     "formula": case.get("formula"),
                     "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
                 }
             )
-            reason_counts[reason] = reason_counts.get(reason, 0) + 1
-            continue
+            reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
 
-        if act is None:
-            reason = "missing-actual"
+        elif act is None:
+            mismatch_reason = "missing-actual"
             mismatches.append(
                 {
                     "caseId": case_id,
-                    "reason": reason,
+                    "reason": mismatch_reason,
                     "formula": case.get("formula"),
                     "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
                     "expected": exp.get("result"),
                 }
             )
-            reason_counts[reason] = reason_counts.get(reason, 0) + 1
-            continue
+            reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
 
-        ok, reason = _compare_value(exp.get("result"), act.get("result"), cfg)
-        if not ok:
-            mismatches.append(
-                {
-                    "caseId": case_id,
-                    "reason": reason,
-                    "formula": case.get("formula"),
-                    "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
-                    "expected": exp.get("result"),
-                    "actual": act.get("result"),
-                }
-            )
-            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        else:
+            ok, reason = _compare_value(exp.get("result"), act.get("result"), cfg)
+            if not ok:
+                mismatch_reason = reason
+                mismatches.append(
+                    {
+                        "caseId": case_id,
+                        "reason": mismatch_reason,
+                        "formula": case.get("formula"),
+                        "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                        "expected": exp.get("result"),
+                        "actual": act.get("result"),
+                    }
+                )
+                reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
+
+        # Per-tag accounting (a case can contribute to multiple tags).
+        if not tag_set:
+            tag_set = {"<untagged>"}
+
+        for t in tag_set:
+            tag_totals[t] = tag_totals.get(t, 0) + 1
+            if mismatch_reason is not None:
+                tag_fails[t] = tag_fails.get(t, 0) + 1
 
     total = len(included_cases)
     mismatch_count = len(mismatches)
     mismatch_rate = (mismatch_count / total) if total else 0.0
+
+    tag_summary: list[dict[str, Any]] = []
+    for tag, tot in tag_totals.items():
+        fails = tag_fails.get(tag, 0)
+        passes = tot - fails
+        tag_summary.append(
+            {
+                "tag": tag,
+                "total": tot,
+                "passes": passes,
+                "mismatches": fails,
+                "mismatchRate": (fails / tot) if tot else 0.0,
+            }
+        )
+    tag_summary.sort(key=lambda x: (-x["mismatches"], -x["total"], x["tag"]))
+
+    # Derived aggregates over mismatches: missing functions and error kinds.
+    missing_functions: dict[str, int] = {}
+    actual_error_kinds: dict[str, int] = {}
+    for m in mismatches:
+        actual = m.get("actual")
+        if isinstance(actual, dict) and actual.get("t") == "e":
+            code = actual.get("v")
+            if isinstance(code, str):
+                actual_error_kinds[code] = actual_error_kinds.get(code, 0) + 1
+                if code == "#NAME?":
+                    for fn in _extract_function_names(m.get("formula")):
+                        missing_functions[fn] = missing_functions.get(fn, 0) + 1
+
+    top_missing_functions = [
+        {"name": k, "count": v}
+        for k, v in sorted(missing_functions.items(), key=lambda kv: (-kv[1], kv[0]))
+    ][:20]
+    top_actual_error_kinds = [
+        {"code": k, "count": v}
+        for k, v in sorted(actual_error_kinds.items(), key=lambda kv: (-kv[1], kv[0]))
+    ][:20]
 
     report = {
         "schemaVersion": 1,
@@ -272,10 +354,14 @@ def main() -> int:
             "totalCases": total,
             "includeTags": sorted(include_tags),
             "excludeTags": sorted(exclude_tags),
+            "maxCases": args.max_cases,
             "mismatches": mismatch_count,
             "mismatchRate": mismatch_rate,
             "maxMismatchRate": args.max_mismatch_rate,
             "reasonCounts": dict(sorted(reason_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+            "tagSummary": tag_summary,
+            "topMissingFunctions": top_missing_functions,
+            "topActualErrorKinds": top_actual_error_kinds,
             "casesSha256": cases_sha,
         },
         "expectedSource": expected.get("source"),
@@ -287,6 +373,32 @@ def main() -> int:
     with report_path.open("w", encoding="utf-8", newline="\n") as f:
         json.dump(report, f, ensure_ascii=False, indent=2, sort_keys=False)
         f.write("\n")
+
+    # Human-friendly summary (stdout) for CI/dev ergonomics.
+    print(f"Excel compatibility: {total} cases, {mismatch_count} mismatches ({mismatch_rate:.4%})")
+    if tag_summary:
+        print("")
+        print("Tag summary (mismatches/total):")
+        # Print tags with failures; if none, print the largest tags for context.
+        interesting = [t for t in tag_summary if t["mismatches"] > 0]
+        if not interesting:
+            interesting = tag_summary[: min(10, len(tag_summary))]
+        for row in interesting[: min(25, len(interesting))]:
+            print(
+                f"  {row['tag']}: {row['mismatches']}/{row['total']} ({row['mismatchRate']:.2%})"
+            )
+
+    if top_missing_functions:
+        print("")
+        print("Top missing functions (mismatches where actual is #NAME?):")
+        for row in top_missing_functions[: min(10, len(top_missing_functions))]:
+            print(f"  {row['name']}: {row['count']}")
+
+    if top_actual_error_kinds:
+        print("")
+        print("Top actual error kinds (in mismatches):")
+        for row in top_actual_error_kinds[: min(10, len(top_actual_error_kinds))]:
+            print(f"  {row['code']}: {row['count']}")
 
     # Exit code based on threshold.
     if mismatch_rate > args.max_mismatch_rate:

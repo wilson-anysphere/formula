@@ -185,6 +185,7 @@ jobs:
         if: ${{ env.MODE == 'validate-engine' }}
         shell: powershell
         run: |
+          $max = [int]"${{ env.MAX_CASES }}"
           $maxRate = $env:EFFECTIVE_MAX_MISMATCH_RATE
           $include = $env:EFFECTIVE_INCLUDE_TAGS
           $exclude = $env:EFFECTIVE_EXCLUDE_TAGS
@@ -197,6 +198,7 @@ jobs:
             "--report", "tests/compatibility/excel-oracle/reports/mismatch-report.json",
             "--max-mismatch-rate", $maxRate
           )
+          if ($max -gt 0) { $args += @("--max-cases", $max) }
 
           foreach ($t in ($include -split ",")) {
             $tag = $t.Trim()
