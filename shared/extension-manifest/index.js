@@ -1,74 +1,32 @@
 const GLOBAL_KEY = "__formula_extension_manifest__";
 
-const SEMVER_RE =
-  /^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+const SEMVER_RANGE_KEY = "__formula_semver_range__";
 
-function parseSemver(version) {
-  const match = SEMVER_RE.exec(version);
-  if (!match) return null;
-  const { major, minor, patch, prerelease } = match.groups;
-  return {
-    major: Number(major),
-    minor: Number(minor),
-    patch: Number(patch),
-    prerelease: prerelease ? prerelease.split(".") : null,
-  };
-}
-
-function isValidSemver(version) {
-  return Boolean(parseSemver(version));
-}
-
-function compareIdentifiers(a, b) {
-  const aNum = /^[0-9]+$/.test(a);
-  const bNum = /^[0-9]+$/.test(b);
-  if (aNum && bNum) {
-    const aVal = Number(a);
-    const bVal = Number(b);
-    if (aVal !== bVal) return aVal < bVal ? -1 : 1;
-    return 0;
+function getSemverRange() {
+  // Node / CommonJS: use require when available.
+  if (typeof require === "function") {
+    try {
+      return require("../semver-range");
+    } catch {
+      // ignore
+    }
   }
 
-  if (aNum !== bNum) {
-    // Numeric identifiers have lower precedence than non-numeric.
-    return aNum ? -1 : 1;
+  // Browser / ESM: semver-range is expected to have registered itself on globalThis.
+  try {
+    if (typeof globalThis === "undefined") return null;
+    return globalThis[SEMVER_RANGE_KEY] || null;
+  } catch {
+    return null;
   }
-
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
 }
 
-function compareSemver(a, b) {
-  const aParsed = parseSemver(a);
-  const bParsed = parseSemver(b);
-  if (!aParsed || !bParsed) {
-    throw new Error(`Invalid semver compare: "${a}" vs "${b}"`);
-  }
-
-  if (aParsed.major !== bParsed.major) return aParsed.major < bParsed.major ? -1 : 1;
-  if (aParsed.minor !== bParsed.minor) return aParsed.minor < bParsed.minor ? -1 : 1;
-  if (aParsed.patch !== bParsed.patch) return aParsed.patch < bParsed.patch ? -1 : 1;
-
-  const aPre = aParsed.prerelease;
-  const bPre = bParsed.prerelease;
-
-  // A version without prerelease has higher precedence than one with prerelease.
-  if (!aPre && !bPre) return 0;
-  if (!aPre) return 1;
-  if (!bPre) return -1;
-
-  const max = Math.max(aPre.length, bPre.length);
-  for (let i = 0; i < max; i++) {
-    const aId = aPre[i];
-    const bId = bPre[i];
-    if (aId === undefined) return -1;
-    if (bId === undefined) return 1;
-    const cmp = compareIdentifiers(aId, bId);
-    if (cmp !== 0) return cmp;
-  }
-
-  return 0;
+const semverRange = getSemverRange();
+if (!semverRange) {
+  throw new Error("shared/extension-manifest: failed to initialize semver-range");
 }
+
+const { isValidSemver, satisfies } = semverRange;
 
 const VALID_PERMISSIONS = new Set([
   "cells.read",
@@ -88,55 +46,6 @@ class ManifestError extends Error {
     super(message);
     this.name = "ManifestError";
   }
-}
-
-function satisfies(version, range) {
-  if (typeof version !== "string") return false;
-  const vStr = version.trim();
-  const v = parseSemver(vStr);
-  if (!v) return false;
-
-  if (typeof range !== "string" || range.trim().length === 0) return false;
-  const r = range.trim();
-
-  if (r === "*") return true;
-
-  if (r.startsWith("^")) {
-    const baseStr = r.slice(1).trim();
-    const base = parseSemver(baseStr);
-    if (!base) return false;
-    if (v.major !== base.major) return false;
-    return compareSemver(vStr, baseStr) >= 0;
-  }
-
-  if (r.startsWith("~")) {
-    const baseStr = r.slice(1).trim();
-    const base = parseSemver(baseStr);
-    if (!base) return false;
-    if (v.major !== base.major) return false;
-    if (v.minor !== base.minor) return false;
-    return compareSemver(vStr, baseStr) >= 0;
-  }
-
-  if (r.startsWith(">=")) {
-    const baseStr = r.slice(2).trim();
-    const base = parseSemver(baseStr);
-    if (!base) return false;
-    return compareSemver(vStr, baseStr) >= 0;
-  }
-
-  if (r.startsWith("<=")) {
-    const baseStr = r.slice(2).trim();
-    const base = parseSemver(baseStr);
-    if (!base) return false;
-    return compareSemver(vStr, baseStr) <= 0;
-  }
-
-  const exactStr = r;
-  const exact = parseSemver(exactStr);
-  if (exact) return compareSemver(vStr, exactStr) === 0;
-
-  return false;
 }
 
 function assertObject(value, label) {

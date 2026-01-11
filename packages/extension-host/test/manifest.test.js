@@ -44,6 +44,36 @@ test("manifest validation: engine mismatch rejected", () => {
   );
 });
 
+test("manifest validation: engine supports compound semver ranges", () => {
+  assert.doesNotThrow(() =>
+    validateExtensionManifest(
+      {
+        name: "x",
+        version: "1.0.0",
+        publisher: "p",
+        main: "./dist/extension.js",
+        engines: { formula: ">=1.0.0 <2.0.0" }
+      },
+      { engineVersion: "1.5.0", enforceEngine: true }
+    )
+  );
+});
+
+test("manifest validation: engine supports OR (||) semver ranges", () => {
+  assert.doesNotThrow(() =>
+    validateExtensionManifest(
+      {
+        name: "x",
+        version: "1.0.0",
+        publisher: "p",
+        main: "./dist/extension.js",
+        engines: { formula: "<1.0.0 || >=2.0.0" }
+      },
+      { engineVersion: "2.1.0", enforceEngine: true }
+    )
+  );
+});
+
 test("manifest validation: activation event must reference contributed command", () => {
   assert.throws(
     () =>

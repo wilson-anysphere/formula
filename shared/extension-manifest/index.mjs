@@ -1,6 +1,7 @@
 const GLOBAL_KEY = "__formula_extension_manifest__";
 
 // Load the implementation (CommonJS in Node, plain module in browsers).
+import "../semver-range/index.mjs";
 import "./index.js";
 
 const impl = globalThis?.[GLOBAL_KEY];

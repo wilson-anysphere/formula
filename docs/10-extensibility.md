@@ -206,6 +206,25 @@ Entrypoint fields:
 The browser extension host loads `browser` → `module` → `main` (first defined wins). The Node
 extension host always uses `main`.
 
+### `engines.formula` semver range syntax
+
+The extension host validates `engines.formula` using a small semver range implementation that is
+shared across the marketplace and both the Node and browser extension hosts.
+
+Supported range forms:
+
+- `*` (any version)
+- Exact versions: `1.2.3`
+- Caret / tilde: `^1.2.3`, `~1.2.3`
+- Comparators: `>=1.0.0`, `>1.0.0`, `<=2.0.0`, `<2.0.0`
+- AND (whitespace-separated): `>=1.0.0 <2.0.0`
+- OR (optional): `<1.0.0 || >=2.0.0`
+
+Notes:
+
+- Pre-release ordering follows semver precedence rules (e.g. `1.0.0-alpha < 1.0.0`).
+- Build metadata (`+build.123`) is ignored for ordering.
+
 ---
 
 ## Extension API

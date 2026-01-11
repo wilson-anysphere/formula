@@ -5,14 +5,27 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 test("shared/extension-manifest can execute in a browser-like environment (no require/module)", async () => {
-  const code = await fs.readFile(path.join(__dirname, "index.js"), "utf8");
+  const semverCode = await fs.readFile(path.join(__dirname, "..", "semver-range", "index.js"), "utf8");
+  const manifestCode = await fs.readFile(path.join(__dirname, "index.js"), "utf8");
 
   // Simulate a browser module environment: no `require`, no `module`, but `globalThis` exists.
   /** @type {Record<string, any>} */
   const sandbox = {};
   sandbox.globalThis = sandbox;
 
-  vm.runInNewContext(code, sandbox, { filename: "shared/extension-manifest/index.js" });
+  function runModuleLike(code, filename) {
+    // Both `shared/semver-range/index.js` and `shared/extension-manifest/index.js` are authored to
+    // work as CommonJS in Node and as ESM in browsers. When we run them via `vm`, we wrap the
+    // source to simulate module scoping so top-level `const` declarations don't collide.
+    vm.runInNewContext(`(() => {\n${code}\n})();`, sandbox, { filename });
+  }
+
+  runModuleLike(semverCode, "shared/semver-range/index.js");
+  const semverImpl = sandbox.__formula_semver_range__;
+  assert.ok(semverImpl, "expected semver-range to register on globalThis");
+  assert.equal(typeof semverImpl.satisfies, "function");
+
+  runModuleLike(manifestCode, "shared/extension-manifest/index.js");
 
   const impl = sandbox.__formula_extension_manifest__;
   assert.ok(impl, "expected implementation to register on globalThis");
