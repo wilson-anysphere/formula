@@ -3,11 +3,19 @@ import { validateExtensionManifest } from "./manifest.mjs";
 
 const API_PERMISSIONS = {
   "workbook.getActiveWorkbook": [],
+  "workbook.openWorkbook": ["workbook.manage"],
+  "workbook.createWorkbook": ["workbook.manage"],
   "sheets.getActiveSheet": [],
 
   "cells.getSelection": ["cells.read"],
+  "cells.getRange": ["cells.read"],
   "cells.getCell": ["cells.read"],
   "cells.setCell": ["cells.write"],
+  "cells.setRange": ["cells.write"],
+
+  "sheets.getSheet": ["sheets.manage"],
+  "sheets.createSheet": ["sheets.manage"],
+  "sheets.renameSheet": ["sheets.manage"],
 
   "commands.registerCommand": ["ui.commands"],
   "commands.unregisterCommand": ["ui.commands"],
@@ -84,6 +92,10 @@ class BrowserExtensionHost {
     this._pendingWorkerRequests = new Map();
 
     this._spreadsheet = spreadsheetApi;
+    this._workbook = { name: "Workbook", path: null };
+    this._sheets = [{ id: "sheet1", name: "Sheet1" }];
+    this._nextSheetId = 2;
+    this._activeSheetId = "sheet1";
 
     this._clipboardText = "";
     this._clipboardApi = clipboardApi ?? {
@@ -99,10 +111,39 @@ class BrowserExtensionHost {
 
     this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
     this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
+    this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e));
   }
 
   get spreadsheet() {
     return this._spreadsheet;
+  }
+
+  async _getActiveWorkbook() {
+    if (typeof this._spreadsheet.getActiveWorkbook === "function") {
+      try {
+        const workbook = await this._spreadsheet.getActiveWorkbook();
+        if (workbook && typeof workbook === "object") {
+          this._workbook = {
+            name: String(workbook.name ?? this._workbook.name),
+            path: workbook.path ?? this._workbook.path ?? null
+          };
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return this._workbook;
+  }
+
+  openWorkbook(workbookPath) {
+    const workbookPathStr = workbookPath == null ? null : String(workbookPath);
+    const name =
+      workbookPathStr == null || workbookPathStr.trim().length === 0
+        ? "MockWorkbook"
+        : workbookPathStr.split(/[/\\]/).pop() ?? workbookPathStr;
+    this._workbook = { name, path: workbookPathStr };
+    this._broadcastEvent("workbookOpened", { workbook: this._workbook });
+    return this._workbook;
   }
 
   async loadExtensionFromUrl(manifestUrl) {
@@ -196,6 +237,10 @@ class BrowserExtensionHost {
       }
     }
     await Promise.all(tasks);
+
+    // Mirror the Node host behavior: extensions that activate on startup should receive the
+    // initial workbook event so they can initialize state.
+    this._broadcastEvent("workbookOpened", { workbook: await this._getActiveWorkbook() });
   }
 
   async activateView(viewId) {
@@ -362,22 +407,53 @@ class BrowserExtensionHost {
   async _executeApi(namespace, method, args, extension) {
     switch (`${namespace}.${method}`) {
       case "workbook.getActiveWorkbook":
-        if (typeof this._spreadsheet.getActiveWorkbook === "function") {
-          return this._spreadsheet.getActiveWorkbook();
-        }
-        return { name: "Workbook", path: null };
+        return this._getActiveWorkbook();
+      case "workbook.openWorkbook":
+        return this.openWorkbook(args[0]);
+      case "workbook.createWorkbook":
+        return this.openWorkbook(null);
       case "sheets.getActiveSheet":
         if (typeof this._spreadsheet.getActiveSheet === "function") {
           return this._spreadsheet.getActiveSheet();
         }
-        return { id: "sheet1", name: "Sheet1" };
+        return this._sheets.find((s) => s.id === this._activeSheetId) ?? { id: "sheet1", name: "Sheet1" };
 
       case "cells.getSelection":
         return this._spreadsheet.getSelection();
+      case "cells.getRange":
+        if (typeof this._spreadsheet.getRange === "function") {
+          return this._spreadsheet.getRange(args[0]);
+        }
+        return this._defaultGetRange(args[0]);
       case "cells.getCell":
         return this._spreadsheet.getCell(args[0], args[1]);
       case "cells.setCell":
         await this._spreadsheet.setCell(args[0], args[1], args[2]);
+        return null;
+      case "cells.setRange":
+        if (typeof this._spreadsheet.setRange === "function") {
+          await this._spreadsheet.setRange(args[0], args[1]);
+          return null;
+        }
+        await this._defaultSetRange(args[0], args[1]);
+        return null;
+
+      case "sheets.getSheet":
+        if (typeof this._spreadsheet.getSheet === "function") {
+          return this._spreadsheet.getSheet(args[0]);
+        }
+        return this._defaultGetSheet(args[0]);
+      case "sheets.createSheet":
+        if (typeof this._spreadsheet.createSheet === "function") {
+          return this._spreadsheet.createSheet(args[0]);
+        }
+        return this._defaultCreateSheet(args[0]);
+      case "sheets.renameSheet":
+        if (typeof this._spreadsheet.renameSheet === "function") {
+          await this._spreadsheet.renameSheet(args[0], args[1]);
+          return null;
+        }
+        this._defaultRenameSheet(args[0], args[1]);
         return null;
 
       case "commands.registerCommand":
@@ -533,6 +609,112 @@ class BrowserExtensionHost {
       default:
         throw new Error(`Unknown API method: ${namespace}.${method}`);
     }
+  }
+
+  _parseA1CellRef(ref) {
+    const match = /^\s*\$?([A-Za-z]+)\$?(\d+)\s*$/.exec(String(ref ?? ""));
+    if (!match) throw new Error(`Invalid A1 cell reference: ${ref}`);
+    const [, colLetters, rowDigits] = match;
+    const row = Number.parseInt(rowDigits, 10) - 1;
+    if (!Number.isFinite(row) || row < 0) throw new Error(`Invalid row in A1 reference: ${ref}`);
+
+    const cleaned = colLetters.toUpperCase();
+    let col = 0;
+    for (const ch of cleaned) {
+      col = col * 26 + (ch.charCodeAt(0) - 64);
+    }
+    col -= 1;
+    if (col < 0) throw new Error(`Invalid column in A1 reference: ${ref}`);
+    return { row, col };
+  }
+
+  _parseA1RangeRef(ref) {
+    const raw = String(ref ?? "");
+    const parts = raw.split(":");
+    if (parts.length > 2) throw new Error(`Invalid A1 range reference: ${ref}`);
+    const start = this._parseA1CellRef(parts[0]);
+    const end = parts.length === 2 ? this._parseA1CellRef(parts[1]) : start;
+    return {
+      startRow: Math.min(start.row, end.row),
+      startCol: Math.min(start.col, end.col),
+      endRow: Math.max(start.row, end.row),
+      endCol: Math.max(start.col, end.col)
+    };
+  }
+
+  async _defaultGetRange(ref) {
+    const { startRow, startCol, endRow, endCol } = this._parseA1RangeRef(ref);
+    const values = [];
+    for (let r = startRow; r <= endRow; r++) {
+      const row = [];
+      for (let c = startCol; c <= endCol; c++) {
+        // eslint-disable-next-line no-await-in-loop
+        row.push(await this._spreadsheet.getCell(r, c));
+      }
+      values.push(row);
+    }
+    return { startRow, startCol, endRow, endCol, values };
+  }
+
+  async _defaultSetRange(ref, values) {
+    const { startRow, startCol, endRow, endCol } = this._parseA1RangeRef(ref);
+    const expectedRows = endRow - startRow + 1;
+    const expectedCols = endCol - startCol + 1;
+
+    if (!Array.isArray(values) || values.length !== expectedRows) {
+      throw new Error(
+        `Range values must be a ${expectedRows}x${expectedCols} array (got ${Array.isArray(values) ? values.length : 0} rows)`
+      );
+    }
+
+    for (let r = 0; r < expectedRows; r++) {
+      const rowValues = values[r];
+      if (!Array.isArray(rowValues) || rowValues.length !== expectedCols) {
+        throw new Error(
+          `Range values must be a ${expectedRows}x${expectedCols} array (row ${r} has ${Array.isArray(rowValues) ? rowValues.length : 0} cols)`
+        );
+      }
+      for (let c = 0; c < expectedCols; c++) {
+        // eslint-disable-next-line no-await-in-loop
+        await this._spreadsheet.setCell(startRow + r, startCol + c, rowValues[c]);
+      }
+    }
+  }
+
+  _defaultGetSheet(name) {
+    const sheets = Array.isArray(this._sheets) ? this._sheets : [];
+    const sheet = sheets.find((s) => s.name === String(name));
+    if (!sheet) return undefined;
+    return { id: sheet.id, name: sheet.name };
+  }
+
+  _defaultCreateSheet(name) {
+    const sheetName = String(name);
+    if (sheetName.trim().length === 0) throw new Error("Sheet name must be a non-empty string");
+    this._sheets = this._sheets ?? [{ id: "sheet1", name: "Sheet1" }];
+    this._nextSheetId = this._nextSheetId ?? 2;
+    if (this._sheets.some((s) => s.name === sheetName)) {
+      throw new Error(`Sheet already exists: ${sheetName}`);
+    }
+
+    const sheet = { id: `sheet${this._nextSheetId++}`, name: sheetName };
+    this._sheets.push(sheet);
+    this._activeSheetId = sheet.id;
+    this._broadcastEvent("sheetActivated", { sheet: { id: sheet.id, name: sheet.name } });
+    return { id: sheet.id, name: sheet.name };
+  }
+
+  _defaultRenameSheet(oldName, newName) {
+    const from = String(oldName);
+    const to = String(newName);
+    if (to.trim().length === 0) throw new Error("New sheet name must be a non-empty string");
+    this._sheets = this._sheets ?? [{ id: "sheet1", name: "Sheet1" }];
+    if (this._sheets.some((s) => s.name === to)) {
+      throw new Error(`Sheet already exists: ${to}`);
+    }
+    const sheet = this._sheets.find((s) => s.name === from);
+    if (!sheet) throw new Error(`Unknown sheet: ${from}`);
+    sheet.name = to;
   }
 
   _handleWorkerMessage(extension, message) {
