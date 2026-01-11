@@ -413,7 +413,7 @@ export class RefreshOrchestrator {
     }
 
     /** @type {Record<string, QueryExecutionResult>} */
-    const queryResults = {};
+    const queryResults = Object.create(null);
 
     const baseContext = this.getContext();
     const registeredQueries = Object.fromEntries(this.registrations.entries());
