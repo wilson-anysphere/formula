@@ -520,6 +520,26 @@ else:
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Process execution is not permitted/);
   });
 
+  it("blocks process creation escape hatches (os.fork)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import os
+
+pid = os.fork()
+if pid == 0:
+    os._exit(0)
+os.waitpid(pid, 0)
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Process execution is not permitted/);
+  });
+
   it("enforces script execution timeouts", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({

@@ -314,6 +314,26 @@ sock.close()
   assert.equal(hits1272, 0);
 });
 
+test("native python sandbox blocks process creation escape hatch (os.fork)", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import os
+
+pid = os.fork()
+if pid == 0:
+    os._exit(0)
+os.waitpid(pid, 0)
+`;
+
+  await assert.rejects(() => runtime.execute(script, { api: workbook }), /Process execution is not permitted/);
+});
+
 test("native python sandbox blocks posix_spawn escape hatch", async () => {
   const workbook = new MockWorkbook();
   const runtime = new NativePythonRuntime({

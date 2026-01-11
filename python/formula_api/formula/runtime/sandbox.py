@@ -73,6 +73,8 @@ _OS_FS_FUNCS = (
 _OS_PROCESS_FUNCS = (
     "system",
     "popen",
+    "fork",
+    "forkpty",
     "posix_spawn",
     "posix_spawnp",
     "spawnl",
