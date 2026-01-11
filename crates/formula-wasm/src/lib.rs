@@ -421,7 +421,7 @@ impl WorkbookState {
             }
         }
 
-        let changes = by_cell
+        let changes: Vec<CellChange> = by_cell
             .into_iter()
             .map(|(key, value)| {
                 let address = key.address();
@@ -858,6 +858,41 @@ mod tests {
                 address: "A1".to_string(),
                 value: JsonValue::Null,
             }]
+        );
+    }
+
+    #[test]
+    fn recalculate_does_not_filter_changes_by_sheet_argument() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("=A1*2")).unwrap();
+
+        wb.set_cell_internal("Sheet2", "A1", json!(10.0)).unwrap();
+        wb.set_cell_internal("Sheet2", "A2", json!("=A1*2")).unwrap();
+
+        wb.recalculate_internal(None).unwrap();
+
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(2.0)).unwrap();
+        wb.set_cell_internal("Sheet2", "A1", json!(11.0)).unwrap();
+
+        // The wasm API accepts a `sheet` argument for symmetry, but recalc deltas are always
+        // workbook-wide. Unknown sheet names should be ignored.
+        let changes = wb.recalculate_internal(Some("MissingSheet")).unwrap();
+        assert_eq!(
+            changes,
+            vec![
+                CellChange {
+                    sheet: "Sheet1".to_string(),
+                    address: "A2".to_string(),
+                    value: json!(4.0),
+                },
+                CellChange {
+                    sheet: "Sheet2".to_string(),
+                    address: "A2".to_string(),
+                    value: json!(22.0),
+                },
+            ]
         );
     }
 
