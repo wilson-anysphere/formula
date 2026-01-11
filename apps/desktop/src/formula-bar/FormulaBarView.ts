@@ -1,5 +1,4 @@
 import { FormulaBarModel } from "./FormulaBarModel.js";
-import { highlightFormulaToHtml } from "./highlight/highlightFormula.js";
 import { parseA1Range, type RangeAddress } from "../spreadsheet/a1.js";
 
 export interface FormulaBarViewCallbacks {
@@ -146,6 +145,11 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: false });
   }
 
+  setAiSuggestion(suggestion: string | null): void {
+    this.model.setAiSuggestion(suggestion);
+    this.#render({ preserveTextareaValue: true });
+  }
+
   focus(opts: { cursor?: "end" | "all" } = {}): void {
     this.textarea.style.display = "block";
     this.textarea.focus();
@@ -257,14 +261,36 @@ export class FormulaBarView {
       this.textarea.value = this.model.draft;
     }
 
-    let highlightHtml = highlightFormulaToHtml(this.model.draft);
-    const ghost = this.model.aiSuggestion();
-    if (
-      this.model.isEditing &&
-      ghost &&
-      this.model.cursorStart === this.model.cursorEnd &&
-      this.model.cursorStart === this.model.draft.length
-    ) {
+    const cursor = this.model.cursorStart;
+    const ghost = this.model.isEditing ? this.model.aiGhostText() : "";
+    let ghostInserted = false;
+    let highlightHtml = "";
+
+    for (const span of this.model.highlightedSpans()) {
+      if (!ghostInserted && ghost && cursor <= span.start) {
+        highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+        ghostInserted = true;
+      }
+
+      if (!ghostInserted && ghost && cursor > span.start && cursor < span.end) {
+        const split = cursor - span.start;
+        const before = span.text.slice(0, split);
+        const after = span.text.slice(split);
+        if (before) {
+          highlightHtml += `<span data-kind="${span.kind}">${escapeHtml(before)}</span>`;
+        }
+        highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+        ghostInserted = true;
+        if (after) {
+          highlightHtml += `<span data-kind="${span.kind}">${escapeHtml(after)}</span>`;
+        }
+        continue;
+      }
+
+      highlightHtml += `<span data-kind="${span.kind}">${escapeHtml(span.text)}</span>`;
+    }
+
+    if (!ghostInserted && ghost) {
       highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
     }
     this.#highlightEl.innerHTML = highlightHtml;

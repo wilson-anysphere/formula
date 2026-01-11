@@ -58,6 +58,11 @@
   box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
+.formula-bar-highlight .formula-bar-ghost {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
 .grid {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -182,4 +187,3 @@
   background: var(--selection-bg);
   color: var(--selection-text);
 }
-

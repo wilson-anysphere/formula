@@ -29,7 +29,7 @@ describe("FormulaBarModel", () => {
     model.beginEdit();
     model.updateDraft("=SU", 3, 3);
 
-    model.setAiSuggestion("M");
+    model.setAiSuggestion("=SUM");
     expect(model.acceptAiSuggestion()).toBe(true);
     expect(model.draft).toBe("=SUM");
     expect(model.cursorStart).toBe(4);

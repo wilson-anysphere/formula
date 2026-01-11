@@ -1,4 +1,5 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
+import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
 import { FormulaBarView } from "../formula-bar/FormulaBarView";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
@@ -107,6 +108,7 @@ export class SpreadsheetApp {
 
   private editor: CellEditorOverlay;
   private formulaBar: FormulaBarView | null = null;
+  private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
   private formulaEditCell: CellCoord | null = null;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
 
@@ -274,6 +276,13 @@ export class SpreadsheetApp {
           this.renderReferencePreview();
         }
       });
+
+      this.formulaBarCompletion = new FormulaBarTabCompletionController({
+        formulaBar: this.formulaBar,
+        document: this.document,
+        getSheetId: () => this.sheetId,
+        limits: this.limits,
+      });
     }
 
     this.charts = [
@@ -306,6 +315,7 @@ export class SpreadsheetApp {
   }
 
   destroy(): void {
+    this.formulaBarCompletion?.destroy();
     this.stopCommentPersistence?.();
     this.resizeObserver.disconnect();
     this.root.replaceChildren();
@@ -904,6 +914,7 @@ export class SpreadsheetApp {
       const input = this.getCellInputText(this.selection.active);
       const value = this.getCellComputedValue(this.selection.active);
       this.formulaBar.setActiveCell({ address, input, value });
+      this.formulaBarCompletion?.update();
     }
 
     this.renderCommentsPanel();
