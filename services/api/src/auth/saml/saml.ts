@@ -539,13 +539,17 @@ function decodeSamlXml(base64: string): string {
 }
 
 function preflightSamlResponseXml(xml: string): void {
-  const lower = xml.toLowerCase();
-  if (lower.includes("<!doctype") || lower.includes("<!entity")) {
+  if (/<\s*!doctype/i.test(xml) || /<\s*!entity/i.test(xml)) {
     throw new SamlValidationError("invalid_response", "SAMLResponse contains a forbidden DOCTYPE/ENTITY");
   }
 
   // Defense-in-depth against signature wrapping: reject responses with multiple assertions.
-  const assertionCount = (xml.match(/<\s*(?:[A-Za-z0-9_]+:)?Assertion\b/g) ?? []).length;
+  const assertionRegex = /<\s*(?:[A-Za-z0-9_]+:)?Assertion\b/g;
+  let assertionCount = 0;
+  while (assertionRegex.exec(xml)) {
+    assertionCount += 1;
+    if (assertionCount > 1) break;
+  }
   if (assertionCount !== 1) {
     throw new SamlValidationError("invalid_response", `expected exactly 1 Assertion (got ${assertionCount})`);
   }
@@ -874,8 +878,9 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
   });
 
   let decodedXml: string;
+  const samlResponse = parsed.data.SAMLResponse.replace(/ /g, "+");
   try {
-    decodedXml = decodeSamlXml(parsed.data.SAMLResponse);
+    decodedXml = decodeSamlXml(samlResponse);
     preflightSamlResponseXml(decodedXml);
   } catch (err) {
     const validation = mapSamlValidationError(err);
@@ -894,7 +899,7 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
   let profile: Record<string, unknown>;
   try {
     const container: Record<string, string> = {
-      SAMLResponse: parsed.data.SAMLResponse,
+      SAMLResponse: samlResponse,
       RelayState: parsed.data.RelayState
     };
 
