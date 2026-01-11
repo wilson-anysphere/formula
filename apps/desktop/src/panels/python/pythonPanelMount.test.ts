@@ -90,6 +90,44 @@ describe("pythonPanelMount", () => {
     });
   });
 
+  it("applies native Python updates via applyExternalDeltas (and tags them as python)", async () => {
+    const invoke = vi.fn(async () => ({
+      ok: true,
+      stdout: "",
+      stderr: "",
+      updates: [{ sheet_id: "Sheet1", row: 0, col: 0, value: 123, formula: null, display_value: "123" }],
+    }));
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const container = document.createElement("div");
+    const applyExternalDeltas = vi.fn();
+    const doc: any = {
+      getCell: vi.fn(() => ({ value: null, formula: null, styleId: 0 })),
+      applyExternalDeltas,
+    };
+
+    mountPythonPanel({
+      doc,
+      container,
+      workbookId: "wb1",
+      drainBackendSync: async () => {},
+      getActiveSheetId: () => "Sheet1",
+      getSelection: () => ({ sheet_id: "Sheet1", start_row: 0, start_col: 0, end_row: 0, end_col: 0 }),
+    });
+
+    const runButton = container.querySelector<HTMLButtonElement>('[data-testid="python-panel-run"]');
+    expect(runButton).not.toBeNull();
+    runButton?.dispatchEvent(new MouseEvent("click"));
+
+    for (let i = 0; i < 10 && applyExternalDeltas.mock.calls.length === 0; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(applyExternalDeltas).toHaveBeenCalledTimes(1);
+    expect(applyExternalDeltas.mock.calls[0]?.[1]).toMatchObject({ source: "python" });
+  });
+
   it("falls back to main-thread Pyodide when SharedArrayBuffer is unavailable", async () => {
     const originalSab = (globalThis as any).SharedArrayBuffer;
     const originalIsolation = (globalThis as any).crossOriginIsolated;

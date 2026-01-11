@@ -1,11 +1,31 @@
 import { PyodideRuntime } from "@formula/python-runtime";
 import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
-import { applyMacroCellUpdates } from "../../macros/applyUpdates";
-
 const PYODIDE_INDEX_URL = globalThis.__pyodideIndexURL || "/pyodide/v0.25.1/full/";
 const DEFAULT_NATIVE_PERMISSIONS = { filesystem: "none", network: "none" };
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_MEMORY_BYTES = 256 * 1024 * 1024;
+
+function valuesEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== "object" || typeof b !== "object") return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function inputEquals(before, after) {
+  return valuesEqual(before.value ?? null, after.value ?? null) && (before.formula ?? null) === (after.formula ?? null);
+}
+
+function normalizeFormulaText(formula) {
+  if (typeof formula !== "string") return null;
+  const trimmed = formula.trimStart();
+  if (trimmed === "") return null;
+  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+}
 
 /**
  * @param {any[] | undefined} raw
@@ -301,14 +321,20 @@ export function mountPythonPanel({
 
         const updates = normalizeUpdates(result?.updates);
         if (updates.length > 0) {
-          doc.beginBatch({ label: "Run Python" });
-          let committed = false;
-          try {
-            applyMacroCellUpdates(doc, updates);
-            committed = true;
-          } finally {
-            if (committed) doc.endBatch();
-            else doc.cancelBatch();
+          const deltas = [];
+          for (const update of updates) {
+            const before = doc.getCell(update.sheetId, { row: update.row, col: update.col });
+            const formula = normalizeFormulaText(update.formula);
+            const value = formula ? null : (update.value ?? null);
+            const after = { value, formula, styleId: before.styleId ?? 0 };
+            if (inputEquals(before, after)) continue;
+            deltas.push({ sheetId: update.sheetId, row: update.row, col: update.col, before, after });
+          }
+          if (deltas.length > 0) {
+            // Native Python scripts mutate the backend workbook directly and return
+            // updates for the UI. Apply them without creating a new undo step, and
+            // tag them so the workbook sync bridge doesn't echo them back.
+            doc.applyExternalDeltas(deltas, { source: "python" });
           }
         }
 
