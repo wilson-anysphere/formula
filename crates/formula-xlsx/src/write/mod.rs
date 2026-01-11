@@ -322,7 +322,7 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
             }
 
             seen.insert((meta_sheet_id, cell_ref));
-            let baseline_meta = doc
+            let meta_formula = doc
                 .meta
                 .cell_meta
                 .get(&(meta_sheet_id, cell_ref))
@@ -331,14 +331,16 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
             // `read` expands textless shared-formula follower cells into explicit formulas in the
             // in-memory model. Those synthesized formulas should not count as edits when deciding
             // whether we need to drop `xl/calcChain.xml`.
-            if let Some(meta) = baseline_meta {
-                let is_textless_shared_follower = meta.t.as_deref() == Some("shared")
-                    && meta.reference.is_none()
-                    && meta.file_text.is_empty()
-                    && meta.shared_index.is_some();
+            if let Some(meta_formula) = meta_formula {
+                let is_textless_shared_follower = meta_formula.t.as_deref() == Some("shared")
+                    && meta_formula.reference.is_none()
+                    && meta_formula.file_text.is_empty()
+                    && meta_formula.shared_index.is_some();
                 if is_textless_shared_follower {
-                    if let Some(si) = meta.shared_index {
-                        if let Some(expected) = shared_formula_expected(shared_formulas, si, cell_ref) {
+                    if let Some(shared_index) = meta_formula.shared_index {
+                        if let Some(expected) =
+                            shared_formula_expected(shared_formulas, shared_index, cell_ref)
+                        {
                             if !formula_text_differs(Some(expected.as_str()), Some(formula)) {
                                 continue;
                             }
@@ -347,7 +349,7 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
                 }
             }
 
-            let baseline = baseline_meta.map(|f| f.file_text.as_str());
+            let baseline = meta_formula.map(|f| f.file_text.as_str());
             if formula_text_differs(baseline, Some(formula)) {
                 return true;
             }

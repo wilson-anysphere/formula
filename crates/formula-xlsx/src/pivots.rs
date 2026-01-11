@@ -12,19 +12,14 @@ pub mod pivot_charts;
 pub mod preserve;
 pub mod slicers;
 pub mod graph;
-
 pub use graph::{PivotTableInstance, XlsxPivotGraph};
-
 pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
+pub mod table_definition;
 
 pub use preserve::{PreservedPivotParts, RelationshipStub};
+pub use table_definition::PivotTableDefinition;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PivotTablePart {
-    pub path: String,
-    pub name: Option<String>,
-    pub cache_id: Option<u32>,
-}
+pub type PivotTablePart = PivotTableDefinition;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PivotCacheDefinitionPart {
@@ -66,7 +61,9 @@ impl XlsxPivots {
 
         for path in table_paths {
             let xml = entries.get(&path).unwrap();
-            pivots.pivot_tables.push(parse_pivot_table_part(&path, xml)?);
+            pivots
+                .pivot_tables
+                .push(PivotTableDefinition::parse(&path, xml)?);
         }
         for path in cache_def_paths {
             let xml = entries.get(&path).unwrap();
@@ -99,47 +96,6 @@ impl XlsxPivots {
     }
 }
 
-fn parse_pivot_table_part(path: &str, xml: &[u8]) -> Result<PivotTablePart, XlsxError> {
-    let mut reader = Reader::from_reader(Cursor::new(xml));
-    reader.config_mut().trim_text(true);
-
-    let mut buf = Vec::new();
-    let mut name = None;
-    let mut cache_id = None;
-
-    loop {
-        let event = reader.read_event_into(&mut buf)?;
-        match event {
-            Event::Start(e) => {
-                if e.local_name().as_ref() == b"pivotTableDefinition" {
-                    for attr in e.attributes().with_checks(false) {
-                        let attr = attr.map_err(quick_xml::Error::from)?;
-                        match attr.key.local_name().as_ref() {
-                            b"name" => name = Some(attr.unescape_value()?.to_string()),
-                            b"cacheId" => {
-                                if let Ok(v) = attr.unescape_value()?.parse::<u32>() {
-                                    cache_id = Some(v);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    break;
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(PivotTablePart {
-        path: path.to_string(),
-        name,
-        cache_id,
-    })
-}
-
 fn parse_pivot_cache_definition_part(path: &str, xml: &[u8]) -> Result<PivotCacheDefinitionPart, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
@@ -152,19 +108,22 @@ fn parse_pivot_cache_definition_part(path: &str, xml: &[u8]) -> Result<PivotCach
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Start(e) | Event::Empty(e) => {
-                if e.local_name().as_ref() == b"pivotCacheDefinition" {
+                let name = e.name();
+                let tag = crate::openxml::local_name(name.as_ref());
+                if tag.eq_ignore_ascii_case(b"pivotCacheDefinition") {
                     for attr in e.attributes().with_checks(false) {
-                        let attr = attr.map_err(quick_xml::Error::from)?;
-                        if attr.key.local_name().as_ref() == b"recordCount" {
+                        let attr = attr?;
+                        if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"recordCount")
+                        {
                             if let Ok(v) = attr.unescape_value()?.parse::<u64>() {
                                 record_count = Some(v);
                             }
                         }
                     }
-                } else if e.local_name().as_ref() == b"cacheField" {
+                } else if tag.eq_ignore_ascii_case(b"cacheField") {
                     for attr in e.attributes().with_checks(false) {
-                        let attr = attr.map_err(quick_xml::Error::from)?;
-                        if attr.key.local_name().as_ref() == b"name" {
+                        let attr = attr?;
+                        if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"name") {
                             fields.push(attr.unescape_value()?.to_string());
                         }
                     }
@@ -194,10 +153,11 @@ fn parse_pivot_cache_records_part(path: &str, xml: &[u8]) -> Result<PivotCacheRe
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Start(e) => {
-                if e.local_name().as_ref() == b"pivotCacheRecords" {
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"pivotCacheRecords")
+                {
                     for attr in e.attributes().with_checks(false) {
-                        let attr = attr.map_err(quick_xml::Error::from)?;
-                        if attr.key.local_name().as_ref() == b"count" {
+                        let attr = attr?;
+                        if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"count") {
                             if let Ok(v) = attr.unescape_value()?.parse::<u64>() {
                                 count = Some(v);
                             }
