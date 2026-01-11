@@ -34,7 +34,16 @@ function connectDocs(docA, docB) {
   };
 }
 
-test("CollabSession↔DocumentController binder masks unreadable remote values/formulas", () => {
+async function waitForCondition(fn, timeoutMs = 2000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (fn()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error("Timed out waiting for condition");
+}
+
+test("CollabSession↔DocumentController binder masks unreadable remote values/formulas", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
   const disconnect = connectDocs(docA, docB);
@@ -67,13 +76,15 @@ test("CollabSession↔DocumentController binder masks unreadable remote values/f
 
   sessionA.setCellFormula("Sheet1:0:0", "=TOP_SECRET()");
 
-  const cellA = dcA.getCell("Sheet1", "A1");
-  assert.equal(cellA.formula, "=TOP_SECRET()");
-  assert.equal(cellA.value, null);
+  await waitForCondition(() => {
+    const cellA = dcA.getCell("Sheet1", "A1");
+    return cellA.formula === "=TOP_SECRET()" && cellA.value == null;
+  });
 
-  const cellB = dcB.getCell("Sheet1", "A1");
-  assert.equal(cellB.value, "###");
-  assert.equal(cellB.formula, null);
+  await waitForCondition(() => {
+    const cellB = dcB.getCell("Sheet1", "A1");
+    return cellB.value === "###" && cellB.formula == null;
+  });
 
   binderA.destroy();
   binderB.destroy();
@@ -84,7 +95,7 @@ test("CollabSession↔DocumentController binder masks unreadable remote values/f
   docB.destroy();
 });
 
-test("CollabSession↔DocumentController binder blocks edits to non-editable cells", () => {
+test("CollabSession↔DocumentController binder blocks edits to non-editable cells", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
   const disconnect = connectDocs(docA, docB);
@@ -118,12 +129,14 @@ test("CollabSession↔DocumentController binder blocks edits to non-editable cel
 
   // Seed a value as the editable user.
   dcA.setCellValue("Sheet1", "A1", "original");
-  assert.equal(dcB.getCell("Sheet1", "A1").value, "original");
+  await waitForCondition(() => dcB.getCell("Sheet1", "A1").value === "original");
+  await waitForCondition(() => sessionA.getCell("Sheet1:0:0")?.value === "original");
 
   // Attempt an edit as the restricted user.
   dcB.setCellValue("Sheet1", "A1", "hacked");
 
   // Local UI and shared Yjs document should remain unchanged.
+  await new Promise((r) => setTimeout(r, 25));
   assert.equal(dcB.getCell("Sheet1", "A1").value, "original");
   assert.equal(dcA.getCell("Sheet1", "A1").value, "original");
   assert.equal(sessionA.getCell("Sheet1:0:0")?.value, "original");
@@ -136,4 +149,3 @@ test("CollabSession↔DocumentController binder blocks edits to non-editable cel
   docA.destroy();
   docB.destroy();
 });
-
