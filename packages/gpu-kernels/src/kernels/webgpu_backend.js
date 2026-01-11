@@ -503,7 +503,38 @@ export class WebGpuBackend {
    * @param {"f32" | "f64" | "u32"} dtype
    */
   supportsKernelPrecision(kernel, dtype) {
-    if (dtype === "f32") return true;
+    if (dtype === "f32") {
+      switch (kernel) {
+        case "groupBySum":
+          return Boolean(this.pipelines.groupByClear && this.pipelines.groupBySum_f32);
+        case "groupByMin":
+          return Boolean(this.pipelines.groupByClear && this.pipelines.groupByMin_f32);
+        case "groupByMax":
+          return Boolean(this.pipelines.groupByClear && this.pipelines.groupByMax_f32);
+        case "groupByCount":
+        case "hashJoin":
+          return false;
+        case "sum":
+          return Boolean(this.pipelines.reduceSum_f32);
+        case "min":
+          return Boolean(this.pipelines.reduceMin_f32);
+        case "max":
+          return Boolean(this.pipelines.reduceMax_f32);
+        case "sumproduct":
+          return Boolean(this.pipelines.reduceSumproduct_f32 && this.pipelines.reduceSum_f32);
+        case "average":
+        case "count":
+          return Boolean(this.pipelines.reduceSum_f32);
+        case "mmult":
+          return Boolean(this.pipelines.mmult_f32);
+        case "sort":
+          return Boolean(this.pipelines.bitonicSort_f32);
+        case "histogram":
+          return Boolean(this.pipelines.histogram_f32);
+        default:
+          return false;
+      }
+    }
     if (dtype === "u32") {
       switch (kernel) {
         case "groupByCount":
