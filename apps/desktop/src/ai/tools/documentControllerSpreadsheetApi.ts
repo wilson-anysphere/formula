@@ -236,14 +236,30 @@ function toControllerRange(range: RangeAddress): { start: { row: number; col: nu
   };
 }
 
-function parseRowColKey(key: string): { row: number; col: number } {
-  const [rowStr, colStr] = key.split(",");
-  const row = Number(rowStr);
-  const col = Number(colStr);
+function parseSemanticDiffCellKey(key: string): { row: number; col: number } {
+  const match = /^r(\d+)c(\d+)$/.exec(key);
+  if (!match) throw new Error(`Invalid semantic diff cell key: ${key}`);
+  const row = Number(match[1]);
+  const col = Number(match[2]);
   if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) {
-    throw new Error(`Invalid sheet cell key: ${key}`);
+    throw new Error(`Invalid semantic diff cell key: ${key}`);
   }
   return { row, col };
+}
+
+function toCellDataFromExportedCell(exportedCell: any): CellData {
+  const rawFormula = exportedCell?.formula;
+  const normalizedFormula =
+    rawFormula == null || rawFormula === "" ? undefined : normalizeFormula(String(rawFormula));
+
+  const format = styleToCellFormat(exportedCell?.format ?? null);
+  const value = normalizedFormula ? null : cloneCellValue(exportedCell?.value ?? null);
+
+  return {
+    value,
+    ...(normalizedFormula ? { formula: normalizedFormula } : {}),
+    ...(format ? { format } : {})
+  };
 }
 
 /**
@@ -271,17 +287,13 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   listNonEmptyCells(sheet?: string): CellEntry[] {
-    const sheets = (this.controller as any).model?.sheets;
-    if (!sheets || typeof sheets.get !== "function") return [];
-
     const sheetIds = sheet ? [sheet] : this.controller.getSheetIds();
     const entries: CellEntry[] = [];
     for (const sheetId of sheetIds) {
-      const sheetModel = sheets.get(sheetId);
-      if (!sheetModel) continue;
-      for (const [key, state] of sheetModel.cells?.entries?.() ?? []) {
-        const { row, col } = parseRowColKey(key);
-        const cell = toCellData(this.controller, state);
+      const exported = this.controller.exportSheetForSemanticDiff(sheetId);
+      for (const [key, exportedCell] of exported.cells?.entries?.() ?? []) {
+        const { row, col } = parseSemanticDiffCellKey(key);
+        const cell = toCellDataFromExportedCell(exportedCell);
         if (isCellEmpty(cell)) continue;
         entries.push({
           address: { sheet: sheetId, row: row + 1, col: col + 1 },
@@ -397,13 +409,11 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   getLastUsedRow(sheet: string): number {
-    const sheets = (this.controller as any).model?.sheets;
-    const sheetModel = sheets?.get?.(sheet);
-    if (!sheetModel) return 0;
     let max = 0;
-    for (const [key, state] of sheetModel.cells?.entries?.() ?? []) {
-      const { row } = parseRowColKey(key);
-      const cell = toCellData(this.controller, state);
+    const exported = this.controller.exportSheetForSemanticDiff(sheet);
+    for (const [key, exportedCell] of exported.cells?.entries?.() ?? []) {
+      const { row } = parseSemanticDiffCellKey(key);
+      const cell = toCellDataFromExportedCell(exportedCell);
       if (isCellEmpty(cell)) continue;
       max = Math.max(max, row + 1);
     }
