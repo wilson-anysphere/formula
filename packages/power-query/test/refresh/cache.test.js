@@ -376,13 +376,13 @@ test("FileSystemCacheStore: persists DataTable cache entries and preserves Date 
 
 test("IndexedDBCacheStore: caches Arrow-backed Parquet results without re-reading the source", async () => {
   const dbName = `pq-cache-idb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const store = new IndexedDBCacheStore({ dbName });
-  const cache = new CacheManager({ store });
+  const store1 = new IndexedDBCacheStore({ dbName });
+  const cache1 = new CacheManager({ store: store1 });
 
   const parquetPath = path.join(__dirname, "..", "..", "..", "data-io", "test", "fixtures", "simple.parquet");
   let readCount = 0;
-  const engine = new QueryEngine({
-    cache,
+  const engine1 = new QueryEngine({
+    cache: cache1,
     fileAdapter: {
       readBinary: async (p) => {
         readCount += 1;
@@ -393,20 +393,36 @@ test("IndexedDBCacheStore: caches Arrow-backed Parquet results without re-readin
 
   const query = { id: "q_parquet_idb_cache", name: "Parquet idb cache", source: { type: "parquet", path: parquetPath }, steps: [] };
 
-  const first = await engine.executeQueryWithMeta(query, {}, {});
+  const first = await engine1.executeQueryWithMeta(query, {}, {});
   assert.equal(first.meta.cache?.hit, false);
   assert.equal(readCount, 1);
   assert.ok(first.table instanceof ArrowTableAdapter);
   const grid = first.table.toGrid();
 
-  const second = await engine.executeQueryWithMeta(query, {}, {});
+  let secondReadCount = 0;
+  const store2 = new IndexedDBCacheStore({ dbName });
+  const cache2 = new CacheManager({ store: store2 });
+  const engine2 = new QueryEngine({
+    cache: cache2,
+    fileAdapter: {
+      readBinary: async (p) => {
+        secondReadCount += 1;
+        return new Uint8Array(await readFile(p));
+      },
+    },
+  });
+
+  const second = await engine2.executeQueryWithMeta(query, {}, {});
   assert.equal(second.meta.cache?.hit, true);
-  assert.equal(readCount, 1, "cache hit should not re-read Parquet bytes");
+  assert.equal(secondReadCount, 0, "cache hit should not re-read Parquet bytes");
   assert.ok(second.table instanceof ArrowTableAdapter);
   assert.deepEqual(second.table.toGrid(), grid);
 
-  const db = await store.open();
-  db.close();
+  // Close DB handles before deleting to keep fake-indexeddb happy.
+  const db1 = await store1.open();
+  db1.close();
+  const db2 = await store2.open();
+  db2.close();
 
   await new Promise((resolve, reject) => {
     const req = indexedDB.deleteDatabase(dbName);
