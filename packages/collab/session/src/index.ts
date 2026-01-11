@@ -191,6 +191,13 @@ export interface CollabSessionOptions {
   cellConflicts?: {
     localUserId: string;
     onConflict: (conflict: CellStructuralConflict) => void;
+    /**
+     * Maximum number of structural op records to keep per user in the shared
+     * `cellStructuralOps` Yjs log.
+     *
+     * Higher values improve conflict detection fidelity over longer offline
+     * periods; lower values cap document growth.
+     */
     maxOpRecordsPerUser?: number;
   };
   /**
