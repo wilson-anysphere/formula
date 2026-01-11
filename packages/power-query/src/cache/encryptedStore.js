@@ -396,7 +396,7 @@ function readEnvelopeVersion(value) {
   if (value.__pq_cache_encrypted !== ENVELOPE_MARKER) return null;
   // @ts-ignore - runtime access
   const v = value.v;
-  return typeof v === "number" ? v : null;
+  return Number.isInteger(v) && v >= 1 ? v : null;
 }
 
 /**
