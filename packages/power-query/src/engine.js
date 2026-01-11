@@ -955,6 +955,7 @@ export class QueryEngine {
         url: source.url,
         method: source.method,
         headers: source.headers ?? {},
+        auth: source.auth,
         responseType: "auto",
       };
       await this.assertPermission(connector.permissionKind, { source, request }, state);
@@ -1223,7 +1224,7 @@ export class QueryEngine {
     if (source.type === "api") {
       const connector = this.connectors.get("http");
       if (!connector) throw new Error("API source requires an HttpConnector");
-      const request = { url: source.url, method: source.method, headers: source.headers ?? {}, responseType: "auto" };
+      const request = { url: source.url, method: source.method, headers: source.headers ?? {}, auth: source.auth, responseType: "auto" };
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("http", request, state);
