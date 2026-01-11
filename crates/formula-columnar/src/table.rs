@@ -8,6 +8,7 @@ use crate::encoding::{
 };
 use crate::stats::{ColumnStats, DistinctCounter};
 use crate::types::{ColumnType, Value};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy)]
@@ -331,6 +332,1562 @@ impl ColumnarTable {
         right_on: usize,
     ) -> Result<crate::query::JoinResult, crate::query::QueryError> {
         crate::query::hash_join(self, right, left_on, right_on)
+    }
+}
+
+/// A mutable, incrementally updatable columnar table.
+///
+/// This type supports:
+/// - fast appends via page-sized chunk flushing (no rewriting of existing pages)
+/// - sparse point/range updates via an in-memory overlay map
+/// - `compact()` / `freeze()` to materialize overlays into a compact immutable [`ColumnarTable`]
+///
+/// The common Power Query refresh pattern is:
+/// 1. Start with a mutable table (empty or derived from a previous snapshot)
+/// 2. `append_rows` new data and apply any `update_*` fixes
+/// 3. `compact()` or `freeze()` to hand a compact snapshot to the Data Model / query engine
+#[derive(Debug)]
+pub struct MutableColumnarTable {
+    schema: Vec<ColumnSchema>,
+    columns: Vec<MutableColumn>,
+    rows: usize,
+    options: TableOptions,
+    cache: Arc<Mutex<LruCache<CacheKey, Arc<DecodedChunk>>>>,
+    /// Sparse per-column overlays keyed by row index.
+    ///
+    /// When present, an overlay value takes precedence over the base encoded pages + the current
+    /// append buffer. Overlays are cleared by `compact()`.
+    overlays: Vec<HashMap<usize, Value>>,
+}
+
+#[derive(Debug)]
+enum MutableColumn {
+    Int(MutableIntColumn),
+    Float(MutableFloatColumn),
+    Bool(MutableBoolColumn),
+    Dict(MutableDictColumn),
+}
+
+#[derive(Debug)]
+struct MutableIntColumn {
+    schema: ColumnSchema,
+    page_size: usize,
+    current: Vec<i64>,
+    validity: BitVec,
+    chunks: Vec<EncodedChunk>,
+    distinct_base: u64,
+    distinct: DistinctCounter,
+    null_count: u64,
+    min: Option<i64>,
+    max: Option<i64>,
+    sum: i128,
+}
+
+#[derive(Debug)]
+struct MutableFloatColumn {
+    schema: ColumnSchema,
+    page_size: usize,
+    current: Vec<f64>,
+    validity: BitVec,
+    chunks: Vec<EncodedChunk>,
+    distinct_base: u64,
+    distinct: DistinctCounter,
+    null_count: u64,
+    min: Option<f64>,
+    max: Option<f64>,
+    sum: f64,
+}
+
+#[derive(Debug)]
+struct MutableBoolColumn {
+    schema: ColumnSchema,
+    page_size: usize,
+    current: BitVec,
+    validity: BitVec,
+    chunks: Vec<EncodedChunk>,
+    null_count: u64,
+    true_count: u64,
+}
+
+#[derive(Debug)]
+struct MutableDictColumn {
+    schema: ColumnSchema,
+    page_size: usize,
+    dictionary: Arc<Vec<Arc<str>>>,
+    dict_map: HashMap<Arc<str>, u32>,
+    current: Vec<u32>,
+    validity: BitVec,
+    chunks: Vec<EncodedChunk>,
+    null_count: u64,
+    min: Option<Arc<str>>,
+    max: Option<Arc<str>>,
+    total_len: u64,
+}
+
+fn coerce_value_for_type(column_type: ColumnType, value: Value) -> Value {
+    match (column_type, value) {
+        (_, Value::Null) => Value::Null,
+        (ColumnType::Number, Value::Number(v)) => Value::Number(v),
+        (ColumnType::String, Value::String(s)) => Value::String(s),
+        (ColumnType::Boolean, Value::Boolean(b)) => Value::Boolean(b),
+        (ColumnType::DateTime, v)
+        | (ColumnType::Currency { .. }, v)
+        | (ColumnType::Percentage { .. }, v) => {
+            // Int-backed logical types: accept any i64-like payload and coerce into the logical
+            // column type for stable reads.
+            let raw = match v {
+                Value::DateTime(v) | Value::Currency(v) | Value::Percentage(v) => Some(v),
+                Value::Number(v) => Some(v as i64),
+                _ => None,
+            };
+            raw.map(|v| value_from_i64(column_type, v))
+                .unwrap_or(Value::Null)
+        }
+        _ => Value::Null,
+    }
+}
+
+fn i64_from_value(value: &Value) -> Option<i64> {
+    match value {
+        Value::DateTime(v) | Value::Currency(v) | Value::Percentage(v) => Some(*v),
+        Value::Number(v) => Some(*v as i64),
+        _ => None,
+    }
+}
+
+impl MutableColumnarTable {
+    pub fn new(schema: Vec<ColumnSchema>, options: TableOptions) -> Self {
+        let columns = schema
+            .iter()
+            .cloned()
+            .map(|col| match col.column_type {
+                ColumnType::Number => MutableColumn::Float(MutableFloatColumn::new(
+                    col,
+                    options.page_size_rows,
+                )),
+                ColumnType::String => {
+                    MutableColumn::Dict(MutableDictColumn::new(col, options.page_size_rows))
+                }
+                ColumnType::Boolean => {
+                    MutableColumn::Bool(MutableBoolColumn::new(col, options.page_size_rows))
+                }
+                ColumnType::DateTime
+                | ColumnType::Currency { .. }
+                | ColumnType::Percentage { .. } => {
+                    MutableColumn::Int(MutableIntColumn::new(col, options.page_size_rows))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let overlays = (0..schema.len()).map(|_| HashMap::new()).collect();
+
+        Self {
+            schema,
+            columns,
+            rows: 0,
+            options,
+            cache: Arc::new(Mutex::new(LruCache::new(options.cache.max_entries))),
+            overlays,
+        }
+    }
+
+    pub fn schema(&self) -> &[ColumnSchema] {
+        &self.schema
+    }
+
+    pub fn row_count(&self) -> usize {
+        self.rows
+    }
+
+    pub fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// Return the dictionary backing a string column (if the column is dictionary encoded).
+    pub fn dictionary(&self, col: usize) -> Option<Arc<Vec<Arc<str>>>> {
+        match self.columns.get(col)? {
+            MutableColumn::Dict(c) => Some(c.dictionary.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn overlay_cell_count(&self) -> usize {
+        self.overlays.iter().map(|m| m.len()).sum()
+    }
+
+    pub fn get_cell(&self, row: usize, col: usize) -> Value {
+        if row >= self.rows {
+            return Value::Null;
+        }
+        let Some(column) = self.columns.get(col) else {
+            return Value::Null;
+        };
+        if let Some(overlay) = self.overlays.get(col).and_then(|m| m.get(&row)) {
+            return overlay.clone();
+        }
+        column.get_cell(row, self.options.page_size_rows)
+    }
+
+    fn get_cell_base(&self, row: usize, col: usize) -> Value {
+        if row >= self.rows {
+            return Value::Null;
+        }
+        let Some(column) = self.columns.get(col) else {
+            return Value::Null;
+        };
+        column.get_cell(row, self.options.page_size_rows)
+    }
+
+    fn decoded_chunk_cached(&self, col: usize, chunk_idx: usize) -> Option<Arc<DecodedChunk>> {
+        let key = CacheKey {
+            col,
+            chunk: chunk_idx,
+        };
+
+        let mut cache = self.cache.lock().expect("columnar page cache poisoned");
+        if let Some(hit) = cache.get(&key) {
+            return Some(hit);
+        }
+        drop(cache);
+
+        let decoded = self.columns.get(col)?.decode_chunk(chunk_idx)?;
+        let decoded = Arc::new(decoded);
+
+        let mut cache = self.cache.lock().expect("columnar page cache poisoned");
+        cache.insert(key, decoded.clone());
+        Some(decoded)
+    }
+
+    pub fn cache_stats(&self) -> CacheStats {
+        self.cache
+            .lock()
+            .expect("columnar page cache poisoned")
+            .stats()
+    }
+
+    pub fn column_stats(&self, col: usize) -> Option<ColumnStats> {
+        self.columns.get(col).map(|c| c.stats())
+    }
+
+    pub fn append_row(&mut self, row: &[Value]) {
+        assert_eq!(
+            row.len(),
+            self.columns.len(),
+            "row length must match schema"
+        );
+
+        for (column, value) in self.columns.iter_mut().zip(row.iter()) {
+            column.push(value);
+        }
+
+        self.rows += 1;
+        if self.rows % self.options.page_size_rows == 0 {
+            for column in &mut self.columns {
+                column.flush();
+            }
+        }
+    }
+
+    pub fn append_rows(&mut self, rows: &[Vec<Value>]) {
+        for row in rows {
+            self.append_row(row);
+        }
+    }
+
+    pub fn update_cell(&mut self, row: usize, col: usize, value: Value) -> bool {
+        if row >= self.rows {
+            return false;
+        }
+        let Some(column) = self.columns.get(col) else {
+            return false;
+        };
+
+        let coerced = coerce_value_for_type(column.column_type(), value);
+        let base = self.get_cell_base(row, col);
+        let old = self.get_cell(row, col);
+
+        if old == coerced {
+            return true;
+        }
+
+        if coerced == base {
+            if let Some(map) = self.overlays.get_mut(col) {
+                map.remove(&row);
+            }
+        } else if let Some(map) = self.overlays.get_mut(col) {
+            map.insert(row, coerced.clone());
+        }
+
+        let recompute = self.columns[col].apply_update(&old, &coerced);
+        if recompute {
+            self.recompute_min_max(col);
+        }
+        true
+    }
+
+    pub fn update_range(
+        &mut self,
+        row_start: usize,
+        row_end: usize,
+        col_start: usize,
+        col_end: usize,
+        values: &[Value],
+    ) -> usize {
+        let row_end = row_end.min(self.rows);
+        let col_end = col_end.min(self.columns.len());
+        let row_start = row_start.min(row_end);
+        let col_start = col_start.min(col_end);
+
+        let rows = row_end - row_start;
+        let cols = col_end - col_start;
+        let expected = rows.saturating_mul(cols);
+        assert_eq!(
+            values.len(),
+            expected,
+            "values must be row-major with len == rows*cols"
+        );
+
+        if expected == 0 {
+            return 0;
+        }
+
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = r * cols + c;
+                let _ = self.update_cell(row_start + r, col_start + c, values[idx].clone());
+            }
+        }
+
+        expected
+    }
+
+    fn flush_all(&mut self) {
+        for column in &mut self.columns {
+            column.flush();
+        }
+    }
+
+    fn recompute_min_max(&mut self, col: usize) {
+        if col >= self.columns.len() {
+            return;
+        }
+
+        let column_type = match self.columns.get(col) {
+            Some(c) => c.column_type(),
+            None => return,
+        };
+
+        match column_type {
+            ColumnType::Number => {
+                let mut min: Option<f64> = None;
+                let mut max: Option<f64> = None;
+                for row in 0..self.rows {
+                    if let Value::Number(v) = self.get_cell(row, col) {
+                        min = Some(min.map(|m| m.min(v)).unwrap_or(v));
+                        max = Some(max.map(|m| m.max(v)).unwrap_or(v));
+                    }
+                }
+                if let MutableColumn::Float(c) = &mut self.columns[col] {
+                    c.min = min;
+                    c.max = max;
+                }
+            }
+            ColumnType::String => {
+                let mut min: Option<Arc<str>> = None;
+                let mut max: Option<Arc<str>> = None;
+                for row in 0..self.rows {
+                    if let Value::String(s) = self.get_cell(row, col) {
+                        min = match &min {
+                            Some(m) if m.as_ref() <= s.as_ref() => Some(m.clone()),
+                            _ => Some(s.clone()),
+                        };
+                        max = match &max {
+                            Some(m) if m.as_ref() >= s.as_ref() => Some(m.clone()),
+                            _ => Some(s.clone()),
+                        };
+                    }
+                }
+                if let MutableColumn::Dict(c) = &mut self.columns[col] {
+                    c.min = min;
+                    c.max = max;
+                }
+            }
+            ColumnType::Boolean => {}
+            ColumnType::DateTime | ColumnType::Currency { .. } | ColumnType::Percentage { .. } => {
+                let mut min: Option<i64> = None;
+                let mut max: Option<i64> = None;
+                for row in 0..self.rows {
+                    if let Some(v) = i64_from_value(&self.get_cell(row, col)) {
+                        min = Some(min.map(|m| m.min(v)).unwrap_or(v));
+                        max = Some(max.map(|m| m.max(v)).unwrap_or(v));
+                    }
+                }
+                if let MutableColumn::Int(c) = &mut self.columns[col] {
+                    c.min = min;
+                    c.max = max;
+                }
+            }
+        }
+    }
+
+    /// Materialize overlays + append buffers into a compact immutable [`ColumnarTable`], and
+    /// remove all overlay/delta state from `self`.
+    pub fn compact(&mut self) -> ColumnarTable {
+        // Fast path: no overlays, just flush the append buffer.
+        if self.overlay_cell_count() == 0 {
+            self.flush_all();
+            for overlay in &mut self.overlays {
+                overlay.clear();
+            }
+            return self.to_columnar_table();
+        }
+
+        let mut rebuilt = MutableColumnarTable::new(self.schema.clone(), self.options);
+        let mut row_buf: Vec<Value> = Vec::with_capacity(self.columns.len());
+        for row in 0..self.rows {
+            row_buf.clear();
+            for col in 0..self.columns.len() {
+                row_buf.push(self.get_cell(row, col));
+            }
+            rebuilt.append_row(&row_buf);
+        }
+        rebuilt.flush_all();
+
+        let snapshot = rebuilt.to_columnar_table();
+        *self = rebuilt;
+        // Overlays are guaranteed empty after rebuild, but clear defensively.
+        for overlay in &mut self.overlays {
+            overlay.clear();
+        }
+
+        snapshot
+    }
+
+    /// Consume the mutable table and return a compact immutable [`ColumnarTable`].
+    pub fn freeze(mut self) -> ColumnarTable {
+        if self.overlay_cell_count() > 0 {
+            let mut builder = ColumnarTableBuilder::new(self.schema.clone(), self.options);
+            let mut row_buf: Vec<Value> = Vec::with_capacity(self.columns.len());
+            for row in 0..self.rows {
+                row_buf.clear();
+                for col in 0..self.columns.len() {
+                    row_buf.push(self.get_cell(row, col));
+                }
+                builder.append_row(&row_buf);
+            }
+            return builder.finalize();
+        }
+
+        self.flush_all();
+        self.into_columnar_table()
+    }
+
+    fn to_columnar_table(&self) -> ColumnarTable {
+        let columns = self.columns.iter().map(|c| c.as_column()).collect();
+        ColumnarTable {
+            schema: self.schema.clone(),
+            columns,
+            rows: self.rows,
+            options: self.options,
+            cache: Arc::new(Mutex::new(LruCache::new(self.options.cache.max_entries))),
+        }
+    }
+
+    fn into_columnar_table(self) -> ColumnarTable {
+        let columns = self.columns.into_iter().map(|c| c.into_column()).collect();
+        ColumnarTable {
+            schema: self.schema,
+            columns,
+            rows: self.rows,
+            options: self.options,
+            cache: Arc::new(Mutex::new(LruCache::new(self.options.cache.max_entries))),
+        }
+    }
+
+    pub fn get_range(
+        &self,
+        row_start: usize,
+        row_end: usize,
+        col_start: usize,
+        col_end: usize,
+    ) -> ColumnarRange {
+        let row_end = row_end.min(self.rows);
+        let col_end = col_end.min(self.columns.len());
+        let row_start = row_start.min(row_end);
+        let col_start = col_start.min(col_end);
+
+        let rows = row_end - row_start;
+        let cols = col_end - col_start;
+
+        let mut out_columns: Vec<Vec<Value>> = Vec::with_capacity(cols);
+        for col in col_start..col_end {
+            let mut values = Vec::with_capacity(rows);
+            let column_type = self.columns.get(col).map(|c| c.column_type());
+            let overlay = self.overlays.get(col);
+            let has_overlay = overlay.is_some_and(|m| !m.is_empty());
+
+            let mut r = row_start;
+            while r < row_end {
+                let chunk_idx = r / self.options.page_size_rows;
+                let chunk_row_start = chunk_idx * self.options.page_size_rows;
+                let in_chunk_start = r - chunk_row_start;
+                let remaining_in_chunk = self.options.page_size_rows - in_chunk_start;
+                let take = (row_end - r).min(remaining_in_chunk);
+
+                if chunk_idx < self.columns[col].chunk_count() {
+                    if let Some(decoded) = self.decoded_chunk_cached(col, chunk_idx) {
+                        for i in 0..take {
+                            let row_idx = r + i;
+                            if has_overlay {
+                                if let Some(v) = overlay.and_then(|m| m.get(&row_idx)) {
+                                    values.push(v.clone());
+                                    continue;
+                                }
+                            }
+                            let idx = in_chunk_start + i;
+                            values.push(match column_type {
+                                Some(ColumnType::Number) => decoded
+                                    .get_f64(idx)
+                                    .map(Value::Number)
+                                    .unwrap_or(Value::Null),
+                                Some(ColumnType::String) => decoded
+                                    .get_string(idx)
+                                    .map(Value::String)
+                                    .unwrap_or(Value::Null),
+                                Some(ColumnType::Boolean) => decoded
+                                    .get_bool(idx)
+                                    .map(Value::Boolean)
+                                    .unwrap_or(Value::Null),
+                                Some(ColumnType::DateTime) => decoded
+                                    .get_i64(idx)
+                                    .map(Value::DateTime)
+                                    .unwrap_or(Value::Null),
+                                Some(ColumnType::Currency { .. }) => decoded
+                                    .get_i64(idx)
+                                    .map(Value::Currency)
+                                    .unwrap_or(Value::Null),
+                                Some(ColumnType::Percentage { .. }) => decoded
+                                    .get_i64(idx)
+                                    .map(Value::Percentage)
+                                    .unwrap_or(Value::Null),
+                                None => Value::Null,
+                            });
+                        }
+                    } else {
+                        for i in 0..take {
+                            let row_idx = r + i;
+                            if has_overlay {
+                                if let Some(v) = overlay.and_then(|m| m.get(&row_idx)) {
+                                    values.push(v.clone());
+                                    continue;
+                                }
+                            }
+                            values.push(Value::Null);
+                        }
+                    }
+                } else {
+                    for i in 0..take {
+                        let row_idx = r + i;
+                        if has_overlay {
+                            if let Some(v) = overlay.and_then(|m| m.get(&row_idx)) {
+                                values.push(v.clone());
+                                continue;
+                            }
+                        }
+                        values.push(self.columns[col].get_cell(row_idx, self.options.page_size_rows));
+                    }
+                }
+
+                r += take;
+            }
+
+            out_columns.push(values);
+        }
+
+        ColumnarRange {
+            row_start,
+            row_end,
+            col_start,
+            col_end,
+            columns: out_columns,
+        }
+    }
+}
+
+impl ColumnarTable {
+    pub fn into_mutable(self) -> MutableColumnarTable {
+        MutableColumnarTable::from(self)
+    }
+}
+
+impl From<ColumnarTable> for MutableColumnarTable {
+    fn from(table: ColumnarTable) -> Self {
+        let overlays = (0..table.columns.len()).map(|_| HashMap::new()).collect();
+        let columns = table
+            .columns
+            .into_iter()
+            .map(|col| MutableColumn::from_column(col, table.options.page_size_rows))
+            .collect();
+
+        Self {
+            schema: table.schema,
+            columns,
+            rows: table.rows,
+            options: table.options,
+            cache: Arc::new(Mutex::new(LruCache::new(table.options.cache.max_entries))),
+            overlays,
+        }
+    }
+}
+
+impl MutableColumn {
+    fn column_type(&self) -> ColumnType {
+        match self {
+            MutableColumn::Int(c) => c.schema.column_type,
+            MutableColumn::Float(c) => c.schema.column_type,
+            MutableColumn::Bool(c) => c.schema.column_type,
+            MutableColumn::Dict(c) => c.schema.column_type,
+        }
+    }
+
+    fn chunk_count(&self) -> usize {
+        match self {
+            MutableColumn::Int(c) => c.chunks.len(),
+            MutableColumn::Float(c) => c.chunks.len(),
+            MutableColumn::Bool(c) => c.chunks.len(),
+            MutableColumn::Dict(c) => c.chunks.len(),
+        }
+    }
+
+    fn get_cell(&self, row: usize, page_size: usize) -> Value {
+        match self {
+            MutableColumn::Int(c) => c.get_cell(row, page_size),
+            MutableColumn::Float(c) => c.get_cell(row, page_size),
+            MutableColumn::Bool(c) => c.get_cell(row, page_size),
+            MutableColumn::Dict(c) => c.get_cell(row, page_size),
+        }
+    }
+
+    fn decode_chunk(&self, chunk_idx: usize) -> Option<DecodedChunk> {
+        match self {
+            MutableColumn::Int(c) => c.decode_chunk(chunk_idx),
+            MutableColumn::Float(c) => c.decode_chunk(chunk_idx),
+            MutableColumn::Bool(c) => c.decode_chunk(chunk_idx),
+            MutableColumn::Dict(c) => c.decode_chunk(chunk_idx),
+        }
+    }
+
+    fn push(&mut self, value: &Value) {
+        match self {
+            MutableColumn::Int(c) => c.push(value),
+            MutableColumn::Float(c) => c.push(value),
+            MutableColumn::Bool(c) => c.push(value),
+            MutableColumn::Dict(c) => c.push(value),
+        }
+    }
+
+    fn flush(&mut self) {
+        match self {
+            MutableColumn::Int(c) => c.flush(),
+            MutableColumn::Float(c) => c.flush(),
+            MutableColumn::Bool(c) => c.flush(),
+            MutableColumn::Dict(c) => c.flush(),
+        }
+    }
+
+    fn stats(&self) -> ColumnStats {
+        match self {
+            MutableColumn::Int(c) => c.stats(),
+            MutableColumn::Float(c) => c.stats(),
+            MutableColumn::Bool(c) => c.stats(),
+            MutableColumn::Dict(c) => c.stats(),
+        }
+    }
+
+    fn apply_update(&mut self, old: &Value, new: &Value) -> bool {
+        match self {
+            MutableColumn::Int(c) => c.apply_update(old, new),
+            MutableColumn::Float(c) => c.apply_update(old, new),
+            MutableColumn::Bool(c) => c.apply_update(old, new),
+            MutableColumn::Dict(c) => c.apply_update(old, new),
+        }
+    }
+
+    fn as_column(&self) -> Column {
+        match self {
+            MutableColumn::Int(c) => c.as_column(),
+            MutableColumn::Float(c) => c.as_column(),
+            MutableColumn::Bool(c) => c.as_column(),
+            MutableColumn::Dict(c) => c.as_column(),
+        }
+    }
+
+    fn into_column(self) -> Column {
+        match self {
+            MutableColumn::Int(c) => c.into_column(),
+            MutableColumn::Float(c) => c.into_column(),
+            MutableColumn::Bool(c) => c.into_column(),
+            MutableColumn::Dict(c) => c.into_column(),
+        }
+    }
+
+    fn from_column(col: Column, page_size: usize) -> Self {
+        match col.schema.column_type {
+            ColumnType::Number => MutableColumn::Float(MutableFloatColumn::from_column(col, page_size)),
+            ColumnType::String => MutableColumn::Dict(MutableDictColumn::from_column(col, page_size)),
+            ColumnType::Boolean => MutableColumn::Bool(MutableBoolColumn::from_column(col, page_size)),
+            ColumnType::DateTime
+            | ColumnType::Currency { .. }
+            | ColumnType::Percentage { .. } => {
+                MutableColumn::Int(MutableIntColumn::from_column(col, page_size))
+            }
+        }
+    }
+}
+
+impl MutableIntColumn {
+    fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        Self {
+            schema,
+            page_size,
+            current: Vec::with_capacity(page_size),
+            validity: BitVec::with_capacity_bits(page_size),
+            chunks: Vec::new(),
+            distinct_base: 0,
+            distinct: DistinctCounter::new(),
+            null_count: 0,
+            min: None,
+            max: None,
+            sum: 0,
+        }
+    }
+
+    fn from_column(col: Column, page_size: usize) -> Self {
+        let distinct_base = col.stats.distinct_count;
+        let (null_count, min, max, sum) = match (&col.stats.min, &col.stats.max, col.stats.sum) {
+            (min, max, sum) => {
+                let min_i = min.as_ref().and_then(i64_from_value);
+                let max_i = max.as_ref().and_then(i64_from_value);
+                (col.stats.null_count, min_i, max_i, sum.unwrap_or(0.0) as i128)
+            }
+        };
+
+        Self {
+            schema: col.schema,
+            page_size,
+            current: Vec::with_capacity(page_size),
+            validity: BitVec::with_capacity_bits(page_size),
+            chunks: col.chunks,
+            distinct_base,
+            distinct: DistinctCounter::new(),
+            null_count,
+            min,
+            max,
+            sum,
+        }
+    }
+
+    fn chunk_index(&self, row: usize, page_size: usize) -> (usize, usize) {
+        (row / page_size, row % page_size)
+    }
+
+    fn get_cell(&self, row: usize, page_size: usize) -> Value {
+        let (chunk_idx, in_chunk) = self.chunk_index(row, page_size);
+        if let Some(chunk) = self.chunks.get(chunk_idx) {
+            let EncodedChunk::Int(c) = chunk else {
+                return Value::Null;
+            };
+            return c
+                .get_i64(in_chunk)
+                .map(|v| value_from_i64(self.schema.column_type, v))
+                .unwrap_or(Value::Null);
+        }
+
+        if chunk_idx == self.chunks.len() {
+            if in_chunk < self.current.len() {
+                if self.validity.get(in_chunk) {
+                    return value_from_i64(self.schema.column_type, self.current[in_chunk]);
+                }
+            }
+        }
+
+        Value::Null
+    }
+
+    fn decode_chunk(&self, chunk_idx: usize) -> Option<DecodedChunk> {
+        let chunk = self.chunks.get(chunk_idx)?;
+        let EncodedChunk::Int(c) = chunk else {
+            return None;
+        };
+        Some(DecodedChunk::Int {
+            values: c.decode_i64(),
+            validity: c.validity.clone(),
+        })
+    }
+
+    fn push(&mut self, value: &Value) {
+        let pushed = match value {
+            Value::Null => {
+                self.current.push(0);
+                self.validity.push(false);
+                self.null_count += 1;
+                return;
+            }
+            Value::DateTime(v) | Value::Currency(v) | Value::Percentage(v) => Some(*v),
+            Value::Number(v) => Some(*v as i64),
+            _ => None,
+        };
+
+        match pushed {
+            Some(v) => {
+                self.current.push(v);
+                self.validity.push(true);
+                self.distinct.insert_i64(v);
+                self.sum += v as i128;
+                self.min = Some(self.min.map(|m| m.min(v)).unwrap_or(v));
+                self.max = Some(self.max.map(|m| m.max(v)).unwrap_or(v));
+            }
+            None => {
+                self.current.push(0);
+                self.validity.push(false);
+                self.null_count += 1;
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.current.is_empty() {
+            return;
+        }
+
+        let mut min_valid: Option<i64> = None;
+        for (idx, v) in self.current.iter().enumerate() {
+            if self.validity.get(idx) {
+                min_valid = Some(min_valid.map(|m| m.min(*v)).unwrap_or(*v));
+            }
+        }
+        let min = min_valid.unwrap_or(0);
+        let offsets: Vec<u64> = self
+            .current
+            .iter()
+            .enumerate()
+            .map(|(idx, v)| {
+                if self.validity.get(idx) {
+                    (*v as i128 - min as i128) as u64
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let offsets = U64SequenceEncoding::encode(&offsets);
+
+        let validity = if self.validity.all_true() {
+            None
+        } else {
+            Some(self.validity.clone())
+        };
+
+        self.chunks.push(EncodedChunk::Int(ValueEncodedChunk {
+            min,
+            len: self.current.len(),
+            offsets,
+            validity,
+        }));
+
+        self.current.clear();
+        self.validity = BitVec::with_capacity_bits(self.page_size);
+    }
+
+    fn stats(&self) -> ColumnStats {
+        ColumnStats {
+            column_type: self.schema.column_type,
+            distinct_count: self.distinct_base.saturating_add(self.distinct.estimate()),
+            null_count: self.null_count,
+            min: self.min.map(|v| value_from_i64(self.schema.column_type, v)),
+            max: self.max.map(|v| value_from_i64(self.schema.column_type, v)),
+            sum: Some(self.sum as f64),
+            avg_length: None,
+        }
+    }
+
+    fn apply_update(&mut self, old: &Value, new: &Value) -> bool {
+        let old_i = i64_from_value(old);
+        let new_i = i64_from_value(new);
+
+        match (old_i, new_i) {
+            (None, None) => return false,
+            (None, Some(v)) => {
+                self.null_count = self.null_count.saturating_sub(1);
+                self.sum += v as i128;
+                self.distinct.insert_i64(v);
+                self.min = Some(self.min.map(|m| m.min(v)).unwrap_or(v));
+                self.max = Some(self.max.map(|m| m.max(v)).unwrap_or(v));
+                return false;
+            }
+            (Some(v), None) => {
+                self.null_count += 1;
+                self.sum -= v as i128;
+                let needs_recompute = self.min == Some(v) || self.max == Some(v);
+                return needs_recompute;
+            }
+            (Some(old_v), Some(new_v)) => {
+                self.sum += new_v as i128 - old_v as i128;
+                self.distinct.insert_i64(new_v);
+                self.min = Some(self.min.map(|m| m.min(new_v)).unwrap_or(new_v));
+                self.max = Some(self.max.map(|m| m.max(new_v)).unwrap_or(new_v));
+                let needs_recompute =
+                    (self.min == Some(old_v) && new_v != old_v) || (self.max == Some(old_v) && new_v != old_v);
+                return needs_recompute;
+            }
+        }
+    }
+
+    fn as_column(&self) -> Column {
+        Column {
+            schema: self.schema.clone(),
+            chunks: self.chunks.clone(),
+            stats: self.stats(),
+            dictionary: None,
+        }
+    }
+
+    fn into_column(self) -> Column {
+        let stats = self.stats();
+        Column {
+            schema: self.schema,
+            chunks: self.chunks,
+            stats,
+            dictionary: None,
+        }
+    }
+}
+
+impl MutableFloatColumn {
+    fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        Self {
+            schema,
+            page_size,
+            current: Vec::with_capacity(page_size),
+            validity: BitVec::with_capacity_bits(page_size),
+            chunks: Vec::new(),
+            distinct_base: 0,
+            distinct: DistinctCounter::new(),
+            null_count: 0,
+            min: None,
+            max: None,
+            sum: 0.0,
+        }
+    }
+
+    fn from_column(col: Column, page_size: usize) -> Self {
+        let distinct_base = col.stats.distinct_count;
+        let min = match &col.stats.min {
+            Some(Value::Number(v)) => Some(*v),
+            _ => None,
+        };
+        let max = match &col.stats.max {
+            Some(Value::Number(v)) => Some(*v),
+            _ => None,
+        };
+        let sum = col.stats.sum.unwrap_or(0.0);
+
+        Self {
+            schema: col.schema,
+            page_size,
+            current: Vec::with_capacity(page_size),
+            validity: BitVec::with_capacity_bits(page_size),
+            chunks: col.chunks,
+            distinct_base,
+            distinct: DistinctCounter::new(),
+            null_count: col.stats.null_count,
+            min,
+            max,
+            sum,
+        }
+    }
+
+    fn chunk_index(&self, row: usize, page_size: usize) -> (usize, usize) {
+        (row / page_size, row % page_size)
+    }
+
+    fn get_cell(&self, row: usize, page_size: usize) -> Value {
+        let (chunk_idx, in_chunk) = self.chunk_index(row, page_size);
+        if let Some(chunk) = self.chunks.get(chunk_idx) {
+            let EncodedChunk::Float(c) = chunk else {
+                return Value::Null;
+            };
+            return c
+                .get_f64(in_chunk)
+                .map(Value::Number)
+                .unwrap_or(Value::Null);
+        }
+
+        if chunk_idx == self.chunks.len() {
+            if in_chunk < self.current.len() {
+                if self.validity.get(in_chunk) {
+                    return Value::Number(self.current[in_chunk]);
+                }
+            }
+        }
+
+        Value::Null
+    }
+
+    fn decode_chunk(&self, chunk_idx: usize) -> Option<DecodedChunk> {
+        let chunk = self.chunks.get(chunk_idx)?;
+        let EncodedChunk::Float(c) = chunk else {
+            return None;
+        };
+        Some(DecodedChunk::Float {
+            values: c.values.clone(),
+            validity: c.validity.clone(),
+        })
+    }
+
+    fn push(&mut self, value: &Value) {
+        match value {
+            Value::Null => {
+                self.current.push(0.0);
+                self.validity.push(false);
+                self.null_count += 1;
+            }
+            Value::Number(v) => {
+                self.current.push(*v);
+                self.validity.push(true);
+                self.distinct.insert_i64(v.to_bits() as i64);
+                self.sum += *v;
+                self.min = Some(self.min.map(|m| m.min(*v)).unwrap_or(*v));
+                self.max = Some(self.max.map(|m| m.max(*v)).unwrap_or(*v));
+            }
+            _ => {
+                self.current.push(0.0);
+                self.validity.push(false);
+                self.null_count += 1;
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.current.is_empty() {
+            return;
+        }
+
+        let validity = if self.validity.all_true() {
+            None
+        } else {
+            Some(self.validity.clone())
+        };
+
+        self.chunks.push(EncodedChunk::Float(FloatChunk {
+            values: std::mem::take(&mut self.current),
+            validity,
+        }));
+
+        self.validity = BitVec::with_capacity_bits(self.page_size);
+    }
+
+    fn stats(&self) -> ColumnStats {
+        ColumnStats {
+            column_type: self.schema.column_type,
+            distinct_count: self.distinct_base.saturating_add(self.distinct.estimate()),
+            null_count: self.null_count,
+            min: self.min.map(Value::Number),
+            max: self.max.map(Value::Number),
+            sum: Some(self.sum),
+            avg_length: None,
+        }
+    }
+
+    fn apply_update(&mut self, old: &Value, new: &Value) -> bool {
+        let old_v = match old {
+            Value::Number(v) => Some(*v),
+            _ => None,
+        };
+        let new_v = match new {
+            Value::Number(v) => Some(*v),
+            _ => None,
+        };
+
+        match (old_v, new_v) {
+            (None, None) => false,
+            (None, Some(v)) => {
+                self.null_count = self.null_count.saturating_sub(1);
+                self.sum += v;
+                self.distinct.insert_i64(v.to_bits() as i64);
+                self.min = Some(self.min.map(|m| m.min(v)).unwrap_or(v));
+                self.max = Some(self.max.map(|m| m.max(v)).unwrap_or(v));
+                false
+            }
+            (Some(v), None) => {
+                self.null_count += 1;
+                self.sum -= v;
+                self.min == Some(v) || self.max == Some(v)
+            }
+            (Some(old_v), Some(new_v)) => {
+                self.sum += new_v - old_v;
+                self.distinct.insert_i64(new_v.to_bits() as i64);
+                self.min = Some(self.min.map(|m| m.min(new_v)).unwrap_or(new_v));
+                self.max = Some(self.max.map(|m| m.max(new_v)).unwrap_or(new_v));
+                (self.min == Some(old_v) && new_v != old_v) || (self.max == Some(old_v) && new_v != old_v)
+            }
+        }
+    }
+
+    fn as_column(&self) -> Column {
+        Column {
+            schema: self.schema.clone(),
+            chunks: self.chunks.clone(),
+            stats: self.stats(),
+            dictionary: None,
+        }
+    }
+
+    fn into_column(self) -> Column {
+        let stats = self.stats();
+        Column {
+            schema: self.schema,
+            chunks: self.chunks,
+            stats,
+            dictionary: None,
+        }
+    }
+}
+
+impl MutableBoolColumn {
+    fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        Self {
+            schema,
+            page_size,
+            current: BitVec::with_capacity_bits(page_size),
+            validity: BitVec::with_capacity_bits(page_size),
+            chunks: Vec::new(),
+            null_count: 0,
+            true_count: 0,
+        }
+    }
+
+    fn from_column(col: Column, page_size: usize) -> Self {
+        let true_count = col.stats.sum.unwrap_or(0.0).round().max(0.0) as u64;
+        Self {
+            schema: col.schema,
+            page_size,
+            current: BitVec::with_capacity_bits(page_size),
+            validity: BitVec::with_capacity_bits(page_size),
+            chunks: col.chunks,
+            null_count: col.stats.null_count,
+            true_count,
+        }
+    }
+
+    fn chunk_index(&self, row: usize, page_size: usize) -> (usize, usize) {
+        (row / page_size, row % page_size)
+    }
+
+    fn get_cell(&self, row: usize, page_size: usize) -> Value {
+        let (chunk_idx, in_chunk) = self.chunk_index(row, page_size);
+        if let Some(chunk) = self.chunks.get(chunk_idx) {
+            let EncodedChunk::Bool(c) = chunk else {
+                return Value::Null;
+            };
+            return c
+                .get_bool(in_chunk)
+                .map(Value::Boolean)
+                .unwrap_or(Value::Null);
+        }
+
+        if chunk_idx == self.chunks.len() {
+            if in_chunk < self.current.len() {
+                if self.validity.get(in_chunk) {
+                    return Value::Boolean(self.current.get(in_chunk));
+                }
+            }
+        }
+
+        Value::Null
+    }
+
+    fn decode_chunk(&self, chunk_idx: usize) -> Option<DecodedChunk> {
+        let chunk = self.chunks.get(chunk_idx)?;
+        let EncodedChunk::Bool(c) = chunk else {
+            return None;
+        };
+        Some(DecodedChunk::Bool {
+            values: c.decode_bools(),
+            validity: c.validity.clone(),
+        })
+    }
+
+    fn push(&mut self, value: &Value) {
+        match value {
+            Value::Null => {
+                self.current.push(false);
+                self.validity.push(false);
+                self.null_count += 1;
+            }
+            Value::Boolean(v) => {
+                self.current.push(*v);
+                self.validity.push(true);
+                if *v {
+                    self.true_count += 1;
+                }
+            }
+            _ => {
+                self.current.push(false);
+                self.validity.push(false);
+                self.null_count += 1;
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.current.is_empty() {
+            return;
+        }
+
+        let len = self.current.len();
+        let mut data = vec![0u8; (len + 7) / 8];
+        for i in 0..len {
+            if self.current.get(i) {
+                data[i / 8] |= 1u8 << (i % 8);
+            }
+        }
+
+        let validity = if self.validity.all_true() {
+            None
+        } else {
+            Some(self.validity.clone())
+        };
+
+        self.chunks.push(EncodedChunk::Bool(BoolChunk {
+            len,
+            data,
+            validity,
+        }));
+
+        self.current = BitVec::with_capacity_bits(self.page_size);
+        self.validity = BitVec::with_capacity_bits(self.page_size);
+    }
+
+    fn stats(&self) -> ColumnStats {
+        let non_null = (self
+            .chunks
+            .iter()
+            .map(|c| c.len() as u64)
+            .sum::<u64>()
+            + self.current.len() as u64)
+        .saturating_sub(self.null_count);
+        let false_count = non_null.saturating_sub(self.true_count);
+        let distinct_count = match (self.true_count > 0, false_count > 0) {
+            (false, false) => 0,
+            (true, true) => 2,
+            _ => 1,
+        };
+
+        ColumnStats {
+            column_type: self.schema.column_type,
+            distinct_count,
+            null_count: self.null_count,
+            min: None,
+            max: None,
+            sum: Some(self.true_count as f64),
+            avg_length: None,
+        }
+    }
+
+    fn apply_update(&mut self, old: &Value, new: &Value) -> bool {
+        match (old, new) {
+            (Value::Null, Value::Null) => {}
+            (Value::Null, Value::Boolean(v)) => {
+                self.null_count = self.null_count.saturating_sub(1);
+                if *v {
+                    self.true_count += 1;
+                }
+            }
+            (Value::Boolean(v), Value::Null) => {
+                self.null_count += 1;
+                if *v {
+                    self.true_count = self.true_count.saturating_sub(1);
+                }
+            }
+            (Value::Boolean(old_v), Value::Boolean(new_v)) => {
+                match (*old_v, *new_v) {
+                    (true, false) => self.true_count = self.true_count.saturating_sub(1),
+                    (false, true) => self.true_count += 1,
+                    _ => {}
+                }
+            }
+            // Any mismatched types were coerced to null already.
+            _ => {}
+        }
+        false
+    }
+
+    fn as_column(&self) -> Column {
+        Column {
+            schema: self.schema.clone(),
+            chunks: self.chunks.clone(),
+            stats: self.stats(),
+            dictionary: None,
+        }
+    }
+
+    fn into_column(self) -> Column {
+        let stats = self.stats();
+        Column {
+            schema: self.schema,
+            chunks: self.chunks,
+            stats,
+            dictionary: None,
+        }
+    }
+}
+
+impl MutableDictColumn {
+    fn new(schema: ColumnSchema, page_size: usize) -> Self {
+        Self {
+            schema,
+            page_size,
+            dictionary: Arc::new(Vec::new()),
+            dict_map: HashMap::new(),
+            current: Vec::with_capacity(page_size),
+            validity: BitVec::with_capacity_bits(page_size),
+            chunks: Vec::new(),
+            null_count: 0,
+            min: None,
+            max: None,
+            total_len: 0,
+        }
+    }
+
+    fn from_column(col: Column, page_size: usize) -> Self {
+        let dict = col.dictionary.unwrap_or_else(|| Arc::new(Vec::new()));
+        let mut dict_map = HashMap::with_capacity(dict.len());
+        for (idx, s) in dict.iter().cloned().enumerate() {
+            dict_map.insert(s, idx as u32);
+        }
+
+        let (min, max, total_len) = {
+            let min = col.stats.min.as_ref().and_then(|v| match v {
+                Value::String(s) => Some(s.clone()),
+                _ => None,
+            });
+            let max = col.stats.max.as_ref().and_then(|v| match v {
+                Value::String(s) => Some(s.clone()),
+                _ => None,
+            });
+            let non_null = (col.chunks.iter().map(|c| c.len() as u64).sum::<u64>())
+                .saturating_sub(col.stats.null_count)
+                .max(1);
+            let avg = col.stats.avg_length.unwrap_or(0.0);
+            let total_len = (avg * non_null as f64).round().max(0.0) as u64;
+            (min, max, total_len)
+        };
+
+        Self {
+            schema: col.schema,
+            page_size,
+            dictionary: dict,
+            dict_map,
+            current: Vec::with_capacity(page_size),
+            validity: BitVec::with_capacity_bits(page_size),
+            chunks: col.chunks,
+            null_count: col.stats.null_count,
+            min,
+            max,
+            total_len,
+        }
+    }
+
+    fn intern(&mut self, s: Arc<str>) -> u32 {
+        if let Some(idx) = self.dict_map.get(s.as_ref()) {
+            return *idx;
+        }
+
+        let dict = Arc::make_mut(&mut self.dictionary);
+        let idx = dict.len() as u32;
+        dict.push(s.clone());
+        self.dict_map.insert(s, idx);
+        idx
+    }
+
+    fn chunk_index(&self, row: usize, page_size: usize) -> (usize, usize) {
+        (row / page_size, row % page_size)
+    }
+
+    fn get_cell(&self, row: usize, page_size: usize) -> Value {
+        let (chunk_idx, in_chunk) = self.chunk_index(row, page_size);
+        if let Some(chunk) = self.chunks.get(chunk_idx) {
+            let EncodedChunk::Dict(c) = chunk else {
+                return Value::Null;
+            };
+            return c
+                .get_index(in_chunk)
+                .map(|idx| Value::String(self.dictionary[idx as usize].clone()))
+                .unwrap_or(Value::Null);
+        }
+
+        if chunk_idx == self.chunks.len() {
+            if in_chunk < self.current.len() {
+                if self.validity.get(in_chunk) {
+                    let idx = self.current[in_chunk] as usize;
+                    if let Some(s) = self.dictionary.get(idx) {
+                        return Value::String(s.clone());
+                    }
+                }
+            }
+        }
+
+        Value::Null
+    }
+
+    fn decode_chunk(&self, chunk_idx: usize) -> Option<DecodedChunk> {
+        let chunk = self.chunks.get(chunk_idx)?;
+        let EncodedChunk::Dict(c) = chunk else {
+            return None;
+        };
+        Some(DecodedChunk::Dict {
+            indices: c.decode_indices(),
+            validity: c.validity.clone(),
+            dictionary: self.dictionary.clone(),
+        })
+    }
+
+    fn push(&mut self, value: &Value) {
+        match value {
+            Value::Null => {
+                self.current.push(0);
+                self.validity.push(false);
+                self.null_count += 1;
+            }
+            Value::String(s) => {
+                let idx = self.intern(s.clone());
+                self.current.push(idx);
+                self.validity.push(true);
+                self.total_len += s.len() as u64;
+
+                self.min = match &self.min {
+                    Some(m) if m.as_ref() <= s.as_ref() => Some(m.clone()),
+                    _ => Some(s.clone()),
+                };
+                self.max = match &self.max {
+                    Some(m) if m.as_ref() >= s.as_ref() => Some(m.clone()),
+                    _ => Some(s.clone()),
+                };
+            }
+            _ => {
+                self.current.push(0);
+                self.validity.push(false);
+                self.null_count += 1;
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.current.is_empty() {
+            return;
+        }
+
+        let indices = U32SequenceEncoding::encode(&self.current);
+        let validity = if self.validity.all_true() {
+            None
+        } else {
+            Some(self.validity.clone())
+        };
+
+        self.chunks.push(EncodedChunk::Dict(DictionaryEncodedChunk {
+            len: self.current.len(),
+            indices,
+            validity,
+        }));
+
+        self.current.clear();
+        self.validity = BitVec::with_capacity_bits(self.page_size);
+    }
+
+    fn stats(&self) -> ColumnStats {
+        let total_rows: u64 =
+            self.chunks.iter().map(|c| c.len() as u64).sum::<u64>() + self.current.len() as u64;
+        let non_null = total_rows.saturating_sub(self.null_count);
+        let non_null_f = non_null.max(1) as f64;
+        ColumnStats {
+            column_type: self.schema.column_type,
+            distinct_count: self.dictionary.len() as u64,
+            null_count: self.null_count,
+            min: self.min.as_ref().map(|s| Value::String(s.clone())),
+            max: self.max.as_ref().map(|s| Value::String(s.clone())),
+            sum: None,
+            avg_length: Some(self.total_len as f64 / non_null_f),
+        }
+    }
+
+    fn apply_update(&mut self, old: &Value, new: &Value) -> bool {
+        let old_s = match old {
+            Value::String(s) => Some(s.clone()),
+            _ => None,
+        };
+        let new_s = match new {
+            Value::String(s) => Some(s.clone()),
+            _ => None,
+        };
+
+        match (old_s, new_s) {
+            (None, None) => false,
+            (None, Some(s)) => {
+                self.null_count = self.null_count.saturating_sub(1);
+                self.total_len += s.len() as u64;
+                let _ = self.intern(s.clone());
+                self.min = match &self.min {
+                    Some(m) if m.as_ref() <= s.as_ref() => Some(m.clone()),
+                    _ => Some(s.clone()),
+                };
+                self.max = match &self.max {
+                    Some(m) if m.as_ref() >= s.as_ref() => Some(m.clone()),
+                    _ => Some(s.clone()),
+                };
+                false
+            }
+            (Some(s), None) => {
+                self.null_count += 1;
+                self.total_len = self.total_len.saturating_sub(s.len() as u64);
+                self.min == Some(s.clone()) || self.max == Some(s)
+            }
+            (Some(old_s), Some(new_s)) => {
+                self.total_len = self
+                    .total_len
+                    .saturating_add(new_s.len() as u64)
+                    .saturating_sub(old_s.len() as u64);
+                let _ = self.intern(new_s.clone());
+                self.min = match &self.min {
+                    Some(m) if m.as_ref() <= new_s.as_ref() => Some(m.clone()),
+                    _ => Some(new_s.clone()),
+                };
+                self.max = match &self.max {
+                    Some(m) if m.as_ref() >= new_s.as_ref() => Some(m.clone()),
+                    _ => Some(new_s.clone()),
+                };
+                (self.min == Some(old_s.clone()) && new_s.as_ref() != old_s.as_ref())
+                    || (self.max == Some(old_s.clone()) && new_s.as_ref() != old_s.as_ref())
+            }
+        }
+    }
+
+    fn as_column(&self) -> Column {
+        Column {
+            schema: self.schema.clone(),
+            chunks: self.chunks.clone(),
+            stats: self.stats(),
+            dictionary: Some(self.dictionary.clone()),
+        }
+    }
+
+    fn into_column(self) -> Column {
+        let stats = self.stats();
+        Column {
+            schema: self.schema,
+            chunks: self.chunks,
+            stats,
+            dictionary: Some(self.dictionary),
+        }
     }
 }
 

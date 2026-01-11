@@ -60,6 +60,11 @@ where
         self.map.len()
     }
 
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+    }
+
     pub fn get(&mut self, key: &K) -> Option<V> {
         if self.cap == 0 {
             self.stats.misses += 1;
