@@ -122,14 +122,23 @@ export class EngineWorker {
   /**
    * Load a workbook from raw `.xlsx` bytes.
    *
-   * Note: the underlying `ArrayBuffer` is transferred to the worker to avoid an
-   * extra structured-clone copy. This *detaches* `bytes.buffer` on the calling
-   * side. If you need to keep using the data, pass a copy (e.g. `bytes.slice()`)
-   * instead.
+   * Note: the payload is transferred to the worker to avoid an extra
+   * structured-clone copy.
+   *
+   * - If `bytes` spans its entire backing buffer (`byteOffset === 0` and
+   *   `byteLength === bytes.buffer.byteLength`), the buffer is transferred and
+   *   detached on the calling side.
+   * - If `bytes` is a view into a larger buffer, we first copy it to a compact
+   *   `Uint8Array` so only the relevant range is transferred (leaving the
+   *   original buffer intact).
    */
   async loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void> {
     await this.flush();
-    await this.invoke("loadFromXlsxBytes", { bytes }, options, [bytes.buffer]);
+    let payload = bytes;
+    if (payload.byteOffset !== 0 || payload.byteLength !== payload.buffer.byteLength) {
+      payload = payload.slice();
+    }
+    await this.invoke("loadFromXlsxBytes", { bytes: payload }, options, [payload.buffer]);
   }
 
   async toJson(options?: RpcOptions): Promise<string> {

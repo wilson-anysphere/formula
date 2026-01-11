@@ -158,6 +158,36 @@ describe("EngineWorker RPC", () => {
     expect(call?.transfer?.[0]).toBe(bytes.buffer);
   });
 
+  it("transfers only the view range when loading xlsx bytes from a subarray", async () => {
+    const worker = new MockWorker();
+    const channel = createMockChannel();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: () => channel
+    });
+
+    const backing = new Uint8Array([0, 0, 1, 2, 3, 4, 0, 0]);
+    const view = backing.subarray(2, 6);
+    await engine.loadWorkbookFromXlsxBytes(view);
+
+    const clientPort = channel.port1 as unknown as MockMessagePort;
+    const call = clientPort.sent.find((entry) => {
+      const msg = entry.message as any;
+      return msg?.type === "request" && msg?.method === "loadFromXlsxBytes";
+    });
+
+    expect(call?.transfer).toHaveLength(1);
+    const transferred = call?.transfer?.[0] as ArrayBuffer | undefined;
+    expect(transferred).toBeInstanceOf(ArrayBuffer);
+    expect(transferred?.byteLength).toBe(view.byteLength);
+
+    const paramsBytes = (call?.message as any)?.params?.bytes as Uint8Array | undefined;
+    expect(paramsBytes).toBeInstanceOf(Uint8Array);
+    expect(paramsBytes?.byteLength).toBe(view.byteLength);
+    expect(paramsBytes?.buffer).toBe(transferred);
+  });
+
   it("flushes pending setCell batches before loading workbook from xlsx bytes", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
