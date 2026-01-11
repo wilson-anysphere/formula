@@ -320,6 +320,11 @@ enum PlaceholderKind {
 }
 
 fn parse_fixed(number_raw: &str) -> FixedSpec {
+    // Scaling commas can appear:
+    // - after all digit placeholders (e.g. `0.0,`)
+    // - after the integer portion but before the decimal separator (e.g. `0,.0`)
+    //
+    // Both divide the value by 1000 per comma.
     let mut raw = number_raw.to_string();
     let mut scale_commas = 0;
     while raw.ends_with(',') {
@@ -360,10 +365,19 @@ fn parse_fixed(number_raw: &str) -> FixedSpec {
         }
     }
 
-    let (int_pat, frac_pat) = match decimal_pos {
+    let (int_pat_raw, frac_pat) = match decimal_pos {
         Some(pos) => (&raw[..pos], &raw[pos + 1..]),
         None => (raw.as_str(), ""),
     };
+
+    // Count scaling commas at the end of the integer portion, even if fractional placeholders
+    // exist after the decimal point.
+    let mut int_cut = int_pat_raw.len();
+    while int_cut > 0 && int_pat_raw.as_bytes()[int_cut - 1] == b',' {
+        int_cut -= 1;
+        scale_commas += 1;
+    }
+    let int_pat = &int_pat_raw[..int_cut];
 
     let grouping = int_pat.contains(',');
     let int_placeholders = parse_placeholders(int_pat);
