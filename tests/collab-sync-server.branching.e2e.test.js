@@ -322,8 +322,14 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   await sessionC.whenSynced();
 
   // --- Workbook state persisted ---
+  // Note: sync-server persistence is loaded asynchronously on the server (y-websocket
+  // does not await `bindState()`), so `whenSynced()` only guarantees the client
+  // finished the initial sync protocol. Persisted updates may arrive shortly after.
+  await waitForCondition(async () => (await sessionC.getCell("Sheet1:0:0"))?.value === "feature", 10_000);
   assert.equal((await sessionC.getCell("Sheet1:0:0"))?.value, "feature");
+  await waitForCondition(async () => (await sessionC.getCell("Sheet1:0:1"))?.formula === "=1+1", 10_000);
   assert.equal((await sessionC.getCell("Sheet1:0:1"))?.formula, "=1+1");
+  await waitForCondition(async () => (await sessionC.getCell("Sheet1:0:2"))?.value === 99, 10_000);
   assert.equal((await sessionC.getCell("Sheet1:0:2"))?.value, 99);
   assert.deepEqual(getYMap(sessionC.cells.get("Sheet1:0:1"))?.get("format"), {
     numberFormat: "percent",

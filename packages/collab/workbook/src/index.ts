@@ -49,25 +49,54 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
 
   if (shouldNormalize) {
     doc.transact(() => {
-      const seen = new Set<string>();
-      const deleteIndices: number[] = [];
+      /** @type {Map<string, number[]>} */
+      const indicesById = new Map<string, number[]>();
+      let hasSheetWithId = false;
 
-      // When duplicates exist, prefer keeping the *last* occurrence. This is
-      // important when a client locally initializes a default Sheet1 while a
-      // sync provider is still asynchronously hydrating persisted state: the
-      // later (remote/persisted) entry typically reflects the canonical order
-      // and any subsequent reordering ops.
-      for (let i = sheets.length - 1; i >= 0; i--) {
+      for (let i = 0; i < sheets.length; i += 1) {
         const entry = sheets.get(i) as any;
         const id = coerceString(entry?.get?.("id") ?? entry?.id);
         if (!id) continue;
-        if (seen.has(id)) {
-          deleteIndices.push(i);
-          continue;
-        }
-        seen.add(id);
+        hasSheetWithId = true;
+        const existing = indicesById.get(id);
+        if (existing) existing.push(i);
+        else indicesById.set(id, [i]);
       }
 
+      const deleteIndices: number[] = [];
+      for (const indices of indicesById.values()) {
+        if (indices.length <= 1) continue;
+
+        const local: number[] = [];
+        const nonLocal: number[] = [];
+        for (const index of indices) {
+          const entry = sheets.get(index) as any;
+          const client = entry?._item?.id?.client;
+          if (typeof client === "number" && client === doc.clientID) {
+            local.push(index);
+          } else {
+            nonLocal.push(index);
+          }
+        }
+
+        // If we see duplicates created by the current client alongside entries
+        // from other clients, prefer keeping the non-local entry. This avoids a
+        // common persistence/hydration pitfall where a client creates a default
+        // Sheet1 before the server finishes loading persisted state, and the
+        // resulting "placeholder" sheet races with the real one.
+        let remaining = indices;
+        if (nonLocal.length > 0 && local.length > 0) {
+          deleteIndices.push(...local);
+          remaining = nonLocal;
+        }
+
+        remaining.sort((a, b) => a - b);
+        for (let i = 1; i < remaining.length; i += 1) {
+          deleteIndices.push(remaining[i]!);
+        }
+      }
+
+      deleteIndices.sort((a, b) => b - a);
       for (const index of deleteIndices) {
         sheets.delete(index, 1);
       }
@@ -84,7 +113,7 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
       // the first entry by assigning it the default sheet id/name. This keeps
       // the sheet list stable even if a client created the first sheet in
       // multiple transactions (e.g. insert map, then set id later).
-      if (createDefaultSheet && seen.size === 0 && sheets.length > 0) {
+      if (createDefaultSheet && !hasSheetWithId && sheets.length > 0) {
         const first: any = sheets.get(0);
         if (first && typeof first.get === "function" && typeof first.set === "function") {
           const existingId = coerceString(first.get("id"));
