@@ -47,6 +47,12 @@ test("cpu: sort", async () => {
   assert.deepEqual(Array.from(out), [-1, 1, 2, 3]);
 });
 
+test("cpu: sort handles NaN and Infinity like TypedArray#sort", async () => {
+  const cpu = new CpuBackend();
+  const out = await cpu.sort(new Float64Array([3, Number.NaN, 1, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]));
+  assert.deepEqual(Array.from(out), [Number.NEGATIVE_INFINITY, 1, 3, Number.POSITIVE_INFINITY, Number.NaN]);
+});
+
 test("cpu: histogram", async () => {
   const cpu = new CpuBackend();
   const values = new Float64Array([0, 0.49, 0.5, 0.99, 1.0, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]);
