@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{Cursor, Read, Write};
 use tempfile::tempdir;
 use zip::ZipArchive;
+use xlsx_diff::DiffReport;
 
 fn insert_before_closing_tag(mut xml: String, closing_tag: &str, insert: &str) -> String {
     let idx = xml
@@ -121,6 +122,15 @@ fn tweak_first_float_cell(sheet_bytes: &[u8]) -> Vec<u8> {
     panic!("did not find FLOAT record to tweak");
 }
 
+fn format_report(report: &DiffReport) -> String {
+    report
+        .differences
+        .iter()
+        .map(|d| d.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn save_as_preserves_calc_chain_when_unedited() {
     let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
@@ -215,6 +225,63 @@ fn edited_save_removes_calc_chain_and_references() {
         .find(|c| (c.row, c.col) == (0, 1))
         .expect("B1 exists");
     assert_eq!(b1.value, CellValue::Number(43.5));
+}
+
+#[test]
+fn edited_save_changes_only_expected_parts() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let base_bytes = std::fs::read(fixture_path).expect("read fixture");
+    let with_calc_chain = build_fixture_with_calc_chain(&base_bytes);
+
+    let dir = tempdir().expect("tempdir");
+    let input_path = dir.path().join("with_calc_chain.xlsb");
+    let output_path = dir.path().join("edited.xlsb");
+    std::fs::write(&input_path, with_calc_chain).expect("write input");
+
+    let wb = XlsbWorkbook::open_with_options(&input_path, OpenOptions::default()).expect("open");
+
+    // Override the worksheet part with a tiny, structure-preserving edit.
+    let mut zip_in =
+        ZipArchive::new(File::open(&input_path).expect("open input zip")).expect("read input zip");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let mut sheet_bytes = Vec::new();
+    zip_in
+        .by_name(&sheet_part)
+        .expect("read sheet part")
+        .read_to_end(&mut sheet_bytes)
+        .expect("read sheet bytes");
+    let edited_sheet = tweak_first_float_cell(&sheet_bytes);
+
+    let mut overrides = HashMap::new();
+    overrides.insert(sheet_part.clone(), edited_sheet);
+
+    wb.save_with_part_overrides(&output_path, &overrides)
+        .expect("save with part overrides");
+
+    let report = xlsx_diff::diff_workbooks(&input_path, &output_path).expect("diff workbooks");
+
+    let expected_parts: std::collections::BTreeSet<String> = [
+        sheet_part,
+        "xl/calcChain.bin".to_string(),
+        "[Content_Types].xml".to_string(),
+        "xl/_rels/workbook.bin.rels".to_string(),
+    ]
+    .into_iter()
+    .collect();
+
+    let actual_parts: std::collections::BTreeSet<String> =
+        report.differences.iter().map(|d| d.part.clone()).collect();
+
+    let unexpected: Vec<_> = actual_parts
+        .difference(&expected_parts)
+        .cloned()
+        .collect();
+
+    assert!(
+        unexpected.is_empty(),
+        "unexpected part diffs: {unexpected:?}\n{}",
+        format_report(&report)
+    );
 }
 
 #[test]
