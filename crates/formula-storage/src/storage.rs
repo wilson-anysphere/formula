@@ -630,7 +630,9 @@ impl Storage {
                 r#"
                 SELECT workbook_id, name, scope, reference
                 FROM named_ranges
-                WHERE workbook_id = ?1 AND name = ?2 AND scope = ?3
+                WHERE workbook_id = ?1
+                  AND name = ?2 COLLATE NOCASE
+                  AND scope = ?3 COLLATE NOCASE
                 "#,
                 params![workbook_id.to_string(), name, scope],
                 |r| {
@@ -649,20 +651,52 @@ impl Storage {
     }
 
     pub fn upsert_named_range(&self, range: &NamedRange) -> Result<()> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
-        conn.execute(
-            r#"
-            INSERT INTO named_ranges (workbook_id, name, scope, reference)
-            VALUES (?1, ?2, ?3, ?4)
-            ON CONFLICT(workbook_id, name, scope) DO UPDATE SET reference = excluded.reference
-            "#,
-            params![
-                range.workbook_id.to_string(),
-                &range.name,
-                &range.scope,
-                &range.reference
-            ],
-        )?;
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+
+        let existing: Option<(String, String)> = tx
+            .query_row(
+                r#"
+                SELECT name, scope
+                FROM named_ranges
+                WHERE workbook_id = ?1
+                  AND name = ?2 COLLATE NOCASE
+                  AND scope = ?3 COLLATE NOCASE
+                LIMIT 1
+                "#,
+                params![range.workbook_id.to_string(), &range.name, &range.scope],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+
+        match existing {
+            Some((name, scope)) => {
+                tx.execute(
+                    r#"
+                    UPDATE named_ranges
+                    SET reference = ?1
+                    WHERE workbook_id = ?2 AND name = ?3 AND scope = ?4
+                    "#,
+                    params![&range.reference, range.workbook_id.to_string(), name, scope],
+                )?;
+            }
+            None => {
+                tx.execute(
+                    r#"
+                    INSERT INTO named_ranges (workbook_id, name, scope, reference)
+                    VALUES (?1, ?2, ?3, ?4)
+                    "#,
+                    params![
+                        range.workbook_id.to_string(),
+                        &range.name,
+                        &range.scope,
+                        &range.reference
+                    ],
+                )?;
+            }
+        }
+
+        tx.commit()?;
         Ok(())
     }
 

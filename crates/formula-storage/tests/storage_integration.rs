@@ -2,9 +2,9 @@ use formula_model::{ArrayValue, CellRef, ErrorValue, RichText, SpillValue};
 use formula_storage::storage::StorageError;
 use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData, CellRange, CellValue, SheetVisibility,
-    Storage, Style,
+    NamedRange, Storage, Style,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use serde_json::json;
 use std::time::Duration;
 use tempfile::NamedTempFile;
@@ -543,4 +543,55 @@ fn sheet_names_are_unique_case_insensitive() {
         StorageError::DuplicateSheetName(name) => assert_eq!(name, "sheet1"),
         other => panic!("unexpected error: {other:?}"),
     }
+}
+
+#[test]
+fn named_ranges_are_case_insensitive() {
+    let uri = "file:named_ranges_ci?mode=memory&cache=shared";
+    let storage = Storage::open_uri(uri).expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+
+    storage
+        .upsert_named_range(&NamedRange {
+            workbook_id: workbook.id,
+            name: "MyRange".to_string(),
+            scope: "workbook".to_string(),
+            reference: "Sheet1!$A$1".to_string(),
+        })
+        .expect("insert named range");
+
+    let fetched = storage
+        .get_named_range(workbook.id, "myrange", "WORKBOOK")
+        .expect("get named range")
+        .expect("named range exists");
+    assert_eq!(fetched.reference, "Sheet1!$A$1");
+
+    storage
+        .upsert_named_range(&NamedRange {
+            workbook_id: workbook.id,
+            name: "MYRANGE".to_string(),
+            scope: "workbook".to_string(),
+            reference: "Sheet1!$B$2".to_string(),
+        })
+        .expect("update named range");
+
+    let fetched = storage
+        .get_named_range(workbook.id, "MyRange", "workbook")
+        .expect("get named range")
+        .expect("named range exists");
+    assert_eq!(fetched.reference, "Sheet1!$B$2");
+
+    let flags =
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI;
+    let conn = Connection::open_with_flags(uri, flags).expect("open raw connection");
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM named_ranges WHERE workbook_id = ?1",
+            rusqlite::params![workbook.id.to_string()],
+            |r| r.get(0),
+        )
+        .expect("count named ranges");
+    assert_eq!(count, 1);
 }

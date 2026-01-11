@@ -285,11 +285,13 @@ impl AppState {
             .print_settings
             .sheets
             .iter()
-            .find(|s| s.sheet_name == sheet.name);
+            .find(|s| s.sheet_name.eq_ignore_ascii_case(&sheet.name));
 
-        Ok(settings
+        let mut out = settings
             .cloned()
-            .unwrap_or_else(|| default_sheet_print_settings(sheet.name.clone())))
+            .unwrap_or_else(|| default_sheet_print_settings(sheet.name.clone()));
+        out.sheet_name = sheet.name.clone();
+        Ok(out)
     }
 
     pub fn set_sheet_print_area(
@@ -1524,7 +1526,13 @@ fn ensure_sheet_print_settings<'a>(
     sheets: &'a mut Vec<SheetPrintSettings>,
     sheet_name: &str,
 ) -> &'a mut SheetPrintSettings {
-    if let Some(idx) = sheets.iter().position(|s| s.sheet_name == sheet_name) {
+    if let Some(idx) = sheets
+        .iter()
+        .position(|s| s.sheet_name.eq_ignore_ascii_case(sheet_name))
+    {
+        if sheets[idx].sheet_name != sheet_name {
+            sheets[idx].sheet_name = sheet_name.to_string();
+        }
         return &mut sheets[idx];
     }
 
@@ -1838,7 +1846,7 @@ mod tests {
             .print_settings
             .sheets
             .push(formula_xlsx::print::SheetPrintSettings {
-                sheet_name: "Sheet1".to_string(),
+                sheet_name: "sheet1".to_string(),
                 print_area: Some(vec![CellRange {
                     start_row: 1,
                     end_row: 10,
@@ -1888,6 +1896,14 @@ mod tests {
         );
         assert_eq!(print_settings.page_setup.paper_size.code, 9);
         assert_eq!(print_settings.page_setup.scaling, Scaling::Percent(90));
+    }
+
+    #[test]
+    fn sheet_print_settings_lookup_is_case_insensitive() {
+        let mut sheets = vec![default_sheet_print_settings("sheet1".to_string())];
+        ensure_sheet_print_settings(&mut sheets, "Sheet1");
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].sheet_name, "Sheet1");
     }
 
     #[test]
