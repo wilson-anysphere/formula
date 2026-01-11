@@ -156,10 +156,13 @@ export class ExtensionHostManager {
 
       const verification = await this._verifyInstalledExtension(state, extensionId);
       if (!verification.ok) {
-        const reason = verification.reason || "unknown reason";
-        throw new Error(
-          `Extension integrity check failed for ${extensionId}: ${reason}. Repair (reinstall) the extension to continue.`
+        // Do not prevent the rest of the runtime from starting if one install is corrupted.
+        // The extension is marked as corrupted in state and can be repaired by reinstalling.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `Skipping extension ${extensionId}: integrity check failed: ${verification.reason || "unknown reason"}`
         );
+        continue;
       }
 
       const extensionPath = path.join(this.extensionsDir, extensionId);
