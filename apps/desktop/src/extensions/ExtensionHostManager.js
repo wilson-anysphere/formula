@@ -231,6 +231,27 @@ export class ExtensionHostManager {
     const installed = state.installed ?? {};
     const installedIds = new Set(Object.keys(installed));
 
+    // Always re-verify integrity for installed extensions when syncing. This allows the
+    // runtime to detect on-disk tampering that happens after the initial install/startup
+    // and quarantine the extension (mark corrupted + unload) before it executes again.
+    for (const id of installedIds) {
+      if (installed[id]?.corrupted) continue;
+      try {
+        const verification = await this._verifyInstalledExtension(state, id);
+        if (!verification.ok) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `Quarantining extension ${id}: integrity check failed: ${verification.reason || "unknown reason"}`
+          );
+        }
+      } catch (error) {
+        const reason = error?.message ?? String(error);
+        await this._markCorrupted(state, id, reason);
+        // eslint-disable-next-line no-console
+        console.warn(`Quarantining extension ${id}: integrity check failed: ${reason}`);
+      }
+    }
+
     const loadedExtensions = this._host.listExtensions();
     const loadedById = new Map(loadedExtensions.map((ext) => [ext.id, ext]));
 
