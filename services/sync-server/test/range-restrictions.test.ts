@@ -8,6 +8,11 @@ import test from "node:test";
 import jwt from "jsonwebtoken";
 import WebSocket from "ws";
 import { WebsocketProvider, Y } from "./yjs-interop.ts";
+import {
+  FILE_HEADER_BYTES,
+  hasFileHeader,
+  scanLegacyRecords,
+} from "../../../packages/collab/persistence/src/file-format.js";
 
 import {
   getAvailablePort,
@@ -126,24 +131,14 @@ function persistedDocPath(dataDir: string, docName: string): string {
   return path.join(dataDir, `${docHash}.yjs`);
 }
 
-function decodeLegacyRecords(data: Buffer): Uint8Array[] {
-  const out: Uint8Array[] = [];
-  let offset = 0;
-  while (offset + 4 <= data.length) {
-    const len = data.readUInt32BE(offset);
-    offset += 4;
-    if (offset + len > data.length) break;
-    out.push(new Uint8Array(data.subarray(offset, offset + len)));
-    offset += len;
-  }
-  return out;
-}
-
 async function loadPersistedDoc(dataDir: string, docName: string): Promise<Y.Doc> {
   const filePath = persistedDocPath(dataDir, docName);
   const data = await readFile(filePath);
   const doc = new Y.Doc();
-  for (const update of decodeLegacyRecords(data)) {
+  const updates = hasFileHeader(data)
+    ? scanLegacyRecords(data, FILE_HEADER_BYTES).updates
+    : scanLegacyRecords(data).updates;
+  for (const update of updates) {
     Y.applyUpdate(doc, update);
   }
   return doc;
