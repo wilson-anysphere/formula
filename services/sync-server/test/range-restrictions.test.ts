@@ -233,6 +233,8 @@ test("allowed cell write is accepted and syncs", async (t) => {
   docWriter.transact(() => {
     const cell = new Y.Map();
     cell.set("value", "ok");
+    // Attempt to spoof audit metadata; server should rewrite to authenticated userId.
+    cell.set("modifiedBy", "spoofed");
     docWriter.getMap("cells").set(cellKey, cell);
   });
 
