@@ -1,0 +1,252 @@
+use formula_xlsb::{patch_sheet_bin, CellEdit, CellValue};
+use pretty_assertions::assert_eq;
+use std::io::Cursor;
+
+fn encode_biff12_id(id: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    for i in 0..4 {
+        let byte = ((id >> (8 * i)) & 0xFF) as u8;
+        out.push(byte);
+        if byte & 0x80 == 0 {
+            break;
+        }
+    }
+    out
+}
+
+fn encode_biff12_len(mut len: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let mut byte = (len & 0x7F) as u8;
+        len >>= 7;
+        if len != 0 {
+            byte |= 0x80;
+        }
+        out.push(byte);
+        if len == 0 {
+            break;
+        }
+    }
+    out
+}
+
+fn biff12_record(id: u32, payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&encode_biff12_id(id));
+    out.extend_from_slice(&encode_biff12_len(payload.len() as u32));
+    out.extend_from_slice(payload);
+    out
+}
+
+fn encode_xl_wide_string(
+    s: &str,
+    flags: u16,
+    flags_width: usize,
+    rich_runs: Option<&[u8]>,
+    phonetic: Option<&[u8]>,
+) -> Vec<u8> {
+    let units: Vec<u16> = s.encode_utf16().collect();
+    let mut out = Vec::new();
+    out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+    match flags_width {
+        1 => out.push(flags as u8),
+        2 => out.extend_from_slice(&flags.to_le_bytes()),
+        other => panic!("unexpected flags width {other}"),
+    }
+    for u in units {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
+
+    if flags & 0x0001 != 0 {
+        let rich = rich_runs.expect("rich flag requires runs");
+        assert_eq!(rich.len() % 8, 0, "rich run bytes must be multiple of 8");
+        out.extend_from_slice(&((rich.len() / 8) as u32).to_le_bytes());
+        out.extend_from_slice(rich);
+    }
+
+    if flags & 0x0002 != 0 {
+        let pho = phonetic.expect("phonetic flag requires bytes");
+        out.extend_from_slice(&(pho.len() as u32).to_le_bytes());
+        out.extend_from_slice(pho);
+    }
+
+    out
+}
+
+fn build_sheet_bin() -> (Vec<u8>, String, Vec<u8>, String, Vec<u8>, String, Vec<u8>) {
+    // Record ids (subset):
+    // - BrtBeginSheetData 0x0191
+    // - BrtEndSheetData   0x0192
+    // - BrtRow            0x0000
+    // - BrtCellSt         0x0006
+    // - BrtFmlaString     0x0008
+    const SHEETDATA: u32 = 0x0191;
+    const SHEETDATA_END: u32 = 0x0192;
+    const ROW: u32 = 0x0000;
+    const CELL_ST: u32 = 0x0006;
+    const FORMULA_STRING: u32 = 0x0008;
+
+    let mut sheet_bin = Vec::new();
+    sheet_bin.extend_from_slice(&biff12_record(SHEETDATA, &[]));
+    sheet_bin.extend_from_slice(&biff12_record(ROW, &0u32.to_le_bytes()));
+
+    // A1: inline string with flags byte present (flags=0).
+    let inline_text = r#"He said "Hi""#.to_string();
+    let inline_wide = encode_xl_wide_string(&inline_text, 0, 1, None, None);
+    let mut cell_st_payload = Vec::new();
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    cell_st_payload.extend_from_slice(&inline_wide);
+    sheet_bin.extend_from_slice(&biff12_record(CELL_ST, &cell_st_payload));
+
+    // B1: formula cached string with rich-text runs.
+    let rich_runs: Vec<u8> = vec![0x10, 0x11, 0x12, 0x13, 0x20, 0x21, 0x22, 0x23];
+    let rich_text = "Rich".to_string();
+    let rich_wide = encode_xl_wide_string(&rich_text, 0x0001, 2, Some(&rich_runs), None);
+    let mut fmla_rich = Vec::new();
+    fmla_rich.extend_from_slice(&1u32.to_le_bytes()); // col
+    fmla_rich.extend_from_slice(&0u32.to_le_bytes()); // style
+    fmla_rich.extend_from_slice(&rich_wide);
+    fmla_rich.extend_from_slice(&2u32.to_le_bytes()); // cce
+    fmla_rich.extend_from_slice(&[0x1D, 0x01]); // rgce: PtgBool TRUE
+    sheet_bin.extend_from_slice(&biff12_record(FORMULA_STRING, &fmla_rich));
+
+    // C1: formula cached string with phonetic/extended bytes.
+    let phonetic_bytes: Vec<u8> = vec![0x90, 0x91, 0x92, 0x93, 0x94];
+    let pho_text = "Pho".to_string();
+    let pho_wide = encode_xl_wide_string(&pho_text, 0x0002, 2, None, Some(&phonetic_bytes));
+    let mut fmla_pho = Vec::new();
+    fmla_pho.extend_from_slice(&2u32.to_le_bytes()); // col
+    fmla_pho.extend_from_slice(&0u32.to_le_bytes()); // style
+    fmla_pho.extend_from_slice(&pho_wide);
+    fmla_pho.extend_from_slice(&2u32.to_le_bytes()); // cce
+    fmla_pho.extend_from_slice(&[0x1D, 0x01]); // rgce: PtgBool TRUE
+    sheet_bin.extend_from_slice(&biff12_record(FORMULA_STRING, &fmla_pho));
+
+    sheet_bin.extend_from_slice(&biff12_record(SHEETDATA_END, &[]));
+
+    (
+        sheet_bin,
+        inline_text,
+        rich_runs,
+        rich_text,
+        phonetic_bytes,
+        pho_text,
+        vec![0x1D, 0x00], // rgce: PtgBool FALSE
+    )
+}
+
+#[test]
+fn patcher_preserves_flagged_inline_string_record_for_noop_edits() {
+    let (sheet_bin, inline_text, _rich_runs, _rich_text, _pho_bytes, _pho_text, _new_rgce) =
+        build_sheet_bin();
+
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text(inline_text),
+        new_formula: None,
+    };
+
+    let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+    assert_eq!(patched, sheet_bin);
+}
+
+#[test]
+fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
+    let (
+        sheet_bin,
+        _inline_text,
+        rich_runs,
+        rich_text,
+        phonetic_bytes,
+        pho_text,
+        new_rgce,
+    ) = build_sheet_bin();
+
+    let edit_rich = CellEdit {
+        row: 0,
+        col: 1,
+        new_value: CellValue::Text(rich_text.clone()),
+        new_formula: Some(new_rgce.clone()),
+    };
+    let patched_rich = patch_sheet_bin(&sheet_bin, &[edit_rich]).expect("patch rich formula");
+
+    // Ensure the cached rich-run bytes were preserved verbatim.
+    assert!(
+        patched_rich
+            .windows(rich_runs.len())
+            .any(|w| w == rich_runs.as_slice()),
+        "expected patched output to still contain rich run bytes"
+    );
+
+    // Ensure the sheet parses and the formula token stream was updated.
+    let parsed =
+        formula_xlsb::parse_sheet_bin(&mut Cursor::new(&patched_rich), &[]).expect("parse sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 1)
+        .expect("find patched rich cell");
+    assert_eq!(cell.value, CellValue::Text(rich_text));
+    assert_eq!(cell.formula.as_ref().unwrap().rgce, new_rgce);
+
+    let edit_pho = CellEdit {
+        row: 0,
+        col: 2,
+        new_value: CellValue::Text(pho_text.clone()),
+        new_formula: Some(new_rgce.clone()),
+    };
+    let patched_pho = patch_sheet_bin(&sheet_bin, &[edit_pho]).expect("patch phonetic formula");
+
+    assert!(
+        patched_pho
+            .windows(phonetic_bytes.len())
+            .any(|w| w == phonetic_bytes.as_slice()),
+        "expected patched output to still contain phonetic bytes"
+    );
+
+    let parsed =
+        formula_xlsb::parse_sheet_bin(&mut Cursor::new(&patched_pho), &[]).expect("parse sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 2)
+        .expect("find patched phonetic cell");
+    assert_eq!(cell.value, CellValue::Text(pho_text));
+    assert_eq!(cell.formula.as_ref().unwrap().rgce, new_rgce);
+}
+
+#[test]
+fn patcher_clears_rich_phonetic_flags_when_rewriting_cached_string_value() {
+    let (sheet_bin, _inline_text, rich_runs, rich_text, _pho_bytes, _pho_text, _new_rgce) =
+        build_sheet_bin();
+
+    let edit = CellEdit {
+        row: 0,
+        col: 1,
+        new_value: CellValue::Text("New".to_string()),
+        new_formula: None,
+    };
+    let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch cached string");
+
+    // Cached formatting bytes should not remain if we rewrote the string value.
+    assert!(
+        !patched
+            .windows(rich_runs.len())
+            .any(|w| w == rich_runs.as_slice()),
+        "expected rich run bytes to be dropped when cached value changes"
+    );
+
+    let parsed = formula_xlsb::parse_sheet_bin(&mut Cursor::new(&patched), &[]).expect("parse sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 1)
+        .expect("find patched cell");
+    assert_eq!(cell.value, CellValue::Text("New".to_string()));
+    // Formula bytes remain unchanged, but we should still have a formula payload.
+    assert_eq!(cell.formula.as_ref().unwrap().rgce, vec![0x1D, 0x01]);
+    // sanity: original cached text was different.
+    assert_ne!(rich_text, "New");
+}

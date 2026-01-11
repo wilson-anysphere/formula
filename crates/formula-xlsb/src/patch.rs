@@ -3,7 +3,18 @@ use std::io::{self, Cursor};
 
 use crate::biff12_varint;
 use crate::parser::{biff12, CellValue, Error};
+use crate::strings::FlagsWidth;
 use crate::writer::Biff12Writer;
+
+// BIFF12 "wide string" flags (used by BrtCellSt inline strings and BrtFmlaString cached values).
+const FLAG_RICH: u16 = 0x0001;
+const FLAG_PHONETIC: u16 = 0x0002;
+
+// Size (in bytes) of a single rich text formatting run in BIFF12.
+//
+// `StrRun` entries are 8 bytes:
+//   [ich: u32][ifnt: u16][reserved: u16]
+const RICH_RUN_BYTE_LEN: usize = 8;
 
 /// A single cell update to apply while patch-writing a worksheet `.bin` part.
 ///
@@ -289,6 +300,72 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
     Ok(out)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct WideStringOffsets {
+    cch: usize,
+    flags: u16,
+    utf16_start: usize,
+    utf16_end: usize,
+    end: usize,
+}
+
+fn parse_wide_string_offsets(
+    data: &[u8],
+    start: usize,
+    flags_width: FlagsWidth,
+) -> Result<WideStringOffsets, Error> {
+    let cch = read_u32(data, start)? as usize;
+    let mut offset = start.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    let flags = match flags_width {
+        FlagsWidth::U8 => {
+            let v = read_u8(data, offset)? as u16;
+            offset = offset.checked_add(1).ok_or(Error::UnexpectedEof)?;
+            v
+        }
+        FlagsWidth::U16 => {
+            let v = read_u16(data, offset)?;
+            offset = offset.checked_add(2).ok_or(Error::UnexpectedEof)?;
+            v
+        }
+    };
+
+    let utf16_start = offset;
+    let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+    let utf16_end = utf16_start
+        .checked_add(utf16_len)
+        .ok_or(Error::UnexpectedEof)?;
+    data.get(utf16_start..utf16_end)
+        .ok_or(Error::UnexpectedEof)?;
+    offset = utf16_end;
+
+    if flags & FLAG_RICH != 0 {
+        let c_run = read_u32(data, offset)? as usize;
+        offset = offset.checked_add(4).ok_or(Error::UnexpectedEof)?;
+        let run_bytes = c_run
+            .checked_mul(RICH_RUN_BYTE_LEN)
+            .ok_or(Error::UnexpectedEof)?;
+        let end = offset.checked_add(run_bytes).ok_or(Error::UnexpectedEof)?;
+        data.get(offset..end).ok_or(Error::UnexpectedEof)?;
+        offset = end;
+    }
+
+    if flags & FLAG_PHONETIC != 0 {
+        let cb = read_u32(data, offset)? as usize;
+        offset = offset.checked_add(4).ok_or(Error::UnexpectedEof)?;
+        let end = offset.checked_add(cb).ok_or(Error::UnexpectedEof)?;
+        data.get(offset..end).ok_or(Error::UnexpectedEof)?;
+        offset = end;
+    }
+
+    Ok(WideStringOffsets {
+        cch,
+        flags,
+        utf16_start,
+        utf16_end,
+        end: offset,
+    })
+}
+
 fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
     let existing_cached = read_f64(payload, 8)?;
     let flags = read_u16(payload, 16)?;
@@ -314,22 +391,16 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
         _ => return Ok(false),
     };
 
-    let cch = read_u32(payload, 8)? as usize;
-    let _flags = read_u16(payload, 12)?; // bounds check
-
-    let str_bytes_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-    let str_start = 14usize;
-    let str_end = str_start
-        .checked_add(str_bytes_len)
-        .ok_or(Error::UnexpectedEof)?;
+    let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U16)?;
     let raw = payload
-        .get(str_start..str_end)
+        .get(ws.utf16_start..ws.utf16_end)
         .ok_or(Error::UnexpectedEof)?;
 
-    if desired_cached.encode_utf16().count() != cch {
+    if desired_cached.encode_utf16().count() != ws.cch {
         return Ok(false);
     }
 
+    let str_bytes_len = ws.cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
     let mut desired_bytes = Vec::with_capacity(str_bytes_len);
     for unit in desired_cached.encode_utf16() {
         desired_bytes.extend_from_slice(&unit.to_le_bytes());
@@ -338,8 +409,8 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
         return Ok(false);
     }
 
-    let cce = read_u32(payload, str_end)? as usize;
-    let rgce_offset = str_end.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    let cce = read_u32(payload, ws.end)? as usize;
+    let rgce_offset = ws.end.checked_add(4).ok_or(Error::UnexpectedEof)?;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
     let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
 
@@ -404,9 +475,21 @@ fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<b
 
     let len_chars = read_u32(payload, 8)? as usize;
     let byte_len = len_chars.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-    let raw = payload
-        .get(12..12 + byte_len)
+    let expected_simple_len = 12usize
+        .checked_add(byte_len)
         .ok_or(Error::UnexpectedEof)?;
+    let raw = if payload.len() == expected_simple_len {
+        // Simple layout: [col][style][cch][utf16 chars...]
+        payload
+            .get(12..expected_simple_len)
+            .ok_or(Error::UnexpectedEof)?
+    } else {
+        // Flagged layout: [col][style][cch][flags:u8][utf16 chars...][extras...]
+        let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U8)?;
+        payload
+            .get(ws.utf16_start..ws.utf16_end)
+            .ok_or(Error::UnexpectedEof)?
+    };
 
     if desired.encode_utf16().count() != len_chars {
         return Ok(false);
@@ -733,16 +816,15 @@ fn patch_fmla_string<W: io::Write>(
     style: u32,
     edit: &CellEdit,
 ) -> Result<(), Error> {
-    // BrtFmlaString: [col: u32][style: u32][cch: u32][flags: u16][utf16 chars...][cce: u32][rgce bytes...][extra...]
-    let cch = read_u32(payload, 8)? as usize;
-    let flags = read_u16(payload, 12)?;
-    let str_bytes_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-    let str_start = 14usize;
-    let str_end = str_start
-        .checked_add(str_bytes_len)
-        .ok_or(Error::UnexpectedEof)?;
-    let cce = read_u32(payload, str_end)? as usize;
-    let rgce_offset = str_end.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    // BrtFmlaString:
+    //   [col: u32][style: u32]
+    //   [cached value: XLWideString (cch + flags + utf16 + optional rich/phonetic blocks)]
+    //   [cce: u32][rgce bytes...][extra...]
+    let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U16)?;
+    let flags = ws.flags;
+
+    let cce = read_u32(payload, ws.end)? as usize;
+    let rgce_offset = ws.end.checked_add(4).ok_or(Error::UnexpectedEof)?;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
     let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
@@ -771,14 +853,36 @@ fn patch_fmla_string<W: io::Write>(
         }
     };
 
-    let cch = cached.encode_utf16().count();
-    let cch = u32::try_from(cch).map_err(|_| {
+    let desired_cch = cached.encode_utf16().count();
+    let desired_cch_u32 = u32::try_from(desired_cch).map_err(|_| {
         Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "string is too large",
         ))
     })?;
-    let str_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+    let desired_str_len = desired_cch_u32
+        .checked_mul(2)
+        .ok_or(Error::UnexpectedEof)?;
+
+    let existing_utf16 = payload
+        .get(ws.utf16_start..ws.utf16_end)
+        .ok_or(Error::UnexpectedEof)?;
+    let mut desired_utf16 = Vec::with_capacity(desired_str_len as usize);
+    for unit in cached.encode_utf16() {
+        desired_utf16.extend_from_slice(&unit.to_le_bytes());
+    }
+    let preserve_cached_bytes = desired_cch == ws.cch && desired_utf16.as_slice() == existing_utf16;
+    let cached_bytes_len = if preserve_cached_bytes {
+        u32::try_from(ws.end.saturating_sub(8)).map_err(|_| {
+            Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cached string payload is too large",
+            ))
+        })?
+    } else {
+        // [cch:u32][flags:u16][utf16 bytes...]
+        6u32.checked_add(desired_str_len).ok_or(Error::UnexpectedEof)?
+    };
 
     let new_rgce_len = u32::try_from(new_rgce.len()).map_err(|_| {
         Error::Io(io::Error::new(
@@ -792,8 +896,9 @@ fn patch_fmla_string<W: io::Write>(
             "formula trailing payload is too large",
         ))
     })?;
-    let payload_len = 18u32
-        .checked_add(str_len)
+    let payload_len = 8u32
+        .checked_add(cached_bytes_len)
+        .and_then(|v| v.checked_add(4)) // cce
         .and_then(|v| v.checked_add(new_rgce_len))
         .and_then(|v| v.checked_add(extra_len))
         .ok_or(Error::UnexpectedEof)?;
@@ -801,9 +906,15 @@ fn patch_fmla_string<W: io::Write>(
     writer.write_record_header(biff12::FORMULA_STRING, payload_len)?;
     writer.write_u32(col)?;
     writer.write_u32(style)?;
-    writer.write_u32(cch)?;
-    writer.write_u16(flags)?;
-    write_utf16_chars(writer, cached)?;
+    if preserve_cached_bytes {
+        let raw = payload.get(8..ws.end).ok_or(Error::UnexpectedEof)?;
+        writer.write_raw(raw)?;
+    } else {
+        let flags = flags & !(FLAG_RICH | FLAG_PHONETIC);
+        writer.write_u32(desired_cch_u32)?;
+        writer.write_u16(flags)?;
+        writer.write_raw(&desired_utf16)?;
+    }
     writer.write_u32(new_rgce_len)?;
     writer.write_raw(new_rgce)?;
     writer.write_raw(extra)?;
@@ -916,13 +1027,6 @@ fn encode_rk_number(value: f64) -> Option<u32> {
     }
 
     None
-}
-
-fn write_utf16_chars<W: io::Write>(writer: &mut Biff12Writer<W>, s: &str) -> Result<(), Error> {
-    for unit in s.encode_utf16() {
-        writer.write_u16(unit)?;
-    }
-    Ok(())
 }
 
 fn decode_rk_number(raw: u32) -> f64 {
