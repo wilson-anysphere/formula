@@ -1,9 +1,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { builtinModules } from "node:module";
+import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
 
 const repoRoot = path.resolve(new URL(".", import.meta.url).pathname, "..");
+const require = createRequire(import.meta.url);
 
 /**
  * @param {string} dir
@@ -44,12 +45,14 @@ if (!hasDeps) {
 if (runnableTestFiles.length !== testFiles.length) {
   const skipped = testFiles.length - runnableTestFiles.length;
   if (canStripTypes) {
-    console.log(`Skipping ${skipped} node:test file(s) that depend on external packages (node_modules missing).`);
+    console.log(
+      `Skipping ${skipped} node:test file(s) that depend on external packages (dependencies not installed).`,
+    );
   } else if (hasDeps) {
     console.log(`Skipping ${skipped} node:test file(s) that import .ts modules (TypeScript stripping not available).`);
   } else {
     console.log(
-      `Skipping ${skipped} node:test file(s) that import .ts modules or depend on external packages (TypeScript stripping and node_modules missing).`,
+      `Skipping ${skipped} node:test file(s) that import .ts modules or depend on external packages (TypeScript stripping not available and dependencies not installed).`,
     );
   }
 }
@@ -85,7 +88,18 @@ function supportsTypeStripping() {
 async function hasNodeModules() {
   try {
     const stats = await stat(path.join(repoRoot, "node_modules"));
-    return stats.isDirectory();
+    if (!stats.isDirectory()) return false;
+  } catch {
+    return false;
+  }
+
+  // Some repo environments (including agent sandboxes) may create a minimal `node_modules/`
+  // containing only workspace links without actually installing third-party packages.
+  // Probe for a representative dependency so we can skip tests that require external
+  // packages when deps aren't installed.
+  try {
+    require.resolve("esbuild", { paths: [repoRoot] });
+    return true;
   } catch {
     return false;
   }
