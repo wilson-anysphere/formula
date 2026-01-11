@@ -589,6 +589,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const canMatchMedia = typeof window !== "undefined" && typeof window.matchMedia === "function";
     const mqlDark = canMatchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
     const mqlContrast = canMatchMedia ? window.matchMedia("(prefers-contrast: more)") : null;
+    const mqlForcedColors = canMatchMedia ? window.matchMedia("(forced-colors: active)") : null;
     const onMediaChange = () => refreshTheme();
 
     const attachMediaListener = (mql: MediaQueryList | null) => {
@@ -609,6 +610,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     const detachDark = attachMediaListener(mqlDark);
     const detachContrast = attachMediaListener(mqlContrast);
+    const detachForced = attachMediaListener(mqlForcedColors);
 
     // Apply the CSS-driven theme immediately (important when the grid mounts under a non-default
     // prefers-color-scheme/contrast setting).
@@ -618,6 +620,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       for (const observer of observers) observer.disconnect();
       detachDark();
       detachContrast();
+      detachForced();
     };
   }, []);
 
