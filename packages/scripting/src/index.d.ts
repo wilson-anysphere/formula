@@ -1,6 +1,7 @@
 export type CellValue = string | number | boolean | null;
 
 export interface CellFormat {
+  [key: string]: any;
   bold?: boolean;
   italic?: boolean;
   numberFormat?: string | null;
