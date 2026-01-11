@@ -7,6 +7,7 @@ const { verifyBytesSignature, sha256 } = require("../../../shared/crypto/signing
 const {
   canonicalJsonBytes,
   detectExtensionPackageFormatVersion,
+  readExtensionPackageV2,
   verifyExtensionPackageV2,
 } = require("../../../shared/extension-package");
 const { validateExtensionManifest } = require("../../../shared/extension-manifest");
@@ -87,6 +88,53 @@ function calculateSearchScore(ext, tokens) {
 const PACKAGE_FORMAT = "formula-extension-package";
 const PACKAGE_FORMAT_VERSION = 1;
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+const PACKAGE_SCAN_STATUS = {
+  PENDING: "pending",
+  PASSED: "passed",
+  FAILED: "failed",
+};
+
+const DEFAULT_JS_HEURISTIC_RULES = [
+  {
+    id: "js.child_process",
+    message: "References Node.js child_process APIs",
+    test: (source) => /\bchild_process\b/.test(source),
+  },
+  {
+    id: "js.eval",
+    message: "Uses eval()",
+    test: (source) => /\beval\s*\(/.test(source),
+  },
+  {
+    id: "js.new_function",
+    message: "Uses new Function()",
+    test: (source) => /\bnew\s+Function\s*\(/.test(source),
+  },
+  {
+    id: "js.obfuscation.hex_escape",
+    message: "Contains repeated hex escape sequences (possible obfuscation)",
+    test: (source) => /(\\x[0-9a-fA-F]{2}){16,}/.test(source),
+  },
+];
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function parseCsvSet(value) {
+  if (!value) return new Set();
+  return new Set(
+    String(value)
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+  );
+}
+
+function sha256Utf8(value) {
+  return sha256(Buffer.from(String(value ?? ""), "utf8"));
+}
 
 function parseJsonArray(json, fallback = []) {
   try {
@@ -355,7 +403,7 @@ function validateEntrypoint(manifest, fileRecords) {
 }
 
 class MarketplaceStore {
-  constructor({ dataDir }) {
+  constructor({ dataDir, scanAllowlist = null, requireScanPassedForDownload = null } = {}) {
     this.dataDir = dataDir;
     this.legacyStorePath = path.join(this.dataDir, "store.json");
     this.legacyPackageDir = path.join(this.dataDir, "packages");
@@ -364,6 +412,13 @@ class MarketplaceStore {
       filePath: this.dbPath,
       migrationsDir: path.join(__dirname, "db", "migrations"),
     });
+
+    const envAllowlist = parseCsvSet(process.env.MARKETPLACE_SCAN_ALLOWLIST);
+    this.scanAllowlist = scanAllowlist ? new Set(scanAllowlist) : envAllowlist;
+    this.requireScanPassedForDownload =
+      requireScanPassedForDownload !== null && requireScanPassedForDownload !== undefined
+        ? Boolean(requireScanPassedForDownload)
+        : process.env.MARKETPLACE_REQUIRE_SCAN_PASSED === "1";
   }
 
   async init() {
@@ -692,7 +747,7 @@ class MarketplaceStore {
   async getPublisherByTokenSha256(tokenSha256) {
     return this.db.withRead((db) => {
       const stmt = db.prepare(
-        `SELECT publisher, token_sha256, public_key_pem, verified, created_at
+        `SELECT publisher, token_sha256, public_key_pem, verified, revoked, revoked_at, created_at
          FROM publishers WHERE token_sha256 = ? LIMIT 1`
       );
       stmt.bind([tokenSha256]);
@@ -707,6 +762,8 @@ class MarketplaceStore {
         tokenSha256: row.token_sha256,
         publicKeyPem: row.public_key_pem,
         verified: Boolean(row.verified),
+        revoked: Boolean(row.revoked),
+        revokedAt: row.revoked_at ? String(row.revoked_at) : null,
         createdAt: row.created_at,
       };
     });
@@ -715,7 +772,7 @@ class MarketplaceStore {
   async getPublisher(publisher) {
     return this.db.withRead((db) => {
       const stmt = db.prepare(
-        `SELECT publisher, token_sha256, public_key_pem, verified, created_at
+        `SELECT publisher, token_sha256, public_key_pem, verified, revoked, revoked_at, created_at
          FROM publishers WHERE publisher = ? LIMIT 1`
       );
       stmt.bind([publisher]);
@@ -730,6 +787,8 @@ class MarketplaceStore {
         tokenSha256: row.token_sha256,
         publicKeyPem: row.public_key_pem,
         verified: Boolean(row.verified),
+        revoked: Boolean(row.revoked),
+        revokedAt: row.revoked_at ? String(row.revoked_at) : null,
         createdAt: row.created_at,
       };
     });
@@ -827,6 +886,191 @@ class MarketplaceStore {
     return { publisher, keyId, revoked: true };
   }
 
+  async rotatePublisherToken(publisher, { token = null, actor = "admin", ip = null } = {}) {
+    if (!publisher || typeof publisher !== "string") throw new Error("publisher is required");
+
+    const newToken =
+      token && typeof token === "string"
+        ? token
+        : crypto
+            .randomBytes(32)
+            .toString("base64")
+            .replace(/\+/g, "-")
+            .replace(/\//g, "_")
+            .replace(/=+$/g, "");
+    const tokenSha256 = sha256Utf8(newToken);
+    const now = nowIso();
+
+    await this.db.withTransaction((db) => {
+      const stmt = db.prepare(`SELECT publisher FROM publishers WHERE publisher = ? LIMIT 1`);
+      stmt.bind([publisher]);
+      const exists = stmt.step();
+      stmt.free();
+      if (!exists) throw new Error("Publisher not found");
+
+      db.run(`UPDATE publishers SET token_sha256 = ? WHERE publisher = ?`, [tokenSha256, publisher]);
+
+      const audit = db.prepare(
+        `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      audit.run([randomId(), actor, "publisher.rotate_token", null, null, ip, safeJsonStringify({ publisher }), now]);
+      audit.free();
+    });
+
+    return { publisher, token: newToken, tokenSha256 };
+  }
+
+  async rotatePublisherPublicKey(
+    publisher,
+    { publicKeyPem, overlapMs = null, actor = "admin", ip = null } = {}
+  ) {
+    if (!publisher || typeof publisher !== "string") throw new Error("publisher is required");
+    if (!publicKeyPem || typeof publicKeyPem !== "string") throw new Error("publicKeyPem is required");
+
+    const now = nowIso();
+    const normalizedPublicKeyPem = normalizePublicKeyPem(publicKeyPem);
+    const keyId = publisherKeyIdFromPublicKeyPem(normalizedPublicKeyPem);
+
+    await this.db.withTransaction((db) => {
+      const existingPublisherStmt = db.prepare(
+        `SELECT public_key_pem, created_at
+         FROM publishers
+         WHERE publisher = ?
+         LIMIT 1`
+      );
+      existingPublisherStmt.bind([publisher]);
+      if (!existingPublisherStmt.step()) {
+        existingPublisherStmt.free();
+        throw new Error("Publisher not found");
+      }
+      const existing = existingPublisherStmt.getAsObject();
+      existingPublisherStmt.free();
+
+      const existingPem = existing.public_key_pem ? normalizePublicKeyPem(String(existing.public_key_pem)) : "";
+      const existingCreatedAt = existing.created_at ? String(existing.created_at) : now;
+      if (existingPem) {
+        let existingKeyId = null;
+        try {
+          existingKeyId = publisherKeyIdFromPublicKeyPem(existingPem);
+        } catch {
+          existingKeyId = null;
+        }
+
+        if (existingKeyId) {
+          const existingKeyStmt = db.prepare(`SELECT publisher FROM publisher_keys WHERE id = ? LIMIT 1`);
+          existingKeyStmt.bind([existingKeyId]);
+          if (existingKeyStmt.step()) {
+            const row = existingKeyStmt.getAsObject();
+            const existingPublisher = String(row.publisher || "");
+            existingKeyStmt.free();
+            if (existingPublisher && existingPublisher !== publisher) {
+              throw new Error(`Signing key id already registered to a different publisher: ${existingKeyId}`);
+            }
+          } else {
+            existingKeyStmt.free();
+          }
+
+          db.run(
+            `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
+             VALUES (?, ?, ?, ?, 0, NULL, 0)
+             ON CONFLICT(id) DO UPDATE SET
+               public_key_pem = excluded.public_key_pem`,
+            [existingKeyId, publisher, existingPem, existingCreatedAt]
+          );
+
+          db.run(
+            `UPDATE extension_versions
+             SET signing_key_id = ?, signing_public_key_pem = ?
+             WHERE signing_key_id IS NULL
+               AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
+            [existingKeyId, existingPem, publisher]
+          );
+        }
+      }
+
+      db.run(`UPDATE publishers SET public_key_pem = ? WHERE publisher = ?`, [normalizedPublicKeyPem, publisher]);
+
+      const existingKeyStmt = db.prepare(`SELECT publisher FROM publisher_keys WHERE id = ? LIMIT 1`);
+      existingKeyStmt.bind([keyId]);
+      if (existingKeyStmt.step()) {
+        const row = existingKeyStmt.getAsObject();
+        const existingPublisher = String(row.publisher || "");
+        existingKeyStmt.free();
+        if (existingPublisher && existingPublisher !== publisher) {
+          throw new Error(`Signing key id already registered to a different publisher: ${keyId}`);
+        }
+      } else {
+        existingKeyStmt.free();
+      }
+
+      db.run(
+        `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
+         VALUES (?, ?, ?, ?, 0, NULL, 0)
+         ON CONFLICT(id) DO UPDATE SET
+           public_key_pem = excluded.public_key_pem`,
+        [keyId, publisher, normalizedPublicKeyPem, now]
+      );
+
+      const revokedStmt = db.prepare(`SELECT revoked FROM publisher_keys WHERE id = ? LIMIT 1`);
+      revokedStmt.bind([keyId]);
+      const isRevoked = revokedStmt.step() ? Boolean(revokedStmt.getAsObject().revoked) : false;
+      revokedStmt.free();
+      if (isRevoked) {
+        throw new Error("Cannot set a revoked signing key as primary");
+      }
+
+      db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE publisher = ?`, [publisher]);
+      db.run(`UPDATE publisher_keys SET is_primary = 1 WHERE id = ?`, [keyId]);
+
+      const audit = db.prepare(
+        `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      audit.run([
+        randomId(),
+        actor,
+        "publisher.rotate_key",
+        null,
+        null,
+        ip,
+        safeJsonStringify({ publisher, keyId, overlapMs }),
+        now,
+      ]);
+      audit.free();
+    });
+
+    return { publisher, keyId, publicKeyPem: normalizedPublicKeyPem, overlapMs };
+  }
+
+  async revokePublisher(publisher, { revoked = true, actor = "admin", ip = null } = {}) {
+    if (!publisher || typeof publisher !== "string") throw new Error("publisher is required");
+
+    const now = nowIso();
+    await this.db.withTransaction((db) => {
+      const stmt = db.prepare(`SELECT publisher FROM publishers WHERE publisher = ? LIMIT 1`);
+      stmt.bind([publisher]);
+      const exists = stmt.step();
+      stmt.free();
+      if (!exists) throw new Error("Publisher not found");
+
+      db.run(`UPDATE publishers SET revoked = ?, revoked_at = ? WHERE publisher = ?`, [
+        revoked ? 1 : 0,
+        revoked ? now : null,
+        publisher,
+      ]);
+
+      const audit = db.prepare(
+        `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      audit.run([randomId(), actor, "publisher.revoke", null, null, ip, safeJsonStringify({ publisher, revoked }), now]);
+      audit.free();
+    });
+
+    return this.getPublisher(publisher);
+  }
+
   async setExtensionFlags(id, { verified, featured, deprecated, blocked, malicious }, { actor = "admin", ip = null } = {}) {
     const now = new Date().toISOString();
     await this.db.withTransaction((db) => {
@@ -879,6 +1123,9 @@ class MarketplaceStore {
   async publishExtension({ publisher, packageBytes, signatureBase64 }) {
     const publisherRecord = await this.getPublisher(publisher);
     if (!publisherRecord) throw new Error(`Unknown publisher: ${publisher}`);
+    if (publisherRecord.revoked) {
+      throw new Error("Publisher revoked");
+    }
 
     const now = new Date().toISOString();
 
@@ -1036,6 +1283,7 @@ class MarketplaceStore {
         throw new Error("Invalid extension package: package.json does not match embedded manifest");
       }
 
+      fileRecords.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
       fileCount = fileRecords.length;
       if (unpackedSize > MAX_UNPACKED_BYTES) {
         throw new Error("Package exceeds maximum uncompressed payload size");
@@ -1197,6 +1445,13 @@ class MarketplaceStore {
           signingPublicKeyPem,
         ]
       );
+
+      db.run(
+        `INSERT OR IGNORE INTO package_scans
+          (extension_id, version, status, findings_json, scanned_at)
+         VALUES (?, ?, ?, '[]', NULL)`,
+        [id, version, PACKAGE_SCAN_STATUS.PENDING]
+      );
     }).catch((err) => {
       if (String(err?.message || "").includes("UNIQUE constraint failed: extension_versions.extension_id, extension_versions.version")) {
         throw new Error("That extension version is already published");
@@ -1204,7 +1459,341 @@ class MarketplaceStore {
       throw err;
     });
 
+    try {
+      await this.scanExtensionVersion(id, version, { packageBytes });
+    } catch {
+    }
+
     return { id, version };
+  }
+
+  async getPackageScan(extensionId, version) {
+    return this.db.withRead((db) => {
+      const stmt = db.prepare(
+        `SELECT status, findings_json, scanned_at
+         FROM package_scans
+         WHERE extension_id = ? AND version = ?
+         LIMIT 1`
+      );
+      stmt.bind([extensionId, version]);
+      if (!stmt.step()) {
+        stmt.free();
+        return null;
+      }
+      const row = stmt.getAsObject();
+      stmt.free();
+
+      let findings = null;
+      try {
+        findings = JSON.parse(String(row.findings_json || "[]"));
+      } catch {
+        findings = [];
+      }
+
+      return {
+        extensionId,
+        version,
+        status: String(row.status),
+        findings,
+        scannedAt: row.scanned_at ? String(row.scanned_at) : null,
+      };
+    });
+  }
+
+  async rescanExtensionVersion(extensionId, version, { actor = "admin", ip = null } = {}) {
+    const now = nowIso();
+    await this.db.withTransaction((db) => {
+      const existingStmt = db.prepare(
+        `SELECT extension_id
+         FROM extension_versions
+         WHERE extension_id = ? AND version = ?
+         LIMIT 1`
+      );
+      existingStmt.bind([extensionId, version]);
+      const exists = existingStmt.step();
+      existingStmt.free();
+      if (!exists) throw new Error("Extension version not found");
+
+      db.run(
+        `INSERT OR IGNORE INTO package_scans
+          (extension_id, version, status, findings_json, scanned_at)
+         VALUES (?, ?, ?, '[]', NULL)`,
+        [extensionId, version, PACKAGE_SCAN_STATUS.PENDING]
+      );
+      db.run(
+        `UPDATE package_scans
+         SET status = ?, findings_json = '[]', scanned_at = NULL
+         WHERE extension_id = ? AND version = ?`,
+        [PACKAGE_SCAN_STATUS.PENDING, extensionId, version]
+      );
+
+      const audit = db.prepare(
+        `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      audit.run([randomId(), actor, "package_scan.rescan", extensionId, version, ip, "{}", now]);
+      audit.free();
+    });
+
+    await this.scanExtensionVersion(extensionId, version);
+    return this.getPackageScan(extensionId, version);
+  }
+
+  async scanExtensionVersion(extensionId, version, { packageBytes = null } = {}) {
+    const meta = await this.db.withRead((db) => {
+      const stmt = db.prepare(
+        `SELECT sha256, package_bytes, package_path
+         FROM extension_versions
+         WHERE extension_id = ? AND version = ?
+         LIMIT 1`
+      );
+      stmt.bind([extensionId, version]);
+      if (!stmt.step()) {
+        stmt.free();
+        return null;
+      }
+      const row = stmt.getAsObject();
+      stmt.free();
+      return {
+        expectedSha256: String(row.sha256),
+        packageBytes: row.package_bytes,
+        packagePath: row.package_path ? String(row.package_path) : null,
+      };
+    });
+
+    if (!meta) throw new Error("Extension version not found");
+
+    /** @type {Buffer | null} */
+    let bytes = packageBytes ? Buffer.from(packageBytes) : null;
+    if (!bytes) {
+      if (meta.packagePath) {
+        const fullPath = resolvePackagePath(this.dataDir, meta.packagePath);
+        try {
+          bytes = await fs.readFile(fullPath);
+        } catch {
+          bytes = null;
+        }
+      } else {
+        bytes = Buffer.from(meta.packageBytes);
+      }
+    }
+
+    const allowlist = this.scanAllowlist || new Set();
+    const findings = [];
+    const actualSha = bytes ? sha256(bytes) : null;
+    if (!bytes || bytes.length === 0) {
+      findings.push({ id: "package.missing_bytes", message: "Package bytes missing on disk" });
+    } else if (actualSha !== meta.expectedSha256) {
+      findings.push({
+        id: "package.sha256_mismatch",
+        message: "Stored package sha256 does not match on-disk bytes",
+        expected: meta.expectedSha256,
+        actual: actualSha,
+      });
+    }
+
+    let scanData = {
+      formatVersion: null,
+      fileRecords: [],
+      fileCount: 0,
+      unpackedSize: 0,
+      findings: [],
+    };
+
+    if (bytes && bytes.length > 0) {
+      try {
+        scanData = await this._computePackageScan(bytes, { allowlist });
+      } catch (err) {
+        scanData = {
+          formatVersion: null,
+          fileRecords: [],
+          fileCount: 0,
+          unpackedSize: 0,
+          findings: [{ id: "scan.error", message: String(err?.message || err) }],
+        };
+      }
+    }
+
+    const mergedFindings = [...findings, ...(scanData.findings || [])].filter((f) => !allowlist.has(f.id));
+    const status = mergedFindings.length > 0 ? PACKAGE_SCAN_STATUS.FAILED : PACKAGE_SCAN_STATUS.PASSED;
+    const scannedAt = nowIso();
+
+    const filesJson = safeJsonStringify(scanData.fileRecords || []);
+    const findingsJson = safeJsonStringify({
+      formatVersion: scanData.formatVersion,
+      fileCount: scanData.fileCount,
+      unpackedSize: scanData.unpackedSize,
+      findings: mergedFindings,
+    });
+
+    await this.db.withTransaction((db) => {
+      if (Array.isArray(scanData.fileRecords) && scanData.fileRecords.length > 0) {
+        db.run(
+          `UPDATE extension_versions
+           SET format_version = ?, file_count = ?, unpacked_size = ?, files_json = ?
+           WHERE extension_id = ? AND version = ?`,
+          [scanData.formatVersion || 1, scanData.fileCount || 0, scanData.unpackedSize || 0, filesJson, extensionId, version]
+        );
+      }
+
+      db.run(
+        `INSERT OR IGNORE INTO package_scans
+          (extension_id, version, status, findings_json, scanned_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [extensionId, version, status, findingsJson, scannedAt]
+      );
+      db.run(
+        `UPDATE package_scans
+         SET status = ?, findings_json = ?, scanned_at = ?
+         WHERE extension_id = ? AND version = ?`,
+        [status, findingsJson, scannedAt, extensionId, version]
+      );
+    });
+
+    return { extensionId, version, status, scannedAt, findings: mergedFindings };
+  }
+
+  async _computePackageScan(packageBytes, { allowlist }) {
+    const findings = [];
+    const formatVersion = detectExtensionPackageFormatVersion(packageBytes);
+
+    /** @type {any} */
+    let manifest = null;
+    /** @type {{path: string, sha256: string, size: number}[]} */
+    const fileRecords = [];
+    /** @type {Map<string, Buffer>} */
+    const files = new Map();
+    let unpackedSize = 0;
+
+    const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+    const MAX_UNPACKED_BYTES = 50 * 1024 * 1024;
+    const MAX_FILES = 500;
+
+    if (formatVersion === 1) {
+      const bundle = await readExtensionPackageSafe(packageBytes, { maxUncompressedBytes: MAX_UNCOMPRESSED_BYTES });
+      manifest = bundle.manifest;
+      for (const file of bundle.files || []) {
+        if (!file?.path || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
+          continue;
+        }
+        const normalizedPath = file.path.replace(/\\/g, "/");
+        const bytes = Buffer.from(file.dataBase64, "base64");
+        unpackedSize += bytes.length;
+        files.set(normalizedPath, bytes);
+        fileRecords.push({ path: normalizedPath, sha256: sha256(bytes), size: bytes.length });
+      }
+    } else if (formatVersion === 2) {
+      const parsed = readExtensionPackageV2(packageBytes);
+      manifest = parsed.manifest;
+
+      const checksums = parsed.checksums;
+      const checksumEntries = new Map();
+      if (checksums?.algorithm === "sha256" && typeof checksums.files === "object" && checksums.files) {
+        for (const [relPath, entry] of Object.entries(checksums.files)) {
+          checksumEntries.set(relPath, entry);
+        }
+      } else {
+        findings.push({ id: "package.v2.invalid_checksums", message: "Invalid checksums.json" });
+      }
+
+      const expectedPaths = new Set(checksumEntries.keys());
+      for (const [relPath, data] of parsed.files.entries()) {
+        unpackedSize += data.length;
+        files.set(relPath, data);
+        const actualSha = sha256(data);
+        fileRecords.push({ path: relPath, sha256: actualSha, size: data.length });
+
+        const expected = checksumEntries.get(relPath);
+        if (!expected) {
+          findings.push({ id: "package.v2.missing_checksum", message: `checksums.json missing entry for ${relPath}` });
+        } else {
+          const expectedSha = typeof expected.sha256 === "string" ? expected.sha256.toLowerCase() : null;
+          const expectedSize = expected.size;
+          if (expectedSha && expectedSha !== actualSha) {
+            findings.push({ id: "package.v2.checksum_mismatch", message: `Checksum mismatch for ${relPath}` });
+          }
+          if (typeof expectedSize === "number" && expectedSize !== data.length) {
+            findings.push({ id: "package.v2.size_mismatch", message: `Size mismatch for ${relPath}` });
+          }
+        }
+        expectedPaths.delete(relPath);
+      }
+      if (expectedPaths.size > 0) {
+        findings.push({
+          id: "package.v2.extra_checksums",
+          message: `checksums.json contains extra entries: ${[...expectedPaths].join(", ")}`,
+        });
+      }
+    } else {
+      findings.push({ id: "package.unknown_format", message: `Unsupported extension package formatVersion: ${formatVersion}` });
+    }
+
+    fileRecords.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+
+    if (fileRecords.length > MAX_FILES) {
+      findings.push({ id: "package.too_many_files", message: `Extension package contains too many files (${fileRecords.length})` });
+    }
+
+    if (unpackedSize > MAX_UNPACKED_BYTES) {
+      findings.push({ id: "package.unpacked_size", message: `Package exceeds maximum uncompressed payload size (${unpackedSize})` });
+    }
+
+    for (const record of fileRecords) {
+      if (!isAllowedFilePath(record.path)) {
+        findings.push({ id: "package.disallowed_path", message: `Disallowed file type in extension package: ${record.path}` });
+      }
+    }
+
+    const packageJsonBytes = files.get("package.json");
+    if (!packageJsonBytes) {
+      findings.push({ id: "manifest.missing_package_json", message: "Missing package.json in extension package" });
+    } else {
+      try {
+        const pkg = JSON.parse(packageJsonBytes.toString("utf8"));
+        if (!canonicalJsonBytes(pkg).equals(canonicalJsonBytes(manifest))) {
+          findings.push({ id: "manifest.package_json_mismatch", message: "package.json does not match embedded manifest" });
+        }
+      } catch (err) {
+        findings.push({ id: "manifest.package_json_invalid", message: String(err?.message || err) });
+      }
+    }
+
+    let validatedManifest = null;
+    try {
+      validatedManifest = validateManifest(manifest);
+    } catch (err) {
+      findings.push({ id: "manifest.invalid", message: String(err?.message || err) });
+      validatedManifest = null;
+    }
+
+    if (validatedManifest) {
+      try {
+        validateEntrypoint(validatedManifest, fileRecords);
+      } catch (err) {
+        findings.push({ id: "manifest.entrypoint", message: String(err?.message || err) });
+      }
+    }
+
+    for (const [relPath, data] of files.entries()) {
+      const lower = relPath.toLowerCase();
+      if (!(lower.endsWith(".js") || lower.endsWith(".cjs") || lower.endsWith(".mjs"))) continue;
+
+      const source = data.toString("utf8");
+      for (const rule of DEFAULT_JS_HEURISTIC_RULES) {
+        if (allowlist.has(rule.id)) continue;
+        if (rule.test(source)) {
+          findings.push({ id: rule.id, message: rule.message, file: relPath });
+        }
+      }
+    }
+
+    return {
+      formatVersion,
+      fileRecords,
+      fileCount: fileRecords.length,
+      unpackedSize,
+      findings,
+    };
   }
 
   async search({
@@ -1557,9 +2146,12 @@ class MarketplaceStore {
       const stmt = db.prepare(
         `SELECT e.publisher, e.blocked, e.malicious,
                 v.signature_base64, v.sha256, v.package_path, v.yanked, v.format_version,
-                v.signing_key_id
+                v.signing_key_id,
+                v.files_json,
+                s.status AS scan_status
          FROM extensions e
          JOIN extension_versions v ON v.extension_id = e.id
+         LEFT JOIN package_scans s ON s.extension_id = v.extension_id AND s.version = v.version
          WHERE e.id = ? AND v.version = ? LIMIT 1`
       );
       stmt.bind([id, version]);
@@ -1573,6 +2165,17 @@ class MarketplaceStore {
       if (row.blocked || row.malicious || row.yanked) {
         return null;
       }
+
+      const scanStatusRaw = row.scan_status ? String(row.scan_status) : null;
+      if (scanStatusRaw === PACKAGE_SCAN_STATUS.FAILED) {
+        return null;
+      }
+      if (this.requireScanPassedForDownload && scanStatusRaw !== PACKAGE_SCAN_STATUS.PASSED) {
+        return null;
+      }
+
+      const filesJson = row.files_json ? String(row.files_json) : "[]";
+      const filesSha256 = sha256Utf8(filesJson);
 
       const packagePath = row.package_path ? String(row.package_path) : null;
       let packageBytes = null;
@@ -1596,6 +2199,8 @@ class MarketplaceStore {
         sha256: String(row.sha256),
         formatVersion: Number(row.format_version || 1),
         signingKeyId: row.signing_key_id ? String(row.signing_key_id) : null,
+        scanStatus: scanStatusRaw || "unknown",
+        filesSha256,
         packageBytes,
         packagePath,
       };
@@ -1635,6 +2240,8 @@ class MarketplaceStore {
       formatVersion: meta.formatVersion,
       publisher: meta.publisher,
       signingKeyId: meta.signingKeyId,
+      scanStatus: meta.scanStatus,
+      filesSha256: meta.filesSha256,
       packagePath: includePath ? fullPath : null,
     };
   }

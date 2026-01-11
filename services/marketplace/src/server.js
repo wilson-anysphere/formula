@@ -363,9 +363,13 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           "Cache-Control": CACHE_CONTROL_REVALIDATE,
           "X-Package-Signature": pkgMeta.signatureBase64,
           "X-Package-Sha256": pkgMeta.sha256,
+          "X-Package-Scan-Status": String(pkgMeta.scanStatus || "unknown"),
           "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
           "X-Publisher": pkgMeta.publisher,
         };
+        if (pkgMeta.filesSha256) {
+          baseHeaders["X-Package-Files-Sha256"] = String(pkgMeta.filesSha256);
+        }
         if (pkgMeta.signingKeyId) {
           baseHeaders["X-Publisher-Key-Id"] = String(pkgMeta.signingKeyId);
         }
@@ -441,6 +445,10 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         if (!publisherRecord) {
           statusCode = 403;
           return sendJson(res, 403, { error: "Invalid token" });
+        }
+        if (publisherRecord.revoked) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Publisher revoked" });
         }
 
         const publisherRate = publishLimiter.take(tokenSha);
@@ -522,6 +530,10 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         if (!publisherRecord) {
           statusCode = 403;
           return sendJson(res, 403, { error: "Invalid token" });
+        }
+        if (publisherRecord.revoked) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Publisher revoked" });
         }
 
         const publisherRate = publishLimiter.take(tokenSha);
@@ -619,6 +631,196 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         }
         statusCode = 200;
         return sendJson(res, 200, { ok: true });
+      }
+
+      if (
+        req.method === "POST" &&
+        segments[0] === "api" &&
+        segments[1] === "admin" &&
+        segments[2] === "publishers" &&
+        segments[4] === "rotate-token" &&
+        segments.length === 5
+      ) {
+        route = "/api/admin/publishers/:publisher/rotate-token";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const publisher = segments[3];
+        const body = await readJsonBody(req).catch(() => null);
+        try {
+          const rotated = await store.rotatePublisherToken(publisher, { token: body?.token, actor: "admin", ip });
+          statusCode = 200;
+          return sendJson(res, 200, rotated);
+        } catch (error) {
+          if (String(error?.message || "").toLowerCase().includes("not found")) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Publisher not found" });
+          }
+          throw error;
+        }
+      }
+
+      if (
+        req.method === "POST" &&
+        segments[0] === "api" &&
+        segments[1] === "admin" &&
+        segments[2] === "publishers" &&
+        segments[4] === "rotate-key" &&
+        segments.length === 5
+      ) {
+        route = "/api/admin/publishers/:publisher/rotate-key";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const publisher = segments[3];
+        const body = await readJsonBody(req);
+        if (!body?.publicKeyPem) {
+          statusCode = 400;
+          return sendJson(res, 400, { error: "publicKeyPem is required" });
+        }
+        try {
+          const rotated = await store.rotatePublisherPublicKey(publisher, {
+            publicKeyPem: body.publicKeyPem,
+            overlapMs: body?.overlapMs,
+            actor: "admin",
+            ip,
+          });
+          statusCode = 200;
+          return sendJson(res, 200, rotated);
+        } catch (error) {
+          if (String(error?.message || "").toLowerCase().includes("not found")) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Publisher not found" });
+          }
+          throw error;
+        }
+      }
+
+      if (
+        req.method === "POST" &&
+        segments[0] === "api" &&
+        segments[1] === "admin" &&
+        segments[2] === "publishers" &&
+        segments[4] === "revoke" &&
+        segments.length === 5
+      ) {
+        route = "/api/admin/publishers/:publisher/revoke";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const publisher = segments[3];
+        const body = await readJsonBody(req).catch(() => null);
+        try {
+          const updated = await store.revokePublisher(publisher, {
+            revoked: body?.revoked ?? true,
+            actor: "admin",
+            ip,
+          });
+          statusCode = 200;
+          return sendJson(res, 200, updated);
+        } catch (error) {
+          if (String(error?.message || "").toLowerCase().includes("not found")) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Publisher not found" });
+          }
+          throw error;
+        }
+      }
+
+      if (
+        req.method === "GET" &&
+        segments[0] === "api" &&
+        segments[1] === "admin" &&
+        segments[2] === "extensions" &&
+        segments[4] === "versions" &&
+        segments[6] === "scan" &&
+        segments.length === 7
+      ) {
+        route = "/api/admin/extensions/:id/versions/:version/scan";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const id = segments[3];
+        const version = segments[5];
+        const scan = await store.getPackageScan(id, version);
+        if (!scan) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Not found" });
+        }
+        statusCode = 200;
+        return sendJson(res, 200, scan);
+      }
+
+      if (
+        req.method === "POST" &&
+        segments[0] === "api" &&
+        segments[1] === "admin" &&
+        segments[2] === "extensions" &&
+        segments[4] === "versions" &&
+        segments[6] === "scan" &&
+        segments.length === 7
+      ) {
+        route = "/api/admin/extensions/:id/versions/:version/scan";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const id = segments[3];
+        const version = segments[5];
+        try {
+          const scan = await store.rescanExtensionVersion(id, version, { actor: "admin", ip });
+          if (!scan) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Not found" });
+          }
+          statusCode = 200;
+          return sendJson(res, 200, scan);
+        } catch (error) {
+          if (String(error?.message || "").toLowerCase().includes("not found")) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Not found" });
+          }
+          throw error;
+        }
       }
 
       if (
