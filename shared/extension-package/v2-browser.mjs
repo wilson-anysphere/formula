@@ -1,5 +1,3 @@
-import { ed25519 } from "@noble/curves/ed25519";
-
 import v2Core from "./core/v2-core.js";
 
 const {
@@ -55,113 +53,27 @@ function pemToDerBytes(pem) {
   return base64ToBytes(raw);
 }
 
-function readDerLength(bytes, offset) {
-  const first = bytes[offset++];
-  if ((first & 0x80) === 0) {
-    return { length: first, offset };
-  }
-
-  const count = first & 0x7f;
-  if (count === 0 || count > 4) {
-    throw new Error("Invalid DER length encoding");
-  }
-
-  let length = 0;
-  for (let i = 0; i < count; i++) {
-    length = (length << 8) | bytes[offset++];
-  }
-
-  return { length, offset };
-}
-
-function expectDerTag(bytes, offset, tag, ctx) {
-  const actual = bytes[offset];
-  if (actual !== tag) {
-    throw new Error(`Invalid DER: expected tag 0x${tag.toString(16)} for ${ctx} but got 0x${actual.toString(16)}`);
-  }
-  return offset + 1;
-}
-
-function parseEd25519PublicKeyFromSpki(spkiDer) {
-  const bytes = spkiDer instanceof Uint8Array ? spkiDer : new Uint8Array(spkiDer);
-  let offset = 0;
-
-  offset = expectDerTag(bytes, offset, 0x30, "SubjectPublicKeyInfo");
-  const seq = readDerLength(bytes, offset);
-  offset = seq.offset;
-  const seqEnd = offset + seq.length;
-  if (seqEnd > bytes.length) throw new Error("Invalid DER: truncated SubjectPublicKeyInfo sequence");
-
-  offset = expectDerTag(bytes, offset, 0x30, "AlgorithmIdentifier");
-  const alg = readDerLength(bytes, offset);
-  offset = alg.offset;
-  const algEnd = offset + alg.length;
-  if (algEnd > seqEnd) throw new Error("Invalid DER: truncated AlgorithmIdentifier sequence");
-
-  offset = expectDerTag(bytes, offset, 0x06, "AlgorithmIdentifier.oid");
-  const oidLen = readDerLength(bytes, offset);
-  offset = oidLen.offset;
-  const oidBytes = bytes.subarray(offset, offset + oidLen.length);
-  offset += oidLen.length;
-
-  // OID 1.3.101.112 (Ed25519) encodes to 06 03 2B 65 70.
-  const expectedOid = [0x2b, 0x65, 0x70];
-  if (oidBytes.length !== expectedOid.length) {
-    throw new Error("Invalid Ed25519 public key: unexpected SPKI algorithm OID");
-  }
-  for (let i = 0; i < expectedOid.length; i++) {
-    if (oidBytes[i] !== expectedOid[i]) {
-      throw new Error("Invalid Ed25519 public key: unexpected SPKI algorithm OID");
-    }
-  }
-
-  // Ed25519 AlgorithmIdentifier has no params; skip any remaining bytes in the sequence.
-  offset = algEnd;
-
-  offset = expectDerTag(bytes, offset, 0x03, "SubjectPublicKeyInfo.publicKey");
-  const bitStringLen = readDerLength(bytes, offset);
-  offset = bitStringLen.offset;
-  if (offset + bitStringLen.length > seqEnd) {
-    throw new Error("Invalid DER: truncated public key bit string");
-  }
-
-  const unusedBits = bytes[offset++];
-  if (unusedBits !== 0) {
-    throw new Error("Invalid Ed25519 public key: expected 0 unused bits in BIT STRING");
-  }
-
-  const keyBytes = bytes.subarray(offset, offset + (bitStringLen.length - 1));
-  if (keyBytes.length !== 32) {
-    throw new Error(`Invalid Ed25519 public key: expected 32 bytes but got ${keyBytes.length}`);
-  }
-  return keyBytes;
-}
-
 async function verifyEd25519Signature(payloadBytes, signatureBase64, publicKeyPem) {
   const signature = base64ToBytes(signatureBase64);
 
   const subtle = globalThis.crypto?.subtle;
-  if (subtle && typeof subtle.importKey === "function" && typeof subtle.verify === "function") {
-    try {
-      const key = await subtle.importKey(
-        "spki",
-        pemToDerBytes(publicKeyPem),
-        { name: "Ed25519" },
-        false,
-        ["verify"]
-      );
-      const ok = await subtle.verify({ name: "Ed25519" }, key, signature, payloadBytes);
-      return Boolean(ok);
-    } catch {
-      // fall through to JS verifier
-    }
-  }
-
-  const publicKeyBytes = parseEd25519PublicKeyFromSpki(pemToDerBytes(publicKeyPem));
   try {
-    return ed25519.verify(signature, payloadBytes, publicKeyBytes);
-  } catch {
-    return false;
+    if (!subtle || typeof subtle.importKey !== "function" || typeof subtle.verify !== "function") {
+      throw new Error("WebCrypto subtle.importKey()/verify() is required to verify extension packages in the browser");
+    }
+
+    const key = await subtle.importKey(
+      "spki",
+      pemToDerBytes(publicKeyPem),
+      { name: "Ed25519" },
+      false,
+      ["verify"]
+    );
+
+    const ok = await subtle.verify({ name: "Ed25519" }, key, signature, payloadBytes);
+    return Boolean(ok);
+  } catch (error) {
+    throw new Error(`Failed to verify extension signature via WebCrypto: ${String(error?.message ?? error)}`);
   }
 }
 
@@ -282,4 +194,3 @@ export async function verifyExtensionPackageV2Browser(packageBytes, publicKeyPem
 }
 
 export { PACKAGE_FORMAT_VERSION, readExtensionPackageV2 };
-

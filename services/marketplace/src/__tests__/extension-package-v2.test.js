@@ -144,6 +144,25 @@ test("v2 signature verification fails with wrong public key", async () => {
   }
 });
 
+test("v2 browser verifier accepts a valid package (WebCrypto Ed25519)", async () => {
+  const { dir, manifest } = await createTempExtensionDir();
+  const key = generateEd25519KeyPair();
+
+  try {
+    const pkg = await createExtensionPackageV2(dir, { privateKeyPem: key.privateKeyPem });
+    const browserVerifier = await import("../../../../shared/extension-package/v2-browser.mjs");
+    const verified = await browserVerifier.verifyExtensionPackageV2Browser(pkg, key.publicKeyPem);
+
+    assert.equal(verified.manifest?.name, manifest.name);
+    assert.equal(verified.manifest?.publisher, manifest.publisher);
+    assert.equal(verified.manifest?.version, manifest.version);
+    assert.ok(Array.isArray(verified.files));
+    assert.ok(verified.files.length > 0);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("v2 checksum mismatch is detected", async () => {
   const { dir } = await createTempExtensionDir();
   const key = generateEd25519KeyPair();
