@@ -262,6 +262,52 @@ test("RefreshOrchestrator: runs independent queries concurrently", async () => {
   await handle.promise;
 });
 
+test("RefreshOrchestrator: refreshAll sessions get unique sessionIds", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1 });
+  orchestrator.registerQuery(makeQuery("q1", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+
+  const h1 = orchestrator.refreshAll(["q1"]);
+  engine.calls[0].deferred.resolve(makeResult("q1"));
+  await h1.promise;
+
+  const h2 = orchestrator.refreshAll(["q1"]);
+  engine.calls[1].deferred.resolve(makeResult("q1"));
+  await h2.promise;
+
+  assert.notEqual(h1.sessionId, h2.sessionId);
+});
+
+test("RefreshOrchestrator: refreshAll([]) resolves immediately without engine work", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("q1", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+
+  const handle = orchestrator.refreshAll([]);
+  const results = await handle.promise;
+  assert.deepEqual(results, {});
+  assert.equal(engine.calls.length, 0);
+});
+
+test("RefreshOrchestrator: refreshAll propagates reason to jobs", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1 });
+  orchestrator.registerQuery(makeQuery("q1", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+
+  /** @type {any[]} */
+  const started = [];
+  orchestrator.onEvent((evt) => {
+    if (evt.type === "started") started.push(evt);
+  });
+
+  const handle = orchestrator.refreshAll(["q1"], "cron");
+  engine.calls[0].deferred.resolve(makeResult("q1"));
+  await handle.promise;
+
+  assert.equal(started.length, 1);
+  assert.equal(started[0].job.reason, "cron");
+});
+
 test("RefreshOrchestrator: shared dependency executes once when not explicitly targeted", async () => {
   let reads = 0;
   const engine = new QueryEngine({
