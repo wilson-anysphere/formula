@@ -1080,7 +1080,9 @@ async function activateExtension() {
           throw error;
         }
       }
-      extensionModule = await import(workerData.mainUrl);
+      // The entrypoint URL is provided at runtime by the host, so Vite/Rollup
+      // cannot statically analyze it. Suppress Vite's dynamic import warning.
+      extensionModule = await import(/* @vite-ignore */ workerData.mainUrl);
     }
 
     const activateFn = extensionModule.activate || extensionModule.default?.activate;
