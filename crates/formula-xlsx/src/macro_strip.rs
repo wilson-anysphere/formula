@@ -539,7 +539,11 @@ fn element_has_removed_relationship_id(
             continue;
         }
         let local = crate::openxml::local_name(key);
-        if !local.eq_ignore_ascii_case(b"id") && !local.eq_ignore_ascii_case(b"embed") {
+        if !local.eq_ignore_ascii_case(b"id")
+            && !local.eq_ignore_ascii_case(b"embed")
+            && !local.eq_ignore_ascii_case(b"relid")
+            && !local.eq_ignore_ascii_case(b"link")
+        {
             continue;
         }
         let value = attr.unescape_value()?;

@@ -1122,4 +1122,48 @@ mod tests {
         assert!(pkg.part("xl/ctrlProps/image1.png").is_none());
         assert!(pkg.part("xl/media/image2.png").is_some());
     }
+
+    #[test]
+    fn remove_vba_project_strips_vml_relid_references() {
+        let vml_xml = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xml xmlns:v="urn:schemas-microsoft-com:vml"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel">
+  <v:shape id="_x0000_s1025" type="#_x0000_t75">
+    <v:imagedata o:relid="rIdImg"/>
+  </v:shape>
+  <v:shape id="_x0000_s1026" type="#_x0000_t75">
+    <v:imagedata o:relid="rIdKeep"/>
+  </v:shape>
+</xml>"##;
+
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../ctrlProps/image1.png"/>
+  <Relationship Id="rIdKeep" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
+</Relationships>"#;
+
+        let bytes = build_package(&[
+            ("xl/drawings/vmlDrawing1.vml", vml_xml.as_bytes()),
+            ("xl/drawings/_rels/vmlDrawing1.vml.rels", rels_xml.as_bytes()),
+            ("xl/ctrlProps/image1.png", b"macro-image"),
+            ("xl/media/image2.png", b"keep-image"),
+        ]);
+
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.remove_vba_project().expect("strip macros");
+
+        let updated_rels =
+            std::str::from_utf8(pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap()).unwrap();
+        assert!(!updated_rels.contains("rIdImg"));
+        assert!(updated_rels.contains("rIdKeep"));
+
+        let updated_vml =
+            std::str::from_utf8(pkg.part("xl/drawings/vmlDrawing1.vml").unwrap()).unwrap();
+        assert!(!updated_vml.contains("rIdImg"));
+        assert!(updated_vml.contains("rIdKeep"));
+
+        assert!(pkg.part("xl/ctrlProps/image1.png").is_none());
+        assert!(pkg.part("xl/media/image2.png").is_some());
+    }
 }
