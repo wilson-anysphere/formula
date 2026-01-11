@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -37,7 +37,11 @@ if (testFiles.length === 0) {
   process.exit(0);
 }
 
-const child = spawn(process.execPath, ["--no-warnings", "--test", ...testFiles], {
+const nodeArgs = ["--no-warnings"];
+if (supportsTypeStripping()) nodeArgs.push("--experimental-strip-types");
+nodeArgs.push("--test", ...testFiles);
+
+const child = spawn(process.execPath, nodeArgs, {
   stdio: "inherit",
 });
 
@@ -49,3 +53,9 @@ child.on("exit", (code, signal) => {
   process.exit(code ?? 1);
 });
 
+function supportsTypeStripping() {
+  const probe = spawnSync(process.execPath, ["--experimental-strip-types", "-e", "process.exit(0)"], {
+    stdio: "ignore",
+  });
+  return probe.status === 0;
+}
