@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createDesktopQueryEngine } from "../engine.ts";
+import { createDefaultOrgPolicy } from "../../../../../packages/security/dlp/src/policy.js";
 
 test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is unavailable", async () => {
   const originalTauri = globalThis.__TAURI__;
@@ -46,6 +47,41 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
   } finally {
     globalThis.__TAURI__ = originalTauri;
   }
+});
+
+test("createDesktopQueryEngine enforces DLP policy on external connector permissions", async () => {
+  const policy = createDefaultOrgPolicy();
+
+  const engine = createDesktopQueryEngine({
+    dlp: {
+      documentId: "doc1",
+      classificationStore: {
+        list: () => [
+          {
+            selector: { scope: "document", documentId: "doc1" },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+      },
+      policy,
+    },
+    fileAdapter: {
+      readText: async () => ["A,B", "1,2"].join("\n"),
+      readBinary: async () => new Uint8Array([1, 2, 3]),
+    },
+    onPermissionPrompt: () => {
+      throw new Error("Permission prompt should not run when DLP blocks first");
+    },
+  });
+
+  const query = {
+    id: "q_csv",
+    name: "CSV",
+    source: { type: "csv", path: "/tmp/test.csv", options: { hasHeaders: true } },
+    steps: [],
+  };
+
+  await assert.rejects(engine.executeQuery(query, {}, {}), (err) => err?.name === "DlpViolationError");
 });
 
 test("createDesktopQueryEngine wires oauth2Manager into HttpConnector", async () => {
