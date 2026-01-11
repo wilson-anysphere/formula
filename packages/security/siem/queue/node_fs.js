@@ -453,6 +453,26 @@ export class NodeFsOfflineAuditQueue {
     if (deleted) await syncDir(this.segmentsDir);
   }
 
+  async _gcTmpFiles() {
+    let entries;
+    try {
+      entries = await readdir(this.segmentsDir, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw error;
+    }
+
+    let deleted = false;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".tmp")) continue;
+      await safeUnlink(path.join(this.segmentsDir, entry.name));
+      deleted = true;
+    }
+
+    if (deleted) await syncDir(this.segmentsDir);
+  }
+
   async _isOpenSegmentOrphan(segment) {
     const lock = await safeReadJson(segment.lockPath);
     const lockedPid = Number(lock?.pid);
@@ -483,6 +503,7 @@ export class NodeFsOfflineAuditQueue {
 
       await acquireFlushLock(this.lockPath);
       try {
+        await this._gcTmpFiles();
         await this._gcAckedSegments();
 
         let sent = 0;
