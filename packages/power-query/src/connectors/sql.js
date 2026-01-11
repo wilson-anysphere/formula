@@ -134,7 +134,12 @@ function resolveConnectionId(request, getConnectionIdentity) {
     return request.connectionId;
   }
 
-  const identity = getConnectionIdentity(request.connection);
+  let identity;
+  try {
+    identity = getConnectionIdentity(request.connection);
+  } catch {
+    return null;
+  }
   if (identity == null) return null;
   if (typeof identity === "string") return identity;
   return hashValue(identity);

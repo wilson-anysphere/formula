@@ -1720,22 +1720,31 @@ function resolveDatabaseConnectionId(source, connector) {
     return source.connectionId;
   }
 
-  // Conservative built-in fallback: treat `{ id: string }` as a stable identity.
   const connection = source.connection;
+
+  // Prefer connector-provided identity hook when available. This allows hosts to
+  // define identities that incorporate additional fields (e.g. server + database)
+  // even when a generic `connection.id` property is present.
+  if (connector && typeof connector.getConnectionIdentity === "function") {
+    try {
+      const identity = connector.getConnectionIdentity(connection);
+      if (identity != null) {
+        if (typeof identity === "string") return identity;
+        return hashValue(identity);
+      }
+    } catch {
+      // Fall through to conservative fallback below.
+    }
+  }
+
+  // Conservative fallback: treat `{ id: string }` as a stable identity when no
+  // connector hook is available (or it returns null/throws).
   if (connection && typeof connection === "object" && !Array.isArray(connection)) {
     // @ts-ignore - runtime inspection
     if (typeof connection.id === "string" && connection.id) return connection.id;
   }
 
-  if (!connector || typeof connector.getConnectionIdentity !== "function") return null;
-  try {
-    const identity = connector.getConnectionIdentity(connection);
-    if (identity == null) return null;
-    if (typeof identity === "string") return identity;
-    return hashValue(identity);
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 /**

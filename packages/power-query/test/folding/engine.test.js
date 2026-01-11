@@ -395,3 +395,48 @@ test("QueryEngine: database credentials are requested once per execution when ca
   assert.equal(permissionCount, 1);
   assert.equal(credentialCount, 1);
 });
+
+test("QueryEngine: SqlConnector.getConnectionIdentity can override connection.id for cache keys", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  const engine = new QueryEngine({
+    cache,
+    connectors: {
+      sql: new SqlConnector({
+        getConnectionIdentity: (connection) => {
+          // Deliberately incorporate more than `connection.id` so different hosts
+          // with the same logical id produce distinct cache keys.
+          if (!connection || typeof connection !== "object") return null;
+          // @ts-ignore - runtime indexing
+          return { id: connection.id, host: connection.host };
+        },
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Value"],
+              [1],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+  });
+
+  const base = {
+    id: "q_db_identity_override",
+    name: "DB Identity Override",
+    source: { type: "database", connection: { id: "db1", host: "a" }, query: "SELECT 1" },
+    steps: [],
+  };
+  const otherHostSameId = {
+    ...base,
+    source: { ...base.source, connection: { id: "db1", host: "b" } },
+  };
+
+  const keyA = await engine.getCacheKey(base, { queries: {} }, {});
+  const keyB = await engine.getCacheKey(otherHostSameId, { queries: {} }, {});
+  assert.ok(keyA);
+  assert.ok(keyB);
+  assert.notEqual(keyA, keyB);
+});
