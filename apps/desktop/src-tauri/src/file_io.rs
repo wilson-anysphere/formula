@@ -14,7 +14,7 @@ use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
 };
 use formula_xlsx::{
-    load_from_bytes, CellPatch as XlsxCellPatch, PreservedPivotParts, WorkbookCellPatches,
+    CellPatch as XlsxCellPatch, PreservedPivotParts, WorkbookCellPatches,
     patch_xlsx_streaming_workbook_cell_patches, XlsxPackage,
 };
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
@@ -353,7 +353,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         let origin_xlsx_bytes = Arc::<[u8]>::from(
             std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
         );
-        let document = load_from_bytes(origin_xlsx_bytes.as_ref())
+        let workbook_model = formula_xlsx::read_workbook_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
             .with_context(|| format!("parse xlsx {:?}", path))?;
         let print_settings = read_workbook_print_settings(origin_xlsx_bytes.as_ref())
             .ok()
@@ -368,7 +368,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             preserved_drawing_parts: None,
             preserved_pivot_parts: None,
             theme_palette: None,
-            date_system: document.workbook.date_system,
+            date_system: workbook_model.date_system,
             defined_names: Vec::new(),
             tables: Vec::new(),
             sheets: Vec::new(),
@@ -402,22 +402,19 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             }
         }
 
-        out.sheets = document
-            .workbook
+        out.sheets = workbook_model
             .sheets
             .iter()
             .map(formula_model_sheet_to_app_sheet)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        let sheet_names_by_id: HashMap<WorksheetId, String> = document
-            .workbook
+        let sheet_names_by_id: HashMap<WorksheetId, String> = workbook_model
             .sheets
             .iter()
             .map(|sheet| (sheet.id, sheet.name.clone()))
             .collect();
 
-        out.defined_names = document
-            .workbook
+        out.defined_names = workbook_model
             .defined_names
             .iter()
             .map(|dn| {
@@ -437,8 +434,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             })
             .collect();
 
-        out.tables = document
-            .workbook
+        out.tables = workbook_model
             .sheets
             .iter()
             .flat_map(|sheet| {
@@ -2156,7 +2152,8 @@ mod tests {
         let written_bytes = write_xlsx_blocking(&out_path, state.get_workbook().unwrap())
             .expect("write workbook");
 
-        let doc = load_from_bytes(written_bytes.as_ref()).expect("load saved workbook from bytes");
+        let doc =
+            formula_xlsx::load_from_bytes(written_bytes.as_ref()).expect("load saved workbook from bytes");
         let sheet = doc
             .workbook
             .sheet_by_name("Sheet1")
