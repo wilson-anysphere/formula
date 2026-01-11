@@ -770,11 +770,12 @@ export default {
     {
       "name": "INDEX",
       "min_args": 2,
-      "max_args": 3,
+      "max_args": 4,
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
         "any",
+        "number",
         "number",
         "number"
       ]

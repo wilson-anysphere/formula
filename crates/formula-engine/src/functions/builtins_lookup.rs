@@ -197,60 +197,184 @@ inventory::submit! {
     FunctionSpec {
         name: "INDEX",
         min_args: 2,
-        max_args: 3,
+        max_args: 4,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Any,
-        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number, ValueType::Number],
         implementation: index_fn,
     }
 }
 
 fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    fn index_reference(reference: &Reference, row: i64, col: i64) -> Result<Reference, ErrorKind> {
+        let array = reference.normalized();
+        let rows = (array.end.row - array.start.row + 1) as i64;
+        let cols = (array.end.col - array.start.col + 1) as i64;
+
+        match (row, col) {
+            (0, 0) => Ok(array),
+            (0, c) => {
+                if c < 1 || c > cols {
+                    return Err(ErrorKind::Ref);
+                }
+                let col = array.start.col + (c as u32) - 1;
+                Ok(Reference {
+                    sheet_id: array.sheet_id,
+                    start: crate::eval::CellAddr {
+                        row: array.start.row,
+                        col,
+                    },
+                    end: crate::eval::CellAddr {
+                        row: array.end.row,
+                        col,
+                    },
+                })
+            }
+            (r, 0) => {
+                if r < 1 || r > rows {
+                    return Err(ErrorKind::Ref);
+                }
+                let row = array.start.row + (r as u32) - 1;
+                Ok(Reference {
+                    sheet_id: array.sheet_id,
+                    start: crate::eval::CellAddr {
+                        row,
+                        col: array.start.col,
+                    },
+                    end: crate::eval::CellAddr {
+                        row,
+                        col: array.end.col,
+                    },
+                })
+            }
+            (r, c) => {
+                if r < 1 || r > rows || c < 1 || c > cols {
+                    return Err(ErrorKind::Ref);
+                }
+                let addr = crate::eval::CellAddr {
+                    row: array.start.row + (r as u32) - 1,
+                    col: array.start.col + (c as u32) - 1,
+                };
+                Ok(Reference {
+                    sheet_id: array.sheet_id,
+                    start: addr,
+                    end: addr,
+                })
+            }
+        }
+    }
+
+    fn index_array(arr: Array, row: i64, col: i64) -> Result<Value, ErrorKind> {
+        let rows = i64::try_from(arr.rows).unwrap_or(i64::MAX);
+        let cols = i64::try_from(arr.cols).unwrap_or(i64::MAX);
+        match (row, col) {
+            (0, 0) => Ok(Value::Array(arr)),
+            (0, c) => {
+                if c < 1 || c > cols {
+                    return Err(ErrorKind::Ref);
+                }
+                let c = (c - 1) as usize;
+                let mut values = Vec::with_capacity(arr.rows);
+                for r in 0..arr.rows {
+                    values.push(arr.get(r, c).cloned().unwrap_or(Value::Blank));
+                }
+                Ok(Value::Array(Array::new(arr.rows, 1, values)))
+            }
+            (r, 0) => {
+                if r < 1 || r > rows {
+                    return Err(ErrorKind::Ref);
+                }
+                let r = (r - 1) as usize;
+                let mut values = Vec::with_capacity(arr.cols);
+                for c in 0..arr.cols {
+                    values.push(arr.get(r, c).cloned().unwrap_or(Value::Blank));
+                }
+                Ok(Value::Array(Array::new(1, arr.cols, values)))
+            }
+            (r, c) => {
+                if r < 1 || r > rows || c < 1 || c > cols {
+                    return Err(ErrorKind::Ref);
+                }
+                Ok(arr
+                    .get((r - 1) as usize, (c - 1) as usize)
+                    .cloned()
+                    .unwrap_or(Value::Blank))
+            }
+        }
+    }
+
     let row = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let col = if args.len() == 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
+    let col_provided = args.get(2).is_some();
+    let col = match args.get(2) {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
-        }
-    } else {
-        1
+        },
+        None => 1,
     };
-    if row < 1 || col < 1 {
+    if row < 0 || col < 0 {
         return Value::Error(ErrorKind::Value);
     }
+    if row == 0 && !col_provided {
+        return Value::Error(ErrorKind::Value);
+    }
+
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => {
-            let array = r.normalized();
-            // Record dereference for dynamic dependency tracing (e.g. INDEX(OFFSET(...), …)).
-            ctx.record_reference(&array);
-            let rows = (array.end.row - array.start.row + 1) as i64;
-            let cols = (array.end.col - array.start.col + 1) as i64;
-            if row > rows || col > cols {
+            let area_num = match args.get(3) {
+                Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+                    Ok(n) => n,
+                    Err(e) => return Value::Error(e),
+                },
+                None => 1,
+            };
+            if area_num != 1 {
                 return Value::Error(ErrorKind::Ref);
             }
-            let addr = crate::eval::CellAddr {
-                row: array.start.row + (row as u32) - 1,
-                col: array.start.col + (col as u32) - 1,
+            match index_reference(&r, row, col) {
+                Ok(reference) => Value::Reference(reference),
+                Err(e) => Value::Error(e),
+            }
+        }
+        ArgValue::ReferenceUnion(ranges) => {
+            let area_num = match args.get(3) {
+                Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+                    Ok(n) => n,
+                    Err(e) => return Value::Error(e),
+                },
+                None => 1,
             };
-            ctx.get_cell_value(&array.sheet_id, addr)
+            if area_num < 1 {
+                return Value::Error(ErrorKind::Ref);
+            }
+            let idx = match usize::try_from(area_num - 1) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Ref),
+            };
+            let Some(r) = ranges.get(idx) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            match index_reference(r, row, col) {
+                Ok(reference) => Value::Reference(reference),
+                Err(e) => Value::Error(e),
+            }
         }
         ArgValue::Scalar(Value::Array(arr)) => {
-            let rows = i64::try_from(arr.rows).unwrap_or(i64::MAX);
-            let cols = i64::try_from(arr.cols).unwrap_or(i64::MAX);
-            if row > rows || col > cols {
-                return Value::Error(ErrorKind::Ref);
+            if args.len() == 4 {
+                return Value::Error(ErrorKind::Value);
             }
-            arr.get((row - 1) as usize, (col - 1) as usize)
-                .cloned()
-                .unwrap_or(Value::Blank)
+            match index_array(arr, row, col) {
+                Ok(v) => v,
+                Err(e) => Value::Error(e),
+            }
         }
         ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
-        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
+        ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
     }
 }
 

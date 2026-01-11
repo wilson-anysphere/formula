@@ -12,6 +12,7 @@ mod harness;
 mod information;
 mod information_worksheet;
 mod lambda_let;
+mod index_reference;
 mod logical;
 mod logical_extended;
 mod lookup;
