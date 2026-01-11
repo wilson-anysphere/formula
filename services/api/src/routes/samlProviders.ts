@@ -264,7 +264,7 @@ function providerToResponse(row: OrgSamlProviderRow): Record<string, unknown> {
 
 export function registerSamlProviderRoutes(app: FastifyInstance): void {
   const requireSessionMfa = async (request: FastifyRequest, reply: FastifyReply, orgId: string) => {
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
       reply.code(403).send({ error: "mfa_required" });
       return false;
     }

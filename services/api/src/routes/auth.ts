@@ -16,7 +16,7 @@ import {
 import { oidcCallback, oidcStart } from "../auth/oidc/oidc";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { samlCallback, samlMetadata, samlStart } from "../auth/saml/saml";
-import { createSession, lookupSessionByToken, revokeSession } from "../auth/sessions";
+import { createSession, lookupSessionByToken, revokeSession, setSessionMfaSatisfied } from "../auth/sessions";
 import { withTransaction } from "../db/tx";
 import { TokenBucketRateLimiter, sha256Hex } from "../http/rateLimit";
 import { getClientIp, getUserAgent } from "../http/request-meta";
@@ -426,7 +426,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
           userId: row.id,
           expiresAt,
           ipAddress: getClientIp(request),
-          userAgent: getUserAgent(request)
+          userAgent: getUserAgent(request),
+          mfaSatisfied: row.mfa_totp_enabled
         });
       });
 
@@ -613,6 +614,11 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       await client.query("UPDATE users SET mfa_totp_enabled = false, mfa_totp_secret_legacy = null WHERE id = $1", [
         request.user!.id
       ]);
+      await setSessionMfaSatisfied(client, {
+        sessionId: request.session!.id,
+        userId: request.user!.id,
+        mfaSatisfied: false
+      });
       await deleteUnusedRecoveryCodes(client, request.user!.id);
       return { ok: true, error, usedRecoveryCodeId };
     });
@@ -673,6 +679,11 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       const secret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, request.user!.id);
       if (!secret || !verifyTotpCode(secret, parsed.data.code)) return false;
       await client.query("UPDATE users SET mfa_totp_enabled = true WHERE id = $1", [request.user!.id]);
+      await setSessionMfaSatisfied(client, {
+        sessionId: request.session!.id,
+        userId: request.user!.id,
+        mfaSatisfied: true
+      });
       return true;
     });
     if (!ok) return reply.code(400).send({ error: "invalid_code" });
@@ -727,6 +738,11 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         request.user!.id
       ]);
       await deleteSecret(client, totpSecretName(request.user!.id));
+      await setSessionMfaSatisfied(client, {
+        sessionId: request.session!.id,
+        userId: request.user!.id,
+        mfaSatisfied: false
+      });
       await deleteUnusedRecoveryCodes(client, request.user!.id);
       return { ok: true, error: null, usedRecoveryCodeId };
     });
@@ -842,6 +858,11 @@ export function registerAuthRoutes(app: FastifyInstance): void {
             [crypto.randomUUID(), userId, hashRecoveryCode(code)]
           );
         }
+        await setSessionMfaSatisfied(client, {
+          sessionId: request.session!.id,
+          userId,
+          mfaSatisfied: true
+        });
         return { ok: true as const, usedRecoveryCodeId };
       });
 

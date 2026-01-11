@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { authenticator } from "otplib";
 import type { Pool } from "pg";
-import type { AuthenticatedUser } from "./sessions";
+import type { SessionInfo } from "./sessions";
 
 authenticator.options = { window: 1 };
 
@@ -27,9 +27,16 @@ export async function isMfaEnforcedForOrg(pool: Pool, orgId: string): Promise<bo
   return Boolean(result.rows[0]?.require_mfa);
 }
 
-export async function requireOrgMfaSatisfied(pool: Pool, orgId: string, user: AuthenticatedUser): Promise<boolean> {
+export async function requireOrgMfaSatisfied(
+  pool: Pool,
+  orgId: string,
+  session: SessionInfo | undefined
+): Promise<boolean> {
   if (!(await isMfaEnforcedForOrg(pool, orgId))) return true;
-  return Boolean(user.mfaTotpEnabled);
+  // Org MFA enforcement applies to interactive sessions. API keys / SCIM auth do not
+  // have an MFA challenge and are intentionally excluded.
+  if (!session) return true;
+  return Boolean(session.mfaSatisfied);
 }
 
 export function generateRecoveryCode(): string {

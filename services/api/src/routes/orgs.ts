@@ -144,7 +144,7 @@ async function requireOrgMember(
     reply.code(404).send({ error: "org_not_found" });
     return null;
   }
-  if (request.session && !(await requireOrgMfaSatisfied(request.server.db, orgId, request.user!))) {
+  if (request.session && !(await requireOrgMfaSatisfied(request.server.db, orgId, request.session))) {
     reply.code(403).send({ error: "mfa_required" });
     return null;
   }
@@ -179,7 +179,7 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgMember(request, reply, orgId);
     if (!member) return;
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -226,7 +226,7 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       const member = await requireOrgMember(request, reply, orgId);
       if (!member) return;
       if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 
@@ -419,7 +419,7 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const member = await requireOrgMember(request, reply, orgId);
       if (!member) return;
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 
@@ -439,7 +439,7 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       const member = await requireOrgMember(request, reply, orgId);
       if (!member) return;
       if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 

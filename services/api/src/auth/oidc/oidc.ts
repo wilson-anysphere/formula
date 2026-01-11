@@ -637,7 +637,8 @@ export async function oidcCallback(request: FastifyRequest, reply: FastifyReply)
     return;
   }
 
-  if (settings.requireMfa && !tokenClaimsIndicateMfa(claims)) {
+  const mfaSatisfied = tokenClaimsIndicateMfa(claims);
+  if (settings.requireMfa && !mfaSatisfied) {
     request.server.metrics.authFailuresTotal.inc({ reason: "mfa_required" });
     await writeOidcFailureAudit({
       request,
@@ -724,7 +725,8 @@ export async function oidcCallback(request: FastifyRequest, reply: FastifyReply)
       userId,
       expiresAt,
       ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
+      userAgent: getUserAgent(request),
+      mfaSatisfied
     });
     return { userId, sessionId: session.sessionId, token: session.token };
   });

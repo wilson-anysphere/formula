@@ -45,7 +45,7 @@ export function registerScimAdminRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const member = await requireOrgAdminForScimTokenManagement(request, reply, orgId);
       if (!member) return;
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 
@@ -100,7 +100,7 @@ export function registerScimAdminRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const member = await requireOrgAdminForScimTokenManagement(request, reply, orgId);
       if (!member) return;
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 
@@ -136,7 +136,7 @@ export function registerScimAdminRoutes(app: FastifyInstance): void {
       const tokenId = (request.params as { orgId: string; tokenId: string }).tokenId;
       const member = await requireOrgAdminForScimTokenManagement(request, reply, orgId);
       if (!member) return;
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 

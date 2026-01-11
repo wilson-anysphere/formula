@@ -958,7 +958,8 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
     return;
   }
 
-  if (settings.requireMfa && !samlIndicatesMfa(profile)) {
+  const mfaSatisfied = samlIndicatesMfa(profile);
+  if (settings.requireMfa && !mfaSatisfied) {
     request.server.metrics.authFailuresTotal.inc({ reason: "mfa_required" });
     await writeSamlFailureAudit({
       request,
@@ -1062,7 +1063,8 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
       userId,
       expiresAt,
       ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
+      userAgent: getUserAgent(request),
+      mfaSatisfied
     });
     return { userId, sessionId: session.sessionId, token: session.token };
   });

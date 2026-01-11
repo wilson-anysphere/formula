@@ -119,7 +119,7 @@ async function requireDocRole(
     reply.code(403).send({ error: "forbidden" });
     return null;
   }
-  if (request.session && !(await requireOrgMfaSatisfied(request.server.db, membership.orgId, request.user!))) {
+  if (request.session && !(await requireOrgMfaSatisfied(request.server.db, membership.orgId, request.session))) {
     reply.code(403).send({ error: "mfa_required" });
     return null;
   }
@@ -156,7 +156,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
 
     if (!(await enforceOrgIpAllowlistForSession(request, reply, orgId))) return;
 
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -204,7 +204,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const docId = (request.params as { docId: string }).docId;
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -217,7 +217,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -264,7 +264,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (!membership) return;
     if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
     if (membership.deletedAt) return reply.code(403).send({ error: "doc_deleted" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -319,7 +319,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -364,7 +364,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -404,7 +404,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -444,7 +444,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const docId = (request.params as { docId: string }).docId;
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -465,7 +465,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -515,7 +515,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -566,7 +566,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "share")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -633,7 +633,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "share")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -656,7 +656,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (!membership) return;
 
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -703,7 +703,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -814,7 +814,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "share")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -930,7 +930,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "share")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -990,7 +990,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
       return reply.code(404).send({ error: "share_link_not_found" });
     }
 
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1117,7 +1117,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1180,7 +1180,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1202,7 +1202,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1238,7 +1238,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const docId = (request.params as { docId: string }).docId;
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1296,7 +1296,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1312,7 +1312,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1363,7 +1363,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1396,7 +1396,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1452,7 +1452,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -1544,7 +1544,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 

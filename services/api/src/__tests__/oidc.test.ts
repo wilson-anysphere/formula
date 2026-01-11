@@ -8,6 +8,7 @@ import { newDb } from "pg-mem";
 import type { Pool } from "pg";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
+import { hashSessionToken } from "../auth/sessions";
 import { runMigrations } from "../db/migrations";
 import { deriveSecretStoreKey, putSecret } from "../secrets/secretStore";
 
@@ -312,6 +313,92 @@ describe("OIDC SSO", () => {
       expect(audit.rowCount).toBe(1);
       expect(audit.rows[0].org_id).toBe(orgId);
       expect(parseJsonValue(audit.rows[0].details)).toMatchObject({ method: "oidc", provider: "mock" });
+      } finally {
+        await app.close();
+        await db.end();
+      }
+    },
+    20_000
+  );
+
+  it(
+    "treats upstream MFA signals as satisfying org require_mfa for gated endpoints",
+    async () => {
+      const { db, config, app } = await createTestApp();
+      try {
+        const ownerRegister = await app.inject({
+          method: "POST",
+          url: "/auth/register",
+          payload: {
+            email: "sso-mfa-owner@example.com",
+            password: "password1234",
+            name: "Owner",
+            orgName: "SSO MFA Org"
+          }
+        });
+        expect(ownerRegister.statusCode).toBe(200);
+        const orgId = (ownerRegister.json() as any).organization.id as string;
+
+        await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb, require_mfa = true WHERE org_id = $1", [
+          orgId,
+          JSON.stringify(["password", "oidc"])
+        ]);
+
+        await db.query(
+          `
+            INSERT INTO org_oidc_providers (org_id, provider_id, issuer_url, client_id, scopes, enabled)
+            VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+          `,
+          [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
+        );
+
+        await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, provider.clientSecret);
+
+        const startRes = await app.inject({
+          method: "GET",
+          url: `/auth/oidc/${orgId}/mock/start`
+        });
+        expect(startRes.statusCode).toBe(302);
+        const authUrl = new URL(startRes.headers.location as string);
+        const state = authUrl.searchParams.get("state");
+        const nonce = authUrl.searchParams.get("nonce");
+        expect(state).toBeTruthy();
+        expect(nonce).toBeTruthy();
+
+        const code = "mfa-code";
+        provider.registerCode(code, {
+          nonce: nonce!,
+          sub: "user-mfa-subject-1",
+          email: "sso-mfa-user@example.com",
+          amr: ["mfa"]
+        });
+
+        const callbackRes = await app.inject({
+          method: "GET",
+          url: `/auth/oidc/${orgId}/mock/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state!)}`
+        });
+        expect(callbackRes.statusCode).toBe(200);
+        const cookie = extractCookie(callbackRes.headers["set-cookie"]);
+
+        const callbackBody = callbackRes.json() as any;
+        const userId = callbackBody.user.id as string;
+
+        const userRow = await db.query("SELECT mfa_totp_enabled FROM users WHERE id = $1", [userId]);
+        expect(userRow.rowCount).toBe(1);
+        expect(userRow.rows[0].mfa_totp_enabled).toBe(false);
+
+        const token = cookie.split("=", 2)[1]!;
+        const tokenHash = hashSessionToken(token);
+        const sessionRow = await db.query("SELECT mfa_satisfied FROM sessions WHERE token_hash = $1", [tokenHash]);
+        expect(sessionRow.rowCount).toBe(1);
+        expect(sessionRow.rows[0].mfa_satisfied).toBe(true);
+
+        const orgRes = await app.inject({
+          method: "GET",
+          url: `/orgs/${orgId}`,
+          headers: { cookie }
+        });
+        expect(orgRes.statusCode).toBe(200);
       } finally {
         await app.close();
         await db.end();

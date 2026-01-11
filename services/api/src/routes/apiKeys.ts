@@ -45,7 +45,7 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const member = await requireOrgAdminForKeyManagement(request, reply, orgId);
       if (!member) return;
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 
@@ -110,7 +110,7 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const member = await requireOrgAdminForKeyManagement(request, reply, orgId);
       if (!member) return;
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 
@@ -146,7 +146,7 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
       const apiKeyId = (request.params as { orgId: string; id: string }).id;
       const member = await requireOrgAdminForKeyManagement(request, reply, orgId);
       if (!member) return;
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
       }
 

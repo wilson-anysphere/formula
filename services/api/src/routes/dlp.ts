@@ -71,7 +71,7 @@ export function registerDlpRoutes(app: FastifyInstance): void {
     const docId = (request.params as { docId: string }).docId;
     const membership = await requireDocRead(request, reply, docId);
     if (!membership) return;
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
