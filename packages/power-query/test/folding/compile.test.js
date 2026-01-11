@@ -79,6 +79,24 @@ test("compile: folds renameColumn when output columns are known", () => {
   });
 });
 
+test("compile: renameColumn to an existing column breaks folding (matches local error semantics)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_rename_break",
+    name: "Rename Break",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Region", "Sales"] } },
+      { id: "s2", name: "Rename", operation: { type: "renameColumn", oldName: "Sales", newName: "Region" } },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "hybrid");
+  assert.equal(plan.sql, 'SELECT t."Region", t."Sales" FROM (SELECT * FROM sales) AS t');
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["renameColumn"]);
+});
+
 test("compile: folds changeType via CAST when output columns are known", () => {
   const folding = new QueryFoldingEngine();
   const query = {
@@ -91,7 +109,7 @@ test("compile: folds changeType via CAST when output columns are known", () => {
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT CAST(t."Value" AS DOUBLE PRECISION) AS "Value" FROM (SELECT * FROM raw) AS t',
+    sql: 'SELECT CASE WHEN TRIM(CAST(t."Value" AS TEXT)) = \'\' THEN NULL WHEN TRIM(CAST(t."Value" AS TEXT)) ~ \'^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$\' THEN CAST(TRIM(CAST(t."Value" AS TEXT)) AS DOUBLE PRECISION) ELSE NULL END AS "Value" FROM (SELECT * FROM raw) AS t',
     params: [],
   });
 });

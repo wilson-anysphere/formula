@@ -285,6 +285,9 @@ export class QueryFoldingEngine {
         if (!state.columns) return null;
         const idx = state.columns.indexOf(operation.oldName);
         if (idx === -1) return null;
+        if (state.columns.includes(operation.newName) && operation.newName !== operation.oldName) {
+          return null;
+        }
         if (operation.oldName === operation.newName) {
           return {
             fragment: { sql: state.fragment.sql, params },
@@ -320,13 +323,12 @@ export class QueryFoldingEngine {
         if (!state.columns) return null;
         if (!state.columns.includes(operation.column)) return null;
 
-        const sqlType = dataTypeToSqlType(dialect, operation.newType);
-        if (!sqlType) return null;
+        const expr = changeTypeToSqlExpr(dialect, `t.${quoteIdentifier(operation.column)}`, operation.newType);
+        if (!expr) return null;
 
         const cols = state.columns.map((name) => {
           if (name !== operation.column) return `t.${quoteIdentifier(name)}`;
-          const colRef = `t.${quoteIdentifier(name)}`;
-          return `CAST(${colRef} AS ${sqlType}) AS ${quoteIdentifier(name)}`;
+          return `${expr} AS ${quoteIdentifier(name)}`;
         });
 
         return {
@@ -598,6 +600,54 @@ function dataTypeToSqlType(dialect, type) {
           throw new Error(`Unsupported type '${exhausted}'`);
         }
       }
+    default: {
+      /** @type {never} */
+      const exhausted = dialect.name;
+      throw new Error(`Unsupported dialect '${exhausted}'`);
+    }
+  }
+}
+
+/**
+ * @param {SqlDialect} dialect
+ * @param {string} colRef
+ * @param {DataType} newType
+ * @returns {string | null}
+ */
+function changeTypeToSqlExpr(dialect, colRef, newType) {
+  switch (newType) {
+    case "string":
+      return dialect.castText(colRef);
+    case "number":
+      return safeCastNumberToSql(dialect, colRef);
+    default:
+      return null;
+  }
+}
+
+/**
+ * @param {SqlDialect} dialect
+ * @param {string} colRef
+ * @returns {string | null}
+ */
+function safeCastNumberToSql(dialect, colRef) {
+  const sqlType = dataTypeToSqlType(dialect, "number");
+  if (!sqlType) return null;
+
+  // Local `changeType` semantics map non-numeric inputs to `null` instead of
+  // throwing (and they accept leading/trailing whitespace). We emulate that
+  // behavior with a conservative numeric regex gate. Dialects without a regex
+  // operator (e.g. SQLite) fall back to local execution.
+  const trimmed = `TRIM(${dialect.castText(colRef)})`;
+  const pattern = "'^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$'";
+
+  switch (dialect.name) {
+    case "postgres":
+      return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} ~ ${pattern} THEN CAST(${trimmed} AS ${sqlType}) ELSE NULL END`;
+    case "mysql":
+      return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} REGEXP ${pattern} THEN CAST(${trimmed} AS ${sqlType}) ELSE NULL END`;
+    case "sqlite":
+      return null;
     default: {
       /** @type {never} */
       const exhausted = dialect.name;
