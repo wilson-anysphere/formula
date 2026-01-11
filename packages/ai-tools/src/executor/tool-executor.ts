@@ -602,20 +602,37 @@ export class ToolExecutor {
       throw toolError("permission_denied", "fetch_external_data is disabled by default.");
     }
 
-    const url = new URL(params.url);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw toolError("permission_denied", `External protocol "${url.protocol}" is not supported for fetch_external_data.`);
-    }
-    if (this.options.allowed_external_hosts.length > 0 && !this.options.allowed_external_hosts.includes(url.host)) {
-      throw toolError(
-        "permission_denied",
-        `External host "${url.host}" is not in the allowlist for fetch_external_data.`
-      );
+    const requestedUrl = new URL(params.url);
+    ensureExternalUrlAllowed(requestedUrl, this.options.allowed_external_hosts);
+
+    // Prevent allowlist bypass via redirects by manually following redirects and
+    // validating each hop.
+    const maxRedirects = 5;
+    let currentUrl = requestedUrl;
+    let response: Response | null = null;
+
+    for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
+      ensureExternalUrlAllowed(currentUrl, this.options.allowed_external_hosts);
+      response = await fetch(currentUrl.toString(), {
+        headers: params.headers ?? undefined,
+        redirect: "manual"
+      });
+
+      if (!isRedirectStatus(response.status)) break;
+
+      const location = response.headers.get("location");
+      if (!location) {
+        throw toolError("runtime_error", `External fetch failed with HTTP ${response.status} (missing Location header)`);
+      }
+      currentUrl = new URL(location, currentUrl);
     }
 
-    const response = await fetch(url.toString(), {
-      headers: params.headers ?? undefined
-    });
+    if (!response) {
+      throw toolError("runtime_error", "External fetch failed to produce a response.");
+    }
+    if (isRedirectStatus(response.status)) {
+      throw toolError("runtime_error", `External fetch exceeded maximum redirects (${maxRedirects}).`);
+    }
 
     const statusCode = response.status;
     const contentType = response.headers.get("content-type") ?? undefined;
@@ -648,7 +665,7 @@ export class ToolExecutor {
         endCol: destination.col
       });
       return {
-        url: url.toString(),
+        url: currentUrl.toString(),
         destination: formatA1Cell(destination),
         written_cells: 1,
         shape: { rows: 1, cols: 1 },
@@ -674,7 +691,7 @@ export class ToolExecutor {
     this.refreshPivotsForRange(range);
 
     return {
-      url: url.toString(),
+      url: currentUrl.toString(),
       destination: formatA1Cell(destination),
       written_cells: table.length * (table[0]?.length ?? 0),
       shape: { rows: table.length, cols: table[0]?.length ?? 0 },
@@ -1463,6 +1480,19 @@ function normalizeJsonScalar(value: unknown): CellScalar {
   if (value === null || value === undefined) return null;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
   return JSON.stringify(value);
+}
+
+function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw toolError("permission_denied", `External protocol "${url.protocol}" is not supported for fetch_external_data.`);
+  }
+  if (allowedHosts.length > 0 && !allowedHosts.includes(url.host)) {
+    throw toolError("permission_denied", `External host "${url.host}" is not in the allowlist for fetch_external_data.`);
+  }
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
 async function readResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array> {

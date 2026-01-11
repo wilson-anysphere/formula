@@ -386,6 +386,86 @@ describe("ToolExecutor", () => {
     expect(result.error?.code).toBe("permission_denied");
   });
 
+  it("fetch_external_data blocks allowlist bypass via redirects", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "https://api.example.com/start") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://evil.example.com/data" }
+        });
+      }
+      return new Response(JSON.stringify([{ should: "not fetch" }]), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com/start",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+  });
+
+  it("fetch_external_data follows allowlisted redirects and returns the final URL", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
+
+    const payload = JSON.stringify([{ foo: "bar" }]);
+    const payloadBytes = Buffer.byteLength(payload);
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "https://api.example.com/start") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "/final" }
+        });
+      }
+      if (url === "https://api.example.com/final") {
+        return new Response(payload, {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "content-length": String(payloadBytes)
+          }
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com/start",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("fetch_external_data");
+    if (!result.ok || result.tool !== "fetch_external_data") throw new Error("Unexpected tool result");
+    if (!result.data) throw new Error("Expected fetch_external_data to return data");
+
+    expect(result.data.url).toBe("https://api.example.com/final");
+    expect(result.data.content_length_bytes).toBe(payloadBytes);
+
+    const written = workbook
+      .readRange(parseA1Range("Sheet1!A1:A2"))
+      .map((row) => row.map((cell) => cell.value));
+    expect(written).toEqual([["foo"], ["bar"]]);
+  });
+
   it("fetch_external_data enforces max_external_bytes using content-length header", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, {
