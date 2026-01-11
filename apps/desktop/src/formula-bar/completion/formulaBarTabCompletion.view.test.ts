@@ -131,6 +131,44 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("previews sheet-qualified range suggestions", async () => {
+    const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      doc.setCellValue("Sheet2", { row, col: 0 }, row + 1);
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "B11", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(Sheet2!A";
+    view.textarea.setSelectionRange(13, 13);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=SUM(Sheet2!A1:A10)");
+    expect(view.model.aiGhostText()).toBe("1:A10)");
+    expect(view.model.aiSuggestionPreview()).toBe(55);
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    expect(highlight?.textContent).toContain("=SUM(Sheet2!A1:A10)");
+    expect(highlight?.querySelector(".formula-bar-preview")?.textContent).toContain("55");
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("suggests function name completion (=VLO → VLOOKUP()", async () => {
     const doc = new DocumentController();
     const host = document.createElement("div");

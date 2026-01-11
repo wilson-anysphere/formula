@@ -127,6 +127,20 @@ function flattenNumbers(values: CellValue[], out: number[]): string | null {
 
 type GetCellValue = (address: string) => SpreadsheetValue;
 
+function splitSheetQualifier(input: string): { sheetName: string | null; ref: string } {
+  const s = String(input).trim();
+
+  const quoted = s.match(/^'((?:[^']|'')+)'!(.+)$/);
+  if (quoted) {
+    return { sheetName: quoted[1].replace(/''/g, "'"), ref: quoted[2] };
+  }
+
+  const unquoted = s.match(/^([^!]+)!(.+)$/);
+  if (unquoted) return { sheetName: unquoted[1], ref: unquoted[2] };
+
+  return { sheetName: null, ref: s };
+}
+
 function evalFunction(
   name: string,
   args: CellValue[],
@@ -171,16 +185,19 @@ function evalFunction(
 }
 
 function readReference(refText: string, getCellValue: GetCellValue): CellValue {
-  const range = parseA1Range(refText);
+  const { sheetName, ref } = splitSheetQualifier(refText);
+  const range = parseA1Range(ref);
   if (!range) return "#REF!";
+
+  const prefix = sheetName ? `${sheetName}!` : "";
   if (range.start.row === range.end.row && range.start.col === range.end.col) {
-    return getCellValue(toA1(range.start));
+    return getCellValue(`${prefix}${toA1(range.start)}`);
   }
   const values: SpreadsheetValue[] = [];
   for (let r = range.start.row; r <= range.end.row; r += 1) {
     for (let c = range.start.col; c <= range.end.col; c += 1) {
       const addr = toA1({ row: r, col: c });
-      values.push(getCellValue(addr));
+      values.push(getCellValue(`${prefix}${addr}`));
     }
   }
   return values;

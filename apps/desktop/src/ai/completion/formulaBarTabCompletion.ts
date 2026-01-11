@@ -271,9 +271,9 @@ function createPreviewEvaluator(params: {
     const text = suggestion?.text ?? "";
     if (typeof text !== "string" || text.trim() === "") return undefined;
 
-    // The lightweight evaluator can't resolve sheet-qualified references or
-    // structured references yet; don't show misleading errors.
-    if (text.includes("!") || text.includes("[")) return "(preview unavailable)";
+    // The lightweight evaluator can't resolve structured references yet; don't
+    // show misleading errors.
+    if (text.includes("[")) return "(preview unavailable)";
 
     const namedRanges = await getNamedRanges();
     const resolveNameToReference = (name: string): string | null => {
@@ -282,6 +282,18 @@ function createPreviewEvaluator(params: {
       if (!entry) return null;
       if (entry.sheetName && entry.sheetName.toLowerCase() !== sheetId.toLowerCase()) return null;
       return entry.ref;
+    };
+
+    const knownSheets =
+      typeof document.getSheetIds === "function"
+        ? (document.getSheetIds() as string[]).filter((s) => typeof s === "string" && s.length > 0)
+        : [];
+
+    const resolveSheetId = (name: string): string | null => {
+      const trimmed = name.trim();
+      if (!trimmed) return null;
+      if (knownSheets.length === 0) return trimmed;
+      return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
     };
 
     let reads = 0;
@@ -294,17 +306,29 @@ function createPreviewEvaluator(params: {
         throw new Error("preview too large");
       }
 
-      const normalized = ref.replaceAll("$", "").toUpperCase();
-      const key = `${sheetId}:${normalized}`;
+      const trimmed = ref.replaceAll("$", "").trim();
+      let targetSheet = sheetId;
+      let addr = trimmed;
+      const bang = trimmed.indexOf("!");
+      if (bang >= 0) {
+        const sheetName = trimmed.slice(0, bang).trim();
+        const resolved = resolveSheetId(sheetName);
+        if (!resolved) return null;
+        targetSheet = resolved;
+        addr = trimmed.slice(bang + 1);
+      }
+
+      const normalized = addr.replaceAll("$", "").toUpperCase();
+      const key = `${targetSheet}:${normalized}`;
       if (memo.has(key)) return memo.get(key) as unknown;
       if (stack.has(key)) return "#REF!";
 
       stack.add(key);
-      const state = document.getCell(sheetId, normalized) as { value: unknown; formula: string | null };
+      const state = document.getCell(targetSheet, normalized) as { value: unknown; formula: string | null };
       let value: unknown;
       if (state?.formula) {
         value = evaluateFormula(state.formula, getCellValue, {
-          cellAddress: `${sheetId}!${normalized}`,
+          cellAddress: `${targetSheet}!${normalized}`,
           resolveNameToReference,
         });
       } else {
