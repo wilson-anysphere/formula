@@ -764,6 +764,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "share")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const parsed = ShareLinkBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
@@ -877,6 +880,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "share")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const links = await app.db.query(
       `
