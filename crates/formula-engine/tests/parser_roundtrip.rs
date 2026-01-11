@@ -112,7 +112,7 @@ fn serializes_sheet_names_that_require_quoting() {
 }
 
 #[test]
-fn serializes_external_workbook_prefixes_as_single_quoted_sheet_refs() {
+fn serializes_external_workbook_prefixes_without_quotes_when_possible() {
     let opts = ParseOptions::default();
     let ser = SerializeOptions::default();
     let ast = parse_formula("=[Book.xlsx]Sheet1!A1+1", opts).unwrap();

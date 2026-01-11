@@ -907,8 +907,8 @@ fn fmt_ref_prefix(
     match (workbook.as_ref(), sheet.as_ref()) {
         (Some(book), Some(sheet_ref)) => {
             // External references are written as `[Book.xlsx]Sheet1!A1`.
-            // Excel uses a single quoted string for the combined `[book]sheet` prefix when it
-            // contains spaces/special characters.
+            // Excel uses a single quoted string for the combined `[book]sheet` prefix when the
+            // sheet name requires quoting (e.g. spaces / characters that aren't valid identifiers).
             match sheet_ref {
                 SheetRef::Sheet(sheet) => {
                     // Workbook names inside `[...]` are permissive (Excel allows spaces, dashes,

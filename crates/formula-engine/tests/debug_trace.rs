@@ -435,3 +435,37 @@ fn debug_trace_collapses_degenerate_external_3d_sheet_spans() {
         })
     );
 }
+
+#[test]
+fn debug_trace_rejects_external_3d_sheet_spans() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        1.0,
+    );
+    provider.set(
+        "[Book.xlsx]Sheet3",
+        CellAddr { row: 0, col: 0 },
+        3.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Error(formula_engine::ErrorKind::Ref));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        "[Book.xlsx]Sheet1:Sheet3!A1"
+    );
+    assert!(matches!(dbg.trace.kind, TraceKind::CellRef));
+    assert!(dbg.trace.reference.is_none());
+}
