@@ -375,4 +375,62 @@ describe("ToolExecutor DLP enforcement", () => {
     });
     expect(event.decision?.decision).toBe("redact");
   });
+
+  it("write_cell does not reveal equality with restricted content via changed=false", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 42 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 0,
+              col: 0
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Sheet1!A1", value: 42 }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("write_cell");
+    if (!result.ok || result.tool !== "write_cell") throw new Error("Unexpected tool result");
+    // If we returned the true `changed` value, this would be `false` and would leak that the old value was 42.
+    expect(result.data?.changed).toBe(true);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "write_cell",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1",
+      redactedCellCount: 1
+    });
+    expect(event.decision?.decision).toBe("redact");
+  });
 });

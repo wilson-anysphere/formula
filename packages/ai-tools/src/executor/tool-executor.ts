@@ -288,7 +288,10 @@ export class ToolExecutor {
 
   private writeCell(params: any): ToolResultDataByName["write_cell"] {
     const address = parseA1Cell(params.cell, this.options.default_sheet);
-    const before = this.spreadsheet.getCell(address);
+    const range = { sheet: address.sheet, startRow: address.row, endRow: address.row, startCol: address.col, endCol: address.col };
+    const dlp = this.evaluateDlpForRange("write_cell", range);
+    const shouldMaskChanged = Boolean(dlp && dlp.decision.decision !== DLP_DECISION.ALLOW);
+    const before = shouldMaskChanged ? null : this.spreadsheet.getCell(address);
 
     const rest = params as { value: CellScalar; is_formula?: boolean };
     const isFormula =
@@ -306,8 +309,9 @@ export class ToolExecutor {
       startCol: address.col,
       endCol: address.col
     });
-    const after = this.spreadsheet.getCell(address);
-    return { cell: formatA1Cell(address), changed: !cellsEqual(before, after) };
+    const changed = shouldMaskChanged ? true : !cellsEqual(before!, this.spreadsheet.getCell(address));
+    if (dlp) this.logToolDlpDecision({ tool: "write_cell", range, dlp, redactedCellCount: shouldMaskChanged ? 1 : 0 });
+    return { cell: formatA1Cell(address), changed };
   }
 
   private setRange(params: any): ToolResultDataByName["set_range"] {
