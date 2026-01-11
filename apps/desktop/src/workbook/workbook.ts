@@ -1,4 +1,5 @@
 import { rewriteSheetNamesInFormula } from "./formulaRewrite";
+import { fromA1, toA1 } from "@formula/spreadsheet-frontend/a1";
 
 export type SheetVisibility = "visible" | "hidden" | "veryHidden";
 
@@ -194,15 +195,10 @@ function localRef(workbook: Workbook, currentSheetId: string, part: string): num
 }
 
 function parseA1(a1: string): { row: number; col: number; a1: string } | null {
-  const match = /^([A-Za-z]+)(\d+)$/.exec(a1);
-  if (!match) return null;
-  const [, colLetters, rowStr] = match;
-  const row = Number(rowStr) - 1;
-  if (!Number.isFinite(row) || row < 0) return null;
-  let col = 0;
-  for (const ch of colLetters.toUpperCase()) {
-    col = col * 26 + (ch.charCodeAt(0) - 64);
+  try {
+    const { row0, col0 } = fromA1(a1);
+    return { row: row0, col: col0, a1: toA1(row0, col0) };
+  } catch {
+    return null;
   }
-  if (col <= 0) return null;
-  return { row, col: col - 1, a1 };
 }
