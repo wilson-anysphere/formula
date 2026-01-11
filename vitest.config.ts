@@ -10,6 +10,7 @@ export default defineConfig({
       "services/api/src/__tests__/**/*.test.ts"
     ],
     environment: "node",
-    setupFiles: ["./vitest.setup.ts"]
+    setupFiles: ["./vitest.setup.ts"],
+    globalSetup: "./scripts/vitest.global-setup.mjs"
   }
 });
