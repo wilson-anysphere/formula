@@ -88,6 +88,12 @@ fn biff_codepage(workbook_stream: &[u8]) -> u16 {
         let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
             break;
         };
+        // BOF indicates the start of a new substream; the workbook globals
+        // contain a single BOF at offset 0, so a second BOF means we're past
+        // the globals section.
+        if offset != 0 && (record_id == 0x0809 || record_id == 0x0009) {
+            break;
+        }
         offset = match offset
             .checked_add(4)
             .and_then(|o| o.checked_add(data.len()))
@@ -219,6 +225,13 @@ pub(crate) fn parse_biff_workbook_globals(
         let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
             break;
         };
+        // BOF indicates the start of a new substream; the workbook globals
+        // contain a single BOF at offset 0, so a second BOF means we're past
+        // the globals section (even if the EOF record is missing).
+        if offset != 0 && (record_id == 0x0809 || record_id == 0x0009) {
+            saw_eof = true;
+            break;
+        }
         offset = offset
             .checked_add(4)
             .and_then(|o| o.checked_add(data.len()))
@@ -319,6 +332,11 @@ pub(crate) fn parse_biff_bound_sheets(
         let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
             break;
         };
+        // Same rationale as `parse_biff_workbook_globals`: stop once we reach the
+        // BOF record for the next substream.
+        if offset != 0 && (record_id == 0x0809 || record_id == 0x0009) {
+            break;
+        }
         offset = offset
             .checked_add(4)
             .and_then(|o| o.checked_add(data.len()))
