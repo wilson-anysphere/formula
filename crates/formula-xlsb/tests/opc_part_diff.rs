@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -69,6 +70,13 @@ fn build_fixture_with_calc_chain_and_styles(base_bytes: &[u8]) -> Vec<u8> {
     }
 
     zip_out.finish().expect("finish zip").into_inner()
+}
+
+fn zip_has_part(path: &Path, part: &str) -> bool {
+    let file = File::open(path).expect("open zip");
+    let zip = ZipArchive::new(file).expect("read zip");
+    let has = zip.file_names().any(|name| name == part);
+    has
 }
 
 fn format_report(report: &xlsx_diff::DiffReport) -> String {
@@ -150,6 +158,7 @@ fn save_as_is_lossless_with_minimal_open_options() {
 fn patch_writer_changes_only_target_sheet_part() {
     let fixture_path = fixture_path();
     let wb = XlsbWorkbook::open(&fixture_path).expect("open xlsb fixture");
+    let fixture_has_calc_chain = zip_has_part(&fixture_path, "xl/calcChain.bin");
 
     let tmpdir = tempfile::tempdir().expect("create temp dir");
     let out_path = tmpdir.path().join("patched.xlsb");
@@ -166,38 +175,68 @@ fn patch_writer_changes_only_target_sheet_part() {
     assert_eq!(b1.value, CellValue::Number(123.0));
 
     let report = xlsx_diff::diff_workbooks(&fixture_path, &out_path).expect("diff workbooks");
+    let report_text = format_report(&report);
+
     assert!(
         report
             .differences
             .iter()
             .any(|d| d.part == "xl/worksheets/sheet1.bin"),
-        "expected worksheet part to change, got:\n{}",
-        format_report(&report)
+        "expected worksheet part to change, got:\n{report_text}",
     );
 
-    let unexpected_missing: Vec<_> = report
+    // When a workbook has an existing calcChain, the writer may remove it (and update the
+    // accompanying XML plumbing). When there is no calcChain in the source package, we should
+    // not create one or touch those parts.
+    let mut allowed_parts: BTreeSet<String> =
+        BTreeSet::from(["xl/worksheets/sheet1.bin".to_string()]);
+    if fixture_has_calc_chain {
+        allowed_parts.extend([
+            "xl/calcChain.bin".to_string(),
+            "[Content_Types].xml".to_string(),
+            "xl/_rels/workbook.bin.rels".to_string(),
+        ]);
+    } else {
+        assert!(
+            report
+                .differences
+                .iter()
+                .all(|d| !d.part.starts_with("xl/calcChain.")),
+            "did not expect calcChain changes for fixture without calcChain.bin; got:\n{report_text}",
+        );
+        assert!(
+            !zip_has_part(&out_path, "xl/calcChain.bin"),
+            "patched workbook should not gain xl/calcChain.bin"
+        );
+    }
+
+    let missing_parts: Vec<_> = report
         .differences
         .iter()
-        .filter(|d| d.kind == "missing_part" && !is_calc_chain_part(&d.part))
+        .filter(|d| d.kind == "missing_part")
         .map(|d| d.part.clone())
         .collect();
-    assert!(
-        unexpected_missing.is_empty(),
-        "unexpected missing parts: {unexpected_missing:?}\n{}",
-        format_report(&report)
-    );
+    if fixture_has_calc_chain {
+        assert!(
+            missing_parts == vec!["xl/calcChain.bin".to_string()],
+            "expected only calcChain.bin to be missing; got {missing_parts:?}\n{report_text}"
+        );
+    } else {
+        assert!(
+            missing_parts.is_empty(),
+            "unexpected missing parts: {missing_parts:?}\n{report_text}"
+        );
+    }
 
-    let parts: BTreeSet<String> = report.differences.iter().map(|d| d.part.clone()).collect();
-    let unexpected_parts: Vec<_> = parts
-        .iter()
-        .filter(|part| !is_allowed_patch_diff_part(part))
+    let diff_parts: BTreeSet<String> = report.differences.iter().map(|d| d.part.clone()).collect();
+    let unexpected_parts: Vec<_> = diff_parts
+        .difference(&allowed_parts)
         .cloned()
         .collect();
 
     assert!(
         unexpected_parts.is_empty(),
-        "unexpected diff parts: {unexpected_parts:?}\n{}",
-        format_report(&report)
+        "unexpected diff parts: {unexpected_parts:?}\n{report_text}",
     );
 }
 
@@ -311,12 +350,4 @@ fn patch_writer_allows_only_expected_calc_chain_side_effects() {
             .any(|name| name == "xl/styles.bin"),
         "xl/styles.bin must be preserved in patched workbook"
     );
-}
-
-fn is_allowed_patch_diff_part(part: &str) -> bool {
-    part == "xl/worksheets/sheet1.bin" || is_calc_chain_part(part)
-}
-
-fn is_calc_chain_part(part: &str) -> bool {
-    part.starts_with("xl/calcChain.")
 }
