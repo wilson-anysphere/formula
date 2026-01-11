@@ -229,6 +229,25 @@ test("v2 rejects packages where files/package.json differs from manifest.json", 
   assert.throws(() => verifyExtensionPackageV2(archive, key.publicKeyPem), /does not match manifest/i);
 });
 
+test("v2 rejects duplicate manifest.json entries", () => {
+  const manifest = {
+    name: "temp-ext",
+    publisher: "temp-pub",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+  };
+
+  const archive = createTarArchive([
+    { name: "manifest.json", data: canonicalJsonBytes(manifest) },
+    { name: "manifest.json", data: canonicalJsonBytes(manifest) },
+    { name: "checksums.json", data: canonicalJsonBytes({ algorithm: "sha256", files: {} }) },
+    { name: "signature.json", data: canonicalJsonBytes({ algorithm: "ed25519", formatVersion: 2, signatureBase64: "" }) },
+  ]);
+
+  assert.throws(() => readExtensionPackageV2(archive), /duplicate manifest\.json/i);
+});
+
 test("marketplace store accepts v1 packages during transition", async (t) => {
   try {
     requireFromHere.resolve("sql.js");

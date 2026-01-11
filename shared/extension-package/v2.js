@@ -315,14 +315,23 @@ function readExtensionPackageV2(packageBytes) {
     const name = normalizePath(normalizedName);
 
     if (name === "manifest.json") {
+      if (required.manifest) {
+        throw new Error("Invalid extension package: duplicate manifest.json");
+      }
       required.manifest = JSON.parse(entry.data.toString("utf8"));
       continue;
     }
     if (name === "checksums.json") {
+      if (required.checksums) {
+        throw new Error("Invalid extension package: duplicate checksums.json");
+      }
       required.checksums = JSON.parse(entry.data.toString("utf8"));
       continue;
     }
     if (name === "signature.json") {
+      if (required.signature) {
+        throw new Error("Invalid extension package: duplicate signature.json");
+      }
       required.signature = JSON.parse(entry.data.toString("utf8"));
       continue;
     }
