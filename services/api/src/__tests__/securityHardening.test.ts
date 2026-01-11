@@ -92,10 +92,12 @@ describe("security hardening", () => {
     expect(res.headers["x-frame-options"]).toBe("DENY");
     expect(res.headers["referrer-policy"]).toBe("no-referrer");
     expect(res.headers["permissions-policy"]).toContain("camera=()");
+    expect(res.headers["cache-control"]).toBe("no-store");
     expect(res.headers["strict-transport-security"]).toBeUndefined();
 
     const resSecure = await secureApp.inject({ method: "GET", url: "/health" });
     expect(resSecure.statusCode).toBe(200);
+    expect(resSecure.headers["cache-control"]).toBe("no-store");
     expect(resSecure.headers["strict-transport-security"]).toContain("max-age=");
   });
 
