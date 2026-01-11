@@ -227,6 +227,24 @@ ib.BuiltinImporter.exec_module(mod)
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Import of '_socket' is not permitted/);
   });
 
+  it("blocks importlib.reload while sandboxed", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import importlib
+import math
+
+importlib.reload(math)
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Reload of 'math' is not permitted/);
+  });
+
   it("blocks network access even if a script tries to use sys.modules for socket (network=none)", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({

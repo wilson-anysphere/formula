@@ -166,6 +166,24 @@ ib.BuiltinImporter.exec_module(mod)
   await assert.rejects(() => runtime.execute(script, { api: workbook }), /Import of '_socket' is not permitted/);
 });
 
+test("native python sandbox blocks importlib.reload while sandboxed", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import importlib
+import math
+
+importlib.reload(math)
+`;
+
+  await assert.rejects(() => runtime.execute(script, { api: workbook }), /Reload of 'math' is not permitted/);
+});
+
 test("native allowlist sandbox cannot be bypassed via _socket", async () => {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain" });

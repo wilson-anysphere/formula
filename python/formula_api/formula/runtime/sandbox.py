@@ -448,6 +448,8 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
         BaseSocketType = _ORIGINAL__SOCKET_SOCKET
 
         class GuardedSocketType(BaseSocketType):  # type: ignore[misc,valid-type]
+            __slots__ = ()
+
             def connect(self, address):  # type: ignore[no-untyped-def]
                 if getattr(_SOCKET_THREAD_LOCAL, "bypass_connect_check", 0):
                     return super().connect(address)

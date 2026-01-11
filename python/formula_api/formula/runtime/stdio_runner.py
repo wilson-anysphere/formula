@@ -110,6 +110,18 @@ def main() -> None:
 
             sys.meta_path.insert(0, _ImportBlocker())
 
+            # Best-effort: disallow module reloads while sandboxing is active.
+            # Reloading core modules like `socket` can restore unpatched connection
+            # methods and bypass the allowlist policy.
+            try:
+                def blocked_reload(module):  # type: ignore[no-untyped-def]
+                    name = getattr(module, "__name__", "<unknown>")
+                    raise PermissionError(f"Reload of {name!r} is not permitted")
+
+                importlib.reload = blocked_reload  # type: ignore[assignment]
+            except Exception:
+                pass
+
             # Best-effort: block common importlib escape hatches that can load
             # built-in modules directly without consulting sys.meta_path.
             try:
