@@ -461,14 +461,19 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
   },
   detect_anomalies: {
     name: "detect_anomalies",
-    description: "Find outliers and anomalies in a range.",
+    description:
+      "Find outliers and anomalies in a range. `threshold` meaning depends on `method`: zscore uses a z-score cutoff, iqr uses an IQR multiplier, and isolation_forest uses a score cutoff (0-1) or, if >1, the top N anomalies.",
     paramsSchema: DetectAnomaliesParamsSchema,
     jsonSchema: {
       type: "object",
       properties: {
         range: { type: "string" },
         method: { type: "string", enum: ["zscore", "iqr", "isolation_forest"], default: "zscore" },
-        threshold: { type: "number" }
+        threshold: {
+          type: "number",
+          description:
+            "zscore: absolute z-score cutoff (default 3). iqr: IQR multiplier (default 1.5). isolation_forest: score cutoff (0-1, default 0.65) or top N anomalies (if >1)."
+        }
       },
       required: ["range"]
     }

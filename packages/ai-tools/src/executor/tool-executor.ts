@@ -61,11 +61,22 @@ export type ToolResultDataByName = {
     range: string;
     formatted_cells: number;
   };
-  detect_anomalies: {
-    range: string;
-    method: string;
-    anomalies: Array<{ cell: string; value: number; score?: number }>;
-  };
+  detect_anomalies:
+    | {
+        range: string;
+        method: "iqr";
+        anomalies: Array<{ cell: string; value: number }>;
+      }
+    | {
+        range: string;
+        method: "zscore";
+        anomalies: Array<{ cell: string; value: number; score: number }>;
+      }
+    | {
+        range: string;
+        method: "isolation_forest";
+        anomalies: Array<{ cell: string; value: number; score: number }>;
+      };
   compute_statistics: {
     range: string;
     statistics: Record<string, number | null>;
@@ -420,7 +431,8 @@ export class ToolExecutor {
 
   private detectAnomalies(params: any): ToolResultDataByName["detect_anomalies"] {
     const range = parseA1Range(params.range, this.options.default_sheet);
-    const method: string = params.method ?? "zscore";
+    const formattedRange = formatA1Range(range);
+    const method = (params.method ?? "zscore") as "zscore" | "iqr" | "isolation_forest";
     const cells = this.spreadsheet.readRange(range);
     const entries: Array<{ cell: string; value: number }> = [];
     for (let r = 0; r < cells.length; r++) {
@@ -436,7 +448,16 @@ export class ToolExecutor {
     }
 
     if (entries.length === 0) {
-      return { range: formatA1Range(range), method, anomalies: [] };
+      switch (method) {
+        case "zscore":
+        case "iqr":
+        case "isolation_forest":
+          return { range: formattedRange, method, anomalies: [] };
+        default: {
+          const exhaustive: never = method;
+          throw new Error(`Unsupported detect_anomalies method: ${exhaustive}`);
+        }
+      }
     }
 
     switch (method) {
@@ -448,12 +469,12 @@ export class ToolExecutor {
             ? entries.reduce((sum, e) => sum + (e.value - mean) ** 2, 0) / (entries.length - 1)
             : 0;
         const stdev = Math.sqrt(variance);
-        if (stdev === 0) return { range: formatA1Range(range), method, anomalies: [] };
+        if (stdev === 0) return { range: formattedRange, method, anomalies: [] };
         const anomalies = entries
           .map((e) => ({ ...e, score: (e.value - mean) / stdev }))
           .filter((e) => Math.abs(e.score) >= threshold)
           .map((e) => ({ cell: e.cell, value: e.value, score: e.score }));
-        return { range: formatA1Range(range), method, anomalies };
+        return { range: formattedRange, method, anomalies };
       }
       case "iqr": {
         const multiplier = params.threshold ?? 1.5;
@@ -466,10 +487,37 @@ export class ToolExecutor {
         const anomalies = entries
           .filter((e) => e.value < low || e.value > high)
           .map((e) => ({ cell: e.cell, value: e.value }));
-        return { range: formatA1Range(range), method, anomalies };
+        return { range: formattedRange, method, anomalies };
       }
-      case "isolation_forest":
-        throw toolError("not_implemented", "detect_anomalies method isolation_forest is not implemented yet.");
+      case "isolation_forest": {
+        const values = entries.map((entry) => entry.value);
+        const seed = fnv1a32(`${formattedRange}|isolation_forest`);
+        const scores = isolationForestScores(values, { seed });
+        const scored = entries
+          .map((entry, index) => ({ ...entry, score: scores[index]! }))
+          .sort((a, b) => b.score - a.score || a.cell.localeCompare(b.cell));
+
+        /**
+         * Isolation forest `threshold` semantics:
+         * - If omitted, we use a default score cutoff (`score >= 0.65`).
+         * - If `0 < threshold <= 1`, treat it as a score cutoff (`score >= threshold`).
+         * - If `threshold > 1`, treat it as a "top N" selector (rounded + clamped).
+         */
+        const threshold = params.threshold as number | undefined;
+        if (threshold === undefined || threshold <= 1) {
+          const cutoff = threshold ?? 0.65;
+          const anomalies = scored
+            .filter((entry) => entry.score >= cutoff)
+            .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
+          return { range: formattedRange, method, anomalies };
+        }
+
+        const topN = Math.min(scored.length, Math.max(0, Math.round(threshold)));
+        const anomalies = scored
+          .slice(0, topN)
+          .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
+        return { range: formattedRange, method, anomalies };
+      }
       default:
         throw new Error(`Unsupported detect_anomalies method: ${method}`);
     }
@@ -1198,6 +1246,141 @@ function variance(values: number[]): number {
 
 function stdev(values: number[]): number {
   return Math.sqrt(variance(values));
+}
+
+interface IsolationTreeNode {
+  size: number;
+  split?: number;
+  left?: IsolationTreeNode;
+  right?: IsolationTreeNode;
+}
+
+function fnv1a32(value: string): number {
+  // 32-bit FNV-1a hash.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sampleIndicesWithoutReplacement(length: number, sampleSize: number, rng: () => number): number[] {
+  const indices = Array.from({ length }, (_, idx) => idx);
+  const count = Math.min(sampleSize, length);
+  for (let i = 0; i < count; i++) {
+    const j = i + Math.floor(rng() * (length - i));
+    const tmp = indices[i]!;
+    indices[i] = indices[j]!;
+    indices[j] = tmp;
+  }
+  indices.length = count;
+  return indices;
+}
+
+const harmonicNumberCache: number[] = [0];
+
+function harmonicNumber(n: number): number {
+  for (let i = harmonicNumberCache.length; i <= n; i++) {
+    harmonicNumberCache[i] = harmonicNumberCache[i - 1]! + 1 / i;
+  }
+  return harmonicNumberCache[n]!;
+}
+
+const isolationForestAveragePathLengthCache: number[] = [];
+
+function isolationForestAveragePathLength(n: number): number {
+  // c(n) in the isolation forest paper: average path length of unsuccessful search in a BST.
+  const cached = isolationForestAveragePathLengthCache[n];
+  if (cached !== undefined) return cached;
+
+  let next: number;
+  if (n <= 1) next = 0;
+  else if (n === 2) next = 1;
+  else next = 2 * harmonicNumber(n - 1) - (2 * (n - 1)) / n;
+
+  isolationForestAveragePathLengthCache[n] = next;
+  return next;
+}
+
+function buildIsolationTree(values: number[], depth: number, maxDepth: number, rng: () => number): IsolationTreeNode {
+  const size = values.length;
+  if (size <= 1 || depth >= maxDepth) return { size };
+
+  let min = Infinity;
+  let max = -Infinity;
+  for (const value of values) {
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+
+  // All values are identical -> cannot split.
+  if (min === max) return { size };
+
+  const split = min + rng() * (max - min);
+  const leftValues: number[] = [];
+  const rightValues: number[] = [];
+  for (const value of values) {
+    if (value <= split) leftValues.push(value);
+    else rightValues.push(value);
+  }
+
+  // Defensive: if a degenerate split happens (should be extremely rare), stop growing this branch.
+  if (leftValues.length === 0 || rightValues.length === 0) return { size };
+
+  return {
+    size,
+    split,
+    left: buildIsolationTree(leftValues, depth + 1, maxDepth, rng),
+    right: buildIsolationTree(rightValues, depth + 1, maxDepth, rng)
+  };
+}
+
+function isolationTreePathLength(node: IsolationTreeNode, value: number, depth: number): number {
+  if (!node.left || !node.right || node.split === undefined) {
+    return depth + isolationForestAveragePathLength(node.size);
+  }
+  if (value <= node.split) return isolationTreePathLength(node.left, value, depth + 1);
+  return isolationTreePathLength(node.right, value, depth + 1);
+}
+
+function isolationForestScores(values: number[], options: { seed: number; trees?: number; sampleSize?: number }): number[] {
+  const trees = options.trees ?? 100;
+  const sampleSize = Math.min(options.sampleSize ?? 256, values.length);
+  const cSample = isolationForestAveragePathLength(sampleSize);
+  if (values.length === 0 || trees <= 0 || sampleSize <= 1 || cSample === 0) {
+    return values.map(() => 0);
+  }
+
+  const rng = mulberry32(options.seed);
+  const maxDepth = Math.ceil(Math.log2(sampleSize));
+  const pathLengthSums = new Array<number>(values.length).fill(0);
+
+  for (let t = 0; t < trees; t++) {
+    const sampleIndices = sampleIndicesWithoutReplacement(values.length, sampleSize, rng);
+    const sampleValues = sampleIndices.map((idx) => values[idx]!);
+    const tree = buildIsolationTree(sampleValues, 0, maxDepth, rng);
+
+    for (let i = 0; i < values.length; i++) {
+      pathLengthSums[i]! += isolationTreePathLength(tree, values[i]!, 0);
+    }
+  }
+
+  return pathLengthSums.map((sum) => {
+    const avgPath = sum / trees;
+    return Math.pow(2, -avgPath / cSample);
+  });
 }
 
 function correlation(pairs: Array<[number, number]>): number {
