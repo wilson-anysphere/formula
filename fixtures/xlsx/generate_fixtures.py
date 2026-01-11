@@ -473,6 +473,36 @@ def sheet_formulas_xml() -> str:
 """
 
 
+def sheet_shared_formula_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1">
+        <f t="shared" ref="A1:A3" si="0">B1*2</f>
+        <v>2</v>
+      </c>
+      <c r="B1"><v>1</v></c>
+    </row>
+    <row r="2">
+      <c r="A2">
+        <f t="shared" si="0"/>
+        <v>4</v>
+      </c>
+      <c r="B2"><v>2</v></c>
+    </row>
+    <row r="3">
+      <c r="A3">
+        <f t="shared" si="0"/>
+        <v>6</v>
+      </c>
+      <c r="B3"><v>3</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
 def sheet_conditional_formatting_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1018,6 +1048,11 @@ def main() -> None:
     write_xlsx(
         ROOT / "formulas" / "formulas.xlsx",
         [sheet_formulas_xml()],
+        styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "formulas" / "shared-formula.xlsx",
+        [sheet_shared_formula_xml()],
         styles_minimal_xml(),
     )
     write_xlsx(

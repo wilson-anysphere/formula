@@ -1,11 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
+use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::RichText;
 use formula_model::{
-    normalize_formula_text, Cell, CellRef, CellValue, ErrorValue, SheetVisibility, Workbook,
+    normalize_formula_text, Cell, CellRef, CellValue, ErrorValue, Range, SheetVisibility, Workbook,
 };
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
@@ -171,6 +172,8 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             &styles_part,
             &mut cell_meta,
         )?;
+
+        expand_shared_formulas(ws, ws_id, &cell_meta);
 
         sheet_meta.push(SheetMeta {
             worksheet_id: ws_id,
@@ -570,6 +573,81 @@ fn parse_worksheet_into_model(
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct SharedFormulaGroup {
+    range: Range,
+    ast: formula_engine::Ast,
+}
+
+fn expand_shared_formulas(
+    worksheet: &mut formula_model::Worksheet,
+    worksheet_id: formula_model::WorksheetId,
+    cell_meta_map: &HashMap<(formula_model::WorksheetId, CellRef), CellMeta>,
+) {
+    let mut groups: HashMap<u32, SharedFormulaGroup> = HashMap::new();
+
+    for ((ws_id, cell_ref), meta) in cell_meta_map {
+        if *ws_id != worksheet_id {
+            continue;
+        }
+        let Some(formula) = meta.formula.as_ref() else {
+            continue;
+        };
+
+        let is_shared_master = formula.t.as_deref() == Some("shared")
+            && formula.reference.is_some()
+            && formula.shared_index.is_some()
+            && !formula.file_text.is_empty();
+        if !is_shared_master {
+            continue;
+        }
+
+        let Some(reference) = formula.reference.as_deref() else {
+            continue;
+        };
+        let Some(shared_index) = formula.shared_index else {
+            continue;
+        };
+
+        let range = match Range::from_a1(reference) {
+            Ok(range) => range,
+            Err(_) => continue,
+        };
+
+        let master_display = crate::formula_text::strip_xlfn_prefixes(&formula.file_text);
+        let mut opts = ParseOptions::default();
+        opts.normalize_relative_to = Some(CellAddr::new(cell_ref.row, cell_ref.col));
+
+        let ast = match parse_formula(&master_display, opts) {
+            Ok(ast) => ast,
+            Err(_) => continue,
+        };
+
+        groups.insert(shared_index, SharedFormulaGroup { range, ast });
+    }
+
+    for group in groups.values() {
+        for cell_ref in group.range.iter() {
+            // Avoid overwriting any explicit formula already present in the worksheet. The goal is
+            // to materialize formulas for shared-formula followers that are textless in the file.
+            if worksheet.formula(cell_ref).is_some() {
+                continue;
+            }
+
+            let mut ser = SerializeOptions::default();
+            ser.origin = Some(CellAddr::new(cell_ref.row, cell_ref.col));
+            ser.omit_equals = true;
+
+            let display = match group.ast.to_string(ser) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            worksheet.set_formula(cell_ref, Some(display));
+        }
+    }
 }
 
 fn interpret_cell_value(

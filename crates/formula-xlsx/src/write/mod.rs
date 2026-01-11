@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Write};
 
+use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
     CellRef, CellValue, ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range,
@@ -1352,6 +1353,8 @@ fn render_sheet_data(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     outline: Option<&Outline>,
 ) -> String {
+    let shared_formulas = shared_formula_groups(doc, sheet_meta.worksheet_id);
+
     let mut out = String::new();
     out.push_str("<sheetData>");
 
@@ -1441,7 +1444,8 @@ fn render_sheet_data(
         out.push('>');
 
         let model_formula = cell.formula.as_deref();
-        let formula_meta = match (model_formula, meta.and_then(|m| m.formula.clone())) {
+        let mut preserve_textless_shared = false;
+        let mut formula_meta = match (model_formula, meta.and_then(|m| m.formula.clone())) {
             (Some(_), Some(meta)) => Some(meta),
             (Some(formula), None) => Some(crate::FormulaMeta {
                 file_text: crate::formula_text::add_xlfn_prefixes(strip_leading_equals(formula)),
@@ -1468,6 +1472,43 @@ fn render_sheet_data(
             (None, None) => None,
         };
 
+        if let (Some(display), Some(meta)) = (model_formula, formula_meta.as_mut()) {
+            if meta.t.as_deref() == Some("shared") && meta.file_text.is_empty() {
+                if let Some(si) = meta.shared_index {
+                    if let Some(expected) = shared_formula_expected(&shared_formulas, si, cell_ref) {
+                        if expected == strip_leading_equals(display) {
+                            preserve_textless_shared = true;
+                        } else {
+                            // The cell's model formula differs from the shared-formula expansion,
+                            // so break sharing and store the explicit formula text.
+                            meta.t = None;
+                            meta.reference = None;
+                            meta.shared_index = None;
+                            meta.file_text = crate::formula_text::add_xlfn_prefixes(
+                                strip_leading_equals(display),
+                            );
+                        }
+                    } else {
+                        // Without the shared-formula master we can't validate equivalence, so
+                        // prefer preserving the model formula over keeping the shared structure.
+                        meta.t = None;
+                        meta.reference = None;
+                        meta.shared_index = None;
+                        meta.file_text = crate::formula_text::add_xlfn_prefixes(
+                            strip_leading_equals(display),
+                        );
+                    }
+                } else {
+                    // Malformed shared-formula follower; fall back to a normal formula.
+                    meta.t = None;
+                    meta.reference = None;
+                    meta.shared_index = None;
+                    meta.file_text =
+                        crate::formula_text::add_xlfn_prefixes(strip_leading_equals(display));
+                }
+            }
+        }
+
         if let Some(formula_meta) = formula_meta {
             out.push_str("<f");
             if let Some(t) = &formula_meta.t {
@@ -1483,7 +1524,11 @@ fn render_sheet_data(
                 out.push_str(&format!(r#" aca="{}""#, if aca { "1" } else { "0" }));
             }
 
-            let file_text = formula_file_text(&formula_meta, model_formula);
+            let file_text = if preserve_textless_shared {
+                String::new()
+            } else {
+                formula_file_text(&formula_meta, model_formula)
+            };
             if file_text.is_empty() {
                 out.push_str("/>");
             } else {
@@ -1613,6 +1658,73 @@ fn value_kind_compatible(kind: &CellValueKind, value: &CellValue) -> bool {
         (CellValueKind::Str, CellValue::String(_)) => true,
         _ => false,
     }
+}
+
+#[derive(Debug, Clone)]
+struct SharedFormulaGroup {
+    range: Range,
+    ast: formula_engine::Ast,
+}
+
+fn shared_formula_groups(doc: &XlsxDocument, sheet_id: WorksheetId) -> HashMap<u32, SharedFormulaGroup> {
+    let mut groups = HashMap::new();
+
+    for ((ws_id, cell_ref), meta) in &doc.meta.cell_meta {
+        if *ws_id != sheet_id {
+            continue;
+        }
+        let Some(formula_meta) = meta.formula.as_ref() else {
+            continue;
+        };
+
+        let is_shared_master = formula_meta.t.as_deref() == Some("shared")
+            && formula_meta.reference.is_some()
+            && formula_meta.shared_index.is_some()
+            && !formula_meta.file_text.is_empty();
+        if !is_shared_master {
+            continue;
+        }
+
+        let Some(reference) = formula_meta.reference.as_deref() else {
+            continue;
+        };
+        let Some(shared_index) = formula_meta.shared_index else {
+            continue;
+        };
+
+        let range = match Range::from_a1(reference) {
+            Ok(range) => range,
+            Err(_) => continue,
+        };
+
+        let master_display = crate::formula_text::strip_xlfn_prefixes(&formula_meta.file_text);
+        let mut opts = ParseOptions::default();
+        opts.normalize_relative_to = Some(CellAddr::new(cell_ref.row, cell_ref.col));
+        let ast = match parse_formula(&master_display, opts) {
+            Ok(ast) => ast,
+            Err(_) => continue,
+        };
+
+        groups.insert(shared_index, SharedFormulaGroup { range, ast });
+    }
+
+    groups
+}
+
+fn shared_formula_expected(
+    shared_formulas: &HashMap<u32, SharedFormulaGroup>,
+    shared_index: u32,
+    cell_ref: CellRef,
+) -> Option<String> {
+    let group = shared_formulas.get(&shared_index)?;
+    if !group.range.contains(cell_ref) {
+        return None;
+    }
+
+    let mut ser = SerializeOptions::default();
+    ser.origin = Some(CellAddr::new(cell_ref.row, cell_ref.col));
+    ser.omit_equals = true;
+    group.ast.to_string(ser).ok()
 }
 
 fn formula_file_text(meta: &crate::FormulaMeta, display: Option<&str>) -> String {
