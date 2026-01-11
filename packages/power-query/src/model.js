@@ -205,13 +205,13 @@
  *    * Join key columns on the left-hand input.
  *    *
  *    * Must be the same length as `rightKeys` and contain at least one entry.
- *    */
+ *    *\/
  *   leftKeys?: string[];
  *   /**
  *    * Join key columns on the right-hand input.
  *    *
  *    * Must be the same length as `leftKeys` and contain at least one entry.
- *    */
+ *    *\/
  *   rightKeys?: string[];
  *   /**
  *    * Output mode:
@@ -219,21 +219,21 @@
  *    * - `"nested"`: Power Query `Table.NestedJoin` semantics (adds a column containing nested tables).
  *    *
  *    * Defaults to `"flat"` when omitted.
-    */
+ *    *\/
  *   joinMode?: "flat" | "nested";
  *   /**
  *    * Name of the nested table column produced when `joinMode === "nested"`.
- *    */
+ *    *\/
  *   newColumnName?: string;
  *   /**
  *    * Optional projection for the nested table schema when `joinMode === "nested"`.
  *    * When omitted, all columns from the right table are included.
- *    */
+ *    *\/
  *   rightColumns?: string[] | null;
  *   /**
  *    * Legacy single-key fields. These are kept for backwards compatibility with older
  *    * serialized queries.
- *    */
+ *    *\/
  *   leftKey?: string;
  *   rightKey?: string;
  * }} MergeOp
