@@ -2585,10 +2585,6 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
             CellScalar::Error("#VALUE!".to_string())
         }
         EngineValue::Array(arr) => engine_value_to_scalar(arr.top_left()),
-        // Reference values are not displayable in a single cell; Excel typically surfaces these
-        // as a #VALUE! error when coerced. Treat them as #VALUE! for now so the desktop UI can
-        // render them deterministically.
-        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => CellScalar::Error("#VALUE!".to_string()),
         EngineValue::Lambda(_) => CellScalar::Text("<LAMBDA>".to_string()),
         EngineValue::Spill { .. } => CellScalar::Error("#SPILL!".to_string()),
     }
