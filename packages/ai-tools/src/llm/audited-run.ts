@@ -26,6 +26,13 @@ export interface AuditedRunOptions {
    * Max size of the stored tool result summary (in characters).
    */
   max_audit_result_chars?: number;
+  /**
+   * Max size of tool call parameters stored in audit entries (in characters).
+   *
+   * Tool call parameters can contain large payloads (e.g. `set_range.values`). We
+   * cap them to keep LocalStorage-backed audit logs bounded.
+   */
+  max_audit_parameter_chars?: number;
 }
 
 export interface AuditedRunParams {
@@ -130,10 +137,12 @@ export async function runChatWithToolsAuditedVerified(
         temperature: params.temperature,
         maxTokens: params.max_tokens,
         onToolCall: (call: any, meta: any) => {
+          const maxParamChars = params.audit.max_audit_parameter_chars ?? 20_000;
+          const rawParams = sanitizeAuditToolParameters(call.name, call.arguments);
           recorder.recordToolCall({
             id: call.id,
             name: call.name,
-            parameters: sanitizeAuditToolParameters(call.name, call.arguments),
+            parameters: compactAuditValue(rawParams, maxParamChars),
             requires_approval: Boolean(meta?.requiresApproval)
           });
           params.on_tool_call?.(call, meta);
@@ -343,4 +352,31 @@ function appendStrictToolInstruction(messages: any[]): any[] {
     break;
   }
   return [...messages.slice(0, insertionIndex), strictSystemMessage, ...messages.slice(insertionIndex)];
+}
+
+function compactAuditValue(value: unknown, maxChars: number): unknown {
+  const limit = typeof maxChars === "number" && Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : 20_000;
+  const json = safeJsonStringify(value);
+  if (json.length <= limit) return value;
+
+  // Keep a small preview plus metadata so the stored value is always bounded.
+  const previewChars = Math.min(1000, Math.max(0, limit - 200));
+  return {
+    truncated: true,
+    original_chars: json.length,
+    preview: json.slice(0, previewChars)
+  };
+}
+
+function safeJsonStringify(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    try {
+      return JSON.stringify(String(value));
+    } catch {
+      return String(value);
+    }
+  }
 }

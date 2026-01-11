@@ -228,4 +228,66 @@ describe("runChatWithToolsAudited", () => {
     expect(summary.tool).toBe("read_range");
     expect(summary.data?.truncated).toBe(true);
   });
+
+  it("caps oversized tool call parameters in audit logs", async () => {
+    const huge = "x".repeat(5000);
+
+    let callCount = 0;
+    const client = {
+      async chat() {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [
+                {
+                  id: "call-1",
+                  name: "set_range",
+                  arguments: { range: "Sheet1!A1", values: [[huge]] }
+                }
+              ]
+            }
+          };
+        }
+        return { message: { role: "assistant", content: "done" } };
+      }
+    };
+
+    const tool_executor = {
+      tools: [{ name: "set_range", description: "set", parameters: {} }],
+      async execute(call: any) {
+        return {
+          tool: "set_range",
+          ok: true,
+          timing: { started_at_ms: 0, duration_ms: 0 },
+          data: { range: call.arguments.range, updated_cells: 1 }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+    await runChatWithToolsAudited({
+      client,
+      tool_executor,
+      messages: [{ role: "user", content: "Set A1" }],
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-param-cap-1",
+        mode: "chat",
+        input: { prompt: "Set A1" },
+        model: "unit-test-model",
+        max_audit_parameter_chars: 1000
+      }
+    });
+
+    const entries = await auditStore.listEntries({ session_id: "session-param-cap-1" });
+    expect(entries.length).toBe(1);
+    const toolCall = entries[0]!.tool_calls[0]!;
+    const params = toolCall.parameters as any;
+    expect(params?.truncated).toBe(true);
+    expect(typeof params?.preview).toBe("string");
+    expect(params.preview.length).toBeLessThanOrEqual(1000);
+  });
 });
