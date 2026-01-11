@@ -1075,6 +1075,9 @@ if (typeof globalThis.WebSocket === "function") {
 function toSandbox(value, seen = new Map()) {
   if (value === null) return null;
   const type = typeof value;
+  if (type === "function") {
+    throw createSandboxError("Cannot transfer functions into the extension sandbox");
+  }
   if (type !== "object") return value;
 
   if (seen.has(value)) return seen.get(value);
