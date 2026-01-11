@@ -878,10 +878,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const picked = renderer.pickCellAt(point.x, point.y);
       if (!picked) return;
 
-      selectionPointerIdRef.current = event.pointerId;
-      selectionCanvas.setPointerCapture?.(event.pointerId);
-
       if (interactionModeRef.current === "rangeSelection") {
+        selectionPointerIdRef.current = event.pointerId;
+        selectionCanvas.setPointerCapture?.(event.pointerId);
+
         selectionAnchorRef.current = picked;
         const range: CellRange = {
           startRow: picked.row,
@@ -907,6 +907,119 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       const isAdditive = event.metaKey || event.ctrlKey;
       const isExtend = event.shiftKey;
+
+      const { rowCount, colCount } = renderer.scroll.getCounts();
+      const viewport = renderer.scroll.getViewportState();
+      const headerRows = headerRowsRef.current;
+      const headerCols = headerColsRef.current;
+      const dataStartRow = headerRows >= rowCount ? 0 : headerRows;
+      const dataStartCol = headerCols >= colCount ? 0 : headerCols;
+
+      const applyHeaderRange = (range: CellRange, activeCell: { row: number; col: number }) => {
+        if (isAdditive) {
+          const existing = renderer.getSelectionRanges();
+          const nextRanges = [...existing, range];
+          renderer.setSelectionRanges(nextRanges, {
+            activeIndex: nextRanges.length - 1,
+            activeCell
+          });
+          return;
+        }
+
+        if (isExtend && prevSelection) {
+          const existing = renderer.getSelectionRanges();
+          const activeIndex = renderer.getActiveSelectionIndex();
+          const updatedRanges = existing.length === 0 ? [range] : existing;
+          updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = range;
+          renderer.setSelectionRanges(updatedRanges, { activeIndex, activeCell });
+          return;
+        }
+
+        renderer.setSelectionRange(range, { activeCell });
+      };
+
+      const isCornerHeader =
+        headerRows > 0 &&
+        headerCols > 0 &&
+        picked.row < headerRows &&
+        picked.col < headerCols;
+      const isColumnHeader = headerRows > 0 && picked.row < headerRows && picked.col >= headerCols;
+      const isRowHeader = headerCols > 0 && picked.col < headerCols && picked.row >= headerRows;
+
+      if (isCornerHeader || isColumnHeader || isRowHeader) {
+        const prevSelection = renderer.getSelection();
+        const prevRange = renderer.getSelectionRange();
+
+        if (isCornerHeader) {
+          const range: CellRange = {
+            startRow: dataStartRow,
+            endRow: rowCount,
+            startCol: dataStartCol,
+            endCol: colCount
+          };
+          const activeCell =
+            prevSelection ??
+            ({
+              row: Math.max(dataStartRow, viewport.main.rows.start),
+              col: Math.max(dataStartCol, viewport.main.cols.start)
+            } as const);
+          applyHeaderRange(range, activeCell);
+        } else if (isColumnHeader) {
+          const anchorCol = prevSelection ? clamp(prevSelection.col, dataStartCol, colCount - 1) : picked.col;
+          const startCol = isExtend && prevSelection ? Math.min(anchorCol, picked.col) : picked.col;
+          const endCol = (isExtend && prevSelection ? Math.max(anchorCol, picked.col) : picked.col) + 1;
+
+          const range: CellRange = {
+            startRow: dataStartRow,
+            endRow: rowCount,
+            startCol,
+            endCol: Math.min(colCount, endCol)
+          };
+
+          const baseRow = prevSelection ? prevSelection.row : Math.max(dataStartRow, viewport.main.rows.start);
+          applyHeaderRange(range, { row: baseRow, col: picked.col });
+        } else {
+          const anchorRow = prevSelection ? clamp(prevSelection.row, dataStartRow, rowCount - 1) : picked.row;
+          const startRow = isExtend && prevSelection ? Math.min(anchorRow, picked.row) : picked.row;
+          const endRow = (isExtend && prevSelection ? Math.max(anchorRow, picked.row) : picked.row) + 1;
+
+          const range: CellRange = {
+            startRow,
+            endRow: Math.min(rowCount, endRow),
+            startCol: dataStartCol,
+            endCol: colCount
+          };
+
+          const baseCol = prevSelection ? prevSelection.col : Math.max(dataStartCol, viewport.main.cols.start);
+          applyHeaderRange(range, { row: picked.row, col: baseCol });
+        }
+
+        const nextSelection = renderer.getSelection();
+        const nextRange = renderer.getSelectionRange();
+
+        announceSelection(nextSelection, nextRange);
+
+        if (
+          (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+          (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+        ) {
+          onSelectionChangeRef.current?.(nextSelection);
+        }
+
+        if (
+          (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+          (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+          (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+          (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+        ) {
+          onSelectionRangeChangeRef.current?.(nextRange);
+        }
+
+        return;
+      }
+
+      selectionPointerIdRef.current = event.pointerId;
+      selectionCanvas.setPointerCapture?.(event.pointerId);
 
       if (isAdditive) {
         selectionAnchorRef.current = picked;
