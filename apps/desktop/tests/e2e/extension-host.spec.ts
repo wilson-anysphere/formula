@@ -92,6 +92,90 @@ test.describe("BrowserExtensionHost", () => {
     expect(result.a3).toBe("10");
   });
 
+  test("activation context includes storage paths and matches formula.context", async ({ page }) => {
+    await page.goto("/");
+
+    const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
+
+    const result = await page.evaluate(
+      async ({ hostModuleUrl, extensionApiUrl }) => {
+        const { BrowserExtensionHost } = await import(hostModuleUrl);
+
+        const commandId = "ctxExt.read";
+        const manifest = {
+          name: "ctx-ext",
+          version: "1.0.0",
+          publisher: "formula-test",
+          main: "./dist/extension.mjs",
+          engines: { formula: "^1.0.0" },
+          activationEvents: [`onCommand:${commandId}`],
+          contributes: { commands: [{ command: commandId, title: "Read Context" }] },
+          permissions: ["ui.commands"],
+        };
+
+        const code = `
+          import * as formula from ${JSON.stringify(extensionApiUrl)};
+          export async function activate(context) {
+            const snapshot = {
+              ctx: {
+                extensionId: context.extensionId,
+                extensionPath: context.extensionPath,
+                extensionUri: context.extensionUri,
+                globalStoragePath: context.globalStoragePath,
+                workspaceStoragePath: context.workspaceStoragePath
+              },
+              api: {
+                extensionId: formula.context.extensionId,
+                extensionPath: formula.context.extensionPath,
+                extensionUri: formula.context.extensionUri,
+                globalStoragePath: formula.context.globalStoragePath,
+                workspaceStoragePath: formula.context.workspaceStoragePath
+              }
+            };
+
+            context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+              commandId
+            )}, async () => snapshot));
+          }
+          export default { activate };
+        `;
+
+        const blob = new Blob([code], { type: "text/javascript" });
+        const mainUrl = URL.createObjectURL(blob);
+
+        const host = new BrowserExtensionHost({
+          engineVersion: "1.0.0",
+          spreadsheetApi: {},
+          permissionPrompt: async () => true,
+        });
+
+        await host.loadExtension({
+          extensionId: `${manifest.publisher}.${manifest.name}`,
+          extensionPath: "memory://ctx-ext/",
+          manifest,
+          mainUrl,
+        });
+
+        const snapshot = await host.executeCommand(commandId);
+        await host.dispose();
+        URL.revokeObjectURL(mainUrl);
+
+        return snapshot;
+      },
+      { hostModuleUrl, extensionApiUrl }
+    );
+
+    expect(result.ctx.extensionId).toBe("formula-test.ctx-ext");
+    expect(result.ctx.extensionPath).toBe("memory://ctx-ext/");
+    expect(result.ctx.extensionUri).toBe("memory://ctx-ext/");
+    expect(String(result.ctx.globalStoragePath)).toContain("globalStorage");
+    expect(String(result.ctx.workspaceStoragePath)).toContain("workspaceStorage");
+
+    // Extension API should reflect the same values as the activation context.
+    expect(result.api).toEqual(result.ctx);
+  });
+
   test("network.fetch is permission gated in the browser host", async ({ page }) => {
     const server = http.createServer((req, res) => {
       res.writeHead(200, {
