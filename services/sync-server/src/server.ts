@@ -13,10 +13,16 @@ import type { IncomingMessage } from "node:http";
 import ywsUtils from "y-websocket/bin/utils";
 
 import type { SyncServerConfig } from "./config.js";
-import { AuthError, authenticateRequest, extractToken } from "./auth.js";
+import {
+  AuthError,
+  authenticateRequest,
+  extractToken,
+  type AuthContext,
+} from "./auth.js";
 import { ConnectionTracker, TokenBucketRateLimiter } from "./limits.js";
 import { FilePersistence } from "./persistence.js";
 import { Y } from "./yjs.js";
+import { installYwsSecurity } from "./ywsSecurity.js";
 
 const { setupWSConnection, setPersistence } = ywsUtils as {
   setupWSConnection: (
@@ -218,7 +224,7 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
     const url = new URL(req.url ?? "/", "http://localhost");
     const docName = url.pathname.replace(/^\//, "");
     const authCtx = (req as IncomingMessage & { auth?: unknown }).auth as
-      | { userId: string; tokenType: string }
+      | AuthContext
       | undefined;
 
     let messagesInWindow = 0;
@@ -252,10 +258,17 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
     });
 
     logger.info(
-      { ip, docName, userId: authCtx?.userId, tokenType: authCtx?.tokenType },
+      {
+        ip,
+        docName,
+        userId: authCtx?.userId,
+        role: authCtx?.role,
+        tokenType: authCtx?.tokenType,
+      },
       "ws_connection_open"
     );
 
+    installYwsSecurity(ws, { docName, auth: authCtx, logger });
     setupWSConnection(ws, req, { gc: config.gc });
   });
 
