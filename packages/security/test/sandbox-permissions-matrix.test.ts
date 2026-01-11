@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -130,6 +131,7 @@ describe("Sandbox permissions matrix", () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-sec-py-"));
     const filePath = path.join(dir, "data.txt");
     await fs.writeFile(filePath, "hello-py", "utf8");
+    const runnerPath = fileURLToPath(new URL("../src/sandbox/pythonSandbox.py", import.meta.url));
 
     const { auditLogger } = createInMemoryAuditLogger();
     const permissionManager = new PermissionManager({ auditLogger });
@@ -149,6 +151,79 @@ describe("Sandbox permissions matrix", () => {
         timeoutMs: 2_000
       })
     ).resolves.toBe("hello-py");
+
+    await expect(
+      runScript({
+        scriptId,
+        language: "python",
+        code: `import io\nwith io.open(${JSON.stringify(filePath)}, "r") as f:\n    __result__ = f.read()\n`,
+        permissionManager,
+        auditLogger,
+        timeoutMs: 2_000
+      })
+    ).resolves.toBe("hello-py");
+
+    if (process.platform !== "win32") {
+      await expect(
+        runScript({
+          scriptId,
+          language: "python",
+          code: `import posix\nfd = posix.open(${JSON.stringify(filePath)}, posix.O_RDONLY)\ndata = posix.read(fd, 1024)\nposix.close(fd)\n__result__ = data.decode("utf8")\n`,
+          permissionManager,
+          auditLogger,
+          timeoutMs: 2_000
+        })
+      ).resolves.toBe("hello-py");
+    }
+
+    // Escape hatches must still be permission gated.
+    await expect(
+      runScript({
+        scriptId: "py.fs.io.denied",
+        language: "python",
+        code: `import io\nio.open(${JSON.stringify(runnerPath)}, "r").read()\n`,
+        permissionManager,
+        auditLogger,
+        timeoutMs: 2_000
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "filesystem", access: "read" } });
+
+    await expect(
+      runScript({
+        scriptId: "py.fs._io.denied",
+        language: "python",
+        code: `import _io\n_io.open(${JSON.stringify(runnerPath)}, "r").read()\n`,
+        permissionManager,
+        auditLogger,
+        timeoutMs: 2_000
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "filesystem", access: "read" } });
+
+    if (process.platform !== "win32") {
+      await expect(
+        runScript({
+          scriptId: "py.fs.posix.denied",
+          language: "python",
+          code: `import posix\nfd = posix.open(${JSON.stringify(runnerPath)}, posix.O_RDONLY)\nposix.read(fd, 10)\n`,
+          permissionManager,
+          auditLogger,
+          timeoutMs: 2_000
+        })
+      ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "filesystem", access: "read" } });
+    }
+
+    if (process.platform !== "win32") {
+      await expect(
+        runScript({
+          scriptId: "py.automation.denied",
+          language: "python",
+          code: `import os\nos.spawnv(os.P_WAIT, "/bin/true", ["true"])\n`,
+          permissionManager,
+          auditLogger,
+          timeoutMs: 2_000
+        })
+      ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "automation" } });
+    }
 
     await expect(
       runScript({
@@ -180,4 +255,3 @@ describe("Sandbox permissions matrix", () => {
     ).resolves.toBe(200);
   });
 });
-

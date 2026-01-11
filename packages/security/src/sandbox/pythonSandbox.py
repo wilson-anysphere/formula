@@ -215,6 +215,34 @@ def _main():
     max_output_bytes = int(payload.get("maxOutputBytes", 128 * 1024))
     code = payload.get("code", "")
 
+    # Never write __pycache__ (bytecode) files from inside the sandbox.
+    sys.dont_write_bytecode = True
+
+    runner_dir = os.path.abspath(os.path.dirname(__file__))
+    cwd = os.path.abspath(os.getcwd())
+
+    # Remove local filesystem paths (including the repo) from the import path to reduce
+    # ambient access. stdlib/site-packages remain available.
+    cleaned_sys_path = []
+    for entry in sys.path:
+        if not entry:
+            continue
+        abs_entry = os.path.abspath(entry)
+        if abs_entry == cwd or abs_entry.startswith(cwd + os.sep):
+            continue
+        if abs_entry == runner_dir or abs_entry.startswith(runner_dir + os.sep):
+            continue
+        cleaned_sys_path.append(entry)
+    sys.path = cleaned_sys_path
+
+    # Allow read-only access for Python's own import machinery (stdlib/site-packages).
+    # These scopes are *not* treated as user-granted permissions; they exist so the
+    # interpreter can import modules without requiring explicit filesystem grants.
+    safe_read_scopes = [os.path.abspath(p) for p in sys.path if p]
+
+    def _is_safe_read_path(abs_path: str) -> bool:
+        return any(_is_within_scope(abs_path, scope) for scope in safe_read_scopes)
+
     # Best-effort resource limits (Linux/macOS). If unavailable, continue.
     try:
         import resource
@@ -242,25 +270,40 @@ def _main():
 
     builtins.__import__ = guarded_import
 
-    original_open = builtins.open
+    import _io as _builtin_io
+    try:
+        import posix as _posix
+    except Exception:
+        try:
+            import nt as _posix  # type: ignore
+        except Exception:
+            _posix = None
+
+    original__io_open = _builtin_io.open
     original_os_open = os.open
 
     def guarded_open(file, mode="r", *args, **kwargs):
         abs_path = os.path.abspath(str(file))
         needs_write = any(flag in mode for flag in ["w", "a", "+", "x"])
         access = "readwrite" if needs_write else "read"
+        if access == "read" and _is_safe_read_path(abs_path):
+            return original__io_open(file, mode, *args, **kwargs)
+
         ensure({"kind": "filesystem", "access": access, "path": abs_path})
         audit(
             "security.filesystem.write" if needs_write else "security.filesystem.read",
             True,
             {"path": abs_path},
         )
-        return original_open(file, mode, *args, **kwargs)
+        return original__io_open(file, mode, *args, **kwargs)
 
     def guarded_os_open(path, flags, mode=0o777, *args, **kwargs):
         abs_path = os.path.abspath(str(path))
         needs_write = (flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC)) != 0
         access = "readwrite" if needs_write else "read"
+        if access == "read" and _is_safe_read_path(abs_path):
+            return original_os_open(path, flags, mode, *args, **kwargs)
+
         ensure({"kind": "filesystem", "access": access, "path": abs_path})
         audit(
             "security.filesystem.write" if needs_write else "security.filesystem.read",
@@ -271,6 +314,11 @@ def _main():
 
     builtins.open = guarded_open
     os.open = guarded_os_open
+    # Close common filesystem escape hatches.
+    io.open = guarded_open
+    _builtin_io.open = guarded_open
+    if _posix is not None and hasattr(_posix, "open"):
+        _posix.open = guarded_os_open  # type: ignore[attr-defined]
 
     def guard_read_path(fn, path_arg_index=0):
         original = fn
@@ -279,6 +327,8 @@ def _main():
             if len(args) <= path_arg_index:
                 return original(*args, **kwargs)
             abs_path = os.path.abspath(str(args[path_arg_index]))
+            if _is_safe_read_path(abs_path):
+                return original(*args, **kwargs)
             ensure({"kind": "filesystem", "access": "read", "path": abs_path})
             audit("security.filesystem.read", True, {"path": abs_path, "op": original.__name__})
             return original(*args, **kwargs)
@@ -298,15 +348,107 @@ def _main():
 
         return wrapped
 
-    os.listdir = guard_read_path(os.listdir)
-    os.scandir = guard_read_path(os.scandir)
-    os.stat = guard_read_path(os.stat)
-    os.lstat = guard_read_path(os.lstat)
-    os.unlink = guard_write_path(os.unlink)
-    os.remove = guard_write_path(os.remove)
-    os.rmdir = guard_write_path(os.rmdir)
-    os.mkdir = guard_write_path(os.mkdir)
+    guarded_listdir = guard_read_path(os.listdir)
+    os.listdir = guarded_listdir
+    if _posix is not None and hasattr(_posix, "listdir"):
+        _posix.listdir = guarded_listdir  # type: ignore[attr-defined]
+
+    guarded_scandir = guard_read_path(os.scandir)
+    os.scandir = guarded_scandir
+    if _posix is not None and hasattr(_posix, "scandir"):
+        _posix.scandir = guarded_scandir  # type: ignore[attr-defined]
+
+    guarded_stat = guard_read_path(os.stat)
+    os.stat = guarded_stat
+    if _posix is not None and hasattr(_posix, "stat"):
+        _posix.stat = guarded_stat  # type: ignore[attr-defined]
+
+    guarded_lstat = guard_read_path(os.lstat)
+    os.lstat = guarded_lstat
+    if _posix is not None and hasattr(_posix, "lstat"):
+        _posix.lstat = guarded_lstat  # type: ignore[attr-defined]
+
+    if hasattr(os, "readlink"):
+        guarded_readlink = guard_read_path(os.readlink)
+        os.readlink = guarded_readlink
+        if _posix is not None and hasattr(_posix, "readlink"):
+            _posix.readlink = guarded_readlink  # type: ignore[attr-defined]
+
+    guarded_unlink = guard_write_path(os.unlink)
+    os.unlink = guarded_unlink
+    if _posix is not None and hasattr(_posix, "unlink"):
+        _posix.unlink = guarded_unlink  # type: ignore[attr-defined]
+
+    guarded_remove = guard_write_path(os.remove)
+    os.remove = guarded_remove
+    if _posix is not None and hasattr(_posix, "remove"):
+        _posix.remove = guarded_remove  # type: ignore[attr-defined]
+
+    guarded_rmdir = guard_write_path(os.rmdir)
+    os.rmdir = guarded_rmdir
+    if _posix is not None and hasattr(_posix, "rmdir"):
+        _posix.rmdir = guarded_rmdir  # type: ignore[attr-defined]
+
+    guarded_mkdir = guard_write_path(os.mkdir)
+    os.mkdir = guarded_mkdir
+    if _posix is not None and hasattr(_posix, "mkdir"):
+        _posix.mkdir = guarded_mkdir  # type: ignore[attr-defined]
+
     os.makedirs = guard_write_path(os.makedirs)
+
+    if hasattr(os, "utime"):
+        guarded_utime = guard_write_path(os.utime)
+        os.utime = guarded_utime
+        if _posix is not None and hasattr(_posix, "utime"):
+            _posix.utime = guarded_utime  # type: ignore[attr-defined]
+
+    if hasattr(os, "chmod"):
+        guarded_chmod = guard_write_path(os.chmod)
+        os.chmod = guarded_chmod
+        if _posix is not None and hasattr(_posix, "chmod"):
+            _posix.chmod = guarded_chmod  # type: ignore[attr-defined]
+
+    if hasattr(os, "chown"):
+        guarded_chown = guard_write_path(os.chown)
+        os.chown = guarded_chown
+        if _posix is not None and hasattr(_posix, "chown"):
+            _posix.chown = guarded_chown  # type: ignore[attr-defined]
+
+    if hasattr(os, "link"):
+        original_link = os.link
+
+        def guarded_link(src, dst, *args, **kwargs):
+            abs_src = os.path.abspath(str(src))
+            abs_dst = os.path.abspath(str(dst))
+            ensure({"kind": "filesystem", "access": "readwrite", "path": abs_src})
+            ensure({"kind": "filesystem", "access": "readwrite", "path": abs_dst})
+            audit("security.filesystem.write", True, {"path": abs_src, "op": "link", "dst": abs_dst})
+            return original_link(src, dst, *args, **kwargs)
+
+        os.link = guarded_link
+        if _posix is not None and hasattr(_posix, "link"):
+            _posix.link = guarded_link  # type: ignore[attr-defined]
+
+    if hasattr(os, "symlink"):
+        original_symlink = os.symlink
+
+        def guarded_symlink(src, dst, *args, **kwargs):
+            abs_src = os.path.abspath(str(src))
+            abs_dst = os.path.abspath(str(dst))
+            ensure({"kind": "filesystem", "access": "readwrite", "path": abs_src})
+            ensure({"kind": "filesystem", "access": "readwrite", "path": abs_dst})
+            audit("security.filesystem.write", True, {"path": abs_src, "op": "symlink", "dst": abs_dst})
+            return original_symlink(src, dst, *args, **kwargs)
+
+        os.symlink = guarded_symlink
+        if _posix is not None and hasattr(_posix, "symlink"):
+            _posix.symlink = guarded_symlink  # type: ignore[attr-defined]
+
+    if hasattr(os, "truncate"):
+        guarded_truncate = guard_write_path(os.truncate)
+        os.truncate = guarded_truncate
+        if _posix is not None and hasattr(_posix, "truncate"):
+            _posix.truncate = guarded_truncate  # type: ignore[attr-defined]
 
     original_rename = os.rename
     original_replace = os.replace
@@ -329,6 +471,10 @@ def _main():
 
     os.rename = guarded_rename
     os.replace = guarded_replace
+    if _posix is not None and hasattr(_posix, "rename"):
+        _posix.rename = guarded_rename  # type: ignore[attr-defined]
+    if _posix is not None and hasattr(_posix, "replace"):
+        _posix.replace = guarded_replace  # type: ignore[attr-defined]
 
     # Automation/subprocess escape routes.
     original_system = os.system
@@ -346,6 +492,44 @@ def _main():
 
     os.system = guarded_system
     os.popen = guarded_popen
+
+    # Block all process-spawning APIs unless automation permission is granted.
+    def guard_automation(fn, action: str):
+        original = fn
+
+        def wrapped(*args, **kwargs):
+            ensure({"kind": "automation"})
+            audit("security.automation.run", True, {"action": action})
+            return original(*args, **kwargs)
+
+        return wrapped
+
+    for name in [
+        "fork",
+        "forkpty",
+        "execl",
+        "execle",
+        "execlp",
+        "execlpe",
+        "execv",
+        "execve",
+        "execvp",
+        "execvpe",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+        "posix_spawn",
+        "posix_spawnp",
+    ]:
+        if hasattr(os, name):
+            setattr(os, name, guard_automation(getattr(os, name), f"os.{name}"))
+        if _posix is not None and hasattr(_posix, name):
+            setattr(_posix, name, guard_automation(getattr(_posix, name), f"posix.{name}"))
 
     import socket as _socket
 

@@ -131,15 +131,15 @@ export async function runSandboxedJavaScript({
             const err = new SandboxOutputLimitError({ maxBytes: maxOutputBytes });
             err.stdout = stdout;
             err.stderr = stderr;
-          auditLogger?.log({
-            eventType: `security.${label}.run`,
-            actor: principal,
-            success: false,
-            metadata: { phase: "output_limit", maxOutputBytes, language: "javascript" }
+            auditLogger?.log({
+              eventType: `security.${label}.run`,
+              actor: principal,
+              success: false,
+              metadata: { phase: "output_limit", maxOutputBytes, language: "javascript" }
+            });
+            reject(err);
           });
-          reject(err);
-        });
-      }
+        }
         return;
       }
 
@@ -200,7 +200,29 @@ export async function runSandboxedJavaScript({
     });
 
     worker.on("error", (err) => {
-      finalize(() => reject(err));
+      finalize(() => {
+        if (err?.code === "ERR_WORKER_OUT_OF_MEMORY") {
+          const oom = new SandboxMemoryLimitError({ memoryMb, usedMb: null });
+          oom.stdout = stdout;
+          oom.stderr = stderr;
+          auditLogger?.log({
+            eventType: `security.${label}.run`,
+            actor: principal,
+            success: false,
+            metadata: { phase: "memory_limit", memoryMb, language: "javascript", code: err.code }
+          });
+          reject(oom);
+          return;
+        }
+
+        auditLogger?.log({
+          eventType: `security.${label}.run`,
+          actor: principal,
+          success: false,
+          metadata: { phase: "error", language: "javascript", message: err?.message, code: err?.code }
+        });
+        reject(err);
+      });
     });
 
     worker.on("exit", (code) => {
