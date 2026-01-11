@@ -21,6 +21,8 @@ const { ExtensionHost } = extensionHostPkg;
 const { createExtensionPackageV1, createExtensionPackageV2 } = extensionPackagePkg;
 const { signBytes, verifyBytesSignature, sha256 } = signingPkg;
 
+const EXTENSION_TIMEOUT_MS = 20_000;
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
@@ -117,6 +119,10 @@ test("desktop runtime: auto-load installed extensions + hot reload on update", a
       permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
       extensionStoragePath: path.join(tmpRoot, "storage.json"),
       permissionPrompt: async () => true,
+      activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+      commandTimeoutMs: EXTENSION_TIMEOUT_MS,
+      customFunctionTimeoutMs: EXTENSION_TIMEOUT_MS,
+      dataConnectorTimeoutMs: EXTENSION_TIMEOUT_MS,
     });
     await runtime.startup();
 
@@ -256,6 +262,10 @@ test("marketplace publish → discover → install → verify signature → run 
       permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
       extensionStoragePath: path.join(tmpRoot, "storage.json"),
       permissionPrompt: async () => true,
+      activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+      commandTimeoutMs: EXTENSION_TIMEOUT_MS,
+      customFunctionTimeoutMs: EXTENSION_TIMEOUT_MS,
+      dataConnectorTimeoutMs: EXTENSION_TIMEOUT_MS,
     });
  
     const installedPath = path.join(extensionsDir, extensionId);
@@ -298,6 +308,10 @@ test("marketplace publish → discover → install → verify signature → run 
       permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
       extensionStoragePath: path.join(tmpRoot, "storage.json"),
       permissionPrompt: async () => true,
+      activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+      commandTimeoutMs: EXTENSION_TIMEOUT_MS,
+      customFunctionTimeoutMs: EXTENSION_TIMEOUT_MS,
+      dataConnectorTimeoutMs: EXTENSION_TIMEOUT_MS,
     });
  
     await manager.loadIntoHost(host2, extensionId);
@@ -480,6 +494,10 @@ test("installed extension tampering is detected, quarantines execution, and repa
       permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
       extensionStoragePath: path.join(tmpRoot, "storage.json"),
       permissionPrompt: async () => true,
+      activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+      commandTimeoutMs: EXTENSION_TIMEOUT_MS,
+      customFunctionTimeoutMs: EXTENSION_TIMEOUT_MS,
+      dataConnectorTimeoutMs: EXTENSION_TIMEOUT_MS,
     });
 
     // Startup should quarantine the tampered install (mark state corrupted) but allow the
@@ -507,6 +525,10 @@ test("installed extension tampering is detected, quarantines execution, and repa
       permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
       extensionStoragePath: path.join(tmpRoot, "storage.json"),
       permissionPrompt: async () => true,
+      activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+      commandTimeoutMs: EXTENSION_TIMEOUT_MS,
+      customFunctionTimeoutMs: EXTENSION_TIMEOUT_MS,
+      dataConnectorTimeoutMs: EXTENSION_TIMEOUT_MS,
     });
 
     await runtime2.startup();

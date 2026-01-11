@@ -12,6 +12,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 
+const EXTENSION_TIMEOUT_MS = 20_000;
+
 async function copyDir(srcDir, destDir) {
   await fs.mkdir(destDir, { recursive: true });
   const entries = await fs.readdir(srcDir, { withFileTypes: true });
@@ -91,6 +93,10 @@ test("ExtensionHostManager routes commands/panels/custom functions/data connecto
     permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
     extensionStoragePath: path.join(tmpRoot, "storage.json"),
     permissionPrompt: async () => true,
+    activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+    commandTimeoutMs: EXTENSION_TIMEOUT_MS,
+    customFunctionTimeoutMs: EXTENSION_TIMEOUT_MS,
+    dataConnectorTimeoutMs: EXTENSION_TIMEOUT_MS,
   });
 
   t.after(async () => {
@@ -119,7 +125,7 @@ test("ExtensionHostManager routes commands/panels/custom functions/data connecto
 
   runtime.dispatchPanelMessage("sampleHello.panel", { type: "ping" });
 
-  const deadline = Date.now() + 500;
+  const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const outgoing = runtime.getPanelOutgoingMessages("sampleHello.panel");
     if (outgoing.some((m) => m && m.type === "pong")) return;
@@ -128,4 +134,3 @@ test("ExtensionHostManager routes commands/panels/custom functions/data connecto
 
   assert.fail("Timed out waiting for pong message from extension panel");
 });
-

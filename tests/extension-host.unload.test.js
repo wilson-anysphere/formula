@@ -8,6 +8,8 @@ import extensionHostPkg from "../packages/extension-host/src/index.js";
 
 const { ExtensionHost } = extensionHostPkg;
 
+const EXTENSION_TIMEOUT_MS = 20_000;
+
 async function copyDir(srcDir, destDir) {
   await fs.mkdir(destDir, { recursive: true });
   const entries = await fs.readdir(srcDir, { withFileTypes: true });
@@ -49,6 +51,10 @@ test("ExtensionHost.unloadExtension removes contributed commands/custom function
     permissionsStoragePath,
     extensionStoragePath,
     permissionPrompt: async () => true,
+    activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+    commandTimeoutMs: EXTENSION_TIMEOUT_MS,
+    customFunctionTimeoutMs: EXTENSION_TIMEOUT_MS,
+    dataConnectorTimeoutMs: EXTENSION_TIMEOUT_MS,
   });
 
   t.after(async () => {

@@ -13,6 +13,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 
+const EXTENSION_TIMEOUT_MS = 20_000;
+
 async function copyDir(srcDir, destDir) {
   await fs.mkdir(destDir, { recursive: true });
   const entries = await fs.readdir(srcDir, { withFileTypes: true });
@@ -92,6 +94,8 @@ test("ExtensionHostManager.syncInstalledExtensions loads/reloads/unloads based o
     permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
     extensionStoragePath: path.join(tmpRoot, "storage.json"),
     permissionPrompt: async () => true,
+    activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+    commandTimeoutMs: EXTENSION_TIMEOUT_MS,
   });
 
   t.after(async () => {

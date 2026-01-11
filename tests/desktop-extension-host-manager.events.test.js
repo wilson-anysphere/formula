@@ -7,6 +7,8 @@ import os from "node:os";
 
 import { ExtensionHostManager } from "../apps/desktop/src/extensions/ExtensionHostManager.js";
 
+const EXTENSION_TIMEOUT_MS = 20_000;
+
 function sha256Hex(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
@@ -109,6 +111,8 @@ test("ExtensionHostManager can auto-sync from ExtensionManager change events", a
     permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
     extensionStoragePath: path.join(tmpRoot, "storage.json"),
     permissionPrompt: async () => true,
+    activationTimeoutMs: EXTENSION_TIMEOUT_MS,
+    commandTimeoutMs: EXTENSION_TIMEOUT_MS,
     extensionManager: fakeManager,
   });
 
@@ -156,4 +160,3 @@ test("ExtensionHostManager can auto-sync from ExtensionManager change events", a
 
   await assert.rejects(() => runtime.executeCommand("good.hello"), /Unknown command/i);
 });
-

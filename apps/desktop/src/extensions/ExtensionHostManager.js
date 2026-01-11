@@ -44,14 +44,15 @@ export class ExtensionHostManager {
    *   permissionsStoragePath?: string,
    *   extensionStoragePath?: string,
    *   auditDbPath?: string | null,
-   *   activationTimeoutMs?: number,
-   *   commandTimeoutMs?: number,
-   *   customFunctionTimeoutMs?: number,
-   *   memoryMb?: number,
-   *   spreadsheet?: any,
-   *   extensionManager?: any,
-   * }} params
-   */
+ *   activationTimeoutMs?: number,
+ *   commandTimeoutMs?: number,
+ *   customFunctionTimeoutMs?: number,
+ *   dataConnectorTimeoutMs?: number,
+ *   memoryMb?: number,
+ *   spreadsheet?: any,
+ *   extensionManager?: any,
+ * }} params
+ */
   constructor({
     extensionsDir,
     statePath,
@@ -63,6 +64,7 @@ export class ExtensionHostManager {
     activationTimeoutMs,
     commandTimeoutMs,
     customFunctionTimeoutMs,
+    dataConnectorTimeoutMs,
     memoryMb,
     spreadsheet,
     extensionManager = null,
@@ -86,6 +88,7 @@ export class ExtensionHostManager {
       activationTimeoutMs,
       commandTimeoutMs,
       customFunctionTimeoutMs,
+      dataConnectorTimeoutMs,
       memoryMb,
       spreadsheet,
     });

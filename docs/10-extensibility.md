@@ -39,15 +39,20 @@ The desktop app wires marketplace installs into the Node extension host runtime:
    - Packages are extracted to `extensionsDir/<publisher>.<name>/`
    - The installed set is tracked in `ExtensionManager.statePath` (JSON)
 3. **Runtime loading** via `ExtensionHostManager` (`apps/desktop/src/extensions/ExtensionHostManager.js`)
-   - Reads `statePath` and calls `ExtensionHost.loadExtension(...)` for each installed extension
-   - Exposes `executeCommand`, `invokeCustomFunction`, and `listContributions` for the app to route UI actions
-   - Verifies extracted extension integrity using the file manifest stored in `statePath`; corrupted installs are quarantined and require reinstall
+    - Reads `statePath` and calls `ExtensionHost.loadExtension(...)` for each installed extension
+    - Exposes `executeCommand`, `invokeCustomFunction`, and `listContributions` for the app to route UI actions
+    - Verifies extracted extension integrity using the file manifest stored in `statePath`; corrupted installs are quarantined and require reinstall
 4. **Execution + contributions** via `ExtensionHost` (`packages/extension-host`)
-   - Spawns an isolated worker per extension
-   - Registers contributions (commands, panels, menus, keybindings, custom functions, data connectors)
-5. **Hot reload on change**
-   - Install/update calls `ExtensionHostManager.reloadExtension(id)`
-   - Uninstall calls `ExtensionHostManager.unloadExtension(id)` (removes contributions and terminates worker)
+    - Spawns an isolated worker per extension
+    - Registers contributions (commands, panels, menus, keybindings, custom functions, data connectors)
+5. **Hot reload + runtime syncing**
+    - `ExtensionHostManager.syncInstalledExtensions()` reconciles the runtime with `statePath`:
+      loads new installs, reloads updated versions, and unloads removed extensions.
+    - The runtime can **bind to installer change events** (`ExtensionManager.onDidChange`) so installs outside
+      the marketplace panel still hot-reload automatically.
+    - `syncInstalledExtensions()` is serialized/coalesced so multiple rapid install/update events won't race
+      unload/reload operations.
+    - Uninstall removes contributions and terminates the worker (via `ExtensionHost.unloadExtension`).
 
 ---
 
