@@ -552,6 +552,13 @@ fn pivot_planned_row_group_by(
     measures: &[PivotMeasure],
     filter: &FilterContext,
 ) -> DaxResult<Option<PivotResult>> {
+    if group_by.is_empty() {
+        // When there are no group keys, pivot becomes a single "grand total" row. Preserve existing
+        // behavior (including any backend-specific stat fast paths) by falling back to the legacy
+        // per-group evaluation.
+        return Ok(None);
+    }
+
     let (table_ref, group_key_accessors) = build_group_key_accessors(model, base_table, group_by)?;
 
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
