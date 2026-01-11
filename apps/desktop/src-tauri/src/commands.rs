@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use formula_engine::pivot::PivotConfig;
 
 use crate::macro_trust::MacroTrustDecision;
 
@@ -127,6 +128,50 @@ pub struct SheetUsedRange {
 pub struct RangeCellEdit {
     pub value: Option<JsonValue>,
     pub formula: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PivotCellRange {
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PivotDestination {
+    pub sheet_id: String,
+    pub row: usize,
+    pub col: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CreatePivotTableRequest {
+    pub name: String,
+    pub source_sheet_id: String,
+    pub source_range: PivotCellRange,
+    pub destination: PivotDestination,
+    pub config: PivotConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CreatePivotTableResponse {
+    pub pivot_id: String,
+    pub updates: Vec<CellUpdate>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RefreshPivotTableRequest {
+    pub pivot_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PivotTableSummary {
+    pub id: String,
+    pub name: String,
+    pub source_sheet_id: String,
+    pub source_range: PivotCellRange,
+    pub destination: PivotDestination,
 }
 
 #[cfg(feature = "desktop")]
@@ -438,6 +483,87 @@ pub async fn set_range(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn create_pivot_table(
+    request: CreatePivotTableRequest,
+    state: State<'_, SharedAppState>,
+) -> Result<CreatePivotTableResponse, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let (pivot_id, updates) = state
+            .create_pivot_table(
+                request.name,
+                request.source_sheet_id,
+                crate::state::CellRect {
+                    start_row: request.source_range.start_row,
+                    start_col: request.source_range.start_col,
+                    end_row: request.source_range.end_row,
+                    end_col: request.source_range.end_col,
+                },
+                crate::state::PivotDestination {
+                    sheet_id: request.destination.sheet_id,
+                    row: request.destination.row,
+                    col: request.destination.col,
+                },
+                request.config,
+            )
+            .map_err(app_error)?;
+
+        Ok::<_, String>(CreatePivotTableResponse {
+            pivot_id,
+            updates: updates.into_iter().map(cell_update_from_state).collect(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn refresh_pivot_table(
+    request: RefreshPivotTableRequest,
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<CellUpdate>, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let updates = state
+            .refresh_pivot_table(&request.pivot_id)
+            .map_err(app_error)?;
+        Ok::<_, String>(updates.into_iter().map(cell_update_from_state).collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn list_pivot_tables(state: State<'_, SharedAppState>) -> Result<Vec<PivotTableSummary>, String> {
+    let state = state.inner().lock().unwrap();
+    Ok(state
+        .list_pivot_tables()
+        .into_iter()
+        .map(|pivot| PivotTableSummary {
+            id: pivot.id,
+            name: pivot.name,
+            source_sheet_id: pivot.source_sheet_id,
+            source_range: PivotCellRange {
+                start_row: pivot.source_range.start_row,
+                start_col: pivot.source_range.start_col,
+                end_row: pivot.source_range.end_row,
+                end_col: pivot.source_range.end_col,
+            },
+            destination: PivotDestination {
+                sheet_id: pivot.destination.sheet_id,
+                row: pivot.destination.row,
+                col: pivot.destination.col,
+            },
+        })
+        .collect())
 }
 
 #[cfg(feature = "desktop")]

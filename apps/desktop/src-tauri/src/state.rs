@@ -5,6 +5,7 @@ use crate::macros::{
 };
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
+use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotValue};
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
 use formula_engine::what_if::monte_carlo::{MonteCarloEngine, SimulationConfig, SimulationResult};
 use formula_engine::what_if::scenario_manager::{
@@ -21,6 +22,7 @@ use formula_xlsx::print::{
 };
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -40,6 +42,10 @@ pub enum AppStateError {
         end_row: usize,
         end_col: usize,
     },
+    #[error("unknown pivot id: {0}")]
+    UnknownPivot(String),
+    #[error("pivot table failed: {0}")]
+    Pivot(String),
     #[error("what-if analysis failed: {0}")]
     WhatIf(String),
 }
@@ -157,6 +163,71 @@ pub struct WorkbookInfoData {
     pub sheets: Vec<SheetInfoData>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CellRect {
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+}
+
+impl CellRect {
+    fn contains(&self, row: usize, col: usize) -> bool {
+        row >= self.start_row
+            && row <= self.end_row
+            && col >= self.start_col
+            && col <= self.end_col
+    }
+
+    fn union(&self, other: &CellRect) -> CellRect {
+        CellRect {
+            start_row: self.start_row.min(other.start_row),
+            start_col: self.start_col.min(other.start_col),
+            end_row: self.end_row.max(other.end_row),
+            end_col: self.end_col.max(other.end_col),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PivotDestination {
+    pub sheet_id: String,
+    pub row: usize,
+    pub col: usize,
+}
+
+#[derive(Clone, Debug)]
+struct PivotRegistration {
+    id: String,
+    name: String,
+    source_sheet_id: String,
+    source_range: CellRect,
+    destination: PivotDestination,
+    config: PivotConfig,
+    last_output_range: Option<CellRect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PivotTableSummary {
+    pub id: String,
+    pub name: String,
+    pub source_sheet_id: String,
+    pub source_range: CellRect,
+    pub destination: PivotDestination,
+}
+
+#[derive(Default)]
+struct PivotManager {
+    pivots: Vec<PivotRegistration>,
+}
+
+impl PivotManager {
+    fn next_id() -> String {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        format!("pivot-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct CellInputSnapshot {
     sheet_id: String,
@@ -182,6 +253,7 @@ pub struct AppState {
     redo_stack: Vec<UndoEntry>,
     scenario_manager: ScenarioManager,
     macro_host: MacroHost,
+    pivots: PivotManager,
 }
 
 impl Default for AppState {
@@ -200,6 +272,7 @@ impl AppState {
             redo_stack: Vec::new(),
             scenario_manager: ScenarioManager::new(),
             macro_host: MacroHost::default(),
+            pivots: PivotManager::default(),
         }
     }
 
@@ -232,6 +305,7 @@ impl AppState {
         self.engine = FormulaEngine::new();
         self.scenario_manager = ScenarioManager::new();
         self.macro_host.invalidate();
+        self.pivots = PivotManager::default();
 
         // Best effort: rebuild and calculate. Unsupported formulas become #NAME? via the engine.
         let _ = self.rebuild_engine_from_workbook();
@@ -461,8 +535,11 @@ impl AppState {
         }
 
         self.apply_snapshots(&[after_cell.clone()])?;
-        self.engine.recalculate();
-        let mut updates = self.refresh_computed_values()?;
+        let mut updates = self.recalculate_with_pivots(vec![(
+            sheet_id.to_string(),
+            row,
+            col,
+        )])?;
 
         if !updates
             .iter()
@@ -559,8 +636,11 @@ impl AppState {
         }
 
         self.apply_snapshots(&after)?;
-        self.engine.recalculate();
-        let mut updates = self.refresh_computed_values()?;
+        let direct_changes = changed
+            .iter()
+            .map(|(row, col)| (sheet_id.to_string(), *row, *col))
+            .collect::<Vec<_>>();
+        let mut updates = self.recalculate_with_pivots(direct_changes)?;
 
         for (row, col) in changed {
             if !updates
@@ -582,6 +662,108 @@ impl AppState {
         self.redo_stack.clear();
         self.undo_stack.push(UndoEntry { before, after });
         Ok(updates)
+    }
+
+    pub fn list_pivot_tables(&self) -> Vec<PivotTableSummary> {
+        self.pivots
+            .pivots
+            .iter()
+            .map(|pivot| PivotTableSummary {
+                id: pivot.id.clone(),
+                name: pivot.name.clone(),
+                source_sheet_id: pivot.source_sheet_id.clone(),
+                source_range: pivot.source_range.clone(),
+                destination: pivot.destination.clone(),
+            })
+            .collect()
+    }
+
+    pub fn create_pivot_table(
+        &mut self,
+        name: String,
+        source_sheet_id: String,
+        source_range: CellRect,
+        destination: PivotDestination,
+        config: PivotConfig,
+    ) -> Result<(String, Vec<CellUpdateData>), AppStateError> {
+        if source_range.start_row > source_range.end_row || source_range.start_col > source_range.end_col
+        {
+            return Err(AppStateError::InvalidRange {
+                start_row: source_range.start_row,
+                start_col: source_range.start_col,
+                end_row: source_range.end_row,
+                end_col: source_range.end_col,
+            });
+        }
+
+        if self.workbook.is_none() {
+            return Err(AppStateError::NoWorkbookLoaded);
+        }
+
+        // Validate sheet ids early so we don't register unusable pivots.
+        let workbook = self
+            .workbook
+            .as_ref()
+            .expect("checked is_some above");
+        if workbook.sheet(&source_sheet_id).is_none() {
+            return Err(AppStateError::UnknownSheet(source_sheet_id));
+        }
+        if workbook.sheet(&destination.sheet_id).is_none() {
+            return Err(AppStateError::UnknownSheet(destination.sheet_id));
+        }
+
+        let pivot_id = PivotManager::next_id();
+        self.pivots.pivots.push(PivotRegistration {
+            id: pivot_id.clone(),
+            name,
+            source_sheet_id,
+            source_range,
+            destination,
+            config,
+            last_output_range: None,
+        });
+
+        let updates = match self.refresh_pivot_table(&pivot_id) {
+            Ok(updates) => updates,
+            Err(err) => {
+                // Best-effort rollback if refresh failed.
+                self.pivots.pivots.retain(|p| p.id != pivot_id);
+                return Err(err);
+            }
+        };
+
+        self.dirty = true;
+        self.redo_stack.clear();
+
+        Ok((pivot_id, updates))
+    }
+
+    pub fn refresh_pivot_table(&mut self, pivot_id: &str) -> Result<Vec<CellUpdateData>, AppStateError> {
+        let idx = self
+            .pivots
+            .pivots
+            .iter()
+            .position(|p| p.id == pivot_id)
+            .ok_or_else(|| AppStateError::UnknownPivot(pivot_id.to_string()))?;
+
+        let workbook = self
+            .workbook
+            .as_mut()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let engine = &mut self.engine;
+
+        let pivot_updates = refresh_pivot_registration(workbook, engine, &mut self.pivots.pivots[idx])?;
+
+        if !pivot_updates.is_empty() {
+            self.dirty = true;
+        }
+
+        // Recalculate once more so formulas depending on the pivot output update.
+        self.engine.recalculate();
+        let mut updates = pivot_updates;
+        updates.extend(self.refresh_computed_values()?);
+
+        Ok(dedupe_updates(updates))
     }
 
     pub fn recalculate_all(&mut self) -> Result<Vec<CellUpdateData>, AppStateError> {
@@ -998,9 +1180,13 @@ impl AppState {
             return Err(AppStateError::NoWorkbookLoaded);
         }
         let entry = self.undo_stack.pop().ok_or(AppStateError::NoUndoHistory)?;
+        let direct_changes = entry
+            .before
+            .iter()
+            .map(|cell| (cell.sheet_id.clone(), cell.row, cell.col))
+            .collect::<Vec<_>>();
         self.apply_snapshots(&entry.before)?;
-        self.engine.recalculate();
-        let mut updates = self.refresh_computed_values()?;
+        let mut updates = self.recalculate_with_pivots(direct_changes)?;
 
         for cell in &entry.before {
             if !updates
@@ -1028,9 +1214,13 @@ impl AppState {
             return Err(AppStateError::NoWorkbookLoaded);
         }
         let entry = self.redo_stack.pop().ok_or(AppStateError::NoRedoHistory)?;
+        let direct_changes = entry
+            .after
+            .iter()
+            .map(|cell| (cell.sheet_id.clone(), cell.row, cell.col))
+            .collect::<Vec<_>>();
         self.apply_snapshots(&entry.after)?;
-        self.engine.recalculate();
-        let mut updates = self.refresh_computed_values()?;
+        let mut updates = self.recalculate_with_pivots(direct_changes)?;
 
         for cell in &entry.after {
             if !updates
@@ -1215,6 +1405,88 @@ impl AppState {
         })
     }
 
+    fn recalculate_with_pivots(
+        &mut self,
+        mut pending_changes: Vec<(String, usize, usize)>,
+    ) -> Result<Vec<CellUpdateData>, AppStateError> {
+        const MAX_PIVOT_REFRESH_PASSES: usize = 2;
+
+        let mut updates = Vec::new();
+        let mut pivot_updates_in_last_pass = Vec::new();
+
+        for pass in 0..MAX_PIVOT_REFRESH_PASSES {
+            self.engine.recalculate();
+            let formula_updates = self.refresh_computed_values()?;
+
+            let mut changed_for_pivots = pending_changes.clone();
+            changed_for_pivots.extend(
+                formula_updates
+                    .iter()
+                    .map(|u| (u.sheet_id.clone(), u.row, u.col)),
+            );
+
+            let pivot_updates = self.refresh_pivots_for_changed_cells(&changed_for_pivots)?;
+
+            updates.extend(formula_updates);
+            updates.extend(pivot_updates.clone());
+
+            if pivot_updates.is_empty() {
+                return Ok(dedupe_updates(updates));
+            }
+
+            pending_changes = pivot_updates
+                .iter()
+                .map(|u| (u.sheet_id.clone(), u.row, u.col))
+                .collect();
+
+            if pass == MAX_PIVOT_REFRESH_PASSES - 1 {
+                pivot_updates_in_last_pass = pivot_updates;
+            }
+        }
+
+        // If we hit the refresh limit, ensure we still run one final formula pass
+        // so dependents of the last pivot output update.
+        if !pivot_updates_in_last_pass.is_empty() {
+            self.engine.recalculate();
+            updates.extend(self.refresh_computed_values()?);
+        }
+
+        Ok(dedupe_updates(updates))
+    }
+
+    fn refresh_pivots_for_changed_cells(
+        &mut self,
+        changed_cells: &[(String, usize, usize)],
+    ) -> Result<Vec<CellUpdateData>, AppStateError> {
+        if changed_cells.is_empty() || self.pivots.pivots.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let workbook = self
+            .workbook
+            .as_mut()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let engine = &mut self.engine;
+
+        let mut updates = Vec::new();
+        for pivot in self.pivots.pivots.iter_mut() {
+            let should_refresh = changed_cells.iter().any(|(sheet_id, row, col)| {
+                sheet_id == &pivot.source_sheet_id && pivot.source_range.contains(*row, *col)
+            });
+            if !should_refresh {
+                continue;
+            }
+
+            updates.extend(refresh_pivot_registration(workbook, engine, pivot)?);
+        }
+
+        if !updates.is_empty() {
+            self.dirty = true;
+        }
+
+        Ok(updates)
+    }
+
     fn snapshot_cell(
         &self,
         sheet_id: &str,
@@ -1363,6 +1635,187 @@ impl AppState {
 
         Ok(updates)
     }
+}
+
+fn dedupe_updates(updates: Vec<CellUpdateData>) -> Vec<CellUpdateData> {
+    let mut out: Vec<CellUpdateData> = Vec::new();
+    let mut index_by_key = std::collections::HashMap::<(String, usize, usize), usize>::new();
+
+    for update in updates {
+        let key = (update.sheet_id.clone(), update.row, update.col);
+        if let Some(idx) = index_by_key.get(&key).copied() {
+            out[idx] = update;
+        } else {
+            index_by_key.insert(key, out.len());
+            out.push(update);
+        }
+    }
+
+    out
+}
+
+fn scalar_to_pivot_value(value: &CellScalar) -> PivotValue {
+    match value {
+        CellScalar::Empty => PivotValue::Blank,
+        CellScalar::Number(n) => PivotValue::Number(*n),
+        CellScalar::Text(s) => PivotValue::Text(s.clone()),
+        CellScalar::Bool(b) => PivotValue::Bool(*b),
+        // Errors are treated as text for pivot purposes (so aggregations won't treat them as numbers).
+        CellScalar::Error(e) => PivotValue::Text(e.clone()),
+    }
+}
+
+fn pivot_value_to_scalar(value: &PivotValue) -> CellScalar {
+    match value {
+        PivotValue::Blank => CellScalar::Empty,
+        PivotValue::Number(n) => CellScalar::Number(*n),
+        PivotValue::Text(s) => CellScalar::Text(s.clone()),
+        PivotValue::Bool(b) => CellScalar::Bool(*b),
+    }
+}
+
+fn pivot_value_to_scalar_opt(value: &PivotValue) -> Option<CellScalar> {
+    match value {
+        PivotValue::Blank => None,
+        other => Some(pivot_value_to_scalar(other)),
+    }
+}
+
+fn normalize_pivot_grid(mut grid: Vec<Vec<PivotValue>>) -> Vec<Vec<PivotValue>> {
+    if grid.is_empty() {
+        return vec![vec![PivotValue::Blank]];
+    }
+
+    let mut cols = grid.iter().map(|row| row.len()).max().unwrap_or(0);
+    cols = cols.max(1);
+
+    for row in &mut grid {
+        while row.len() < cols {
+            row.push(PivotValue::Blank);
+        }
+    }
+
+    grid
+}
+
+fn refresh_pivot_registration(
+    workbook: &mut Workbook,
+    engine: &mut FormulaEngine,
+    pivot: &mut PivotRegistration,
+) -> Result<Vec<CellUpdateData>, AppStateError> {
+    let source_values = {
+        let sheet = workbook
+            .sheet(&pivot.source_sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(pivot.source_sheet_id.clone()))?;
+        let cells = sheet.get_range_cells(
+            pivot.source_range.start_row,
+            pivot.source_range.start_col,
+            pivot.source_range.end_row,
+            pivot.source_range.end_col,
+        );
+
+        cells
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|cell| scalar_to_pivot_value(&cell.computed_value))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let cache = PivotCache::from_range(&source_values).map_err(|e| AppStateError::Pivot(e.to_string()))?;
+    let result =
+        PivotEngine::calculate(&cache, &pivot.config).map_err(|e| AppStateError::Pivot(e.to_string()))?;
+
+    let grid = normalize_pivot_grid(result.data);
+    let row_count = grid.len();
+    let col_count = grid[0].len();
+
+    let dest_start_row = pivot.destination.row;
+    let dest_start_col = pivot.destination.col;
+
+    let next_range = CellRect {
+        start_row: dest_start_row,
+        start_col: dest_start_col,
+        end_row: dest_start_row + row_count - 1,
+        end_col: dest_start_col + col_count - 1,
+    };
+
+    let union_range = pivot
+        .last_output_range
+        .as_ref()
+        .map(|prev| prev.union(&next_range))
+        .unwrap_or_else(|| next_range.clone());
+
+    let union_rows = union_range.end_row - union_range.start_row + 1;
+    let union_cols = union_range.end_col - union_range.start_col + 1;
+
+    let dest_sheet_id = pivot.destination.sheet_id.clone();
+    let dest_sheet_name = workbook
+        .sheet(&dest_sheet_id)
+        .ok_or_else(|| AppStateError::UnknownSheet(dest_sheet_id.clone()))?
+        .name
+        .clone();
+
+    let mut updates = Vec::new();
+
+    {
+        let sheet = workbook
+            .sheet_mut(&dest_sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(dest_sheet_id.clone()))?;
+
+        for r in 0..union_rows {
+            for c in 0..union_cols {
+                let row = union_range.start_row + r;
+                let col = union_range.start_col + c;
+
+                let within_new = row >= next_range.start_row
+                    && row <= next_range.end_row
+                    && col >= next_range.start_col
+                    && col <= next_range.end_col;
+
+                let pv = if within_new {
+                    grid[row - next_range.start_row][col - next_range.start_col].clone()
+                } else {
+                    PivotValue::Blank
+                };
+
+                let desired_scalar = pivot_value_to_scalar(&pv);
+                let desired_opt = pivot_value_to_scalar_opt(&pv);
+
+                let existing = sheet.get_cell(row, col);
+                let changed = existing.formula.is_some() || existing.computed_value != desired_scalar;
+                if !changed {
+                    continue;
+                }
+
+                let new_cell = match desired_opt.as_ref() {
+                    Some(s) => Cell::from_literal(Some(s.clone())),
+                    None => Cell::empty(),
+                };
+                sheet.set_cell(row, col, new_cell);
+
+                let addr = coord_to_a1(row, col);
+                let engine_value = desired_opt
+                    .as_ref()
+                    .map(scalar_to_engine_value)
+                    .unwrap_or(EngineValue::Blank);
+                let _ = engine.set_cell_value(&dest_sheet_name, &addr, engine_value);
+
+                updates.push(CellUpdateData {
+                    sheet_id: dest_sheet_id.clone(),
+                    row,
+                    col,
+                    value: desired_scalar,
+                    formula: None,
+                });
+            }
+        }
+    }
+
+    pivot.last_output_range = Some(union_range);
+    Ok(updates)
 }
 
 fn resolve_cell_ref(
@@ -1614,6 +2067,9 @@ fn ensure_sheet_print_settings<'a>(
 mod tests {
     use super::*;
     use crate::file_io::{read_xlsx_blocking, write_xlsx_blocking};
+    use formula_engine::pivot::{
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, SubtotalPosition, ValueField,
+    };
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
 
@@ -2227,5 +2683,352 @@ mod tests {
         assert_eq!(col_index_to_letters(27), "AB");
         assert_eq!(col_index_to_letters(701), "ZZ");
         assert_eq!(col_index_to_letters(702), "AAA");
+    }
+
+    fn simple_pivot_config() -> PivotConfig {
+        PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Region".to_string(),
+            }],
+            column_fields: Vec::new(),
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: Vec::new(),
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        }
+    }
+
+    #[test]
+    fn creating_pivot_table_writes_expected_output() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Data".to_string());
+        workbook.add_sheet("Pivot".to_string());
+        let data_sheet_id = workbook.sheets[0].id.clone();
+        let pivot_sheet_id = workbook.sheets[1].id.clone();
+
+        let sheet = workbook.sheet_mut(&data_sheet_id).unwrap();
+        sheet.set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("Region".to_string()))),
+        );
+        sheet.set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("Sales".to_string()))),
+        );
+        sheet.set_cell(
+            1,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("East".to_string()))),
+        );
+        sheet.set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(100.0))));
+        sheet.set_cell(
+            2,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("West".to_string()))),
+        );
+        sheet.set_cell(2, 1, Cell::from_literal(Some(CellScalar::Number(200.0))));
+        sheet.set_cell(
+            3,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("East".to_string()))),
+        );
+        sheet.set_cell(3, 1, Cell::from_literal(Some(CellScalar::Number(50.0))));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let (_pivot_id, _updates) = state
+            .create_pivot_table(
+                "Sales by Region".to_string(),
+                data_sheet_id.clone(),
+                CellRect {
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: 3,
+                    end_col: 1,
+                },
+                PivotDestination {
+                    sheet_id: pivot_sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                simple_pivot_config(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 0, 0).unwrap().value,
+            CellScalar::Text("Region".to_string())
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 0, 1).unwrap().value,
+            CellScalar::Text("Sum of Sales".to_string())
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 1, 0).unwrap().value,
+            CellScalar::Text("East".to_string())
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 1, 1).unwrap().value,
+            CellScalar::Number(150.0)
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 2, 0).unwrap().value,
+            CellScalar::Text("West".to_string())
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 2, 1).unwrap().value,
+            CellScalar::Number(200.0)
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 0).unwrap().value,
+            CellScalar::Text("Grand Total".to_string())
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
+            CellScalar::Number(350.0)
+        );
+    }
+
+    #[test]
+    fn pivot_auto_refreshes_when_source_cell_changes() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Data".to_string());
+        workbook.add_sheet("Pivot".to_string());
+        let data_sheet_id = workbook.sheets[0].id.clone();
+        let pivot_sheet_id = workbook.sheets[1].id.clone();
+
+        let sheet = workbook.sheet_mut(&data_sheet_id).unwrap();
+        sheet.set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("Region".to_string()))),
+        );
+        sheet.set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("Sales".to_string()))),
+        );
+        sheet.set_cell(
+            1,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("East".to_string()))),
+        );
+        sheet.set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(100.0))));
+        sheet.set_cell(
+            2,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("West".to_string()))),
+        );
+        sheet.set_cell(2, 1, Cell::from_literal(Some(CellScalar::Number(200.0))));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        state
+            .create_pivot_table(
+                "Sales by Region".to_string(),
+                data_sheet_id.clone(),
+                CellRect {
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: 2,
+                    end_col: 1,
+                },
+                PivotDestination {
+                    sheet_id: pivot_sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                simple_pivot_config(),
+            )
+            .unwrap();
+
+        // Change East sales from 100 -> 120; pivot should refresh.
+        state
+            .set_cell(&data_sheet_id, 1, 1, Some(JsonValue::from(120)), None)
+            .unwrap();
+
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 1, 1).unwrap().value,
+            CellScalar::Number(120.0)
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
+            CellScalar::Number(320.0)
+        );
+    }
+
+    #[test]
+    fn pivot_refreshes_when_formula_in_source_range_updates() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Data".to_string());
+        workbook.add_sheet("Pivot".to_string());
+        let data_sheet_id = workbook.sheets[0].id.clone();
+        let pivot_sheet_id = workbook.sheets[1].id.clone();
+
+        let sheet = workbook.sheet_mut(&data_sheet_id).unwrap();
+        sheet.set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("Region".to_string()))),
+        );
+        sheet.set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("Sales".to_string()))),
+        );
+
+        // Sales values are formulas that depend on C2/C3 (outside the pivot source range).
+        sheet.set_cell(
+            1,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("East".to_string()))),
+        );
+        sheet.set_cell(1, 1, Cell::from_formula("=C2".to_string()));
+        sheet.set_cell(1, 2, Cell::from_literal(Some(CellScalar::Number(100.0))));
+
+        sheet.set_cell(
+            2,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("West".to_string()))),
+        );
+        sheet.set_cell(2, 1, Cell::from_formula("=C3".to_string()));
+        sheet.set_cell(2, 2, Cell::from_literal(Some(CellScalar::Number(200.0))));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        state
+            .create_pivot_table(
+                "Sales by Region".to_string(),
+                data_sheet_id.clone(),
+                CellRect {
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: 2,
+                    end_col: 1,
+                },
+                PivotDestination {
+                    sheet_id: pivot_sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                simple_pivot_config(),
+            )
+            .unwrap();
+
+        // Update C2 (outside source range). B2 should update (formula), and that should trigger pivot refresh.
+        state
+            .set_cell(&data_sheet_id, 1, 2, Some(JsonValue::from(150)), None)
+            .unwrap();
+
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 1, 1).unwrap().value,
+            CellScalar::Number(150.0)
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
+            CellScalar::Number(350.0)
+        );
+    }
+
+    #[test]
+    fn pivot_shrinking_clears_stale_cells() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Data".to_string());
+        workbook.add_sheet("Pivot".to_string());
+        let data_sheet_id = workbook.sheets[0].id.clone();
+        let pivot_sheet_id = workbook.sheets[1].id.clone();
+
+        let sheet = workbook.sheet_mut(&data_sheet_id).unwrap();
+        sheet.set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("Region".to_string()))),
+        );
+        sheet.set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("Sales".to_string()))),
+        );
+        sheet.set_cell(
+            1,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("East".to_string()))),
+        );
+        sheet.set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(100.0))));
+        sheet.set_cell(
+            2,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("West".to_string()))),
+        );
+        sheet.set_cell(2, 1, Cell::from_literal(Some(CellScalar::Number(200.0))));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        state
+            .create_pivot_table(
+                "Sales by Region".to_string(),
+                data_sheet_id.clone(),
+                CellRect {
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: 2,
+                    end_col: 1,
+                },
+                PivotDestination {
+                    sheet_id: pivot_sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                simple_pivot_config(),
+            )
+            .unwrap();
+
+        // Ensure the "West" row exists before shrinking.
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 2, 0).unwrap().value,
+            CellScalar::Text("West".to_string())
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 0).unwrap().value,
+            CellScalar::Text("Grand Total".to_string())
+        );
+
+        // Collapse West into East; pivot should now have only 3 rows (header, East, Grand Total).
+        state
+            .set_cell(
+                &data_sheet_id,
+                2,
+                0,
+                Some(JsonValue::from("East")),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 2, 0).unwrap().value,
+            CellScalar::Text("Grand Total".to_string())
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 0).unwrap().value,
+            CellScalar::Empty
+        );
+        assert_eq!(
+            state.get_cell(&pivot_sheet_id, 3, 1).unwrap().value,
+            CellScalar::Empty
+        );
     }
 }
