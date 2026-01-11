@@ -391,8 +391,8 @@ export function installYwsSecurity(
   if (shadowDoc && shadowCells) {
     const originalSend = ws.send.bind(ws);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ws.send = ((...args: any[]) => {
-      const raw = args[0] as WebSocket.RawData;
+    ws.send = ((data: any, optionsOrCb?: any, cb?: any) => {
+      const raw = data as WebSocket.RawData;
       try {
         const message = toUint8Array(raw);
         if (message) {
@@ -409,7 +409,11 @@ export function installYwsSecurity(
         // Best-effort: ignore malformed outbound messages. Enforcement stays strict
         // on inbound updates.
       }
-      return originalSend(...args);
+      // Preserve ws.send overload semantics (send(data, cb) vs send(data, opts, cb)).
+      if (typeof optionsOrCb === "function") {
+        return originalSend(data, optionsOrCb);
+      }
+      return originalSend(data, optionsOrCb, cb);
     }) as typeof ws.send;
 
     ws.on("close", () => {
@@ -652,7 +656,7 @@ export function installYwsSecurity(
               if (!(cell instanceof Y.Map)) continue;
               const value = cell.get("modifiedBy");
               if (value != null && value !== userId) {
-                (cell as Y.Map<unknown>).set("modifiedBy", userId);
+                (cell as any).set("modifiedBy", userId);
               }
             }
           });
