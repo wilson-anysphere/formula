@@ -688,28 +688,40 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   const MAX_COLS = 200;
   const CHUNK_ROWS = 200;
-  const MAX_ROWS = 2000;
-  const EMPTY_CHUNKS_BEFORE_STOP = 2;
+  const MAX_ROWS = 10_000;
 
   const snapshotSheets: Array<{ id: string; cells: any[] }> = [];
 
   for (const sheet of sheets) {
     const cells: Array<{ row: number; col: number; value: unknown | null; formula: string | null; format: null }> = [];
 
-    let seenData = false;
-    let emptyChunks = 0;
+    const usedRange = await tauriBackend.getSheetUsedRange(sheet.id);
+    if (!usedRange) {
+      snapshotSheets.push({ id: sheet.id, cells });
+      continue;
+    }
 
-    for (let startRow = 0; startRow < MAX_ROWS; startRow += CHUNK_ROWS) {
+    const startCol = Math.max(0, Math.min(usedRange.start_col, MAX_COLS - 1));
+    const endCol = Math.max(0, Math.min(usedRange.end_col, MAX_COLS - 1));
+    const startRow = Math.max(0, Math.min(usedRange.start_row, MAX_ROWS - 1));
+    const endRow = Math.max(0, Math.min(usedRange.end_row, MAX_ROWS - 1));
+
+    if (startRow > endRow || startCol > endCol) {
+      snapshotSheets.push({ id: sheet.id, cells });
+      continue;
+    }
+
+    for (let chunkStartRow = startRow; chunkStartRow <= endRow; chunkStartRow += CHUNK_ROWS) {
+      const chunkEndRow = Math.min(endRow, chunkStartRow + CHUNK_ROWS - 1);
       const range = await tauriBackend.getRange({
         sheetId: sheet.id,
-        startRow,
-        startCol: 0,
-        endRow: startRow + CHUNK_ROWS - 1,
-        endCol: MAX_COLS - 1
+        startRow: chunkStartRow,
+        startCol,
+        endRow: chunkEndRow,
+        endCol
       });
 
       const rows = Array.isArray(range?.values) ? range.values : [];
-      let chunkHasData = false;
 
       for (let r = 0; r < rows.length; r++) {
         const rowValues = Array.isArray(rows[r]) ? rows[r] : [];
@@ -719,23 +731,14 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
           const value = cell?.value ?? null;
           if (formula == null && value == null) continue;
 
-          chunkHasData = true;
           cells.push({
-            row: startRow + r,
-            col: c,
+            row: chunkStartRow + r,
+            col: startCol + c,
             value: formula != null ? null : value,
             formula,
             format: null
           });
         }
-      }
-
-      if (chunkHasData) {
-        seenData = true;
-        emptyChunks = 0;
-      } else if (seenData) {
-        emptyChunks += 1;
-        if (emptyChunks >= EMPTY_CHUNKS_BEFORE_STOP) break;
       }
     }
 

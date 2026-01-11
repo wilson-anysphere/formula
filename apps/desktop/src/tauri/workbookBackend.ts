@@ -26,6 +26,13 @@ export type RangeCellEdit = {
   formula: string | null;
 };
 
+export type SheetUsedRange = {
+  start_row: number;
+  end_row: number;
+  start_col: number;
+  end_col: number;
+};
+
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 function getTauriInvoke(): TauriInvoke {
@@ -71,6 +78,13 @@ export class TauriWorkbookBackend {
     return payload as RangeData;
   }
 
+  async getSheetUsedRange(sheetId: string): Promise<SheetUsedRange | null> {
+    const payload = await this.invoke("get_sheet_used_range", {
+      sheet_id: sheetId,
+    });
+    return (payload as SheetUsedRange | null) ?? null;
+  }
+
   async setCell(params: {
     sheetId: string;
     row: number;
@@ -105,4 +119,3 @@ export class TauriWorkbookBackend {
     });
   }
 }
-

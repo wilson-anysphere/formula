@@ -116,6 +116,14 @@ pub struct WorkbookInfo {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SheetUsedRange {
+    pub start_row: usize,
+    pub end_row: usize,
+    pub start_col: usize,
+    pub end_col: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RangeCellEdit {
     pub value: Option<JsonValue>,
     pub formula: Option<String>,
@@ -315,6 +323,58 @@ pub fn get_range(
         start_row,
         start_col,
     })
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn get_sheet_used_range(
+    sheet_id: String,
+    state: State<'_, SharedAppState>,
+) -> Result<Option<SheetUsedRange>, String> {
+    let state = state.inner().lock().unwrap();
+    let workbook = state.get_workbook().map_err(app_error)?;
+    let sheet = workbook
+        .sheet(&sheet_id)
+        .ok_or_else(|| app_error(AppStateError::UnknownSheet(sheet_id)))?;
+
+    if let Some(table) = &sheet.columnar {
+        let rows = table.row_count();
+        let cols = table.column_count();
+        if rows == 0 || cols == 0 {
+            return Ok(None);
+        }
+        return Ok(Some(SheetUsedRange {
+            start_row: 0,
+            end_row: rows.saturating_sub(1),
+            start_col: 0,
+            end_col: cols.saturating_sub(1),
+        }));
+    }
+
+    let mut min_row = usize::MAX;
+    let mut min_col = usize::MAX;
+    let mut max_row = 0usize;
+    let mut max_col = 0usize;
+    let mut has_any = false;
+
+    for ((row, col), _cell) in sheet.cells_iter() {
+        has_any = true;
+        min_row = min_row.min(row);
+        min_col = min_col.min(col);
+        max_row = max_row.max(row);
+        max_col = max_col.max(col);
+    }
+
+    if !has_any {
+        return Ok(None);
+    }
+
+    Ok(Some(SheetUsedRange {
+        start_row: min_row,
+        end_row: max_row,
+        start_col: min_col,
+        end_col: max_col,
+    }))
 }
 
 #[cfg(feature = "desktop")]

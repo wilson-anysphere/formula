@@ -47,6 +47,7 @@ fn main() {
             commands::get_cell,
             commands::set_cell,
             commands::get_range,
+            commands::get_sheet_used_range,
             commands::set_range,
             commands::recalculate,
             commands::undo,

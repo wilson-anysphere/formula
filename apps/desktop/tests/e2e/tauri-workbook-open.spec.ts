@@ -17,6 +17,9 @@ test.describe("tauri workbook integration", () => {
                   sheets: [{ id: "Sheet1", name: "Sheet1" }]
                 };
 
+              case "get_sheet_used_range":
+                return { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
+
               case "get_range": {
                 const startRow = Number(args?.start_row ?? 0);
                 const endRow = Number(args?.end_row ?? startRow);
@@ -87,4 +90,3 @@ test.describe("tauri workbook integration", () => {
     expect(a1).toBe("Hello");
   });
 });
-
