@@ -50,6 +50,47 @@ fn apply_cell_patches_preserves_unrelated_parts_for_xlsx() -> Result<(), Box<dyn
 }
 
 #[test]
+fn apply_cell_patches_preserves_unknown_cell_types() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/date-type.xlsx");
+    let bytes = std::fs::read(&fixture)?;
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("C1")?,
+        CellPatch::set_value(CellValue::String("2027-04-05T00:00:00Z".to_string())),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let tmpdir = tempfile::tempdir()?;
+    let out = tmpdir.path().join("patched.xlsx");
+    std::fs::write(&out, pkg.write_to_bytes()?)?;
+
+    // Only the worksheet part should change (no sharedStrings churn).
+    let parts = diff_parts(&fixture, &out);
+    assert_eq!(
+        parts,
+        BTreeSet::from(["xl/worksheets/sheet1.xml".to_string()])
+    );
+
+    // And the original unknown `t="d"` cell type should be preserved.
+    let out_bytes = std::fs::read(&out)?;
+    let pkg2 = XlsxPackage::from_bytes(&out_bytes)?;
+    let sheet_xml = std::str::from_utf8(
+        pkg2.part("xl/worksheets/sheet1.xml")
+            .expect("worksheet part exists"),
+    )?;
+    assert!(
+        sheet_xml.contains(r#"<c r="C1" t="d"><v>2027-04-05T00:00:00Z</v></c>"#),
+        "expected patched worksheet xml to keep t=\"d\""
+    );
+
+    Ok(())
+}
+
+#[test]
 fn apply_cell_patches_preserves_vba_project_for_xlsm() -> Result<(), Box<dyn std::error::Error>> {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/macros/basic.xlsm");

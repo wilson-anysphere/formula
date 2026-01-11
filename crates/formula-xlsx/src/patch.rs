@@ -678,7 +678,7 @@ fn write_cell_patch(
         CellPatch::Set { value, formula, .. } => (Some(value), formula.as_deref()),
     };
 
-    let mut ty: Option<&'static str> = None;
+    let mut ty: Option<&str> = None;
     let mut value_xml = String::new();
 
     if let Some(formula) = formula {
@@ -711,26 +711,63 @@ fn write_cell_patch(
             CellValue::String(s) => {
                 // Preserve existing string storage form when possible; otherwise default to shared
                 // strings when the package already has `sharedStrings.xml`.
-                let prefer_shared = shared_strings.is_some() && existing_t != Some("inlineStr");
-
-                match (existing_t, prefer_shared) {
-                    (Some("inlineStr"), _) => {
-                        ty = Some("inlineStr");
-                        value_xml.push_str("<is><t");
-                        if needs_space_preserve(s) {
-                            value_xml.push_str(r#" xml:space="preserve""#);
-                        }
-                        value_xml.push('>');
-                        value_xml.push_str(&escape_text(s));
-                        value_xml.push_str("</t></is>");
-                    }
-                    (Some("str"), _) => {
-                        ty = Some("str");
+                // If the existing cell uses an unknown/less-common type (e.g. `t="d"`), keep the
+                // type and write the raw value text into `<v>`. This avoids corrupting the sheet
+                // by rewriting it as a shared string / inline string when we don't understand the
+                // original semantics.
+                if let Some(existing_t) = existing_t {
+                    if !matches!(existing_t, "s" | "b" | "e" | "n" | "str" | "inlineStr") {
+                        ty = Some(existing_t);
                         value_xml.push_str("<v>");
                         value_xml.push_str(&escape_text(s));
                         value_xml.push_str("</v>");
+                    } else {
+                        let prefer_shared =
+                            shared_strings.is_some() && existing_t != "inlineStr";
+
+                        match (existing_t, prefer_shared) {
+                            ("inlineStr", _) => {
+                                ty = Some("inlineStr");
+                                value_xml.push_str("<is><t");
+                                if needs_space_preserve(s) {
+                                    value_xml.push_str(r#" xml:space="preserve""#);
+                                }
+                                value_xml.push('>');
+                                value_xml.push_str(&escape_text(s));
+                                value_xml.push_str("</t></is>");
+                            }
+                            ("str", _) => {
+                                ty = Some("str");
+                                value_xml.push_str("<v>");
+                                value_xml.push_str(&escape_text(s));
+                                value_xml.push_str("</v>");
+                            }
+                            (_, true) => {
+                                let idx = shared_strings
+                                    .as_deref_mut()
+                                    .map(|ss| ss.get_or_insert_plain(s))
+                                    .unwrap_or(0);
+                                ty = Some("s");
+                                value_xml.push_str("<v>");
+                                value_xml.push_str(&idx.to_string());
+                                value_xml.push_str("</v>");
+                            }
+                            _ => {
+                                ty = Some("inlineStr");
+                                value_xml.push_str("<is><t");
+                                if needs_space_preserve(s) {
+                                    value_xml.push_str(r#" xml:space="preserve""#);
+                                }
+                                value_xml.push('>');
+                                value_xml.push_str(&escape_text(s));
+                                value_xml.push_str("</t></is>");
+                            }
+                        }
                     }
-                    _ if prefer_shared => {
+                } else {
+                    let prefer_shared = shared_strings.is_some();
+
+                    if prefer_shared {
                         let idx = shared_strings
                             .as_deref_mut()
                             .map(|ss| ss.get_or_insert_plain(s))
@@ -739,8 +776,7 @@ fn write_cell_patch(
                         value_xml.push_str("<v>");
                         value_xml.push_str(&idx.to_string());
                         value_xml.push_str("</v>");
-                    }
-                    _ => {
+                    } else {
                         ty = Some("inlineStr");
                         value_xml.push_str("<is><t");
                         if needs_space_preserve(s) {
