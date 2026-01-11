@@ -801,7 +801,10 @@ impl Storage {
             SELECT COALESCE(
               MAX(
                 CASE
-                  WHEN model_sheet_id >= 0 AND model_sheet_id <= ?2 THEN model_sheet_id
+                  WHEN typeof(model_sheet_id) = 'integer'
+                    AND model_sheet_id >= 0
+                    AND model_sheet_id <= ?2
+                  THEN model_sheet_id
                   ELSE NULL
                 END
               ),
@@ -972,9 +975,11 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "SELECT model_sheet_id FROM sheets WHERE workbook_id = ?1 AND model_sheet_id IS NOT NULL",
             )?;
-            let ids = stmt.query_map(params![&workbook_id_str], |row| row.get::<_, i64>(0))?;
+            let ids = stmt.query_map(params![&workbook_id_str], |row| Ok(row.get::<_, i64>(0).ok()))?;
             for raw in ids {
-                let raw = raw?;
+                let Some(raw) = raw? else {
+                    continue;
+                };
                 if let Ok(id) = u32::try_from(raw) {
                     used_sheet_ids.insert(id);
                     max_sheet_id = max_sheet_id.max(id);
