@@ -842,15 +842,15 @@ export function bindCollabSessionToDocumentController(options: {
   if (!documentController)
     throw new Error("bindCollabSessionToDocumentController requires { documentController }");
 
-  // Session undo is implemented via Yjs' UndoManager and doesn't expose an origin token,
-  // but the CollabSession does. Provide it so the binder can ignore local transactions.
-  const defaultUndoService =
-    session.undo && typeof session.undo === "object" ? ({ ...session.undo, origin: session.origin } as any) : null;
-
   return bindYjsToDocumentController({
     ydoc: session.doc,
     documentController,
-    undoService: undoService === undefined ? defaultUndoService : undoService,
+    // Intentionally do not default to `session.undo` here: CollabSession's undo origin
+    // is the same as `session.origin`, and wiring it into the binder would cause
+    // direct `session.setCell*` calls to be treated as "local" and ignored by the
+    // Yjs→DocumentController observer. Callers that want Yjs UndoManager semantics
+    // can pass an explicit `undoService`.
+    undoService: undoService ?? null,
     defaultSheetId,
     userId,
     canReadCell: (cell) => session.canReadCell(cell),
