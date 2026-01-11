@@ -20,6 +20,14 @@ export interface EvaluateFormulaOptions {
    * resolved, treated as A1 references/ranges.
    */
   resolveNameToReference?: (name: string) => string | null;
+  /**
+   * When directly passing a range reference as an AI function argument, cap the number of
+   * cells materialized to avoid unbounded range serialization.
+   *
+   * Nested non-AI functions (e.g. `SUM(A1:A1000)` inside an AI argument) still materialize
+   * the full range so their semantics remain intact.
+   */
+  aiRangeSampleLimit?: number;
 }
 
 function isErrorCode(value: unknown): value is string {
@@ -178,9 +186,21 @@ type EvalContext = {
    * classifications from the referenced cell address (not just the cell value).
    */
   preserveReferenceProvenance: boolean;
+  /**
+   * When true, multi-cell range references are sampled (first N) instead of fully materialized.
+   */
+  sampleRangeReferences: boolean;
+  maxRangeCells: number;
 };
 
-const DEFAULT_CONTEXT: EvalContext = { preserveReferenceProvenance: false };
+const DEFAULT_CONTEXT: EvalContext = { preserveReferenceProvenance: false, sampleRangeReferences: false, maxRangeCells: 0 };
+
+const DEFAULT_AI_RANGE_SAMPLE_LIMIT = 200;
+
+function clampInt(value: number, opts: { min: number; max: number }): number {
+  const n = Number.isFinite(value) ? Math.trunc(value) : opts.min;
+  return Math.max(opts.min, Math.min(opts.max, n));
+}
 
 function splitSheetQualifier(input: string): { sheetName: string | null; ref: string } {
   const s = String(input).trim();
@@ -292,9 +312,13 @@ function readReference(
     return values;
   }
 
+  const totalCells = (range.end.row - range.start.row + 1) * (range.end.col - range.start.col + 1);
+  const maxCells = context.sampleRangeReferences ? Math.min(totalCells, Math.max(1, context.maxRangeCells)) : totalCells;
+
   const values: ProvenanceCellValue[] = [];
-  for (let r = range.start.row; r <= range.end.row; r += 1) {
+  outer: for (let r = range.start.row; r <= range.end.row; r += 1) {
     for (let c = range.start.col; c <= range.end.col; c += 1) {
+      if (values.length >= maxCells) break outer;
       const addr = toA1({ row: r, col: c });
       const cellRef = provenanceSheet ? `${provenanceSheet}!${addr}` : addr;
       values.push({ __cellRef: cellRef, value: readCell(addr) });
@@ -304,6 +328,7 @@ function readReference(
   const end = toA1(range.end);
   const rangeRef = start === end ? start : `${start}:${end}`;
   (values as any).__rangeRef = provenanceSheet ? `${provenanceSheet}!${rangeRef}` : rangeRef;
+  (values as any).__totalCells = totalCells;
   return values;
 }
 
@@ -363,7 +388,13 @@ function parsePrimary(
     if (!parser.match("paren", "(")) return "#VALUE!";
 
     const args: CellValue[] = [];
-    const argContext = isAiFunctionName(name) ? { preserveReferenceProvenance: true } : context;
+    const argContext = isAiFunctionName(name)
+      ? {
+          preserveReferenceProvenance: true,
+          sampleRangeReferences: true,
+          maxRangeCells: clampInt(options.aiRangeSampleLimit ?? DEFAULT_AI_RANGE_SAMPLE_LIMIT, { min: 1, max: 10_000 }),
+        }
+      : { ...context, sampleRangeReferences: false };
     if (!parser.match("paren", ")")) {
       while (true) {
         args.push(parseExpression(parser, getCellValue, options, argContext));

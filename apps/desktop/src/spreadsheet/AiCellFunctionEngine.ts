@@ -368,24 +368,36 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     defaultSheetId: string | null,
   ): ClassifiedArg {
     if (Array.isArray(arg)) {
-      const totalCells = arg.length;
-      const sampledCells = Math.min(totalCells, this.maxInputCells);
+      const providedCells = arg.length;
+      const metaTotalCells = (arg as any).__totalCells;
+      const totalCells =
+        typeof metaTotalCells === "number" && Number.isFinite(metaTotalCells) && metaTotalCells >= 0 ? metaTotalCells : providedCells;
+      const sampledCells = Math.min(providedCells, this.maxInputCells);
+      const rangeRef = (arg as any).__rangeRef;
+      const rangeClassification =
+        typeof rangeRef === "string" && rangeRef.trim()
+          ? this.classificationForCellRef(rangeRef, null, records, defaultSheetId)
+          : null;
       const items: ClassifiedItem[] = [];
 
       for (let i = 0; i < sampledCells; i += 1) {
         const entry = (arg as any[])[i];
         if (isProvenanceCellValue(entry)) {
+          let classification = this.classificationForCellRef(entry.__cellRef, entry.value, records, defaultSheetId);
+          if (rangeClassification) classification = maxClassification(classification, rangeClassification);
           items.push({
             value: entry.value,
-            classification: this.classificationForCellRef(entry.__cellRef, entry.value, records, defaultSheetId),
+            classification,
           });
         } else {
           const value = entry as SpreadsheetValue;
-          items.push({ value, classification: this.classifyForDlp(value) });
+          let classification = this.classifyForDlp(value);
+          if (rangeClassification) classification = maxClassification(classification, rangeClassification);
+          items.push({ value, classification });
         }
       }
 
-      return { kind: "range", items, totalCells, sampledCells, truncated: sampledCells < totalCells };
+      return { kind: "range", items, totalCells, sampledCells, truncated: totalCells > sampledCells };
     }
 
     if (isProvenanceCellValue(arg)) {

@@ -28,6 +28,7 @@ describe("evaluateFormula (AI provenance)", () => {
     expect(args[1][0]).toEqual({ __cellRef: "Sheet1!A1", value: "hello" });
     expect(args[1][1]).toEqual({ __cellRef: "Sheet1!A2", value: "world" });
     expect((args[1] as any).__rangeRef).toBe("Sheet1!A1:A2");
+    expect((args[1] as any).__totalCells).toBe(2);
   });
 
   it("preserves provenance on derived values inside AI arguments (e.g. SUM)", () => {
@@ -46,6 +47,53 @@ describe("evaluateFormula (AI provenance)", () => {
     expect(result).toBe("ok");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args?.[1]).toEqual({ __cellRef: "Sheet1!A1:A2", value: 3 });
+  });
+
+  it("samples large range references passed directly to AI functions", () => {
+    const calls: any[] = [];
+    const ai = {
+      evaluateAiFunction: (params: any) => {
+        calls.push(params);
+        return "ok";
+      },
+    };
+
+    let readCount = 0;
+    const getCellValue = (_addr: string) => {
+      readCount += 1;
+      return 1;
+    };
+
+    const result = evaluateFormula('=AI("summarize", A1:A500)', getCellValue, { ai, cellAddress: "Sheet1!B1" });
+    expect(result).toBe("ok");
+    expect(readCount).toBe(200);
+
+    const rangeArg = calls[0]?.args?.[1];
+    expect(Array.isArray(rangeArg)).toBe(true);
+    expect(rangeArg).toHaveLength(200);
+    expect((rangeArg as any).__rangeRef).toBe("Sheet1!A1:A500");
+    expect((rangeArg as any).__totalCells).toBe(500);
+  });
+
+  it("does not sample ranges inside nested non-AI functions (e.g. SUM) within AI arguments", () => {
+    const calls: any[] = [];
+    const ai = {
+      evaluateAiFunction: (params: any) => {
+        calls.push(params);
+        return "ok";
+      },
+    };
+
+    let readCount = 0;
+    const getCellValue = (_addr: string) => {
+      readCount += 1;
+      return 1;
+    };
+
+    const result = evaluateFormula('=AI("sum", SUM(A1:A500))', getCellValue, { ai, cellAddress: "Sheet1!B1" });
+    expect(result).toBe("ok");
+    expect(readCount).toBe(500);
+    expect(calls[0]?.args?.[1]).toEqual({ __cellRef: "Sheet1!A1:A500", value: 500 });
   });
 
   it("preserves provenance through nested expressions inside AI arguments (e.g. IF)", () => {
