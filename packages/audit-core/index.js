@@ -532,6 +532,14 @@ function buildPostgresAuditLogInsert(event) {
 function normalizePgJson(value) {
   if (value === null || value === undefined) return {};
   if (isPlainObject(value)) return value;
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer && Buffer.isBuffer(value)) {
+    try {
+      const parsed = JSON.parse(value.toString("utf8"));
+      return isPlainObject(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
   if (typeof value === "string") {
     try {
       const parsed = JSON.parse(value);
