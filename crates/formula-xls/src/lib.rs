@@ -311,7 +311,17 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             .and_then(|biff_idx| cell_xf_indices.as_ref().and_then(|v| v.get(biff_idx)))
             .filter(|map| !map.is_empty());
 
-        let sheet_needs_datetime_fallback = xf_style_ids.is_none() || sheet_cell_xfs.is_none();
+        // If BIFF styles are unavailable (or corrupt), fall back to heuristic date/time formats for
+        // any `Data::DateTime` cells that would otherwise have no style.
+        let sheet_has_out_of_range_xf = match (xf_style_ids.as_deref(), sheet_cell_xfs) {
+            (Some(style_ids), Some(map)) => map
+                .values()
+                .any(|&xf_idx| xf_idx as usize >= style_ids.len()),
+            _ => false,
+        };
+
+        let sheet_needs_datetime_fallback =
+            xf_style_ids.is_none() || sheet_cell_xfs.is_none() || sheet_has_out_of_range_xf;
 
         let value_range = match workbook.worksheet_range(&sheet_name) {
             Ok(range) => Some(range),
