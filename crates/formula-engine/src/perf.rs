@@ -120,6 +120,10 @@ impl ValueResolver for ConstResolver {
     ) -> Option<(usize, CellAddr, CellAddr)> {
         None
     }
+
+    fn resolve_name(&self, _sheet_id: usize, _name: &str) -> Option<crate::eval::ResolvedName> {
+        None
+    }
 }
 
 fn setup_chain_engine(size: usize) -> (Engine, String) {

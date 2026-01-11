@@ -4,6 +4,8 @@ use crate::error::ExcelError;
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
 pub struct EvalContext {
@@ -19,6 +21,15 @@ pub trait ValueResolver {
         ctx: EvalContext,
         sref: &crate::structured_refs::StructuredRef,
     ) -> Option<(usize, CellAddr, CellAddr)>;
+    fn resolve_name(&self, _sheet_id: usize, _name: &str) -> Option<ResolvedName> {
+        None
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ResolvedName {
+    Constant(Value),
+    Expr(CompiledExpr),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -61,11 +72,24 @@ enum EvalValue {
 pub struct Evaluator<'a, R: ValueResolver> {
     resolver: &'a R,
     ctx: EvalContext,
+    name_stack: Rc<RefCell<Vec<(usize, String)>>>,
 }
 
 impl<'a, R: ValueResolver> Evaluator<'a, R> {
     pub fn new(resolver: &'a R, ctx: EvalContext) -> Self {
-        Self { resolver, ctx }
+        Self {
+            resolver,
+            ctx,
+            name_stack: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+
+    fn with_ctx(&self, ctx: EvalContext) -> Self {
+        Self {
+            resolver: self.resolver,
+            ctx,
+            name_stack: Rc::clone(&self.name_stack),
+        }
     }
 
     /// Evaluate a compiled AST as a scalar formula result.
@@ -106,6 +130,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Name)),
             },
+            Expr::NameRef(nref) => self.eval_name_ref(nref),
             Expr::Unary { op, expr } => {
                 let v = self.eval_scalar(expr);
                 match v {
@@ -186,6 +211,58 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         EvalValue::Scalar(self.apply_implicit_intersection(range))
                     }
                 }
+            }
+        }
+    }
+
+    fn eval_name_ref(&self, nref: &crate::eval::NameRef<usize>) -> EvalValue {
+        let Some(sheet_id) = self.resolve_sheet_id(&nref.sheet) else {
+            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+        };
+        if !self.resolver.sheet_exists(sheet_id) {
+            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+        }
+
+        let Some(def) = self.resolver.resolve_name(sheet_id, &nref.name) else {
+            return EvalValue::Scalar(Value::Error(ErrorKind::Name));
+        };
+
+        // Prevent infinite recursion from self-referential name chains.
+        let key = (sheet_id, nref.name.to_ascii_uppercase());
+        {
+            let mut stack = self.name_stack.borrow_mut();
+            if stack.contains(&key) {
+                return EvalValue::Scalar(Value::Error(ErrorKind::Name));
+            }
+            stack.push(key.clone());
+        }
+
+        struct NameGuard {
+            stack: Rc<RefCell<Vec<(usize, String)>>>,
+            key: (usize, String),
+        }
+
+        impl Drop for NameGuard {
+            fn drop(&mut self) {
+                let mut stack = self.stack.borrow_mut();
+                let popped = stack.pop();
+                debug_assert_eq!(popped.as_ref(), Some(&self.key));
+            }
+        }
+
+        let _guard = NameGuard {
+            stack: Rc::clone(&self.name_stack),
+            key,
+        };
+
+        match def {
+            ResolvedName::Constant(v) => EvalValue::Scalar(v),
+            ResolvedName::Expr(expr) => {
+                let evaluator = self.with_ctx(EvalContext {
+                    current_sheet: sheet_id,
+                    current_cell: self.ctx.current_cell,
+                });
+                evaluator.eval_value(&expr)
             }
         }
     }

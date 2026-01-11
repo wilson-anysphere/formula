@@ -26,6 +26,12 @@ pub struct RangeRef<S> {
     pub end: CellAddr,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NameRef<S> {
+    pub sheet: SheetReference<S>,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Plus,
@@ -61,6 +67,7 @@ pub enum Expr<S> {
     CellRef(CellRef<S>),
     RangeRef(RangeRef<S>),
     StructuredRef(crate::structured_refs::StructuredRef),
+    NameRef(NameRef<S>),
     Unary {
         op: UnaryOp,
         expr: Box<Expr<S>>,
@@ -105,6 +112,10 @@ impl<S: Clone> Expr<S> {
                 end: r.end,
             }),
             Expr::StructuredRef(r) => Expr::StructuredRef(r.clone()),
+            Expr::NameRef(n) => Expr::NameRef(NameRef {
+                sheet: f(&n.sheet),
+                name: n.name.clone(),
+            }),
             Expr::Unary { op, expr } => Expr::Unary {
                 op: *op,
                 expr: Box::new(expr.map_sheets(f)),

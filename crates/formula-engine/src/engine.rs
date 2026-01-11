@@ -35,6 +35,30 @@ pub enum RecalcMode {
     MultiThreaded,
 }
 
+/// Scope for a defined name / named range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameScope<'a> {
+    Workbook,
+    Sheet(&'a str),
+}
+
+/// A defined name (named range) definition.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NameDefinition {
+    /// A constant scalar value (number/text/bool/error).
+    Constant(Value),
+    /// A reference/range definition (typically something like `Sheet1!$A$1:$B$3`).
+    Reference(String),
+    /// A formula definition stored as a canonical formula string (may evaluate to a scalar or reference).
+    Formula(String),
+}
+
+#[derive(Debug, Clone)]
+struct DefinedName {
+    definition: NameDefinition,
+    compiled: Option<CompiledExpr>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CellKey {
     pub(crate) sheet: SheetId,
@@ -66,6 +90,7 @@ impl Default for Cell {
 struct Sheet {
     cells: HashMap<CellAddr, Cell>,
     tables: Vec<Table>,
+    names: HashMap<String, DefinedName>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -73,6 +98,7 @@ struct Workbook {
     sheets: Vec<Sheet>,
     sheet_names: Vec<String>,
     sheet_name_to_id: HashMap<String, SheetId>,
+    names: HashMap<String, DefinedName>,
 }
 
 impl Workbook {
@@ -91,6 +117,7 @@ impl Workbook {
         self.sheets.push(Sheet {
             cells: HashMap::new(),
             tables: Vec::new(),
+            names: HashMap::new(),
         });
         self.sheet_names.push(name.to_string());
         self.sheet_name_to_id.insert(key, id);
@@ -165,6 +192,8 @@ impl AuditGraph {
 
 pub struct Engine {
     workbook: Workbook,
+    name_dependents: HashMap<String, HashSet<CellKey>>,
+    cell_name_refs: HashMap<CellKey, HashSet<String>>,
     /// Optimized dependency graph used for incremental recalculation ordering.
     calc_graph: CalcGraph,
     /// Expanded dependency graph used for auditing/introspection (precedents/dependents queries).
@@ -185,6 +214,8 @@ impl Engine {
     pub fn new() -> Self {
         Self {
             workbook: Workbook::default(),
+            name_dependents: HashMap::new(),
+            cell_name_refs: HashMap::new(),
             calc_graph: CalcGraph::new(),
             graph: AuditGraph::default(),
             dirty: HashSet::new(),
@@ -238,6 +269,7 @@ impl Engine {
         // Replace any existing formula and dependencies.
         self.graph.clear_cell(key);
         self.calc_graph.remove_cell(cell_id);
+        self.clear_cell_name_refs(key);
         self.dirty.remove(&key);
         self.dirty_reasons.remove(&key);
 
@@ -280,15 +312,18 @@ impl Engine {
 
         for (key, ast) in formulas {
             let cell_id = cell_id_from_key(key);
-            let (precedents, volatile, thread_safe) = analyze_expr(&ast, key, &tables_by_sheet);
+            let (precedents, names, volatile, thread_safe) =
+                analyze_expr(&ast, key, &tables_by_sheet, &self.workbook);
             self.graph.set_precedents(key, precedents);
             if volatile {
                 self.graph.volatile_cells.insert(key);
             } else {
                 self.graph.volatile_cells.remove(&key);
             }
+            self.set_cell_name_refs(key, names);
 
-            let calc_precedents = analyze_calc_precedents(&ast, key, &tables_by_sheet);
+            let calc_precedents =
+                analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook);
             let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
             calc_vec.sort_by_key(|p| match p {
                 Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
@@ -307,6 +342,88 @@ impl Engine {
         }
     }
 
+    pub fn define_name(
+        &mut self,
+        name: &str,
+        scope: NameScope<'_>,
+        definition: NameDefinition,
+    ) -> Result<(), EngineError> {
+        let name_key = normalize_defined_name(name);
+        if name_key.is_empty() {
+            return Ok(());
+        }
+
+        let compiled = match &definition {
+            NameDefinition::Constant(_) => None,
+            NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+                let parsed = Parser::parse(formula)?;
+                Some(self.compile_name_expr(&parsed))
+            }
+        };
+
+        let entry = DefinedName {
+            definition,
+            compiled,
+        };
+
+        match scope {
+            NameScope::Workbook => {
+                self.workbook.names.insert(name_key.clone(), entry);
+            }
+            NameScope::Sheet(sheet_name) => {
+                let sheet_id = self.workbook.ensure_sheet(sheet_name);
+                self.workbook.sheets[sheet_id]
+                    .names
+                    .insert(name_key.clone(), entry);
+            }
+        }
+
+        self.refresh_cells_after_name_change(&name_key);
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+        Ok(())
+    }
+
+    pub fn remove_name(&mut self, name: &str, scope: NameScope<'_>) -> Option<NameDefinition> {
+        let name_key = normalize_defined_name(name);
+        if name_key.is_empty() {
+            return None;
+        }
+
+        let removed = match scope {
+            NameScope::Workbook => self.workbook.names.remove(&name_key),
+            NameScope::Sheet(sheet_name) => {
+                let sheet_id = self.workbook.sheet_id(sheet_name)?;
+                self.workbook.sheets.get_mut(sheet_id)?.names.remove(&name_key)
+            }
+        };
+
+        let removed_def = removed.map(|n| n.definition);
+        if removed_def.is_some() {
+            self.refresh_cells_after_name_change(&name_key);
+            if self.calc_settings.calculation_mode != CalculationMode::Manual {
+                self.recalculate();
+            }
+        }
+        removed_def
+    }
+
+    pub fn get_name(&self, name: &str, scope: NameScope<'_>) -> Option<&NameDefinition> {
+        let name_key = normalize_defined_name(name);
+        if name_key.is_empty() {
+            return None;
+        }
+
+        match scope {
+            NameScope::Workbook => self.workbook.names.get(&name_key).map(|n| &n.definition),
+            NameScope::Sheet(sheet_name) => {
+                let sheet_id = self.workbook.sheet_id(sheet_name)?;
+                self.workbook.sheets.get(sheet_id)?.names.get(&name_key).map(|n| &n.definition)
+            }
+        }
+    }
+
     pub fn set_cell_formula(
         &mut self,
         sheet: &str,
@@ -317,23 +434,27 @@ impl Engine {
         let addr = parse_a1(addr)?;
         let key = CellKey { sheet: sheet_id, addr };
         let cell_id = cell_id_from_key(key);
-
+ 
         let parsed = Parser::parse(formula)?;
         let compiled = self.compile_expr(&parsed, sheet_id);
+        self.clear_cell_name_refs(key);
         let tables_by_sheet: Vec<Vec<Table>> =
             self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
-
+ 
         // Expanded precedents for auditing, plus volatility/thread-safety flags.
-        let (precedents, volatile, thread_safe) = analyze_expr(&compiled, key, &tables_by_sheet);
+        let (precedents, names, volatile, thread_safe) =
+            analyze_expr(&compiled, key, &tables_by_sheet, &self.workbook);
         self.graph.set_precedents(key, precedents);
         if volatile {
             self.graph.volatile_cells.insert(key);
         } else {
             self.graph.volatile_cells.remove(&key);
         }
-
+        self.set_cell_name_refs(key, names);
+ 
         // Optimized precedents for calculation ordering (range nodes are not expanded).
-        let calc_precedents = analyze_calc_precedents(&compiled, key, &tables_by_sheet);
+        let calc_precedents =
+            analyze_calc_precedents(&compiled, key, &tables_by_sheet, &self.workbook);
         let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
         calc_vec.sort_by_key(|p| match p {
             Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
@@ -883,6 +1004,93 @@ impl Engine {
         expr.map_sheets(&mut map)
     }
 
+    fn compile_name_expr(&mut self, expr: &Expr<String>) -> CompiledExpr {
+        let mut map = |sref: &SheetReference<String>| match sref {
+            SheetReference::Current => SheetReference::Current,
+            SheetReference::Sheet(name) => SheetReference::Sheet(self.workbook.ensure_sheet(name)),
+            SheetReference::External(wb) => SheetReference::External(wb.clone()),
+        };
+        expr.map_sheets(&mut map)
+    }
+
+    fn clear_cell_name_refs(&mut self, cell: CellKey) {
+        let Some(names) = self.cell_name_refs.remove(&cell) else {
+            return;
+        };
+        for name in names {
+            let should_remove = self
+                .name_dependents
+                .get_mut(&name)
+                .map(|deps| {
+                    deps.remove(&cell);
+                    deps.is_empty()
+                })
+                .unwrap_or(false);
+            if should_remove {
+                self.name_dependents.remove(&name);
+            }
+        }
+    }
+
+    fn set_cell_name_refs(&mut self, cell: CellKey, names: HashSet<String>) {
+        self.clear_cell_name_refs(cell);
+        if names.is_empty() {
+            return;
+        }
+        self.cell_name_refs.insert(cell, names.clone());
+        for name in names {
+            self.name_dependents.entry(name).or_default().insert(cell);
+        }
+    }
+
+    fn refresh_cells_after_name_change(&mut self, name: &str) {
+        let Some(cells) = self.name_dependents.get(name).cloned() else {
+            return;
+        };
+
+        let tables_by_sheet: Vec<Vec<Table>> =
+            self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+
+        for key in cells {
+            let Some(ast) = self
+                .workbook
+                .get_cell(key)
+                .and_then(|c| c.ast.clone())
+            else {
+                continue;
+            };
+
+            let cell_id = cell_id_from_key(key);
+
+            let (precedents, names, volatile, thread_safe) =
+                analyze_expr(&ast, key, &tables_by_sheet, &self.workbook);
+            self.graph.set_precedents(key, precedents);
+            if volatile {
+                self.graph.volatile_cells.insert(key);
+            } else {
+                self.graph.volatile_cells.remove(&key);
+            }
+            self.set_cell_name_refs(key, names);
+
+            let calc_precedents =
+                analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook);
+            let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
+            calc_vec.sort_by_key(|p| match p {
+                Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
+                Precedent::Range(r) => (1u8, r.sheet_id, r.range.start.row, r.range.start.col),
+            });
+            let deps = CellDeps::new(calc_vec).volatile(volatile);
+            self.calc_graph.update_cell_dependencies(cell_id, deps);
+
+            let cell = self.workbook.get_or_create_cell_mut(key);
+            cell.volatile = volatile;
+            cell.thread_safe = thread_safe;
+
+            self.mark_dirty_including_self_with_reasons(key);
+            self.calc_graph.mark_dirty(cell_id);
+        }
+    }
+
     fn rebuild_graph(&mut self) -> Result<(), EngineError> {
         let sheet_names = sheet_names_by_id(&self.workbook);
         let mut formulas: Vec<(String, CellAddr, String)> = Vec::new();
@@ -899,6 +1107,8 @@ impl Engine {
 
         self.graph = AuditGraph::default();
         self.calc_graph = CalcGraph::new();
+        self.name_dependents.clear();
+        self.cell_name_refs.clear();
         self.dirty.clear();
         self.dirty_reasons.clear();
 
@@ -1568,6 +1778,8 @@ struct Snapshot {
     sheets: HashSet<SheetId>,
     values: HashMap<CellKey, Value>,
     tables: Vec<Vec<Table>>,
+    workbook_names: HashMap<String, crate::eval::ResolvedName>,
+    sheet_names: Vec<HashMap<String, crate::eval::ResolvedName>>,
 }
 
 impl Snapshot {
@@ -1580,7 +1792,39 @@ impl Snapshot {
             }
         }
         let tables = workbook.sheets.iter().map(|s| s.tables.clone()).collect();
-        Self { sheets, values, tables }
+
+        let mut workbook_names = HashMap::new();
+        for (name, def) in &workbook.names {
+            workbook_names.insert(name.clone(), name_to_resolved(def));
+        }
+
+        let mut sheet_names = Vec::with_capacity(workbook.sheets.len());
+        for sheet in &workbook.sheets {
+            let mut names = HashMap::new();
+            for (name, def) in &sheet.names {
+                names.insert(name.clone(), name_to_resolved(def));
+            }
+            sheet_names.push(names);
+        }
+
+        fn name_to_resolved(def: &DefinedName) -> crate::eval::ResolvedName {
+            match &def.definition {
+                NameDefinition::Constant(v) => crate::eval::ResolvedName::Constant(v.clone()),
+                NameDefinition::Reference(_) | NameDefinition::Formula(_) => crate::eval::ResolvedName::Expr(
+                    def.compiled
+                        .clone()
+                        .expect("non-constant defined name must have compiled expression"),
+                ),
+            }
+        }
+
+        Self {
+            sheets,
+            values,
+            tables,
+            workbook_names,
+            sheet_names,
+        }
     }
 }
 
@@ -1603,34 +1847,65 @@ impl crate::eval::ValueResolver for Snapshot {
     ) -> Option<(usize, CellAddr, CellAddr)> {
         crate::structured_refs::resolve_structured_ref(&self.tables, ctx.current_sheet, ctx.current_cell, sref).ok()
     }
+
+    fn resolve_name(&self, sheet_id: usize, name: &str) -> Option<crate::eval::ResolvedName> {
+        let key = name.trim().to_ascii_uppercase();
+        if let Some(map) = self.sheet_names.get(sheet_id) {
+            if let Some(def) = map.get(&key) {
+                return Some(def.clone());
+            }
+        }
+        self.workbook_names.get(&key).cloned()
+    }
+}
+
+fn resolve_defined_name<'a>(
+    workbook: &'a Workbook,
+    sheet_id: SheetId,
+    name_key: &str,
+) -> Option<&'a DefinedName> {
+    workbook
+        .sheets
+        .get(sheet_id)
+        .and_then(|s| s.names.get(name_key))
+        .or_else(|| workbook.names.get(name_key))
 }
 
 fn analyze_expr(
     expr: &CompiledExpr,
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
-) -> (HashSet<CellKey>, bool, bool) {
+    workbook: &Workbook,
+) -> (HashSet<CellKey>, HashSet<String>, bool, bool) {
     let mut precedents = HashSet::new();
+    let mut names = HashSet::new();
     let mut volatile = false;
     let mut thread_safe = true;
+    let mut visiting_names = HashSet::new();
     walk_expr(
         expr,
         current_cell,
         tables_by_sheet,
+        workbook,
         &mut precedents,
+        &mut names,
         &mut volatile,
         &mut thread_safe,
+        &mut visiting_names,
     );
-    (precedents, volatile, thread_safe)
+    (precedents, names, volatile, thread_safe)
 }
 
 fn walk_expr(
     expr: &CompiledExpr,
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
+    workbook: &Workbook,
     precedents: &mut HashSet<CellKey>,
+    names: &mut HashSet<String>,
     volatile: &mut bool,
     thread_safe: &mut bool,
+    visiting_names: &mut HashSet<(SheetId, String)>,
 ) {
     match expr {
         Expr::CellRef(r) => {
@@ -1687,30 +1962,74 @@ fn walk_expr(
                 }
             }
         }
+        Expr::NameRef(nref) => {
+            let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
+                return;
+            };
+            let name_key = normalize_defined_name(&nref.name);
+            if name_key.is_empty() {
+                return;
+            }
+            names.insert(name_key.clone());
+            let visit_key = (sheet, name_key.clone());
+            if !visiting_names.insert(visit_key.clone()) {
+                // Cycle in the name definition graph. Stop expanding to avoid infinite recursion;
+                // evaluation will surface `#NAME?` via the runtime recursion guard.
+                return;
+            }
+            if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                if let Some(expr) = def.compiled.as_ref() {
+                    walk_expr(
+                        expr,
+                        CellKey {
+                            sheet,
+                            addr: current_cell.addr,
+                        },
+                        tables_by_sheet,
+                        workbook,
+                        precedents,
+                        names,
+                        volatile,
+                        thread_safe,
+                        visiting_names,
+                    );
+                }
+            }
+            visiting_names.remove(&visit_key);
+        }
         Expr::Unary { expr, .. } => walk_expr(
             expr,
             current_cell,
             tables_by_sheet,
+            workbook,
             precedents,
+            names,
             volatile,
             thread_safe,
+            visiting_names,
         ),
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
             walk_expr(
                 left,
                 current_cell,
                 tables_by_sheet,
+                workbook,
                 precedents,
+                names,
                 volatile,
                 thread_safe,
+                visiting_names,
             );
             walk_expr(
                 right,
                 current_cell,
                 tables_by_sheet,
+                workbook,
                 precedents,
+                names,
                 volatile,
                 thread_safe,
+                visiting_names,
             );
         }
         Expr::FunctionCall { name, args, .. } => {
@@ -1730,9 +2049,12 @@ fn walk_expr(
                     a,
                     current_cell,
                     tables_by_sheet,
+                    workbook,
                     precedents,
+                    names,
                     volatile,
                     thread_safe,
+                    visiting_names,
                 );
             }
         }
@@ -1741,9 +2063,12 @@ fn walk_expr(
                 inner,
                 current_cell,
                 tables_by_sheet,
+                workbook,
                 precedents,
+                names,
                 volatile,
                 thread_safe,
+                visiting_names,
             )
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
@@ -1754,9 +2079,18 @@ fn analyze_calc_precedents(
     expr: &CompiledExpr,
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
+    workbook: &Workbook,
 ) -> HashSet<Precedent> {
     let mut out = HashSet::new();
-    walk_calc_expr(expr, current_cell, tables_by_sheet, &mut out);
+    let mut visiting_names = HashSet::new();
+    walk_calc_expr(
+        expr,
+        current_cell,
+        tables_by_sheet,
+        workbook,
+        &mut out,
+        &mut visiting_names,
+    );
     out
 }
 
@@ -1764,7 +2098,9 @@ fn walk_calc_expr(
     expr: &CompiledExpr,
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
+    workbook: &Workbook,
     precedents: &mut HashSet<Precedent>,
+    visiting_names: &mut HashSet<(SheetId, String)>,
 ) {
     match expr {
         Expr::CellRef(r) => {
@@ -1805,17 +2141,50 @@ fn walk_calc_expr(
                 )));
             }
         }
-        Expr::Unary { expr, .. } => walk_calc_expr(expr, current_cell, tables_by_sheet, precedents),
+        Expr::NameRef(nref) => {
+            let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
+                return;
+            };
+            let name_key = normalize_defined_name(&nref.name);
+            if name_key.is_empty() {
+                return;
+            }
+            let visit_key = (sheet, name_key.clone());
+            if !visiting_names.insert(visit_key.clone()) {
+                return;
+            }
+            if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                if let Some(expr) = def.compiled.as_ref() {
+                    walk_calc_expr(
+                        expr,
+                        CellKey {
+                            sheet,
+                            addr: current_cell.addr,
+                        },
+                        tables_by_sheet,
+                        workbook,
+                        precedents,
+                        visiting_names,
+                    );
+                }
+            }
+            visiting_names.remove(&visit_key);
+        }
+        Expr::Unary { expr, .. } => {
+            walk_calc_expr(expr, current_cell, tables_by_sheet, workbook, precedents, visiting_names)
+        }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
-            walk_calc_expr(left, current_cell, tables_by_sheet, precedents);
-            walk_calc_expr(right, current_cell, tables_by_sheet, precedents);
+            walk_calc_expr(left, current_cell, tables_by_sheet, workbook, precedents, visiting_names);
+            walk_calc_expr(right, current_cell, tables_by_sheet, workbook, precedents, visiting_names);
         }
         Expr::FunctionCall { args, .. } => {
             for a in args {
-                walk_calc_expr(a, current_cell, tables_by_sheet, precedents);
+                walk_calc_expr(a, current_cell, tables_by_sheet, workbook, precedents, visiting_names);
             }
         }
-        Expr::ImplicitIntersection(inner) => walk_calc_expr(inner, current_cell, tables_by_sheet, precedents),
+        Expr::ImplicitIntersection(inner) => {
+            walk_calc_expr(inner, current_cell, tables_by_sheet, workbook, precedents, visiting_names)
+        }
         Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }
 }
@@ -1861,4 +2230,8 @@ fn numeric_value(value: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Text(_) | Value::Error(_) => None,
     }
+}
+
+fn normalize_defined_name(name: &str) -> String {
+    name.trim().to_ascii_uppercase()
 }

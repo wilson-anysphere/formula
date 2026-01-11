@@ -1,6 +1,6 @@
 use crate::eval::address::{parse_a1, AddressParseError, CellAddr};
 use crate::eval::ast::{
-    BinaryOp, CellRef, CompareOp, Expr, ParsedExpr, RangeRef, SheetReference, UnaryOp,
+    BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, RangeRef, SheetReference, UnaryOp,
 };
 use crate::value::ErrorKind;
 use thiserror::Error;
@@ -216,7 +216,10 @@ impl ParserImpl {
                         "FALSE" => Ok(Expr::Bool(false)),
                         _ => match try_parse_cell_addr(&id) {
                             Ok(addr) => self.parse_cell_or_range(SheetReference::Current, addr),
-                            Err(_) => Ok(Expr::Error(ErrorKind::Name)),
+                            Err(_) => Ok(Expr::NameRef(NameRef {
+                                sheet: SheetReference::Current,
+                                name: id,
+                            })),
                         },
                     }
                 }
@@ -302,8 +305,10 @@ impl ParserImpl {
                 })
             }
         };
-        let addr = parse_a1(&addr_str)?;
-        self.parse_cell_or_range(sheet, addr)
+        match try_parse_cell_addr(&addr_str) {
+            Ok(addr) => self.parse_cell_or_range(sheet, addr),
+            Err(_) => Ok(Expr::NameRef(NameRef { sheet, name: addr_str })),
+        }
     }
 
     fn parse_cell_or_range(

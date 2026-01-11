@@ -42,7 +42,7 @@ pub mod parser;
 pub use ast::*;
 pub use crate::error::{ExcelError, ExcelResult};
 pub use editing::{CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange};
-pub use engine::{Engine, EngineError, RecalcMode};
+pub use engine::{Engine, EngineError, NameDefinition, NameScope, RecalcMode};
 pub use perf::{run_benchmarks, BenchmarkResult};
 pub use parser::{
     lex, parse_formula_partial, FunctionContext, ParseContext, PartialParse, Token, TokenKind,
