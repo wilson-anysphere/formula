@@ -345,11 +345,24 @@ export class ContextManager {
         : undefined,
     });
 
-    // If DLP is enabled, redact the query before sending it to the embedder. This avoids
-    // leaking user-provided sensitive tokens (e.g. an email/SSN pasted into the prompt)
-    // to cloud embedding providers, and also improves retrieval when stored chunk text
-    // has been redacted to deterministic placeholders.
-    const queryForEmbedding = dlp && !includeRestrictedContent ? this.redactor(params.query) : params.query;
+    // If DLP is enabled, redact the query before sending it to the embedder when policy
+    // would not allow sending that sensitive content to a cloud provider. This avoids
+    // leaking user-provided tokens (e.g. an email/SSN pasted into the prompt) to cloud
+    // embedding services, and also improves retrieval when stored chunk text has been
+    // redacted to deterministic placeholders.
+    const queryHeuristic = dlp ? classifyText(params.query) : null;
+    const queryClassification = queryHeuristic ? heuristicToPolicyClassification(queryHeuristic) : null;
+    const queryDecision =
+      dlp && queryClassification
+        ? evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification: queryClassification,
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          })
+        : null;
+    const queryForEmbedding =
+      dlp && queryDecision && queryDecision.decision !== DLP_DECISION.ALLOW ? this.redactor(params.query) : params.query;
     const [queryVector] = await embedder.embedTexts([queryForEmbedding]);
     const hits = await vectorStore.query(queryVector, topK, {
       workbookId: params.workbook.id,

@@ -206,6 +206,34 @@ test("buildWorkbookContext: redacts sensitive query before embedding when DLP is
   assert.match(embedder.seen[1], /\[REDACTED_EMAIL\]/);
 });
 
+test("buildWorkbookContext: redacts sensitive query before embedding even when includeRestrictedContent=true but policy blocks", async () => {
+  const workbook = makeSensitiveWorkbook();
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 500,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  await assert.rejects(() =>
+    cm.buildWorkbookContext({
+      workbook,
+      query: "alice@example.com",
+      dlp: {
+        documentId: workbook.id,
+        policy: makePolicy({ redactDisallowed: false }),
+        includeRestrictedContent: true,
+      },
+    })
+  );
+
+  // embedder.seen includes [chunk_text, query_text]; both should be safe.
+  assert.equal(embedder.seen.length, 2);
+  assert.doesNotMatch(embedder.seen[1], /alice@example\.com/);
+  assert.match(embedder.seen[1], /\[REDACTED_EMAIL\]/);
+});
+
 test("buildWorkbookContext: structured Restricted classifications fully redact retrieved chunks", async () => {
   const workbook = makeSensitiveWorkbook();
   // Add a value that isn't handled by the regex redactor but should still be suppressed by
