@@ -259,6 +259,67 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("filters recalc changes by sheet name (case-insensitive)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", 1, "Sheet1");
+      await engine.setCell("A2", "=A1*2", "Sheet1");
+
+      await engine.setCell("A1", 3, "Sheet2");
+      await engine.setCell("A2", "=A1*2", "Sheet2");
+
+      await engine.recalculate();
+      expect((await engine.getCell("A2", "Sheet1")).value).toBe(2);
+      expect((await engine.getCell("A2", "Sheet2")).value).toBe(6);
+
+      await engine.setCell("A1", 4, "Sheet2");
+      const changes = await engine.recalculate("sHeEt2");
+
+      expect(changes).toEqual([{ sheet: "Sheet2", address: "A2", value: 8 }]);
+      expect((await engine.getCell("A2", "Sheet2")).value).toBe(8);
+      // Sheet1 should not have been included in the delta list.
+      expect((await engine.getCell("A2", "Sheet1")).value).toBe(2);
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("sheet-scoped recalc still updates cross-sheet dependents in the engine", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", 1, "Sheet1");
+      await engine.setCell("A1", "=Sheet1!A1*2", "Sheet2");
+      await engine.recalculate();
+      expect((await engine.getCell("A1", "Sheet2")).value).toBe(2);
+
+      await engine.setCell("A1", 2, "Sheet1");
+      const changes = await engine.recalculate("Sheet1");
+      // The sheet-scoped delta list is filtered, but the engine still recalculates Sheet2.
+      expect(changes).toEqual([]);
+      expect((await engine.getCell("A1", "Sheet2")).value).toBe(4);
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("reports formula edits that clear a previously displayed value", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
