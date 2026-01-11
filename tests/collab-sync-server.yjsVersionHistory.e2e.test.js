@@ -41,7 +41,7 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   const docId = `yjs-version-history-${randomUUID()}`;
   const wsUrl = server.wsUrl;
 
-  const createClient = ({ userId, userName, storeCompression, explicitStore = false }) => {
+  const createClient = ({ userId, userName, storeCompression, explicitStore = false, retention }) => {
     const session = createCollabSession({
       connection: {
         wsUrl,
@@ -68,11 +68,13 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
             store,
             user: { userId, userName },
             autoStart: false,
+            ...(retention ? { retention } : {}),
           }
         : {
             session,
             user: { userId, userName },
             autoStart: false,
+            ...(retention ? { retention } : {}),
           }
     );
 
@@ -93,6 +95,7 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
     userName: "User A",
     storeCompression: "gzip",
     explicitStore: true,
+    retention: { maxSnapshots: 2 },
   });
   // B uses the default store (YjsVersionStore) provided by CollabVersioning.
   const clientB = createClient({ userId: "u-b", userName: "User B" });
@@ -108,6 +111,10 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   await clientA.session.setCellValue("Sheet1:0:0", 1);
   await waitForCondition(async () => (await clientB.session.getCell("Sheet1:0:0"))?.value === 1, 10_000);
 
+  // Create a couple of snapshots so we can verify retention pruning (maxSnapshots=2).
+  const pre1 = await clientA.versioning.createSnapshot({ description: "pre-1" });
+  const pre2 = await clientA.versioning.createSnapshot({ description: "pre-2" });
+
   const checkpoint = await clientA.versioning.createCheckpoint({ name: "Approved", locked: true });
   assert.equal(checkpoint.kind, "checkpoint");
 
@@ -119,7 +126,14 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   // --- Version history sync A -> B ---
   await waitForCondition(async () => {
     const versions = await clientB.versioning.listVersions();
-    return versions.some((v) => v.id === checkpoint.id) && versions.some((v) => v.id === snapshot.id);
+    const snapshots = versions.filter((v) => v.kind === "snapshot");
+    return (
+      versions.some((v) => v.id === checkpoint.id) &&
+      versions.some((v) => v.id === snapshot.id) &&
+      versions.some((v) => v.id === pre2.id) &&
+      !versions.some((v) => v.id === pre1.id) &&
+      snapshots.length === 2
+    );
   }, 10_000);
 
   {
@@ -178,6 +192,8 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   const versionsC = await clientC.versioning.listVersions();
   assert.ok(versionsC.some((v) => v.id === checkpoint.id), "expected checkpoint to persist in doc");
   assert.ok(versionsC.some((v) => v.id === snapshot.id), "expected snapshot to persist in doc");
+  assert.ok(versionsC.some((v) => v.id === pre2.id), "expected retained snapshot to persist in doc");
+  assert.equal(versionsC.some((v) => v.id === pre1.id), false, "expected pruned snapshot to stay deleted");
   assert.ok(versionsC.some((v) => v.kind === "restore"), "expected restore head to persist in doc");
   {
     const v = versionsC.find((row) => row.id === checkpoint.id);
