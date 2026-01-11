@@ -169,3 +169,28 @@ test("concurrent delete vs overwrite surfaces a conflict", () => {
     "expected one side of conflict to be the overwrite"
   );
 });
+
+test("sequential remote deletes that use key deletion do not surface conflicts", () => {
+  const alice = createClient("alice");
+
+  // Simulate a legacy client that clears formulas by deleting the key entirely.
+  const docB = new Y.Doc();
+  const cellsB = docB.getMap("cells");
+
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  syncDocs(alice.doc, docB);
+
+  const cellB = /** @type {Y.Map<any>} */ (cellsB.get("s:0:0"));
+  assert.ok(cellB);
+
+  docB.transact(() => {
+    cellB.delete("formula");
+    cellB.set("modifiedBy", "bob");
+    cellB.set("modified", Date.now());
+  });
+
+  syncDocs(alice.doc, docB);
+
+  assert.equal(alice.conflicts.length, 0);
+  assert.equal(getFormula(alice.cells, "s:0:0"), "");
+});
