@@ -152,8 +152,15 @@ fn translate_formula(
                 idx += 1;
             }
             TokenKind::Ident(raw) if matches!(dir, Direction::ToCanonical) => {
-                if let Some(value) = locale.canonical_boolean_literal(raw) {
-                    out.push_str(bool_literal(value));
+                // Boolean keywords are locale-specific (e.g. `WAHR`/`FALSCH` for German), but those
+                // tokens can also appear as identifiers (e.g. table names, sheet prefixes). Only
+                // translate them when they are used as standalone scalar literals.
+                if !is_sheet_prefix_ident(&tokens, idx) && !is_table_name_ident(&tokens, idx) {
+                    if let Some(value) = locale.canonical_boolean_literal(raw) {
+                        out.push_str(bool_literal(value));
+                    } else {
+                        out.push_str(token_slice(expr_src, tok)?);
+                    }
                 } else {
                     out.push_str(token_slice(expr_src, tok)?);
                 }
@@ -192,6 +199,22 @@ fn is_function_ident(tokens: &[Token], idx: usize) -> bool {
     }
 
     matches!(tokens.get(j).map(|t| &t.kind), Some(TokenKind::LParen))
+}
+
+fn next_non_trivia_kind<'a>(tokens: &'a [Token], idx: usize) -> Option<&'a TokenKind> {
+    let mut j = idx + 1;
+    while matches!(tokens.get(j).map(|t| &t.kind), Some(TokenKind::Whitespace(_))) {
+        j += 1;
+    }
+    tokens.get(j).map(|t| &t.kind)
+}
+
+fn is_sheet_prefix_ident(tokens: &[Token], idx: usize) -> bool {
+    matches!(next_non_trivia_kind(tokens, idx), Some(TokenKind::Bang))
+}
+
+fn is_table_name_ident(tokens: &[Token], idx: usize) -> bool {
+    matches!(next_non_trivia_kind(tokens, idx), Some(TokenKind::LBracket))
 }
 
 fn translate_number(raw: &str, decimal_in: char, decimal_out: char) -> String {

@@ -94,6 +94,18 @@ fn canonicalize_and_localize_boolean_literals() {
 }
 
 #[test]
+fn localized_boolean_keywords_are_not_translated_inside_structured_refs() {
+    // `WAHR` is the de-DE TRUE keyword, but table names can still be identifiers; separators
+    // inside structured refs should never be touched by translation.
+    let localized = "=SUMME(WAHR[Col])";
+    let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();
+    assert_eq!(canonical, "=SUM(WAHR[Col])");
+
+    let localized_roundtrip = locale::localize_formula(&canonical, &locale::DE_DE).unwrap();
+    assert_eq!(localized_roundtrip, localized);
+}
+
+#[test]
 fn canonicalize_and_localize_error_literals() {
     let de = "=#WERT!";
     let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
