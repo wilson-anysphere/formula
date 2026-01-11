@@ -1,5 +1,62 @@
 import * as Y from "yjs";
 
+const patchedItemConstructors = new WeakSet();
+
+function patchForeignItemConstructor(item) {
+  if (!item || typeof item !== "object") return;
+  if (item instanceof Y.Item) return;
+  const ctor = item.constructor;
+  if (!ctor || ctor === Y.Item) return;
+  if (ctor.name !== "Item") return;
+  if (patchedItemConstructors.has(ctor)) return;
+  patchedItemConstructors.add(ctor);
+
+  // When Yjs is loaded more than once (e.g. ESM + CJS in Node), documents can
+  // contain Item instances created by a different module instance. Yjs'
+  // UndoManager uses `instanceof Item` checks, so it will refuse to undo
+  // transactions that touch those foreign items.
+  //
+  // Patch the foreign constructor prototype chain so foreign Item instances pass
+  // `instanceof Y.Item` checks in this module.
+  try {
+    Object.setPrototypeOf(ctor.prototype, Y.Item.prototype);
+    ctor.prototype.constructor = Y.Item;
+  } catch {
+    // Best-effort: if we can't patch (frozen prototypes, etc), undo will behave
+    // like upstream Yjs in mixed-module environments.
+  }
+}
+
+function patchForeignItemsInType(type) {
+  if (!type || typeof type !== "object") return;
+
+  const map = type._map;
+  if (map instanceof Map) {
+    for (const value of map.values()) {
+      patchForeignItemConstructor(value);
+      // Also patch left chain because map entries are linked lists.
+      let cur = value;
+      while (cur) {
+        patchForeignItemConstructor(cur);
+        cur = cur.left;
+      }
+    }
+  }
+
+  let cur = type._start;
+  while (cur) {
+    patchForeignItemConstructor(cur);
+    cur = cur.right;
+  }
+}
+
+function patchForeignItemsInScope(scope) {
+  const types = Array.isArray(scope) ? scope : [scope];
+  for (const type of types) {
+    patchForeignItemsInType(type);
+  }
+}
+
 /**
  * Origin token used when applying remote updates in tests / providers.
  *
@@ -33,6 +90,8 @@ export const REMOTE_ORIGIN = { type: "remote" };
 export function createCollabUndoService(opts) {
   const { doc, scope, captureTimeoutMs = 750 } = opts;
   const origin = opts.origin ?? { type: "local" };
+
+  patchForeignItemsInScope(scope);
 
   const undoManager = new Y.UndoManager(scope, {
     captureTimeout: captureTimeoutMs,

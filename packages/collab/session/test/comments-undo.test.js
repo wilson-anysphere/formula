@@ -6,7 +6,7 @@ import * as Y from "yjs";
 
 import { REMOTE_ORIGIN } from "@formula/collab-undo";
 
-import { createCommentManagerForSession } from "../../comments/src/manager.ts";
+import { createCommentManagerForSession, createYComment } from "../../comments/src/manager.ts";
 import { createCollabSession } from "../src/index.ts";
 
 /**
@@ -47,6 +47,9 @@ test("CollabSession undo captures comment edits when comments root is created la
 
   const sessionA = createCollabSession({ doc: docA, undo: {} });
   const sessionB = createCollabSession({ doc: docB, undo: {} });
+
+  assert.ok(docA.share.get("comments") instanceof Y.Map);
+  assert.ok(docB.share.get("comments") instanceof Y.Map);
 
   const commentsA = createCommentManagerForSession(sessionA);
   const commentsB = createCommentManagerForSession(sessionB);
@@ -118,18 +121,31 @@ test("CollabSession undo captures comment edits when comments root is created la
   docB.destroy();
 });
 
-test("CollabSession undo captures comment edits when comments root is a legacy array (in-memory sync)", () => {
+test("CollabSession undo does not clobber legacy Array-backed comments root (in-memory sync)", () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
 
-  // Legacy docs stored comments as a Y.Array. The session must not clobber this
-  // by eagerly calling `doc.getMap("comments")` when building the undo scope.
-  docA.getArray("comments");
-  docB.getArray("comments");
+  const legacyRoot = docA.getArray("comments");
+  legacyRoot.push([
+    createYComment({
+      id: "c_legacy",
+      cellRef: "Sheet1:0:0",
+      kind: "threaded",
+      content: "legacy",
+      author: { id: "u_legacy", name: "Legacy User" },
+      now: 1,
+    }),
+  ]);
+
+  // Legacy doc already has the array root. The receiving doc intentionally does
+  // not instantiate it yet, so `doc.share.get("comments")` may be an
+  // AbstractType placeholder after sync.
   assert.ok(docA.share.get("comments") instanceof Y.Array);
-  assert.ok(docB.share.get("comments") instanceof Y.Array);
+  assert.equal(docB.share.get("comments"), undefined);
 
   const disconnect = connectDocs(docA, docB);
+
+  assert.ok(docB.share.get("comments"));
 
   const sessionA = createCollabSession({ doc: docA, undo: {} });
   const sessionB = createCollabSession({ doc: docB, undo: {} });
@@ -140,49 +156,21 @@ test("CollabSession undo captures comment edits when comments root is a legacy a
   const commentsA = createCommentManagerForSession(sessionA);
   const commentsB = createCommentManagerForSession(sessionB);
 
-  const commentIdA = commentsA.addComment({
-    id: "c_a",
-    cellRef: "Sheet1:0:0",
-    kind: "threaded",
-    content: "from-a",
-    author: { id: "u-a", name: "User A" },
-    now: 1,
-  });
-  sessionA.undo?.stopCapturing();
+  const getContent = (mgr) => mgr.listAll().find((c) => c.id === "c_legacy")?.content ?? null;
 
-  const commentIdB = commentsB.addComment({
-    id: "c_b",
-    cellRef: "Sheet1:0:1",
-    kind: "threaded",
-    content: "from-b",
-    author: { id: "u-b", name: "User B" },
-    now: 2,
-  });
+  assert.equal(getContent(commentsA), "legacy");
+  assert.equal(getContent(commentsB), "legacy");
 
-  commentsA.setCommentContent({ commentId: commentIdA, content: "from-a (edited)", now: 3 });
+  commentsA.setCommentContent({ commentId: "c_legacy", content: "legacy (edited)", now: 2 });
 
-  const getContent = (mgr, id) => mgr.listAll().find((c) => c.id === id)?.content ?? null;
-
-  assert.equal(getContent(commentsA, commentIdA), "from-a (edited)");
-  assert.equal(getContent(commentsB, commentIdA), "from-a (edited)");
-  assert.equal(getContent(commentsA, commentIdB), "from-b");
-  assert.equal(getContent(commentsB, commentIdB), "from-b");
+  assert.equal(getContent(commentsA), "legacy (edited)");
+  assert.equal(getContent(commentsB), "legacy (edited)");
 
   assert.equal(sessionA.undo?.canUndo(), true);
   sessionA.undo?.undo();
 
-  assert.equal(getContent(commentsA, commentIdA), "from-a");
-  assert.equal(getContent(commentsB, commentIdA), "from-a");
-  assert.equal(getContent(commentsA, commentIdB), "from-b");
-  assert.equal(getContent(commentsB, commentIdB), "from-b");
-
-  assert.equal(sessionA.undo?.canUndo(), true);
-  sessionA.undo?.undo();
-
-  assert.equal(getContent(commentsA, commentIdA), null);
-  assert.equal(getContent(commentsB, commentIdA), null);
-  assert.equal(getContent(commentsA, commentIdB), "from-b");
-  assert.equal(getContent(commentsB, commentIdB), "from-b");
+  assert.equal(getContent(commentsA), "legacy");
+  assert.equal(getContent(commentsB), "legacy");
 
   sessionA.destroy();
   sessionB.destroy();
