@@ -333,7 +333,11 @@ export class WebMacroBackend implements MacroBackend {
   }
 
   private async ensurePyodideInitialized(api: unknown): Promise<PyodideRuntime> {
-    const indexURL = this.options.pyodideIndexURL ?? "/pyodide/v0.25.1/full/";
+    const indexURL =
+      this.options.pyodideIndexURL ??
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((globalThis as any).__pyodideIndexURL as string | undefined) ??
+      "/pyodide/v0.25.1/full/";
 
     if (!this.pyodide) {
       this.pyodide = new PyodideRuntime({
