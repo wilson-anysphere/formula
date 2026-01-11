@@ -144,7 +144,20 @@ async function ensureBuilt({ repoRoot, binPath }) {
           ? path.join(repoRoot, "target", "cargo-home")
           : envCargoHome;
       await mkdir(cargoHome, { recursive: true });
-      const baseEnv = { ...process.env, CARGO_HOME: cargoHome };
+      const baseEnv = {
+        ...process.env,
+        CARGO_HOME: cargoHome,
+        // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
+        // if the caller didn't source `scripts/agent-init.sh`.
+        CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
+        MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
+        RUSTFLAGS: process.env.RUSTFLAGS ?? "-C codegen-units=4",
+        // Some environments configure Cargo globally with `build.rustc-wrapper`. When the
+        // wrapper is unavailable/misconfigured, builds can fail even for `cargo metadata`.
+        // Default to disabling any configured wrapper unless the user explicitly overrides it.
+        RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
+        RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+      };
       try {
         await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], { cwd: repoRoot, env: baseEnv });
       } catch (err) {
