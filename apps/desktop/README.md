@@ -29,3 +29,4 @@ For an end-to-end smoke test, open:
 
 - `/python-runtime-test.html` (PyodideRuntime + formula bridge)
 - `/scripting-test.html` (TypeScript scripting runtime)
+- `/` and click the "Python" button in the status bar (Python panel demo)

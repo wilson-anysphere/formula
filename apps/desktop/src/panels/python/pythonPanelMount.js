@@ -20,6 +20,11 @@ export function mountPythonPanel({ doc, container, getActiveSheetId }) {
     rpcTimeoutMs: 5_000,
   });
 
+  const isolation = {
+    crossOriginIsolated: globalThis.crossOriginIsolated === true,
+    sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+  };
+
   let initPromise = null;
 
   container.innerHTML = "";
@@ -31,9 +36,20 @@ export function mountPythonPanel({ doc, container, getActiveSheetId }) {
   toolbar.style.borderBottom = "1px solid var(--panel-border)";
 
   const runButton = document.createElement("button");
+  runButton.type = "button";
   runButton.textContent = "Run";
   runButton.dataset.testid = "python-panel-run";
   toolbar.appendChild(runButton);
+
+  const isolationLabel = document.createElement("div");
+  isolationLabel.dataset.testid = "python-panel-isolation";
+  isolationLabel.style.marginLeft = "auto";
+  isolationLabel.style.fontSize = "12px";
+  isolationLabel.style.color = "var(--text-secondary)";
+  isolationLabel.textContent = isolation.sharedArrayBuffer
+    ? "SharedArrayBuffer enabled"
+    : "SharedArrayBuffer unavailable (crossOriginIsolated required)";
+  toolbar.appendChild(isolationLabel);
 
   const editorHost = document.createElement("div");
   editorHost.style.flex = "1";
@@ -77,6 +93,14 @@ export function mountPythonPanel({ doc, container, getActiveSheetId }) {
   const setOutput = (text) => {
     consoleHost.textContent = text;
   };
+
+  if (!isolation.sharedArrayBuffer || !isolation.crossOriginIsolated) {
+    setOutput(
+      "SharedArrayBuffer is required for the Pyodide formula bridge.\n\n" +
+        "In browsers/webviews this requires a cross-origin isolated context (COOP/COEP).\n" +
+        "Formula's Vite dev server config enables this automatically; other hosts must do the same.",
+    );
+  }
 
   async function ensureInitialized() {
     if (initPromise) return await initPromise;

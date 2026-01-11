@@ -17,6 +17,13 @@ sheet["A2"] = "=A1*2"
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await page.goto("/");
       try {
+        const isolation = await page.evaluate(() => ({
+          crossOriginIsolated: globalThis.crossOriginIsolated,
+          sharedArrayBuffer: typeof (globalThis as any).SharedArrayBuffer !== "undefined",
+        }));
+        expect(isolation.crossOriginIsolated).toBe(true);
+        expect(isolation.sharedArrayBuffer).toBe(true);
+
         await page.getByTestId("open-python-panel").click();
         const panel = page.getByTestId("dock-bottom").getByTestId("panel-python");
         await expect(panel).toBeVisible();
