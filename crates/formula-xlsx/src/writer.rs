@@ -127,6 +127,7 @@ fn workbook_xml(workbook: &Workbook) -> String {
         DateSystem::Excel1900 => r#"<workbookPr/>"#.to_string(),
         DateSystem::Excel1904 => r#"<workbookPr date1904="1"/>"#.to_string(),
     };
+    let calc_pr = calc_pr_xml(workbook);
 
     let mut sheets_xml = String::new();
     for (idx, sheet) in workbook.sheets.iter().enumerate() {
@@ -155,9 +156,37 @@ fn workbook_xml(workbook: &Workbook) -> String {
     {}
   </sheets>
   {}
+  {}
 </workbook>"#,
-        workbook_pr, sheets_xml, defined_names_xml
+        workbook_pr, sheets_xml, defined_names_xml, calc_pr
     )
+}
+
+fn calc_pr_xml(workbook: &Workbook) -> String {
+    let settings = &workbook.calc_settings;
+    format!(
+        r#"<calcPr calcMode="{}" calcOnSave="{}" iterative="{}" iterateCount="{}" iterateDelta="{}" fullPrecision="{}"/>"#,
+        settings.calculation_mode.as_calc_mode_attr(),
+        bool_attr(settings.calculate_before_save),
+        bool_attr(settings.iterative.enabled),
+        settings.iterative.max_iterations,
+        trim_float(settings.iterative.max_change),
+        bool_attr(settings.full_precision),
+    )
+}
+
+fn bool_attr(value: bool) -> &'static str {
+    if value { "1" } else { "0" }
+}
+
+fn trim_float(value: f64) -> String {
+    let s = format!("{value:.15}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s.is_empty() {
+        "0".to_string()
+    } else {
+        s.to_string()
+    }
 }
 
 fn workbook_defined_names_xml(workbook: &Workbook) -> String {

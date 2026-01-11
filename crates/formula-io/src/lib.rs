@@ -193,8 +193,8 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
 
 fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Workbook, xlsb::Error> {
     use formula_model::{
-        normalize_formula_text, CellRef, CellValue, DateSystem, ErrorValue, SheetVisibility, Style,
-        Workbook as ModelWorkbook,
+        normalize_formula_text, CalculationMode, CellRef, CellValue, DateSystem, ErrorValue,
+        SheetVisibility, Style, Workbook as ModelWorkbook,
     };
 
     let mut out = ModelWorkbook::new();
@@ -203,6 +203,13 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
     } else {
         DateSystem::Excel1900
     };
+    if let Some(calc_mode) = wb.workbook_properties().calc_mode {
+        out.calc_settings.calculation_mode = match calc_mode {
+            xlsb::CalcMode::Auto => CalculationMode::Automatic,
+            xlsb::CalcMode::Manual => CalculationMode::Manual,
+            xlsb::CalcMode::AutoExceptTables => CalculationMode::AutomaticNoTable,
+        };
+    }
 
     // Best-effort style mapping: XLSB cell records reference an XF index.
     //
