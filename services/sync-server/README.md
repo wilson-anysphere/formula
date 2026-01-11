@@ -126,8 +126,21 @@ Additional knobs:
 
 - `SYNC_SERVER_DATA_DIR` (default: `./.sync-server-data`)
 - `SYNC_SERVER_PERSIST_COMPACT_AFTER_UPDATES` (default: `200`)
+- `SYNC_SERVER_LEVELDB_DOCNAME_HASHING` (default: `false`) – hash `docName` before writing LevelDB keys to avoid
+  storing raw document ids in the database.
 
 If `y-leveldb` is not installed, the server falls back to file persistence in non-production environments.
+
+## Data directory locking
+
+By default the server creates a lock file (`.sync-server.lock`) in `SYNC_SERVER_DATA_DIR` to prevent multiple
+processes from using the same persistence directory.
+
+You can disable this (unsafe for multi-process deployments) with:
+
+- `SYNC_SERVER_DISABLE_DATA_DIR_LOCK=true`
+
+When locking is disabled, `/readyz` will return `503` with reason `data_dir_lock_disabled`.
 
 ## At-rest encryption (KeyRing)
 
@@ -140,6 +153,11 @@ Provide keys via one of:
 - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON` (KeyRing JSON)
 - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH` (path to KeyRing JSON)
 - `SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64` (base64-encoded 32-byte key; implies keyring mode)
+
+Optional:
+
+- `SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT` (default: `true` in production) – when `true`, legacy plaintext reads
+  are rejected. When `false`, legacy plaintext documents can still be read to allow in-place migration.
 
 KeyRing CLI helpers:
 
@@ -200,6 +218,12 @@ Notable metrics (prefix `sync_server_`):
 - Hard maximum websocket message size:
 
 - `SYNC_SERVER_MAX_MESSAGE_BYTES` (default: `2097152` / 2 MiB)
+
+- Connection limits:
+  - `SYNC_SERVER_MAX_CONNECTIONS`
+  - `SYNC_SERVER_MAX_CONNECTIONS_PER_IP`
+  - `SYNC_SERVER_MAX_CONN_ATTEMPTS_PER_WINDOW`
+  - `SYNC_SERVER_CONN_ATTEMPT_WINDOW_MS`
 
 - Per-connection message rate limiting:
 
