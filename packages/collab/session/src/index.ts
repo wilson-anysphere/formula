@@ -187,6 +187,7 @@ export interface CollabSessionOptions {
   cellConflicts?: {
     localUserId: string;
     onConflict: (conflict: CellStructuralConflict) => void;
+    maxOpRecordsPerUser?: number;
   };
   /**
    * When enabled, the session monitors cell value updates for true conflicts
@@ -536,6 +537,7 @@ export class CollabSession {
         origin: this.origin,
         localOrigins: this.localOrigins,
         onConflict: options.cellConflicts.onConflict,
+        maxOpRecordsPerUser: options.cellConflicts.maxOpRecordsPerUser,
       });
     }
 
