@@ -197,3 +197,55 @@ test("retention sweep skips docs with active websocket connections", async (t) =
   assert.deepEqual(remaining, ["active-doc"]);
 });
 
+test("retention sweep endpoint returns 404 when internal admin token is disabled", async (t) => {
+  const ldb = new InMemoryLeveldbPersistence();
+  const logger = createLogger("silent");
+  const server = createSyncServer(
+    {
+      ...createConfig(1_000),
+      internalAdminToken: null,
+    },
+    logger,
+    { createLeveldbPersistence: () => ldb as any }
+  );
+
+  await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const res = await fetch(`${server.getHttpUrl()}/internal/retention/sweep`, {
+    method: "POST",
+    headers: {
+      "x-internal-admin-token": "admin-token",
+    },
+  });
+
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: "not_found" });
+});
+
+test("retention sweep endpoint returns 400 when retention TTL is disabled", async (t) => {
+  const ldb = new InMemoryLeveldbPersistence();
+  const logger = createLogger("silent");
+  const server = createSyncServer(createConfig(0), logger, {
+    createLeveldbPersistence: () => ldb as any,
+  });
+
+  await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const res = await fetch(`${server.getHttpUrl()}/internal/retention/sweep`, {
+    method: "POST",
+    headers: {
+      "x-internal-admin-token": "admin-token",
+    },
+  });
+
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as any;
+  assert.equal(body.error, "retention_disabled");
+  assert.equal(typeof body.message, "string");
+});
