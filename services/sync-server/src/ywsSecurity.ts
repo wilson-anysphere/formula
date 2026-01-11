@@ -175,8 +175,13 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
   if (key.charCodeAt(0) === 114 /* r */) {
     const cIndex = key.indexOf("c", 1);
     if (cIndex > 1 && cIndex < key.length - 1) {
+      const rowLen = cIndex - 1;
+      const colStart = cIndex + 1;
+      const colLen = key.length - colStart;
+      if (rowLen > 32 || colLen > 32) return null;
+
       const row = parseIndex(key.slice(1, cIndex));
-      const col = parseIndex(key.slice(cIndex + 1));
+      const col = parseIndex(key.slice(colStart));
       if (row !== null && col !== null) {
         return { sheetId: defaultSheetId, row, col };
       }
@@ -191,13 +196,20 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
 
   // Format: `${sheetId}:${row},${col}` (legacy internal encoding)
   if (secondColon < 0) {
-    const rest = key.slice(firstColon + 1);
-    const comma = rest.indexOf(",");
-    if (comma <= 0 || comma >= rest.length - 1) return null;
+    const rowStart = firstColon + 1;
+    const commaIndex = key.indexOf(",", rowStart);
+    if (commaIndex < 0) return null;
+    if (commaIndex <= rowStart || commaIndex >= key.length - 1) return null;
     // Reject `row,col,extra` (bound parsing work / keep format strict).
-    if (rest.indexOf(",", comma + 1) !== -1) return null;
-    const row = parseIndex(rest.slice(0, comma));
-    const col = parseIndex(rest.slice(comma + 1));
+    if (key.indexOf(",", commaIndex + 1) !== -1) return null;
+
+    const rowLen = commaIndex - rowStart;
+    const colStart = commaIndex + 1;
+    const colLen = key.length - colStart;
+    if (rowLen > 32 || colLen > 32) return null;
+
+    const row = parseIndex(key.slice(rowStart, commaIndex));
+    const col = parseIndex(key.slice(colStart));
     if (row === null || col === null) return null;
     return { sheetId, row, col };
   }
@@ -206,8 +218,15 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
   if (key.indexOf(":", secondColon + 1) !== -1) return null;
 
   // Format: `${sheetId}:${row}:${col}` (canonical)
-  const row = parseIndex(key.slice(firstColon + 1, secondColon));
-  const col = parseIndex(key.slice(secondColon + 1));
+  const rowStart = firstColon + 1;
+  const rowLen = secondColon - rowStart;
+  const colStart = secondColon + 1;
+  const colLen = key.length - colStart;
+  if (rowLen <= 0 || colLen <= 0) return null;
+  if (rowLen > 32 || colLen > 32) return null;
+
+  const row = parseIndex(key.slice(rowStart, secondColon));
+  const col = parseIndex(key.slice(colStart));
   if (row === null || col === null) return null;
   return { sheetId, row, col };
 }
