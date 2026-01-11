@@ -1,4 +1,5 @@
 import { parseA1Range } from "./a1.js";
+import { defaultChartTheme, renderChartToSvg, resolveChartData as resolveChartDataFromModel } from "./renderChart.js";
 
 function fmt(n) {
   if (!Number.isFinite(n)) return "0";
@@ -299,4 +300,20 @@ export function renderChartSvg(chart, provider, opts) {
         label: `Unsupported chart (${chart.chartType.name ?? chart.chartType.kind})`,
       });
   }
+}
+
+/**
+ * Migration helper: render an SVG from a ChartModel-backed chart (prefering cached
+ * series values inside the model).
+ *
+ * @param {any} model
+ * @param {any} [liveData]
+ * @param {{ width?: number; height?: number; theme?: any }} [opts]
+ */
+export function renderChartSvgFromModel(model, liveData, opts) {
+  const width = opts?.width ?? 320;
+  const height = opts?.height ?? 200;
+  const theme = opts?.theme ?? defaultChartTheme;
+  const data = resolveChartDataFromModel(model, liveData);
+  return renderChartToSvg(model, data, theme, { width, height });
 }
