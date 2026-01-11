@@ -502,6 +502,37 @@ test("extension-worker: allows relative import graphs", async () => {
   }
 });
 
+test("extension-worker: eval works when disableEval is disabled", async () => {
+  const dir = await createTempDir("formula-ext-worker-eval-enabled-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  const value = eval("1 + 1");\n  if (value !== 2) throw new Error("bad");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await activateExtensionWorker({ mainUrl, extensionPath, sandbox: { disableEval: false } });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: strictImports=false allows dynamic import of relative modules", async () => {
+  const dir = await createTempDir("formula-ext-worker-dynamic-import-relative-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  const mod = await import("./dep.mjs");\n  if (mod.value !== 123) throw new Error("bad");\n}\n`,
+      "dep.mjs": `export const value = 123;\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await activateExtensionWorker({ mainUrl, extensionPath, sandbox: { strictImports: false } });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("extension-worker: eval() throws when disableEval is enabled", async () => {
   const dir = await createTempDir("formula-ext-worker-eval-");
   try {
