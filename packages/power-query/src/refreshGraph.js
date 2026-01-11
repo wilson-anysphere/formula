@@ -6,6 +6,8 @@
  *   - Extracting a dependency graph across registered queries.
  *   - Refreshing dependencies before dependents (Excel-like semantics).
  *   - Deduping shared dependencies so they execute at most once per session.
+ *   - Allowing independent subgraphs to continue even if another branch errors;
+ *     downstream dependents of the failed query are cancelled.
  *   - Sharing a `QueryExecutionSession` across all query executions to minimize
  *     repeated credential/permission prompts.
  */
