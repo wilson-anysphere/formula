@@ -202,7 +202,8 @@ export class TabCompletionEngine {
       // Preserve the user-typed prefix exactly so inline "ghost text" can be
       // rendered as a pure insertion at the cursor.
       const remainder = completedName.slice(prefix.length);
-      const replacement = `${prefix}${remainder}(`;
+      const callSuffix = spec.minArgs === 0 && spec.maxArgs === 0 ? "()" : "(";
+      const replacement = `${prefix}${remainder}${callSuffix}`;
       const newText = replaceSpan(input, token.start, token.end, replacement);
       suggestions.push({
         text: newText,

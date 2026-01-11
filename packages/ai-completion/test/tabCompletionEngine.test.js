@@ -120,6 +120,22 @@ test("Typing =MAX(A suggests a contiguous range above the current cell", async (
   );
 });
 
+test("Typing =TOD suggests TODAY() (zero-arg function inserts closing paren)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=TOD",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=TODAY()"),
+    `Expected a TODAY() suggestion, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const localModel = {

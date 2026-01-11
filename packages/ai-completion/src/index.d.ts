@@ -54,6 +54,8 @@ export interface FunctionArgSpec {
 export interface FunctionSpec {
   name: string;
   description?: string;
+  minArgs?: number;
+  maxArgs?: number;
   args: FunctionArgSpec[];
 }
 

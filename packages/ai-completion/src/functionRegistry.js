@@ -21,6 +21,8 @@ import FUNCTION_CATALOG from "../../../shared/functionCatalog.mjs";
  * @typedef {{
  *   name: string,
  *   description?: string,
+ *   minArgs?: number,
+ *   maxArgs?: number,
  *   args: FunctionArgSpec[]
  * }} FunctionSpec
  */
@@ -281,7 +283,14 @@ function functionsFromCatalog(catalog) {
   const out = [];
   for (const entry of catalog.functions) {
     if (!entry || typeof entry.name !== "string" || entry.name.length === 0) continue;
-    out.push({ name: entry.name.toUpperCase(), args: [] });
+    const minArgs = Number.isInteger(entry.min_args) ? entry.min_args : undefined;
+    const maxArgs = Number.isInteger(entry.max_args) ? entry.max_args : undefined;
+    out.push({
+      name: entry.name.toUpperCase(),
+      minArgs,
+      maxArgs,
+      args: [],
+    });
   }
   return out;
 }
