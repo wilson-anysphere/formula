@@ -1,5 +1,6 @@
 use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
+use crate::functions::array_lift;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
@@ -96,7 +97,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Text,
         arg_types: &[ValueType::Text, ValueType::Number],
         implementation: left_fn,
@@ -104,22 +105,20 @@ inventory::submit! {
 }
 
 fn left_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
+    let text = array_lift::eval_arg(ctx, &args[0]);
     let n = if args.len() == 2 {
-        match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        }
+        array_lift::eval_arg(ctx, &args[1])
     } else {
-        1
+        Value::Number(1.0)
     };
-    if n < 0 {
-        return Value::Error(ErrorKind::Value);
-    }
-    Value::Text(slice_chars(&text, 0, n as usize))
+    array_lift::lift2(text, n, |text, n| {
+        let text = text.coerce_to_string()?;
+        let n = n.coerce_to_i64()?;
+        if n < 0 {
+            return Err(ErrorKind::Value);
+        }
+        Ok(Value::Text(slice_chars(&text, 0, n as usize)))
+    })
 }
 
 inventory::submit! {
@@ -129,7 +128,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Text,
         arg_types: &[ValueType::Text, ValueType::Number],
         implementation: right_fn,
@@ -137,25 +136,23 @@ inventory::submit! {
 }
 
 fn right_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
+    let text = array_lift::eval_arg(ctx, &args[0]);
     let n = if args.len() == 2 {
-        match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        }
+        array_lift::eval_arg(ctx, &args[1])
     } else {
-        1
+        Value::Number(1.0)
     };
-    if n < 0 {
-        return Value::Error(ErrorKind::Value);
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let start = len.saturating_sub(n as usize);
-    Value::Text(chars[start..].iter().collect())
+    array_lift::lift2(text, n, |text, n| {
+        let text = text.coerce_to_string()?;
+        let n = n.coerce_to_i64()?;
+        if n < 0 {
+            return Err(ErrorKind::Value);
+        }
+        let chars: Vec<char> = text.chars().collect();
+        let len = chars.len();
+        let start = len.saturating_sub(n as usize);
+        Ok(Value::Text(chars[start..].iter().collect()))
+    })
 }
 
 inventory::submit! {
@@ -165,7 +162,7 @@ inventory::submit! {
         max_args: 3,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Text,
         arg_types: &[ValueType::Text, ValueType::Number, ValueType::Number],
         implementation: mid_fn,
@@ -173,23 +170,19 @@ inventory::submit! {
 }
 
 fn mid_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    let start = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    let len = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    if start < 1 || len < 0 {
-        return Value::Error(ErrorKind::Value);
-    }
-    let start_idx = (start - 1) as usize;
-    Value::Text(slice_chars(&text, start_idx, len as usize))
+    let text = array_lift::eval_arg(ctx, &args[0]);
+    let start = array_lift::eval_arg(ctx, &args[1]);
+    let len = array_lift::eval_arg(ctx, &args[2]);
+    array_lift::lift3(text, start, len, |text, start, len| {
+        let text = text.coerce_to_string()?;
+        let start = start.coerce_to_i64()?;
+        let len = len.coerce_to_i64()?;
+        if start < 1 || len < 0 {
+            return Err(ErrorKind::Value);
+        }
+        let start_idx = (start - 1) as usize;
+        Ok(Value::Text(slice_chars(&text, start_idx, len as usize)))
+    })
 }
 
 inventory::submit! {
@@ -199,7 +192,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Text],
         implementation: len_fn,
@@ -207,11 +200,11 @@ inventory::submit! {
 }
 
 fn len_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Number(text.chars().count() as f64)
+    let text = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(text, |text| {
+        let text = text.coerce_to_string()?;
+        Ok(Value::Number(text.chars().count() as f64))
+    })
 }
 
 inventory::submit! {
@@ -221,7 +214,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Text,
         arg_types: &[ValueType::Text],
         implementation: trim_fn,
@@ -229,11 +222,11 @@ inventory::submit! {
 }
 
 fn trim_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Text(excel_trim(&text))
+    let text = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(text, |text| {
+        let text = text.coerce_to_string()?;
+        Ok(Value::Text(excel_trim(&text)))
+    })
 }
 
 inventory::submit! {
@@ -243,7 +236,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Text,
         arg_types: &[ValueType::Text],
         implementation: upper_fn,
@@ -251,11 +244,10 @@ inventory::submit! {
 }
 
 fn upper_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Text(text.to_uppercase())
+    let text = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(text, |text| {
+        Ok(Value::Text(text.coerce_to_string()?.to_uppercase()))
+    })
 }
 
 inventory::submit! {
@@ -265,7 +257,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Text,
         arg_types: &[ValueType::Text],
         implementation: lower_fn,
@@ -273,11 +265,10 @@ inventory::submit! {
 }
 
 fn lower_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Text(text.to_lowercase())
+    let text = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(text, |text| {
+        Ok(Value::Text(text.coerce_to_string()?.to_lowercase()))
+    })
 }
 
 inventory::submit! {
@@ -287,7 +278,7 @@ inventory::submit! {
         max_args: 3,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Text, ValueType::Text, ValueType::Number],
         implementation: find_fn,
@@ -295,23 +286,19 @@ inventory::submit! {
 }
 
 fn find_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let needle = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    let haystack = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
+    let needle = array_lift::eval_arg(ctx, &args[0]);
+    let haystack = array_lift::eval_arg(ctx, &args[1]);
     let start = if args.len() == 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        }
+        array_lift::eval_arg(ctx, &args[2])
     } else {
-        1
+        Value::Number(1.0)
     };
-    find_impl(&needle, &haystack, start, false)
+    array_lift::lift3(needle, haystack, start, |needle, haystack, start| {
+        let needle = needle.coerce_to_string()?;
+        let haystack = haystack.coerce_to_string()?;
+        let start = start.coerce_to_i64()?;
+        Ok(find_impl(&needle, &haystack, start, false))
+    })
 }
 
 inventory::submit! {
@@ -321,7 +308,7 @@ inventory::submit! {
         max_args: 3,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Text, ValueType::Text, ValueType::Number],
         implementation: search_fn,
@@ -329,23 +316,19 @@ inventory::submit! {
 }
 
 fn search_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let needle = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    let haystack = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
+    let needle = array_lift::eval_arg(ctx, &args[0]);
+    let haystack = array_lift::eval_arg(ctx, &args[1]);
     let start = if args.len() == 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        }
+        array_lift::eval_arg(ctx, &args[2])
     } else {
-        1
+        Value::Number(1.0)
     };
-    find_impl(&needle, &haystack, start, true)
+    array_lift::lift3(needle, haystack, start, |needle, haystack, start| {
+        let needle = needle.coerce_to_string()?;
+        let haystack = haystack.coerce_to_string()?;
+        let start = start.coerce_to_i64()?;
+        Ok(find_impl(&needle, &haystack, start, true))
+    })
 }
 
 inventory::submit! {
@@ -355,7 +338,7 @@ inventory::submit! {
         max_args: 4,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Text,
         arg_types: &[ValueType::Text, ValueType::Text, ValueType::Text, ValueType::Number],
         implementation: substitute_fn,
@@ -363,40 +346,54 @@ inventory::submit! {
 }
 
 fn substitute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    let old_text = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    let new_text = match eval_scalar_arg(ctx, &args[2]).coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
+    let text = array_lift::eval_arg(ctx, &args[0]);
+    let old_text = array_lift::eval_arg(ctx, &args[1]);
+    let new_text = array_lift::eval_arg(ctx, &args[2]);
 
-    let instance_num = if args.len() == 4 {
-        let raw = match eval_scalar_arg(ctx, &args[3]).coerce_to_i64() {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        match i32::try_from(raw) {
-            Ok(n) => Some(n),
-            Err(_) => return Value::Error(ErrorKind::Value),
-        }
-    } else {
-        None
-    };
+    if args.len() == 4 {
+        let instance_num = array_lift::eval_arg(ctx, &args[3]);
+        return array_lift::lift4(
+            text,
+            old_text,
+            new_text,
+            instance_num,
+            |text, old_text, new_text, instance_num| {
+                let text = text.coerce_to_string()?;
+                let old_text = old_text.coerce_to_string()?;
+                let new_text = new_text.coerce_to_string()?;
+                let raw = instance_num.coerce_to_i64()?;
+                let instance_num = i32::try_from(raw).map_err(|_| ErrorKind::Value)?;
 
-    match crate::functions::text::substitute(&text, &old_text, &new_text, instance_num) {
-        Ok(s) => Value::Text(s),
-        Err(e) => Value::Error(match e {
-            ExcelError::Div0 => ErrorKind::Div0,
-            ExcelError::Value => ErrorKind::Value,
-            ExcelError::Num => ErrorKind::Num,
-        }),
+                match crate::functions::text::substitute(
+                    &text,
+                    &old_text,
+                    &new_text,
+                    Some(instance_num),
+                ) {
+                    Ok(s) => Ok(Value::Text(s)),
+                    Err(e) => Err(match e {
+                        ExcelError::Div0 => ErrorKind::Div0,
+                        ExcelError::Value => ErrorKind::Value,
+                        ExcelError::Num => ErrorKind::Num,
+                    }),
+                }
+            },
+        );
     }
+
+    array_lift::lift3(text, old_text, new_text, |text, old_text, new_text| {
+        let text = text.coerce_to_string()?;
+        let old_text = old_text.coerce_to_string()?;
+        let new_text = new_text.coerce_to_string()?;
+        match crate::functions::text::substitute(&text, &old_text, &new_text, None) {
+            Ok(s) => Ok(Value::Text(s)),
+            Err(e) => Err(match e {
+                ExcelError::Div0 => ErrorKind::Div0,
+                ExcelError::Value => ErrorKind::Value,
+                ExcelError::Num => ErrorKind::Num,
+            }),
+        }
+    })
 }
 
 inventory::submit! {

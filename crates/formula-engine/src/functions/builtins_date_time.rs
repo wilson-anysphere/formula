@@ -3,6 +3,7 @@ use chrono::{Datelike, Timelike};
 use crate::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
+use crate::functions::array_lift;
 use crate::functions::date_time;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
@@ -136,7 +137,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number],
         implementation: year_fn,
@@ -144,7 +145,11 @@ inventory::submit! {
 }
 
 fn year_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_serial_arg(eval_scalar_arg(ctx, &args[0]), ctx.date_system(), |(y, _, _)| y as f64)
+    map_serial_arg(
+        array_lift::eval_arg(ctx, &args[0]),
+        ctx.date_system(),
+        |(y, _, _)| y as f64,
+    )
 }
 
 inventory::submit! {
@@ -154,7 +159,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number],
         implementation: month_fn,
@@ -162,7 +167,11 @@ inventory::submit! {
 }
 
 fn month_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_serial_arg(eval_scalar_arg(ctx, &args[0]), ctx.date_system(), |(_, m, _)| m as f64)
+    map_serial_arg(
+        array_lift::eval_arg(ctx, &args[0]),
+        ctx.date_system(),
+        |(_, m, _)| m as f64,
+    )
 }
 
 inventory::submit! {
@@ -172,7 +181,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number],
         implementation: day_fn,
@@ -180,7 +189,11 @@ inventory::submit! {
 }
 
 fn day_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_serial_arg(eval_scalar_arg(ctx, &args[0]), ctx.date_system(), |(_, _, d)| d as f64)
+    map_serial_arg(
+        array_lift::eval_arg(ctx, &args[0]),
+        ctx.date_system(),
+        |(_, _, d)| d as f64,
+    )
 }
 
 inventory::submit! {
@@ -214,7 +227,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Any],
         implementation: hour_fn,
@@ -222,7 +235,7 @@ inventory::submit! {
 }
 
 fn hour_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
         Ok((h, _, _)) => Value::Number(h as f64),
         Err(e) => Value::Error(e),
     })
@@ -235,7 +248,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Any],
         implementation: minute_fn,
@@ -243,7 +256,7 @@ inventory::submit! {
 }
 
 fn minute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
         Ok((_, m, _)) => Value::Number(m as f64),
         Err(e) => Value::Error(e),
     })
@@ -256,7 +269,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Any],
         implementation: second_fn,
@@ -264,7 +277,7 @@ inventory::submit! {
 }
 
 fn second_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
         Ok((_, _, s)) => Value::Number(s as f64),
         Err(e) => Value::Error(e),
     })

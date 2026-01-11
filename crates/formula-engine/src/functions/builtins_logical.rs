@@ -1,7 +1,8 @@
 use crate::eval::CompiledExpr;
-use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
+use crate::functions::array_lift;
+use crate::functions::{ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{Array, ErrorKind, Value};
+use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
 
@@ -12,7 +13,7 @@ inventory::submit! {
         max_args: 3,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Any,
         arg_types: &[ValueType::Any, ValueType::Any, ValueType::Any],
         implementation: if_fn,
@@ -20,22 +21,93 @@ inventory::submit! {
 }
 
 fn if_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let cond_val = eval_scalar_arg(ctx, &args[0]);
-    if let Value::Error(e) = cond_val {
-        return Value::Error(e);
-    }
+    let cond_val = array_lift::eval_arg(ctx, &args[0]);
+    match cond_val {
+        Value::Array(ref arr) => {
+            let mut needs_true = false;
+            let mut needs_false = false;
+            for el in arr.iter() {
+                match el.coerce_to_bool() {
+                    Ok(true) => needs_true = true,
+                    Ok(false) => needs_false = true,
+                    Err(_) => {}
+                }
+                if needs_true && needs_false {
+                    break;
+                }
+            }
 
-    let cond = match cond_val.coerce_to_bool() {
-        Ok(b) => b,
-        Err(e) => return Value::Error(e),
-    };
+            if needs_true && needs_false {
+                let true_val = array_lift::eval_arg(ctx, &args[1]);
+                let false_val = if args.len() >= 3 {
+                    array_lift::eval_arg(ctx, &args[2])
+                } else {
+                    Value::Bool(false)
+                };
+                return array_lift::lift3(cond_val, true_val, false_val, |cond, t, f| {
+                    if cond.coerce_to_bool()? {
+                        Ok(t.clone())
+                    } else {
+                        Ok(f.clone())
+                    }
+                });
+            }
 
-    if cond {
-        ctx.eval_scalar(&args[1])
-    } else if args.len() >= 3 {
-        ctx.eval_scalar(&args[2])
-    } else {
-        Value::Bool(false)
+            if needs_true {
+                let true_val = array_lift::eval_arg(ctx, &args[1]);
+                return array_lift::lift2(cond_val, true_val, |cond, t| {
+                    if cond.coerce_to_bool()? {
+                        Ok(t.clone())
+                    } else {
+                        // `needs_false` is false, so this branch is unreachable unless the
+                        // condition array contains values that coerce differently on a second pass.
+                        Ok(Value::Bool(false))
+                    }
+                });
+            }
+
+            if needs_false {
+                let false_val = if args.len() >= 3 {
+                    array_lift::eval_arg(ctx, &args[2])
+                } else {
+                    Value::Bool(false)
+                };
+                return array_lift::lift2(cond_val, false_val, |cond, f| {
+                    if cond.coerce_to_bool()? {
+                        // `needs_true` is false, so this branch is unreachable unless the
+                        // condition array contains values that coerce differently on a second pass.
+                        Ok(Value::Bool(false))
+                    } else {
+                        Ok(f.clone())
+                    }
+                });
+            }
+
+            // The condition array contains only errors / invalid values, so map the coercion
+            // error for each element without forcing evaluation of either branch.
+            array_lift::lift1(cond_val, |cond| {
+                let _ = cond.coerce_to_bool()?;
+                Ok(Value::Bool(false))
+            })
+        }
+        other => {
+            if let Value::Error(e) = other {
+                return Value::Error(e);
+            }
+
+            let cond = match other.coerce_to_bool() {
+                Ok(b) => b,
+                Err(e) => return Value::Error(e),
+            };
+
+            if cond {
+                array_lift::eval_arg(ctx, &args[1])
+            } else if args.len() >= 3 {
+                array_lift::eval_arg(ctx, &args[2])
+            } else {
+                Value::Bool(false)
+            }
+        }
     }
 }
 
@@ -280,10 +352,10 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                             Value::Bool(b) => {
                                 any = true;
-                            if b {
-                                any_true = true;
+                                if b {
+                                    any_true = true;
+                                }
                             }
-                        }
                             Value::Text(_)
                             | Value::Blank
                             | Value::Array(_)
@@ -309,7 +381,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Bool,
         arg_types: &[ValueType::Any],
         implementation: not_fn,
@@ -317,12 +389,8 @@ inventory::submit! {
 }
 
 fn not_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let v = eval_scalar_arg(ctx, &args[0]);
-    let b = match v.coerce_to_bool() {
-        Ok(b) => b,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Bool(!b)
+    let value = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(value, |v| Ok(Value::Bool(!v.coerce_to_bool()?)))
 }
 
 inventory::submit! {
@@ -332,7 +400,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Any,
         arg_types: &[ValueType::Any, ValueType::Any],
         implementation: iferror_fn,
@@ -340,11 +408,24 @@ inventory::submit! {
 }
 
 fn iferror_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let first = ctx.eval_scalar(&args[0]);
-    match first {
-        Value::Error(_) => ctx.eval_scalar(&args[1]),
-        other => other,
+    let first = array_lift::eval_arg(ctx, &args[0]);
+    let needs_fallback = match &first {
+        Value::Error(_) => true,
+        Value::Array(arr) => arr.iter().any(|v| matches!(v, Value::Error(_))),
+        _ => false,
+    };
+    if !needs_fallback {
+        return first;
     }
+
+    let fallback = array_lift::eval_arg(ctx, &args[1]);
+    array_lift::lift2(first, fallback, |first, fallback| {
+        if matches!(first, Value::Error(_)) {
+            Ok(fallback.clone())
+        } else {
+            Ok(first.clone())
+        }
+    })
 }
 
 inventory::submit! {
@@ -354,7 +435,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Any,
         arg_types: &[ValueType::Any, ValueType::Any],
         implementation: ifna_fn,
@@ -362,11 +443,24 @@ inventory::submit! {
 }
 
 fn ifna_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let first = ctx.eval_scalar(&args[0]);
-    match first {
-        Value::Error(ErrorKind::NA) => ctx.eval_scalar(&args[1]),
-        other => other,
+    let first = array_lift::eval_arg(ctx, &args[0]);
+    let needs_fallback = match &first {
+        Value::Error(ErrorKind::NA) => true,
+        Value::Array(arr) => arr.iter().any(|v| matches!(v, Value::Error(ErrorKind::NA))),
+        _ => false,
+    };
+    if !needs_fallback {
+        return first;
     }
+
+    let fallback = array_lift::eval_arg(ctx, &args[1]);
+    array_lift::lift2(first, fallback, |first, fallback| {
+        if matches!(first, Value::Error(ErrorKind::NA)) {
+            Ok(fallback.clone())
+        } else {
+            Ok(first.clone())
+        }
+    })
 }
 
 inventory::submit! {
@@ -384,37 +478,8 @@ inventory::submit! {
 }
 
 fn iserror_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    match ctx.eval_arg(&args[0]) {
-        ArgValue::Scalar(v) => match v {
-            Value::Array(arr) => Value::Array(Array::new(
-                arr.rows,
-                arr.cols,
-                arr.iter()
-                    .map(|v| Value::Bool(matches!(v, Value::Error(_))))
-                    .collect(),
-            )),
-            other => Value::Bool(matches!(other, Value::Error(_))),
-        },
-        ArgValue::Reference(r) => {
-            if r.is_single_cell() {
-                let v = ctx.get_cell_value(r.sheet_id, r.start);
-                Value::Bool(matches!(v, Value::Error(_)))
-            } else {
-                let r = r.normalized();
-                let rows = (r.end.row - r.start.row + 1) as usize;
-                let cols = (r.end.col - r.start.col + 1) as usize;
-                let mut values = Vec::with_capacity(rows.saturating_mul(cols));
-                for row in r.start.row..=r.end.row {
-                    for col in r.start.col..=r.end.col {
-                        let v = ctx.get_cell_value(r.sheet_id, crate::eval::CellAddr { row, col });
-                        values.push(Value::Bool(matches!(v, Value::Error(_))));
-                    }
-                }
-                Value::Array(Array::new(rows, cols, values))
-            }
-        }
-        ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
-    }
+    let v = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(v, |v| Ok(Value::Bool(matches!(v, Value::Error(_)))))
 }
 
 inventory::submit! {

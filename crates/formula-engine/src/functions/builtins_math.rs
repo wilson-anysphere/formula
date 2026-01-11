@@ -1,4 +1,5 @@
 use crate::eval::CompiledExpr;
+use crate::functions::array_lift;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::simd::{CmpOp, NumericCriteria};
@@ -807,7 +808,8 @@ fn countblank_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 }
 
 fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
-    let rects: Vec<crate::functions::Reference> = ranges.iter().copied().map(|r| r.normalized()).collect();
+    let rects: Vec<crate::functions::Reference> =
+        ranges.iter().copied().map(|r| r.normalized()).collect();
     if rects.is_empty() {
         return 0;
     }
@@ -870,7 +872,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: round_fn,
@@ -888,7 +890,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: rounddown_fn,
@@ -906,7 +908,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: roundup_fn,
@@ -918,15 +920,13 @@ fn roundup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 }
 
 fn round_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], mode: RoundMode) -> Value {
-    let number = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    let digits = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Number(round_with_mode(number, digits as i32, mode))
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let digits = array_lift::eval_arg(ctx, &args[1]);
+    array_lift::lift2(number, digits, |number, digits| {
+        let number = number.coerce_to_number()?;
+        let digits = digits.coerce_to_i64()?;
+        Ok(Value::Number(round_with_mode(number, digits as i32, mode)))
+    })
 }
 
 inventory::submit! {
@@ -936,7 +936,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number],
         implementation: int_fn,
@@ -944,11 +944,8 @@ inventory::submit! {
 }
 
 fn int_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let n = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Number(n.floor())
+    let value = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(value, |v| Ok(Value::Number(v.coerce_to_number()?.floor())))
 }
 
 inventory::submit! {
@@ -958,7 +955,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number],
         implementation: abs_fn,
@@ -966,11 +963,8 @@ inventory::submit! {
 }
 
 fn abs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let n = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Number(n.abs())
+    let value = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(value, |v| Ok(Value::Number(v.coerce_to_number()?.abs())))
 }
 
 inventory::submit! {
@@ -980,7 +974,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: mod_fn,
@@ -988,18 +982,16 @@ inventory::submit! {
 }
 
 fn mod_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let n = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    let d = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    if d == 0.0 {
-        return Value::Error(ErrorKind::Div0);
-    }
-    Value::Number(n - d * (n / d).floor())
+    let n = array_lift::eval_arg(ctx, &args[0]);
+    let d = array_lift::eval_arg(ctx, &args[1]);
+    array_lift::lift2(n, d, |n, d| {
+        let n = n.coerce_to_number()?;
+        let d = d.coerce_to_number()?;
+        if d == 0.0 {
+            return Err(ErrorKind::Div0);
+        }
+        Ok(Value::Number(n - d * (n / d).floor()))
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1050,7 +1042,7 @@ inventory::submit! {
         max_args: 1,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number],
         implementation: sign_fn,
@@ -1058,18 +1050,18 @@ inventory::submit! {
 }
 
 fn sign_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let number = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    if !number.is_finite() {
-        return Value::Error(ErrorKind::Num);
-    }
-    if number > 0.0 {
-        Value::Number(1.0)
-    } else if number < 0.0 {
-        Value::Number(-1.0)
-    } else {
-        Value::Number(0.0)
-    }
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    array_lift::lift1(number, |number| {
+        let number = number.coerce_to_number()?;
+        if !number.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+        if number > 0.0 {
+            Ok(Value::Number(1.0))
+        } else if number < 0.0 {
+            Ok(Value::Number(-1.0))
+        } else {
+            Ok(Value::Number(0.0))
+        }
+    })
 }
