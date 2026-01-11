@@ -346,7 +346,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
   },
   create_pivot_table: {
     name: "create_pivot_table",
-    description: "Create a pivot table from a source range (stub).",
+    description: "Create a pivot table from a source range.",
     paramsSchema: CreatePivotTableParamsSchema,
     jsonSchema: {
       type: "object",
@@ -360,7 +360,10 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
             type: "object",
             properties: {
               field: { type: "string" },
-              aggregation: { type: "string", enum: ["sum", "count", "average", "max", "min"] }
+              aggregation: {
+                type: "string",
+                enum: ["sum", "count", "average", "max", "min", "product", "countnumbers", "stddev", "stddevp", "var", "varp"]
+              }
             },
             required: ["field", "aggregation"]
           }
