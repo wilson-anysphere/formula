@@ -6,6 +6,7 @@ use crate::parser::{
 use crate::patch::{patch_sheet_bin, CellEdit};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
+use quick_xml::Writer as XmlWriter;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, Write};
@@ -290,6 +291,14 @@ impl XlsbWorkbook {
     /// `overrides` maps ZIP entry paths (e.g. `xl/worksheets/sheet1.bin`) to replacement bytes.
     /// All other parts are copied from the source workbook, except for any entry already present
     /// in [`XlsbWorkbook::preserved_parts`], which is emitted from that buffer.
+    ///
+    /// If any overridden worksheet part differs from the original package, we treat this as an
+    /// edited save and remove `xl/calcChain.bin` (if present) and its references from:
+    /// - `[Content_Types].xml`
+    /// - `xl/_rels/workbook.bin.rels`
+    ///
+    /// A stale calcChain can cause Excel to open with incorrect cached results or spend time
+    /// rebuilding the chain.
     pub fn save_with_part_overrides(
         &self,
         dest: impl AsRef<Path>,
@@ -299,6 +308,30 @@ impl XlsbWorkbook {
 
         let file = File::open(&self.path)?;
         let mut zip = ZipArchive::new(file)?;
+
+        let edited = worksheets_edited(&mut zip, &self.sheets, overrides)?;
+
+        // Compute updated plumbing parts if we need to invalidate calcChain.
+        let mut updated_content_types: Option<Vec<u8>> = None;
+        let mut updated_workbook_rels: Option<Vec<u8>> = None;
+
+        if edited {
+            let content_types =
+                get_part_bytes(&mut zip, &self.preserved_parts, overrides, "[Content_Types].xml")?;
+            if let Some(content_types) = content_types {
+                updated_content_types = Some(remove_calc_chain_from_content_types(&content_types)?);
+            }
+
+            let workbook_rels = get_part_bytes(
+                &mut zip,
+                &self.preserved_parts,
+                overrides,
+                "xl/_rels/workbook.bin.rels",
+            )?;
+            if let Some(workbook_rels) = workbook_rels {
+                updated_workbook_rels = Some(remove_calc_chain_from_workbook_rels(&workbook_rels)?);
+            }
+        }
 
         let out = File::create(dest)?;
         let mut writer = ZipWriter::new(out);
@@ -320,7 +353,37 @@ impl XlsbWorkbook {
                 continue;
             }
 
+            // Drop calcChain when any worksheet was edited.
+            if edited && name == "xl/calcChain.bin" {
+                if overrides.contains_key(&name) {
+                    used_overrides.insert(name);
+                }
+                continue;
+            }
+
             writer.start_file(name.as_str(), options)?;
+
+            // When invalidating calcChain, we may need to rewrite XML parts even if they're
+            // present in `overrides`.
+            if edited && name == "[Content_Types].xml" {
+                if let Some(updated) = &updated_content_types {
+                    if overrides.contains_key(&name) {
+                        used_overrides.insert(name.clone());
+                    }
+                    writer.write_all(updated)?;
+                    continue;
+                }
+            }
+            if edited && name == "xl/_rels/workbook.bin.rels" {
+                if let Some(updated) = &updated_workbook_rels {
+                    if overrides.contains_key(&name) {
+                        used_overrides.insert(name.clone());
+                    }
+                    writer.write_all(updated)?;
+                    continue;
+                }
+            }
+
             if let Some(bytes) = overrides.get(&name) {
                 used_overrides.insert(name.clone());
                 writer.write_all(bytes)?;
@@ -409,4 +472,180 @@ fn preserve_part<R: Read + Seek>(
         preserved.insert(name.to_string(), bytes);
     }
     Ok(())
+}
+
+fn worksheets_edited<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    sheets: &[SheetMeta],
+    overrides: &HashMap<String, Vec<u8>>,
+) -> Result<bool, ParseError> {
+    let worksheet_paths: HashSet<&str> = sheets.iter().map(|s| s.part_path.as_str()).collect();
+
+    for (name, override_bytes) in overrides {
+        if !worksheet_paths.contains(name.as_str()) {
+            continue;
+        }
+
+        let Some(original) = read_zip_entry(zip, name)? else {
+            // Treat missing original parts as edited; downstream the caller
+            // may be synthesizing a sheet.
+            return Ok(true);
+        };
+
+        if original != *override_bytes {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn get_part_bytes<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    preserved_parts: &HashMap<String, Vec<u8>>,
+    overrides: &HashMap<String, Vec<u8>>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, ParseError> {
+    if let Some(bytes) = overrides.get(name) {
+        return Ok(Some(bytes.clone()));
+    }
+    if let Some(bytes) = preserved_parts.get(name) {
+        return Ok(Some(bytes.clone()));
+    }
+    read_zip_entry(zip, name)
+}
+
+fn remove_calc_chain_from_content_types(xml_bytes: &[u8]) -> Result<Vec<u8>, ParseError> {
+    let mut reader = XmlReader::from_reader(std::io::BufReader::new(Cursor::new(xml_bytes)));
+    reader.trim_text(false);
+    let mut writer = XmlWriter::new(Vec::new());
+    let mut buf = Vec::new();
+    let mut skip_depth = 0usize;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(event) => {
+                if skip_depth > 0 {
+                    match event {
+                        Event::Start(_) => skip_depth += 1,
+                        Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                        _ => {}
+                    }
+                } else if should_drop_content_type_event(&event, &reader)? {
+                    if matches!(event, Event::Start(_)) {
+                        skip_depth = 1;
+                    }
+                } else {
+                    writer.write_event(event.into_owned())?;
+                }
+            }
+            Err(e) => return Err(ParseError::Xml(e)),
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn should_drop_content_type_event<B: std::io::BufRead>(
+    event: &Event<'_>,
+    reader: &XmlReader<B>,
+) -> Result<bool, ParseError> {
+    let (Event::Start(e) | Event::Empty(e)) = event else {
+        return Ok(false);
+    };
+
+    let qname = e.name();
+    let name = qname.as_ref();
+    if name.ends_with(b"Override") {
+        if let Some(part) = xml_attr_value(e, reader, b"PartName")? {
+            if part == "/xl/calcChain.bin" || part == "xl/calcChain.bin" {
+                return Ok(true);
+            }
+        }
+    } else if name.ends_with(b"Default") {
+        // Some generators might (incorrectly) use a custom extension for calcChain.
+        if let Some(ext) = xml_attr_value(e, reader, b"Extension")? {
+            if ext.eq_ignore_ascii_case("calcchain") || ext.eq_ignore_ascii_case("calcchain.bin") {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+fn remove_calc_chain_from_workbook_rels(xml_bytes: &[u8]) -> Result<Vec<u8>, ParseError> {
+    let mut reader = XmlReader::from_reader(std::io::BufReader::new(Cursor::new(xml_bytes)));
+    reader.trim_text(false);
+    let mut writer = XmlWriter::new(Vec::new());
+    let mut buf = Vec::new();
+    let mut skip_depth = 0usize;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(event) => {
+                if skip_depth > 0 {
+                    match event {
+                        Event::Start(_) => skip_depth += 1,
+                        Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                        _ => {}
+                    }
+                } else if should_drop_workbook_rel_event(&event, &reader)? {
+                    if matches!(event, Event::Start(_)) {
+                        skip_depth = 1;
+                    }
+                } else {
+                    writer.write_event(event.into_owned())?;
+                }
+            }
+            Err(e) => return Err(ParseError::Xml(e)),
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn should_drop_workbook_rel_event<B: std::io::BufRead>(
+    event: &Event<'_>,
+    reader: &XmlReader<B>,
+) -> Result<bool, ParseError> {
+    let (Event::Start(e) | Event::Empty(e)) = event else {
+        return Ok(false);
+    };
+
+    let qname = e.name();
+    if !qname.as_ref().ends_with(b"Relationship") {
+        return Ok(false);
+    }
+
+    if let Some(target) = xml_attr_value(e, reader, b"Target")? {
+        if target.replace('\\', "/").ends_with("calcChain.bin") {
+            return Ok(true);
+        }
+    }
+
+    if let Some(ty) = xml_attr_value(e, reader, b"Type")? {
+        if ty.contains("relationships/calcChain") {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn xml_attr_value<B: std::io::BufRead>(
+    e: &quick_xml::events::BytesStart<'_>,
+    reader: &XmlReader<B>,
+    key: &[u8],
+) -> Result<Option<String>, ParseError> {
+    for attr in e.attributes().flatten() {
+        if attr.key.as_ref() == key {
+            return Ok(Some(attr.decode_and_unescape_value(reader)?.into_owned()));
+        }
+    }
+    Ok(None)
 }
