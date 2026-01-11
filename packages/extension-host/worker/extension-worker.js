@@ -235,8 +235,11 @@ function assertAllowedModuleRequest(request) {
 
 function assertWithinExtensionRoot(resolvedPath, request) {
   const real = fs.realpathSync(resolvedPath);
-  if (real === extensionRoot) return;
-  if (!real.startsWith(extensionRoot + path.sep)) {
+  const relative = path.relative(extensionRoot, real);
+  const inside =
+    relative === "" ||
+    (!relative.startsWith(".." + path.sep) && relative !== ".." && !path.isAbsolute(relative));
+  if (!inside) {
     throw createSandboxError(
       `Extensions cannot require modules outside their extension folder: '${request}' resolved to '${real}'`
     );
