@@ -369,6 +369,36 @@ fn index_and_match() {
 }
 
 #[test]
+fn choose_selects_index_supports_arrays_and_range_unions() {
+    let mut sheet = TestSheet::new();
+
+    assert_eq!(sheet.eval("=CHOOSE(1, 10, 1/0)"), Value::Number(10.0));
+    assert_eq!(sheet.eval("=CHOOSE(2, 1/0, 20)"), Value::Number(20.0));
+    assert_eq!(
+        sheet.eval("=CHOOSE(0, 1, 2)"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    sheet.set("A1", 10.0);
+    sheet.set("B1", 20.0);
+    sheet.set_formula("C1", "=CHOOSE({1,2}, A1, B1)");
+    sheet.recalculate();
+    assert_eq!(sheet.get("C1"), Value::Number(10.0));
+    assert_eq!(sheet.get("D1"), Value::Number(20.0));
+
+    sheet.set("A2", 1.0);
+    sheet.set("A3", 2.0);
+    sheet.set("A4", 3.0);
+    sheet.set("B2", 10.0);
+    sheet.set("B3", 20.0);
+    sheet.set("B4", 30.0);
+    assert_eq!(
+        sheet.eval("=SUM(CHOOSE({1,2}, A2:A4, B2:B4))"),
+        Value::Number(66.0)
+    );
+}
+
+#[test]
 fn getpivotdata_returns_values_from_tabular_pivot_output() {
     let mut sheet = TestSheet::new();
 

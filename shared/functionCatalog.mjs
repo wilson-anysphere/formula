@@ -163,6 +163,17 @@ export default {
       ]
     },
     {
+      "name": "CHOOSE",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "number",
+        "any"
+      ]
+    },
+    {
       "name": "CHOOSECOLS",
       "min_args": 2,
       "max_args": 255,
@@ -591,6 +602,16 @@ export default {
       "return_type": "any",
       "arg_types": [
         "any",
+        "any"
+      ]
+    },
+    {
+      "name": "IFS",
+      "min_args": 2,
+      "max_args": 254,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
         "any"
       ]
     },

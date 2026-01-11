@@ -5,6 +5,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "BYROW",
     "EXPAND",
     "FILTER",
+    "IFS",
     "ISOMITTED",
     "MAKEARRAY",
     "MAP",

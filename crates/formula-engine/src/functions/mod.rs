@@ -25,6 +25,7 @@ mod builtins_logical;
 mod builtins_lookup;
 mod builtins_math;
 mod builtins_math_extended;
+mod builtins_select;
 mod builtins_reference;
 mod builtins_text;
 

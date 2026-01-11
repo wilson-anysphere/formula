@@ -72,6 +72,39 @@ fn iferror_and_ifna() {
 }
 
 #[test]
+fn ifs_selects_first_true_condition_and_is_lazy() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(&sheet.eval("=IFS(TRUE, 1, FALSE, 2)"), 1.0);
+    assert_number(&sheet.eval("=IFS(FALSE, 1, TRUE, 2)"), 2.0);
+    assert_eq!(
+        sheet.eval("=IFS(FALSE, 1, FALSE, 2)"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    // Short-circuit: unselected value expressions are not evaluated.
+    assert_number(&sheet.eval("=IFS(TRUE, 1, TRUE, 1/0)"), 1.0);
+    assert_number(&sheet.eval("=IFS(FALSE, 1/0, TRUE, 2)"), 2.0);
+
+    // Argument pairs are required.
+    assert_eq!(
+        sheet.eval("=IFS(TRUE, 1, FALSE)"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn ifs_accepts_xlfn_prefix_and_spills_arrays() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=_xlfn.IFS(TRUE, 1, FALSE, 2)"), 1.0);
+
+    sheet.set_formula("C1", "=IFS({TRUE,FALSE}, 1, TRUE, 2)");
+    sheet.recalculate();
+    assert_eq!(sheet.get("C1"), Value::Number(1.0));
+    assert_eq!(sheet.get("D1"), Value::Number(2.0));
+}
+
+#[test]
 fn na_function_returns_na_error() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=NA()"), Value::Error(ErrorKind::NA));
