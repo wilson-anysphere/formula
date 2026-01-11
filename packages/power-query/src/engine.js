@@ -1950,17 +1950,22 @@ export class QueryEngine {
     const connector = this.connectors.get("odata");
     if (!connector) throw new Error("OData source requires an ODataConnector");
 
-    const request = {
+    // Important: permission/credential prompts and source-state cache validation
+    // should be consistent regardless of whether OData folding runs. Use a
+    // signature request that omits derived query options.
+    const signatureRequest = {
       url: source.url,
       headers: source.headers ?? {},
       auth: source.auth,
       rowsPath: source.rowsPath ?? source.jsonPath,
-      query,
     };
 
-    await this.assertPermission(connector.permissionKind, { source, request }, state);
-    const credentials = await this.getCredentials("odata", request, state);
-    const sourceKey = buildConnectorSourceKey(connector, request);
+    const request = { ...signatureRequest, query };
+
+    await this.assertPermission(connector.permissionKind, { source, request: signatureRequest }, state);
+    const credentials = await this.getCredentials("odata", signatureRequest, state);
+
+    const sourceKey = buildConnectorSourceKey(connector, signatureRequest);
 
     const cacheMode = options.cache?.mode ?? "use";
     const cacheValidation = options.cache?.validation ?? "source-state";
@@ -1968,7 +1973,7 @@ export class QueryEngine {
     let sourceState = {};
     if (this.cache && cacheMode !== "bypass" && cacheValidation === "source-state" && typeof connector.getSourceState === "function") {
       try {
-        sourceState = await connector.getSourceState(request, { signal: options.signal, credentials, now: state.now });
+        sourceState = await connector.getSourceState(signatureRequest, { signal: options.signal, credentials, now: state.now });
       } catch {
         sourceState = {};
       }
