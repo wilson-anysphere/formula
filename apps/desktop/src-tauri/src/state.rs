@@ -31,6 +31,7 @@ use formula_xlsx::print::{
 };
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -504,8 +505,13 @@ impl AppState {
                 .map_err(|e| AppStateError::Persistence(e.to_string()))?;
             (existing_meta.id, sheet_metas, recovered)
         } else {
-            let model =
-                workbook_to_model(&workbook).map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            let model = if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
+                formula_xlsx::read_workbook_from_reader(Cursor::new(origin_bytes))
+                    .map_err(|e| AppStateError::Persistence(e.to_string()))?
+            } else {
+                workbook_to_model(&workbook)
+                    .map_err(|e| AppStateError::Persistence(e.to_string()))?
+            };
 
             let name = workbook
                 .origin_path

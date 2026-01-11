@@ -163,6 +163,93 @@ fn styles_are_deduplicated() {
 }
 
 #[test]
+fn apply_cell_changes_preserves_style_when_style_is_omitted() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet", 0, None)
+        .expect("create sheet");
+
+    let style = Style {
+        font_id: None,
+        fill_id: None,
+        border_id: None,
+        number_format: Some("0.00".to_string()),
+        alignment: None,
+        protection: None,
+    };
+
+    storage
+        .apply_cell_changes(&[CellChange {
+            sheet_id: sheet.id,
+            row: 0,
+            col: 0,
+            data: CellData {
+                value: CellValue::Number(1.0),
+                formula: None,
+                style: Some(style),
+            },
+            user_id: None,
+        }])
+        .expect("set styled cell");
+
+    let initial = storage
+        .load_cells_in_range(sheet.id, CellRange::new(0, 0, 0, 0))
+        .expect("load initial cell");
+    let initial_style_id = initial
+        .first()
+        .map(|(_, snap)| snap.style_id)
+        .flatten()
+        .expect("expected initial style id");
+
+    storage
+        .apply_cell_changes(&[CellChange {
+            sheet_id: sheet.id,
+            row: 0,
+            col: 0,
+            data: CellData {
+                value: CellValue::Number(2.0),
+                formula: None,
+                style: None,
+            },
+            user_id: None,
+        }])
+        .expect("update cell without style payload");
+
+    let updated = storage
+        .load_cells_in_range(sheet.id, CellRange::new(0, 0, 0, 0))
+        .expect("load updated cell");
+    let updated_style_id = updated
+        .first()
+        .map(|(_, snap)| snap.style_id)
+        .flatten()
+        .expect("expected updated style id");
+    assert_eq!(updated_style_id, initial_style_id);
+
+    // Clearing the cell contents should keep the style row so the cell remains formatted.
+    storage
+        .apply_cell_changes(&[CellChange {
+            sheet_id: sheet.id,
+            row: 0,
+            col: 0,
+            data: CellData::empty(),
+            user_id: None,
+        }])
+        .expect("clear cell");
+
+    let cleared = storage
+        .load_cells_in_range(sheet.id, CellRange::new(0, 0, 0, 0))
+        .expect("load cleared cell");
+    assert_eq!(cleared.len(), 1, "expected style-only cell to remain");
+    let cleared_snap = &cleared[0].1;
+    assert!(cleared_snap.value.is_empty());
+    assert!(cleared_snap.formula.is_none());
+    assert_eq!(cleared_snap.style_id, Some(initial_style_id));
+}
+
+#[test]
 fn change_log_records_cell_operations() {
     let storage = Storage::open_in_memory().expect("open storage");
     let workbook = storage

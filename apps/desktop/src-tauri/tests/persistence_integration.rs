@@ -3,6 +3,7 @@ use formula_desktop_tauri::persistence::{write_xlsx_from_storage, WorkbookPersis
 use formula_desktop_tauri::state::{AppState, CellScalar};
 use formula_storage::{CellRange, CellValue, Storage};
 use serde_json::json;
+use std::path::PathBuf;
 
 #[tokio::test]
 async fn autosave_persists_and_exports_round_trip() {
@@ -110,4 +111,34 @@ async fn autosave_persists_and_exports_round_trip() {
         .expect("get B1 after reopen");
     assert_eq!(cell.formula.as_deref(), Some("=A1+1"));
     assert_eq!(cell.value, CellScalar::Number(1.0));
+}
+
+#[test]
+fn xlsx_import_uses_origin_bytes_to_preserve_styles_in_storage() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../fixtures/xlsx/styles/styles.xlsx");
+    let workbook = read_xlsx_blocking(&fixture).expect("read fixture");
+    assert!(
+        workbook.origin_xlsx_bytes.is_some(),
+        "fixture should load with origin_xlsx_bytes"
+    );
+
+    let tmp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = tmp_dir.path().join("autosave.sqlite");
+
+    let mut state = AppState::new();
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path))
+        .expect("load persistent workbook");
+
+    let storage = state.persistent_storage().expect("storage");
+    let workbook_id = state.persistent_workbook_id().expect("workbook id");
+    let model = storage
+        .export_model_workbook(workbook_id)
+        .expect("export model");
+
+    assert!(
+        model.styles.len() > 1,
+        "expected more than the default style in imported workbook"
+    );
 }

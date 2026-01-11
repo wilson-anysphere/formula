@@ -1568,8 +1568,19 @@ fn snapshot_from_row(
 fn apply_one_change(tx: &Transaction<'_>, change: &CellChange) -> Result<()> {
     // Read previous state for change log.
     let old_snapshot = fetch_cell_snapshot_tx(tx, change.sheet_id, change.row, change.col)?;
+    let previous_style_id = old_snapshot.as_ref().and_then(|s| s.style_id);
 
-    if change.data.is_truly_empty() {
+    // If no explicit style payload is provided, preserve the existing style. This
+    // matches Excel semantics where editing/clearing a cell's contents typically
+    // does not clear formatting (cell styles remain unless explicitly changed).
+    let style_id = match &change.data.style {
+        Some(style) => Some(get_or_insert_style_tx(tx, style)?),
+        None => previous_style_id,
+    };
+
+    let is_empty = change.data.value.is_empty() && change.data.formula.is_none();
+
+    if is_empty && style_id.is_none() {
         tx.execute(
             "DELETE FROM cells WHERE sheet_id = ?1 AND row = ?2 AND col = ?3",
             params![change.sheet_id.to_string(), change.row, change.col],
@@ -1586,11 +1597,6 @@ fn apply_one_change(tx: &Transaction<'_>, change: &CellChange) -> Result<()> {
         touch_workbook_modified_at(tx, change.sheet_id)?;
         return Ok(());
     }
-
-    let style_id = match &change.data.style {
-        Some(style) => Some(get_or_insert_style_tx(tx, style)?),
-        None => None,
-    };
 
     let formula = change.data.formula.clone();
     // `cells.value_json` is the canonical representation for all cell values

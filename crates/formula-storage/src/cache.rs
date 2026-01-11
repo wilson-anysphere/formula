@@ -395,21 +395,35 @@ impl MemoryManager {
         let before_page_bytes = page.bytes;
         let was_clean = page.pending_changes.is_empty();
         // Update cached snapshot.
+        let existing_style_id = page
+            .cells
+            .get(&(change.row, change.col))
+            .and_then(|snapshot| snapshot.style_id);
+
         if let Some(existing) = page.cells.get(&(change.row, change.col)) {
             page.bytes = page
                 .bytes
                 .saturating_sub(estimate_cell_snapshot_bytes(existing));
         }
 
-        if change.data.is_truly_empty() {
+        let is_empty = change.data.value.is_empty() && change.data.formula.is_none();
+
+        if is_empty && existing_style_id.is_none() {
             page.cells.remove(&(change.row, change.col));
         } else {
+            // Mirror storage semantics: if no explicit style is provided, preserve the
+            // existing style id so cached snapshots remain consistent with SQLite.
+            let style_id = match change.data.style.as_ref() {
+                Some(_) => None,
+                None => existing_style_id,
+            };
+
             page.cells.insert(
                 (change.row, change.col),
                 CellSnapshot {
                     value: change.data.value.clone(),
                     formula: change.data.formula.clone(),
-                    style_id: None,
+                    style_id,
                 },
             );
         }
