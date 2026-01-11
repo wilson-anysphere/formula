@@ -27,6 +27,45 @@ export class CollabBranchingWorkflow {
     this.#rootName = rootName ?? "branching";
   }
 
+  async listBranches() {
+    return this.#branchService.listBranches();
+  }
+
+  /**
+   * @param {Actor} actor
+   * @param {{ name: string, description?: string }} input
+   */
+  async createBranch(actor, input) {
+    this.#syncBranchServiceToGlobalBranch();
+    return this.#branchService.createBranch(actor, input);
+  }
+
+  /**
+   * @param {Actor} actor
+   * @param {{ oldName: string, newName: string }} input
+   */
+  async renameBranch(actor, { oldName, newName }) {
+    this.#syncBranchServiceToGlobalBranch();
+    await this.#branchService.renameBranch(actor, { oldName, newName });
+
+    const current = this.#getGlobalCurrentBranchName();
+    if (current === oldName) this.#setGlobalCurrentBranchName(newName);
+  }
+
+  /**
+   * @param {Actor} actor
+   * @param {{ name: string }} input
+   */
+  async deleteBranch(actor, { name }) {
+    this.#syncBranchServiceToGlobalBranch();
+    const current = this.#getGlobalCurrentBranchName();
+    if (current === name) {
+      // Match BranchService semantics, but against the *global* checked-out branch.
+      throw new Error("Cannot delete the currently checked-out branch");
+    }
+    await this.#branchService.deleteBranch(actor, { name });
+  }
+
   /**
    * @returns {string}
    */
