@@ -295,7 +295,10 @@ function EngineDemoApp() {
     referenceColorByTextRef.current = nextByText;
 
     const highlights = colored
-      .filter((ref) => !ref.range.sheet || ref.range.sheet === activeSheet)
+      .filter((ref) => {
+        if (!ref.range.sheet) return true;
+        return ref.range.sheet.toLowerCase() === activeSheet.toLowerCase();
+      })
       .map((ref) => ({
         range: {
           startRow: ref.range.startRow + headerRowOffset,

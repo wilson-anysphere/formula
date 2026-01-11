@@ -656,11 +656,23 @@ export class SpreadsheetApp {
                 end: { row: range.end.row, col: range.end.col }
               }
             : null;
-          this.renderReferencePreview();
+         this.renderReferencePreview();
         },
         onReferenceHighlights: (highlights) => {
+          const sheetIds = this.document.getSheetIds();
+          const resolveSheetId = (name: string): string | null => {
+            const trimmed = name.trim();
+            if (!trimmed) return null;
+            return sheetIds.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+          };
+
           this.referenceHighlights = highlights
-            .filter((h) => !h.range.sheet || h.range.sheet === this.sheetId)
+            .filter((h) => {
+              if (!h.range.sheet) return true;
+              const resolved = resolveSheetId(h.range.sheet);
+              if (!resolved) return false;
+              return resolved.toLowerCase() === this.sheetId.toLowerCase();
+            })
             .map((h) => ({
               start: { row: h.range.startRow, col: h.range.startCol },
               end: { row: h.range.endRow, col: h.range.endCol },
