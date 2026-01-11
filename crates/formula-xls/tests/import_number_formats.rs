@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use formula_model::{CellRef, CellValue, DateSystem};
+use formula_model::{CellRef, CellValue, DateSystem, Range};
 
 mod xls_fixture_builder;
 
@@ -66,3 +66,40 @@ fn respects_1904_date_system_flag() {
     assert_eq!(result.workbook.date_system, DateSystem::Excel1904);
 }
 
+#[test]
+fn applies_formatted_blank_styles_to_merged_cell_anchors() {
+    let bytes = xls_fixture_builder::build_merged_formatted_blank_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("MergedFmt")
+        .expect("MergedFmt missing");
+
+    let merge_range = Range::from_a1("A1:B1").unwrap();
+    assert!(
+        sheet
+            .merged_regions
+            .iter()
+            .any(|region| region.range == merge_range),
+        "missing expected merged range A1:B1"
+    );
+
+    // The BIFF BLANK record is for B1, but the model stores formatting on the
+    // merged-region anchor (A1).
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let b1 = CellRef::from_a1("B1").unwrap();
+
+    let a1_cell = sheet.cell(a1).expect("A1 missing (formatted blank anchor)");
+    let b1_cell = sheet.cell(b1).expect("B1 missing (merged)");
+    assert!(matches!(a1_cell.value, CellValue::Empty));
+    assert_eq!(a1_cell.style_id, b1_cell.style_id);
+    assert_ne!(a1_cell.style_id, 0);
+
+    let fmt = result
+        .workbook
+        .styles
+        .get(a1_cell.style_id)
+        .and_then(|s| s.number_format.as_deref());
+    assert_eq!(fmt, Some("0.00%"));
+}

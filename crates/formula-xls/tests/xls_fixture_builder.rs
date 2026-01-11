@@ -20,6 +20,26 @@ pub fn build_number_format_fixture_xls(date_1904: bool) -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
+/// non-anchor cell (`B1`) has a formatted `BLANK` record.
+///
+/// This exercises the importer’s “apply styles to merged-cell anchors” behaviour:
+/// formatting attached to any cell inside the merged region must be applied to
+/// the anchor cell so it round-trips in our model.
+pub fn build_merged_formatted_blank_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_merged_formatted_blank_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
     // -- Globals -----------------------------------------------------------------
     let mut globals = Vec::<u8>::new();
@@ -88,6 +108,78 @@ fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
     // Append sheet substream.
     globals.extend_from_slice(&sheet);
     globals
+}
+
+fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, 0x0809, &bof(0x0005)); // BOF: workbook globals
+    push_record(&mut globals, 0x0042, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, 0x003D, &window1()); // WINDOW1
+    push_record(&mut globals, 0x0031, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, 0x00E0, &xf_record(0, 0, true));
+    }
+
+    // One cell XF: built-in percent format (numFmtId=10 => "0.00%").
+    let xf_percent = 16u16;
+    push_record(&mut globals, 0x00E0, &xf_record(0, 10, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "MergedFmt");
+    push_record(&mut globals, 0x0085, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, 0x000A, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_merged_formatted_blank_sheet_stream(xf_percent);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_merged_formatted_blank_sheet_stream(xf_percent: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, 0x0809, &bof(0x0010)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 2)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, 0x0200, &dims);
+
+    push_record(&mut sheet, 0x023E, &window2()); // WINDOW2
+
+    // MERGEDCELLS [MS-XLS 2.4.139]: 1 range, A1:B1.
+    let mut merged = Vec::<u8>::new();
+    merged.extend_from_slice(&1u16.to_le_bytes()); // cAreas
+    merged.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+    merged.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+    merged.extend_from_slice(&0u16.to_le_bytes()); // colFirst (A)
+    merged.extend_from_slice(&1u16.to_le_bytes()); // colLast (B)
+    push_record(&mut sheet, 0x00E5, &merged);
+
+    // B1: BLANK record with percent format.
+    push_record(&mut sheet, 0x0201, &blank_cell(0, 1, xf_percent));
+
+    push_record(&mut sheet, 0x000A, &[]); // EOF worksheet
+    sheet
 }
 
 fn build_sheet_stream(
@@ -237,4 +329,3 @@ fn write_unicode_string(out: &mut Vec<u8>, s: &str) {
     out.push(0); // compressed (8-bit)
     out.extend_from_slice(bytes);
 }
-
