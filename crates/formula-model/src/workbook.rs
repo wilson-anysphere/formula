@@ -905,9 +905,18 @@ fn normalize_refers_to(refers_to: String) -> String {
 fn generate_duplicate_sheet_name(base: &str, sheets: &[Worksheet]) -> String {
     for i in 2u32.. {
         let suffix = format!(" ({i})");
-        let suffix_len = suffix.chars().count();
+        let suffix_len = suffix.encode_utf16().count();
         let max_base_len = crate::sheet_name::EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
-        let truncated: String = base.chars().take(max_base_len).collect();
+        let mut used_len = 0usize;
+        let mut truncated = String::new();
+        for ch in base.chars() {
+            let ch_len = ch.len_utf16();
+            if used_len + ch_len > max_base_len {
+                break;
+            }
+            used_len += ch_len;
+            truncated.push(ch);
+        }
         let candidate = format!("{truncated}{suffix}");
         if sheets
             .iter()

@@ -1,5 +1,6 @@
 use formula_model::{
-    CellRef, DuplicateSheetError, Range, SheetNameError, Table, TableColumn, Workbook,
+    validate_sheet_name, CellRef, DuplicateSheetError, Range, SheetNameError, Table, TableColumn,
+    Workbook,
 };
 
 #[test]
@@ -104,6 +105,21 @@ fn duplicate_sheet_name_collisions_match_excel_style_suffixes() {
 
     let copy3 = wb.duplicate_sheet(sheet1, None).unwrap();
     assert_eq!(wb.sheet(copy3).unwrap().name, "Sheet1 (3)");
+}
+
+#[test]
+fn duplicate_sheet_name_generation_respects_utf16_length_limit() {
+    let mut wb = Workbook::new();
+    let base = format!("{}A", "😀".repeat(15)); // 15 emoji (30 UTF-16) + 'A' = 31
+    let sheet = wb.add_sheet(base).unwrap();
+
+    let copied = wb.duplicate_sheet(sheet, None).unwrap();
+    let copy_name = wb.sheet(copied).unwrap().name.clone();
+
+    // Should not exceed Excel's 31 UTF-16 code unit limit.
+    validate_sheet_name(&copy_name).unwrap();
+    assert_eq!(copy_name.encode_utf16().count(), 30); // 13 emoji (26) + " (2)" (4)
+    assert_eq!(copy_name, format!("{} (2)", "😀".repeat(13)));
 }
 
 #[test]
