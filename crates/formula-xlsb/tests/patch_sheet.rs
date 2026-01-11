@@ -448,6 +448,57 @@ fn patch_sheet_bin_can_update_formula_rgcb_bytes() {
 }
 
 #[test]
+fn patch_sheet_bin_preserves_formula_rgcb_when_updating_cached_value_only() {
+    let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context("=SUM({1,2,3})", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert!(
+        !encoded.rgcb.is_empty(),
+        "expected array formula encoding to produce rgcb bytes"
+    );
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("ArrayRgcb");
+    builder.set_cell_formula_num(0, 0, 6.0, encoded.rgce.clone(), encoded.rgcb.clone());
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(10.0),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin");
+
+    let parsed = formula_xlsb::parse_sheet_bin_with_context(&mut Cursor::new(&patched), &[], &ctx)
+        .expect("parse patched sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 0))
+        .expect("A1 exists");
+    assert_eq!(cell.value, CellValue::Number(10.0));
+
+    let formula = cell.formula.as_ref().expect("formula metadata");
+    assert_eq!(formula.rgce, encoded.rgce);
+    assert_eq!(formula.extra, encoded.rgcb);
+    assert_eq!(formula.text.as_deref(), Some("SUM({1,2,3})"));
+}
+
+#[test]
 fn patch_sheet_bin_requires_new_rgcb_when_replacing_rgce_for_formula_with_existing_rgcb() {
     let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
 
