@@ -690,7 +690,13 @@ export class WebGpuBackend {
     const pass = encoder.beginComputePass();
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(Math.ceil(bCols / MMULT_TILE), Math.ceil(aRows / MMULT_TILE), 1);
+    const wgX = Math.ceil(bCols / MMULT_TILE);
+    const wgY = Math.ceil(aRows / MMULT_TILE);
+    const max = this.device.limits?.maxComputeWorkgroupsPerDimension ?? 65535;
+    if (wgX > max || wgY > max) {
+      throw new Error(`MMULT dispatch exceeds device limits: ${wgX}x${wgY} workgroups (max ${max})`);
+    }
+    pass.dispatchWorkgroups(wgX, wgY, 1);
     pass.end();
     this.queue.submit([encoder.finish()]);
 
