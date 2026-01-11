@@ -93,8 +93,12 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
 
   // Resolve deps from the sync-server package so this test doesn't need to add them to the root package.json.
   const requireFromSyncServer = createRequire(path.join(serviceDir, "package.json"));
+  const yWebsocketDir = path.dirname(requireFromSyncServer.resolve("y-websocket/package.json"));
+
+  // Import y-websocket's ESM entrypoint so it shares the same `yjs` module instance as the test (ESM),
+  // avoiding the "Yjs was already imported" constructor-mismatch warning.
   const [{ WebsocketProvider }, wsModule] = await Promise.all([
-    import(pathToFileURL(requireFromSyncServer.resolve("y-websocket")).href),
+    import(pathToFileURL(path.join(yWebsocketDir, "src", "y-websocket.js")).href),
     import(pathToFileURL(requireFromSyncServer.resolve("ws")).href),
   ]);
   const WebSocket = wsModule.default ?? wsModule.WebSocket ?? wsModule;
@@ -220,16 +224,18 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
   await waitForProviderSync(clientB.provider);
 
   // --- Edits propagate A -> B ---
-  clientA.documentController.setCellFormula("Sheet1", "B1", "=1+1");
-  clientA.undo.stopCapturing();
+  clientA.session.setCellFormula("Sheet1:0:1", "=1+1");
   clientA.documentController.setCellValue("Sheet1", "A1", "hello");
 
   await waitForCell(clientB.documentController, "Sheet1", "B1", { value: null, formula: "=1+1" });
   await waitForCell(clientB.documentController, "Sheet1", "A1", { value: "hello", formula: null });
+  assert.equal(clientB.session.getCell("Sheet1:0:1")?.formula, "=1+1");
+  assert.equal(clientB.session.getCell("Sheet1:0:0")?.value, "hello");
 
   // --- Edits propagate B -> A ---
   clientB.documentController.setCellValue("Sheet1", "C1", 123);
   await waitForCell(clientA.documentController, "Sheet1", "C1", { value: 123, formula: null });
+  assert.equal(clientA.session.getCell("Sheet1:0:2")?.value, 123);
 
   // --- Undo only affects local-origin changes ---
   clientA.undo.undo();

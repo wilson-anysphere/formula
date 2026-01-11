@@ -118,7 +118,20 @@ export function parseCellKey(
 }
 
 function getYMapCell(cellData: unknown): Y.Map<unknown> | null {
-  return cellData instanceof Y.Map ? cellData : null;
+  if (cellData instanceof Y.Map) return cellData;
+
+  // In some environments (notably pnpm workspaces + Node), it's possible to end up with
+  // multiple `yjs` module instances (e.g. one loaded via ESM import and another via CJS require).
+  // When that happens, `instanceof Y.Map` checks fail even though the value is a valid Yjs map.
+  //
+  // Use a small duck-type check so CollabSession APIs keep working regardless of module loader.
+  if (!cellData || typeof cellData !== "object") return null;
+  const maybe = cellData as any;
+  if (maybe.constructor?.name !== "YMap") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return maybe as Y.Map<unknown>;
 }
 
 export class CollabSession {
