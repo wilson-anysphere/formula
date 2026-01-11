@@ -423,6 +423,12 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         const value = (entry as any).value;
         const updatedAtMs = (entry as any).updatedAtMs;
         if (typeof key !== "string" || typeof value !== "string") continue;
+        // Cache key format has evolved over time. We currently expect:
+        //   `${model}\0${function}\0${promptHash}\0${inputsHash}`
+        // where both hashes are 8-hex FNV-1a values.
+        //
+        // Drop legacy keys that embed the raw prompt text (can be large / sensitive).
+        if (!isSupportedCacheKey(key)) continue;
         this.cache.set(key, {
           value,
           updatedAtMs: typeof updatedAtMs === "number" ? updatedAtMs : Date.now(),
@@ -444,6 +450,14 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       // Ignore persistence failures.
     }
   }
+}
+
+function isSupportedCacheKey(key: string): boolean {
+  const parts = key.split("\u0000");
+  if (parts.length !== 4) return false;
+  const promptHash = parts[2] ?? "";
+  const inputsHash = parts[3] ?? "";
+  return /^[0-9a-f]{8}$/.test(promptHash) && /^[0-9a-f]{8}$/.test(inputsHash);
 }
 
 type AiCellFunctionReferences = {

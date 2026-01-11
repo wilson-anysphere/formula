@@ -118,6 +118,37 @@ describe("AiCellFunctionEngine", () => {
     expect(llmClient.chat).toHaveBeenCalledTimes(1);
   });
 
+  it("purges legacy persisted cache keys that embed raw prompt text", async () => {
+    const persistKey = "ai-cache-legacy";
+    const legacyPrompt = "summarize";
+    globalThis.localStorage?.setItem(
+      persistKey,
+      JSON.stringify([{ key: `test-model\u0000AI\u0000${legacyPrompt}\u0000deadbeef`, value: "legacy", updatedAtMs: 0 }]),
+    );
+
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      model: "test-model",
+      cache: { persistKey },
+    });
+
+    const pending = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const stored = globalThis.localStorage?.getItem(persistKey) ?? "";
+    expect(stored).not.toContain("legacy");
+    expect(stored).not.toContain(legacyPrompt);
+  });
+
   it("changing referenced cells invalidates the cache key", async () => {
     const deferred1 = defer<any>();
     const deferred2 = defer<any>();
