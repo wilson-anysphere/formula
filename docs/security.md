@@ -13,7 +13,7 @@ The code lives in:
 
 - `packages/security/crypto/**` – AES-256-GCM primitives, envelope encryption, KMS + keychain abstractions
 - `apps/desktop/src-tauri/src/storage/**` – desktop encryption hooks (testable JS reference + Rust placeholder)
-- `services/api/**` – org policies + enforcement helpers + retention service
+- `services/api/src/**` – Fastify API implementation (org settings/policies, retention sweep, audit logging)
 
 ## Encryption at Rest
 
@@ -43,9 +43,10 @@ Cloud storage uses **envelope encryption**:
 
 Implementation:
 
-- `packages/security/crypto/envelope.js`
-- `packages/security/crypto/kms/*` (providers)
-- `services/api/storage/documentStorageRouter.js` (example routing + encryption wrapper)
+- `services/api/src/crypto/envelope.ts`
+- `services/api/src/crypto/keyring.ts`
+- `services/api/src/crypto/kms/*` (providers)
+- `services/api/src/db/documentVersions.ts` (applies envelope encryption to DB blobs)
 
 The included `LocalKmsProvider` is meant for tests and single-node dev. Production deployments should supply AWS/GCP/Azure implementations.
 
@@ -159,14 +160,11 @@ Example JWT claim:
 
 Cloud services should enforce **TLS 1.3 minimum**.
 
-- `services/api/policies/tls.js` exports `createTlsServerOptions()` (sets `minVersion: "TLSv1.3"`).
+In production, TLS is typically terminated at the load balancer / edge proxy; the API expects to run behind an HTTPS-only ingress.
 
 ### Certificate pinning (enterprise option)
 
-Certificate pinning is supported via a custom `checkServerIdentity` function:
-
-- `services/api/policies/tls.js` exports `createPinnedCheckServerIdentity({ pins })`
-- Pins are SHA-256 fingerprints of the server certificate (hex, with or without `:` separators).
+Certificate pinning settings are stored per org (see `org_settings.certificate_pinning_enabled` and `org_settings.certificate_pins`) and validated by the API when admins update org settings (`services/api/src/routes/orgs.ts`).
 
 ## Data Residency
 
@@ -177,11 +175,7 @@ Residency is represented per organization:
 
 Helpers:
 
-- `services/api/policies/dataResidency.js`
-  - `getAllowedRegions()`
-  - `resolvePrimaryStorageRegion()`
-  - `resolveAiProcessingRegion()`
-  - `assertRegionAllowed()`
+- Org residency settings are stored in `org_settings` and validated by the API in `services/api/src/routes/orgs.ts`.
 
 ## Retention + Legal Hold
 
@@ -205,7 +199,6 @@ To enable sync-server state purge:
 
 Implementation:
 
-- `services/api/retention/retentionService.js`
 - `services/api/src/retention.ts` (Postgres retention sweep: archives `audit_log` → `audit_log_archive`, deletes old `document_versions`, purges soft-deleted `documents`)
 - `services/api/migrations/0002_enterprise_security_policies.sql` (adds `audit_log_archive` + `document_legal_holds` + org policy columns)
 - `services/api/src/routes/docs.ts` (`/docs/:docId/legal-hold` endpoints + soft-delete)
@@ -214,14 +207,10 @@ Implementation:
 
 All org-level policy changes are logged:
 
-- `services/api/org/orgPolicyService.js` emits:
+- `services/api/src/routes/orgs.ts` emits:
   - `org.policy.encryption.updated`
   - `org.policy.dataResidency.updated`
   - `org.policy.retention.updated`
-
-For tests/examples:
-
-- `services/api/audit/auditLogger.js` provides `InMemoryAuditLogger`.
 
 ## Running tests
 

@@ -784,63 +784,31 @@ class AuditLogger {
 For concrete export formats (JSON/CEF/LEEF), batching/retry behavior, and per-organization configuration endpoints, see [`docs/siem.md`](./siem.md).
 
 ```typescript
-interface SIEMConfig {
-  type: "splunk" | "elastic" | "datadog" | "sentinel" | "custom";
-  endpoint: string;
-  credentials: {
-    type: "api_key" | "oauth" | "basic";
-    value: string;
-  };
-  format: "json" | "cef" | "leef";
-  batchSize: number;
-  flushInterval: number;
-}
+// `services/api` implements SIEM as a worker-driven export:
+// - Per-org config is stored in Postgres and managed via `GET/PUT/DELETE /orgs/:orgId/siem`.
+// - Audit logs can be queried/exported via `GET /orgs/:orgId/audit` and `/orgs/:orgId/audit/export`.
+// - A background worker (`SiemExportWorker`) batches + redacts events and POSTs them to the configured SIEM endpoint.
 
-class SIEMConnector {
-  private buffer: AuditEvent[] = [];
-  
-  async sendToSIEM(event: AuditEvent): Promise<void> {
-    this.buffer.push(event);
-    
-    if (this.buffer.length >= this.config.batchSize) {
-      await this.flush();
-    }
-  }
-  
-  private async flush(): Promise<void> {
-    if (this.buffer.length === 0) return;
-    
-    const events = this.buffer;
-    this.buffer = [];
-    
-    const formatted = events.map(e => this.formatEvent(e));
-    
-    await fetch(this.config.endpoint, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(formatted)
-    });
-  }
-  
-  private formatEvent(event: AuditEvent): any {
-    switch (this.config.format) {
-      case "cef":
-        return this.toCEF(event);
-      case "leef":
-        return this.toLEEF(event);
-      default:
-        return event;
-    }
-  }
-  
-  private toCEF(event: AuditEvent): string {
-    // Common Event Format
-    return `CEF:0|Formula|Spreadsheet|1.0|${event.eventType}|${event.eventType}|5|` +
-      `src=${event.ipAddress} ` +
-      `suser=${event.userEmail} ` +
-      `duser=${event.resourceId} ` +
-      `msg=${JSON.stringify(event.details)}`;
-  }
+type SiemAuthConfig =
+  | { type: "none" }
+  | { type: "bearer"; token: string }
+  | { type: "basic"; username: string; password: string }
+  | { type: "header"; name: string; value: string };
+
+interface SiemEndpointConfig {
+  endpointUrl: string;
+  format?: "json" | "cef" | "leef";
+  batchSize?: number;
+  timeoutMs?: number;
+  idempotencyKeyHeader?: string | null;
+  headers?: Record<string, string>;
+  auth?: SiemAuthConfig;
+  retry?: {
+    maxAttempts?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    jitter?: boolean;
+  };
 }
 ```
 
