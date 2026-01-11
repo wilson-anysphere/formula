@@ -34,6 +34,9 @@ class SqliteFileDb {
 
   async _openInner() {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+    // If the process crashed mid-persist, a stale tmp file might remain. The main DB file is
+    // always authoritative; best-effort cleanup avoids leaking disk over time.
+    await fs.unlink(`${this.filePath}.tmp`).catch(() => {});
 
     // sql.js is ESM, but this service is CJS.
     const initSqlJs = (await import("sql.js")).default;
