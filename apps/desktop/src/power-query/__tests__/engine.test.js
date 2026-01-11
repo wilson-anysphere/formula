@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { createDesktopQueryEngine } from "../engine.ts";
 import { createDefaultOrgPolicy } from "../../../../../packages/security/dlp/src/policy.js";
+import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
+import { getHttpSourceId } from "../../../../../packages/power-query/src/privacy/sourceId.js";
 
 test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is unavailable", async () => {
   const originalTauri = globalThis.__TAURI__;
@@ -196,4 +198,66 @@ test("createDesktopQueryEngine wires oauth2Manager into HttpConnector", async ()
   assert.deepEqual(table.toGrid(), [["id"], [1]]);
   assert.equal(oauthCalls.length, 1);
   assert.equal(oauthCalls[0].providerId, "example");
+});
+
+test("createDesktopQueryEngine maps DLP classification into workbook privacy levels", async () => {
+  const policy = createDefaultOrgPolicy();
+  // Allow external connectors for Restricted documents so this test can observe the
+  // privacy firewall behavior instead of a DLP block.
+  policy.rules[DLP_ACTION.EXTERNAL_CONNECTOR].maxAllowed = "Restricted";
+
+  const apiUrl = "https://public.example.com/data";
+  const apiSourceId = getHttpSourceId(apiUrl);
+
+  const engine = createDesktopQueryEngine({
+    privacyMode: "enforce",
+    dlp: {
+      documentId: "doc1",
+      classificationStore: {
+        list: () => [
+          {
+            selector: { scope: "document", documentId: "doc1" },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+      },
+      policy,
+    },
+    fileAdapter: {
+      readText: async () => "",
+      readBinary: async () => new Uint8Array(),
+    },
+    fetch: async () =>
+      new Response(JSON.stringify([{ Id: 1, Target: 10 }]), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  const publicQuery = {
+    id: "q_public",
+    name: "Public API",
+    source: { type: "api", url: apiUrl, method: "GET" },
+    steps: [],
+  };
+
+  const privateQuery = {
+    id: "q_private",
+    name: "Private Range",
+    source: { type: "range", range: { values: [["Id", "Region"], [1, "East"]], hasHeaders: true } },
+    steps: [
+      {
+        id: "s_merge",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_public", joinType: "left", leftKey: "Id", rightKey: "Id" },
+      },
+    ],
+  };
+
+  // Only provide a privacy level for the API source; the desktop engine should
+  // infer the workbook range privacy from DLP classification.
+  await assert.rejects(
+    engine.executeQuery(privateQuery, {
+      queries: { q_public: publicQuery },
+      privacy: { levelsBySourceId: { [apiSourceId]: "public" } },
+    }),
+    /Formula\.Firewall/,
+  );
 });

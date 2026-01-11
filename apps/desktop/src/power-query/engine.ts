@@ -8,6 +8,7 @@ import type { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/
 
 import { enforceExternalConnector } from "../dlp/enforceExternalConnector.js";
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
+import { effectiveDocumentClassification, effectiveRangeClassification } from "../../../../packages/security/dlp/src/selectors.js";
 
 type DlpContext = {
   documentId: string;
@@ -56,6 +57,10 @@ export type DesktopQueryEngineOptions = {
    */
   cache?: CacheManager;
   defaultCacheTtlMs?: number;
+  /**
+   * Power Query privacy/firewall mode. Defaults to `"ignore"` for backwards compatibility.
+   */
+  privacyMode?: "ignore" | "enforce" | "warn";
 };
 
 const PERMISSION_KIND_TO_DLP_ACTION: Record<string, string> = {
@@ -210,6 +215,137 @@ function defaultPermissionPrompt(kind: string, details: unknown): boolean {
   return window.confirm(`Allow this query to access: ${kind}?`);
 }
 
+type PrivacyLevel = "public" | "organizational" | "private" | "unknown";
+
+function classificationLevelToPrivacy(level: unknown): PrivacyLevel {
+  switch (level) {
+    case "Public":
+      return "public";
+    case "Internal":
+      return "organizational";
+    case "Confidential":
+    case "Restricted":
+      return "private";
+    default:
+      return "unknown";
+  }
+}
+
+function computeWorkbookPrivacyLevel(dlp: DlpContext | undefined): PrivacyLevel {
+  if (!dlp) return "unknown";
+  try {
+    const records = dlp.classificationStore.list(dlp.documentId);
+    if (dlp.sheetId && dlp.range) {
+      try {
+        const selection = effectiveRangeClassification(
+          { documentId: dlp.documentId, sheetId: dlp.sheetId, range: dlp.range },
+          records,
+        );
+        return classificationLevelToPrivacy((selection as any)?.level);
+      } catch {
+        // Fall back to document classification below.
+      }
+    }
+    const doc = effectiveDocumentClassification(dlp.documentId, records);
+    return classificationLevelToPrivacy((doc as any)?.level);
+  } catch {
+    return "unknown";
+  }
+}
+
+function collectWorkbookTableSourceIds(query: any, queries: Record<string, any> | undefined): Set<string> {
+  const out = new Set<string>();
+  const visited = new Set<string>();
+
+  const visit = (q: any) => {
+    if (!q || typeof q !== "object") return;
+    if (typeof q.id === "string") {
+      if (visited.has(q.id)) return;
+      visited.add(q.id);
+    }
+
+    const source = q.source;
+    if (source && typeof source === "object") {
+      if (source.type === "table" && typeof source.table === "string") {
+        out.add(`workbook:table:${source.table}`);
+      } else if (source.type === "range") {
+        out.add("workbook:range");
+      } else if (source.type === "query" && typeof source.queryId === "string") {
+        const dep = queries?.[source.queryId];
+        if (dep) visit(dep);
+      }
+    }
+
+    const steps = Array.isArray(q.steps) ? q.steps : [];
+    for (const step of steps) {
+      const op = step?.operation;
+      if (!op || typeof op !== "object") continue;
+      if (op.type === "merge" && typeof op.rightQuery === "string") {
+        const dep = queries?.[op.rightQuery];
+        if (dep) visit(dep);
+      } else if (op.type === "append" && Array.isArray(op.queries)) {
+        for (const id of op.queries) {
+          if (typeof id !== "string") continue;
+          const dep = queries?.[id];
+          if (dep) visit(dep);
+        }
+      }
+    }
+  };
+
+  visit(query);
+  return out;
+}
+
+class DesktopQueryEngine extends QueryEngine {
+  private defaultPrivacyLevelsBySourceId: Record<string, PrivacyLevel>;
+  private workbookPrivacyLevel: PrivacyLevel;
+
+  constructor(options: any, privacy: { levelsBySourceId: Record<string, PrivacyLevel>; workbookLevel: PrivacyLevel }) {
+    super(options);
+    this.defaultPrivacyLevelsBySourceId = privacy.levelsBySourceId;
+    this.workbookPrivacyLevel = privacy.workbookLevel;
+  }
+
+  private withPrivacyContext(query: any, context: any = {}) {
+    const base = { ...this.defaultPrivacyLevelsBySourceId };
+    if (this.workbookPrivacyLevel !== "unknown") {
+      const ids = collectWorkbookTableSourceIds(query, context?.queries);
+      for (const id of ids) base[id] = this.workbookPrivacyLevel;
+      base["workbook:range"] = this.workbookPrivacyLevel;
+    }
+
+    const overrides = context?.privacy?.levelsBySourceId;
+    const mergedLevels = overrides ? { ...base, ...overrides } : base;
+    if (Object.keys(mergedLevels).length === 0) return context;
+    return { ...context, privacy: { ...(context?.privacy ?? {}), levelsBySourceId: mergedLevels } };
+  }
+
+  async executeQuery(query: any, context: any = {}, options: any = {}) {
+    return super.executeQuery(query, this.withPrivacyContext(query, context), options);
+  }
+
+  async executeQueryWithMeta(query: any, context: any = {}, options: any = {}) {
+    return super.executeQueryWithMeta(query, this.withPrivacyContext(query, context), options);
+  }
+
+  async executeQueryWithMetaInSession(query: any, context: any = {}, options: any = {}, session: any) {
+    return super.executeQueryWithMetaInSession(query, this.withPrivacyContext(query, context), options, session);
+  }
+
+  async executeQueryStreaming(query: any, context: any = {}, options: any) {
+    return super.executeQueryStreaming(query, this.withPrivacyContext(query, context), options);
+  }
+
+  async getCacheKey(query: any, context: any = {}, options: any = {}) {
+    return super.getCacheKey(query, this.withPrivacyContext(query, context), options);
+  }
+
+  async invalidateQueryCache(query: any, context: any = {}, options: any = {}) {
+    return super.invalidateQueryCache(query, this.withPrivacyContext(query, context), options);
+  }
+}
+
 /**
  * Create a QueryEngine configured for the desktop app runtime:
  * - file reads via the Tauri FS bridge
@@ -230,40 +366,51 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
   // doesn't repeatedly ask the user.
   const permissionPromptCache = new Map<string, Promise<boolean>>();
 
-  return new QueryEngine({
-    cache,
-    defaultCacheTtlMs: options.defaultCacheTtlMs,
-    fileAdapter: {
-      readText: fileAdapter.readText,
-      readBinary: fileAdapter.readBinary,
-      stat: fileAdapter.stat,
-    },
-    connectors: http ? { http } : undefined,
-    onCredentialRequest: options.onCredentialRequest,
-    onPermissionRequest: async (kind, details) => {
-      const dlpAction = PERMISSION_KIND_TO_DLP_ACTION[kind];
-      if (dlpAction === DLP_ACTION.EXTERNAL_CONNECTOR && options.dlp) {
-        enforceExternalConnector({
-          documentId: options.dlp.documentId,
-          sheetId: options.dlp.sheetId,
-          range: options.dlp.range,
-          classificationStore: options.dlp.classificationStore,
-          policy: options.dlp.policy,
-        });
-      }
+  const workbookPrivacyLevel = computeWorkbookPrivacyLevel(options.dlp);
+  /** @type {Record<string, PrivacyLevel>} */
+  const defaultPrivacyLevelsBySourceId = {};
+  if (workbookPrivacyLevel !== "unknown") {
+    defaultPrivacyLevelsBySourceId["workbook:range"] = workbookPrivacyLevel;
+  }
 
-      const cacheKey = `${kind}:${hashValue(details)}`;
-      const existing = permissionPromptCache.get(cacheKey);
-      if (existing) return await existing;
-
-      const decisionPromise = Promise.resolve().then(async () => {
-        if (options.onPermissionPrompt) {
-          return await options.onPermissionPrompt(kind, details);
+  return new DesktopQueryEngine(
+    {
+      cache,
+      defaultCacheTtlMs: options.defaultCacheTtlMs,
+      fileAdapter: {
+        readText: fileAdapter.readText,
+        readBinary: fileAdapter.readBinary,
+        stat: fileAdapter.stat,
+      },
+      connectors: http ? { http } : undefined,
+      privacyMode: options.privacyMode,
+      onCredentialRequest: options.onCredentialRequest,
+      onPermissionRequest: async (kind, details) => {
+        const dlpAction = PERMISSION_KIND_TO_DLP_ACTION[kind];
+        if (dlpAction === DLP_ACTION.EXTERNAL_CONNECTOR && options.dlp) {
+          enforceExternalConnector({
+            documentId: options.dlp.documentId,
+            sheetId: options.dlp.sheetId,
+            range: options.dlp.range,
+            classificationStore: options.dlp.classificationStore,
+            policy: options.dlp.policy,
+          });
         }
-        return defaultPermissionPrompt(kind, details);
-      });
-      permissionPromptCache.set(cacheKey, decisionPromise);
-      return await decisionPromise;
+
+        const cacheKey = `${kind}:${hashValue(details)}`;
+        const existing = permissionPromptCache.get(cacheKey);
+        if (existing) return await existing;
+
+        const decisionPromise = Promise.resolve().then(async () => {
+          if (options.onPermissionPrompt) {
+            return await options.onPermissionPrompt(kind, details);
+          }
+          return defaultPermissionPrompt(kind, details);
+        });
+        permissionPromptCache.set(cacheKey, decisionPromise);
+        return await decisionPromise;
+      },
     },
-  });
+    { levelsBySourceId: defaultPrivacyLevelsBySourceId, workbookLevel: workbookPrivacyLevel },
+  );
 }
