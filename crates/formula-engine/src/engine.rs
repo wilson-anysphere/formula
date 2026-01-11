@@ -3431,7 +3431,7 @@ impl crate::eval::ValueResolver for Snapshot {
         &self,
         ctx: crate::eval::EvalContext,
         sref: &crate::structured_refs::StructuredRef,
-    ) -> Option<(usize, CellAddr, CellAddr)> {
+    ) -> Option<Vec<(usize, CellAddr, CellAddr)>> {
         crate::structured_refs::resolve_structured_ref(
             &self.tables,
             ctx.current_sheet,
@@ -4127,20 +4127,22 @@ fn walk_calc_expr(
             }
         }
         Expr::StructuredRef(sref) => {
-            if let Ok((sheet_id, start, end)) = crate::structured_refs::resolve_structured_ref(
+            if let Ok(ranges) = crate::structured_refs::resolve_structured_ref(
                 tables_by_sheet,
                 current_cell.sheet,
                 current_cell.addr,
                 sref,
             ) {
-                let range = Range::new(
-                    CellRef::new(start.row, start.col),
-                    CellRef::new(end.row, end.col),
-                );
-                precedents.insert(Precedent::Range(SheetRange::new(
-                    sheet_id_for_graph(sheet_id),
-                    range,
-                )));
+                for (sheet_id, start, end) in ranges {
+                    let range = Range::new(
+                        CellRef::new(start.row, start.col),
+                        CellRef::new(end.row, end.col),
+                    );
+                    precedents.insert(Precedent::Range(SheetRange::new(
+                        sheet_id_for_graph(sheet_id),
+                        range,
+                    )));
+                }
             }
         }
         Expr::NameRef(nref) => {

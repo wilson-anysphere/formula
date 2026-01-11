@@ -44,7 +44,7 @@ pub trait ValueResolver {
         &self,
         ctx: EvalContext,
         sref: &crate::structured_refs::StructuredRef,
-    ) -> Option<(usize, CellAddr, CellAddr)>;
+    ) -> Option<Vec<(usize, CellAddr, CellAddr)>>;
     fn resolve_name(&self, _sheet_id: usize, _name: &str) -> Option<ResolvedName> {
         None
     }
@@ -255,8 +255,13 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
             Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref) {
-                Some((sheet_id, start, end)) if self.resolver.sheet_exists(sheet_id) => {
-                    EvalValue::Reference(vec![ResolvedRange { sheet_id, start, end }])
+                Some(ranges) if !ranges.is_empty() && ranges.iter().all(|(sheet_id, _, _)| self.resolver.sheet_exists(*sheet_id)) => {
+                    EvalValue::Reference(
+                        ranges
+                            .into_iter()
+                            .map(|(sheet_id, start, end)| ResolvedRange { sheet_id, start, end })
+                            .collect(),
+                    )
                 }
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Name)),
             },

@@ -1,4 +1,4 @@
-use super::{StructuredColumns, StructuredRef, StructuredRefItem};
+use super::{StructuredColumn, StructuredColumns, StructuredRef, StructuredRefItem};
 
 pub fn parse_structured_ref(input: &str, pos: usize) -> Option<(StructuredRef, usize)> {
     if pos >= input.len() {
@@ -44,28 +44,39 @@ pub fn parse_structured_ref(input: &str, pos: usize) -> Option<(StructuredRef, u
 }
 
 fn parse_bracketed(input: &str, start: usize) -> Option<(&str, usize)> {
-    if input.as_bytes().get(start) != Some(&b'[') {
+    let bytes = input.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
         return None;
     }
 
     let mut depth = 0i32;
     let mut end = None;
     let mut i = start;
-    while i < input.len() {
-        let ch = input[i..].chars().next()?;
-        match ch {
-            '[' => depth += 1,
-            ']' => {
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' => {
+                depth += 1;
+                i += 1;
+            }
+            b']' => {
+                // Excel escapes ']' inside structured references as ']]'. At the outermost depth,
+                // treat a double ']]' as a literal ']' rather than the end of the bracketed segment.
+                if depth == 1 && bytes.get(i + 1) == Some(&b']') {
+                    i += 2;
+                    continue;
+                }
                 depth -= 1;
                 if depth == 0 {
                     end = Some(i);
-                    i += ch.len_utf8();
+                    i += 1;
                     break;
                 }
+                i += 1;
             }
-            _ => {}
+            _ => {
+                i += 1;
+            }
         }
-        i += ch.len_utf8();
     }
 
     let end = end?;
@@ -85,23 +96,45 @@ fn parse_inner_spec(inner: &str) -> Option<(Option<StructuredRefItem>, Structure
             return None;
         }
 
-        if parts.len() == 1 {
-            return parse_bracket_group_or_range(parts[0]).map(|(item, cols)| (item, cols));
-        }
-
-        if parts.len() == 2 {
-            let first = strip_wrapping_brackets(parts[0])?;
-            let first_item = parse_item(first);
-            if let Some(item) = first_item {
-                let (_, cols) = parse_bracket_group_or_range(parts[1])?;
-                return Some((Some(item), cols));
+        let mut item: Option<StructuredRefItem> = None;
+        let mut columns: Vec<StructuredColumn> = Vec::new();
+        for (idx, part) in parts.iter().enumerate() {
+            let (maybe_item, cols) = parse_bracket_group_or_range(part)?;
+            if let Some(it) = maybe_item {
+                // Excel allows an optional item (e.g. [#Headers]) followed by one or more column selectors.
+                if idx == 0 && item.is_none() && columns.is_empty() {
+                    item = Some(it);
+                    continue;
+                }
+                // Multiple items in a structured ref (e.g. [[#Headers],[#Data],[Col]]) are not supported.
+                return None;
             }
 
-            // If the first part isn't an item, treat the whole thing as a multi-column selection (unsupported for now).
-            return None;
+            match cols {
+                StructuredColumns::Single(name) => columns.push(StructuredColumn::Single(name)),
+                StructuredColumns::Range { start, end } => {
+                    columns.push(StructuredColumn::Range { start, end });
+                }
+                StructuredColumns::All => {
+                    return None;
+                }
+                StructuredColumns::Multi(_) => {
+                    return None;
+                }
+            }
         }
 
-        None
+        let cols = match columns.as_slice() {
+            [] => StructuredColumns::All,
+            [StructuredColumn::Single(name)] => StructuredColumns::Single(name.clone()),
+            [StructuredColumn::Range { start, end }] => StructuredColumns::Range {
+                start: start.clone(),
+                end: end.clone(),
+            },
+            _ => StructuredColumns::Multi(columns),
+        };
+
+        Some((item, cols))
     } else {
         // Simple form: "@Col", "Col", "#Headers", etc.
         let trimmed = inner.trim();
@@ -148,18 +181,38 @@ fn parse_bracket_group_or_range(part: &str) -> Option<(Option<StructuredRefItem>
 }
 
 fn split_top_level(input: &str, delimiter: char) -> Vec<&str> {
+    let bytes = input.as_bytes();
+    let delim = delimiter as u8;
+
     let mut parts = Vec::new();
     let mut depth: i32 = 0;
     let mut start = 0usize;
-    for (idx, ch) in input.char_indices() {
-        match ch {
-            '[' => depth += 1,
-            ']' => depth -= 1,
-            _ => {}
-        }
-        if depth == 0 && ch == delimiter {
-            parts.push(input[start..idx].trim());
-            start = idx + ch.len_utf8();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' => {
+                depth += 1;
+                i += 1;
+            }
+            b']' => {
+                // Excel escapes ']' inside structured references as ']]'. At the current nesting
+                // depth, treat a double ']]' as a literal ']' so we don't break bracket matching
+                // while splitting.
+                if depth == 1 && bytes.get(i + 1) == Some(&b']') {
+                    i += 2;
+                    continue;
+                }
+                depth -= 1;
+                i += 1;
+            }
+            b if depth == 0 && b == delim => {
+                parts.push(input[start..i].trim());
+                i += 1;
+                start = i;
+            }
+            _ => {
+                i += 1;
+            }
         }
     }
     parts.push(input[start..].trim());
@@ -210,7 +263,7 @@ fn is_name_continue(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::structured_refs::{StructuredColumns, StructuredRefItem};
+    use crate::structured_refs::{StructuredColumn, StructuredColumns, StructuredRefItem};
 
     #[test]
     fn parses_table_column_ref() {
@@ -235,5 +288,17 @@ mod tests {
         assert_eq!(sref.item, Some(StructuredRefItem::Headers));
         assert_eq!(sref.columns, StructuredColumns::Single("Qty".into()));
     }
-}
 
+    #[test]
+    fn parses_multi_column_ref() {
+        let (sref, _) = parse_structured_ref("Table1[[Col1],[Col3]]", 0).unwrap();
+        assert_eq!(sref.item, None);
+        assert_eq!(
+            sref.columns,
+            StructuredColumns::Multi(vec![
+                StructuredColumn::Single("Col1".into()),
+                StructuredColumn::Single("Col3".into()),
+            ])
+        );
+    }
+}

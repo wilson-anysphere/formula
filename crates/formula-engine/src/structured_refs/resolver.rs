@@ -1,4 +1,4 @@
-use super::{StructuredColumns, StructuredRef, StructuredRefItem};
+use super::{StructuredColumn, StructuredColumns, StructuredRef, StructuredRefItem};
 use crate::eval::CellAddr;
 use formula_model::table::{Table, TableArea};
 use formula_model::{CellRef, Range};
@@ -19,45 +19,88 @@ fn column_index_ci(table: &Table, name: &str) -> Option<u32> {
         .map(|idx| idx as u32)
 }
 
-fn column_range_in_area_ci(table: &Table, column_name: &str, area: TableArea) -> Option<Range> {
-    let r = table.range;
-    let col_offset = column_index_ci(table, column_name)?;
-    let col = r.start.col + col_offset;
+fn base_range_for_area(table: &Table, area: TableArea) -> Result<Range, String> {
+    Ok(match area {
+        TableArea::Headers => table
+            .header_range()
+            .ok_or_else(|| "table has no header row".to_string())?,
+        TableArea::Totals => table
+            .totals_range()
+            .ok_or_else(|| "table has no totals row".to_string())?,
+        TableArea::Data => table
+            .data_range()
+            .ok_or_else(|| "table has no data rows".to_string())?,
+        TableArea::All => table.range,
+    })
+}
 
-    match area {
-        TableArea::Headers => table.header_range().map(|hr| {
-            Range::new(
-                CellRef::new(hr.start.row, col),
-                CellRef::new(hr.end.row, col),
-            )
-        }),
-        TableArea::Totals => table.totals_range().map(|tr| {
-            Range::new(
-                CellRef::new(tr.start.row, col),
-                CellRef::new(tr.end.row, col),
-            )
-        }),
-        TableArea::Data => table.data_range().map(|dr| {
-            Range::new(
-                CellRef::new(dr.start.row, col),
-                CellRef::new(dr.end.row, col),
-            )
-        }),
-        TableArea::All => Some(Range::new(CellRef::new(r.start.row, col), CellRef::new(r.end.row, col))),
+fn normalize_column_interval(start_idx: u32, end_idx: u32) -> (u32, u32) {
+    if start_idx <= end_idx {
+        (start_idx, end_idx)
+    } else {
+        (end_idx, start_idx)
     }
 }
 
-fn cell_for_this_row_ci(table: &Table, current_cell: CellRef, column_name: &str) -> Option<CellRef> {
-    let r = table.range;
-    let data_range = table.data_range()?;
-    if !data_range.contains(current_cell) {
-        return None;
+fn column_interval_ci(table: &Table, col: &StructuredColumn) -> Result<(u32, u32), String> {
+    match col {
+        StructuredColumn::Single(name) => {
+            let idx = column_index_ci(table, name).ok_or_else(|| format!("unknown column '{name}'"))?;
+            Ok((idx, idx))
+        }
+        StructuredColumn::Range { start, end } => {
+            let start_idx =
+                column_index_ci(table, start).ok_or_else(|| format!("unknown column '{start}'"))?;
+            let end_idx =
+                column_index_ci(table, end).ok_or_else(|| format!("unknown column '{end}'"))?;
+            Ok(normalize_column_interval(start_idx, end_idx))
+        }
     }
-    let col_offset = column_index_ci(table, column_name)?;
-    Some(CellRef::new(current_cell.row, r.start.col + col_offset))
 }
 
-/// Resolve a structured reference into a concrete `(sheet_id, start, end)` range.
+fn column_intervals_ci(table: &Table, columns: &StructuredColumns) -> Result<Vec<(u32, u32)>, String> {
+    match columns {
+        StructuredColumns::All => Ok(Vec::new()),
+        StructuredColumns::Single(name) => column_interval_ci(table, &StructuredColumn::Single(name.clone()))
+            .map(|interval| vec![interval]),
+        StructuredColumns::Range { start, end } => column_interval_ci(
+            table,
+            &StructuredColumn::Range {
+                start: start.clone(),
+                end: end.clone(),
+            },
+        )
+        .map(|interval| vec![interval]),
+        StructuredColumns::Multi(parts) => {
+            let mut out = Vec::with_capacity(parts.len());
+            for part in parts {
+                out.push(column_interval_ci(table, part)?);
+            }
+            Ok(out)
+        }
+    }
+}
+
+fn merge_column_intervals(mut intervals: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
+    if intervals.is_empty() {
+        return intervals;
+    }
+    intervals.sort_by_key(|(start, end)| (*start, *end));
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    let mut current = intervals[0];
+    for (start, end) in intervals.into_iter().skip(1) {
+        if start <= current.1.saturating_add(1) {
+            current.1 = current.1.max(end);
+        } else {
+            out.push(current);
+            current = (start, end);
+        }
+    }
+    out.push(current);
+    out
+}
+
+/// Resolve a structured reference into one or more concrete `(sheet_id, start, end)` ranges.
 ///
 /// The caller provides `tables_by_sheet` indexed by `sheet_id`.
 pub fn resolve_structured_ref(
@@ -65,11 +108,11 @@ pub fn resolve_structured_ref(
     origin_sheet: usize,
     origin_cell: CellAddr,
     sref: &StructuredRef,
-) -> Result<(usize, CellAddr, CellAddr), String> {
+) -> Result<Vec<(usize, CellAddr, CellAddr)>, String> {
     let (sheet_id, table) = find_table(tables_by_sheet, origin_sheet, origin_cell, sref)?;
 
     let item = sref.item.clone().unwrap_or(StructuredRefItem::Data);
-    let (start, end) = match item {
+    let ranges = match item {
         StructuredRefItem::ThisRow => resolve_this_row(table, origin_cell, &sref.columns)?,
         StructuredRefItem::Headers => resolve_area(table, TableArea::Headers, &sref.columns)?,
         StructuredRefItem::Totals => resolve_area(table, TableArea::Totals, &sref.columns)?,
@@ -77,7 +120,10 @@ pub fn resolve_structured_ref(
         StructuredRefItem::Data => resolve_area(table, TableArea::Data, &sref.columns)?,
     };
 
-    Ok((sheet_id, start, end))
+    Ok(ranges
+        .into_iter()
+        .map(|(start, end)| (sheet_id, start, end))
+        .collect())
 }
 
 fn find_table<'a>(
@@ -110,65 +156,34 @@ fn find_table<'a>(
     Ok((origin_sheet, table))
 }
 
-fn resolve_area(table: &Table, area: TableArea, columns: &StructuredColumns) -> Result<(CellAddr, CellAddr), String> {
-    match columns {
-        StructuredColumns::All => {
-            let range = match area {
-                TableArea::Headers => table
-                    .header_range()
-                    .ok_or_else(|| "table has no header row".to_string())?,
-                TableArea::Totals => table
-                    .totals_range()
-                    .ok_or_else(|| "table has no totals row".to_string())?,
-                TableArea::Data => table
-                    .data_range()
-                    .ok_or_else(|| "table has no data rows".to_string())?,
-                TableArea::All => table.range,
-            };
-            Ok((model_to_addr(range.start), model_to_addr(range.end)))
-        }
-        StructuredColumns::Single(name) => {
-            let range = column_range_in_area_ci(table, name, area)
-                .ok_or_else(|| format!("unknown column '{name}'"))?;
-            Ok((model_to_addr(range.start), model_to_addr(range.end)))
-        }
-        StructuredColumns::Range { start, end } => {
-            let start_idx = column_index_ci(table, start).ok_or_else(|| format!("unknown column '{start}'"))?;
-            let end_idx = column_index_ci(table, end).ok_or_else(|| format!("unknown column '{end}'"))?;
-            let (left_idx, right_idx) = if start_idx <= end_idx {
-                (start_idx, end_idx)
-            } else {
-                (end_idx, start_idx)
-            };
-
-            let base = match area {
-                TableArea::Headers => table
-                    .header_range()
-                    .ok_or_else(|| "table has no header row".to_string())?,
-                TableArea::Totals => table
-                    .totals_range()
-                    .ok_or_else(|| "table has no totals row".to_string())?,
-                TableArea::Data => table
-                    .data_range()
-                    .ok_or_else(|| "table has no data rows".to_string())?,
-                TableArea::All => table.range,
-            };
-
-            let table_start = table.range.start;
-            let range = Range::new(
-                CellRef::new(base.start.row, table_start.col + left_idx),
-                CellRef::new(base.end.row, table_start.col + right_idx),
-            );
-            Ok((model_to_addr(range.start), model_to_addr(range.end)))
-        }
+fn resolve_area(
+    table: &Table,
+    area: TableArea,
+    columns: &StructuredColumns,
+) -> Result<Vec<(CellAddr, CellAddr)>, String> {
+    let base = base_range_for_area(table, area)?;
+    if matches!(columns, StructuredColumns::All) {
+        return Ok(vec![(model_to_addr(base.start), model_to_addr(base.end))]);
     }
+
+    let intervals = merge_column_intervals(column_intervals_ci(table, columns)?);
+    let table_start = table.range.start;
+    let mut out = Vec::with_capacity(intervals.len());
+    for (left_idx, right_idx) in intervals {
+        let range = Range::new(
+            CellRef::new(base.start.row, table_start.col + left_idx),
+            CellRef::new(base.end.row, table_start.col + right_idx),
+        );
+        out.push((model_to_addr(range.start), model_to_addr(range.end)));
+    }
+    Ok(out)
 }
 
 fn resolve_this_row(
     table: &Table,
     origin_cell: CellAddr,
     columns: &StructuredColumns,
-) -> Result<(CellAddr, CellAddr), String> {
+) -> Result<Vec<(CellAddr, CellAddr)>, String> {
     let row = origin_cell.row;
     let data_range = table
         .data_range()
@@ -178,37 +193,29 @@ fn resolve_this_row(
     }
 
     match columns {
-        StructuredColumns::All => Ok((
+        StructuredColumns::All => Ok(vec![(
             CellAddr {
                 row,
                 col: table.range.start.col,
             },
             CellAddr { row, col: table.range.end.col },
-        )),
-        StructuredColumns::Single(name) => {
-            let cell = cell_for_this_row_ci(table, addr_to_model(origin_cell), name)
-                .ok_or_else(|| format!("unknown column '{name}'"))?;
-            let addr = model_to_addr(cell);
-            Ok((addr, addr))
-        }
-        StructuredColumns::Range { start, end } => {
-            let start_idx = column_index_ci(table, start).ok_or_else(|| format!("unknown column '{start}'"))?;
-            let end_idx = column_index_ci(table, end).ok_or_else(|| format!("unknown column '{end}'"))?;
-            let (left_idx, right_idx) = if start_idx <= end_idx {
-                (start_idx, end_idx)
-            } else {
-                (end_idx, start_idx)
-            };
-            Ok((
-                CellAddr {
-                    row,
-                    col: table.range.start.col + left_idx,
-                },
-                CellAddr {
-                    row,
-                    col: table.range.start.col + right_idx,
-                },
-            ))
+        )]),
+        _ => {
+            let intervals = merge_column_intervals(column_intervals_ci(table, columns)?);
+            let mut out = Vec::with_capacity(intervals.len());
+            for (left_idx, right_idx) in intervals {
+                out.push((
+                    CellAddr {
+                        row,
+                        col: table.range.start.col + left_idx,
+                    },
+                    CellAddr {
+                        row,
+                        col: table.range.start.col + right_idx,
+                    },
+                ));
+            }
+            Ok(out)
         }
     }
 }
@@ -262,7 +269,12 @@ mod tests {
             item: None,
             columns: StructuredColumns::Single("Col2".into()),
         };
-        let (_sheet, start, end) = resolve_structured_ref(&tables, 0, CellAddr { row: 0, col: 0 }, &sref).unwrap();
+        let ranges =
+            resolve_structured_ref(&tables, 0, CellAddr { row: 0, col: 0 }, &sref).unwrap();
+        let [(sheet_id, start, end)] = ranges.as_slice() else {
+            panic!("expected a single resolved range");
+        };
+        assert_eq!(*sheet_id, 0);
         assert_eq!(start, CellAddr { row: 1, col: 1 });
         assert_eq!(end, CellAddr { row: 2, col: 1 });
     }

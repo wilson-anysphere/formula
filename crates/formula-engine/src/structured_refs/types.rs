@@ -8,10 +8,18 @@ pub enum StructuredRefItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuredColumn {
+    Single(String),
+    Range { start: String, end: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuredColumns {
     All,
     Single(String),
     Range { start: String, end: String },
+    /// A union of non-contiguous column selections (single columns and/or ranges).
+    Multi(Vec<StructuredColumn>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,4 +28,3 @@ pub struct StructuredRef {
     pub item: Option<StructuredRefItem>,
     pub columns: StructuredColumns,
 }
-

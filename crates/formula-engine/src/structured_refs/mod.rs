@@ -4,4 +4,4 @@ mod types;
 
 pub use parser::parse_structured_ref;
 pub use resolver::resolve_structured_ref;
-pub use types::{StructuredColumns, StructuredRef, StructuredRefItem};
+pub use types::{StructuredColumn, StructuredColumns, StructuredRef, StructuredRefItem};

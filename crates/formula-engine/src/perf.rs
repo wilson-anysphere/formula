@@ -119,7 +119,7 @@ impl ValueResolver for ConstResolver {
         &self,
         _ctx: EvalContext,
         _sref: &crate::structured_refs::StructuredRef,
-    ) -> Option<(usize, CellAddr, CellAddr)> {
+    ) -> Option<Vec<(usize, CellAddr, CellAddr)>> {
         None
     }
 
