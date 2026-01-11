@@ -141,6 +141,16 @@ fn criteria_aggregates_support_ranges_and_arrays() {
 }
 
 #[test]
+fn countif_counts_implicit_blanks() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    // A2 is missing (implicit blank).
+    sheet.set("A3", Value::Text(String::new()));
+
+    assert_number(&sheet.eval("=COUNTIF(A1:A3,\"\")"), 2.0);
+}
+
+#[test]
 fn criteria_aggregates_respect_workbook_date_system() {
     let mut sheet = TestSheet::new();
     sheet.set_date_system(ExcelDateSystem::Excel1904);

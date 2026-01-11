@@ -559,26 +559,54 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    fn reference_cell_count(reference: &crate::functions::Reference) -> u64 {
+        let r = reference.normalized();
+        let rows = (u64::from(r.end.row)).saturating_sub(u64::from(r.start.row)) + 1;
+        let cols = (u64::from(r.end.col)).saturating_sub(u64::from(r.start.col)) + 1;
+        rows.saturating_mul(cols)
+    }
+
+    // `iter_reference_cells` is sparse when the backend supports it. COUNTIF must still account
+    // for implicit blanks, but only when the criteria can actually match blank cells.
+    let blank_matches = criteria.matches(&Value::Blank);
+
     let mut count = 0u64;
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => {
+            let mut seen = 0u64;
             for addr in ctx.iter_reference_cells(&r) {
+                seen += 1;
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
                 if criteria.matches(&v) {
                     count += 1;
                 }
             }
+            if blank_matches {
+                count += reference_cell_count(&r).saturating_sub(seen);
+            }
         }
         ArgValue::ReferenceUnion(ranges) => {
             let mut seen = std::collections::HashSet::new();
             for r in ranges {
-                for addr in ctx.iter_reference_cells(&r) {
-                    if !seen.insert((r.sheet_id.clone(), addr)) {
-                        continue;
+                if blank_matches {
+                    for addr in r.iter_cells() {
+                        if !seen.insert((r.sheet_id.clone(), addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(&r.sheet_id, addr);
+                        if criteria.matches(&v) {
+                            count += 1;
+                        }
                     }
-                    let v = ctx.get_cell_value(&r.sheet_id, addr);
-                    if criteria.matches(&v) {
-                        count += 1;
+                } else {
+                    for addr in ctx.iter_reference_cells(&r) {
+                        if !seen.insert((r.sheet_id.clone(), addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(&r.sheet_id, addr);
+                        if criteria.matches(&v) {
+                            count += 1;
+                        }
                     }
                 }
             }
