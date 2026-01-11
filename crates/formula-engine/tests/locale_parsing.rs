@@ -66,6 +66,16 @@ fn canonicalize_and_localize_round_trip_for_fr_fr_and_es_es() {
 }
 
 #[test]
+fn structured_reference_separators_are_not_translated() {
+    let canonical = "=SUM(Table1[[#Headers],[Qty]],1)";
+    let localized = locale::localize_formula(canonical, &locale::DE_DE).unwrap();
+    assert_eq!(localized, "=SUMME(Table1[[#Headers],[Qty]];1)");
+
+    let canonical_roundtrip = locale::canonicalize_formula(&localized, &locale::DE_DE).unwrap();
+    assert_eq!(canonical_roundtrip, canonical);
+}
+
+#[test]
 fn engine_accepts_localized_formulas_and_persists_canonical() {
     let mut engine = Engine::new();
     engine

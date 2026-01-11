@@ -162,6 +162,7 @@ struct Lexer<'a> {
     tokens: Vec<Token>,
     paren_stack: Vec<ParenContext>,
     brace_depth: usize,
+    bracket_depth: usize,
     prev_sig: Option<TokenKind>,
 }
 
@@ -175,6 +176,7 @@ impl<'a> Lexer<'a> {
             tokens: Vec::new(),
             paren_stack: Vec::new(),
             brace_depth: 0,
+            bracket_depth: 0,
             prev_sig: None,
         }
     }
@@ -182,6 +184,14 @@ impl<'a> Lexer<'a> {
     fn lex(mut self) -> Result<Vec<Token>, ParseError> {
         while let Some(ch) = self.peek_char() {
             let start = self.idx;
+            if self.bracket_depth > 0 && !matches!(ch, '[' | ']') {
+                // Inside workbook/structured reference brackets, treat everything as raw text so
+                // locale separators (e.g. `,` in `Table1[[#Headers],[Col]]`) don't get lexed as
+                // unions/arg separators and non-locale delimiters don't fail lexing.
+                let raw = self.take_while(|c| !matches!(c, '[' | ']'));
+                self.push(TokenKind::Ident(raw), start, self.idx);
+                continue;
+            }
             match ch {
                 ' ' | '\t' | '\r' | '\n' => {
                     let raw = self.take_while(|c| matches!(c, ' ' | '\t' | '\r' | '\n'));
@@ -290,10 +300,23 @@ impl<'a> Lexer<'a> {
                 }
                 '[' => {
                     self.bump();
+                    self.bracket_depth += 1;
                     self.push(TokenKind::LBracket, start, self.idx);
                 }
                 ']' => {
+                    // Excel escapes `]` inside structured references as `]]`. At the outermost
+                    // bracket depth, treat a double `]]` as a literal `]` rather than the end of
+                    // the bracketed segment.
+                    if self.bracket_depth == 1 && self.src[self.idx..].starts_with("]]") {
+                        self.bump();
+                        self.push(TokenKind::RBracket, start, self.idx);
+                        let start2 = self.idx;
+                        self.bump();
+                        self.push(TokenKind::RBracket, start2, self.idx);
+                        continue;
+                    }
                     self.bump();
+                    self.bracket_depth = self.bracket_depth.saturating_sub(1);
                     self.push(TokenKind::RBracket, start, self.idx);
                 }
                 '!' => {

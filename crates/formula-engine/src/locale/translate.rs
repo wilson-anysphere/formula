@@ -56,31 +56,81 @@ fn translate_formula(
         out.push('=');
     }
 
-    for (idx, tok) in tokens.iter().enumerate() {
+    let mut bracket_depth: usize = 0;
+    let mut idx = 0usize;
+    while idx < tokens.len() {
+        let tok = &tokens[idx];
         match &tok.kind {
             TokenKind::Eof => break,
-            TokenKind::Whitespace(raw) | TokenKind::Intersect(raw) => out.push_str(raw),
+            TokenKind::LBracket => {
+                bracket_depth += 1;
+                out.push_str(token_slice(expr_src, tok)?);
+                idx += 1;
+            }
+            TokenKind::RBracket => {
+                // Excel escapes `]` inside structured references as `]]`. At the outermost bracket
+                // depth, treat double `]]` as a literal `]` and keep the bracket depth unchanged.
+                if bracket_depth == 1
+                    && matches!(
+                        tokens.get(idx + 1).map(|t| &t.kind),
+                        Some(TokenKind::RBracket)
+                    )
+                {
+                    out.push_str(token_slice(expr_src, tok)?);
+                    if let Some(next) = tokens.get(idx + 1) {
+                        out.push_str(token_slice(expr_src, next)?);
+                    }
+                    idx += 2;
+                    continue;
+                }
+
+                bracket_depth = bracket_depth.saturating_sub(1);
+                out.push_str(token_slice(expr_src, tok)?);
+                idx += 1;
+            }
+            _ if bracket_depth > 0 => {
+                // Do not translate anything inside workbook/structured reference brackets.
+                out.push_str(token_slice(expr_src, tok)?);
+                idx += 1;
+            }
+            TokenKind::Whitespace(raw) | TokenKind::Intersect(raw) => {
+                out.push_str(raw);
+                idx += 1;
+            }
             TokenKind::String(_) | TokenKind::QuotedIdent(_) => {
                 out.push_str(token_slice(expr_src, tok)?);
+                idx += 1;
             }
             TokenKind::Number(raw) => {
-                out.push_str(&translate_number(raw, src_config.decimal_separator, dst_config.decimal_separator));
+                out.push_str(&translate_number(
+                    raw,
+                    src_config.decimal_separator,
+                    dst_config.decimal_separator,
+                ));
+                idx += 1;
             }
-            TokenKind::Ident(raw) if is_function_ident(&tokens, idx) => match dir {
-                Direction::ToCanonical => out.push_str(&locale.canonical_function_name(raw)),
-                Direction::ToLocalized => out.push_str(&locale.localized_function_name(raw)),
-            },
+            TokenKind::Ident(raw) if is_function_ident(&tokens, idx) => {
+                match dir {
+                    Direction::ToCanonical => out.push_str(&locale.canonical_function_name(raw)),
+                    Direction::ToLocalized => out.push_str(&locale.localized_function_name(raw)),
+                }
+                idx += 1;
+            }
             TokenKind::ArgSep | TokenKind::Union => {
                 out.push(dst_config.arg_separator);
+                idx += 1;
             }
             TokenKind::ArrayRowSep => {
                 out.push(dst_config.array_row_separator);
+                idx += 1;
             }
             TokenKind::ArrayColSep => {
                 out.push(dst_config.array_col_separator);
+                idx += 1;
             }
             _ => {
                 out.push_str(token_slice(expr_src, tok)?);
+                idx += 1;
             }
         }
     }
@@ -123,4 +173,3 @@ fn map_lex_error(err: crate::ParseError) -> FormulaParseError {
         FormulaParseError::UnexpectedToken(err.message)
     }
 }
-
