@@ -272,3 +272,49 @@ test("FileCollabPersistence upgrades legacy plaintext logs to encrypted format w
   const afterBytes = await readFile(filePath);
   assert.equal(afterBytes.subarray(0, 8).toString("ascii"), "FMLYJS01");
 });
+
+test("FileCollabPersistence does not corrupt encrypted logs when KeyRing cannot decrypt existing records", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "collab-file-persistence-encrypted-wrong-key-"));
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const docId = `doc-${randomUUID()}`;
+
+  // Create an encrypted persistence file.
+  const keyRingGood = KeyRing.create();
+  {
+    const persistence = new FileCollabPersistence(dir, { compactAfterUpdates: 1_000, keyRing: keyRingGood });
+    const session = createCollabSession({ docId, persistence, schema: { autoInit: false } });
+    await session.whenLocalPersistenceLoaded();
+    await session.setCellValue("Sheet1:0:0", "secret");
+    await session.flushLocalPersistence();
+    session.destroy();
+    session.doc.destroy();
+    await persistence.flush(docId);
+  }
+
+  const yjsFiles = (await readdir(dir)).filter((name) => name.endsWith(".yjs"));
+  assert.equal(yjsFiles.length, 1);
+  const filePath = path.join(dir, yjsFiles[0]);
+  const sizeBefore = (await stat(filePath)).size;
+
+  // Restart with a KeyRing that *cannot* decrypt the existing records.
+  const keyRingWrong = KeyRing.create();
+  {
+    const persistence = new FileCollabPersistence(dir, { compactAfterUpdates: 1_000, keyRing: keyRingWrong });
+    const session = createCollabSession({ docId, persistence, schema: { autoInit: false } });
+
+    await assert.rejects(session.whenLocalPersistenceLoaded());
+
+    await session.setCellValue("Sheet1:0:1", "should-not-persist");
+    await session.flushLocalPersistence();
+    session.destroy();
+    session.doc.destroy();
+    await persistence.flush(docId);
+  }
+
+  // The encrypted file should not be modified by the failing session.
+  const sizeAfter = (await stat(filePath)).size;
+  assert.equal(sizeAfter, sizeBefore);
+});

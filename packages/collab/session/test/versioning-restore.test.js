@@ -32,6 +32,9 @@ function snapshotSheets(session) {
 }
 
 test("CollabVersioning integration: restore syncs + persists (sync-server)", async (t) => {
+  // Sync-server-backed integration tests can be slower/flakier under heavy CI
+  // load; use a slightly longer timeout than in-memory unit tests.
+  const TIMEOUT_MS = 20_000;
   const dataDir = await mkdtemp(path.join(tmpdir(), "collab-versioning-sync-server-"));
   const versionDbPath = path.join(dataDir, "versions.sqlite");
 
@@ -116,13 +119,13 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
     const nr = sessionB.namedRanges.get("MyRange");
     if (nr?.sheetId !== "Sheet2" || nr?.range !== "A1:B2") return false;
     return sessionB.metadata.get("title") === "Quarterly Budget";
-  }, 10_000);
+  }, TIMEOUT_MS);
 
   // Initial edits + checkpoint.
   await sessionA.setCellValue("Sheet1:0:0", "alpha");
   await sessionA.setCellValue("Sheet1:0:1", 123);
-  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "alpha", 10_000);
-  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:1"))?.value === 123, 10_000);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "alpha", TIMEOUT_MS);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:1"))?.value === 123, TIMEOUT_MS);
 
   const checkpoint = await versioning.createCheckpoint({ name: "checkpoint-1" });
 
@@ -133,18 +136,18 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
   sheetsA.removeSheet("Sheet2");
   namedRangesA.delete("MyRange");
   metadataA.set("title", "After");
-  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "beta", 10_000);
-  await waitForCondition(async () => (await sessionB.getCell("Sheet1:2:0"))?.value === "extra", 10_000);
-  await waitForCondition(() => snapshotSheets(sessionB).length === 1, 10_000);
-  await waitForCondition(() => sessionB.namedRanges.has("MyRange") === false, 10_000);
-  await waitForCondition(() => sessionB.metadata.get("title") === "After", 10_000);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "beta", TIMEOUT_MS);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:2:0"))?.value === "extra", TIMEOUT_MS);
+  await waitForCondition(() => snapshotSheets(sessionB).length === 1, TIMEOUT_MS);
+  await waitForCondition(() => sessionB.namedRanges.has("MyRange") === false, TIMEOUT_MS);
+  await waitForCondition(() => sessionB.metadata.get("title") === "After", TIMEOUT_MS);
 
   // Restore the checkpoint and ensure the other collaborator converges.
   await versioning.restoreVersion(checkpoint.id);
 
-  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "alpha", 10_000);
-  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:1"))?.value === 123, 10_000);
-  await waitForCondition(async () => (await sessionB.getCell("Sheet1:2:0")) == null, 10_000);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "alpha", TIMEOUT_MS);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:1"))?.value === 123, TIMEOUT_MS);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:2:0")) == null, TIMEOUT_MS);
   await waitForCondition(() => {
      const sheets = snapshotSheets(sessionB);
      if (sheets.length !== 2) return false;
@@ -153,7 +156,7 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
     const nr = sessionB.namedRanges.get("MyRange");
     if (nr?.sheetId !== "Sheet2" || nr?.range !== "A1:B2") return false;
     return sessionB.metadata.get("title") === "Quarterly Budget";
-  }, 10_000);
+  }, TIMEOUT_MS);
 
   assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "alpha");
   assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value, 123);

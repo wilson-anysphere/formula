@@ -44,6 +44,7 @@ export class FileCollabPersistence implements CollabPersistence {
   private readonly queues = new Map<string, PendingQueue>();
   private readonly updateCounts = new Map<string, number>();
   private readonly compactTimers = new Map<string, NodeJS.Timeout>();
+  private readonly docsWithFailedEncryptedLoad = new Set<string>();
 
   private readonly dir: string;
   private readonly compactAfterUpdates: number;
@@ -152,18 +153,27 @@ export class FileCollabPersistence implements CollabPersistence {
           throw new Error("Unsupported persistence file flags; expected encrypted format");
         }
         if (this.encryption.mode !== "keyring") {
+          this.docsWithFailedEncryptedLoad.add(docId);
           throw new Error("Encrypted persistence requires a KeyRing");
         }
 
         const { keyRing } = this.encryption;
-        const { updates, lastGoodOffset } = scanEncryptedRecords(data, { keyRing, aadContext });
-        if (lastGoodOffset < data.length) {
-          await fs.truncate(filePath, lastGoodOffset);
+        this.docsWithFailedEncryptedLoad.delete(docId);
+        try {
+          const { updates, lastGoodOffset } = scanEncryptedRecords(data, { keyRing, aadContext });
+          if (lastGoodOffset < data.length) {
+            await fs.truncate(filePath, lastGoodOffset);
+          }
+          for (const update of updates) {
+            Y.applyUpdate(doc, update, persistenceOrigin);
+          }
+          return;
+        } catch (err) {
+          // If encrypted persistence cannot be decoded, disable writes for this doc
+          // (otherwise we'd append records that are irrecoverable with the real keyring).
+          this.docsWithFailedEncryptedLoad.add(docId);
+          throw err;
         }
-        for (const update of updates) {
-          Y.applyUpdate(doc, update, persistenceOrigin);
-        }
-        return;
       }
 
       // Legacy plaintext file (no header). If encryption is enabled, upgrade it
@@ -198,7 +208,7 @@ export class FileCollabPersistence implements CollabPersistence {
     // If file encryption settings don't match what's on disk, we must not
     // append new records (or compact) since that can corrupt the log or
     // accidentally downgrade encrypted persistence to plaintext.
-    let persistenceEnabled = true;
+    let persistenceEnabled = !this.docsWithFailedEncryptedLoad.has(docId);
 
     // Initialize (and validate) the persistence file before any update events are
     // queued. Update writes are serialized behind this task via `enqueue()`.
