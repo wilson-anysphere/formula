@@ -16,7 +16,8 @@ export interface RangeAddress {
   endCol: number;
 }
 
-const CELL_RE = /^([A-Z]+)([1-9]\d*)$/i;
+// Support absolute references (e.g. $A$1) by allowing optional `$` markers.
+const CELL_RE = /^\$?([A-Z]+)\$?([1-9]\d*)$/i;
 
 export function columnLabelToIndex(label: string): number {
   const normalized = label.trim().toUpperCase();
@@ -123,4 +124,3 @@ export function rangeSize(range: RangeAddress): { rows: number; cols: number } {
     cols: range.endCol - range.startCol + 1
   };
 }
-

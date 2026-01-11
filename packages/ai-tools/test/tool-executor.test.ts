@@ -150,6 +150,36 @@ describe("ToolExecutor", () => {
     expect(result.error?.code).toBe("validation_error");
   });
 
+  it("accepts $-absolute A1 references (e.g. $A$1) in ranges", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:B2",
+        values: [
+          [1, 2],
+          [3, 4],
+        ],
+      },
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "$A$1:$B$2" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.range).toBe("Sheet1!A1:B2");
+    expect(result.data?.values).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+  });
+
   it("create_pivot_table writes a pivot output table", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
