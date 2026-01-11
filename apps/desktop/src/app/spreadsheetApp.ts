@@ -33,6 +33,7 @@ import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateF
 import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
 import { parseGoTo } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
+import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
@@ -1573,24 +1574,15 @@ function intersectRanges(a: Range, b: Range): Range | null {
 }
 
 function colToName(col: number): string {
-  let n = col + 1;
-  let out = "";
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    out = String.fromCharCode(65 + rem) + out;
-    n = Math.floor((n - 1) / 26);
-  }
-  return out;
+  if (!Number.isFinite(col) || col < 0) return "";
+  return colToNameA1(col);
 }
 
 function parseA1(a1: string): CellCoord {
-  const match = /^([A-Z]+)([1-9][0-9]*)$/i.exec(a1.trim());
-  if (!match) return { row: 0, col: 0 };
-  const colName = match[1].toUpperCase();
-  const row = Number(match[2]) - 1;
-  let col = 0;
-  for (let i = 0; i < colName.length; i++) {
-    col = col * 26 + (colName.charCodeAt(i) - 64);
+  try {
+    const { row0, col0 } = fromA1A1(a1);
+    return { row: row0, col: col0 };
+  } catch {
+    return { row: 0, col: 0 };
   }
-  return { row: Math.max(0, row), col: Math.max(0, col - 1) };
 }
