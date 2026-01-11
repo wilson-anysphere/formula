@@ -3,16 +3,21 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { arrowTableFromColumns } from "../../../data-io/src/index.js";
 
+import { CacheManager } from "../../src/cache/cache.js";
 import { EncryptedFileSystemCacheStore } from "../../src/cache/encryptedFilesystem.js";
 import { deserializeAnyTable, serializeAnyTable } from "../../src/cache/serialize.js";
 import { ArrowTableAdapter } from "../../src/arrowTable.js";
+import { QueryEngine } from "../../src/engine.js";
 import { fnv1a64 } from "../../src/cache/key.js";
 
 import { isEncryptedFileBytes } from "../../../security/crypto/encryptedFile.js";
 import { InMemoryKeychainProvider } from "../../../security/crypto/keychain/inMemoryKeychain.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("EncryptedFileSystemCacheStore: encrypts at rest and supports disabling encryption", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-"));
@@ -114,5 +119,55 @@ test("EncryptedFileSystemCacheStore: stores Arrow IPC payloads in an encrypted .
     assert.deepEqual(deserializeAnyTable(loadedAfterDisable.value.table).toGrid(), adapter.toGrid());
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("QueryEngine: caches Arrow-backed Parquet results using EncryptedFileSystemCacheStore", async () => {
+  const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-engine-"));
+  try {
+    const keychainProvider = new InMemoryKeychainProvider();
+    const parquetPath = path.join(__dirname, "..", "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+
+    let readCount = 0;
+    const firstEngine = new QueryEngine({
+      cache: new CacheManager({
+        store: new EncryptedFileSystemCacheStore({ directory: cacheDir, encryption: { enabled: true, keychainProvider } }),
+      }),
+      fileAdapter: {
+        readBinary: async (p) => {
+          readCount += 1;
+          return new Uint8Array(await fs.readFile(p));
+        },
+      },
+    });
+
+    const query = { id: "q_parquet_encrypted_fs_cache", name: "Parquet encrypted fs cache", source: { type: "parquet", path: parquetPath }, steps: [] };
+
+    const first = await firstEngine.executeQueryWithMeta(query, {}, {});
+    assert.equal(first.meta.cache?.hit, false);
+    assert.equal(readCount, 1);
+    assert.ok(first.table instanceof ArrowTableAdapter);
+    const grid = first.table.toGrid();
+
+    let secondReadCount = 0;
+    const secondEngine = new QueryEngine({
+      cache: new CacheManager({
+        store: new EncryptedFileSystemCacheStore({ directory: cacheDir, encryption: { enabled: true, keychainProvider } }),
+      }),
+      fileAdapter: {
+        readBinary: async (p) => {
+          secondReadCount += 1;
+          return new Uint8Array(await fs.readFile(p));
+        },
+      },
+    });
+
+    const second = await secondEngine.executeQueryWithMeta(query, {}, {});
+    assert.equal(second.meta.cache?.hit, true);
+    assert.equal(secondReadCount, 0, "cache hit should not re-read Parquet bytes");
+    assert.ok(second.table instanceof ArrowTableAdapter);
+    assert.deepEqual(second.table.toGrid(), grid);
+  } finally {
+    await fs.rm(cacheDir, { recursive: true, force: true });
   }
 });
