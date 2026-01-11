@@ -661,7 +661,7 @@ export class SpreadsheetApp {
     const dlp = createDesktopDlpContext({ documentId: workbookId });
     this.aiCellFunctions = new AiCellFunctionEngine({
       onUpdate: () => this.refresh(),
-      workbookId: opts.workbookId,
+      workbookId,
       cache: { persistKey: "formula:ai_cell_cache" },
       dlp: {
         policy: dlp.policy,

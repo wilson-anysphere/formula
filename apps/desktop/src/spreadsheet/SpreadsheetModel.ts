@@ -25,6 +25,7 @@ export class SpreadsheetModel {
     const dlp = createDesktopDlpContext({ documentId: workbookId });
     this.#aiCellFunctions = new AiCellFunctionEngine({
       onUpdate: () => this.#recomputeAiCells(),
+      workbookId,
       dlp: {
         policy: dlp.policy,
         auditLogger: dlp.auditLogger,
