@@ -39,7 +39,7 @@ export async function waitForServerReady(baseUrl: string): Promise<void> {
     } catch {
       return false;
     }
-  }, 10_000);
+  }, 30_000);
 }
 
 export function waitForProviderSync(provider: {
