@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Query } from "../../../../../packages/power-query/src/model.js";
 import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
+import { parseCronExpression } from "../../../../../packages/power-query/src/cron.js";
 
 import { parseA1 } from "../../document/coords.js";
 
@@ -147,12 +148,26 @@ export function QueryEditorPanelContainer(props: Props) {
   const triggeredOnOpenForQueryId = useRef<string | null>(null);
 
   useEffect(() => {
-    refreshManager.registerQuery(query);
-    // Trigger "on-open" policies once per query id while the panel is mounted.
-    if (query.refreshPolicy?.type === "on-open" && triggeredOnOpenForQueryId.current !== query.id) {
-      refreshManager.triggerOnOpen(query.id);
-      triggeredOnOpenForQueryId.current = query.id;
+    try {
+      refreshManager.registerQuery(query);
+      // Trigger "on-open" policies once per query id while the panel is mounted.
+      if (query.refreshPolicy?.type === "on-open" && triggeredOnOpenForQueryId.current !== query.id) {
+        refreshManager.triggerOnOpen(query.id);
+        triggeredOnOpenForQueryId.current = query.id;
+      }
+    } catch (err: any) {
+      // Invalid refresh policies (e.g. malformed cron expression) should not crash the panel.
+      setActionError(err?.message ?? String(err));
+      const fallback: Query = { ...query, refreshPolicy: { type: "manual" } };
+      try {
+        refreshManager.registerQuery(fallback);
+      } catch {
+        // ignore
+      }
+      // Persist the fallback so the user doesn't get stuck in a crash loop.
+      setQuery(fallback);
     }
+
     return () => refreshManager.unregisterQuery(query.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshManager, query]);
@@ -266,6 +281,56 @@ export function QueryEditorPanelContainer(props: Props) {
     setQuery((prev) => ({ ...prev, source: { type: "api", url, method: "GET" } }));
   }
 
+  function updateRefreshPolicy(next: any): void {
+    setQuery((prev) => ({ ...prev, refreshPolicy: next }));
+  }
+
+  async function setRefreshPolicy(type: string): Promise<void> {
+    setActionError(null);
+    if (type === "manual") {
+      updateRefreshPolicy({ type: "manual" });
+      return;
+    }
+    if (type === "on-open") {
+      updateRefreshPolicy({ type: "on-open" });
+      return;
+    }
+    if (type === "interval") {
+      const currentMs =
+        query.refreshPolicy?.type === "interval" && typeof query.refreshPolicy.intervalMs === "number"
+          ? query.refreshPolicy.intervalMs
+          : 60_000;
+      const input =
+        typeof window !== "undefined" && typeof window.prompt === "function"
+          ? window.prompt("Refresh interval (milliseconds)", String(currentMs))
+          : String(currentMs);
+      if (input == null) return;
+      const ms = Number(input);
+      if (!Number.isFinite(ms) || ms <= 0) {
+        setActionError("Interval must be a positive number of milliseconds.");
+        return;
+      }
+      updateRefreshPolicy({ type: "interval", intervalMs: ms });
+      return;
+    }
+    if (type === "cron") {
+      const currentCron = query.refreshPolicy?.type === "cron" ? query.refreshPolicy.cron : "* * * * *";
+      const input =
+        typeof window !== "undefined" && typeof window.prompt === "function"
+          ? window.prompt("Cron schedule (minute hour day-of-month month day-of-week)", currentCron)
+          : currentCron;
+      if (input == null) return;
+      const cron = String(input).trim();
+      try {
+        parseCronExpression(cron);
+      } catch (err: any) {
+        setActionError(err?.message ?? String(err));
+        return;
+      }
+      updateRefreshPolicy({ type: "cron", cron });
+    }
+  }
+
   async function loadToSheet(current: Query): Promise<void> {
     setActionError(null);
 
@@ -356,6 +421,20 @@ export function QueryEditorPanelContainer(props: Props) {
 
       <div style={{ padding: 12, borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
         <div style={{ color: "var(--text-muted)", fontSize: 12, marginRight: 8 }}>Source: {describeSource(query.source)}</div>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+          Refresh:
+          <select
+            value={query.refreshPolicy?.type ?? "manual"}
+            onChange={(e) => {
+              void setRefreshPolicy(e.target.value);
+            }}
+          >
+            <option value="manual">Manual</option>
+            <option value="on-open">On open</option>
+            <option value="interval">Interval</option>
+            <option value="cron">Cron</option>
+          </select>
+        </label>
         <button type="button" onClick={setCsvSource}>
           CSV…
         </button>
