@@ -84,6 +84,11 @@ export class CellStructuralConflictMonitor {
  
     this._onOpsEvent = this._onOpsEvent.bind(this);
     this._ops.observe(this._onOpsEvent);
+
+    // Seed local state from any persisted op log entries so conflict detection
+    // still works after a client restarts while offline (ops already exist in
+    // the doc, so we won't observe "add" events for them).
+    this._ensureLocalOpQueueInitialized();
   }
  
   dispose() {
@@ -359,6 +364,9 @@ export class CellStructuralConflictMonitor {
     const ours = [];
     this._ops.forEach((record, id) => {
       if (!record || typeof record !== "object") return;
+      if (!this._opRecords.has(id)) {
+        this._opRecords.set(id, record);
+      }
       if (record.userId !== this.localUserId) return;
       ours.push({ id, createdAt: Number(record.createdAt ?? 0) });
     });

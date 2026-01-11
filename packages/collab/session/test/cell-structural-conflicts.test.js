@@ -147,6 +147,91 @@ test("CellStructuralConflictMonitor detects concurrent move-destination conflict
   docA.destroy();
   docB.destroy();
 });
+
+test("CellStructuralConflictMonitor detects conflicts after re-instantiating a session with pre-existing local op log entries", async () => {
+  const docA1 = new Y.Doc();
+  const docB = new Y.Doc();
+  let disconnect = connectDocs(docA1, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA2 = [];
+  /** @type {Array<any>} */
+  const conflictsB = [];
+
+  const sessionA1 = createCollabSession({
+    doc: docA1,
+    cellConflicts: {
+      localUserId: "user-a",
+      onConflict: () => {},
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    cellConflicts: {
+      localUserId: "user-b",
+      onConflict: (c) => conflictsB.push(c),
+    },
+  });
+
+  await sessionA1.setCellValue("Sheet1:0:0", "hello");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "hello");
+
+  // Go offline.
+  disconnect();
+
+  // Local offline move.
+  cutPaste(sessionA1, "Sheet1:0:0", "Sheet1:0:1"); // A1 -> B1
+  // Concurrent remote move to another destination.
+  cutPaste(sessionB, "Sheet1:0:0", "Sheet1:0:2"); // A1 -> C1
+
+  // Simulate closing/reopening the app by copying doc state into a new Y.Doc
+  // and creating a new session/monitor instance.
+  const docA2 = new Y.Doc();
+  Y.applyUpdate(docA2, Y.encodeStateAsUpdate(docA1));
+
+  sessionA1.destroy();
+  docA1.destroy();
+
+  const sessionA2 = createCollabSession({
+    doc: docA2,
+    cellConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA2.push(c),
+    },
+  });
+
+  // Reconnect and sync docA2 with docB.
+  disconnect = connectDocs(docA2, docB);
+
+  const allConflicts = [...conflictsA2, ...conflictsB];
+  assert.ok(allConflicts.length >= 1, "expected at least one conflict to be detected");
+
+  const conflictSide = conflictsA2.length > 0 ? sessionA2 : sessionB;
+  const conflict = conflictsA2.length > 0 ? conflictsA2[0] : conflictsB[0];
+
+  assert.equal(conflict.type, "move");
+  assert.equal(conflict.reason, "move-destination");
+
+  assert.ok(
+    conflictSide.cellConflictMonitor?.resolveConflict(conflict.id, {
+      choice: "manual",
+      to: "Sheet1:0:1",
+    }),
+  );
+
+  assert.equal(await sessionA2.getCell("Sheet1:0:0"), null);
+  assert.equal(await sessionB.getCell("Sheet1:0:0"), null);
+  assert.equal((await sessionA2.getCell("Sheet1:0:1"))?.value, "hello");
+  assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value, "hello");
+  assert.equal(await sessionA2.getCell("Sheet1:0:2"), null);
+  assert.equal(await sessionB.getCell("Sheet1:0:2"), null);
+
+  sessionA2.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA2.destroy();
+  docB.destroy();
+});
  
 test("CellStructuralConflictMonitor detects delete-vs-edit conflicts and converges after resolution", async () => {
   const docA = new Y.Doc();
