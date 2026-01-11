@@ -180,10 +180,11 @@ Formula validates extension manifests using **one shared validator** across:
 - the **Node/desktop extension host**
 - the **browser extension host**
 - **marketplace publish-time** checks
+- the **extension publisher** (so local packaging fails fast)
 
 This means the marketplace rejects extension packages whose manifests would be rejected at runtime
 (e.g. invalid permissions, malformed `contributes` blocks, or `activationEvents` that reference
-unknown commands/panels/custom functions).
+unknown commands/panels/custom functions/data connectors).
 
 Entrypoint fields:
 
