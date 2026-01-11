@@ -45,4 +45,9 @@ test("CollabBranchingWorkflow: keeps global currentBranchName consistent for ren
     branches.map((b) => b.name).sort(),
     ["main"],
   );
+
+  // Defensive: if metadata is corrupted (points at a non-existent branch), the
+  // workflow should fall back to main.
+  session.doc.getMap("branching:meta").set("currentBranchName", "ghost");
+  assert.equal(workflow.getCurrentBranchName(), "main");
 });

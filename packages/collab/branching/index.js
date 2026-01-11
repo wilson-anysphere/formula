@@ -33,7 +33,9 @@ export class CollabBranchingWorkflow {
    * @returns {string}
    */
   getCurrentBranchName() {
-    return this.#getGlobalCurrentBranchName();
+    const name = this.#getGlobalCurrentBranchName();
+    const branches = this.#session.doc.getMap(`${this.#rootName}:branches`);
+    return branches.get(name) !== undefined ? name : "main";
   }
 
   /**
