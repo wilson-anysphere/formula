@@ -19,3 +19,20 @@ async fn sqlite_in_memory_query_returns_rows_and_columns() {
     assert_eq!(types.get("one"), Some(&SqlDataType::Number));
     assert_eq!(types.get("two"), Some(&SqlDataType::String));
 }
+
+#[tokio::test]
+async fn unsupported_connection_kind_returns_clear_error() {
+    let err = sql::sql_query(
+        json!({ "kind": "odbc", "connectionString": "Driver={PostgreSQL};Server=localhost;" }),
+        "SELECT 1".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect_err("expected unsupported kind to error");
+
+    assert!(
+        err.to_string().contains("Unsupported SQL connection kind"),
+        "unexpected error: {err}"
+    );
+}

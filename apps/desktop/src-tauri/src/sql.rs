@@ -31,22 +31,30 @@ pub struct SqlSchemaResult {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-enum ConnectionDescriptor {
-    #[serde(rename_all = "camelCase")]
-    Sqlite {
-        path: Option<String>,
-        in_memory: Option<bool>,
-    },
-    #[serde(rename_all = "camelCase")]
-    Postgres {
-        url: Option<String>,
-        host: Option<String>,
-        port: Option<u16>,
-        database: Option<String>,
-        user: Option<String>,
-        ssl: Option<bool>,
-    },
+#[serde(rename_all = "camelCase")]
+struct SqliteConnectionDescriptor {
+    path: Option<String>,
+    in_memory: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PostgresConnectionDescriptor {
+    url: Option<String>,
+    host: Option<String>,
+    port: Option<u16>,
+    database: Option<String>,
+    user: Option<String>,
+    ssl: Option<bool>,
+}
+
+fn connection_kind(connection: &JsonValue) -> Result<String> {
+    let kind = connection
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("SQL connection descriptor must be an object with a string 'kind' field"))?;
+    Ok(kind)
 }
 
 fn credential_string(credentials: Option<&JsonValue>, key: &str) -> Option<String> {
@@ -437,57 +445,58 @@ pub async fn sql_query(
     params: Vec<JsonValue>,
     credentials: Option<JsonValue>,
 ) -> Result<SqlQueryResult> {
-    let descriptor: ConnectionDescriptor =
-        serde_json::from_value(connection).context("invalid SQL connection descriptor")?;
+    let kind = connection_kind(&connection)?;
 
-    match descriptor {
-        ConnectionDescriptor::Sqlite { path, in_memory } => {
-            let in_memory = in_memory.unwrap_or(false);
+    match kind.as_str() {
+        "sqlite" => {
+            let descriptor: SqliteConnectionDescriptor =
+                serde_json::from_value(connection).context("invalid sqlite connection descriptor")?;
+            let in_memory = descriptor.in_memory.unwrap_or(false);
             let mut opts = if in_memory {
                 sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
             } else {
-                let path = path.ok_or_else(|| anyhow!("sqlite connection requires `path`"))?;
+                let path = descriptor
+                    .path
+                    .ok_or_else(|| anyhow!("sqlite connection requires `path`"))?;
                 sqlx::sqlite::SqliteConnectOptions::new().filename(path)
             };
             opts = opts.create_if_missing(false);
             query_sqlite(&opts, &sql, &params).await
         }
-        ConnectionDescriptor::Postgres {
-            url,
-            host,
-            port,
-            database,
-            user,
-            ssl,
-        } => {
+        "postgres" => {
+            let descriptor: PostgresConnectionDescriptor =
+                serde_json::from_value(connection).context("invalid postgres connection descriptor")?;
             use sqlx::postgres::{PgConnectOptions, PgSslMode};
-            let mut opts = if let Some(url) = url {
+            let mut opts = if let Some(url) = descriptor.url.clone() {
                 PgConnectOptions::from_str(&url).context("invalid postgres url")?
             } else {
-                let host = host.clone().ok_or_else(|| anyhow!("postgres connection requires `host` or `url`"))?;
+                let host = descriptor
+                    .host
+                    .clone()
+                    .ok_or_else(|| anyhow!("postgres connection requires `host` or `url`"))?;
                 let mut opts = PgConnectOptions::new().host(&host);
-                if let Some(port) = port {
+                if let Some(port) = descriptor.port {
                     opts = opts.port(port);
                 }
-                if let Some(database) = database.clone() {
+                if let Some(database) = descriptor.database.clone() {
                     opts = opts.database(&database);
                 }
-                if let Some(user) = user.clone() {
+                if let Some(user) = descriptor.user.clone() {
                     opts = opts.username(&user);
                 }
                 opts
             };
 
-            if let Some(host) = host {
+            if let Some(host) = descriptor.host {
                 opts = opts.host(&host);
             }
-            if let Some(port) = port {
+            if let Some(port) = descriptor.port {
                 opts = opts.port(port);
             }
-            if let Some(database) = database {
+            if let Some(database) = descriptor.database {
                 opts = opts.database(&database);
             }
-            if let Some(user) = user {
+            if let Some(user) = descriptor.user {
                 opts = opts.username(&user);
             }
 
@@ -495,12 +504,15 @@ pub async fn sql_query(
                 opts = opts.password(&password);
             }
 
-            if let Some(ssl) = ssl {
+            if let Some(ssl) = descriptor.ssl {
                 opts = opts.ssl_mode(if ssl { PgSslMode::Require } else { PgSslMode::Disable });
             }
 
             query_postgres(&opts, &sql, &params).await
         }
+        other => Err(anyhow!(
+            "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres)"
+        )),
     }
 }
 
@@ -509,68 +521,72 @@ pub async fn sql_get_schema(
     sql: String,
     credentials: Option<JsonValue>,
 ) -> Result<SqlSchemaResult> {
-    let descriptor: ConnectionDescriptor =
-        serde_json::from_value(connection).context("invalid SQL connection descriptor")?;
+    let kind = connection_kind(&connection)?;
 
-    match descriptor {
-        ConnectionDescriptor::Sqlite { path, in_memory } => {
-            let in_memory = in_memory.unwrap_or(false);
+    match kind.as_str() {
+        "sqlite" => {
+            let descriptor: SqliteConnectionDescriptor =
+                serde_json::from_value(connection).context("invalid sqlite connection descriptor")?;
+            let in_memory = descriptor.in_memory.unwrap_or(false);
             let mut opts = if in_memory {
                 sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
             } else {
-                let path = path.ok_or_else(|| anyhow!("sqlite connection requires `path`"))?;
+                let path = descriptor
+                    .path
+                    .ok_or_else(|| anyhow!("sqlite connection requires `path`"))?;
                 sqlx::sqlite::SqliteConnectOptions::new().filename(path)
             };
             opts = opts.create_if_missing(false);
             sqlite_schema(&opts, &sql).await
         }
-        ConnectionDescriptor::Postgres {
-            url,
-            host,
-            port,
-            database,
-            user,
-            ssl,
-        } => {
+        "postgres" => {
+            let descriptor: PostgresConnectionDescriptor =
+                serde_json::from_value(connection).context("invalid postgres connection descriptor")?;
             use sqlx::postgres::{PgConnectOptions, PgSslMode};
-            let mut opts = if let Some(url) = url {
+            let mut opts = if let Some(url) = descriptor.url.clone() {
                 PgConnectOptions::from_str(&url).context("invalid postgres url")?
             } else {
-                let host = host.clone().ok_or_else(|| anyhow!("postgres connection requires `host` or `url`"))?;
+                let host = descriptor
+                    .host
+                    .clone()
+                    .ok_or_else(|| anyhow!("postgres connection requires `host` or `url`"))?;
                 let mut opts = PgConnectOptions::new().host(&host);
-                if let Some(port) = port {
+                if let Some(port) = descriptor.port {
                     opts = opts.port(port);
                 }
-                if let Some(database) = database.clone() {
+                if let Some(database) = descriptor.database.clone() {
                     opts = opts.database(&database);
                 }
-                if let Some(user) = user.clone() {
+                if let Some(user) = descriptor.user.clone() {
                     opts = opts.username(&user);
                 }
                 opts
             };
 
-            if let Some(host) = host {
+            if let Some(host) = descriptor.host {
                 opts = opts.host(&host);
             }
-            if let Some(port) = port {
+            if let Some(port) = descriptor.port {
                 opts = opts.port(port);
             }
-            if let Some(database) = database {
+            if let Some(database) = descriptor.database {
                 opts = opts.database(&database);
             }
-            if let Some(user) = user {
+            if let Some(user) = descriptor.user {
                 opts = opts.username(&user);
             }
 
             if let Some(password) = credential_password(credentials.as_ref()) {
                 opts = opts.password(&password);
             }
-            if let Some(ssl) = ssl {
+            if let Some(ssl) = descriptor.ssl {
                 opts = opts.ssl_mode(if ssl { PgSslMode::Require } else { PgSslMode::Disable });
             }
 
             postgres_schema(&opts, &sql).await
         }
+        other => Err(anyhow!(
+            "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres)"
+        )),
     }
 }
