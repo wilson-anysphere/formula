@@ -5,6 +5,7 @@ import { IndexedDBCacheStore } from "../../../../packages/power-query/src/cache/
 import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/memory.js";
 import { createWebCryptoCacheProvider } from "../../../../packages/power-query/src/cache/webCryptoProvider.js";
 import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
+import { ODataConnector } from "../../../../packages/power-query/src/connectors/odata.js";
 import { SqlConnector } from "../../../../packages/power-query/src/connectors/sql.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
 import { DataTable } from "../../../../packages/power-query/src/table.js";
@@ -958,6 +959,11 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
       ? new HttpConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
       : undefined;
 
+  const odata =
+    options.fetch || options.oauth2Manager
+      ? new ODataConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
+      : undefined;
+
   const querySql = async (
     connection: unknown,
     sql: string,
@@ -1099,7 +1105,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
         stat: fileAdapter.stat,
       },
       tableAdapter,
-      connectors: { ...(http ? { http } : null), sql },
+      connectors: { ...(http ? { http } : null), ...(odata ? { odata } : null), sql },
       privacyMode: options.privacyMode,
       onCredentialRequest: options.onCredentialRequest,
       onPermissionRequest: async (kind, details) => {

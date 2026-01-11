@@ -396,6 +396,46 @@ test("createDesktopQueryEngine wires oauth2Manager into HttpConnector", async ()
   assert.equal(oauthCalls[0].providerId, "example");
 });
 
+test("createDesktopQueryEngine wires oauth2Manager into ODataConnector", async () => {
+  /** @type {any[]} */
+  const oauthCalls = [];
+  const oauth2Manager = {
+    getAccessToken: async (opts) => {
+      oauthCalls.push(opts);
+      return { accessToken: "token", expiresAtMs: null, refreshToken: null };
+    },
+  };
+
+  /** @type {typeof fetch} */
+  const fetchFn = async (_url, init) => {
+    const auth = /** @type {any} */ (init?.headers)?.Authorization;
+    assert.equal(auth, "Bearer token");
+    return new Response(JSON.stringify({ value: [{ Id: 1 }] }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  const engine = createDesktopQueryEngine({
+    fetch: fetchFn,
+    oauth2Manager,
+    fileAdapter: { readText: async () => "", readBinary: async () => new Uint8Array() },
+  });
+
+  const query = {
+    id: "q_odata",
+    name: "OData",
+    source: {
+      type: "odata",
+      url: "https://api.example/odata/Products",
+      auth: { type: "oauth2", providerId: "example" },
+    },
+    steps: [],
+  };
+
+  const table = await engine.executeQuery(query, {}, { cache: { validation: "none" } });
+  assert.deepEqual(table.toGrid(), [["Id"], [1]]);
+  assert.equal(oauthCalls.length, 1);
+  assert.equal(oauthCalls[0].providerId, "example");
+});
+
 test("createDesktopQueryEngine maps DLP classification into workbook privacy levels", async () => {
   const policy = createDefaultOrgPolicy();
   // Allow external connectors for Restricted documents so this test can observe the
