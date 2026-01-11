@@ -99,6 +99,8 @@ function pickTextColor(backgroundColor: string): string {
   return luma > 0.6 ? "#000000" : "#ffffff";
 }
 
+const EXPLICIT_NEWLINE_RE = /[\r\n]/;
+
 export function formatCellDisplayText(value: CellData["value"]): string {
   if (value === null) return "";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
@@ -1193,12 +1195,13 @@ export class CanvasGridRenderer {
     let currentFontSize = -1;
     let currentFontWeight = "";
 
+    const startColXSheet = this.scroll.cols.positionOf(startCol);
     let rowYSheet = this.scroll.rows.positionOf(startRow);
     for (let row = startRow; row < endRow; row++) {
       const rowHeight = this.scroll.rows.getSize(row);
       const y = rowYSheet - quadrant.scrollBaseY + quadrant.originY;
 
-      let colXSheet = this.scroll.cols.positionOf(startCol);
+      let colXSheet = startColXSheet;
       for (let col = startCol; col < endCol; col++) {
         const colWidth = this.scroll.cols.getSize(col);
         const x = colXSheet - quadrant.scrollBaseX + quadrant.originX;
@@ -1254,7 +1257,7 @@ export class CanvasGridRenderer {
               ? (align as "left" | "right" | "center" | "start" | "end")
               : "start";
 
-          const hasExplicitNewline = /[\r\n]/.test(text);
+          const hasExplicitNewline = EXPLICIT_NEWLINE_RE.test(text);
           const rotationRad = (rotationDeg * Math.PI) / 180;
 
           if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
