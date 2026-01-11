@@ -1,0 +1,1129 @@
+use std::collections::HashMap;
+use std::io::Write;
+
+use formula_model::rich_text::RichText;
+use formula_model::{CellRef, CellValue, ErrorValue, Worksheet, WorksheetId};
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::{Reader, Writer};
+
+use crate::SheetMeta;
+
+use super::{CellValueKind, SharedStringKey, WriteError, XlsxDocument};
+
+pub(super) fn patch_worksheet_xml(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    sheet: &Worksheet,
+    original: &[u8],
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+) -> Result<Vec<u8>, WriteError> {
+    // Desired cells in row-major order.
+    let mut desired_cells: Vec<(CellRef, &formula_model::Cell)> = sheet.iter_cells().collect();
+    desired_cells.sort_by_key(|(r, _)| (r.row, r.col));
+    let mut desired_idx = 0usize;
+
+    let mut reader = Reader::from_reader(original);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut writer = Writer::new(Vec::with_capacity(original.len()));
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.name().as_ref() == b"sheetData" => {
+                writer.write_event(Event::Start(e.into_owned()))?;
+                patch_sheet_data_contents(
+                    doc,
+                    sheet_meta,
+                    sheet,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    &mut desired_cells,
+                    &mut desired_idx,
+                    &mut reader,
+                    &mut writer,
+                    &mut buf,
+                )?;
+            }
+            Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
+                if desired_idx >= desired_cells.len() {
+                    writer.write_event(Event::Empty(e.into_owned()))?;
+                } else {
+                    // Expand <sheetData/> to insert new rows/cells.
+                    writer.write_event(Event::Start(e.into_owned()))?;
+                    write_remaining_rows(
+                        doc,
+                        sheet_meta,
+                        sheet,
+                        shared_lookup,
+                        style_to_xf,
+                        cell_meta_sheet_ids,
+                        &mut desired_cells,
+                        &mut desired_idx,
+                        &mut writer,
+                    )?;
+                    writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
+                }
+            }
+            Event::Eof => break,
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    sheet: &Worksheet,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    desired_cells: &mut [(CellRef, &formula_model::Cell)],
+    desired_idx: &mut usize,
+    reader: &mut Reader<R>,
+    writer: &mut Writer<W>,
+    buf: &mut Vec<u8>,
+) -> Result<(), WriteError> {
+    loop {
+        match reader.read_event_into(buf)? {
+            Event::Start(e) if e.name().as_ref() == b"row" => {
+                let row_num = row_num_from_attrs(&e)?;
+                let has_extra_attrs = row_has_extra_attrs(&e)?;
+                let keep_due_to_row_props = sheet
+                    .row_properties(row_num.saturating_sub(1))
+                    .is_some_and(|props| props.height.is_some() || props.hidden);
+                write_missing_rows_before(
+                    doc,
+                    sheet_meta,
+                    sheet,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                )?;
+
+                let mut row_writer = Writer::new(Vec::new());
+                row_writer.write_event(Event::Start(e.into_owned()))?;
+                let outcome = patch_row_contents(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    reader,
+                    &mut row_writer,
+                    buf,
+                    row_num,
+                )?;
+                let row_bytes = row_writer.into_inner();
+                if has_extra_attrs || keep_due_to_row_props || outcome.wrote_cell || outcome.wrote_other {
+                    writer.get_mut().write_all(&row_bytes)?;
+                }
+            }
+            Event::Empty(e) if e.name().as_ref() == b"row" => {
+                let row_num = row_num_from_attrs(&e)?;
+                let has_extra_attrs = row_has_extra_attrs(&e)?;
+                let keep_due_to_row_props = sheet
+                    .row_properties(row_num.saturating_sub(1))
+                    .is_some_and(|props| props.height.is_some() || props.hidden);
+                write_missing_rows_before(
+                    doc,
+                    sheet_meta,
+                    sheet,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                )?;
+
+                if peek_row(desired_cells, *desired_idx) != Some(row_num) {
+                    if has_extra_attrs || keep_due_to_row_props {
+                        writer.write_event(Event::Empty(e.into_owned()))?;
+                    } else {
+                        // Drop empty placeholder rows that were introduced solely to hold cells
+                        // that are no longer present in the model.
+                        drop(e);
+                    }
+                } else {
+                    // Row existed but was empty; expand and insert any desired cells.
+                    let mut row_writer = Writer::new(Vec::new());
+                    row_writer.write_event(Event::Start(e.into_owned()))?;
+                    write_remaining_cells_in_row(
+                        doc,
+                        sheet_meta,
+                        shared_lookup,
+                        style_to_xf,
+                        cell_meta_sheet_ids,
+                        desired_cells,
+                        desired_idx,
+                        &mut row_writer,
+                        row_num,
+                    )?;
+                    row_writer.write_event(Event::End(BytesEnd::new("row")))?;
+                    writer.get_mut().write_all(&row_writer.into_inner())?;
+                }
+            }
+            Event::End(e) if e.name().as_ref() == b"sheetData" => {
+                write_remaining_rows(
+                    doc,
+                    sheet_meta,
+                    sheet,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                )?;
+                writer.write_event(Event::End(e.into_owned()))?;
+                break;
+            }
+            Event::Eof => break,
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
+    }
+
+    Ok(())
+}
+
+fn patch_row_contents<R: std::io::BufRead, W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    desired_cells: &mut [(CellRef, &formula_model::Cell)],
+    desired_idx: &mut usize,
+    reader: &mut Reader<R>,
+    writer: &mut Writer<W>,
+    buf: &mut Vec<u8>,
+    row_num: u32,
+) -> Result<RowPatchOutcome, WriteError> {
+    let mut wrote_cell = false;
+    let mut wrote_other = false;
+    loop {
+        match reader.read_event_into(buf)? {
+            Event::Start(e) if e.name().as_ref() == b"c" => {
+                let cell_events = collect_full_element(Event::Start(e.into_owned()), reader, buf)?;
+                let (cell_ref, col_1_based) = match cell_ref_from_cell_events(&cell_events)? {
+                    Some(v) => v,
+                    None => {
+                        // Can't address the cell; preserve it.
+                        write_events(writer, cell_events)?;
+                        continue;
+                    }
+                };
+
+                let idx_before = *desired_idx;
+                write_missing_cells_before_col(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                    col_1_based,
+                )?;
+                wrote_cell |= *desired_idx > idx_before;
+                patch_or_copy_cell(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                    col_1_based,
+                    cell_ref,
+                    cell_events,
+                )
+                .map(|wrote| {
+                    wrote_cell |= wrote;
+                })?;
+            }
+            Event::Empty(e) if e.name().as_ref() == b"c" => {
+                let cell_events = vec![Event::Empty(e.into_owned())];
+                let (cell_ref, col_1_based) = match cell_ref_from_cell_events(&cell_events)? {
+                    Some(v) => v,
+                    None => {
+                        write_events(writer, cell_events)?;
+                        continue;
+                    }
+                };
+
+                let idx_before = *desired_idx;
+                write_missing_cells_before_col(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                    col_1_based,
+                )?;
+                wrote_cell |= *desired_idx > idx_before;
+                patch_or_copy_cell(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                    col_1_based,
+                    cell_ref,
+                    cell_events,
+                )
+                .map(|wrote| {
+                    wrote_cell |= wrote;
+                })?;
+            }
+            Event::End(e) if e.name().as_ref() == b"row" => {
+                // Append any new cells at the end of the row.
+                let idx_before = *desired_idx;
+                write_remaining_cells_in_row(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                )?;
+                wrote_cell |= *desired_idx > idx_before;
+
+                writer.write_event(Event::End(e.into_owned()))?;
+                break;
+            }
+            // Non-cell element inside the row (eg extLst). Ensure any new cells are emitted
+            // before it so we keep cells grouped at the start of the row.
+            Event::Start(e) if e.name().as_ref() != b"c" => {
+                wrote_other = true;
+                let idx_before = *desired_idx;
+                write_remaining_cells_in_row(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                )?;
+                wrote_cell |= *desired_idx > idx_before;
+                writer.write_event(Event::Start(e.into_owned()))?;
+            }
+            Event::Empty(e) if e.name().as_ref() != b"c" => {
+                wrote_other = true;
+                let idx_before = *desired_idx;
+                write_remaining_cells_in_row(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    desired_cells,
+                    desired_idx,
+                    writer,
+                    row_num,
+                )?;
+                wrote_cell |= *desired_idx > idx_before;
+                writer.write_event(Event::Empty(e.into_owned()))?;
+            }
+            Event::Text(e) => {
+                let text = e.unescape()?.into_owned();
+                if !text.chars().all(|c| c.is_whitespace()) {
+                    wrote_other = true;
+                }
+                writer.write_event(Event::Text(e.into_owned()))?;
+            }
+            Event::CData(e) => {
+                let text = String::from_utf8_lossy(e.as_ref());
+                if !text.chars().all(|c| c.is_whitespace()) {
+                    wrote_other = true;
+                }
+                writer.write_event(Event::CData(e.into_owned()))?;
+            }
+            Event::Eof => break,
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
+    }
+
+    Ok(RowPatchOutcome {
+        wrote_cell,
+        wrote_other,
+    })
+}
+
+fn patch_or_copy_cell<W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    desired_cells: &mut [(CellRef, &formula_model::Cell)],
+    desired_idx: &mut usize,
+    writer: &mut Writer<W>,
+    row_num: u32,
+    col_1_based: u32,
+    cell_ref: CellRef,
+    cell_events: Vec<Event<'static>>,
+) -> Result<bool, WriteError> {
+    let original = parse_cell_semantics(doc, sheet_meta, &cell_events, &doc.shared_strings)?;
+
+    let desired = desired_cells.get(*desired_idx).copied().filter(|(r, _)| {
+        r.row + 1 == row_num && r.col + 1 == col_1_based
+    });
+
+    match desired {
+        Some((_, desired_cell)) => {
+            // This cell is present in the model; decide whether it changed.
+            let desired_semantics = CellSemantics::from_model(desired_cell, style_to_xf);
+            *desired_idx += 1;
+
+            if desired_semantics == original {
+                write_events(writer, cell_events)?;
+            } else {
+                write_updated_cell(
+                    doc,
+                    sheet_meta,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    writer,
+                    cell_ref,
+                    desired_cell,
+                    cell_events.first(),
+                    extract_preserved_cell_children(&cell_events),
+                )?;
+            }
+            Ok(true)
+        }
+        None => {
+            // Cell not represented in the model.
+            if original.is_truly_empty() {
+                // Preserve unknown metadata-only cells.
+                write_events(writer, cell_events)?;
+                Ok(true)
+            } else {
+                // The cell existed in the original file but was cleared from the model.
+                // Drop it from the output.
+                Ok(false)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct RowPatchOutcome {
+    wrote_cell: bool,
+    wrote_other: bool,
+}
+
+fn write_missing_rows_before<W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    sheet: &Worksheet,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    desired_cells: &mut [(CellRef, &formula_model::Cell)],
+    desired_idx: &mut usize,
+    writer: &mut Writer<W>,
+    row_num: u32,
+) -> Result<(), WriteError> {
+    while let Some(next_row) = peek_row(desired_cells, *desired_idx) {
+        if next_row >= row_num {
+            break;
+        }
+        write_new_row(
+            doc,
+            sheet_meta,
+            sheet,
+            shared_lookup,
+            style_to_xf,
+            cell_meta_sheet_ids,
+            desired_cells,
+            desired_idx,
+            writer,
+            next_row,
+        )?;
+    }
+    Ok(())
+}
+
+fn write_remaining_rows<W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    sheet: &Worksheet,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    desired_cells: &mut [(CellRef, &formula_model::Cell)],
+    desired_idx: &mut usize,
+    writer: &mut Writer<W>,
+) -> Result<(), WriteError> {
+    while let Some(next_row) = peek_row(desired_cells, *desired_idx) {
+        write_new_row(
+            doc,
+            sheet_meta,
+            sheet,
+            shared_lookup,
+            style_to_xf,
+            cell_meta_sheet_ids,
+            desired_cells,
+            desired_idx,
+            writer,
+            next_row,
+        )?;
+    }
+    Ok(())
+}
+
+fn write_new_row<W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    sheet: &Worksheet,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    desired_cells: &mut [(CellRef, &formula_model::Cell)],
+    desired_idx: &mut usize,
+    writer: &mut Writer<W>,
+    row_num: u32,
+) -> Result<(), WriteError> {
+    let mut row_start = BytesStart::new("row");
+    let row_str = row_num.to_string();
+    row_start.push_attribute(("r", row_str.as_str()));
+    let height_str = sheet
+        .row_properties(row_num.saturating_sub(1))
+        .and_then(|props| props.height.map(|h| h.to_string()));
+    if let Some(props) = sheet.row_properties(row_num.saturating_sub(1)) {
+        if let Some(height_str) = &height_str {
+            row_start.push_attribute(("ht", height_str.as_str()));
+            row_start.push_attribute(("customHeight", "1"));
+        }
+        if props.hidden {
+            row_start.push_attribute(("hidden", "1"));
+        }
+    }
+
+    writer.write_event(Event::Start(row_start))?;
+    write_remaining_cells_in_row(
+        doc,
+        sheet_meta,
+        shared_lookup,
+        style_to_xf,
+        cell_meta_sheet_ids,
+        desired_cells,
+        desired_idx,
+        writer,
+        row_num,
+    )?;
+    writer.write_event(Event::End(BytesEnd::new("row")))?;
+    Ok(())
+}
+
+fn write_missing_cells_before_col<W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    desired_cells: &mut [(CellRef, &formula_model::Cell)],
+    desired_idx: &mut usize,
+    writer: &mut Writer<W>,
+    row_num: u32,
+    col_limit_1_based: u32,
+) -> Result<(), WriteError> {
+    while let Some((cell_ref, cell)) = desired_cells.get(*desired_idx).copied() {
+        if cell_ref.row + 1 != row_num {
+            break;
+        }
+        let col = cell_ref.col + 1;
+        if col >= col_limit_1_based {
+            break;
+        }
+        write_updated_cell(
+            doc,
+            sheet_meta,
+            shared_lookup,
+            style_to_xf,
+            cell_meta_sheet_ids,
+            writer,
+            cell_ref,
+            cell,
+            None,
+            Vec::new(),
+        )?;
+        *desired_idx += 1;
+    }
+    Ok(())
+}
+
+fn write_remaining_cells_in_row<W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    desired_cells: &mut [(CellRef, &formula_model::Cell)],
+    desired_idx: &mut usize,
+    writer: &mut Writer<W>,
+    row_num: u32,
+) -> Result<(), WriteError> {
+    while let Some((cell_ref, cell)) = desired_cells.get(*desired_idx).copied() {
+        if cell_ref.row + 1 != row_num {
+            break;
+        }
+        write_updated_cell(
+            doc,
+            sheet_meta,
+            shared_lookup,
+            style_to_xf,
+            cell_meta_sheet_ids,
+            writer,
+            cell_ref,
+            cell,
+            None,
+            Vec::new(),
+        )?;
+        *desired_idx += 1;
+    }
+    Ok(())
+}
+
+fn write_updated_cell<W: Write>(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    writer: &mut Writer<W>,
+    cell_ref: CellRef,
+    cell: &formula_model::Cell,
+    original_cell_event: Option<&Event<'static>>,
+    preserved_children: Vec<Event<'static>>,
+) -> Result<(), WriteError> {
+    let original_start = original_cell_event.and_then(|ev| match ev {
+        Event::Start(e) => Some(e),
+        Event::Empty(e) => Some(e),
+        _ => None,
+    });
+
+    let mut preserved_attrs: Vec<(String, String)> = Vec::new();
+    if let Some(start) = original_start {
+        for attr in start.attributes() {
+            let attr = attr?;
+            match attr.key.as_ref() {
+                b"r" | b"s" | b"t" => {}
+                _ => {
+                    let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("").to_string();
+                    let value = attr.unescape_value()?.into_owned();
+                    preserved_attrs.push((key, value));
+                }
+            }
+        }
+    }
+
+    let a1 = cell_ref.to_a1();
+    let meta = super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
+    let value_kind = super::effective_value_kind(meta, cell);
+
+    let formula_meta = formula_meta_for_cell(meta, cell);
+
+    let has_value = !matches!(cell.value, CellValue::Empty);
+    let has_children = formula_meta.is_some() || has_value || !preserved_children.is_empty();
+
+    let style_xf_str = (cell.style_id != 0)
+        .then(|| style_to_xf.get(&cell.style_id))
+        .flatten()
+        .map(|xf_index| xf_index.to_string());
+
+    let mut c_start = BytesStart::new("c");
+    c_start.push_attribute(("r", a1.as_str()));
+    if let Some(style_xf_str) = &style_xf_str {
+        c_start.push_attribute(("s", style_xf_str.as_str()));
+    }
+    if has_value {
+        match &value_kind {
+            CellValueKind::SharedString { .. } => c_start.push_attribute(("t", "s")),
+            CellValueKind::InlineString => c_start.push_attribute(("t", "inlineStr")),
+            CellValueKind::Bool => c_start.push_attribute(("t", "b")),
+            CellValueKind::Error => c_start.push_attribute(("t", "e")),
+            CellValueKind::Str => c_start.push_attribute(("t", "str")),
+            CellValueKind::Number => {}
+            CellValueKind::Other { t } => c_start.push_attribute(("t", t.as_str())),
+        }
+    }
+    for (k, v) in &preserved_attrs {
+        c_start.push_attribute((k.as_str(), v.as_str()));
+    }
+
+    if !has_children {
+        writer.write_event(Event::Empty(c_start))?;
+        return Ok(());
+    }
+
+    writer.write_event(Event::Start(c_start))?;
+
+    if let Some(formula_meta) = formula_meta {
+        let mut f_start = BytesStart::new("f");
+        let si_str = formula_meta.shared_index.map(|si| si.to_string());
+        if let Some(t) = &formula_meta.t {
+            f_start.push_attribute(("t", t.as_str()));
+        }
+        if let Some(reference) = &formula_meta.reference {
+            f_start.push_attribute(("ref", reference.as_str()));
+        }
+        if let Some(si_str) = &si_str {
+            f_start.push_attribute(("si", si_str.as_str()));
+        }
+        if let Some(aca) = formula_meta.always_calc {
+            f_start.push_attribute(("aca", if aca { "1" } else { "0" }));
+        }
+
+        let file_text = super::formula_file_text(&formula_meta, cell.formula.as_deref());
+        if file_text.is_empty() {
+            writer.write_event(Event::Empty(f_start))?;
+        } else {
+            writer.write_event(Event::Start(f_start))?;
+            writer.write_event(Event::Text(BytesText::new(&file_text)))?;
+            writer.write_event(Event::End(BytesEnd::new("f")))?;
+        }
+    }
+
+    match &cell.value {
+        CellValue::Empty => {}
+        CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
+            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            let v = super::raw_or_other(meta, s);
+            writer.write_event(Event::Text(BytesText::new(&v)))?;
+            writer.write_event(Event::End(BytesEnd::new("v")))?;
+        }
+        CellValue::Number(n) => {
+            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            let v = super::raw_or_number(meta, *n);
+            writer.write_event(Event::Text(BytesText::new(&v)))?;
+            writer.write_event(Event::End(BytesEnd::new("v")))?;
+        }
+        CellValue::Boolean(b) => {
+            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            let v = super::raw_or_bool(meta, *b);
+            writer.write_event(Event::Text(BytesText::new(v)))?;
+            writer.write_event(Event::End(BytesEnd::new("v")))?;
+        }
+        CellValue::Error(err) => {
+            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            let v = super::raw_or_error(meta, *err);
+            writer.write_event(Event::Text(BytesText::new(&v)))?;
+            writer.write_event(Event::End(BytesEnd::new("v")))?;
+        }
+        value @ CellValue::String(s) => match &value_kind {
+            CellValueKind::SharedString { .. } => {
+                let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                writer.write_event(Event::Start(BytesStart::new("v")))?;
+                writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                writer.write_event(Event::End(BytesEnd::new("v")))?;
+            }
+            CellValueKind::InlineString => {
+                writer.write_event(Event::Start(BytesStart::new("is")))?;
+                let mut t_start = BytesStart::new("t");
+                if super::needs_space_preserve(s) {
+                    t_start.push_attribute(("xml:space", "preserve"));
+                }
+                writer.write_event(Event::Start(t_start))?;
+                writer.write_event(Event::Text(BytesText::new(s)))?;
+                writer.write_event(Event::End(BytesEnd::new("t")))?;
+                writer.write_event(Event::End(BytesEnd::new("is")))?;
+            }
+            CellValueKind::Str => {
+                writer.write_event(Event::Start(BytesStart::new("v")))?;
+                let v = super::raw_or_str(meta, s);
+                writer.write_event(Event::Text(BytesText::new(&v)))?;
+                writer.write_event(Event::End(BytesEnd::new("v")))?;
+            }
+            _ => {
+                let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                writer.write_event(Event::Start(BytesStart::new("v")))?;
+                writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                writer.write_event(Event::End(BytesEnd::new("v")))?;
+            }
+        },
+        value @ CellValue::RichText(rich) => {
+            let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+            if idx != 0 || !rich.text.is_empty() {
+                writer.write_event(Event::Start(BytesStart::new("v")))?;
+                writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                writer.write_event(Event::End(BytesEnd::new("v")))?;
+            }
+        }
+        _ => {
+            // Array/Spill not yet modeled for writing. Preserve as blank.
+        }
+    }
+
+    for ev in preserved_children {
+        writer.write_event(ev)?;
+    }
+
+    writer.write_event(Event::End(BytesEnd::new("c")))?;
+    Ok(())
+}
+
+fn formula_meta_for_cell(
+    meta: Option<&crate::CellMeta>,
+    cell: &formula_model::Cell,
+) -> Option<crate::FormulaMeta> {
+    let model_formula = cell.formula.as_deref();
+    match (model_formula, meta.and_then(|m| m.formula.clone())) {
+        (Some(_), Some(meta)) => Some(meta),
+        (Some(formula), None) => Some(crate::FormulaMeta {
+            file_text: crate::formula_text::add_xlfn_prefixes(super::strip_leading_equals(formula)),
+            ..Default::default()
+        }),
+        (None, Some(meta)) => {
+            // Keep follower shared formulas (represented in SpreadsheetML metadata but not modeled
+            // in memory), but drop stale formula text when the model clears it.
+            if meta.file_text.is_empty()
+                && meta.t.is_none()
+                && meta.reference.is_none()
+                && meta.shared_index.is_none()
+                && meta.always_calc.is_none()
+            {
+                None
+            } else if meta.file_text.is_empty() {
+                Some(meta)
+            } else {
+                None
+            }
+        }
+        (None, None) => None,
+    }
+}
+
+fn row_num_from_attrs(e: &BytesStart<'_>) -> Result<u32, WriteError> {
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"r" {
+            return Ok(attr.unescape_value()?.into_owned().parse().unwrap_or(0));
+        }
+    }
+    Ok(0)
+}
+
+fn row_has_extra_attrs(e: &BytesStart<'_>) -> Result<bool, WriteError> {
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() != b"r" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn peek_row(desired_cells: &[(CellRef, &formula_model::Cell)], idx: usize) -> Option<u32> {
+    desired_cells.get(idx).map(|(r, _)| r.row + 1)
+}
+
+fn collect_full_element<R: std::io::BufRead>(
+    start: Event<'static>,
+    reader: &mut Reader<R>,
+    buf: &mut Vec<u8>,
+) -> Result<Vec<Event<'static>>, WriteError> {
+    let mut events: Vec<Event<'static>> = vec![start];
+    let mut depth: usize = 1;
+    loop {
+        let ev = reader.read_event_into(buf)?.into_owned();
+        match ev {
+            Event::Start(_) => {
+                depth += 1;
+                events.push(ev);
+            }
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                events.push(ev);
+                if depth == 0 {
+                    break;
+                }
+            }
+            Event::Eof => break,
+            _ => events.push(ev),
+        }
+        buf.clear();
+    }
+    Ok(events)
+}
+
+fn write_events<W: Write>(writer: &mut Writer<W>, events: Vec<Event<'static>>) -> Result<(), WriteError> {
+    for ev in events {
+        writer.write_event(ev)?;
+    }
+    Ok(())
+}
+
+fn cell_ref_from_cell_events(events: &[Event<'static>]) -> Result<Option<(CellRef, u32)>, WriteError> {
+    let start = match events.first() {
+        Some(Event::Start(e)) => e,
+        Some(Event::Empty(e)) => e,
+        _ => return Ok(None),
+    };
+
+    for attr in start.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"r" {
+            let a1 = attr.unescape_value()?.into_owned();
+            if let Ok(cell_ref) = CellRef::from_a1(&a1) {
+                return Ok(Some((cell_ref, cell_ref.col + 1)));
+            }
+            return Ok(None);
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CellSemantics {
+    style_xf: u32,
+    formula: Option<String>,
+    value: CellValue,
+}
+
+impl CellSemantics {
+    fn from_model(cell: &formula_model::Cell, style_to_xf: &HashMap<u32, u32>) -> Self {
+        let style_xf = if cell.style_id == 0 {
+            0
+        } else {
+            style_to_xf.get(&cell.style_id).copied().unwrap_or(0)
+        };
+        Self {
+            style_xf,
+            formula: cell
+                .formula
+                .as_deref()
+                .map(crate::formula_text::normalize_display_formula)
+                .filter(|f| !f.is_empty()),
+            value: cell.value.clone(),
+        }
+    }
+
+    fn is_truly_empty(&self) -> bool {
+        self.style_xf == 0 && self.formula.is_none() && matches!(self.value, CellValue::Empty)
+    }
+}
+
+fn parse_cell_semantics(
+    _doc: &XlsxDocument,
+    _sheet_meta: &SheetMeta,
+    events: &[Event<'static>],
+    shared_strings: &[RichText],
+) -> Result<CellSemantics, WriteError> {
+    let start = match events.first() {
+        Some(Event::Start(e)) => e,
+        Some(Event::Empty(e)) => e,
+        _ => {
+            return Ok(CellSemantics {
+                style_xf: 0,
+                formula: None,
+                value: CellValue::Empty,
+            })
+        }
+    };
+
+    let mut style_xf: u32 = 0;
+    let mut cell_type: Option<String> = None;
+    for attr in start.attributes() {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"s" => style_xf = attr.unescape_value()?.into_owned().parse().unwrap_or(0),
+            b"t" => cell_type = Some(attr.unescape_value()?.into_owned()),
+            _ => {}
+        }
+    }
+
+    if matches!(events.first(), Some(Event::Empty(_))) {
+        return Ok(CellSemantics {
+            style_xf,
+            formula: None,
+            value: CellValue::Empty,
+        });
+    }
+
+    let mut v_text: Option<String> = None;
+    let mut f_text: Option<String> = None;
+    let mut inline_text: Option<String> = None;
+    let mut in_v = false;
+    let mut in_f = false;
+    let mut in_inline_t = false;
+
+    for ev in events {
+        match ev {
+            Event::Start(e) => match e.name().as_ref() {
+                b"v" => in_v = true,
+                b"f" => in_f = true,
+                b"t" if cell_type.as_deref() == Some("inlineStr") => in_inline_t = true,
+                _ => {}
+            },
+            Event::End(e) => match e.name().as_ref() {
+                b"v" => in_v = false,
+                b"f" => in_f = false,
+                b"t" if cell_type.as_deref() == Some("inlineStr") => in_inline_t = false,
+                _ => {}
+            },
+            Event::Empty(e) => {
+                if e.name().as_ref() == b"f" {
+                    // Shared formulas may be represented as <f .../> with no text.
+                    f_text.get_or_insert_with(String::new);
+                }
+            }
+            Event::Text(t) => {
+                let text = t.unescape()?.into_owned();
+                if in_v {
+                    v_text = Some(text);
+                } else if in_f {
+                    match f_text.as_mut() {
+                        Some(existing) => existing.push_str(&text),
+                        None => f_text = Some(text),
+                    }
+                } else if in_inline_t {
+                    match inline_text.as_mut() {
+                        Some(existing) => existing.push_str(&text),
+                        None => inline_text = Some(text),
+                    }
+                }
+            }
+            Event::CData(c) => {
+                let text = String::from_utf8_lossy(c.as_ref()).into_owned();
+                if in_v {
+                    v_text = Some(text);
+                } else if in_f {
+                    match f_text.as_mut() {
+                        Some(existing) => existing.push_str(&text),
+                        None => f_text = Some(text),
+                    }
+                } else if in_inline_t {
+                    match inline_text.as_mut() {
+                        Some(existing) => existing.push_str(&text),
+                        None => inline_text = Some(text),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let value = interpret_cell_value(cell_type.as_deref(), &v_text, &inline_text, shared_strings);
+    let formula = f_text
+        .as_deref()
+        .filter(|t| !t.is_empty())
+        .map(crate::formula_text::normalize_display_formula);
+
+    Ok(CellSemantics {
+        style_xf,
+        formula,
+        value,
+    })
+}
+
+fn interpret_cell_value(
+    t: Option<&str>,
+    v_text: &Option<String>,
+    inline_text: &Option<String>,
+    shared_strings: &[RichText],
+) -> CellValue {
+    match t {
+        Some("s") => {
+            let raw = v_text.clone().unwrap_or_default();
+            let idx: u32 = raw.parse().unwrap_or(0);
+            let text = shared_strings
+                .get(idx as usize)
+                .map(|rt| rt.text.clone())
+                .unwrap_or_default();
+            CellValue::String(text)
+        }
+        Some("b") => {
+            let raw = v_text.clone().unwrap_or_default();
+            CellValue::Boolean(raw == "1")
+        }
+        Some("e") => {
+            let raw = v_text.clone().unwrap_or_default();
+            let err = raw.parse::<ErrorValue>().unwrap_or(ErrorValue::Unknown);
+            CellValue::Error(err)
+        }
+        Some("str") => {
+            let raw = v_text.clone().unwrap_or_default();
+            CellValue::String(raw)
+        }
+        Some("inlineStr") => {
+            let raw = inline_text.clone().unwrap_or_default();
+            CellValue::String(raw)
+        }
+        Some(_) | None => {
+            if let Some(raw) = v_text.clone() {
+                raw.parse::<f64>()
+                    .map(CellValue::Number)
+                    .unwrap_or(CellValue::String(raw))
+            } else {
+                CellValue::Empty
+            }
+        }
+    }
+}
+
+fn extract_preserved_cell_children(events: &[Event<'static>]) -> Vec<Event<'static>> {
+    if events.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut preserved = Vec::new();
+    let mut skipping: usize = 0;
+
+    for ev in events.iter().skip(1).take(events.len().saturating_sub(2)) {
+        if skipping > 0 {
+            match ev {
+                Event::Start(_) => skipping += 1,
+                Event::End(_) => skipping = skipping.saturating_sub(1),
+                _ => {}
+            }
+            continue;
+        }
+
+        match ev {
+            Event::Start(e) if matches!(e.name().as_ref(), b"f" | b"v" | b"is") => {
+                skipping = 1;
+            }
+            Event::Empty(e) if matches!(e.name().as_ref(), b"f" | b"v" | b"is") => {}
+            other => preserved.push(other.clone()),
+        }
+    }
+
+    preserved
+}

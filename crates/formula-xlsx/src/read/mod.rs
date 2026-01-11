@@ -364,6 +364,7 @@ fn parse_worksheet_into_model(
     let mut buf = Vec::new();
 
     let mut in_sheet_data = false;
+    let mut in_cols = false;
 
     let mut current_ref: Option<CellRef> = None;
     let mut current_t: Option<String> = None;
@@ -377,11 +378,120 @@ fn parse_worksheet_into_model(
 
     loop {
         match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.name().as_ref() == b"cols" => in_cols = true,
+            Event::End(e) if e.name().as_ref() == b"cols" => in_cols = false,
+            Event::Empty(e) if e.name().as_ref() == b"cols" => {
+                in_cols = false;
+                drop(e);
+            }
+            Event::Start(e) | Event::Empty(e) if in_cols && e.name().as_ref() == b"col" => {
+                let mut min: Option<u32> = None;
+                let mut max: Option<u32> = None;
+                let mut width: Option<f32> = None;
+                let mut hidden = false;
+
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"min" => {
+                            min = Some(
+                                attr.unescape_value()?
+                                    .into_owned()
+                                    .parse()
+                                    .unwrap_or(0),
+                            )
+                        }
+                        b"max" => {
+                            max = Some(
+                                attr.unescape_value()?
+                                    .into_owned()
+                                    .parse()
+                                    .unwrap_or(0),
+                            )
+                        }
+                        b"width" => {
+                            width = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<f32>()
+                                .ok();
+                        }
+                        b"hidden" => {
+                            let v = attr.unescape_value()?.into_owned();
+                            hidden = v == "1" || v.eq_ignore_ascii_case("true");
+                        }
+                        _ => {}
+                    }
+                }
+
+                let Some(min) = min else {
+                    continue;
+                };
+                let max = max.unwrap_or(min).min(formula_model::EXCEL_MAX_COLS);
+                if min == 0 || max == 0 || min > formula_model::EXCEL_MAX_COLS {
+                    continue;
+                }
+
+                for col_1_based in min..=max {
+                    let col = col_1_based - 1;
+                    if let Some(width) = width {
+                        worksheet.set_col_width(col, Some(width));
+                    }
+                    if hidden {
+                        worksheet.set_col_hidden(col, true);
+                    }
+                }
+            }
+
             Event::Start(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = true,
             Event::End(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = false,
             Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
                 in_sheet_data = false;
                 drop(e);
+            }
+
+            Event::Start(e) | Event::Empty(e) if in_sheet_data && e.name().as_ref() == b"row" => {
+                let mut row_1_based: Option<u32> = None;
+                let mut height: Option<f32> = None;
+                let mut hidden = false;
+
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"r" => {
+                            row_1_based = Some(
+                                attr.unescape_value()?
+                                    .into_owned()
+                                    .parse()
+                                    .unwrap_or(0),
+                            );
+                        }
+                        b"ht" => {
+                            height = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<f32>()
+                                .ok();
+                        }
+                        b"hidden" => {
+                            let v = attr.unescape_value()?.into_owned();
+                            hidden = v == "1" || v.eq_ignore_ascii_case("true");
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let Some(row_1_based) = row_1_based {
+                    if row_1_based > 0 && row_1_based <= formula_model::EXCEL_MAX_ROWS {
+                        let row = row_1_based - 1;
+                        if let Some(height) = height {
+                            worksheet.set_row_height(row, Some(height));
+                        }
+                        if hidden {
+                            worksheet.set_row_hidden(row, true);
+                        }
+                    }
+                }
             }
 
             Event::Start(e) if in_sheet_data && e.name().as_ref() == b"c" => {

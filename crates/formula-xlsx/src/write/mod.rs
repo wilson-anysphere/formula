@@ -28,6 +28,7 @@ const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 mod dimension;
+mod sheetdata_patch;
 
 #[derive(Debug, Error)]
 pub enum WriteError {
@@ -1061,8 +1062,9 @@ fn write_worksheet_xml(
             cell_meta_sheet_ids,
         );
     }
-
+ 
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
+    let cols_xml = render_cols(sheet);
     let sheet_data_xml = render_sheet_data(
         doc,
         sheet_meta,
@@ -1079,6 +1081,9 @@ fn write_worksheet_xml(
         r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
     );
     xml.push_str(&format!(r#"<dimension ref="{dimension}"/>"#));
+    if !cols_xml.is_empty() {
+        xml.push_str(&cols_xml);
+    }
     xml.push_str(&sheet_data_xml);
     xml.push_str("</worksheet>");
     Ok(xml.into_bytes())
@@ -1098,29 +1103,34 @@ fn patch_worksheet_xml(
     let insert_dimension = !original_has_dimension && original_used_range != new_used_range;
     let dimension_range = dimension::worksheet_dimension_range(sheet);
     let dimension_ref = dimension_range.to_string();
-
-    let outline = std::str::from_utf8(original)
-        .ok()
-        .and_then(|xml| crate::outline::read_outline_from_worksheet_xml(xml).ok());
-    let sheet_data_xml = render_sheet_data(
+    let patched = sheetdata_patch::patch_worksheet_xml(
         doc,
         sheet_meta,
         sheet,
+        original,
         shared_lookup,
         style_to_xf,
         cell_meta_sheet_ids,
-        outline.as_ref(),
-    );
+    )?;
 
-    let mut reader = Reader::from_reader(original);
+    patch_worksheet_dimension(&patched, insert_dimension, dimension_range, &dimension_ref)
+}
+
+fn patch_worksheet_dimension(
+    worksheet_xml: &[u8],
+    insert_dimension: bool,
+    dimension_range: Range,
+    dimension_ref: &str,
+) -> Result<Vec<u8>, WriteError> {
+    let mut reader = Reader::from_reader(worksheet_xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
-    let mut writer = Writer::new(Vec::with_capacity(original.len() + sheet_data_xml.len()));
+    let mut writer = Writer::new(Vec::with_capacity(worksheet_xml.len() + dimension_ref.len()));
 
-    let mut skipping_sheet_data = false;
     let mut inserted_dimension = false;
     let mut saw_sheet_pr = false;
     let mut in_sheet_pr = false;
+
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.name().as_ref() == b"sheetPr" => {
@@ -1132,7 +1142,7 @@ fn patch_worksheet_xml(
                 saw_sheet_pr = true;
                 writer.write_event(Event::Empty(e.into_owned()))?;
                 if insert_dimension && !inserted_dimension {
-                    insert_dimension_element(&mut writer, &dimension_ref);
+                    insert_dimension_element(&mut writer, dimension_ref);
                     inserted_dimension = true;
                 }
             }
@@ -1140,7 +1150,7 @@ fn patch_worksheet_xml(
                 in_sheet_pr = false;
                 writer.write_event(Event::End(e.into_owned()))?;
                 if insert_dimension && !inserted_dimension {
-                    insert_dimension_element(&mut writer, &dimension_ref);
+                    insert_dimension_element(&mut writer, dimension_ref);
                     inserted_dimension = true;
                 }
             }
@@ -1149,47 +1159,33 @@ fn patch_worksheet_xml(
                 if dimension_matches(&e, dimension_range)? {
                     writer.write_event(Event::Start(e.into_owned()))?;
                 } else {
-                    write_dimension_element(&mut writer, &e, &dimension_ref, false)?;
+                    write_dimension_element(&mut writer, &e, dimension_ref, false)?;
                 }
             }
             Event::Empty(e) if e.name().as_ref() == b"dimension" => {
                 if dimension_matches(&e, dimension_range)? {
                     writer.write_event(Event::Empty(e.into_owned()))?;
                 } else {
-                    write_dimension_element(&mut writer, &e, &dimension_ref, true)?;
+                    write_dimension_element(&mut writer, &e, dimension_ref, true)?;
                 }
             }
 
             Event::Start(e) if e.name().as_ref() == b"sheetData" => {
-                if insert_dimension
-                    && !inserted_dimension
-                    && !saw_sheet_pr
-                    && !in_sheet_pr
-                {
-                    insert_dimension_element(&mut writer, &dimension_ref);
+                if insert_dimension && !inserted_dimension && !saw_sheet_pr && !in_sheet_pr {
+                    insert_dimension_element(&mut writer, dimension_ref);
                     inserted_dimension = true;
                 }
-                skipping_sheet_data = true;
-                writer.get_mut().extend_from_slice(sheet_data_xml.as_bytes());
+                writer.write_event(Event::Start(e.into_owned()))?;
             }
             Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
-                if insert_dimension
-                    && !inserted_dimension
-                    && !saw_sheet_pr
-                    && !in_sheet_pr
-                {
-                    insert_dimension_element(&mut writer, &dimension_ref);
+                if insert_dimension && !inserted_dimension && !saw_sheet_pr && !in_sheet_pr {
+                    insert_dimension_element(&mut writer, dimension_ref);
                     inserted_dimension = true;
                 }
-                writer.get_mut().extend_from_slice(sheet_data_xml.as_bytes());
-                drop(e);
+                writer.write_event(Event::Empty(e.into_owned()))?;
             }
-            Event::End(e) if e.name().as_ref() == b"sheetData" => {
-                skipping_sheet_data = false;
-                drop(e);
-            }
+
             Event::Eof => break,
-            ev if skipping_sheet_data => drop(ev),
             ev => {
                 match &ev {
                     Event::Start(e) | Event::Empty(e)
@@ -1199,7 +1195,7 @@ fn patch_worksheet_xml(
                             && !in_sheet_pr
                             && e.name().as_ref() != b"worksheet" =>
                     {
-                        insert_dimension_element(&mut writer, &dimension_ref);
+                        insert_dimension_element(&mut writer, dimension_ref);
                         inserted_dimension = true;
                     }
                     Event::End(e)
@@ -1207,18 +1203,65 @@ fn patch_worksheet_xml(
                             && !inserted_dimension
                             && e.name().as_ref() == b"worksheet" =>
                     {
-                        insert_dimension_element(&mut writer, &dimension_ref);
+                        insert_dimension_element(&mut writer, dimension_ref);
                         inserted_dimension = true;
                     }
                     _ => {}
                 }
-                writer.write_event(ev.into_owned())?
+                writer.write_event(ev.into_owned())?;
             }
         }
         buf.clear();
     }
 
     Ok(writer.into_inner())
+}
+
+fn render_cols(sheet: &Worksheet) -> String {
+    if sheet.col_properties.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("<cols>");
+
+    let mut current: Option<(u32, u32, formula_model::ColProperties)> = None;
+    for (col, props) in sheet.col_properties.iter() {
+        let col = *col;
+        let props = props.clone();
+        match current.take() {
+            None => current = Some((col, col, props)),
+            Some((start, end, cur)) if col == end + 1 && props == cur => {
+                current = Some((start, col, cur));
+            }
+            Some((start, end, cur)) => {
+                out.push_str(&render_col_range(start, end, &cur));
+                current = Some((col, col, props));
+            }
+        }
+    }
+    if let Some((start, end, cur)) = current {
+        out.push_str(&render_col_range(start, end, &cur));
+    }
+
+    out.push_str("</cols>");
+    out
+}
+
+fn render_col_range(start_col: u32, end_col: u32, props: &formula_model::ColProperties) -> String {
+    let mut s = String::new();
+    let min = start_col + 1;
+    let max = end_col + 1;
+    s.push_str(&format!(r#"<col min="{min}" max="{max}""#));
+    if let Some(width) = props.width {
+        s.push_str(&format!(r#" width="{width}""#));
+        s.push_str(r#" customWidth="1""#);
+    }
+    if props.hidden {
+        s.push_str(r#" hidden="1""#);
+    }
+    s.push_str("/>");
+    s
 }
 
 fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteError> {
@@ -1362,6 +1405,16 @@ fn render_sheet_data(
     let mut cells: Vec<(CellRef, &formula_model::Cell)> = sheet.iter_cells().collect();
     cells.sort_by_key(|(r, _)| (r.row, r.col));
 
+    let mut rows: BTreeMap<u32, ()> = BTreeMap::new();
+    for (cell_ref, _) in &cells {
+        rows.insert(cell_ref.row + 1, ());
+    }
+    for (row, props) in sheet.row_properties.iter() {
+        if props.height.is_some() || props.hidden {
+            rows.insert(row + 1, ());
+        }
+    }
+
     let mut outline_rows: Vec<u32> = Vec::new();
     if let Some(outline) = outline {
         // Preserve outline-only rows (groups, hidden rows, etc) even if they contain no cells.
@@ -1369,6 +1422,7 @@ fn render_sheet_data(
         for (row, entry) in outline.rows.iter() {
             if entry.level > 0 || entry.hidden.is_hidden() || entry.collapsed {
                 outline_rows.push(row);
+                rows.insert(row, ());
             }
         }
     }
@@ -1376,27 +1430,34 @@ fn render_sheet_data(
     let mut cell_idx = 0usize;
     let mut outline_idx = 0usize;
 
-    while cell_idx < cells.len() || outline_idx < outline_rows.len() {
-        let next_cell_row = cells
-            .get(cell_idx)
-            .map(|(cell_ref, _)| cell_ref.row + 1)
-            .unwrap_or(u32::MAX);
-        let next_outline_row = outline_rows.get(outline_idx).copied().unwrap_or(u32::MAX);
-        let row_1_based = next_cell_row.min(next_outline_row);
-
-        if row_1_based == next_outline_row {
+    for row_1_based in rows.keys().copied() {
+        // Keep the existing outline-only row tracking, but the actual row list is now the union of:
+        // - cell rows
+        // - outline rows
+        // - modeled row properties
+        if outline_rows.get(outline_idx).copied() == Some(row_1_based) {
             outline_idx += 1;
         }
 
         let outline_entry: OutlineEntry = outline
             .map(|outline| outline.rows.entry(row_1_based))
             .unwrap_or_default();
+        let row_props = sheet.row_properties(row_1_based.saturating_sub(1));
 
         out.push_str(&format!(r#"<row r="{row_1_based}""#));
+        if let Some(row_props) = row_props {
+            if let Some(height) = row_props.height {
+                out.push_str(&format!(r#" ht="{height}""#));
+                out.push_str(r#" customHeight="1""#);
+            }
+            if row_props.hidden {
+                out.push_str(r#" hidden="1""#);
+            }
+        }
         if outline_entry.level > 0 {
             out.push_str(&format!(r#" outlineLevel="{}""#, outline_entry.level));
         }
-        if outline_entry.hidden.is_hidden() {
+        if outline_entry.hidden.is_hidden() && !row_props.is_some_and(|p| p.hidden) {
             out.push_str(r#" hidden="1""#);
         }
         if outline_entry.collapsed {
