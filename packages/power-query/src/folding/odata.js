@@ -152,6 +152,19 @@ function odataLiteral(value) {
 }
 
 /**
+ * Local predicate semantics stringify values (including null/undefined -> "") for
+ * contains/startsWith/endsWith.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function valueToString(value) {
+  if (value == null) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  return String(value);
+}
+
+/**
  * @param {ComparisonPredicate} predicate
  * @returns {string | null}
  */
@@ -162,34 +175,56 @@ function comparisonToFilter(predicate) {
   if (op === "isNull") return `${col} eq null`;
   if (op === "isNotNull") return `${col} ne null`;
 
-  const literal = odataLiteral(predicate.value);
-  if (literal == null) return null;
-
-  const caseSensitive = predicate.caseSensitive ?? true;
-  const isString = typeof predicate.value === "string";
-
-  const wrapCase = (expr) => (caseSensitive || !isString ? expr : `tolower(${expr})`);
-  const wrapLit = (expr) => (caseSensitive || !isString ? expr : `tolower(${expr})`);
-
   switch (op) {
     case "equals":
-      return `${wrapCase(col)} eq ${wrapLit(literal)}`;
-    case "notEquals":
-      return `${wrapCase(col)} ne ${wrapLit(literal)}`;
+    case "notEquals": {
+      // Local semantics treat equals/notEquals as case-sensitive comparisons (even
+      // when caseSensitive is provided), so do not apply `tolower()` here.
+      const literal = odataLiteral(predicate.value);
+      if (literal == null) return null;
+      return op === "equals" ? `${col} eq ${literal}` : `${col} ne ${literal}`;
+    }
     case "greaterThan":
-      return `${col} gt ${literal}`;
     case "greaterThanOrEqual":
-      return `${col} ge ${literal}`;
     case "lessThan":
-      return `${col} lt ${literal}`;
-    case "lessThanOrEqual":
-      return `${col} le ${literal}`;
+    case "lessThanOrEqual": {
+      // Local semantics return false when comparing against null/undefined.
+      if (predicate.value == null) return "false";
+      const literal = odataLiteral(predicate.value);
+      if (literal == null) return null;
+      return op === "greaterThan"
+        ? `${col} gt ${literal}`
+        : op === "greaterThanOrEqual"
+          ? `${col} ge ${literal}`
+          : op === "lessThan"
+            ? `${col} lt ${literal}`
+            : `${col} le ${literal}`;
+    }
     case "contains":
-      return `contains(${wrapCase(col)}, ${wrapLit(literal)})`;
     case "startsWith":
-      return `startswith(${wrapCase(col)}, ${wrapLit(literal)})`;
-    case "endsWith":
-      return `endswith(${wrapCase(col)}, ${wrapLit(literal)})`;
+    case "endsWith": {
+      const caseSensitive = predicate.caseSensitive ?? false;
+
+      // Local semantics treat empty needle as always-true. OData `contains(null,'')`
+      // can yield null/false, so avoid folding that case (run locally).
+      const needleText = valueToString(predicate.value);
+      if (needleText === "") return null;
+
+      const needleLit = odataLiteral(needleText);
+      if (needleLit == null) return null;
+
+      // Best-effort: cast the column to Edm.String to mimic Power Query's local
+      // `valueToString` behavior for these predicates.
+      const textExpr = `cast(${col},Edm.String)`;
+      const haystack = caseSensitive ? textExpr : `tolower(${textExpr})`;
+      const needle = caseSensitive ? needleLit : `tolower(${needleLit})`;
+
+      return op === "contains"
+        ? `contains(${haystack}, ${needle})`
+        : op === "startsWith"
+          ? `startswith(${haystack}, ${needle})`
+          : `endswith(${haystack}, ${needle})`;
+    }
     default:
       return null;
   }
@@ -392,4 +427,3 @@ export class ODataFoldingEngine {
     return { plan: { type: "hybrid", url, query: current, localSteps }, steps };
   }
 }
-

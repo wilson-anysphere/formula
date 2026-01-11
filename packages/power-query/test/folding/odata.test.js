@@ -61,3 +61,66 @@ test("OData folding: falls back to local when an operation is unsupported", () =
   assert.equal(explained.steps[2].reason, "folding_stopped");
 });
 
+test("OData folding: contains defaults to case-insensitive and casts values to text", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_contains",
+    name: "OData contains",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Name", operator: "contains", value: "ABC" } },
+      },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  assert.equal(
+    explained.plan.url,
+    "https://example.com/odata/Products?$filter=contains(tolower(cast(Name,Edm.String)),%20tolower(%27ABC%27))",
+  );
+});
+
+test("OData folding: equals ignores caseSensitive and stays case-sensitive", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_equals_case",
+    name: "OData equals case",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: {
+          type: "filterRows",
+          predicate: { type: "comparison", column: "Name", operator: "equals", value: "ABC", caseSensitive: false },
+        },
+      },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$filter=Name%20eq%20%27ABC%27");
+});
+
+test("OData folding: empty contains needle breaks folding (preserves local semantics)", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_contains_empty",
+    name: "OData contains empty",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      { id: "s1", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Name", operator: "contains", value: "" } } },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "local");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products");
+  assert.equal(explained.steps[0].status, "local");
+  assert.equal(explained.steps[0].reason, "unsupported_predicate");
+});
