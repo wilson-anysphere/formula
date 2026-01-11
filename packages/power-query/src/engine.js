@@ -1566,7 +1566,8 @@ export class QueryEngine {
       }
 
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
-      this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? "<unknown-sql>"]);
+      const sqlSourceId = connectionId ? `sql:${connectionId}` : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
+      this.setTableSourceIds(result.table, [sqlSourceId]);
       const meta = {
         ...result.meta,
         sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
@@ -1635,7 +1636,8 @@ export class QueryEngine {
     }
 
     const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
-    this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? "<unknown-sql>"]);
+    const sqlSourceId = connectionId ? `sql:${connectionId}` : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
+    this.setTableSourceIds(result.table, [sqlSourceId]);
     const meta = {
       ...result.meta,
       sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,

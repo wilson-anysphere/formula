@@ -331,6 +331,76 @@ test("privacy levels: strict mode blocks when combining Private + Public via pre
   assert.ok(blocks.length > 0, "expected a blocking firewall diagnostic event");
 });
 
+test("privacy levels: sql sourceId respects SqlConnector.getConnectionIdentity", async () => {
+  /** @type {any[]} */
+  const events = [];
+
+  const sqlConnector = new SqlConnector({
+    querySql: async (_connection, _sql) =>
+      DataTable.fromGrid(
+        [
+          ["Id", "Region", "Target"],
+          [1, "East", 10],
+        ],
+        { hasHeaders: true, inferTypes: true },
+      ),
+    getConnectionIdentity: (connection) => {
+      const c = /** @type {any} */ (connection);
+      return { server: c.server, database: c.database };
+    },
+  });
+
+  const engine = new QueryEngine({
+    privacyMode: "enforce",
+    connectors: { sql: sqlConnector },
+  });
+
+  const leftConn = { id: "db1", server: "s1", database: "a" };
+  const rightConn = { id: "db2", server: "s2", database: "b" };
+
+  const leftConnectionId = /** @type {any} */ (sqlConnector.getCacheKey({ connection: leftConn, sql: "SELECT 1" })).connectionId;
+  const rightConnectionId = /** @type {any} */ (sqlConnector.getCacheKey({ connection: rightConn, sql: "SELECT 1" })).connectionId;
+  assert.ok(typeof leftConnectionId === "string" && leftConnectionId.length > 0);
+  assert.ok(typeof rightConnectionId === "string" && rightConnectionId.length > 0);
+
+  const leftSourceId = getSqlSourceId(leftConnectionId);
+  const rightSourceId = getSqlSourceId(rightConnectionId);
+
+  const right = {
+    id: "q_right",
+    name: "Targets",
+    source: { type: "database", connection: rightConn, query: "SELECT * FROM targets" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left",
+    name: "Sales",
+    source: { type: "database", connection: leftConn, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region"] } },
+      { id: "l2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+    ],
+  };
+
+  await assert.rejects(
+    () =>
+      engine.executeQuery(
+        left,
+        { queries: { q_right: right }, privacy: { levelsBySourceId: { [leftSourceId]: "private", [rightSourceId]: "public" } } },
+        { onProgress: (e) => events.push(e) },
+      ),
+    /Formula\.Firewall/,
+  );
+
+  const blocks = events.filter((e) => e.type === "privacy:firewall" && e.phase === "combine" && e.action === "block");
+  assert.ok(blocks.length > 0, "expected a blocking firewall diagnostic event");
+  assert.deepEqual(
+    blocks[0].sources.map((s) => s.sourceId),
+    [leftSourceId, rightSourceId].sort(),
+  );
+});
+
 test("privacy levels: warn mode allows execution but emits diagnostic", async () => {
   /** @type {any[]} */
   const events = [];
