@@ -1,8 +1,9 @@
 import React from "react";
 
 import type { DataTable } from "../../../../../packages/power-query/src/table.js";
+import type { ArrowTableAdapter } from "../../../../../packages/power-query/src/arrowTable.js";
 
-export function SchemaView(props: { table: DataTable | null }) {
+export function SchemaView(props: { table: DataTable | ArrowTableAdapter | null }) {
   if (!props.table) return null;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>

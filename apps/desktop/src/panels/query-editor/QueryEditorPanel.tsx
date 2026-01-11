@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { Query, QueryOperation, QueryStep } from "../../../../packages/power-query/src/model.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
 import type { DataTable } from "../../../../packages/power-query/src/table.js";
+import type { ArrowTableAdapter } from "../../../../packages/power-query/src/arrowTable.js";
 
 import { StepsList } from "./components/StepsList";
 import { PreviewGrid } from "./components/PreviewGrid";
@@ -14,7 +15,10 @@ export type QueryEditorPanelProps = {
   engine: QueryEngine;
   context?: any;
   onQueryChange?: (next: Query) => void;
-  onAiSuggestNextSteps?: (intent: string, context: { query: Query; preview: DataTable | null }) => Promise<QueryOperation[]>;
+  onAiSuggestNextSteps?: (
+    intent: string,
+    context: { query: Query; preview: DataTable | ArrowTableAdapter | null },
+  ) => Promise<QueryOperation[]>;
 };
 
 /**
@@ -26,7 +30,7 @@ export type QueryEditorPanelProps = {
  */
 export function QueryEditorPanel(props: QueryEditorPanelProps) {
   const [selectedStepIndex, setSelectedStepIndex] = useState<number>(props.query.steps.length - 1);
-  const [preview, setPreview] = useState<DataTable | null>(null);
+  const [preview, setPreview] = useState<DataTable | ArrowTableAdapter | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const effectiveSelectedStepIndex = Math.max(-1, Math.min(selectedStepIndex, props.query.steps.length - 1));

@@ -1,0 +1,66 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { computeParquetProjectionColumns } from "../src/parquetProjection.js";
+
+test("computeParquetProjectionColumns returns null without an explicit projection", () => {
+  const steps = [
+    { id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } } },
+  ];
+
+  assert.equal(computeParquetProjectionColumns(steps), null);
+});
+
+test("computeParquetProjectionColumns unions referenced columns across supported ops", () => {
+  const steps = [
+    { id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "active", operator: "equals", value: true } } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id", "name", "score"] } },
+    { id: "s_sort", name: "Sort", operation: { type: "sortRows", sortBy: [{ column: "score", direction: "descending" }] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["active", "id", "name", "score"]));
+});
+
+test("computeParquetProjectionColumns maps renamed columns back to parquet source names", () => {
+  const steps = [
+    { id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "score", newName: "Score" } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id", "Score"] } },
+    { id: "s_type", name: "Type", operation: { type: "changeType", column: "Score", newType: "number" } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["id", "score"]));
+});
+
+test("computeParquetProjectionColumns supports groupBy + downstream references to aggregation aliases", () => {
+  const steps = [
+    {
+      id: "s_group",
+      name: "Group",
+      operation: {
+        type: "groupBy",
+        groupColumns: ["Region"],
+        aggregations: [{ column: "Sales", op: "sum", as: "Total Sales" }],
+      },
+    },
+    { id: "s_sort", name: "Sort", operation: { type: "sortRows", sortBy: [{ column: "Total Sales", direction: "descending" }] } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["Region", "Total Sales"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["Region", "Sales"]));
+});
+
+test("computeParquetProjectionColumns returns null when unsupported operations are present", () => {
+  const steps = [
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id"] } },
+    { id: "s_split", name: "Split", operation: { type: "splitColumn", column: "id", delimiter: "-" } },
+  ];
+
+  assert.equal(computeParquetProjectionColumns(steps), null);
+});
+

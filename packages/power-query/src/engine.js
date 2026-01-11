@@ -9,6 +9,7 @@ import { FileConnector } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { SqlConnector } from "./connectors/sql.js";
 import { QueryFoldingEngine } from "./folding/sql.js";
+import { computeParquetProjectionColumns } from "./parquetProjection.js";
 
 /**
  * @typedef {import("./model.js").Query} Query
@@ -345,7 +346,7 @@ export class QueryEngine {
       }
     }
 
-    /** @type {DataTable} */
+    /** @type {ITable} */
     let table;
 
     if (
@@ -380,7 +381,17 @@ export class QueryEngine {
         );
       }
     } else {
-      const sourceResult = await this.loadSourceWithMeta(query.source, context, callStack, options, state);
+      let source = query.source;
+      if (source.type === "parquet" && this.fileAdapter?.readBinary) {
+        const projection = computeParquetProjectionColumns(steps);
+        if (projection && projection.length > 0) {
+          const existing = Array.isArray(source.options?.columns) ? source.options.columns : [];
+          const columns = Array.from(new Set([...existing, ...projection]));
+          source = { ...source, options: { ...(source.options ?? {}), columns } };
+        }
+      }
+
+      const sourceResult = await this.loadSourceWithMeta(source, context, callStack, options, state);
       sources.push(...sourceResult.sources);
       table = sourceResult.table;
       table = await this.executeSteps(table, steps, context, options, state, callStack, sources);
