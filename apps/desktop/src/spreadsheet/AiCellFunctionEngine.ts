@@ -848,6 +848,12 @@ function compactArrayForPrompt(params: {
   const cols = range ? Math.max(1, range.end.col - range.start.col + 1) : null;
   const rows = range ? Math.max(1, range.end.row - range.start.row + 1) : null;
   const totalCells = range && rows && cols ? rows * cols : providedCount;
+  const truncated = totalCells > providedCount;
+  const countMeta = {
+    total_cells: totalCells,
+    sampled_cells: providedCount,
+    ...(truncated ? { truncated: true } : {}),
+  };
 
   const rangeText = range && rangeSheetId ? `${rangeSheetId}!${rangeToA1(range)}` : range ? rangeToA1(range) : null;
 
@@ -981,6 +987,7 @@ function compactArrayForPrompt(params: {
   const value = {
     kind: rangeText ? "range" : "array",
     ...(rangeText ? { range: rangeText } : {}),
+    ...countMeta,
     shape,
     ...(header ? { header } : {}),
     preview,
@@ -992,6 +999,7 @@ function compactArrayForPrompt(params: {
   const compaction = {
     kind: rangeText ? "range" : "array",
     ...(rangeText ? { range: rangeText } : {}),
+    ...countMeta,
     shape,
     header_count: headerIndices.length,
     preview_count: previewCount,

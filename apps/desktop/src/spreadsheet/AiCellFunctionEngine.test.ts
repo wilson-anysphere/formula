@@ -432,6 +432,8 @@ describe("AiCellFunctionEngine", () => {
     const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
     expect(userMessage.length).toBeLessThan(8_000);
     expect(userMessage).toContain('"total_cells":1000');
+    expect(userMessage).toContain('"sampled_cells":200');
+    expect(userMessage).toContain('"truncated":true');
 
     const occurrences = userMessage.match(/CELL_\d{4}/g)?.length ?? 0;
     expect(occurrences).toBeGreaterThan(0);
@@ -464,7 +466,7 @@ describe("AiCellFunctionEngine", () => {
     const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
     expect(userMessage).toContain("PREFIX_");
     expect(userMessage).not.toContain("_SUFFIX");
-    expect(userMessage).toContain("…");
+    expect(userMessage).toContain("…[TRUNCATED]");
   });
 
   it("truncates long prompts in audit entries", async () => {
@@ -494,7 +496,7 @@ describe("AiCellFunctionEngine", () => {
     expect(typeof input?.prompt).toBe("string");
     expect(input.prompt).not.toBe(longPrompt);
     expect(input.prompt.length).toBe(200);
-    expect(input.prompt.endsWith("…")).toBe(true);
+    expect(input.prompt.endsWith("…[TRUNCATED]")).toBe(true);
     expect(input.prompt_hash).toMatch(/^[0-9a-f]{8}$/);
   });
 });
