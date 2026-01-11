@@ -81,7 +81,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
       mode: "jwt-hs256",
       secret: jwtSecret,
       issuer: process.env.SYNC_SERVER_JWT_ISSUER,
-      audience: process.env.SYNC_SERVER_JWT_AUDIENCE,
+      audience: process.env.SYNC_SERVER_JWT_AUDIENCE ?? "formula-sync",
     };
   } else {
     if (nodeEnv === "production") {

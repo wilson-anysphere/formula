@@ -3,9 +3,15 @@ import jwt from "jsonwebtoken";
 
 import type { AuthMode } from "./config.js";
 
+export type SyncRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
+
 export type AuthContext = {
   userId: string;
   tokenType: "opaque" | "jwt";
+  docId: string;
+  orgId: string | null;
+  role: SyncRole;
+  sessionId?: string | null;
 };
 
 export class AuthError extends Error {
@@ -40,13 +46,32 @@ function isStringArray(value: unknown): value is string[] {
   );
 }
 
-function authorizeDocAccessFromJwtPayload(payload: unknown, docName: string) {
+function requireJwtPayloadObject(payload: unknown): Record<string, unknown> {
   if (!payload || typeof payload !== "object") {
     throw new AuthError("Invalid JWT payload", 403);
   }
+  return payload as Record<string, unknown>;
+}
 
-  const docs = (payload as { docs?: unknown }).docs;
-  const doc = (payload as { doc?: unknown }).doc;
+function authorizeDocAccessFromJwtPayload(
+  payload: Record<string, unknown>,
+  docName: string
+): string {
+  const docId = payload.docId;
+  if (docId !== undefined) {
+    if (typeof docId !== "string" || docId.length === 0) {
+      throw new AuthError('JWT "docId" claim must be a non-empty string', 403);
+    }
+
+    if (docId !== docName) {
+      throw new AuthError("Token is not authorized for this document", 403);
+    }
+
+    return docId;
+  }
+
+  const docs = payload.docs;
+  const doc = payload.doc;
 
   const allowedDocs = isStringArray(docs)
     ? docs
@@ -56,15 +81,45 @@ function authorizeDocAccessFromJwtPayload(payload: unknown, docName: string) {
 
   if (!allowedDocs) {
     throw new AuthError(
-      'JWT is missing a "docs" (string[]) or "doc" (string) claim',
+      'JWT is missing a "docId" (string), "docs" (string[]) or "doc" (string) claim',
       403
     );
   }
 
-  if (allowedDocs.includes("*")) return;
+  if (allowedDocs.includes("*")) return docName;
   if (!allowedDocs.includes(docName)) {
     throw new AuthError("Token is not authorized for this document", 403);
   }
+
+  return docName;
+}
+
+function parseRoleFromJwtPayload(payload: Record<string, unknown>): SyncRole {
+  const role = payload.role;
+  if (role === undefined) return "editor";
+
+  if (
+    role === "owner" ||
+    role === "admin" ||
+    role === "editor" ||
+    role === "commenter" ||
+    role === "viewer"
+  ) {
+    return role;
+  }
+
+  throw new AuthError('JWT "role" claim is invalid', 403);
+}
+
+function parseOptionalStringClaim(
+  payload: Record<string, unknown>,
+  claim: string
+): string | null | undefined {
+  const value = payload[claim];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === "string" && value.length > 0) return value;
+  throw new AuthError(`JWT "${claim}" claim must be a non-empty string`, 403);
 }
 
 export function authenticateRequest(
@@ -79,25 +134,46 @@ export function authenticateRequest(
     return {
       userId: "opaque",
       tokenType: "opaque",
+      docId: docName,
+      orgId: null,
+      role: "owner",
     };
   }
 
-  const payload = jwt.verify(token, auth.secret, {
-    algorithms: ["HS256"],
-    issuer: auth.issuer,
-    audience: auth.audience,
-  });
+  let verifiedPayload: unknown;
+  try {
+    verifiedPayload = jwt.verify(token, auth.secret, {
+      algorithms: ["HS256"],
+      issuer: auth.issuer,
+      audience: auth.audience,
+    });
+  } catch {
+    throw new AuthError("Invalid token", 401);
+  }
 
-  authorizeDocAccessFromJwtPayload(payload, docName);
+  const payload = requireJwtPayloadObject(verifiedPayload);
+  const resolvedDocId = authorizeDocAccessFromJwtPayload(payload, docName);
 
-  const sub =
-    payload && typeof payload === "object" && "sub" in payload
-      ? (payload as { sub?: unknown }).sub
-      : undefined;
+  const sub = payload.sub;
+  const userId = typeof sub === "string" && sub.length > 0 ? sub : "jwt";
+  const role = parseRoleFromJwtPayload(payload);
 
-  return {
-    userId: typeof sub === "string" && sub.length > 0 ? sub : "jwt",
+  const orgIdValue = parseOptionalStringClaim(payload, "orgId");
+  const orgId = orgIdValue === undefined ? null : orgIdValue;
+
+  const sessionId = parseOptionalStringClaim(payload, "sessionId");
+
+  const ctx: AuthContext = {
+    userId,
     tokenType: "jwt",
+    docId: resolvedDocId,
+    orgId,
+    role,
   };
-}
 
+  if (sessionId !== undefined) {
+    ctx.sessionId = sessionId;
+  }
+
+  return ctx;
+}
