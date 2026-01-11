@@ -24,6 +24,10 @@ function parseAllowlist(raw: string) {
 export function mountPythonPanel({ documentController, container, getActiveSheetId }: MountPythonPanelOptions) {
   container.replaceChildren();
 
+  const pyodideIndexURL =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__pyodideIndexURL || "/pyodide/v0.25.1/full/";
+
   const root = document.createElement("div");
   root.style.display = "flex";
   root.style.flexDirection = "column";
@@ -149,7 +153,7 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
   let disposed = false;
   let initialized = false;
 
-  const runtime = new PyodideRuntime({ api: bridge });
+  const runtime = new PyodideRuntime({ api: bridge, indexURL: pyodideIndexURL });
 
   function effectivePermissions() {
     const network = networkSelect.value as NetworkPermission;
