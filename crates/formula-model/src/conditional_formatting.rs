@@ -43,6 +43,18 @@ pub struct Cfvo {
     pub value: Option<String>,
 }
 
+impl Cfvo {
+    fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        if self.type_ != CfvoType::Formula {
+            return;
+        }
+        let Some(value) = self.value.as_mut() else {
+            return;
+        };
+        *value = crate::rewrite_sheet_names_in_formula(value, old_name, new_name);
+    }
+}
+
 pub fn parse_argb_hex_color(s: &str) -> Option<Color> {
     let s = s.trim();
     if s.len() != 8 {
@@ -103,10 +115,25 @@ pub struct DataBarRule {
     pub gradient: Option<bool>,
 }
 
+impl DataBarRule {
+    fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        self.min.rewrite_sheet_references(old_name, new_name);
+        self.max.rewrite_sheet_references(old_name, new_name);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColorScaleRule {
     pub cfvos: Vec<Cfvo>,
     pub colors: Vec<Color>,
+}
+
+impl ColorScaleRule {
+    fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        for cfvo in &mut self.cfvos {
+            cfvo.rewrite_sheet_references(old_name, new_name);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -147,6 +174,14 @@ pub struct IconSetRule {
     pub reverse: bool,
 }
 
+impl IconSetRule {
+    fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        for cfvo in &mut self.cfvos {
+            cfvo.rewrite_sheet_references(old_name, new_name);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TopBottomKind {
     Top,
@@ -185,6 +220,27 @@ pub enum CfRuleKind {
     },
 }
 
+impl CfRuleKind {
+    pub(crate) fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        match self {
+            CfRuleKind::CellIs { formulas, .. } => {
+                for formula in formulas {
+                    *formula = crate::rewrite_sheet_names_in_formula(formula, old_name, new_name);
+                }
+            }
+            CfRuleKind::Expression { formula } => {
+                *formula = crate::rewrite_sheet_names_in_formula(formula, old_name, new_name);
+            }
+            CfRuleKind::DataBar(rule) => rule.rewrite_sheet_references(old_name, new_name),
+            CfRuleKind::ColorScale(rule) => rule.rewrite_sheet_references(old_name, new_name),
+            CfRuleKind::IconSet(rule) => rule.rewrite_sheet_references(old_name, new_name),
+            CfRuleKind::TopBottom(_)
+            | CfRuleKind::UniqueDuplicate(_)
+            | CfRuleKind::Unsupported { .. } => {}
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CfRule {
     pub schema: CfRuleSchema,
@@ -201,6 +257,10 @@ pub struct CfRule {
 impl CfRule {
     pub fn applies_to_cell(&self, cell: CellRef) -> bool {
         self.applies_to.iter().any(|r| r.contains(cell))
+    }
+
+    pub(crate) fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        self.kind.rewrite_sheet_references(old_name, new_name);
     }
 }
 
@@ -322,7 +382,8 @@ impl ConditionalFormattingEngine {
         dxfs: Option<&dyn DifferentialFormatProvider>,
     ) -> &CfEvaluationResult {
         if !self.cache.contains_key(&visible) {
-            let (deps, result) = evaluate_rules(&self.rules, visible, values, formula_evaluator, dxfs);
+            let (deps, result) =
+                evaluate_rules(&self.rules, visible, values, formula_evaluator, dxfs);
             self.cache.insert(
                 visible,
                 CachedEvaluation {
@@ -371,11 +432,15 @@ fn evaluate_rules(
             CfRuleKind::Expression { formula } => {
                 apply_expression(&mut result, rule, formula, visible, formula_evaluator, dxfs)
             }
-            CfRuleKind::DataBar(db) => apply_data_bar(&mut result, rule, db, visible, values, formula_evaluator),
+            CfRuleKind::DataBar(db) => {
+                apply_data_bar(&mut result, rule, db, visible, values, formula_evaluator)
+            }
             CfRuleKind::ColorScale(cs) => {
                 apply_color_scale(&mut result, rule, cs, visible, values, formula_evaluator)
             }
-            CfRuleKind::IconSet(is) => apply_icon_set(&mut result, rule, is, visible, values, formula_evaluator),
+            CfRuleKind::IconSet(is) => {
+                apply_icon_set(&mut result, rule, is, visible, values, formula_evaluator)
+            }
             CfRuleKind::TopBottom(tb) => apply_top_bottom(&mut result, rule, tb, visible, values, dxfs),
             CfRuleKind::UniqueDuplicate(ud) => {
                 apply_unique_duplicate(&mut result, rule, ud, visible, values, dxfs)
@@ -711,7 +776,10 @@ fn iter_rule_cells<'a>(rule: &'a CfRule, visible: Range) -> impl Iterator<Item =
         .flat_map(iter_cells)
 }
 
-fn resolve_dxf(dxf_id: Option<u32>, dxfs: Option<&dyn DifferentialFormatProvider>) -> CfStyleOverride {
+fn resolve_dxf(
+    dxf_id: Option<u32>,
+    dxfs: Option<&dyn DifferentialFormatProvider>,
+) -> CfStyleOverride {
     match (dxf_id, dxfs) {
         (Some(id), Some(p)) => p.get_dxf(id).unwrap_or_default(),
         _ => CfStyleOverride::default(),
@@ -1107,7 +1175,10 @@ pub fn format_render_plan(visible: Range, eval: &CfEvaluationResult) -> String {
 }
 
 fn ranges_intersect(a: Range, b: Range) -> bool {
-    a.start.row <= b.end.row && a.end.row >= b.start.row && a.start.col <= b.end.col && a.end.col >= b.start.col
+    a.start.row <= b.end.row
+        && a.end.row >= b.start.row
+        && a.start.col <= b.end.col
+        && a.end.col >= b.start.col
 }
 
 fn range_intersection(a: Range, b: Range) -> Option<Range> {
@@ -1202,7 +1273,13 @@ mod tests {
     #[test]
     fn extract_refs_avoids_function_name() {
         let refs = extract_a1_references("LOG10(A1)+Sheet1!$B$2");
-        assert_eq!(refs, vec![parse_range_a1("A1").unwrap(), parse_range_a1("$B$2").unwrap()]);
+        assert_eq!(
+            refs,
+            vec![
+                parse_range_a1("A1").unwrap(),
+                parse_range_a1("$B$2").unwrap()
+            ]
+        );
     }
 
     #[test]

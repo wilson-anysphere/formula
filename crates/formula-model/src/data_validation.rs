@@ -98,6 +98,24 @@ pub struct DataValidation {
     pub error_alert: Option<DataValidationErrorAlert>,
 }
 
+impl DataValidation {
+    pub(crate) fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        // For list validations, `formula1` can contain a literal list (e.g. `"A,B,C"`). Preserve
+        // literal lists unchanged while still rewriting formula-like list sources.
+        let formula1_is_literal_list =
+            self.kind == DataValidationKind::List && parse_list_constant(&self.formula1).is_some();
+
+        if !formula1_is_literal_list && !self.formula1.is_empty() {
+            self.formula1 =
+                crate::rewrite_sheet_names_in_formula(&self.formula1, old_name, new_name);
+        }
+
+        if let Some(formula2) = self.formula2.as_mut() {
+            *formula2 = crate::rewrite_sheet_names_in_formula(formula2, old_name, new_name);
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataValidationAssignment {
     pub id: DataValidationId,
@@ -181,11 +199,19 @@ fn default_error_message(kind: DataValidationErrorKind) -> &'static str {
         DataValidationErrorKind::BlankNotAllowed => "This cell cannot be left blank.",
         DataValidationErrorKind::TypeMismatch => "The value does not match the required type.",
         DataValidationErrorKind::NotWholeNumber => "The value must be a whole number.",
-        DataValidationErrorKind::ComparisonFailed => "The value does not satisfy the validation rule.",
+        DataValidationErrorKind::ComparisonFailed => {
+            "The value does not satisfy the validation rule."
+        }
         DataValidationErrorKind::NotInList => "The value is not in the list of allowed values.",
-        DataValidationErrorKind::UnresolvedListSource => "The validation list source could not be resolved.",
-        DataValidationErrorKind::UnsupportedFormula => "The validation rule uses an unsupported formula.",
-        DataValidationErrorKind::CustomFormulaFalse => "The custom validation formula evaluated to FALSE.",
+        DataValidationErrorKind::UnresolvedListSource => {
+            "The validation list source could not be resolved."
+        }
+        DataValidationErrorKind::UnsupportedFormula => {
+            "The validation rule uses an unsupported formula."
+        }
+        DataValidationErrorKind::CustomFormulaFalse => {
+            "The custom validation formula evaluated to FALSE."
+        }
         DataValidationErrorKind::CustomFormulaUnresolved => {
             "The custom validation formula could not be evaluated."
         }
@@ -223,22 +249,34 @@ pub fn validate_value(
     match validation.kind {
         DataValidationKind::Whole => {
             let Some(n) = coerce_number(candidate) else {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::TypeMismatch);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::TypeMismatch,
+                );
             };
             if !is_effectively_integer(n) {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::NotWholeNumber);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::NotWholeNumber,
+                );
             }
             validate_with_operator(validation, n)
         }
         DataValidationKind::Decimal => {
             let Some(n) = coerce_number(candidate) else {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::TypeMismatch);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::TypeMismatch,
+                );
             };
             validate_with_operator(validation, n)
         }
         DataValidationKind::List => {
             let Some(text) = coerce_text(candidate) else {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::TypeMismatch);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::TypeMismatch,
+                );
             };
             let allowed = if let Some(list) = parse_list_constant(&validation.formula1) {
                 list
@@ -267,27 +305,43 @@ pub fn validate_value(
         }
         DataValidationKind::Date => {
             let Some(serial) = coerce_date_serial(candidate) else {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::TypeMismatch);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::TypeMismatch,
+                );
             };
             validate_with_operator(validation, serial)
         }
         DataValidationKind::Time => {
             let Some(serial) = coerce_time_fraction(candidate) else {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::TypeMismatch);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::TypeMismatch,
+                );
             };
             validate_with_operator(validation, serial)
         }
         DataValidationKind::TextLength => {
             let Some(text) = coerce_text(candidate) else {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::TypeMismatch);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::TypeMismatch,
+                );
             };
             let len = excel_text_len(&text) as f64;
             validate_with_operator(validation, len)
         }
-        DataValidationKind::Custom => match ctx.eval_custom_formula(normalize_formula(&validation.formula1), candidate) {
+        DataValidationKind::Custom => match ctx
+            .eval_custom_formula(normalize_formula(&validation.formula1), candidate)
+        {
             Some(true) => DataValidationResult::ok(),
-            Some(false) => DataValidationResult::fail(validation, DataValidationErrorKind::CustomFormulaFalse),
-            None => DataValidationResult::fail(validation, DataValidationErrorKind::CustomFormulaUnresolved),
+            Some(false) => {
+                DataValidationResult::fail(validation, DataValidationErrorKind::CustomFormulaFalse)
+            }
+            None => DataValidationResult::fail(
+                validation,
+                DataValidationErrorKind::CustomFormulaUnresolved,
+            ),
         },
     }
 }
@@ -304,10 +358,16 @@ fn validate_with_operator(validation: &DataValidation, candidate: f64) -> DataVa
     let ok = match op {
         DataValidationOperator::Between | DataValidationOperator::NotBetween => {
             let Some(b_str) = validation.formula2.as_deref() else {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::UnsupportedFormula);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::UnsupportedFormula,
+                );
             };
             let Some(b) = parse_operand(validation, b_str) else {
-                return DataValidationResult::fail(validation, DataValidationErrorKind::UnsupportedFormula);
+                return DataValidationResult::fail(
+                    validation,
+                    DataValidationErrorKind::UnsupportedFormula,
+                );
             };
             let between = candidate >= a && candidate <= b;
             if matches!(op, DataValidationOperator::Between) {
@@ -452,7 +512,11 @@ fn coerce_text(value: &CellValue) -> Option<String> {
         CellValue::String(s) => Some(s.clone()),
         CellValue::RichText(rt) => Some(rt.plain_text().to_string()),
         CellValue::Number(n) => Some(number_to_string(*n)),
-        CellValue::Boolean(b) => Some(if *b { "TRUE".to_string() } else { "FALSE".to_string() }),
+        CellValue::Boolean(b) => Some(if *b {
+            "TRUE".to_string()
+        } else {
+            "FALSE".to_string()
+        }),
         _ => None,
     }
 }

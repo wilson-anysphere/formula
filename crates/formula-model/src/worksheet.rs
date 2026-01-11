@@ -8,7 +8,7 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 
 use crate::drawings::DrawingObject;
 use crate::{
-    A1ParseError, Cell, CellKey, CellRef, CellValue, Comment, CommentError, CommentPatch,
+    A1ParseError, Cell, CellKey, CellRef, CellValue, CfRule, Comment, CommentError, CommentPatch,
     DataValidation, DataValidationAssignment, DataValidationId, Hyperlink, MergeError, MergedRegions,
     Outline, OutlineEntry, Range, Reply, SheetProtection, SheetProtectionAction, StyleTable, Table,
 };
@@ -208,6 +208,10 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tables: Vec<Table>,
 
+    /// Conditional formatting rules hosted on this worksheet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditional_formatting: Vec<CfRule>,
+
     /// Optional columnar backing store for large imported datasets.
     ///
     /// This is runtime-only for now; persistence is handled by the storage layer.
@@ -257,6 +261,7 @@ impl Worksheet {
             frozen_cols: 0,
             zoom: default_zoom(),
             tables: Vec::new(),
+            conditional_formatting: Vec::new(),
             columnar: None,
             hyperlinks: Vec::new(),
             data_validations: Vec::new(),
@@ -1405,6 +1410,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             cells: HashMap<CellKey, Cell>,
             #[serde(default)]
             tables: Vec<Table>,
+            #[serde(default)]
+            conditional_formatting: Vec<CfRule>,
             #[serde(default = "default_row_count")]
             row_count: u32,
             #[serde(default = "default_col_count")]
@@ -1536,6 +1543,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             frozen_cols: helper.frozen_cols,
             zoom: helper.zoom,
             tables: helper.tables,
+            conditional_formatting: helper.conditional_formatting,
             columnar: None,
             hyperlinks: helper.hyperlinks,
             data_validations: helper.data_validations,

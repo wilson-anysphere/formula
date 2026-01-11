@@ -64,6 +64,17 @@ pub struct Table {
 }
 
 impl Table {
+    pub(crate) fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        for column in &mut self.columns {
+            if let Some(formula) = column.formula.as_mut() {
+                *formula = crate::rewrite_sheet_names_in_formula(formula, old_name, new_name);
+            }
+            if let Some(formula) = column.totals_formula.as_mut() {
+                *formula = crate::rewrite_sheet_names_in_formula(formula, old_name, new_name);
+            }
+        }
+    }
+
     pub fn data_range(&self) -> Option<Range> {
         let r = self.range;
         let start_row = r.start.row + self.header_row_count;
@@ -94,10 +105,7 @@ impl Table {
         }
         let r = self.range;
         let start_row = r.end.row + 1 - self.totals_row_count;
-        Some(Range::new(
-            CellRef::new(start_row, r.start.col),
-            r.end,
-        ))
+        Some(Range::new(CellRef::new(start_row, r.start.col), r.end))
     }
 
     pub fn column_index(&self, name: &str) -> Option<u32> {
@@ -113,18 +121,24 @@ impl Table {
         let col = r.start.col + col_offset;
 
         match area {
-            TableArea::Headers => self.header_range().map(|hr| Range::new(
-                CellRef::new(hr.start.row, col),
-                CellRef::new(hr.end.row, col),
-            )),
-            TableArea::Totals => self.totals_range().map(|tr| Range::new(
-                CellRef::new(tr.start.row, col),
-                CellRef::new(tr.end.row, col),
-            )),
-            TableArea::Data => self.data_range().map(|dr| Range::new(
-                CellRef::new(dr.start.row, col),
-                CellRef::new(dr.end.row, col),
-            )),
+            TableArea::Headers => self.header_range().map(|hr| {
+                Range::new(
+                    CellRef::new(hr.start.row, col),
+                    CellRef::new(hr.end.row, col),
+                )
+            }),
+            TableArea::Totals => self.totals_range().map(|tr| {
+                Range::new(
+                    CellRef::new(tr.start.row, col),
+                    CellRef::new(tr.end.row, col),
+                )
+            }),
+            TableArea::Data => self.data_range().map(|dr| {
+                Range::new(
+                    CellRef::new(dr.start.row, col),
+                    CellRef::new(dr.end.row, col),
+                )
+            }),
             TableArea::All => Some(Range::new(
                 CellRef::new(r.start.row, col),
                 CellRef::new(r.end.row, col),

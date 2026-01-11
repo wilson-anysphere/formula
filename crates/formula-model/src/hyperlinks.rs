@@ -19,6 +19,17 @@ pub enum HyperlinkTarget {
     Email { uri: String },
 }
 
+impl HyperlinkTarget {
+    pub(crate) fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        let HyperlinkTarget::Internal { sheet, .. } = self else {
+            return;
+        };
+        if crate::formula_rewrite::sheet_name_eq_case_insensitive(sheet, old_name) {
+            *sheet = new_name.to_string();
+        }
+    }
+}
+
 /// A hyperlink anchored to a cell or range.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hyperlink {

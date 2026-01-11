@@ -132,6 +132,34 @@ impl Workbook {
         id
     }
 
+    fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
+        for sheet in &mut self.sheets {
+            for (_, cell) in sheet.iter_cells_mut() {
+                if let Some(formula) = cell.formula.as_mut() {
+                    *formula = rewrite_sheet_names_in_formula(formula, old_name, new_name);
+                }
+            }
+
+            for table in &mut sheet.tables {
+                table.rewrite_sheet_references(old_name, new_name);
+            }
+
+            for rule in &mut sheet.conditional_formatting {
+                rule.rewrite_sheet_references(old_name, new_name);
+            }
+
+            for link in &mut sheet.hyperlinks {
+                link.target.rewrite_sheet_references(old_name, new_name);
+            }
+
+            for assignment in &mut sheet.data_validations {
+                assignment
+                    .validation
+                    .rewrite_sheet_references(old_name, new_name);
+            }
+        }
+    }
+
     /// Rename a worksheet and rewrite formulas that reference it.
     pub fn rename_sheet(
         &mut self,
@@ -159,16 +187,7 @@ impl Workbook {
 
         let old_name = self.sheets[sheet_index].name.clone();
 
-        for sheet in &mut self.sheets {
-            for (_, cell) in sheet.iter_cells_mut() {
-                let Some(formula) = cell.formula.clone() else {
-                    continue;
-                };
-                cell.formula = Some(rewrite_sheet_names_in_formula(
-                    &formula, &old_name, new_name,
-                ));
-            }
-        }
+        self.rewrite_sheet_references(&old_name, new_name);
 
         for name in &mut self.defined_names {
             name.refers_to = rewrite_sheet_names_in_formula(&name.refers_to, &old_name, new_name);
@@ -232,11 +251,10 @@ impl Workbook {
     /// Find a table by its workbook-scoped name.
     pub fn find_table(&self, table_name: &str) -> Option<(&Worksheet, &Table)> {
         for sheet in &self.sheets {
-            if let Some(table) = sheet
-                .tables
-                .iter()
-                .find(|t| t.name.eq_ignore_ascii_case(table_name) || t.display_name.eq_ignore_ascii_case(table_name))
-            {
+            if let Some(table) = sheet.tables.iter().find(|t| {
+                t.name.eq_ignore_ascii_case(table_name)
+                    || t.display_name.eq_ignore_ascii_case(table_name)
+            }) {
                 return Some((sheet, table));
             }
         }
