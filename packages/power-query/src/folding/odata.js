@@ -25,6 +25,7 @@
  *   select?: string[];
  *   filter?: string;
  *   orderby?: string;
+ *   skip?: number;
  *   top?: number;
  * }} ODataQueryOptions
  */
@@ -116,6 +117,12 @@ function parseQueryOptionsFromUrl(url) {
     out.orderby = orderbyRaw;
   }
 
+  const skipRaw = params.get("$skip");
+  if (typeof skipRaw === "string" && skipRaw.trim() !== "") {
+    const parsedSkip = Number.parseInt(skipRaw, 10);
+    if (Number.isFinite(parsedSkip)) out.skip = Math.max(0, parsedSkip);
+  }
+
   const topRaw = params.get("$top");
   if (typeof topRaw === "string" && topRaw.trim() !== "") {
     const parsedTop = Number.parseInt(topRaw, 10);
@@ -153,6 +160,7 @@ export function buildODataUrl(baseUrl, query) {
   if (Array.isArray(normalized.select) && normalized.select.length > 0) overrideKeys.add("$select");
   if (typeof normalized.filter === "string" && normalized.filter.length > 0) overrideKeys.add("$filter");
   if (typeof normalized.orderby === "string" && normalized.orderby.length > 0) overrideKeys.add("$orderby");
+  if (typeof normalized.skip === "number" && Number.isFinite(normalized.skip)) overrideKeys.add("$skip");
   if (typeof normalized.top === "number" && Number.isFinite(normalized.top)) overrideKeys.add("$top");
 
   for (const key of overrideKeys) existing.delete(key);
@@ -176,6 +184,9 @@ export function buildODataUrl(baseUrl, query) {
   }
   if (typeof normalized.orderby === "string" && normalized.orderby.length > 0) {
     entries.push(["$orderby", normalized.orderby]);
+  }
+  if (typeof normalized.skip === "number" && Number.isFinite(normalized.skip)) {
+    entries.push(["$skip", String(Math.max(0, Math.trunc(normalized.skip)))]);
   }
   if (typeof normalized.top === "number" && Number.isFinite(normalized.top)) {
     entries.push(["$top", String(Math.max(0, Math.trunc(normalized.top)))]);
@@ -404,6 +415,9 @@ function applyODataStep(current, operation) {
       //   - folded: filter all rows, then take N
       // Keep filtering local once `$top` has been introduced.
       if (typeof current.top === "number" && Number.isFinite(current.top)) return null;
+      // `$skip` is also applied after `$filter`, so filtering after a skip must
+      // remain local to preserve semantics.
+      if (typeof current.skip === "number" && Number.isFinite(current.skip)) return null;
       if (Array.isArray(current.select) && current.select.length > 0) {
         const available = new Set(current.select);
         for (const col of collectPredicateColumns(operation.predicate)) {
@@ -422,6 +436,8 @@ function applyODataStep(current, operation) {
       // Similar to `$filter`, `$orderby` is applied before `$top` in OData.
       // Sorting after a `take` must stay local to preserve semantics.
       if (typeof current.top === "number" && Number.isFinite(current.top)) return null;
+      // `$orderby` is also applied before `$skip` in OData.
+      if (typeof current.skip === "number" && Number.isFinite(current.skip)) return null;
       if (Array.isArray(current.select) && current.select.length > 0) {
         const available = new Set(current.select);
         for (const spec of operation.sortBy) {
@@ -431,6 +447,16 @@ function applyODataStep(current, operation) {
       const orderby = sortToOrderBy(operation.sortBy);
       if (!orderby) return null;
       return { ...current, orderby };
+    }
+    case "skip": {
+      const count = operation.count;
+      if (typeof count !== "number" || !Number.isFinite(count) || count < 0) return null;
+      // OData applies `$skip` before `$top`, so we can't fold a skip that occurs
+      // after a `take` step.
+      if (typeof current.top === "number" && Number.isFinite(current.top)) return null;
+      const normalized = Math.max(0, Math.trunc(count));
+      const currentSkip = typeof current.skip === "number" && Number.isFinite(current.skip) ? Math.max(0, Math.trunc(current.skip)) : 0;
+      return { ...current, skip: currentSkip + normalized };
     }
     case "take": {
       const count = operation.count;
@@ -456,6 +482,8 @@ function explainODataStepFailure(operation) {
       return "unsupported_predicate";
     case "sortRows":
       return "unsupported_sort";
+    case "skip":
+      return "invalid_skip";
     case "take":
       return "invalid_take";
     default:
@@ -466,7 +494,7 @@ function explainODataStepFailure(operation) {
 export class ODataFoldingEngine {
   constructor() {
     /** @type {Set<QueryOperation["type"]>} */
-    this.foldable = new Set(["selectColumns", "filterRows", "sortRows", "take"]);
+    this.foldable = new Set(["selectColumns", "filterRows", "sortRows", "skip", "take"]);
   }
 
   /**

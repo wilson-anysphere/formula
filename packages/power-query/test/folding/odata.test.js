@@ -190,6 +190,67 @@ test("OData folding: combines source URL $filter with folded filterRows", () => 
   assert.ok(explained.plan.url.includes("Price%20gt%2030"));
 });
 
+test("OData folding: pushes skip into query options", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_skip",
+    name: "OData skip",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      { id: "s1", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Price", operator: "greaterThan", value: 20 } } },
+      { id: "s2", name: "Skip", operation: { type: "skip", count: 10 } },
+      { id: "s3", name: "Take", operation: { type: "take", count: 5 } },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$filter=Price%20gt%2020&$skip=10&$top=5");
+});
+
+test("OData folding: does not fold filterRows after skip (preserves local semantics)", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_skip_then_filter",
+    name: "OData skip then filter",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      { id: "s1", name: "Skip", operation: { type: "skip", count: 5 } },
+      {
+        id: "s2",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Price", operator: "greaterThan", value: 20 } },
+      },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "hybrid");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$skip=5");
+  assert.deepEqual(explained.steps.map((s) => s.status), ["folded", "local"]);
+});
+
+test("OData folding: does not fold filterRows when source URL includes $skip", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_base_skip_filter",
+    name: "OData base skip then filter",
+    source: { type: "odata", url: "https://example.com/odata/Products?$skip=5" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Price", operator: "greaterThan", value: 20 } },
+      },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "local");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$skip=5");
+  assert.deepEqual(explained.steps.map((s) => s.status), ["local"]);
+});
+
 test("OData folding: does not fold filterRows after take (preserves local semantics)", () => {
   const folding = new ODataFoldingEngine();
   const query = {
