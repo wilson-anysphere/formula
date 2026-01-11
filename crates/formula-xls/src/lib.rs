@@ -425,6 +425,10 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             // anchor. When that happens, prefer the anchor cell’s own resolvable style; otherwise
             // choose the first cell (row/col order) within the merged region to keep this pass
             // deterministic (independent of HashMap iteration order).
+            //
+            // Note: we only need this extra aggregation for cells *inside merged regions*.
+            // For the common case (non-merged cells), we apply styles directly without the
+            // additional HashMap overhead.
             let mut best_style_for_anchor: HashMap<CellRef, (u32, CellRef, bool)> = HashMap::new();
             let mut out_of_range_xf_count: usize = 0;
             for (&cell_ref, &xf_idx) in sheet_cell_xfs {
@@ -432,9 +436,10 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                     continue;
                 }
 
+                let maybe_anchor = sheet.merged_regions.anchor_for(cell_ref);
                 // Normalise style assignments to merged-cell anchors so formatting inside a merged
                 // region round-trips consistently with the importer’s value/formula semantics.
-                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                let anchor = maybe_anchor.unwrap_or(cell_ref);
 
                 let Some(style_id) = xf_style_ids.get(xf_idx as usize).copied() else {
                     out_of_range_xf_count = out_of_range_xf_count.saturating_add(1);
@@ -443,6 +448,11 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 let Some(style_id) = style_id else {
                     continue;
                 };
+                if maybe_anchor.is_none() {
+                    sheet.set_style_id(anchor, style_id);
+                    continue;
+                }
+
                 let source_is_anchor = cell_ref == anchor;
                 best_style_for_anchor
                     .entry(anchor)
