@@ -37,13 +37,107 @@ function sumCounts(obj: Record<string, unknown[] | undefined>) {
   return out;
 }
 
-function AggregateAnalysisView(props: { report: AnalysisReport | null }) {
-  const report = props.report;
-  if (!report) {
+type ProjectAnalysisSummary = {
+  kind: "project";
+  projectName: string;
+  risk: { score: number; level: "low" | "medium" | "high" };
+  objectModelUsageCounts: Record<string, number>;
+  rangeShapesCounts: Record<string, number>;
+  externalReferencesCount: number;
+  unsafeConstructsCount: number;
+  unsupportedConstructsCount: number;
+  warningsCount: number;
+  todosCount: number;
+  modules: Array<{
+    moduleName: string;
+    risk: { score: number; level: "low" | "medium" | "high" };
+    externalReferencesCount: number;
+    unsafeConstructsCount: number;
+    unsupportedConstructsCount: number;
+  }>;
+};
+
+type AnalysisViewModel = { kind: "module"; report: AnalysisReport } | ProjectAnalysisSummary;
+
+function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
+  const model = props.report;
+  if (!model) {
     return <div style={{ opacity: 0.8 }}>Select a module to analyze.</div>;
   }
 
+  if (model.kind === "project") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div data-testid="vba-analysis-risk">
+          <div style={{ fontWeight: 600 }}>Project risk</div>
+          <div>
+            Score: <span style={{ fontFamily: "monospace" }}>{model.risk.score}</span>{" "}
+            <span style={{ fontFamily: "monospace" }}>({model.risk.level})</span>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Totals</div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            <li>
+              External references: <span style={{ fontFamily: "monospace" }}>{model.externalReferencesCount}</span>
+            </li>
+            <li>
+              Unsafe constructs: <span style={{ fontFamily: "monospace" }}>{model.unsafeConstructsCount}</span>
+            </li>
+            <li>
+              Unsupported constructs: <span style={{ fontFamily: "monospace" }}>{model.unsupportedConstructsCount}</span>
+            </li>
+            <li>
+              Warnings: <span style={{ fontFamily: "monospace" }}>{model.warningsCount}</span>
+            </li>
+            <li>
+              TODOs: <span style={{ fontFamily: "monospace" }}>{model.todosCount}</span>
+            </li>
+          </ul>
+        </div>
+
+        <details>
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Excel object model calls</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            {Object.entries(model.objectModelUsageCounts).map(([key, count]) => (
+              <li key={key}>
+                {key}: <span style={{ fontFamily: "monospace" }}>{count}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+
+        <details>
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Range shapes</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            {Object.entries(model.rangeShapesCounts).map(([key, count]) => (
+              <li key={key}>
+                {key}: <span style={{ fontFamily: "monospace" }}>{count}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Modules</div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {model.modules.map((m) => (
+              <li key={m.moduleName} style={{ fontFamily: "monospace", fontSize: 12 }}>
+                {m.moduleName}: risk {m.risk.score} ({m.risk.level}), external {m.externalReferencesCount}, unsafe{" "}
+                {m.unsafeConstructsCount}, unsupported {m.unsupportedConstructsCount}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    );
+  }
+
+  const report = model.report;
   const usage = sumCounts(report.objectModelUsage as any);
+  const rangeShapes = sumCounts(report.rangeShapes as any);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div data-testid="vba-analysis-risk">
@@ -54,67 +148,91 @@ function AggregateAnalysisView(props: { report: AnalysisReport | null }) {
         </div>
       </div>
 
-      <div>
-        <div style={{ fontWeight: 600, marginBottom: 6 }}>Excel object model calls</div>
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
+      <details open>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Excel object model calls</summary>
+        <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
           {Object.entries(usage).map(([key, count]) => (
             <li key={key} data-testid={`vba-analysis-usage-${key}`}>
               {key}: <span style={{ fontFamily: "monospace" }}>{count}</span>
             </li>
           ))}
         </ul>
-      </div>
+      </details>
+
+      <details>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Range shapes</summary>
+        <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          {Object.entries(rangeShapes).map(([key, count]) => (
+            <li key={key}>
+              {key}: <span style={{ fontFamily: "monospace" }}>{count}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
 
       {report.externalReferences?.length ? (
-        <div data-testid="vba-analysis-external">
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>External references</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <details open data-testid="vba-analysis-external">
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>External references</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
             {report.externalReferences.map((ref: any, idx: number) => (
               <li key={`${ref.line}-${idx}`} style={{ fontFamily: "monospace", fontSize: 12 }}>
                 L{ref.line}: {ref.text.trim()}
               </li>
             ))}
           </ul>
-        </div>
+        </details>
       ) : null}
 
       {report.unsupportedConstructs?.length ? (
-        <div data-testid="vba-analysis-unsupported">
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Unsupported / risky constructs</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <details open data-testid="vba-analysis-unsupported">
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Unsupported / risky constructs</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
             {report.unsupportedConstructs.map((item: any, idx: number) => (
               <li key={`${item.line}-${idx}`} style={{ fontFamily: "monospace", fontSize: 12 }}>
                 L{item.line}: {item.text.trim()}
               </li>
             ))}
           </ul>
-        </div>
+        </details>
       ) : null}
 
       {report.unsafeConstructs?.length ? (
-        <div data-testid="vba-analysis-unsafe">
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Unsafe dynamic execution</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <details open data-testid="vba-analysis-unsafe">
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Unsafe dynamic execution</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
             {report.unsafeConstructs.map((item: any, idx: number) => (
               <li key={`${item.line}-${idx}`} style={{ fontFamily: "monospace", fontSize: 12 }}>
                 L{item.line}: {item.text.trim()}
               </li>
             ))}
           </ul>
-        </div>
+        </details>
       ) : null}
 
       {report.warnings?.length ? (
-        <div data-testid="vba-analysis-warnings">
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Warnings</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <details data-testid="vba-analysis-warnings">
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Warnings ({report.warnings.length})</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
             {report.warnings.map((warning: any, idx: number) => (
               <li key={`${warning.line}-${idx}`} style={{ fontFamily: "monospace", fontSize: 12 }}>
                 L{warning.line}: {warning.message}
               </li>
             ))}
           </ul>
-        </div>
+        </details>
+      ) : null}
+
+      {report.todos?.length ? (
+        <details data-testid="vba-analysis-todos">
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>TODOs ({report.todos.length})</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            {report.todos.map((todo: any, idx: number) => (
+              <li key={`${todo.line}-${idx}`} style={{ fontFamily: "monospace", fontSize: 12 }}>
+                L{todo.line}: {todo.message}
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
     </div>
   );
@@ -189,51 +307,85 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
     return analyzeVbaModule(selectedModule);
   }, [selectedModule]);
 
-  const projectAnalysis = useMemo(() => {
+  const projectSummary = useMemo<ProjectAnalysisSummary | null>(() => {
     if (!project) return null;
     const modules = project.modules ?? [];
     if (modules.length === 0) return null;
-    // Aggregate by summing findings across modules and using the max risk score.
-    const reports = modules.map((m) => analyzeVbaModule(m));
-    const aggregated: any = {
-      moduleName: project.name ?? "VBA Project",
-      objectModelUsage: {
-        Range: [],
-        Cells: [],
-        Worksheets: [],
-        Workbook: [],
-        Application: [],
-        ActiveSheet: [],
-        ActiveCell: [],
-        Selection: [],
-      },
-      externalReferences: [],
-      unsafeConstructs: [],
-      unsupportedConstructs: [],
-      warnings: [],
-      todos: [],
-      risk: { score: 0, level: "low", factors: [] },
+
+    const objectModelUsageCounts: Record<string, number> = {
+      Range: 0,
+      Cells: 0,
+      Worksheets: 0,
+      Workbook: 0,
+      Application: 0,
+      ActiveSheet: 0,
+      ActiveCell: 0,
+      Selection: 0,
+    };
+    const rangeShapesCounts: Record<string, number> = {
+      singleCell: 0,
+      multiCell: 0,
+      rows: 0,
+      columns: 0,
+      other: 0,
     };
 
-    let maxScore = 0;
-    for (const report of reports) {
-      maxScore = Math.max(maxScore, report.risk?.score ?? 0);
-      for (const key of Object.keys(aggregated.objectModelUsage)) {
-        aggregated.objectModelUsage[key].push(...(report.objectModelUsage?.[key] ?? []));
+    const perModule = modules.map((m) => ({ module: m, report: analyzeVbaModule(m) }));
+
+    let externalReferencesCount = 0;
+    let unsafeConstructsCount = 0;
+    let unsupportedConstructsCount = 0;
+    let warningsCount = 0;
+    let todosCount = 0;
+
+    for (const { report } of perModule) {
+      for (const key of Object.keys(objectModelUsageCounts)) {
+        objectModelUsageCounts[key] += report.objectModelUsage?.[key]?.length ?? 0;
       }
-      aggregated.externalReferences.push(...(report.externalReferences ?? []));
-      aggregated.unsafeConstructs.push(...(report.unsafeConstructs ?? []));
-      aggregated.unsupportedConstructs.push(...(report.unsupportedConstructs ?? []));
-      aggregated.warnings.push(...(report.warnings ?? []));
-      aggregated.todos.push(...(report.todos ?? []));
-      aggregated.risk.factors.push(...(report.risk?.factors ?? []));
+      for (const key of Object.keys(rangeShapesCounts)) {
+        rangeShapesCounts[key] += report.rangeShapes?.[key]?.length ?? 0;
+      }
+      externalReferencesCount += report.externalReferences?.length ?? 0;
+      unsafeConstructsCount += report.unsafeConstructs?.length ?? 0;
+      unsupportedConstructsCount += report.unsupportedConstructs?.length ?? 0;
+      warningsCount += report.warnings?.length ?? 0;
+      todosCount += report.todos?.length ?? 0;
     }
-    aggregated.risk.score = maxScore;
-    aggregated.risk.level = maxScore >= 70 ? "high" : maxScore >= 30 ? "medium" : "low";
-    return aggregated as AnalysisReport;
+
+    const riskScore = Math.min(100, externalReferencesCount * 25 + unsafeConstructsCount * 30 + unsupportedConstructsCount * 10);
+    const riskLevel = riskScore >= 70 ? "high" : riskScore >= 30 ? "medium" : "low";
+
+    return {
+      kind: "project",
+      projectName: project.name ?? "VBA Project",
+      risk: { score: riskScore, level: riskLevel },
+      objectModelUsageCounts,
+      rangeShapesCounts,
+      externalReferencesCount,
+      unsafeConstructsCount,
+      unsupportedConstructsCount,
+      warningsCount,
+      todosCount,
+      modules: perModule
+        .map(({ module, report }) => ({
+          moduleName: module.name,
+          risk: {
+            score: report.risk?.score ?? 0,
+            level: report.risk?.level ?? "low",
+          },
+          externalReferencesCount: report.externalReferences?.length ?? 0,
+          unsafeConstructsCount: report.unsafeConstructs?.length ?? 0,
+          unsupportedConstructsCount: report.unsupportedConstructs?.length ?? 0,
+        }))
+        .sort((a, b) => b.risk.score - a.risk.score),
+    };
   }, [project]);
 
-  const analysis = analysisScope === "project" ? projectAnalysis : moduleAnalysis;
+  const analysis: AnalysisViewModel | null = useMemo(() => {
+    if (analysisScope === "project") return projectSummary;
+    if (!moduleAnalysis) return null;
+    return { kind: "module", report: moduleAnalysis };
+  }, [analysisScope, moduleAnalysis, projectSummary]);
 
   const canConvert = Boolean(selectedModule && migrator);
 
