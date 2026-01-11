@@ -118,7 +118,11 @@ class TokenBucketRateLimiter {
 
     if (tokens < 1) {
       this.state.set(key, { tokens, updatedAt: now });
-      return { ok: false, retryAfterMs: Math.ceil(this.refillMs - elapsed) };
+      const refillRatePerMs = this.capacity / this.refillMs;
+      const missing = Math.max(0, 1 - tokens);
+      const retryAfterMs =
+        Number.isFinite(refillRatePerMs) && refillRatePerMs > 0 ? Math.ceil(missing / refillRatePerMs) : this.refillMs;
+      return { ok: false, retryAfterMs };
     }
 
     this.state.set(key, { tokens: tokens - 1, updatedAt: now });

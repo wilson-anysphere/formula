@@ -681,6 +681,10 @@ test("rate limiting: /api/search enforces per-IP limits", async () => {
       headers: { "X-Forwarded-For": "203.0.113.10" },
     });
     assert.equal(limited.status, 429);
+    const retryAfter = Number(limited.headers.get("retry-after") || "0");
+    assert.ok(Number.isFinite(retryAfter) && retryAfter > 0);
+    // 5 requests/minute -> 1 token every ~12s. Keep a wide bound to avoid flakes.
+    assert.ok(retryAfter <= 20);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });
