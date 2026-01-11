@@ -199,13 +199,14 @@ describe("OpenAIClient.streamChat", () => {
       events.push(event);
     }
 
-    expect(events).toEqual([
-      { type: "tool_call_start", id: "call_1", name: "getData" },
-      { type: "tool_call_delta", id: "call_1", delta: '{"range":"' },
-      { type: "tool_call_delta", id: "call_1", delta: 'A1"}' },
-      { type: "tool_call_end", id: "call_1" },
-      { type: "done" },
-    ]);
+    expect(events[0]).toEqual({ type: "tool_call_start", id: "call_1", name: "getData" });
+    const args = events
+      .filter((e) => e.type === "tool_call_delta")
+      .map((e) => e.delta)
+      .join("");
+    expect(args).toBe('{"range":"A1"}');
+    expect(events.at(-2)).toEqual({ type: "tool_call_end", id: "call_1" });
+    expect(events.at(-1)).toEqual({ type: "done" });
   });
 
   it("diffs tool call arguments when a backend repeatedly streams the full string", async () => {

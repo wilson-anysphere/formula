@@ -271,16 +271,16 @@ export class OpenAIClient {
       let usage = null;
       /**
        * OpenAI identifies tool calls by a stable `index` and sometimes omits the
-        * `id` field on early chunks. Buffer argument fragments by index until we
-        * learn the stable `id` + `name`, then emit `tool_call_start` followed by
-        * the buffered `tool_call_delta` fragments.
-        *
-        * Some OpenAI-compatible backends incorrectly stream the full arguments
-        * string repeatedly (instead of deltas). Track the reconstructed argument
-        * string so we can diff and only emit the incremental suffix.
-        *
-        * @type {Map<number, { id?: string, name?: string, started: boolean, pendingArgs: string, args: string }>}
-        */
+       * `id` field on early chunks. Buffer argument fragments by index until we
+       * learn the stable `id` + `name`, then emit `tool_call_start` followed by
+       * the buffered `tool_call_delta` fragments.
+       *
+       * Some OpenAI-compatible backends incorrectly stream the full arguments
+       * string repeatedly (instead of deltas). Track the reconstructed argument
+       * string so we can diff and only emit the incremental suffix.
+       *
+       * @type {Map<number, { id?: string, name?: string, started: boolean, pendingArgs: string, args: string }>}
+       */
       const toolCallsByIndex = new Map();
       /** @type {Set<string>} */
       const openToolCallIds = new Set();
@@ -396,7 +396,6 @@ export class OpenAIClient {
               if (nameFromDelta) state.name = nameFromDelta;
 
               toolCallsByIndex.set(index, state);
-              for (const event of startToolCallsInOrder()) yield event;
 
               if (argsFragment) {
                 // Best-effort diffing: tolerate backends that repeatedly send the
@@ -418,6 +417,7 @@ export class OpenAIClient {
                 }
               }
             }
+            for (const event of startToolCallsInOrder()) yield event;
           }
 
           if (typeof choice?.finish_reason === "string" && choice.finish_reason === "tool_calls") {
