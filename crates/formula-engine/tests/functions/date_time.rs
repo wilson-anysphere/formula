@@ -24,6 +24,15 @@ fn datevalue_parses_iso_and_us_formats() {
 }
 
 #[test]
+fn datevalue_returns_value_error_for_invalid_dates() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    assert_eq!(
+        date_time::datevalue("2019-02-29", system).unwrap_err(),
+        ExcelError::Value
+    );
+}
+
+#[test]
 fn eomonth_returns_last_day_of_offset_month() {
     let system = ExcelDateSystem::EXCEL_1900;
     let start = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
@@ -65,4 +74,3 @@ fn workday_and_networkdays_skip_weekends_and_holidays() {
     // Working days from Jan 1 to Jan 10 2020 inclusive: 8 (Wed-Fri + Mon-Fri).
     assert_eq!(date_time::networkdays(start, end, None, system).unwrap(), 8);
 }
-

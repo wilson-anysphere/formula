@@ -98,7 +98,9 @@ pub fn datevalue(date_text: &str, system: ExcelDateSystem) -> ExcelResult<i32> {
         .unwrap_or(raw);
 
     let (year, month, day) = parse_date_token(token)?;
-    ymd_to_serial(ExcelDate::new(year, month, day), system)
+    // Excel's DATEVALUE treats invalid date text as a #VALUE! error, even when the string is
+    // parseable but represents an invalid date (e.g. 2019-02-29).
+    ymd_to_serial(ExcelDate::new(year, month, day), system).map_err(|_| ExcelError::Value)
 }
 
 fn parse_date_token(token: &str) -> ExcelResult<(i32, u8, u8)> {

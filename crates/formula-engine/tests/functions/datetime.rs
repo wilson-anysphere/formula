@@ -96,6 +96,10 @@ fn datevalue_edate_and_eomonth() {
         sheet.eval("=DATE(2020,1,1)")
     );
     assert_eq!(sheet.eval("=DATEVALUE(\"nope\")"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=DATEVALUE(\"2019-02-29\")"),
+        Value::Error(ErrorKind::Value)
+    );
 
     assert_number(&sheet.eval("=DAY(EOMONTH(DATE(2020,1,15),0))"), 31.0);
     assert_number(&sheet.eval("=DAY(EOMONTH(DATE(2020,1,15),1))"), 29.0);
