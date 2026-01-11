@@ -935,6 +935,110 @@ fn wrapcols_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     wrap_vector_fn(ctx, args, false)
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "RANDARRAY",
+        min_args: 0,
+        max_args: 5,
+        volatility: Volatility::Volatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Any,
+        arg_types: &[
+            ValueType::Number,
+            ValueType::Number,
+            ValueType::Number,
+            ValueType::Number,
+            ValueType::Bool,
+        ],
+        implementation: randarray_fn,
+    }
+}
+
+fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let rows = match eval_optional_i64(ctx, args.get(0), 1) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let cols = match eval_optional_i64(ctx, args.get(1), 1) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let min = match eval_optional_number(ctx, args.get(2), 0.0) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let max = match eval_optional_number(ctx, args.get(3), 1.0) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let whole_number = match eval_optional_bool(ctx, args.get(4), false) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if rows <= 0 || cols <= 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    if !min.is_finite() || !max.is_finite() {
+        return Value::Error(ErrorKind::Num);
+    }
+    if min > max {
+        return Value::Error(ErrorKind::Num);
+    }
+
+    let rows_usize = match usize::try_from(rows) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+    let cols_usize = match usize::try_from(cols) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+
+    let total = match rows_usize.checked_mul(cols_usize) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Num),
+    };
+
+    let mut values = Vec::with_capacity(total);
+    if whole_number {
+        let low_f = min.ceil();
+        let high_f = max.floor();
+        if low_f < (i64::MIN as f64)
+            || low_f > (i64::MAX as f64)
+            || high_f < (i64::MIN as f64)
+            || high_f > (i64::MAX as f64)
+        {
+            return Value::Error(ErrorKind::Num);
+        }
+
+        let low = low_f as i64;
+        let high = high_f as i64;
+        if low > high {
+            return Value::Error(ErrorKind::Num);
+        }
+
+        let span = match high.checked_sub(low).and_then(|d| d.checked_add(1)) {
+            Some(v) if v > 0 => v as u64,
+            _ => return Value::Error(ErrorKind::Num),
+        };
+
+        for _ in 0..total {
+            let offset = (ctx.volatile_rand_u64() % span) as i64;
+            values.push(Value::Number((low + offset) as f64));
+        }
+    } else {
+        let span = max - min;
+        for _ in 0..total {
+            values.push(Value::Number(min + ctx.volatile_rand() * span));
+        }
+    }
+
+    Value::Array(Array::new(rows_usize, cols_usize, values))
+}
+
 fn eval_array_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Array, ErrorKind> {
     arg_value_to_array(ctx, ctx.eval_arg(expr))
 }
@@ -975,6 +1079,22 @@ fn eval_optional_i64(
         Value::Blank => Ok(default),
         Value::Error(e) => Err(e),
         other => other.coerce_to_i64(),
+    }
+}
+
+fn eval_optional_number(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+    default: f64,
+) -> Result<f64, ErrorKind> {
+    let Some(expr) = expr else {
+        return Ok(default);
+    };
+    let v = eval_scalar_arg(ctx, expr);
+    match v {
+        Value::Blank => Ok(default),
+        Value::Error(e) => Err(e),
+        other => other.coerce_to_number(),
     }
 }
 

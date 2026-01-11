@@ -938,6 +938,20 @@ export default {
       "arg_types": []
     },
     {
+      "name": "RANDARRAY",
+      "min_args": 0,
+      "max_args": 5,
+      "volatility": "volatile",
+      "return_type": "any",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
       "name": "RANDBETWEEN",
       "min_args": 2,
       "max_args": 2,
