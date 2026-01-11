@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Query } from "../../../../../packages/power-query/src/model.js";
 import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
@@ -49,6 +49,56 @@ function defaultQuery(): Query {
   };
 }
 
+type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | string[] | null>;
+
+function getTauriDialogOpen(): TauriDialogOpen | null {
+  const open = (globalThis as any).__TAURI__?.dialog?.open as TauriDialogOpen | undefined;
+  return typeof open === "function" ? open : null;
+}
+
+async function pickFile(extensions: string[]): Promise<string | null> {
+  const open = getTauriDialogOpen();
+  if (open) {
+    const result = await open({
+      multiple: false,
+      filters: [{ name: extensions.join(", ").toUpperCase(), extensions }],
+    });
+    if (Array.isArray(result)) return result[0] ?? null;
+    return result ?? null;
+  }
+
+  if (typeof window !== "undefined" && typeof window.prompt === "function") {
+    const path = window.prompt(`Enter path to ${extensions.join("/").toUpperCase()} file`, "");
+    return path && path.trim() ? path.trim() : null;
+  }
+
+  return null;
+}
+
+function describeSource(source: any): string {
+  if (!source || typeof source !== "object") return "Unknown";
+  switch (source.type) {
+    case "range":
+      return "Range";
+    case "csv":
+      return `CSV: ${source.path}`;
+    case "json":
+      return `JSON: ${source.path}${source.jsonPath ? ` (${source.jsonPath})` : ""}`;
+    case "parquet":
+      return `Parquet: ${source.path}`;
+    case "api":
+      return `Web: ${source.url}`;
+    case "database":
+      return "Database";
+    case "table":
+      return `Table: ${source.table}`;
+    case "query":
+      return `Query: ${source.queryId}`;
+    default:
+      return String(source.type ?? "Unknown");
+  }
+}
+
 export function QueryEditorPanelContainer(props: Props) {
   const storageId = useMemo(() => storageKey(props.workbookId), [props.workbookId]);
 
@@ -83,9 +133,16 @@ export function QueryEditorPanelContainer(props: Props) {
 
   const [refreshEvent, setRefreshEvent] = useState<unknown>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [activeLoad, setActiveLoad] = useState<{ jobId: string; controller: AbortController } | null>(null);
+  const triggeredOnOpenForQueryId = useRef<string | null>(null);
 
   useEffect(() => {
     refreshManager.registerQuery(query);
+    // Trigger "on-open" policies once per query id while the panel is mounted.
+    if (query.refreshPolicy?.type === "on-open" && triggeredOnOpenForQueryId.current !== query.id) {
+      refreshManager.triggerOnOpen(query.id);
+      triggeredOnOpenForQueryId.current = query.id;
+    }
     return () => refreshManager.unregisterQuery(query.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshManager, query]);
@@ -111,6 +168,47 @@ export function QueryEditorPanelContainer(props: Props) {
 
   function activeSheetId(): string {
     return props.getActiveSheetId?.() ?? doc?.getSheetIds?.()?.[0] ?? "Sheet1";
+  }
+
+  function cancelActiveLoad(): void {
+    activeLoad?.controller.abort();
+  }
+
+  async function setCsvSource(): Promise<void> {
+    setActionError(null);
+    const path = await pickFile(["csv"]);
+    if (!path) return;
+    setQuery((prev) => ({ ...prev, source: { type: "csv", path, options: { hasHeaders: true } } }));
+  }
+
+  async function setJsonSource(): Promise<void> {
+    setActionError(null);
+    const path = await pickFile(["json"]);
+    if (!path) return;
+
+    const jsonPath =
+      typeof window !== "undefined" && typeof window.prompt === "function"
+        ? window.prompt("Optional JSON path (e.g. data.items)", "") ?? ""
+        : "";
+
+    setQuery((prev) => ({ ...prev, source: { type: "json", path, jsonPath: jsonPath.trim() || undefined } }));
+  }
+
+  async function setParquetSource(): Promise<void> {
+    setActionError(null);
+    const path = await pickFile(["parquet"]);
+    if (!path) return;
+    setQuery((prev) => ({ ...prev, source: { type: "parquet", path } }));
+  }
+
+  async function setWebSource(): Promise<void> {
+    setActionError(null);
+    const url =
+      typeof window !== "undefined" && typeof window.prompt === "function"
+        ? window.prompt("Enter URL (GET)", "https://")?.trim()
+        : null;
+    if (!url) return;
+    setQuery((prev) => ({ ...prev, source: { type: "api", url, method: "GET" } }));
   }
 
   async function loadToSheet(current: Query): Promise<void> {
@@ -151,11 +249,35 @@ export function QueryEditorPanelContainer(props: Props) {
       lastOutputSize: existingDest?.lastOutputSize,
     };
 
+    // Cancel any existing "load to sheet" operation so we don't interleave writes.
+    cancelActiveLoad();
+    const controller = new AbortController();
+    const jobId = `load_${crypto.randomUUID()}`;
+    setActiveLoad({ jobId, controller });
+
     try {
-      await applyQueryToDocument(doc, current, destination, { engine, batchSize: 1024 });
+      setRefreshEvent({ type: "apply:started", jobId, queryId: current.id, destination });
+      const result = await applyQueryToDocument(doc, current, destination, {
+        engine,
+        batchSize: 1024,
+        signal: controller.signal,
+        onProgress: (evt) => {
+          if (evt.type === "batch") {
+            setRefreshEvent({ type: "apply:progress", jobId, queryId: current.id, rowsWritten: evt.totalRowsWritten });
+          }
+        },
+      });
+      setRefreshEvent({ type: "apply:completed", jobId, queryId: current.id, result });
       setQuery({ ...current, destination });
     } catch (err: any) {
+      if (controller.signal.aborted || err?.name === "AbortError") {
+        setRefreshEvent({ type: "apply:cancelled", jobId, queryId: current.id });
+        return;
+      }
+      setRefreshEvent({ type: "apply:error", jobId, queryId: current.id, error: err });
       setActionError(err?.message ?? String(err));
+    } finally {
+      setActiveLoad((prev) => (prev?.jobId === jobId ? null : prev));
     }
   }
 
@@ -176,6 +298,27 @@ export function QueryEditorPanelContainer(props: Props) {
         </div>
       ) : null}
 
+      <div style={{ padding: 12, borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ color: "var(--text-muted)", fontSize: 12, marginRight: 8 }}>Source: {describeSource(query.source)}</div>
+        <button type="button" onClick={setCsvSource}>
+          CSV…
+        </button>
+        <button type="button" onClick={setJsonSource}>
+          JSON…
+        </button>
+        <button type="button" onClick={setParquetSource}>
+          Parquet…
+        </button>
+        <button type="button" onClick={setWebSource}>
+          Web…
+        </button>
+        {activeLoad ? (
+          <button type="button" onClick={cancelActiveLoad}>
+            Cancel load
+          </button>
+        ) : null}
+      </div>
+
       {actionError ? (
         <div style={{ padding: 12, color: "var(--error)", borderBottom: "1px solid var(--border)" }}>{actionError}</div>
       ) : null}
@@ -192,4 +335,3 @@ export function QueryEditorPanelContainer(props: Props) {
     </div>
   );
 }
-
