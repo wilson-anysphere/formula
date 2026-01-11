@@ -146,6 +146,32 @@ test("precision=excel: validation falls back to CPU on mismatch and records diag
   assert.equal(diag.validation.lastMismatch.kernel, "sum");
 });
 
+test("excel mode: falls back to CPU on GPU error and records diagnostics", async () => {
+  class ErrorGpuBackend extends FakeGpuBackend {
+    async sum() {
+      this.calls.sum += 1;
+      throw new Error("GPU failed");
+    }
+  }
+
+  const fakeGpu = new ErrorGpuBackend(true);
+  const engine = new KernelEngine({
+    precision: "excel",
+    gpuBackend: fakeGpu,
+    thresholds: { sum: 0 },
+    validation: { enabled: false }
+  });
+
+  const values = new Float64Array([1, 2, 3]);
+  const result = await engine.sum(values);
+  assert.equal(result, 6);
+  assert.equal(engine.lastKernelBackend().sum, "cpu");
+
+  const diag = engine.diagnostics();
+  assert.equal(diag.validation.gpuErrors, 1);
+  assert.equal(diag.validation.lastGpuError.kernel, "sum");
+});
+
 test("precision=fast: uses f32 on GPU and does not validate by default", async () => {
   class WrongGpuBackend extends FakeGpuBackend {
     async sum() {
