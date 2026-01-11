@@ -31,6 +31,9 @@ const layout = engine.layout({
 
 ## Using HarfBuzz
 
+HarfBuzz bindings live under the `@formula/text-layout/harfbuzz` entrypoint so browser bundles that only use
+canvas-based measurement don't pull in the HarfBuzz WASM + Node compatibility helpers.
+
 ```js
 import {
   TextLayoutEngine,
