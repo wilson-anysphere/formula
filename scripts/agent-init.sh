@@ -33,6 +33,13 @@ if [ -z "${CARGO_HOME:-}" ]; then
 fi
 mkdir -p "$CARGO_HOME"
 
+# Ensure tools installed via `cargo install` under this CARGO_HOME are available.
+mkdir -p "$CARGO_HOME/bin"
+case ":$PATH:" in
+  *":$CARGO_HOME/bin:"*) ;;
+  *) export PATH="$CARGO_HOME/bin:$PATH" ;;
+esac
+
 # ============================================================================
 # Shared Caching (Optional - reduces disk duplication)
 # ============================================================================

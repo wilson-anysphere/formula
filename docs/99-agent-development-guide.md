@@ -56,6 +56,7 @@ export RUSTFLAGS="-C codegen-units=4"             # Reduce Rust memory per crate
 # CARGO_HOME must be set per-repo (run from repo root) to avoid cross-agent ~/.cargo locks:
 export CARGO_HOME="$(pwd)/target/cargo-home"
 mkdir -p "$CARGO_HOME"
+export PATH="$CARGO_HOME/bin:$PATH"              # So `cargo install` tools (wasm-pack, etc) are found
 ```
 
 #### Cargo Home Isolation (Why `CARGO_HOME` is repo-local)
@@ -77,6 +78,8 @@ target/cargo-home
   acceptable here because disk is abundant.
 - **Note**: Because the default lives under `target/`, deleting `target/` (or running `cargo clean`)
   will also wipe the registry cache for that repo.
+- **Note**: `cargo install` will install binaries into `target/cargo-home/bin` (agent-init prepends
+  this directory to `PATH`).
 
 **Override (CI / shared caching):**
 
@@ -361,6 +364,7 @@ if [ -z "${CARGO_HOME:-}" ]; then
   export CARGO_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/cargo-home"
 fi
 mkdir -p "$CARGO_HOME"
+export PATH="$CARGO_HOME/bin:$PATH"
 
 # Headless display (if not already set)
 if [ -z "$DISPLAY" ]; then

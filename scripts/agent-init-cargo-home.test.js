@@ -46,3 +46,17 @@ test('agent-init preserves an existing CARGO_HOME override', () => {
   assert.equal(cargoHome, override);
 });
 
+test('agent-init prepends CARGO_HOME/bin to PATH', () => {
+  const out = runBash(
+    [
+      'unset CARGO_HOME',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s\\n%s" "$CARGO_HOME" "$PATH"',
+    ].join(' && '),
+  );
+
+  const [cargoHome, pathValue] = out.split('\n');
+  assert.equal(cargoHome, resolve(repoRoot, 'target', 'cargo-home'));
+  assert.ok(pathValue.split(':')[0] === resolve(repoRoot, 'target', 'cargo-home', 'bin'));
+});
