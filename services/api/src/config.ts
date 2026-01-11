@@ -11,6 +11,14 @@ export interface AppConfig {
    */
   trustProxy?: boolean;
   /**
+   * Canonical external base URL (origin) for the API (e.g. `https://api.example.com`).
+   *
+   * This is used for security-sensitive flows that need to generate absolute URLs,
+   * such as OIDC `redirect_uri`. Production deployments must set this explicitly
+   * to avoid host-header / forwarded-header spoofing.
+   */
+  publicBaseUrl?: string;
+  /**
    * Comma-separated allowlist of allowed CORS origins.
    *
    * - In production, defaults to no allowed origins unless explicitly configured.
@@ -118,6 +126,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const sessionTtlSeconds = parseIntEnv(env.SESSION_TTL_SECONDS, 60 * 60 * 24);
   const cookieSecure = env.COOKIE_SECURE === "true";
   const trustProxy = env.TRUST_PROXY === "true";
+  const publicBaseUrlEnv = readStringEnv(env.PUBLIC_BASE_URL, "");
+  const publicBaseUrl =
+    publicBaseUrlEnv.length > 0 ? (() => {
+      const url = new URL(publicBaseUrlEnv);
+      if (url.origin === "null") throw new Error("PUBLIC_BASE_URL must not be null");
+      return url.origin;
+    })() : undefined;
   const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS, nodeEnv);
   const syncTokenSecret = readStringEnv(env.SYNC_TOKEN_SECRET, DEV_SYNC_TOKEN_SECRET);
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
@@ -140,6 +155,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionTtlSeconds,
     cookieSecure,
     trustProxy,
+    publicBaseUrl,
     corsAllowedOrigins,
     syncTokenSecret,
     syncTokenTtlSeconds,
@@ -155,6 +171,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   };
 
   if (nodeEnv === "production") {
+    if (!config.publicBaseUrl) {
+      throw new Error("Refusing to start in production without PUBLIC_BASE_URL");
+    }
+
     const invalidSecrets: string[] = [];
     if (config.syncTokenSecret === DEV_SYNC_TOKEN_SECRET) invalidSecrets.push("SYNC_TOKEN_SECRET");
     if (config.secretStoreKey === DEV_SECRET_STORE_KEY) invalidSecrets.push("SECRET_STORE_KEY");

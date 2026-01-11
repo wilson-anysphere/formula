@@ -141,6 +141,7 @@ describe("security hardening", () => {
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
+        PUBLIC_BASE_URL: "https://api.example.com",
         COOKIE_SECURE: "true"
       })
     ).toThrow(/default development secrets/i);
@@ -148,6 +149,7 @@ describe("security hardening", () => {
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
+        PUBLIC_BASE_URL: "https://api.example.com",
         COOKIE_SECURE: "false",
         SYNC_TOKEN_SECRET: "prod-sync-token-secret",
         SECRET_STORE_KEY: "prod-secret-store-key",

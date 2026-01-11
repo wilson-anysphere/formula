@@ -370,6 +370,65 @@ describe("OIDC SSO", () => {
     }
   });
 
+  it("uses PUBLIC_BASE_URL for OIDC redirect_uri (ignores Host / forwarded headers)", async () => {
+    const { db, config, app } = await createTestApp();
+    let publicApp: ReturnType<typeof buildApp> | null = null;
+    try {
+      const ownerRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "public-base-url-owner@example.com",
+          password: "password1234",
+          name: "Owner",
+          orgName: "Public Base URL OIDC Org"
+        }
+      });
+      expect(ownerRegister.statusCode).toBe(200);
+      const orgId = (ownerRegister.json() as any).organization.id as string;
+
+      await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+        orgId,
+        JSON.stringify(["password", "oidc"])
+      ]);
+
+      await db.query(
+        `
+          INSERT INTO org_oidc_providers (org_id, provider_id, issuer_url, client_id, scopes, enabled)
+          VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+        `,
+        [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
+      );
+
+      await putSecret(db, config.secretStoreKey, `oidc:${orgId}:mock`, provider.clientSecret);
+
+      publicApp = buildApp({
+        db,
+        config: { ...config, publicBaseUrl: "https://api.public.example", trustProxy: true }
+      });
+      await publicApp.ready();
+
+      const startRes = await publicApp.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/mock/start`,
+        headers: {
+          host: "evil-host.example",
+          "x-forwarded-host": "evil-forwarded.example",
+          "x-forwarded-proto": "https"
+        }
+      });
+      expect(startRes.statusCode).toBe(302);
+      const authUrl = new URL(startRes.headers.location as string);
+      expect(authUrl.searchParams.get("redirect_uri")).toBe(
+        `https://api.public.example/auth/oidc/${orgId}/mock/callback`
+      );
+    } finally {
+      await publicApp?.close();
+      await app.close();
+      await db.end();
+    }
+  });
+
   it("fails on invalid state", async () => {
     const { db, app } = await createTestApp();
     try {

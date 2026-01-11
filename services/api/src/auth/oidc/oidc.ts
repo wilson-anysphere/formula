@@ -95,6 +95,10 @@ function extractProto(request: FastifyRequest): string {
 }
 
 function externalBaseUrl(request: FastifyRequest): string {
+  // Prefer an explicit external base URL so we do not rely on potentially spoofed
+  // Host / forwarded headers when generating security-sensitive redirect URIs.
+  const configured = request.server.config.publicBaseUrl;
+  if (typeof configured === "string" && configured.length > 0) return configured;
   return `${extractProto(request)}://${extractHost(request)}`;
 }
 

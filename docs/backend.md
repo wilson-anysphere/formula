@@ -39,6 +39,7 @@ on insecure defaults (for example `COOKIE_SECURE!=true` or known dev secrets). I
 production requires:
 
 - `COOKIE_SECURE=true`
+- `PUBLIC_BASE_URL` set to the canonical external API origin (e.g. `https://api.example.com`)
 - `SYNC_TOKEN_SECRET` set to a non-dev value
 - `SECRET_STORE_KEY` set to a non-dev value
 - `LOCAL_KMS_MASTER_KEY` set to a non-dev value
