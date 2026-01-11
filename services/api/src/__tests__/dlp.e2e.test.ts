@@ -325,5 +325,26 @@ describe("API e2e: DLP policy + classification endpoints", () => {
       classification: { level: "Restricted", labels: ["PII"] },
       maxAllowed: "Confidential"
     });
+
+    const evaluateRange = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/dlp/evaluate`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        action: "clipboard.copy",
+        selector: {
+          scope: "range",
+          documentId: docId,
+          sheetId: "Sheet1",
+          range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } }
+        }
+      }
+    });
+    expect(evaluateRange.statusCode).toBe(200);
+    expect(evaluateRange.json()).toMatchObject({
+      decision: "block",
+      classification: { level: "Restricted", labels: ["Mask", "PII"] },
+      maxAllowed: "Confidential"
+    });
   });
 });
