@@ -54,6 +54,9 @@ describe("FormulaBarView tab completion (integration)", () => {
 
   it("suggests named ranges when typing a range argument", async () => {
     const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      doc.setCellValue("Sheet1", { row, col: 0 }, row + 1);
+    }
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -82,11 +85,11 @@ describe("FormulaBarView tab completion (integration)", () => {
 
     expect(view.model.aiSuggestion()).toBe("=SUM(SalesData)");
     expect(view.model.aiGhostText()).toBe("esData)");
-    expect(view.model.aiSuggestionPreview()).toBe("(preview unavailable)");
+    expect(view.model.aiSuggestionPreview()).toBe(55);
 
     const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
     expect(highlight?.textContent).toContain("=SUM(SalesData)");
-    expect(highlight?.querySelector(".formula-bar-preview")?.textContent).toContain("(preview unavailable)");
+    expect(highlight?.querySelector(".formula-bar-preview")?.textContent).toContain("55");
 
     completion.destroy();
     host.remove();

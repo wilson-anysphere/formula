@@ -11,6 +11,13 @@ export interface AiFunctionEvaluator {
 export interface EvaluateFormulaOptions {
   ai?: AiFunctionEvaluator;
   cellAddress?: string;
+  /**
+   * Optional name resolver used by lightweight evaluation (e.g. formula-bar preview).
+   *
+   * When provided, identifiers that aren't TRUE/FALSE are looked up here and, if
+   * resolved, treated as A1 references/ranges.
+   */
+  resolveNameToReference?: (name: string) => string | null;
 }
 
 function isErrorCode(value: unknown): value is string {
@@ -41,7 +48,7 @@ type EvalToken =
   | { type: "paren"; value: "(" | ")" }
   | { type: "comma"; value: "," };
 
-function lex(formula: string): EvalToken[] {
+function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
   return tokenizeFormula(formula)
     .filter((token) => token.type !== "whitespace")
     .map((token): EvalToken => {
@@ -60,6 +67,8 @@ function lex(formula: string): EvalToken[] {
           const upper = token.text.toUpperCase();
           if (upper === "TRUE") return { type: "boolean", value: true };
           if (upper === "FALSE") return { type: "boolean", value: false };
+          const resolved = options.resolveNameToReference?.(token.text);
+          if (resolved) return { type: "reference", value: resolved };
           return { type: "error", value: "#NAME?" };
         }
         case "operator":
@@ -312,7 +321,7 @@ export function evaluateFormula(
     return text === "" ? null : text;
   }
 
-  const tokens = lex(text.slice(1));
+  const tokens = lex(text.slice(1), options);
   const parser = new Parser(tokens);
   const value = parseExpression(parser, getCellValue, options);
   if (isErrorCode(value)) return value;

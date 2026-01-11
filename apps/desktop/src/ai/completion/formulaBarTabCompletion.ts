@@ -29,6 +29,7 @@ export class FormulaBarTabCompletionController {
   readonly #document: DocumentController;
   readonly #getSheetId: () => string;
   readonly #limits: { maxRows: number; maxCols: number } | null;
+  readonly #schemaProvider: SchemaProvider;
 
   #cellsVersion = 0;
   #completionRequest = 0;
@@ -65,6 +66,7 @@ export class FormulaBarTabCompletionController {
         return extra ? `${base}|${extra}` : base;
       },
     };
+    this.#schemaProvider = schemaProvider;
 
     const localModel = createLocalModelFromSettings();
     // Initialize local models opportunistically in the background (pulling models
@@ -166,7 +168,7 @@ export class FormulaBarTabCompletionController {
         cursorPosition: cursor,
         cellRef: activeCell,
         surroundingCells,
-      }, { previewEvaluator: createPreviewEvaluator({ document: this.#document, sheetId, cellAddress: activeCell }) })
+      }, { previewEvaluator: createPreviewEvaluator({ document: this.#document, sheetId, cellAddress: activeCell, schemaProvider: this.#schemaProvider }) })
       .then((suggestions) => {
         if (requestId !== this.#completionRequest) return;
         if (this.#getSheetId() !== sheetId) return;
@@ -228,21 +230,59 @@ function createPreviewEvaluator(params: {
   document: DocumentController;
   sheetId: string;
   cellAddress: string;
-}): (args: { suggestion: Suggestion; context: CompletionContext }) => unknown {
+  schemaProvider?: SchemaProvider | null;
+}): (args: { suggestion: Suggestion; context: CompletionContext }) => unknown | Promise<unknown> {
   const { document, sheetId, cellAddress } = params;
+  const schemaProvider = params.schemaProvider ?? null;
 
   // Hard cap on the number of cell reads we allow for preview. This keeps
   // completion responsive even when the suggested formula references a large
   // range.
   const MAX_CELL_READS = 5_000;
 
-  return ({ suggestion }: { suggestion: Suggestion; context: CompletionContext }): unknown => {
+  let namedRangesPromise: Promise<Map<string, { sheetName: string | null; ref: string }>> | null = null;
+  const getNamedRanges = () => {
+    if (!schemaProvider?.getNamedRanges) return Promise.resolve(new Map());
+    if (!namedRangesPromise) {
+      namedRangesPromise = Promise.resolve()
+        .then(() => schemaProvider.getNamedRanges?.())
+        .then((items) => (Array.isArray(items) ? items : []))
+        .then((items) => {
+          const map = new Map<string, { sheetName: string | null; ref: string }>();
+          for (const item of items) {
+            const name = typeof (item as any)?.name === "string" ? String((item as any).name) : "";
+            const range = typeof (item as any)?.range === "string" ? String((item as any).range) : "";
+            if (!name || !range) continue;
+
+            const bang = range.indexOf("!");
+            const sheetName = bang >= 0 ? range.slice(0, bang) : null;
+            const ref = bang >= 0 ? range.slice(bang + 1) : range;
+            if (!ref) continue;
+            map.set(name.trim().toUpperCase(), { sheetName: sheetName ? sheetName.trim() : null, ref: ref.trim() });
+          }
+          return map;
+        })
+        .catch(() => new Map());
+    }
+    return namedRangesPromise;
+  };
+
+  return async ({ suggestion }: { suggestion: Suggestion; context: CompletionContext }): Promise<unknown> => {
     const text = suggestion?.text ?? "";
     if (typeof text !== "string" || text.trim() === "") return undefined;
 
     // The lightweight evaluator can't resolve sheet-qualified references or
     // structured references yet; don't show misleading errors.
     if (text.includes("!") || text.includes("[")) return "(preview unavailable)";
+
+    const namedRanges = await getNamedRanges();
+    const resolveNameToReference = (name: string): string | null => {
+      if (!name) return null;
+      const entry = namedRanges.get(name.trim().toUpperCase());
+      if (!entry) return null;
+      if (entry.sheetName && entry.sheetName.toLowerCase() !== sheetId.toLowerCase()) return null;
+      return entry.ref;
+    };
 
     let reads = 0;
     const memo = new Map<string, unknown>();
@@ -263,7 +303,10 @@ function createPreviewEvaluator(params: {
       const state = document.getCell(sheetId, normalized) as { value: unknown; formula: string | null };
       let value: unknown;
       if (state?.formula) {
-        value = evaluateFormula(state.formula, getCellValue, { cellAddress: `${sheetId}!${normalized}` });
+        value = evaluateFormula(state.formula, getCellValue, {
+          cellAddress: `${sheetId}!${normalized}`,
+          resolveNameToReference,
+        });
       } else {
         value = state?.value ?? null;
       }
@@ -273,7 +316,10 @@ function createPreviewEvaluator(params: {
     };
 
     try {
-      const value = evaluateFormula(text, getCellValue, { cellAddress: `${sheetId}!${cellAddress}` });
+      const value = evaluateFormula(text, getCellValue, {
+        cellAddress: `${sheetId}!${cellAddress}`,
+        resolveNameToReference,
+      });
       // Errors from the lightweight evaluator usually mean unsupported syntax.
       if (typeof value === "string" && (value === "#NAME?" || value === "#VALUE!")) return "(preview unavailable)";
       return value;

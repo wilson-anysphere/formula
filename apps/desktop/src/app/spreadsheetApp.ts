@@ -592,8 +592,17 @@ export class SpreadsheetApp {
         schemaProvider: {
           getNamedRanges: () =>
             Array.from(this.searchWorkbook.names.values())
-              .map((entry: any) => ({ name: typeof entry?.name === "string" ? entry.name : "" }))
-              .filter((entry: { name: string }) => entry.name.length > 0),
+              .map((entry: any) => {
+                const name = typeof entry?.name === "string" ? entry.name : "";
+                if (!name) return null;
+                const sheetName = typeof entry?.sheetName === "string" ? entry.sheetName : "";
+                const range = entry?.range;
+                const rangeText = sheetName && range ? `${sheetName}!${rangeToA1(range)}` : undefined;
+                return { name, range: rangeText };
+              })
+              .filter((entry: { name: string; range?: string } | null): entry is { name: string; range?: string } =>
+                Boolean(entry?.name),
+              ),
           getTables: () =>
             Array.from(this.searchWorkbook.tables.values())
               .map((table: any) => ({
