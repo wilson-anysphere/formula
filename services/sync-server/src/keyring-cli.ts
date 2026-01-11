@@ -66,6 +66,8 @@ async function atomicWriteFile(filePath: string, contents: string): Promise<void
   const base = path.basename(filePath);
   const tmpPath = path.join(dir, `.${base}.${process.pid}.${Date.now()}.tmp`);
 
+  await fs.mkdir(dir, { recursive: true });
+
   // KeyRing JSON contains secret key material. Default to owner-readable only,
   // but preserve the existing file mode (if any) to avoid surprising operators.
   let mode = 0o600;
