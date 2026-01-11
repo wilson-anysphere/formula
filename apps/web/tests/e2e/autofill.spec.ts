@@ -26,6 +26,13 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
     return { x: box!.x + rect!.x + rect!.width / 2, y: box!.y + rect!.y + rect!.height / 2 };
   };
 
+  const scrollToCell = async (row0: number, col0: number) => {
+    await page.evaluate(
+      ({ row, col }) => (window as any).__gridApi.scrollToCell(row + 1, col + 1, { align: "center", padding: 24 }),
+      { row: row0, col: col0 }
+    );
+  };
+
   const fillHandleCenter = async () => {
     const rect = await page.evaluate(() => (window as any).__gridApi.getFillHandleRect());
     expect(rect).not.toBeNull();
@@ -35,6 +42,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   const input = page.getByTestId("formula-input");
 
   // Seed A1=1, A2=2.
+  await scrollToCell(0, 0);
   const a1Center = await cellCenter(0, 0);
   await page.mouse.click(a1Center.x, a1Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("A1");
@@ -109,6 +117,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await expect(page.getByTestId("formula-bar-value")).toHaveText("6");
 
   // Horizontal series fill: C1=1, D1=2 -> fill right to F1.
+  await scrollToCell(0, 3);
   const c1Center = await cellCenter(0, 2);
   await page.mouse.click(c1Center.x, c1Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("C1");
@@ -143,6 +152,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await expect(page.getByTestId("formula-bar-value")).toHaveText("4");
 
   // Fill up: H5=10, H6=12 -> fill up to H3.
+  await scrollToCell(5, 7);
   const h5Center = await cellCenter(4, 7);
   await page.mouse.click(h5Center.x, h5Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("H5");
@@ -177,6 +187,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await expect(page.getByTestId("formula-bar-value")).toHaveText("8");
 
   // Multi-column series: J1:K2 = [[1,2],[3,4]] -> fill down to J4:K4.
+  await scrollToCell(1, 10);
   const j1Center = await cellCenter(0, 9);
   await page.mouse.click(j1Center.x, j1Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("J1");
@@ -233,6 +244,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await expect(page.getByTestId("formula-bar-value")).toHaveText("8");
 
   // Text series: G8="Item 1", G9="Item 3" -> fill down to G11.
+  await scrollToCell(8, 6);
   const g8Center = await cellCenter(7, 6);
   await page.mouse.click(g8Center.x, g8Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("G8");
@@ -271,6 +283,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await expect(page.getByTestId("formula-bar-value")).toHaveText("Item 7");
 
   // Fill left: F2=1, G2=2 -> fill left to D2.
+  await scrollToCell(1, 6);
   const f2Center = await cellCenter(1, 5);
   await page.mouse.click(f2Center.x, f2Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("F2");
@@ -307,6 +320,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await expect(page.getByTestId("formula-bar-value")).toHaveText("0");
 
   // Formula fill right: set A10=1, B10 =A10+1, then fill right to D10.
+  await scrollToCell(9, 3);
   const a10Center = await cellCenter(9, 0);
   await page.mouse.click(a10Center.x, a10Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("A10");

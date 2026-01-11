@@ -156,4 +156,61 @@ describe("CanvasGrid fill handle", () => {
     });
     host.remove();
   });
+
+  it("infers horizontal fill when dragging the handle sideways", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onFillHandleCommit = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={20}
+          apiRef={apiRef}
+          onFillHandleCommit={onFillHandleCommit}
+        />
+      );
+    });
+
+    const sourceRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 2 };
+    await act(async () => {
+      apiRef.current?.setSelectionRange(sourceRange);
+    });
+
+    onFillHandleCommit.mockClear();
+
+    const handle = apiRef.current?.getFillHandleRect();
+    expect(handle).not.toBeNull();
+
+    const targetCell = apiRef.current?.getCellRect(0, 3);
+    expect(targetCell).not.toBeNull();
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
+    const end = { clientX: targetCell!.x + targetCell!.width / 2, clientY: start.clientY };
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { ...end, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { ...end, pointerId: 1 }));
+    });
+
+    const expectedTarget = { startRow: 0, endRow: 1, startCol: 0, endCol: 4 };
+
+    expect(onFillHandleCommit).toHaveBeenCalledTimes(1);
+    expect(onFillHandleCommit).toHaveBeenCalledWith({ source: sourceRange, target: expectedTarget });
+    expect(apiRef.current?.getSelectionRange()).toEqual(expectedTarget);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });
