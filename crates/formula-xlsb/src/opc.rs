@@ -2,7 +2,7 @@ use crate::biff12_varint;
 use crate::parser::Error as ParseError;
 use crate::parser::{
     biff12, parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook, Cell, CellValue,
-    SheetData, SheetMeta, WorkbookProperties,
+    DefinedName, SheetData, SheetMeta, WorkbookProperties,
 };
 use crate::patch::{patch_sheet_bin, patch_sheet_bin_streaming, CellEdit};
 use crate::shared_strings_write::SharedStringsWriter;
@@ -60,6 +60,7 @@ pub struct XlsbWorkbook {
     shared_strings_table: Vec<SharedString>,
     workbook_context: WorkbookContext,
     workbook_properties: WorkbookProperties,
+    defined_names: Vec<DefinedName>,
     styles: Styles,
     preserved_parts: HashMap<String, Vec<u8>>,
     preserve_parsed_parts: bool,
@@ -110,7 +111,7 @@ impl XlsbWorkbook {
             bytes
         };
 
-        let (sheets, workbook_context, workbook_properties) =
+        let (sheets, workbook_context, workbook_properties, defined_names) =
             parse_workbook(&mut Cursor::new(&workbook_bin), &workbook_rels)?;
         if options.preserve_parsed_parts {
             preserved_parts.insert("xl/workbook.bin".to_string(), workbook_bin);
@@ -177,6 +178,7 @@ impl XlsbWorkbook {
             shared_strings_table,
             workbook_context,
             workbook_properties,
+            defined_names,
             styles,
             preserved_parts,
             preserve_parsed_parts: options.preserve_parsed_parts,
@@ -204,6 +206,10 @@ impl XlsbWorkbook {
         &self.workbook_context
     }
 
+    pub fn defined_names(&self) -> &[DefinedName] {
+        &self.defined_names
+    }
+
     /// Workbook styles parsed from `xl/styles.bin`.
     pub fn styles(&self) -> &Styles {
         &self.styles
@@ -213,7 +219,10 @@ impl XlsbWorkbook {
     ///
     /// This is a convenience wrapper around [`Styles::parse_with_locale`] that
     /// uses the preserved `xl/styles.bin` bytes from this workbook.
-    pub fn styles_with_locale(&self, locale: formula_format::Locale) -> Option<Result<Styles, ParseError>> {
+    pub fn styles_with_locale(
+        &self,
+        locale: formula_format::Locale,
+    ) -> Option<Result<Styles, ParseError>> {
         let bytes = self.styles_bin()?;
         Some(Styles::parse_with_locale(bytes, locale))
     }
@@ -476,9 +485,12 @@ impl XlsbWorkbook {
             .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
         let sheet_part = meta.part_path.clone();
 
-        self.save_with_part_overrides_streaming(dest, &HashMap::new(), &sheet_part, |input, output| {
-            patch_sheet_bin_streaming(input, output, edits)
-        })
+        self.save_with_part_overrides_streaming(
+            dest,
+            &HashMap::new(),
+            &sheet_part,
+            |input, output| patch_sheet_bin_streaming(input, output, edits),
+        )
     }
 
     /// Save the workbook while overriding specific part payloads.
@@ -668,9 +680,7 @@ impl XlsbWorkbook {
         if overrides.contains_key(stream_part) {
             return Err(ParseError::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!(
-                    "streaming override conflicts with byte override for part: {stream_part}"
-                ),
+                format!("streaming override conflicts with byte override for part: {stream_part}"),
             )));
         }
 
@@ -733,8 +743,12 @@ impl XlsbWorkbook {
                 updated_workbook_rels = Some(remove_calc_chain_from_workbook_rels(&workbook_rels)?);
             }
 
-            let workbook_bin =
-                get_part_bytes(&mut zip, &self.preserved_parts, overrides, "xl/workbook.bin")?;
+            let workbook_bin = get_part_bytes(
+                &mut zip,
+                &self.preserved_parts,
+                overrides,
+                "xl/workbook.bin",
+            )?;
             if let Some(workbook_bin) = workbook_bin {
                 if let Some(patched) = patch_workbook_bin_full_calc_on_load(&workbook_bin)? {
                     updated_workbook_bin = Some(patched);

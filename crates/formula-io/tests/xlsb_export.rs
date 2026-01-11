@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use formula_io::{open_workbook, save_workbook};
-use formula_model::{CalculationMode, CellRef};
+use formula_model::{CalculationMode, CellRef, DefinedNameScope};
 use std::collections::HashMap;
 use std::io::Cursor;
 
@@ -207,6 +207,85 @@ fn xlsb_export_preserves_full_calc_on_load() {
     );
 }
 
+#[test]
+fn xlsb_export_preserves_defined_names_and_ptgname_formulas() {
+    let fixture_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsb/tests/fixtures/simple.xlsb"
+    ));
+    let wb = formula_xlsb::XlsbWorkbook::open_with_options(
+        fixture_path,
+        formula_xlsb::OpenOptions {
+            preserve_worksheets: true,
+            ..Default::default()
+        },
+    )
+    .expect("open xlsb fixture");
+
+    let workbook_bin = wb
+        .preserved_parts()
+        .get("xl/workbook.bin")
+        .expect("expected xl/workbook.bin to be preserved");
+    let sheet_bin = wb
+        .preserved_parts()
+        .get("xl/worksheets/sheet1.bin")
+        .expect("expected xl/worksheets/sheet1.bin to be preserved");
+
+    let patched_workbook_bin = patch_workbook_bin_append_defined_name(workbook_bin, "MyName", 42);
+
+    // Insert a new numeric formula cell at D1 that references the defined name via `PtgName`.
+    // rgce: PtgName (ref class) + nameId=1 + reserved.
+    let mut rgce = vec![0x23];
+    rgce.extend_from_slice(&1u32.to_le_bytes());
+    rgce.extend_from_slice(&0u16.to_le_bytes());
+    let patched_sheet_bin = formula_xlsb::patch_sheet_bin(
+        sheet_bin,
+        &[formula_xlsb::CellEdit {
+            row: 0,
+            col: 3,
+            new_value: formula_xlsb::CellValue::Number(0.0),
+            new_formula: Some(rgce),
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let xlsb_path = dir.path().join("defined_names.xlsb");
+    wb.save_with_part_overrides(
+        &xlsb_path,
+        &HashMap::from([
+            ("xl/workbook.bin".to_string(), patched_workbook_bin),
+            ("xl/worksheets/sheet1.bin".to_string(), patched_sheet_bin),
+        ]),
+    )
+    .expect("write modified xlsb");
+
+    let wb = open_workbook(&xlsb_path).expect("open modified xlsb via formula-io");
+
+    let out_path = dir.path().join("export.xlsx");
+    save_workbook(&wb, &out_path).expect("export workbook");
+
+    let bytes = std::fs::read(&out_path).expect("read exported workbook");
+    let doc = formula_xlsx::load_from_bytes(&bytes).expect("load exported workbook");
+
+    let name = doc
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "MyName")
+        .expect("expected MyName to be preserved as a defined name");
+    assert_eq!(name.scope, DefinedNameScope::Workbook);
+    assert_eq!(name.refers_to, "42");
+
+    let sheet = doc
+        .workbook
+        .sheet_by_name("Sheet1")
+        .unwrap_or_else(|| &doc.workbook.sheets[0]);
+    let formula_cell = CellRef::from_a1("D1").expect("valid cell ref");
+    assert_eq!(sheet.formula(formula_cell), Some("MyName"));
+}
+
 fn patch_workbook_bin_set_first_sheet_visibility(
     workbook_bin: &[u8],
     visibility_state: u32,
@@ -264,4 +343,43 @@ fn patch_workbook_bin_append_calc_prop(workbook_bin: &[u8], flags: u16) -> Vec<u
         .expect("write calcProp record len");
     out.extend_from_slice(&payload);
     out
+}
+
+fn patch_workbook_bin_append_defined_name(workbook_bin: &[u8], name: &str, value: u16) -> Vec<u8> {
+    // BrtName record id in BIFF12 / MS-XLSB.
+    const NAME_RECORD_ID: u32 = 0x0027;
+    const WORKBOOK_SCOPE: u32 = 0xFFFF_FFFF;
+
+    let rgce = {
+        // PtgInt (0x1E) literal.
+        let mut buf = vec![0x1E];
+        buf.extend_from_slice(&value.to_le_bytes());
+        buf
+    };
+
+    let payload = {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0u32.to_le_bytes()); // flags (hidden/etc)
+        buf.extend_from_slice(&WORKBOOK_SCOPE.to_le_bytes()); // scope sheet index
+        write_utf16_string(&mut buf, name);
+        buf.extend_from_slice(&(rgce.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&rgce);
+        buf
+    };
+
+    let mut out = workbook_bin.to_vec();
+    formula_xlsb::biff12_varint::write_record_id(&mut out, NAME_RECORD_ID)
+        .expect("write name record id");
+    formula_xlsb::biff12_varint::write_record_len(&mut out, payload.len() as u32)
+        .expect("write name record len");
+    out.extend_from_slice(&payload);
+    out
+}
+
+fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
+    let units: Vec<u16> = s.encode_utf16().collect();
+    out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+    for u in units {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
 }

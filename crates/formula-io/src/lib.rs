@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-pub use formula_xlsx as xlsx;
 pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
+pub use formula_xlsx as xlsx;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -139,17 +139,17 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
     match workbook {
         Workbook::Xlsx(package) => match ext.as_str() {
             "xlsx" | "xlsm" => {
-            let file = std::fs::File::create(path).map_err(|source| Error::SaveIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            package
-                .write_to(file)
-                .map_err(|source| Error::SaveXlsxPackage {
+                let file = std::fs::File::create(path).map_err(|source| Error::SaveIo {
                     path: path.to_path_buf(),
                     source,
                 })?;
-            Ok(())
+                package
+                    .write_to(file)
+                    .map_err(|source| Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                Ok(())
             }
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
@@ -158,10 +158,10 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
         },
         Workbook::Xls(result) => match ext.as_str() {
             "xlsx" => xlsx::write_workbook(&result.workbook, path).map_err(|source| {
-            Error::SaveXlsxExport {
-                path: path.to_path_buf(),
-                source,
-            }
+                Error::SaveXlsxExport {
+                    path: path.to_path_buf(),
+                    source,
+                }
             }),
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
@@ -193,8 +193,8 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
 
 fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Workbook, xlsb::Error> {
     use formula_model::{
-        normalize_formula_text, CalculationMode, CellRef, CellValue, DateSystem, ErrorValue,
-        SheetVisibility, Style, Workbook as ModelWorkbook,
+        normalize_formula_text, CalculationMode, CellRef, CellValue, DateSystem, DefinedNameScope,
+        ErrorValue, SheetVisibility, Style, Workbook as ModelWorkbook,
     };
 
     let mut out = ModelWorkbook::new();
@@ -235,9 +235,7 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
             continue;
         }
         let number_format = match info.number_format.as_deref() {
-            Some(fmt)
-                if fmt.starts_with(formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX) =>
-            {
+            Some(fmt) if fmt.starts_with(formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX) => {
                 Some(fmt.to_string())
             }
             Some(fmt) => {
@@ -288,10 +286,14 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
         xf_to_style_id.push(style_id);
     }
 
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
+        Vec::with_capacity(wb.sheet_metas().len());
+
     for (sheet_index, meta) in wb.sheet_metas().iter().enumerate() {
         let sheet_id = out
             .add_sheet(meta.name.clone())
             .map_err(|err| xlsb::Error::InvalidSheetName(format!("{}: {err}", meta.name)))?;
+        worksheet_ids_by_index.push(sheet_id);
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");
@@ -331,6 +333,38 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
                 }
             }
         })?;
+    }
+
+    // Defined names: parsed from `xl/workbook.bin` `BrtName` records.
+    for name in wb.defined_names() {
+        let Some(formula) = name.formula.as_ref().and_then(|f| f.text.as_deref()) else {
+            continue;
+        };
+        let Some(refers_to) = normalize_formula_text(formula) else {
+            continue;
+        };
+
+        let (scope, local_sheet_id) = match name.scope_sheet.and_then(|idx| {
+            worksheet_ids_by_index
+                .get(idx as usize)
+                .copied()
+                .map(|id| (idx, id))
+        }) {
+            Some((local_sheet_id, sheet_id)) => {
+                (DefinedNameScope::Sheet(sheet_id), Some(local_sheet_id))
+            }
+            None => (DefinedNameScope::Workbook, None),
+        };
+
+        // Best-effort: ignore invalid/duplicate names so we can still export the workbook.
+        let _ = out.create_defined_name(
+            scope,
+            name.name.clone(),
+            refers_to,
+            name.comment.clone(),
+            name.hidden,
+            local_sheet_id,
+        );
     }
 
     Ok(out)
