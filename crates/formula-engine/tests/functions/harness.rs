@@ -1,3 +1,4 @@
+use formula_engine::date::ExcelDateSystem;
 use formula_engine::{Engine, Value};
 
 pub struct TestSheet {
@@ -13,6 +14,10 @@ impl TestSheet {
             sheet: "Sheet1",
             scratch_cell: "Z1",
         }
+    }
+
+    pub fn set_date_system(&mut self, system: ExcelDateSystem) {
+        self.engine.set_date_system(system);
     }
 
     pub fn set(&mut self, addr: &str, value: impl Into<Value>) {
@@ -45,4 +50,3 @@ pub fn assert_number(value: &Value, expected: f64) {
         other => panic!("expected number {expected}, got {other:?}"),
     }
 }
-

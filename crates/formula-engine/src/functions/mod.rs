@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use crate::date::ExcelDateSystem;
 use crate::eval::{CellAddr, CompiledExpr};
 use crate::value::{ErrorKind, Value};
 
@@ -98,6 +99,7 @@ pub trait FunctionContext {
     fn apply_implicit_intersection(&self, reference: Reference) -> Value;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc>;
+    fn date_system(&self) -> ExcelDateSystem;
 }
 
 pub type FunctionImpl = fn(&dyn FunctionContext, &[CompiledExpr]) -> Value;

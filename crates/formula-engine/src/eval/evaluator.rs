@@ -1,5 +1,6 @@
 use crate::eval::address::CellAddr;
 use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, PostfixOp, SheetReference, UnaryOp};
+use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
 use crate::value::{Array, ErrorKind, Value};
@@ -81,14 +82,24 @@ pub struct Evaluator<'a, R: ValueResolver> {
     resolver: &'a R,
     ctx: EvalContext,
     name_stack: Rc<RefCell<Vec<(usize, String)>>>,
+    date_system: ExcelDateSystem,
 }
 
 impl<'a, R: ValueResolver> Evaluator<'a, R> {
     pub fn new(resolver: &'a R, ctx: EvalContext) -> Self {
+        Self::new_with_date_system(resolver, ctx, ExcelDateSystem::EXCEL_1900)
+    }
+
+    pub fn new_with_date_system(
+        resolver: &'a R,
+        ctx: EvalContext,
+        date_system: ExcelDateSystem,
+    ) -> Self {
         Self {
             resolver,
             ctx,
             name_stack: Rc::new(RefCell::new(Vec::new())),
+            date_system,
         }
     }
 
@@ -97,6 +108,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             resolver: self.resolver,
             ctx,
             name_stack: Rc::clone(&self.name_stack),
+            date_system: self.date_system,
         }
     }
 
@@ -562,6 +574,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
         chrono::Utc::now()
+    }
+
+    fn date_system(&self) -> ExcelDateSystem {
+        self.date_system
     }
 }
 

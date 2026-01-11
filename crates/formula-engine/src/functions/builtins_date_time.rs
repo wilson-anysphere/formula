@@ -44,7 +44,7 @@ fn date_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         _ => return Value::Error(ErrorKind::Num),
     };
 
-    let system = ExcelDateSystem::EXCEL_1900;
+    let system = ctx.date_system();
     let first_serial = match ymd_to_serial(ExcelDate::new(year_i32, month_u8, 1), system) {
         Ok(s) => s as i64,
         Err(_) => return Value::Error(ErrorKind::Num),
@@ -73,7 +73,7 @@ inventory::submit! {
 fn today_fn(ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
     let now = ctx.now_utc();
     let date = now.date_naive();
-    let system = ExcelDateSystem::EXCEL_1900;
+    let system = ctx.date_system();
     match ymd_to_serial(
         ExcelDate::new(date.year(), date.month() as u8, date.day() as u8),
         system,
@@ -100,7 +100,7 @@ inventory::submit! {
 fn now_fn(ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
     let now = ctx.now_utc();
     let date = now.date_naive();
-    let system = ExcelDateSystem::EXCEL_1900;
+    let system = ctx.date_system();
     let base = match ymd_to_serial(
         ExcelDate::new(date.year(), date.month() as u8, date.day() as u8),
         system,
@@ -128,7 +128,7 @@ inventory::submit! {
 }
 
 fn year_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    match serial_to_components(eval_scalar_arg(ctx, &args[0])) {
+    match serial_to_components(eval_scalar_arg(ctx, &args[0]), ctx.date_system()) {
         Ok((y, _, _)) => Value::Number(y as f64),
         Err(e) => Value::Error(e),
     }
@@ -149,7 +149,7 @@ inventory::submit! {
 }
 
 fn month_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    match serial_to_components(eval_scalar_arg(ctx, &args[0])) {
+    match serial_to_components(eval_scalar_arg(ctx, &args[0]), ctx.date_system()) {
         Ok((_, m, _)) => Value::Number(m as f64),
         Err(e) => Value::Error(e),
     }
@@ -170,20 +170,19 @@ inventory::submit! {
 }
 
 fn day_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    match serial_to_components(eval_scalar_arg(ctx, &args[0])) {
+    match serial_to_components(eval_scalar_arg(ctx, &args[0]), ctx.date_system()) {
         Ok((_, _, d)) => Value::Number(d as f64),
         Err(e) => Value::Error(e),
     }
 }
 
-fn serial_to_components(v: Value) -> Result<(i32, i32, i32), ErrorKind> {
+fn serial_to_components(v: Value, system: ExcelDateSystem) -> Result<(i32, i32, i32), ErrorKind> {
     let n = v.coerce_to_number()?;
     if !n.is_finite() {
         return Err(ErrorKind::Num);
     }
     let serial = n.floor();
     let serial_i32 = i32::try_from(serial as i64).map_err(|_| ErrorKind::Num)?;
-    let system = ExcelDateSystem::EXCEL_1900;
     let date = serial_to_ymd(serial_i32, system).map_err(|_| ErrorKind::Num)?;
     Ok((date.year, date.month as i32, date.day as i32))
 }

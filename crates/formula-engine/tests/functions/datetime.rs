@@ -1,3 +1,4 @@
+use formula_engine::date::ExcelDateSystem;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
@@ -48,3 +49,27 @@ fn year_month_day_errors_on_invalid_inputs() {
     assert_eq!(sheet.eval("=YEAR(#REF!)"), Value::Error(ErrorKind::Ref));
 }
 
+#[test]
+fn respects_excel_1904_date_system_for_date_serials() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1904);
+    assert_number(&sheet.eval("=DATE(1904,1,1)"), 0.0);
+}
+
+#[test]
+fn lotus_bug_serial_60_maps_to_feb_29_1900() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: true });
+    assert_number(&sheet.eval("=YEAR(60)"), 1900.0);
+    assert_number(&sheet.eval("=MONTH(60)"), 2.0);
+    assert_number(&sheet.eval("=DAY(60)"), 29.0);
+}
+
+#[test]
+fn lotus_bug_can_be_disabled() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: false });
+    assert_number(&sheet.eval("=YEAR(60)"), 1900.0);
+    assert_number(&sheet.eval("=MONTH(60)"), 3.0);
+    assert_number(&sheet.eval("=DAY(60)"), 1.0);
+}

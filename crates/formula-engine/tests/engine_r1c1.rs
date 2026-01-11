@@ -29,11 +29,13 @@ fn engine_evaluates_r1c1_ranges_equivalent_to_a1() {
     engine.set_cell_formula("Sheet1", "C5", "=A1:A3").unwrap();
     engine.recalculate();
     let a1_value = engine.get_cell_value("Sheet1", "C5");
+    let a1_spill_range = engine.spill_range("Sheet1", "C5");
+
     assert_eq!(a1_value, Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C6"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C7"), Value::Number(3.0));
     assert_eq!(
-        engine.spill_range("Sheet1", "C5"),
+        a1_spill_range,
         Some((eval::parse_a1("C5").unwrap(), eval::parse_a1("C7").unwrap()))
     );
 
@@ -42,14 +44,16 @@ fn engine_evaluates_r1c1_ranges_equivalent_to_a1() {
         .unwrap();
     engine.recalculate();
     let r1c1_value = engine.get_cell_value("Sheet1", "C5");
+    let r1c1_spill_range = engine.spill_range("Sheet1", "C5");
 
     assert_eq!(a1_value, r1c1_value);
     assert_eq!(engine.get_cell_value("Sheet1", "C6"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C7"), Value::Number(3.0));
     assert_eq!(
-        engine.spill_range("Sheet1", "C5"),
+        r1c1_spill_range,
         Some((eval::parse_a1("C5").unwrap(), eval::parse_a1("C7").unwrap()))
     );
+    assert_eq!(a1_spill_range, r1c1_spill_range);
 }
 
 #[test]

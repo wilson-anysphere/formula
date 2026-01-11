@@ -14,6 +14,7 @@ use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange
 use crate::locale::{canonicalize_formula, canonicalize_formula_with_style, FormulaLocale};
 use crate::value::{Array, ErrorKind, Value};
 use crate::calc_settings::{CalcSettings, CalculationMode};
+use crate::date::ExcelDateSystem;
 use crate::iterative;
 use formula_model::{CellId, CellRef, Range, Table};
 use rayon::prelude::*;
@@ -238,6 +239,7 @@ pub struct Engine {
     dirty: HashSet<CellKey>,
     dirty_reasons: HashMap<CellKey, DirtyReason>,
     calc_settings: CalcSettings,
+    date_system: ExcelDateSystem,
     circular_references: HashSet<CellKey>,
     spills: SpillState,
 }
@@ -265,6 +267,7 @@ impl Engine {
                 calculation_mode: CalculationMode::Manual,
                 ..CalcSettings::default()
             },
+            date_system: ExcelDateSystem::EXCEL_1900,
             circular_references: HashSet::new(),
             spills: SpillState::default(),
         }
@@ -293,6 +296,33 @@ impl Engine {
 
     pub fn bytecode_program_count(&self) -> usize {
         self.bytecode_cache.program_count()
+    }
+
+    pub fn set_date_system(&mut self, system: ExcelDateSystem) {
+        if self.date_system == system {
+            return;
+        }
+        self.date_system = system;
+
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            for (addr, cell) in &sheet.cells {
+                if cell.compiled.is_some() {
+                    let key = CellKey { sheet: sheet_id, addr: *addr };
+                    self.dirty.insert(key);
+                    self.dirty_reasons.remove(&key);
+                    self.calc_graph.mark_dirty(cell_id_from_key(key));
+                }
+            }
+        }
+
+        self.sync_dirty_from_calc_graph();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    pub fn date_system(&self) -> ExcelDateSystem {
+        self.date_system
     }
 
     pub fn has_dirty_cells(&self) -> bool {
@@ -1022,6 +1052,7 @@ impl Engine {
     }
 
     fn recalculate_with_mode(&mut self, mode: RecalcMode) {
+        let date_system = self.date_system;
         loop {
             let levels = match self.calc_graph.calc_levels_for_dirty() {
                 Ok(levels) => levels,
@@ -1067,20 +1098,63 @@ impl Engine {
                 let column_cache = BytecodeColumnCache::build(sheet_count, &snapshot, &tasks);
                 let empty_cols: HashMap<i32, BytecodeColumn> = HashMap::new();
 
-                let mut results: Vec<(CellKey, Value)> = if mode == RecalcMode::MultiThreaded && !has_barrier
-                {
-                    tasks
-                        .par_iter()
-                        .map_init(
-                            || bytecode::Vm::with_capacity(32),
-                            |vm, (k, compiled)| {
+                let mut results: Vec<(CellKey, Value)> =
+                    if mode == RecalcMode::MultiThreaded && !has_barrier {
+                        tasks
+                            .par_iter()
+                            .map_init(
+                                || bytecode::Vm::with_capacity(32),
+                                |vm, (k, compiled)| {
+                                    let ctx = crate::eval::EvalContext {
+                                        current_sheet: k.sheet,
+                                        current_cell: k.addr,
+                                    };
+                                    match compiled {
+                                        CompiledFormula::Ast(expr) => {
+                                            let evaluator = crate::eval::Evaluator::new_with_date_system(
+                                                &snapshot,
+                                                ctx,
+                                                date_system,
+                                            );
+                                            (*k, evaluator.eval_formula(expr))
+                                        }
+                                        CompiledFormula::Bytecode(bc) => {
+                                            let cols = column_cache
+                                                .by_sheet
+                                                .get(k.sheet)
+                                                .unwrap_or(&empty_cols);
+                                            let grid = EngineBytecodeGrid {
+                                                snapshot: &snapshot,
+                                                sheet: k.sheet,
+                                                cols,
+                                            };
+                                            let base = bytecode::CellCoord {
+                                                row: k.addr.row as i32,
+                                                col: k.addr.col as i32,
+                                            };
+                                            let v = vm.eval(&bc.program, &grid, base);
+                                            (*k, bytecode_value_to_engine(v))
+                                        }
+                                    }
+                                },
+                            )
+                            .collect()
+                    } else {
+                        let mut vm = bytecode::Vm::with_capacity(32);
+                        tasks
+                            .iter()
+                            .map(|(k, compiled)| {
                                 let ctx = crate::eval::EvalContext {
                                     current_sheet: k.sheet,
                                     current_cell: k.addr,
                                 };
                                 match compiled {
                                     CompiledFormula::Ast(expr) => {
-                                        let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                                        let evaluator = crate::eval::Evaluator::new_with_date_system(
+                                            &snapshot,
+                                            ctx,
+                                            date_system,
+                                        );
                                         (*k, evaluator.eval_formula(expr))
                                     }
                                     CompiledFormula::Bytecode(bc) => {
@@ -1101,44 +1175,9 @@ impl Engine {
                                         (*k, bytecode_value_to_engine(v))
                                     }
                                 }
-                            },
-                        )
-                        .collect()
-                } else {
-                    let mut vm = bytecode::Vm::with_capacity(32);
-                    tasks
-                        .iter()
-                        .map(|(k, compiled)| {
-                            let ctx = crate::eval::EvalContext {
-                                current_sheet: k.sheet,
-                                current_cell: k.addr,
-                            };
-                            match compiled {
-                                CompiledFormula::Ast(expr) => {
-                                    let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
-                                    (*k, evaluator.eval_formula(expr))
-                                }
-                                CompiledFormula::Bytecode(bc) => {
-                                    let cols = column_cache
-                                        .by_sheet
-                                        .get(k.sheet)
-                                        .unwrap_or(&empty_cols);
-                                    let grid = EngineBytecodeGrid {
-                                        snapshot: &snapshot,
-                                        sheet: k.sheet,
-                                        cols,
-                                    };
-                                    let base = bytecode::CellCoord {
-                                        row: k.addr.row as i32,
-                                        col: k.addr.col as i32,
-                                    };
-                                    let v = vm.eval(&bc.program, &grid, base);
-                                    (*k, bytecode_value_to_engine(v))
-                                }
-                            }
-                        })
-                        .collect()
-                };
+                            })
+                            .collect()
+                    };
 
                 results.sort_by_key(|(k, _)| (k.sheet, k.addr.row, k.addr.col));
 
@@ -1204,6 +1243,7 @@ impl Engine {
             self.external_value_provider.clone(),
         );
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
+        let date_system = self.date_system;
 
         for scc_idx in order {
             let mut scc = sccs[scc_idx].clone();
@@ -1231,7 +1271,8 @@ impl Engine {
                     current_sheet: k.sheet,
                     current_cell: k.addr,
                 };
-                let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                let evaluator =
+                    crate::eval::Evaluator::new_with_date_system(&snapshot, ctx, date_system);
                 let v = evaluator.eval_formula(&expr);
                 self.apply_eval_result(k, v, &mut snapshot, &mut spill_dirty_roots);
                 continue;
@@ -1267,7 +1308,8 @@ impl Engine {
                         current_sheet: k.sheet,
                         current_cell: k.addr,
                     };
-                    let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                    let evaluator =
+                        crate::eval::Evaluator::new_with_date_system(&snapshot, ctx, date_system);
                     let new_val = evaluator.eval_formula(&expr);
                     max_delta = max_delta.max(value_delta(&old, &new_val));
                     self.apply_eval_result(k, new_val, &mut snapshot, &mut spill_dirty_roots);

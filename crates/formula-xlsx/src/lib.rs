@@ -103,6 +103,15 @@ impl Default for DateSystem {
     }
 }
 
+impl DateSystem {
+    pub fn to_engine_date_system(self) -> formula_engine::date::ExcelDateSystem {
+        match self {
+            DateSystem::V1900 => formula_engine::date::ExcelDateSystem::EXCEL_1900,
+            DateSystem::V1904 => formula_engine::date::ExcelDateSystem::Excel1904,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CalcPr {
     pub calc_id: Option<String>,
