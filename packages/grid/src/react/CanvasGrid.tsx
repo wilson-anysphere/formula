@@ -1,5 +1,5 @@
 import React, { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
-import type { CellProvider } from "../model/CellProvider";
+import type { CellProvider, CellRange } from "../model/CellProvider";
 import type { GridPresence } from "../presence/types";
 import { CanvasGridRenderer } from "../rendering/CanvasGridRenderer";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
@@ -10,6 +10,8 @@ export interface GridApi {
   getScroll(): { x: number; y: number };
   setFrozen(frozenRows: number, frozenCols: number): void;
   setSelection(row: number, col: number): void;
+  setSelectionRange(range: CellRange | null): void;
+  getSelectionRange(): CellRange | null;
   clearSelection(): void;
   getSelection(): { row: number; col: number } | null;
   setRemotePresences(presences: GridPresence[] | null): void;
@@ -27,6 +29,7 @@ export interface CanvasGridProps {
   remotePresences?: GridPresence[] | null;
   apiRef?: React.Ref<GridApi>;
   onSelectionChange?: (cell: { row: number; col: number } | null) => void;
+  onSelectionRangeChange?: (range: CellRange | null) => void;
   style?: React.CSSProperties;
 }
 
@@ -43,7 +46,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
   const rendererRef = useRef<CanvasGridRenderer | null>(null);
   const onSelectionChangeRef = useRef(props.onSelectionChange);
+  const onSelectionRangeChangeRef = useRef(props.onSelectionRangeChange);
   onSelectionChangeRef.current = props.onSelectionChange;
+  onSelectionRangeChangeRef.current = props.onSelectionRangeChange;
+  const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
+  const selectionPointerIdRef = useRef<number | null>(null);
 
   const frozenRows = props.frozenRows ?? 0;
   const frozenCols = props.frozenCols ?? 0;
@@ -123,11 +130,15 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         syncScrollbars();
       },
       setSelection: (row, col) => rendererRef.current?.setSelection({ row, col }),
+      setSelectionRange: (range) => rendererRef.current?.setSelectionRange(range),
+      getSelectionRange: () => rendererRef.current?.getSelectionRange() ?? null,
       clearSelection: () => {
         const renderer = rendererRef.current;
         const prevSelection = renderer?.getSelection() ?? null;
-        renderer?.setSelection(null);
+        const prevRange = renderer?.getSelectionRange() ?? null;
+        renderer?.setSelectionRange(null);
         if (prevSelection) onSelectionChangeRef.current?.(null);
+        if (prevRange) onSelectionRangeChangeRef.current?.(null);
       },
       getSelection: () => rendererRef.current?.getSelection() ?? null,
       setRemotePresences: (presences) => rendererRef.current?.setRemotePresences(presences),
@@ -191,22 +202,113 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const selectionCanvas = selectionCanvasRef.current;
     if (!selectionCanvas) return;
 
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rendererRef.current) return;
+    const getPickedCell = (event: PointerEvent) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return null;
       const rect = selectionCanvas.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      const picked = rendererRef.current.pickCellAt(x, y);
+      return renderer.pickCellAt(x, y);
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+
+      event.preventDefault();
+      const picked = getPickedCell(event);
       if (!picked) return;
-      const prevSelection = rendererRef.current.getSelection();
-      rendererRef.current.setSelection(picked);
+
+      selectionAnchorRef.current = picked;
+      selectionPointerIdRef.current = event.pointerId;
+      selectionCanvas.setPointerCapture?.(event.pointerId);
+
+      const prevSelection = renderer.getSelection();
+      const prevRange = renderer.getSelectionRange();
+
+      renderer.setSelection(picked);
+
       if (!prevSelection || prevSelection.row !== picked.row || prevSelection.col !== picked.col) {
         onSelectionChangeRef.current?.(picked);
+      }
+
+      const nextRange: CellRange = {
+        startRow: picked.row,
+        endRow: picked.row + 1,
+        startCol: picked.col,
+        endCol: picked.col + 1
+      };
+      if (
+        !prevRange ||
+        prevRange.startRow !== nextRange.startRow ||
+        prevRange.endRow !== nextRange.endRow ||
+        prevRange.startCol !== nextRange.startCol ||
+        prevRange.endCol !== nextRange.endCol
+      ) {
+        onSelectionRangeChangeRef.current?.(nextRange);
+      }
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      if (selectionPointerIdRef.current === null) return;
+      if (event.pointerId !== selectionPointerIdRef.current) return;
+
+      event.preventDefault();
+
+      const anchor = selectionAnchorRef.current;
+      if (!anchor) return;
+
+      const picked = getPickedCell(event);
+      if (!picked) return;
+
+      const range: CellRange = {
+        startRow: Math.min(anchor.row, picked.row),
+        endRow: Math.max(anchor.row, picked.row) + 1,
+        startCol: Math.min(anchor.col, picked.col),
+        endCol: Math.max(anchor.col, picked.col) + 1
+      };
+
+      const prevRange = renderer.getSelectionRange();
+      if (
+        prevRange &&
+        prevRange.startRow === range.startRow &&
+        prevRange.endRow === range.endRow &&
+        prevRange.startCol === range.startCol &&
+        prevRange.endCol === range.endCol
+      ) {
+        return;
+      }
+
+      renderer.setSelectionRange(range);
+      onSelectionRangeChangeRef.current?.(range);
+    };
+
+    const endDrag = (event: PointerEvent) => {
+      if (selectionPointerIdRef.current === null) return;
+      if (event.pointerId !== selectionPointerIdRef.current) return;
+
+      selectionPointerIdRef.current = null;
+      selectionAnchorRef.current = null;
+      try {
+        selectionCanvas.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // Some environments throw if the pointer isn't captured; ignore.
       }
     };
 
     selectionCanvas.addEventListener("pointerdown", onPointerDown);
-    return () => selectionCanvas.removeEventListener("pointerdown", onPointerDown);
+    selectionCanvas.addEventListener("pointermove", onPointerMove);
+    selectionCanvas.addEventListener("pointerup", endDrag);
+    selectionCanvas.addEventListener("pointercancel", endDrag);
+
+    return () => {
+      selectionCanvas.removeEventListener("pointerdown", onPointerDown);
+      selectionCanvas.removeEventListener("pointermove", onPointerMove);
+      selectionCanvas.removeEventListener("pointerup", endDrag);
+      selectionCanvas.removeEventListener("pointercancel", endDrag);
+    };
   }, []);
 
   useEffect(() => {
