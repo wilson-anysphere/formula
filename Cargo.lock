@@ -1780,13 +1780,14 @@ name = "formula-wasm"
 version = "0.1.0"
 dependencies = [
  "formula-core",
- "roxmltree",
+ "formula-engine",
+ "formula-model",
+ "formula-xlsx",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-test",
- "zip 2.4.2",
 ]
 
 [[package]]

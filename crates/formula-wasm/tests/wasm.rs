@@ -33,11 +33,12 @@ fn recalculate_reports_changed_cells() {
 
 #[wasm_bindgen_test]
 fn from_xlsx_bytes_imports_formulas_and_recalculates() {
-    let mut wb = WasmWorkbook::from_xlsx_bytes(include_bytes!(
-        "../../../fixtures/xlsx/formulas/formulas.xlsx"
-    ))
-    .unwrap();
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/formulas/formulas.xlsx"
+    ));
 
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
     wb.recalculate(None).unwrap();
 
     let cell_js = wb.get_cell("C1".to_string(), None).unwrap();
@@ -47,11 +48,18 @@ fn from_xlsx_bytes_imports_formulas_and_recalculates() {
 }
 
 #[wasm_bindgen_test]
-fn from_xlsx_bytes_imports_literal_cells() {
-    let wb = WasmWorkbook::from_xlsx_bytes(include_bytes!(
-        "../../../fixtures/xlsx/basic/basic.xlsx"
-    ))
-    .unwrap();
+fn from_xlsx_bytes_loads_basic_fixture() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    // Should not error even though the fixture contains no formulas.
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert!(changes.is_empty());
 
     let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
     let a1: formula_core::CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();

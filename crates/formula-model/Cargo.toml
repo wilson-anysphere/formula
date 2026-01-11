@@ -28,6 +28,5 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 # `wasm32-unknown-unknown` without JS glue. Keep v4 generation for native
 # targets, but build without it for wasm (see `formula-model/src/lib.rs`).
 uuid = { version = "1", features = ["v4"] }
-
 [dev-dependencies]
 serde_json = "1.0"
