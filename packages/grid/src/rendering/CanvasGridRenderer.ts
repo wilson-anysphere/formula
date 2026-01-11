@@ -210,6 +210,7 @@ export class CanvasGridRenderer {
   private activeSelectionIndex = 0;
   private rangeSelection: CellRange | null = null;
   private fillPreviewRange: CellRange | null = null;
+  private referenceHighlights: Array<{ range: CellRange; color: string }> = [];
 
   private remotePresences: GridPresence[] = [];
   private remotePresenceDirtyPadding = 1;
@@ -698,6 +699,32 @@ export class CanvasGridRenderer {
       this.dirty.selection.markDirty(padRect(rect, padding));
     }
 
+    this.requestRender();
+  }
+
+  setReferenceHighlights(highlights: Array<{ range: CellRange; color: string }> | null): void {
+    const normalized =
+      highlights
+        ?.map((h) => {
+          const range = this.normalizeSelectionRange(h.range);
+          if (!range) return null;
+          return { range, color: h.color };
+        })
+        .filter((h): h is { range: CellRange; color: string } => h !== null) ?? [];
+
+    if (
+      normalized.length === this.referenceHighlights.length &&
+      normalized.every((h, i) => {
+        const prev = this.referenceHighlights[i];
+        return prev && prev.color === h.color && isSameCellRange(prev.range, h.range);
+      })
+    ) {
+      return;
+    }
+
+    this.referenceHighlights = normalized;
+    const viewport = this.scroll.getViewportState();
+    this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
     this.requestRender();
   }
 
@@ -2762,6 +2789,25 @@ export class CanvasGridRenderer {
   ): void {
     const ctx = this.selectionCtx;
     if (!ctx) return;
+
+    if (this.referenceHighlights.length > 0) {
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+
+      for (const highlight of this.referenceHighlights) {
+        const rects = this.rangeToViewportRects(highlight.range, viewport);
+        if (rects.length === 0) continue;
+        ctx.strokeStyle = highlight.color;
+        for (const rect of rects) {
+          if (!intersectRect(rect, intersection)) continue;
+          if (rect.width <= 2 || rect.height <= 2) continue;
+          ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+        }
+      }
+
+      ctx.restore();
+    }
 
     const transientRange = this.rangeSelection;
     if (transientRange) {

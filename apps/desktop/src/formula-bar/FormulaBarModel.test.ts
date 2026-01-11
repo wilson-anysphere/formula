@@ -23,6 +23,17 @@ describe("FormulaBarModel", () => {
     expect(model.draft).toBe("=SUM(A1:A3)");
   });
 
+  it("replaces the active reference when selecting a new range", () => {
+    const model = new FormulaBarModel();
+    model.setActiveCell({ address: "C1", input: "=A1+B1", value: null });
+    model.beginEdit();
+
+    // Place the caret within the first reference (A1).
+    model.updateDraft("=A1+B1", 2, 2);
+    model.beginRangeSelection(parseA1Range("D1")!);
+    expect(model.draft).toBe("=D1+B1");
+  });
+
   it("accepts AI suggestions as an insertion at the caret", () => {
     const model = new FormulaBarModel();
     model.setActiveCell({ address: "A1", input: "=SU", value: null });

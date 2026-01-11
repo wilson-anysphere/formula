@@ -320,6 +320,7 @@ export class SpreadsheetApp {
   private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
   private formulaEditCell: CellCoord | null = null;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
+  private referenceHighlights: Array<{ start: CellCoord; end: CellCoord; color: string }> = [];
   private fillPreviewRange: Range | null = null;
   private showFormulas = false;
 
@@ -626,6 +627,16 @@ export class SpreadsheetApp {
                 end: { row: range.end.row, col: range.end.col }
               }
             : null;
+          this.renderReferencePreview();
+        },
+        onReferenceHighlights: (highlights) => {
+          this.referenceHighlights = highlights
+            .filter((h) => !h.range.sheet || h.range.sheet === this.sheetId)
+            .map((h) => ({
+              start: { row: h.range.startRow, col: h.range.startCol },
+              end: { row: h.range.endRow, col: h.range.endCol },
+              color: h.color
+            }));
           this.renderReferencePreview();
         }
       });
@@ -1034,18 +1045,22 @@ export class SpreadsheetApp {
 
   getFillHandleRect(): { x: number; y: number; width: number; height: number } | null {
     this.ensureViewportMappingCurrent();
-    return this.selectionRenderer.getFillHandleRect(this.selection, {
-      getCellRect: (cell) => this.getCellRect(cell),
-      visibleRows: this.visibleRows,
-      visibleCols: this.visibleCols,
-    }, {
-      clipRect: {
-        x: this.rowHeaderWidth,
-        y: this.colHeaderHeight,
-        width: this.viewportWidth(),
-        height: this.viewportHeight(),
+    return this.selectionRenderer.getFillHandleRect(
+      this.selection,
+      {
+        getCellRect: (cell) => this.getCellRect(cell),
+        visibleRows: this.visibleRows,
+        visibleCols: this.visibleCols,
       },
-    });
+      {
+        clipRect: {
+          x: this.rowHeaderWidth,
+          y: this.colHeaderHeight,
+          width: this.viewportWidth(),
+          height: this.viewportHeight(),
+        },
+      }
+    );
   }
 
   async getCellDisplayValueA1(a1: string): Promise<string> {
@@ -1071,6 +1086,10 @@ export class SpreadsheetApp {
 
   getLastSelectionDrawn(): unknown {
     return this.selectionRenderer.getLastDebug();
+  }
+
+  getReferenceHighlightCount(): number {
+    return this.referenceHighlights.length;
   }
 
   toggleCommentsPanel(): void {
@@ -3520,6 +3539,7 @@ export class SpreadsheetApp {
     this.scrollCellIntoView(this.selection.active);
     this.formulaEditCell = null;
     this.referencePreview = null;
+    this.referenceHighlights = [];
     this.refresh();
     this.focus();
   }
@@ -3530,6 +3550,7 @@ export class SpreadsheetApp {
     }
     this.formulaEditCell = null;
     this.referencePreview = null;
+    this.referenceHighlights = [];
     this.ensureActiveCellVisible();
     const didScroll = this.scrollCellIntoView(this.selection.active);
     if (didScroll) this.ensureViewportMappingCurrent();
@@ -3547,53 +3568,66 @@ export class SpreadsheetApp {
     ctx.clearRect(0, 0, this.referenceCanvas.width, this.referenceCanvas.height);
     ctx.restore();
 
-    if (!this.referencePreview) return;
+    if (this.referenceHighlights.length === 0 && !this.referencePreview) return;
     this.ensureViewportMappingCurrent();
 
-    const startRow = Math.min(this.referencePreview.start.row, this.referencePreview.end.row);
-    const endRow = Math.max(this.referencePreview.start.row, this.referencePreview.end.row);
-    const startCol = Math.min(this.referencePreview.start.col, this.referencePreview.end.col);
-    const endCol = Math.max(this.referencePreview.start.col, this.referencePreview.end.col);
+    const drawDashedRange = (startRow: number, endRow: number, startCol: number, endCol: number, color: string) => {
+      // Clip preview rendering to the visible viewport so dragging a range that
+      // extends offscreen doesn't crash (and still provides visual feedback).
+      const visibleStartRow = this.visibleRows.find((row) => row >= startRow && row <= endRow) ?? null;
+      const visibleEndRow = (() => {
+        for (let i = this.visibleRows.length - 1; i >= 0; i -= 1) {
+          const row = this.visibleRows[i]!;
+          if (row >= startRow && row <= endRow) return row;
+        }
+        return null;
+      })();
+      const visibleStartCol = this.visibleCols.find((col) => col >= startCol && col <= endCol) ?? null;
+      const visibleEndCol = (() => {
+        for (let i = this.visibleCols.length - 1; i >= 0; i -= 1) {
+          const col = this.visibleCols[i]!;
+          if (col >= startCol && col <= endCol) return col;
+        }
+        return null;
+      })();
+      if (visibleStartRow == null || visibleEndRow == null || visibleStartCol == null || visibleEndCol == null) return;
 
-    // Clip preview rendering to the visible viewport so dragging a range that
-    // extends offscreen doesn't crash (and still provides visual feedback).
-    const visibleStartRow = this.visibleRows.find((row) => row >= startRow && row <= endRow) ?? null;
-    const visibleEndRow = (() => {
-      for (let i = this.visibleRows.length - 1; i >= 0; i -= 1) {
-        const row = this.visibleRows[i]!;
-        if (row >= startRow && row <= endRow) return row;
-      }
-      return null;
-    })();
-    const visibleStartCol = this.visibleCols.find((col) => col >= startCol && col <= endCol) ?? null;
-    const visibleEndCol = (() => {
-      for (let i = this.visibleCols.length - 1; i >= 0; i -= 1) {
-        const col = this.visibleCols[i]!;
-        if (col >= startCol && col <= endCol) return col;
-      }
-      return null;
-    })();
-    if (visibleStartRow == null || visibleEndRow == null || visibleStartCol == null || visibleEndCol == null) return;
+      const startRect = this.getCellRect({ row: visibleStartRow, col: visibleStartCol });
+      const endRect = this.getCellRect({ row: visibleEndRow, col: visibleEndCol });
+      if (!startRect || !endRect) return;
 
-    const startRect = this.getCellRect({ row: visibleStartRow, col: visibleStartCol });
-    const endRect = this.getCellRect({ row: visibleEndRow, col: visibleEndCol });
-    if (!startRect || !endRect) return;
+      const x = startRect.x;
+      const y = startRect.y;
+      const width = endRect.x + endRect.width - startRect.x;
+      const height = endRect.y + endRect.height - startRect.y;
+      if (width <= 0 || height <= 0) return;
 
-    const x = startRect.x;
-    const y = startRect.y;
-    const width = endRect.x + endRect.width - startRect.x;
-    const height = endRect.y + endRect.height - startRect.y;
-    if (width <= 0 || height <= 0) return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(this.rowHeaderWidth, this.colHeaderHeight, this.viewportWidth(), this.viewportHeight());
+      ctx.clip();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+      ctx.restore();
+    };
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(this.rowHeaderWidth, this.colHeaderHeight, this.viewportWidth(), this.viewportHeight());
-    ctx.clip();
-    ctx.strokeStyle = resolveCssVar("--warning", { fallback: "CanvasText" });
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 3]);
-    ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
-    ctx.restore();
+    for (const highlight of this.referenceHighlights) {
+      const startRow = Math.min(highlight.start.row, highlight.end.row);
+      const endRow = Math.max(highlight.start.row, highlight.end.row);
+      const startCol = Math.min(highlight.start.col, highlight.end.col);
+      const endCol = Math.max(highlight.start.col, highlight.end.col);
+      drawDashedRange(startRow, endRow, startCol, endCol, highlight.color);
+    }
+
+    if (this.referencePreview) {
+      const startRow = Math.min(this.referencePreview.start.row, this.referencePreview.end.row);
+      const endRow = Math.max(this.referencePreview.start.row, this.referencePreview.end.row);
+      const startCol = Math.min(this.referencePreview.start.col, this.referencePreview.end.col);
+      const endCol = Math.max(this.referencePreview.start.col, this.referencePreview.end.col);
+      drawDashedRange(startRow, endRow, startCol, endCol, resolveCssVar("--warning", { fallback: "CanvasText" }));
+    }
   }
 
   private usedRangeProvider() {

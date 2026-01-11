@@ -31,6 +31,7 @@ function createMockContext(): CanvasRenderingContext2D {
     stroke: noop,
     fill: noop,
     closePath: noop,
+    setLineDash: noop,
     translate: noop,
     rotate: noop,
     setTransform: noop,

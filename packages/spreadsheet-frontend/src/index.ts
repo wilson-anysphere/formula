@@ -11,3 +11,5 @@ export type { EngineGridProviderOptions } from "./grid-provider";
 export { EngineGridProvider } from "./grid-provider";
 
 export { shiftA1References } from "./formula/shiftA1References";
+export type { ColoredFormulaReference, FormulaReference, FormulaReferenceRange } from "./formulaReferences";
+export { assignFormulaReferenceColors, extractFormulaReferences, FORMULA_REFERENCE_PALETTE } from "./formulaReferences";

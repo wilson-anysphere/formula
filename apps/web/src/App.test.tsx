@@ -132,6 +132,7 @@ function createMock2dContext(
     moveTo: noop,
     lineTo: noop,
     closePath: noop,
+    setLineDash: noop,
     save: noop,
     restore: noop,
     drawImage: noop,

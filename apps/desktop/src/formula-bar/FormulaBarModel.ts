@@ -3,6 +3,12 @@ import { getFunctionHint, type FunctionHint } from "./highlight/functionContext.
 import { highlightFormula, type HighlightSpan } from "./highlight/highlightFormula.js";
 import { tokenizeFormula } from "./highlight/tokenizeFormula.js";
 import { parseA1Range, rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
+import {
+  assignFormulaReferenceColors,
+  extractFormulaReferences,
+  type ColoredFormulaReference,
+  type FormulaReferenceRange,
+} from "@formula/spreadsheet-frontend";
 
 export type ActiveCellInfo = {
   address: string;
@@ -23,6 +29,9 @@ export class FormulaBarModel {
   #cursorEnd = 0;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
+  #referenceColorByText = new Map<string, string>();
+  #coloredReferences: ColoredFormulaReference[] = [];
+  #activeReferenceIndex: number | null = null;
   /**
    * Full text suggestion for the current draft (not just the "ghost text" tail).
    *
@@ -44,6 +53,9 @@ export class FormulaBarModel {
     this.#cursorEnd = this.#draft.length;
     this.#rangeInsertion = null;
     this.#hoveredReference = null;
+    this.#referenceColorByText.clear();
+    this.#coloredReferences = [];
+    this.#activeReferenceIndex = null;
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
   }
@@ -70,6 +82,8 @@ export class FormulaBarModel {
 
   beginEdit(): void {
     this.#isEditing = true;
+    this.#updateReferenceHighlights();
+    this.#updateHoverFromCursor();
   }
 
   updateDraft(draft: string, cursorStart: number, cursorEnd: number): void {
@@ -80,6 +94,7 @@ export class FormulaBarModel {
     this.#rangeInsertion = null;
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
+    this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
   }
 
@@ -90,6 +105,9 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
+    this.#referenceColorByText.clear();
+    this.#coloredReferences = [];
+    this.#activeReferenceIndex = null;
     return this.#draft;
   }
 
@@ -102,6 +120,9 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
+    this.#referenceColorByText.clear();
+    this.#coloredReferences = [];
+    this.#activeReferenceIndex = null;
   }
 
   highlightedSpans(): HighlightSpan[] {
@@ -129,11 +150,35 @@ export class FormulaBarModel {
     return this.#hoveredReference;
   }
 
+  coloredReferences(): readonly ColoredFormulaReference[] {
+    return this.#coloredReferences;
+  }
+
+  referenceHighlights(): Array<{ range: FormulaReferenceRange; color: string; text: string; index: number }> {
+    return this.#coloredReferences.map((ref) => ({
+      range: ref.range,
+      color: ref.color,
+      text: ref.text,
+      index: ref.index,
+    }));
+  }
+
+  activeReferenceIndex(): number | null {
+    return this.#activeReferenceIndex;
+  }
+
   beginRangeSelection(range: RangeAddress): void {
     if (!this.#isEditing) return;
-    this.#insertOrReplaceRange(rangeToA1(range), true);
+    const active =
+      this.#activeReferenceIndex == null ? null : (this.#coloredReferences[this.#activeReferenceIndex] ?? null);
+    this.#insertOrReplaceRange(
+      rangeToA1(range),
+      true,
+      active ? { start: active.start, end: active.end } : null
+    );
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
+    this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
   }
 
@@ -142,6 +187,7 @@ export class FormulaBarModel {
     this.#insertOrReplaceRange(rangeToA1(range), false);
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
+    this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
   }
 
@@ -230,14 +276,15 @@ export class FormulaBarModel {
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#rangeInsertion = null;
+    this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
     return true;
   }
 
-  #insertOrReplaceRange(rangeText: string, isBegin: boolean): void {
+  #insertOrReplaceRange(rangeText: string, isBegin: boolean, replaceSpan: { start: number; end: number } | null = null): void {
     if (!this.#rangeInsertion || isBegin) {
-      const start = Math.min(this.#cursorStart, this.#cursorEnd);
-      const end = Math.max(this.#cursorStart, this.#cursorEnd);
+      const start = replaceSpan ? replaceSpan.start : Math.min(this.#cursorStart, this.#cursorEnd);
+      const end = replaceSpan ? replaceSpan.end : Math.max(this.#cursorStart, this.#cursorEnd);
       this.#draft = this.#draft.slice(0, start) + rangeText + this.#draft.slice(end);
       this.#rangeInsertion = { start, end: start + rangeText.length };
       this.#cursorStart = this.#rangeInsertion.end;
@@ -267,5 +314,19 @@ export class FormulaBarModel {
     }
 
     this.#hoveredReference = parseA1Range(token.text);
+  }
+
+  #updateReferenceHighlights(): void {
+    if (!this.#isEditing || !this.#draft.trim().startsWith("=")) {
+      this.#coloredReferences = [];
+      this.#activeReferenceIndex = null;
+      return;
+    }
+
+    const { references, activeIndex } = extractFormulaReferences(this.#draft, this.#cursorStart, this.#cursorEnd);
+    const { colored, nextByText } = assignFormulaReferenceColors(references, this.#referenceColorByText);
+    this.#referenceColorByText = nextByText;
+    this.#coloredReferences = colored;
+    this.#activeReferenceIndex = activeIndex;
   }
 }

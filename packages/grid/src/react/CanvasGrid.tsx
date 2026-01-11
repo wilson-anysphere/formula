@@ -41,6 +41,13 @@ export interface GridApi {
    * formula-bar range picking UX.
    */
   setRangeSelection(range: CellRange | null): void;
+  /**
+   * Set the list of ranges that should be highlighted as formula references.
+   *
+   * This is intended to match Excel's UX while editing a formula: each referenced
+   * range is outlined on the grid using the same color as the formula text.
+   */
+  setReferenceHighlights(highlights: Array<{ range: CellRange; color: string }> | null): void;
   setRemotePresences(presences: GridPresence[] | null): void;
   renderImmediately(): void;
 }
@@ -553,6 +560,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       getCellRect: (row, col) => rendererRef.current?.getCellRect(row, col) ?? null,
       getViewportState: () => rendererRef.current?.getViewportState() ?? null,
       setRangeSelection: (range) => rendererRef.current?.setRangeSelection(range),
+      setReferenceHighlights: (highlights) => rendererRef.current?.setReferenceHighlights(highlights),
       setRemotePresences: (presences) => rendererRef.current?.setRemotePresences(presences),
       renderImmediately: () => rendererRef.current?.renderImmediately()
     }),

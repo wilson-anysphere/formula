@@ -36,6 +36,7 @@ function createMock2dContext(canvas: HTMLCanvasElement): CanvasRenderingContext2
     moveTo: noop,
     lineTo: noop,
     closePath: noop,
+    setLineDash: noop,
     save: noop,
     restore: noop,
     drawImage: noop,

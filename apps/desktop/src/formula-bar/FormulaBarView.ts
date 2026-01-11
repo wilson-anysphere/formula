@@ -1,5 +1,6 @@
 import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
 import { parseA1Range, type RangeAddress } from "../spreadsheet/a1.js";
+import type { FormulaReferenceRange } from "@formula/spreadsheet-frontend";
 
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
@@ -7,6 +8,9 @@ export interface FormulaBarViewCallbacks {
   onCancel?: () => void;
   onGoTo?: (reference: string) => void;
   onHoverRange?: (range: RangeAddress | null) => void;
+  onReferenceHighlights?: (
+    highlights: Array<{ range: FormulaReferenceRange; color: string; text: string; index: number }>
+  ) => void;
 }
 
 export class FormulaBarView {
@@ -183,14 +187,14 @@ export class FormulaBarView {
     this.model.beginRangeSelection(range);
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
-    this.#emitHover();
+    this.#emitOverlays();
   }
 
   updateRangeSelection(range: RangeAddress): void {
     this.model.updateRangeSelection(range);
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
-    this.#emitHover();
+    this.#emitOverlays();
   }
 
   endRangeSelection(): void {
@@ -202,7 +206,7 @@ export class FormulaBarView {
     this.model.beginEdit();
     this.#callbacks.onBeginEdit?.(this.model.activeCell.address);
     this.#render({ preserveTextareaValue: true });
-    this.#emitHover();
+    this.#emitOverlays();
   }
 
   #onInputOrSelection(): void {
@@ -212,7 +216,7 @@ export class FormulaBarView {
     const end = this.textarea.selectionEnd ?? this.textarea.value.length;
     this.model.updateDraft(this.textarea.value, start, end);
     this.#render({ preserveTextareaValue: true });
-    this.#emitHover();
+    this.#emitOverlays();
   }
 
   #onKeyDown(e: KeyboardEvent): void {
@@ -224,7 +228,7 @@ export class FormulaBarView {
         e.preventDefault();
         this.#render({ preserveTextareaValue: false });
         this.#setTextareaSelectionFromModel();
-        this.#emitHover();
+        this.#emitOverlays();
         return;
       }
     }
@@ -236,7 +240,7 @@ export class FormulaBarView {
       this.#hoverOverride = null;
       this.#render({ preserveTextareaValue: false });
       this.#callbacks.onCancel?.();
-      this.#emitHover();
+      this.#emitOverlays();
       return;
     }
 
@@ -248,7 +252,7 @@ export class FormulaBarView {
       this.#hoverOverride = null;
       this.#render({ preserveTextareaValue: false });
       this.#callbacks.onCommit(committed);
-      this.#emitHover();
+      this.#emitOverlays();
       return;
     }
   }
@@ -270,6 +274,33 @@ export class FormulaBarView {
     let previewInserted = false;
     let highlightHtml = "";
 
+    const isFormulaEditing = this.model.isEditing && this.model.draft.trim().startsWith("=");
+    const referenceBySpanKey = new Map<string, { color: string; index: number; active: boolean }>();
+    if (isFormulaEditing) {
+      const activeIndex = this.model.activeReferenceIndex();
+      for (const ref of this.model.coloredReferences()) {
+        referenceBySpanKey.set(`${ref.start}:${ref.end}`, {
+          color: ref.color,
+          index: ref.index,
+          active: activeIndex === ref.index
+        });
+      }
+    }
+
+    const renderSpan = (span: { kind: string; start: number; end: number }, text: string): string => {
+      if (span.kind !== "reference" || !isFormulaEditing) {
+        return `<span data-kind="${span.kind}">${escapeHtml(text)}</span>`;
+      }
+      const meta = referenceBySpanKey.get(`${span.start}:${span.end}`);
+      if (!meta) {
+        return `<span data-kind="${span.kind}">${escapeHtml(text)}</span>`;
+      }
+      const activeClass = meta.active ? " formula-bar-reference--active" : "";
+      return `<span data-kind="${span.kind}" data-ref-index="${meta.index}" class="formula-bar-reference${activeClass}" style="color: ${meta.color};">${escapeHtml(
+        text
+      )}</span>`;
+    };
+
     for (const span of this.model.highlightedSpans()) {
       if (!ghostInserted && ghost && cursor <= span.start) {
         highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
@@ -285,7 +316,7 @@ export class FormulaBarView {
         const before = span.text.slice(0, split);
         const after = span.text.slice(split);
         if (before) {
-          highlightHtml += `<span data-kind="${span.kind}">${escapeHtml(before)}</span>`;
+          highlightHtml += renderSpan(span, before);
         }
         highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
         if (previewText && !previewInserted) {
@@ -294,12 +325,12 @@ export class FormulaBarView {
         }
         ghostInserted = true;
         if (after) {
-          highlightHtml += `<span data-kind="${span.kind}">${escapeHtml(after)}</span>`;
+          highlightHtml += renderSpan(span, after);
         }
         continue;
       }
 
-      highlightHtml += `<span data-kind="${span.kind}">${escapeHtml(span.text)}</span>`;
+      highlightHtml += renderSpan(span, span.text);
     }
 
     if (!ghostInserted && ghost) {
@@ -382,9 +413,15 @@ export class FormulaBarView {
     this.textarea.setSelectionRange(start, end);
   }
 
-  #emitHover(): void {
+  #emitOverlays(): void {
     const range = this.#hoverOverride ?? this.model.hoveredReference();
     this.#callbacks.onHoverRange?.(range);
+
+    if (!this.model.isEditing || !this.model.draft.trim().startsWith("=")) {
+      this.#callbacks.onReferenceHighlights?.([]);
+      return;
+    }
+    this.#callbacks.onReferenceHighlights?.(this.model.referenceHighlights());
   }
 
   #onHighlightHover(e: MouseEvent): void {
@@ -409,7 +446,7 @@ export class FormulaBarView {
   #clearHoverOverride(): void {
     if (this.#hoverOverride === null) return;
     this.#hoverOverride = null;
-    this.#emitHover();
+    this.#emitOverlays();
   }
 }
 

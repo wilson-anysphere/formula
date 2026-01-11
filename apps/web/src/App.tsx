@@ -2,6 +2,8 @@ import { createEngineClient, type CellChange, type CellScalar } from "@formula/e
 import type { CellRange } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
 import {
+  assignFormulaReferenceColors,
+  extractFormulaReferences,
   parseHtmlTableToGrid,
   parseTsvToGrid,
   range0ToA1,
@@ -45,6 +47,7 @@ function EngineDemoApp() {
   const cursorRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   const rangeInsertionRef = useRef<{ start: number; end: number } | null>(null);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const referenceColorByTextRef = useRef<Map<string, string>>(new Map());
   const cellSyncTokenRef = useRef(0);
 
   const isFormulaEditing = formulaFocused && draft.trim().startsWith("=");
@@ -198,12 +201,12 @@ function EngineDemoApp() {
     return null;
   };
 
-  const insertOrReplaceRange = (rangeText: string, isBegin: boolean) => {
+  const insertOrReplaceRange = (rangeText: string, isBegin: boolean, replaceSpan?: { start: number; end: number } | null) => {
     const currentDraft = draftRef.current;
 
     if (!rangeInsertionRef.current || isBegin) {
-      const start = Math.min(cursorRef.current.start, cursorRef.current.end);
-      const end = Math.max(cursorRef.current.start, cursorRef.current.end);
+      const start = replaceSpan ? replaceSpan.start : Math.min(cursorRef.current.start, cursorRef.current.end);
+      const end = replaceSpan ? replaceSpan.end : Math.max(cursorRef.current.start, cursorRef.current.end);
       const nextDraft = currentDraft.slice(0, start) + rangeText + currentDraft.slice(end);
 
       rangeInsertionRef.current = { start, end: start + rangeText.length };
@@ -230,7 +233,13 @@ function EngineDemoApp() {
     const ref = cellRangeToA1(range);
     if (!ref) return;
     syncCursorFromInput();
-    insertOrReplaceRange(ref, true);
+    const { references, activeIndex } = extractFormulaReferences(
+      draftRef.current,
+      cursorRef.current.start,
+      cursorRef.current.end
+    );
+    const active = activeIndex == null ? null : references[activeIndex] ?? null;
+    insertOrReplaceRange(ref, true, active ? { start: active.start, end: active.end } : null);
   };
 
   const updateRangeSelection = (range: CellRange) => {
@@ -256,6 +265,36 @@ function EngineDemoApp() {
     pendingSelectionRef.current = null;
     input.setSelectionRange(pending.start, pending.end);
   }, [draft]);
+
+  useEffect(() => {
+    const api = gridApiRef.current;
+    if (!api) return;
+
+    if (!isFormulaEditing) {
+      api.setReferenceHighlights(null);
+      referenceColorByTextRef.current = new Map();
+      return;
+    }
+
+    const cursor = cursorRef.current;
+    const { references } = extractFormulaReferences(draftRef.current, cursor.start, cursor.end);
+    const { colored, nextByText } = assignFormulaReferenceColors(references, referenceColorByTextRef.current);
+    referenceColorByTextRef.current = nextByText;
+
+    const highlights = colored
+      .filter((ref) => !ref.range.sheet || ref.range.sheet === activeSheet)
+      .map((ref) => ({
+        range: {
+          startRow: ref.range.startRow + headerRowOffset,
+          endRow: ref.range.endRow + 1 + headerRowOffset,
+          startCol: ref.range.startCol + headerColOffset,
+          endCol: ref.range.endCol + 1 + headerColOffset
+        },
+        color: ref.color
+      }));
+
+    api.setReferenceHighlights(highlights.length > 0 ? highlights : null);
+  }, [activeSheet, draft, headerColOffset, headerRowOffset, isFormulaEditing]);
 
   useEffect(() => {
     // Create the Engine client inside the effect. React.StrictMode re-runs effects
