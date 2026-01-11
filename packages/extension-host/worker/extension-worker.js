@@ -995,26 +995,38 @@ function toSandbox(value, seen = new Map()) {
 
 let extensionModule = null;
 let activated = false;
+let activationPromise = null;
 
 async function activateExtension() {
   if (activated) return;
-  if (!extensionModule) {
-    const resolvedMain = assertWithinExtensionRoot(mainPath, mainPath);
-    extensionModule = loadModuleFromFile(resolvedMain);
+  if (activationPromise) return activationPromise;
+
+  activationPromise = (async () => {
+    if (!extensionModule) {
+      const resolvedMain = assertWithinExtensionRoot(mainPath, mainPath);
+      extensionModule = loadModuleFromFile(resolvedMain);
+    }
+
+    const activateFn = extensionModule.activate || extensionModule.default?.activate;
+    if (typeof activateFn !== "function") {
+      throw createSandboxError("Extension entrypoint does not export an activate() function");
+    }
+
+    const context = new SandboxObject();
+    context.extensionId = String(workerData.extensionId);
+    context.extensionPath = String(workerData.extensionPath);
+    context.subscriptions = new SandboxArray();
+
+    await activateFn(context);
+    activated = true;
+  })();
+
+  try {
+    await activationPromise;
+  } finally {
+    // Allow retries after failures (e.g. transient errors) while keeping successful activations fast.
+    if (!activated) activationPromise = null;
   }
-
-  const activateFn = extensionModule.activate || extensionModule.default?.activate;
-  if (typeof activateFn !== "function") {
-    throw createSandboxError("Extension entrypoint does not export an activate() function");
-  }
-
-  const context = new SandboxObject();
-  context.extensionId = String(workerData.extensionId);
-  context.extensionPath = String(workerData.extensionPath);
-  context.subscriptions = new SandboxArray();
-
-  await activateFn(context);
-  activated = true;
 }
 
 parentPort.on("message", async (message) => {
