@@ -65,6 +65,7 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
   - drops common secret-bearing parts like `xl/connections.xml`, `customXml/**`, and `xl/queryTables/**`
   - removes `xl/vbaProject.bin`/`xl/vbaProjectSignature.bin`, `customUI/**`, and embedded binaries like `xl/media/**`
   - removes preview images like `docProps/thumbnail.*`
+  - strips workbook/sheet protection password hashes and file sharing usernames from `xl/workbook.xml` / worksheets
 - **Scrub metadata**
   - redacts author fields in `docProps/core.xml` and sensitive fields in `docProps/app.xml`
   - removes `docProps/custom.xml` (custom document properties)

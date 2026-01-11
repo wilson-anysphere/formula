@@ -186,6 +186,64 @@ def _make_minimal_xlsx_for_sheet_rename() -> bytes:
     return buf.getvalue()
 
 
+def _make_minimal_xlsx_with_protection_and_sharing() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <fileSharing userName="alice@example.com" readOnlyRecommended="1"/>
+  <workbookProtection workbookPassword="ABCDEF" lockStructure="1"/>
+  <workbookPr codeName="MySecretWorkbook"/>
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>
+""",
+        )
+        z.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetProtection password="ABCDEF" sheet="1"/>
+  <sheetData>
+    <row r="1"><c r="A1"><v>123</v></c></row>
+  </sheetData>
+</worksheet>
+""",
+        )
+    return buf.getvalue()
+
+
 class SanitizeTests(unittest.TestCase):
     def test_sanitize_removes_common_secret_bearing_parts(self) -> None:
         original = _make_minimal_xlsx_with_secrets()
@@ -354,6 +412,22 @@ class SanitizeTests(unittest.TestCase):
             f = sheet2.find(".//m:c[@r='A1']/m:f", ns)
             self.assertIsNotNone(f)
             self.assertEqual(f.text, "Sheet1!A1")
+
+    def test_sanitize_strips_protection_and_sharing_metadata(self) -> None:
+        original = _make_minimal_xlsx_with_protection_and_sharing()
+        sanitized, _ = sanitize_xlsx_bytes(original, options=SanitizeOptions())
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            wb_xml = z.read("xl/workbook.xml").decode("utf-8", errors="ignore")
+            self.assertNotIn("fileSharing", wb_xml)
+            self.assertNotIn("workbookProtection", wb_xml)
+            self.assertNotIn("alice@example.com", wb_xml)
+            self.assertNotIn("ABCDEF", wb_xml)
+            self.assertNotIn("MySecretWorkbook", wb_xml)
+
+            sheet_xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8", errors="ignore")
+            self.assertNotIn("sheetProtection", sheet_xml)
+            self.assertNotIn("ABCDEF", sheet_xml)
 
 
 if __name__ == "__main__":

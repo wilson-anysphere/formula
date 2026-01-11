@@ -211,6 +211,13 @@ def _sanitize_worksheet(xml: bytes, *, options: SanitizeOptions) -> bytes:
             if loc and _looks_like_external_url(loc):
                 hl.attrib["location"] = _sanitize_text(loc, options=options)
 
+    if options.remove_secrets:
+        # Remove sheet-level protection/password hashes and protected range metadata.
+        for parent in list(root.iter()):
+            for child in list(parent):
+                if child.tag.split("}")[-1] in {"sheetProtection", "protectedRanges"}:
+                    parent.remove(child)
+
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -337,6 +344,15 @@ def _sanitize_vml_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
             if el.tail and el.tail.strip():
                 el.tail = _sanitize_text(el.tail, options=options)
         _sanitize_xml_attributes(root, options=options, attr_names={"alt", "title", "href"})
+
+    if options.remove_secrets:
+        # VML comments/drawings can embed raster images via `<v:imagedata>` that reference
+        # `xl/media/**`. Remove them so we don't leave dangling image references after
+        # dropping media parts.
+        for parent in list(root.iter()):
+            for child in list(parent):
+                if child.tag.split("}")[-1] == "imagedata":
+                    parent.remove(child)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -546,6 +562,23 @@ def _sanitize_workbook(
             if el.text is None:
                 continue
             el.text = _rewrite_formula_sheet_references(el.text, sheet_rename_map=sheet_rename_map)
+
+    # Workbook-level protection/password hashes and user-sharing metadata are common leak
+    # vectors in enterprise spreadsheets (usernames, legacy password hashes).
+    if options.remove_secrets or options.scrub_metadata or options.hash_strings:
+        for child in list(root):
+            local = child.tag.split("}")[-1]
+            if options.remove_secrets and local in {"workbookProtection"}:
+                root.remove(child)
+                continue
+            if (options.scrub_metadata or options.hash_strings or options.remove_secrets) and local in {
+                "fileSharing"
+            }:
+                root.remove(child)
+                continue
+            if (options.scrub_metadata or options.hash_strings) and local == "workbookPr":
+                if "codeName" in child.attrib:
+                    child.attrib["codeName"] = _sanitize_text(child.attrib["codeName"], options=options)
 
     if sheet_rename_map:
         sheets = None
