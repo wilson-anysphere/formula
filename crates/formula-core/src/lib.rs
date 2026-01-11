@@ -647,7 +647,7 @@ fn parse_reference_token(token: &str) -> Result<CellCoord, &'static str> {
     })
 }
 
-fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, ()> {
+fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
     let mut tokens = Vec::new();
     let mut chars = expr.chars().peekable();
 
@@ -658,6 +658,9 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, ()> {
         }
 
         match ch {
+            // Sheet prefixes are not supported in this lightweight evaluator yet.
+            // Mirror the JS fallback behavior by treating them as invalid references.
+            '!' | '\'' => return Err(ERROR_REF),
             '"' => {
                 chars.next();
                 let mut buf = String::new();
@@ -691,7 +694,7 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, ()> {
                     chars.next();
                 }
                 if !saw_char {
-                    return Err(());
+                    return Err(ERROR_VALUE);
                 }
                 tokens.push(FormulaToken::ErrorCode(buf));
             }
@@ -726,7 +729,7 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, ()> {
                         }
 
                         if !saw_exp_digit {
-                            return Err(());
+                            return Err(ERROR_VALUE);
                         }
                         continue;
                     }
@@ -734,7 +737,7 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, ()> {
                     break;
                 }
 
-                let number: f64 = buf.parse().map_err(|_| ())?;
+                let number: f64 = buf.parse().map_err(|_| ERROR_VALUE)?;
                 tokens.push(FormulaToken::Number(number));
             }
             '+' => {
@@ -780,11 +783,11 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, ()> {
                     }
                 }
                 if buf.is_empty() {
-                    return Err(());
+                    return Err(ERROR_VALUE);
                 }
                 tokens.push(FormulaToken::Ident(buf));
             }
-            _ => return Err(()),
+            _ => return Err(ERROR_VALUE),
         }
     }
 
@@ -803,7 +806,7 @@ where
 {
     let tokens = match tokenize_formula(expr) {
         Ok(tokens) => tokens,
-        Err(_) => return Ok(JsonValue::String(ERROR_VALUE.to_string())),
+        Err(code) => return Ok(JsonValue::String(code.to_string())),
     };
     if tokens.is_empty() {
         return Ok(JsonValue::Null);
@@ -1165,5 +1168,14 @@ mod tests {
 
         wb.recalculate(None).unwrap();
         assert_eq!(wb.get_cell("C1", None).unwrap().value, json!(ERROR_NA));
+    }
+
+    #[test]
+    fn sheet_references_return_ref_error() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("=Sheet2!A1"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_REF));
     }
 }
