@@ -153,6 +153,7 @@ export class WebMacroBackend implements MacroBackend {
 
   private pyodide: PyodideRuntime | null = null;
   private pyodideInit: Promise<void> | null = null;
+  private warnedPyodideMainThread = false;
 
   constructor(private readonly options: WebMacroBackendOptions) {
     this.storage =
@@ -300,6 +301,12 @@ export class WebMacroBackend implements MacroBackend {
 
     try {
       const runtime = await this.ensurePyodideInitialized(api);
+      if (runtime.getBackendMode?.() === "mainThread" && !this.warnedPyodideMainThread) {
+        output.push(
+          "warning: SharedArrayBuffer unavailable; running Pyodide on the main thread (UI may freeze during execution).",
+        );
+        this.warnedPyodideMainThread = true;
+      }
       const permissions = pythonPermissionsFromMacroPermissions(request.permissions);
       const result = await runtime.execute(macro.code, { timeoutMs: request.timeoutMs, permissions });
 
