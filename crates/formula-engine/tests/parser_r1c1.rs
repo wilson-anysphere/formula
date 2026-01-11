@@ -1,4 +1,6 @@
-use formula_engine::{parse_formula, CellAddr, ParseOptions, ReferenceStyle, SerializeOptions};
+use formula_engine::{
+    parse_formula, CellAddr, Expr, NameRef, ParseOptions, ReferenceStyle, SerializeOptions,
+};
 
 fn roundtrip(formula: &str, opts: ParseOptions, ser: SerializeOptions) {
     let ast1 = parse_formula(formula, opts.clone()).unwrap();
@@ -73,4 +75,42 @@ fn converts_a1_relative_to_r1c1_using_origin() {
     ser.reference_style = ReferenceStyle::R1C1;
     ser.origin = Some(CellAddr::new(4, 2)); // C5
     assert_eq!(ast.to_string(ser).unwrap(), "=R[-4]C[-2]");
+}
+
+#[test]
+fn r1c1_does_not_mislex_identifiers_starting_with_rc_prefix() {
+    let mut opts = ParseOptions::default();
+    opts.reference_style = ReferenceStyle::R1C1;
+    let ast = parse_formula("=RCAR", opts).unwrap();
+    assert_eq!(
+        ast.expr,
+        Expr::NameRef(NameRef {
+            workbook: None,
+            sheet: None,
+            name: "RCAR".to_string()
+        })
+    );
+}
+
+#[test]
+fn r1c1_does_not_mislex_identifiers_starting_with_r1c1_prefix() {
+    let mut opts = ParseOptions::default();
+    opts.reference_style = ReferenceStyle::R1C1;
+    let ast = parse_formula("=R1C1FOO", opts).unwrap();
+    assert_eq!(
+        ast.expr,
+        Expr::NameRef(NameRef {
+            workbook: None,
+            sheet: None,
+            name: "R1C1FOO".to_string()
+        })
+    );
+}
+
+#[test]
+fn r1c1_does_not_mislex_function_calls_starting_with_rc_prefix() {
+    let mut opts = ParseOptions::default();
+    opts.reference_style = ReferenceStyle::R1C1;
+    // Unknown functions are legal in the syntax; they should still parse.
+    parse_formula("=RCAR(1)", opts).unwrap();
 }

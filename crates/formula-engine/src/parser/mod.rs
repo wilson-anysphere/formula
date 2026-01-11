@@ -686,6 +686,18 @@ impl<'a> Lexer<'a> {
             return None;
         }
 
+        // Avoid mis-lexing identifiers that start with an A1 reference prefix (e.g. `A1FOO`).
+        //
+        // Excel allows defined names like `A1FOO` because they do not *fully* match the A1 cell
+        // reference grammar. If we accept the `A1` prefix as a cell token, the remaining `FOO`
+        // becomes an adjacent identifier token which is invalid formula syntax and results in
+        // confusing parse errors.
+        if matches!(self.peek_char(), Some(c) if is_ident_cont_char(c) || c == '(') {
+            self.idx = save_idx;
+            self.chars = save_chars;
+            return None;
+        }
+
         let Some(col) = col_from_a1(&col_letters) else {
             self.idx = save_idx;
             self.chars = save_chars;
@@ -794,6 +806,22 @@ impl<'a> Lexer<'a> {
             }
             _ => Coord::Offset(0),
         };
+
+        // Avoid mis-lexing identifiers that *start* with an R1C1 reference prefix.
+        //
+        // In R1C1 mode, valid references like `RC` and `R1C1` can appear as prefixes of valid
+        // identifiers (e.g. `RCAR`, `R1C1FOO`). Excel allows such names because they do not *fully*
+        // match the R1C1 cell-reference grammar.
+        //
+        // If we accept the prefix as a cell token we would end up with adjacency like
+        // `RC` + `AR`, which is not valid formula syntax and causes confusing parse errors.
+        // Instead, reject the cell token when the next character would continue an identifier or
+        // start a function call, so the full string is lexed as an identifier.
+        if matches!(self.peek_char(), Some(c) if is_ident_cont_char(c) || c == '(') {
+            self.idx = save_idx;
+            self.chars = save_chars;
+            return None;
+        }
 
         Some(R1C1CellToken { row, col })
     }
