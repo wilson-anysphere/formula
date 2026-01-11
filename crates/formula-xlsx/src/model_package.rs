@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use formula_model::{Cell, CellRef, CellValue, Workbook, Worksheet, WorksheetId};
+use formula_model::{Cell, CellRef, CellValue, SheetVisibility, Workbook, Worksheet, WorksheetId};
 
 use crate::package::{XlsxError, XlsxPackage};
 use crate::path::resolve_target;
@@ -118,6 +118,14 @@ impl WorkbookPackage {
                 .attr("name")
                 .ok_or(WorkbookPackageError::MissingSheetAttribute("name"))?
                 .to_string();
+            let xlsx_sheet_id = sheet_el
+                .attr("sheetId")
+                .and_then(|v| v.parse::<u32>().ok());
+            let visibility = match sheet_el.attr("state") {
+                Some("hidden") => SheetVisibility::Hidden,
+                Some("veryHidden") => SheetVisibility::VeryHidden,
+                _ => SheetVisibility::Visible,
+            };
             let rel_id = sheet_el
                 .attr_ns(REL_NS, "id")
                 .ok_or(WorkbookPackageError::MissingSheetAttribute("r:id"))?;
@@ -140,6 +148,9 @@ impl WorkbookPackage {
 
             let sheet_id = workbook.add_sheet(name.clone());
             let sheet_model = workbook.sheet_mut(sheet_id).expect("sheet just added");
+            sheet_model.xlsx_sheet_id = xlsx_sheet_id;
+            sheet_model.xlsx_rel_id = Some(rel_id.to_string());
+            sheet_model.visibility = visibility;
             parse_sheet_cells(sheet_model, &sheet_root, &styles)?;
 
             worksheets.push(WorksheetPart {
