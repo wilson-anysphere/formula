@@ -14,7 +14,6 @@ use crate::recalc_policy::{
     content_types_remove_calc_chain, workbook_rels_remove_calc_chain,
     workbook_xml_force_full_calc_on_load, RecalcPolicyError,
 };
-use crate::shared_strings::parse_shared_strings_xml;
 use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::styles::XlsxStylesEditor;
 use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
@@ -439,7 +438,7 @@ fn plan_shared_strings<R: Read + Seek>(
         let mut file = archive.by_name(&shared_strings_part)?;
         file.read_to_end(&mut shared_strings_bytes)?;
     }
-    let mut shared_strings = SharedStringsState::from_part(shared_strings_bytes)?;
+    let mut shared_strings = SharedStringsState::from_part(&shared_strings_bytes)?;
 
     // Deterministic insertion order: sort by (worksheet part, row, col).
     let mut shared_patches: Vec<(&str, &WorksheetCellPatch)> = patches_by_part
@@ -779,384 +778,40 @@ fn read_zip_part<R: Read + Seek>(
 
 #[derive(Debug)]
 struct SharedStringsState {
-    original_xml: Vec<u8>,
-    original_len: usize,
-    items: Vec<RichText>,
-    plain_index: HashMap<String, u32>,
-    dirty: bool,
+    editor: SharedStringsEditor,
 }
 
 impl SharedStringsState {
-    fn from_part(bytes: Vec<u8>) -> Result<Self, StreamingPatchError> {
-        let xml = std::str::from_utf8(&bytes)
-            .map_err(|e| crate::XlsxError::Invalid(format!("sharedStrings.xml utf-8 error: {e}")))?;
-        let parsed = parse_shared_strings_xml(xml).map_err(|e| {
+    fn from_part(bytes: &[u8]) -> Result<Self, StreamingPatchError> {
+        let editor = SharedStringsEditor::parse(bytes).map_err(|e| {
             crate::XlsxError::Invalid(format!("sharedStrings.xml parse error: {e}"))
         })?;
-
-        let mut plain_index = HashMap::new();
-        for (idx, item) in parsed.items.iter().enumerate() {
-            if item.runs.is_empty() {
-                plain_index.insert(item.text.clone(), idx as u32);
-            }
-        }
-
-        Ok(Self {
-            original_len: parsed.items.len(),
-            original_xml: bytes,
-            items: parsed.items,
-            plain_index,
-            dirty: false,
-        })
+        Ok(Self { editor })
     }
 
     fn get_or_insert_plain(&mut self, text: &str) -> u32 {
-        if let Some(idx) = self.plain_index.get(text).copied() {
-            return idx;
-        }
-        let idx = self.items.len() as u32;
-        self.items.push(RichText::new(text.to_string()));
-        self.plain_index.insert(text.to_string(), idx);
-        self.dirty = true;
-        idx
+        self.editor.get_or_insert_plain(text)
     }
 
     fn get_or_insert_rich(&mut self, rich: &RichText) -> u32 {
-        if let Some((idx, _)) = self
-            .items
-            .iter()
-            .enumerate()
-            .find(|(_, item)| *item == rich)
-        {
-            return idx as u32;
-        }
-        let idx = self.items.len() as u32;
-        self.items.push(rich.clone());
-        self.dirty = true;
-        idx
+        self.editor.get_or_insert_rich(rich)
     }
 
     fn write_if_dirty(&self) -> Result<Option<Vec<u8>>, StreamingPatchError> {
-        if !self.dirty {
-            return Ok(None);
-        }
-        let new_items = self.items.get(self.original_len..).unwrap_or(&[]);
-        if new_items.is_empty() {
+        if !self.editor.is_dirty() {
             return Ok(None);
         }
 
-        if let Some(updated) = update_shared_strings_xml_lossless(
-            &self.original_xml,
-            new_items,
-            self.items.len() as u32,
-        )? {
-            return Ok(Some(updated));
-        }
-
-        // Fallback: use the general-purpose SharedStringsEditor so we still preserve unknown XML
-        // subtrees even when we can't apply the formatting-preserving patch above.
-        let mut editor = SharedStringsEditor::parse(&self.original_xml).map_err(|e| {
-            crate::XlsxError::Invalid(format!("sharedStrings.xml parse error: {e}"))
-        })?;
-        for item in new_items {
-            if item.runs.is_empty() {
-                editor.get_or_insert_plain(&item.text);
-            } else {
-                editor.get_or_insert_rich(item);
-            }
-        }
-
-        let unique_count = self.items.len() as u32;
-        let count_hint = editor.original_count().map(|c| c.max(unique_count));
-        let updated = editor.to_xml_bytes(count_hint).map_err(|e| {
+        let unique_count = self.editor.len() as u32;
+        let count_hint = self
+            .editor
+            .original_count()
+            .map(|base| base.max(unique_count));
+        let updated = self.editor.to_xml_bytes(count_hint).map_err(|e| {
             crate::XlsxError::Invalid(format!("sharedStrings.xml write error: {e}"))
         })?;
         Ok(Some(updated))
     }
-}
-
-fn update_shared_strings_xml_lossless(
-    original: &[u8],
-    new_items: &[RichText],
-    new_unique_count: u32,
-) -> Result<Option<Vec<u8>>, StreamingPatchError> {
-    let close_tag = b"</sst>";
-    if find_subslice_rfind(original, close_tag).is_none() {
-        return Ok(None);
-    }
-
-    let start_tag_range = match find_sst_start_tag_range(original) {
-        Some(range) => range,
-        None => return Ok(None),
-    };
-
-    let (old_count, _old_unique_count, replacements) =
-        parse_and_plan_sst_count_replacements(original, start_tag_range, new_unique_count)?;
-
-    if replacements.is_empty() {
-        return Ok(None);
-    }
-
-    let new_count = match old_count {
-        Some(old) => old.max(new_unique_count),
-        None => new_unique_count,
-    };
-
-    let patched = apply_replacements(original, &replacements, new_count, new_unique_count)?;
-
-    // Recompute insert_pos if the `<sst ...>` start tag length changed.
-    let close_tag_pos = match find_subslice_rfind(&patched, close_tag) {
-        Some(pos) => pos,
-        None => return Ok(None),
-    };
-
-    let (newline, indent) = detect_shared_strings_formatting(&patched);
-    let insert_pos = shared_strings_insert_pos(&patched, close_tag_pos, &newline);
-
-    let mut insert_buf = Vec::new();
-    if !newline.is_empty() && !ends_with_slice(&patched[..insert_pos], &newline) {
-        insert_buf.extend_from_slice(&newline);
-    }
-
-    for item in new_items {
-        if !newline.is_empty() {
-            insert_buf.extend_from_slice(&indent);
-        }
-        insert_buf.extend_from_slice(&write_shared_string_si(item)?);
-        if !newline.is_empty() {
-            insert_buf.extend_from_slice(&newline);
-        }
-    }
-
-    let mut out = Vec::with_capacity(patched.len() + insert_buf.len());
-    out.extend_from_slice(&patched[..insert_pos]);
-    out.extend_from_slice(&insert_buf);
-    out.extend_from_slice(&patched[insert_pos..]);
-    Ok(Some(out))
-}
-
-fn shared_strings_insert_pos(xml: &[u8], close_tag_pos: usize, newline: &[u8]) -> usize {
-    if newline.is_empty() || close_tag_pos == 0 {
-        return close_tag_pos;
-    }
-
-    let Some(line_break_pos) = find_subslice_rfind(&xml[..close_tag_pos], newline) else {
-        return close_tag_pos;
-    };
-
-    let line_start = line_break_pos + newline.len();
-    if xml[line_start..close_tag_pos]
-        .iter()
-        .all(|b| matches!(*b, b' ' | b'\t'))
-    {
-        line_start
-    } else {
-        close_tag_pos
-    }
-}
-
-fn ends_with_slice(haystack: &[u8], needle: &[u8]) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    haystack
-        .len()
-        .checked_sub(needle.len())
-        .is_some_and(|start| &haystack[start..] == needle)
-}
-
-fn find_sst_start_tag_range(xml: &[u8]) -> Option<(usize, usize)> {
-    let start = find_subslice(xml, b"<sst")?;
-    let mut in_quote = false;
-    for (idx, b) in xml[start..].iter().enumerate() {
-        match *b {
-            b'"' => in_quote = !in_quote,
-            b'>' if !in_quote => return Some((start, start + idx + 1)),
-            _ => {}
-        }
-    }
-    None
-}
-
-fn parse_and_plan_sst_count_replacements(
-    xml: &[u8],
-    start_tag_range: (usize, usize),
-    new_unique_count: u32,
-) -> Result<(Option<u32>, Option<u32>, Vec<CountReplacement>), StreamingPatchError> {
-    let (start, end) = start_tag_range;
-    let tag = &xml[start..end];
-
-    let mut old_count = None;
-    let mut old_unique = None;
-    let mut replacements = Vec::new();
-
-    if let Some((value_start, value_end, value)) = find_attr_value(tag, b"count")? {
-        old_count = value;
-        replacements.push(CountReplacement {
-            start: start + value_start,
-            end: start + value_end,
-            kind: CountReplacementKind::Count,
-        });
-    }
-
-    if let Some((value_start, value_end, value)) = find_attr_value(tag, b"uniqueCount")? {
-        old_unique = value;
-        replacements.push(CountReplacement {
-            start: start + value_start,
-            end: start + value_end,
-            kind: CountReplacementKind::UniqueCount,
-        });
-    }
-
-    // If we have a `count=` but no `uniqueCount=`, we can't safely insert a new attribute without
-    // potentially changing attribute ordering/formatting. Prefer the full rewrite fallback.
-    if old_count.is_some() && old_unique.is_none() {
-        return Ok((old_count, old_unique, Vec::new()));
-    }
-
-    // Avoid producing invalid metadata where count < uniqueCount.
-    if let Some(count) = old_count {
-        if count < new_unique_count {
-            // We'll rewrite count to at least new_unique_count.
-        }
-    }
-
-    Ok((old_count, old_unique, replacements))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CountReplacementKind {
-    Count,
-    UniqueCount,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CountReplacement {
-    start: usize,
-    end: usize,
-    kind: CountReplacementKind,
-}
-
-fn apply_replacements(
-    xml: &[u8],
-    replacements: &[CountReplacement],
-    new_count: u32,
-    new_unique_count: u32,
-) -> Result<Vec<u8>, StreamingPatchError> {
-    if replacements.is_empty() {
-        return Ok(xml.to_vec());
-    }
-
-    let mut reps = replacements.to_vec();
-    reps.sort_by_key(|r| r.start);
-
-    let mut out = Vec::with_capacity(xml.len());
-    let mut cursor = 0usize;
-    for rep in reps {
-        if rep.start < cursor || rep.end > xml.len() {
-            return Ok(xml.to_vec());
-        }
-        out.extend_from_slice(&xml[cursor..rep.start]);
-        let value = match rep.kind {
-            CountReplacementKind::Count => new_count.to_string(),
-            CountReplacementKind::UniqueCount => new_unique_count.to_string(),
-        };
-        out.extend_from_slice(value.as_bytes());
-        cursor = rep.end;
-    }
-    out.extend_from_slice(&xml[cursor..]);
-    Ok(out)
-}
-
-fn find_attr_value(
-    tag: &[u8],
-    attr_name: &[u8],
-) -> Result<Option<(usize, usize, Option<u32>)>, StreamingPatchError> {
-    let mut needle = Vec::with_capacity(attr_name.len() + 2);
-    needle.extend_from_slice(attr_name);
-    needle.extend_from_slice(b"=\"");
-    let pos = match find_subslice(tag, &needle) {
-        Some(pos) => pos,
-        None => return Ok(None),
-    };
-    let value_start = pos + needle.len();
-    let value_end = match tag[value_start..].iter().position(|b| *b == b'"') {
-        Some(rel) => value_start + rel,
-        None => return Ok(None),
-    };
-    let value = std::str::from_utf8(&tag[value_start..value_end])
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok());
-    Ok(Some((value_start, value_end, value)))
-}
-
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(0);
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-fn find_subslice_rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(haystack.len());
-    }
-    haystack
-        .windows(needle.len())
-        .rposition(|window| window == needle)
-}
-
-fn detect_shared_strings_formatting(xml: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let newline = if find_subslice(xml, b"\r\n").is_some() {
-        b"\r\n".to_vec()
-    } else if find_subslice(xml, b"\n").is_some() {
-        b"\n".to_vec()
-    } else {
-        Vec::new()
-    };
-
-    let mut indent = Vec::new();
-    if !newline.is_empty() {
-        if let Some(si_pos) = find_subslice(xml, b"<si") {
-            if let Some(line_start) = find_subslice_rfind(&xml[..si_pos], &newline) {
-                indent.extend_from_slice(&xml[line_start + newline.len()..si_pos]);
-            }
-        } else {
-            indent.extend_from_slice(b"  ");
-        }
-    }
-
-    (newline, indent)
-}
-
-fn write_shared_string_si(item: &RichText) -> Result<Vec<u8>, StreamingPatchError> {
-    let mut writer = Writer::new(Vec::new());
-
-    writer.write_event(Event::Start(BytesStart::new("si")))?;
-
-    if item.runs.is_empty() {
-        write_shared_string_t(&mut writer, &item.text)?;
-    } else {
-        for run in &item.runs {
-            writer.write_event(Event::Start(BytesStart::new("r")))?;
-
-            if !run.style.is_empty() {
-                writer.write_event(Event::Start(BytesStart::new("rPr")))?;
-                write_shared_string_rpr(&mut writer, &run.style)?;
-                writer.write_event(Event::End(BytesEnd::new("rPr")))?;
-            }
-
-            let segment = item.slice_run_text(run);
-            write_shared_string_t(&mut writer, segment)?;
-
-            writer.write_event(Event::End(BytesEnd::new("r")))?;
-        }
-    }
-
-    writer.write_event(Event::End(BytesEnd::new("si")))?;
-    Ok(writer.into_inner())
 }
 
 fn write_shared_string_t<W: Write>(writer: &mut Writer<W>, text: &str) -> std::io::Result<()> {

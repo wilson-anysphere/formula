@@ -626,3 +626,171 @@ fn streaming_patch_writes_inline_rich_text_when_shared_strings_missing(
 
     Ok(())
 }
+
+const PHONETIC_MARKER: &str = "PHO_MARKER_123";
+const EXTLST_MARKER: &str = "EXT_MARKER_456";
+
+fn build_phonetic_shared_strings_fixture_xlsx() -> Vec<u8> {
+    use zip::write::FileOptions;
+    use zip::{CompressionMethod, ZipWriter};
+
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>"#;
+
+    let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>"#;
+
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="s"><v>0</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+    let shared_strings_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1">
+  <si>
+    <t>Base</t>
+    <rPh sb="0" eb="4"><t>{PHONETIC_MARKER}</t></rPh>
+  </si>
+  <extLst>
+    <ext uri="{{{EXTLST_MARKER}}}">
+      <marker>{EXTLST_MARKER}</marker>
+    </ext>
+  </extLst>
+</sst>"#
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+    zip.start_file("_rels/.rels", options).unwrap();
+    zip.write_all(root_rels.as_bytes()).unwrap();
+
+    zip.start_file("[Content_Types].xml", options).unwrap();
+    zip.write_all(content_types.as_bytes()).unwrap();
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/sharedStrings.xml", options).unwrap();
+    zip.write_all(shared_strings_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn streaming_patch_preserves_phonetic_shared_strings_and_extlst(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_phonetic_shared_strings_fixture_xlsx();
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A2")?,
+        CellValue::String("Patched".to_string()),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes.clone()), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut shared_strings_xml = String::new();
+    archive
+        .by_name("xl/sharedStrings.xml")?
+        .read_to_string(&mut shared_strings_xml)?;
+    assert!(
+        shared_strings_xml.contains(PHONETIC_MARKER),
+        "expected sharedStrings.xml to preserve phonetic subtree"
+    );
+    assert!(
+        shared_strings_xml.contains(EXTLST_MARKER),
+        "expected sharedStrings.xml to preserve <extLst> subtree"
+    );
+    assert!(
+        shared_strings_xml.contains("Patched"),
+        "expected sharedStrings.xml to include newly inserted string"
+    );
+
+    let patched_pos = shared_strings_xml
+        .find("Patched")
+        .expect("sharedStrings.xml should contain Patched");
+    let extlst_pos = shared_strings_xml
+        .find("<extLst")
+        .expect("sharedStrings.xml should contain <extLst>");
+    assert!(
+        patched_pos < extlst_pos,
+        "expected inserted <si> to appear before <extLst> (got sharedStrings.xml: {shared_strings_xml})"
+    );
+
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = doc
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A2"))
+        .expect("A2 should exist");
+    assert_eq!(cell.attribute("t"), Some("s"));
+
+    let tmpdir = tempfile::tempdir()?;
+    let input_path = tmpdir.path().join("input.xlsx");
+    let out_path = tmpdir.path().join("patched.xlsx");
+    fs::write(&input_path, &bytes)?;
+    fs::write(&out_path, out.get_ref())?;
+
+    let report = xlsx_diff::diff_workbooks(&input_path, &out_path)?;
+    for diff in &report.differences {
+        assert_ne!(diff.kind, "missing_part", "missing part {}", diff.part);
+        assert_ne!(diff.kind, "extra_part", "extra part {}", diff.part);
+    }
+
+    let changed_parts: std::collections::BTreeSet<String> = report
+        .differences
+        .iter()
+        .map(|d| d.part.clone())
+        .collect();
+    assert_eq!(
+        changed_parts,
+        std::collections::BTreeSet::from([
+            "xl/sharedStrings.xml".to_string(),
+            "xl/worksheets/sheet1.xml".to_string(),
+        ])
+    );
+
+    Ok(())
+}
