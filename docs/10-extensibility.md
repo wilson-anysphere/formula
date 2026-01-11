@@ -48,6 +48,8 @@ A vibrant extension ecosystem is critical for long-term success. We follow VS Co
   },
   
   "main": "./dist/extension.js",
+  "browser": "./dist/extension.mjs",
+  "module": "./dist/extension.mjs",
   
   "activationEvents": [
     "onStartupFinished",
