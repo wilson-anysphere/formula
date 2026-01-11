@@ -92,12 +92,18 @@ const selectionRange = document.querySelector<HTMLElement>('[data-testid="select
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
 const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
 const openComments = document.querySelector<HTMLButtonElement>('[data-testid="open-comments-panel"]');
+const auditPrecedents = document.querySelector<HTMLButtonElement>('[data-testid="audit-precedents"]');
+const auditDependents = document.querySelector<HTMLButtonElement>('[data-testid="audit-dependents"]');
+const auditTransitive = document.querySelector<HTMLButtonElement>('[data-testid="audit-transitive"]');
 const openVbaMigratePanel = document.querySelector<HTMLButtonElement>('[data-testid="open-vba-migrate-panel"]');
 if (!activeCell || !selectionRange || !activeValue || !sheetSwitcher) {
   throw new Error("Missing status bar elements");
 }
 if (!openComments) {
   throw new Error("Missing comments panel toggle button");
+}
+if (!auditPrecedents || !auditDependents || !auditTransitive) {
+  throw new Error("Missing auditing toolbar buttons");
 }
 
 const workbookId = "local-workbook";
@@ -111,6 +117,19 @@ let activePanelWorkbookId = workbookId;
 app.getDocument().markSaved();
 app.focus();
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
+auditPrecedents.addEventListener("click", () => {
+  app.toggleAuditingPrecedents();
+  app.focus();
+});
+auditDependents.addEventListener("click", () => {
+  app.toggleAuditingDependents();
+  app.focus();
+});
+auditTransitive.addEventListener("click", () => {
+  app.toggleAuditingTransitive();
+  app.focus();
+});
+
 let powerQueryService: DesktopPowerQueryService | null = null;
 let powerQueryServiceWorkbookId: string | null = null;
 
@@ -1960,6 +1979,53 @@ async function handleNewWorkbook(): Promise<void> {
   }
 }
 
+function openCommandPalette(): void {
+  const choice = window
+    .prompt(
+      [
+        "Command palette:",
+        "1) Trace precedents",
+        "2) Trace dependents",
+        "3) Trace precedents + dependents",
+        "4) Clear auditing",
+        "5) Toggle transitive auditing",
+        "",
+        "Enter a number:",
+      ].join("\n"),
+    )
+    ?.trim();
+
+  if (!choice) return;
+  switch (choice) {
+    case "1":
+      app.clearAuditing();
+      app.toggleAuditingPrecedents();
+      app.focus();
+      return;
+    case "2":
+      app.clearAuditing();
+      app.toggleAuditingDependents();
+      app.focus();
+      return;
+    case "3":
+      app.clearAuditing();
+      app.toggleAuditingPrecedents();
+      app.toggleAuditingDependents();
+      app.focus();
+      return;
+    case "4":
+      app.clearAuditing();
+      app.focus();
+      return;
+    case "5":
+      app.toggleAuditingTransitive();
+      app.focus();
+      return;
+    default:
+      return;
+  }
+}
+
 try {
   tauriBackend = new TauriWorkbookBackend();
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
@@ -1968,6 +2034,7 @@ try {
     // Expose the queued invoke so other subsystems (e.g. Power Query table reads)
     // can sequence behind pending workbook writes from `startWorkbookSync`.
     (globalThis as any).__FORMULA_WORKBOOK_INVOKE__ = queuedInvoke;
+    (globalThis as any).__formulaQueuedInvoke = queuedInvoke;
   }
   window.addEventListener("unload", () => {
     vbaEventMacros?.dispose();
@@ -2055,6 +2122,10 @@ try {
       console.error("Failed to open workbook:", err);
       window.alert(`Failed to open workbook: ${String(err)}`);
     });
+  });
+
+  void listen("shortcut-command-palette", () => {
+    openCommandPalette();
   });
 
   let closeInFlight = false;

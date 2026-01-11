@@ -773,6 +773,36 @@ pub fn get_cell(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
+pub fn get_precedents(
+    sheet_id: String,
+    row: usize,
+    col: usize,
+    transitive: Option<bool>,
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<String>, String> {
+    let state = state.inner().lock().unwrap();
+    state
+        .get_precedents(&sheet_id, row, col, transitive.unwrap_or(false))
+        .map_err(app_error)
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn get_dependents(
+    sheet_id: String,
+    row: usize,
+    col: usize,
+    transitive: Option<bool>,
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<String>, String> {
+    let state = state.inner().lock().unwrap();
+    state
+        .get_dependents(&sheet_id, row, col, transitive.unwrap_or(false))
+        .map_err(app_error)
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
 pub async fn set_cell(
     sheet_id: String,
     row: usize,

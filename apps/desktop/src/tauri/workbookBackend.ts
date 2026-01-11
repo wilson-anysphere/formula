@@ -127,4 +127,34 @@ export class TauriWorkbookBackend implements WorkbookBackend {
       values: params.values
     });
   }
+
+  async getPrecedents(params: {
+    sheetId: string;
+    row: number;
+    col: number;
+    transitive?: boolean;
+  }): Promise<string[]> {
+    const payload = await this.invoke("get_precedents", {
+      sheet_id: params.sheetId,
+      row: params.row,
+      col: params.col,
+      transitive: params.transitive ?? false,
+    });
+    return (payload as string[]) ?? [];
+  }
+
+  async getDependents(params: {
+    sheetId: string;
+    row: number;
+    col: number;
+    transitive?: boolean;
+  }): Promise<string[]> {
+    const payload = await this.invoke("get_dependents", {
+      sheet_id: params.sheetId,
+      row: params.row,
+      col: params.col,
+      transitive: params.transitive ?? false,
+    });
+    return (payload as string[]) ?? [];
+  }
 }

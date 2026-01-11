@@ -19,7 +19,8 @@ use formula_engine::what_if::{
     CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, EngineWhatIfModel, WhatIfModel,
 };
 use formula_engine::{
-    Engine as FormulaEngine, ErrorKind, ExternalValueProvider, RecalcMode, Value as EngineValue,
+    Engine as FormulaEngine, ErrorKind, ExternalValueProvider, PrecedentNode, RecalcMode,
+    Value as EngineValue,
 };
 use formula_format::{format_value, FormatOptions, Value as FormatValue};
 use formula_storage::{
@@ -30,7 +31,7 @@ use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -62,6 +63,10 @@ pub enum AppStateError {
     WhatIf(String),
     #[error("persistence failed: {0}")]
     Persistence(String),
+    #[error("formula engine error: {0}")]
+    Engine(String),
+    #[error("too many auditing results for {kind} (limit {limit})")]
+    AuditingTooLarge { kind: String, limit: usize },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -261,6 +266,8 @@ struct UndoEntry {
 }
 
 pub type SharedAppState = std::sync::Arc<std::sync::Mutex<AppState>>;
+
+const AUDITING_RESULT_LIMIT: usize = 2_000;
 
 pub struct AppState {
     workbook: Option<Workbook>,
@@ -970,6 +977,60 @@ impl AppState {
             rows.push(row_out);
         }
         Ok(rows)
+    }
+
+    pub fn get_precedents(
+        &self,
+        sheet_id: &str,
+        row: usize,
+        col: usize,
+        transitive: bool,
+    ) -> Result<Vec<String>, AppStateError> {
+        let workbook = self.get_workbook()?;
+        let sheet = resolve_sheet_case_insensitive(workbook, sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+        let sheet_name = sheet.name.clone();
+
+        let addr = coord_to_a1(row, col);
+        let nodes = if transitive {
+            self.engine
+                .precedents_transitive(&sheet_name, &addr)
+                .map_err(|e| AppStateError::Engine(e.to_string()))?
+        } else {
+            self.engine
+                .precedents(&sheet_name, &addr)
+                .map_err(|e| AppStateError::Engine(e.to_string()))?
+        };
+
+        let cells = expand_precedent_nodes_to_cells(&nodes, AUDITING_RESULT_LIMIT, "precedents")?;
+        Ok(format_auditing_cells(workbook, &sheet_name, cells))
+    }
+
+    pub fn get_dependents(
+        &self,
+        sheet_id: &str,
+        row: usize,
+        col: usize,
+        transitive: bool,
+    ) -> Result<Vec<String>, AppStateError> {
+        let workbook = self.get_workbook()?;
+        let sheet = resolve_sheet_case_insensitive(workbook, sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+        let sheet_name = sheet.name.clone();
+
+        let addr = coord_to_a1(row, col);
+        let nodes = if transitive {
+            self.engine
+                .dependents_transitive(&sheet_name, &addr)
+                .map_err(|e| AppStateError::Engine(e.to_string()))?
+        } else {
+            self.engine
+                .dependents(&sheet_name, &addr)
+                .map_err(|e| AppStateError::Engine(e.to_string()))?
+        };
+
+        let cells = expand_precedent_nodes_to_cells(&nodes, AUDITING_RESULT_LIMIT, "dependents")?;
+        Ok(format_auditing_cells(workbook, &sheet_name, cells))
     }
 
     pub fn set_cell(
@@ -2379,6 +2440,126 @@ fn dedupe_updates(updates: Vec<CellUpdateData>) -> Vec<CellUpdateData> {
     }
 
     out
+}
+
+fn resolve_sheet_case_insensitive<'a>(
+    workbook: &'a Workbook,
+    sheet_id: &str,
+) -> Option<&'a crate::file_io::Sheet> {
+    workbook
+        .sheets
+        .iter()
+        .find(|s| s.id.eq_ignore_ascii_case(sheet_id))
+        .or_else(|| workbook.sheets.iter().find(|s| s.name.eq_ignore_ascii_case(sheet_id)))
+}
+
+fn format_auditing_cells(
+    workbook: &Workbook,
+    active_sheet_name: &str,
+    cells: Vec<(usize, CellAddr)>,
+) -> Vec<String> {
+    let mut out = Vec::with_capacity(cells.len());
+    for (sheet_idx, addr) in cells {
+        let Some(sheet) = workbook.sheets.get(sheet_idx) else {
+            continue;
+        };
+        let a1 = coord_to_a1(addr.row as usize, addr.col as usize);
+        if sheet.name.eq_ignore_ascii_case(active_sheet_name) {
+            out.push(a1);
+        } else {
+            out.push(format!("{}!{}", quote_sheet_name(&sheet.name), a1));
+        }
+    }
+    out
+}
+
+fn expand_precedent_nodes_to_cells(
+    nodes: &[PrecedentNode],
+    limit: usize,
+    kind: &str,
+) -> Result<Vec<(usize, CellAddr)>, AppStateError> {
+    let mut out: Vec<(usize, CellAddr)> = Vec::new();
+    let mut seen: HashSet<(usize, u32, u32)> = HashSet::new();
+
+    let mut push_cell = |sheet: usize, addr: CellAddr| -> Result<(), AppStateError> {
+        if !seen.insert((sheet, addr.row, addr.col)) {
+            return Ok(());
+        }
+        if out.len() >= limit {
+            return Err(AppStateError::AuditingTooLarge {
+                kind: kind.to_string(),
+                limit,
+            });
+        }
+        out.push((sheet, addr));
+        Ok(())
+    };
+
+    for node in nodes {
+        match *node {
+            PrecedentNode::Cell { sheet, addr } => {
+                push_cell(sheet, addr)?;
+            }
+            PrecedentNode::Range { sheet, start, end } => {
+                let row_start = start.row.min(end.row);
+                let row_end = start.row.max(end.row);
+                let col_start = start.col.min(end.col);
+                let col_end = start.col.max(end.col);
+
+                let mut row = row_start;
+                loop {
+                    let mut col = col_start;
+                    loop {
+                        push_cell(sheet, CellAddr { row, col })?;
+                        if col == col_end {
+                            break;
+                        }
+                        col = col.saturating_add(1);
+                    }
+                    if row == row_end {
+                        break;
+                    }
+                    row = row.saturating_add(1);
+                }
+            }
+            // External workbook references (e.g. `[Book.xlsx]Sheet1!A1`) are not currently
+            // surfaced in the desktop UI auditing overlays, which only highlight in-workbook
+            // cells. Skip them rather than failing the entire request.
+            PrecedentNode::ExternalCell { .. } | PrecedentNode::ExternalRange { .. } => {}
+            PrecedentNode::SpillRange {
+                sheet,
+                origin,
+                start,
+                end,
+            } => {
+                push_cell(sheet, origin)?;
+
+                let row_start = start.row.min(end.row);
+                let row_end = start.row.max(end.row);
+                let col_start = start.col.min(end.col);
+                let col_end = start.col.max(end.col);
+
+                let mut row = row_start;
+                loop {
+                    let mut col = col_start;
+                    loop {
+                        push_cell(sheet, CellAddr { row, col })?;
+                        if col == col_end {
+                            break;
+                        }
+                        col = col.saturating_add(1);
+                    }
+                    if row == row_end {
+                        break;
+                    }
+                    row = row.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    out.sort_by_key(|(sheet, addr)| (*sheet, addr.row, addr.col));
+    Ok(out)
 }
 
 fn scalar_to_pivot_value(value: &CellScalar) -> PivotValue {

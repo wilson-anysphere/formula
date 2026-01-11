@@ -4,6 +4,7 @@
  * In production this would integrate with the enterprise audit log pipeline. Here we
  * keep the surface area small and deterministic for unit testing.
  */
+const AUDIT_EVENT_SCHEMA_VERSION = 1;
 
 let auditEventSeq = 0;
 
@@ -24,7 +25,7 @@ function createAuditEvent(input) {
   // Keep the event shape compatible with `@formula/audit-core` without depending
   // on Node-only modules (the desktop UI runs in a browser runtime for e2e).
   return {
-    schemaVersion: eventInput.schemaVersion ?? 1,
+    schemaVersion: eventInput.schemaVersion ?? AUDIT_EVENT_SCHEMA_VERSION,
     id,
     timestamp,
     eventType: eventInput.eventType,
@@ -34,7 +35,7 @@ function createAuditEvent(input) {
     success: Boolean(eventInput.success),
     error: eventInput.error,
     details: eventInput.details ?? {},
-    correlation: eventInput.correlation
+    correlation: eventInput.correlation,
   };
 }
 

@@ -18,6 +18,8 @@ import { cellToA1, rangeToA1 } from "../selection/a1";
 import { navigateSelectionByKey } from "../selection/navigation";
 import { SelectionRenderer } from "../selection/renderer";
 import type { CellCoord, GridLimits, Range, SelectionState } from "../selection/types";
+import { AuditingOverlayRenderer } from "../grid/auditing-overlays/AuditingOverlayRenderer";
+import { computeAuditingOverlays, type AuditingMode, type AuditingOverlays } from "../grid/auditing-overlays/overlays";
 import { resolveCssVar } from "../theme/cssVars.js";
 import { t, tWithVars } from "../i18n/index.js";
 import {
@@ -57,6 +59,12 @@ import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
 
 type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
+type AuditingCacheEntry = {
+  precedents: string[];
+  dependents: string[];
+  precedentsError: string | null;
+  dependentsError: string | null;
+};
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
@@ -249,14 +257,30 @@ export class SpreadsheetApp {
   private wasmSyncSuspended = false;
   private wasmUnsubscribe: (() => void) | null = null;
   private wasmSyncPromise: Promise<void> = Promise.resolve();
+  private auditingUnsubscribe: (() => void) | null = null;
 
   private gridCanvas: HTMLCanvasElement;
   private chartLayer: HTMLDivElement;
   private referenceCanvas: HTMLCanvasElement;
+  private auditingCanvas: HTMLCanvasElement;
   private selectionCanvas: HTMLCanvasElement;
   private gridCtx: CanvasRenderingContext2D;
   private referenceCtx: CanvasRenderingContext2D;
+  private auditingCtx: CanvasRenderingContext2D;
   private selectionCtx: CanvasRenderingContext2D;
+
+  private auditingRenderer = new AuditingOverlayRenderer();
+  private auditingMode: "off" | AuditingMode = "off";
+  private auditingTransitive = false;
+  private auditingHighlights: AuditingOverlays = { precedents: new Set(), dependents: new Set() };
+  private auditingErrors: { precedents: string | null; dependents: string | null } = { precedents: null, dependents: null };
+  private readonly auditingCache = new Map<string, AuditingCacheEntry>();
+  private auditingLegend!: HTMLDivElement;
+  private auditingUpdateScheduled = false;
+  private auditingNeedsUpdateAfterDrag = false;
+  private auditingRequestId = 0;
+  private auditingIdlePromise: Promise<void> = Promise.resolve();
+  private auditingLastCellKey: string | null = null;
 
   private outline = new Outline();
   private outlineLayer: HTMLDivElement;
@@ -445,6 +469,9 @@ export class SpreadsheetApp {
     this.referenceCanvas = document.createElement("canvas");
     this.referenceCanvas.className = "grid-canvas";
     this.referenceCanvas.setAttribute("aria-hidden", "true");
+    this.auditingCanvas = document.createElement("canvas");
+    this.auditingCanvas.className = "grid-canvas";
+    this.auditingCanvas.setAttribute("aria-hidden", "true");
     this.selectionCanvas = document.createElement("canvas");
     this.selectionCanvas.className = "grid-canvas";
     this.selectionCanvas.setAttribute("aria-hidden", "true");
@@ -452,6 +479,7 @@ export class SpreadsheetApp {
     this.root.appendChild(this.gridCanvas);
     this.root.appendChild(this.chartLayer);
     this.root.appendChild(this.referenceCanvas);
+    this.root.appendChild(this.auditingCanvas);
     this.root.appendChild(this.selectionCanvas);
 
     this.chartStore = new ChartStore({
@@ -524,14 +552,19 @@ export class SpreadsheetApp {
     this.commentTooltip = this.createCommentTooltip();
     this.root.appendChild(this.commentTooltip);
 
+    this.auditingLegend = this.createAuditingLegend();
+    this.root.appendChild(this.auditingLegend);
+
     const gridCtx = this.gridCanvas.getContext("2d");
     const referenceCtx = this.referenceCanvas.getContext("2d");
+    const auditingCtx = this.auditingCanvas.getContext("2d");
     const selectionCtx = this.selectionCanvas.getContext("2d");
-    if (!gridCtx || !referenceCtx || !selectionCtx) {
+    if (!gridCtx || !referenceCtx || !auditingCtx || !selectionCtx) {
       throw new Error("Canvas 2D context not available");
     }
     this.gridCtx = gridCtx;
     this.referenceCtx = referenceCtx;
+    this.auditingCtx = auditingCtx;
     this.selectionCtx = selectionCtx;
 
     this.editor = new CellEditorOverlay(this.root, {
@@ -646,6 +679,14 @@ export class SpreadsheetApp {
     };
     this.commentsDoc.on("update", this.commentsDocUpdateListener);
 
+    this.auditingUnsubscribe = this.document.on("change", () => {
+      this.auditingCache.clear();
+      this.auditingLastCellKey = null;
+      if (this.auditingMode !== "off") {
+        this.scheduleAuditingUpdate();
+      }
+    });
+
     if (typeof window !== "undefined") {
       try {
         this.stopCommentPersistence = bindDocToStorage(this.commentsDoc, window.localStorage, "formula:comments");
@@ -757,6 +798,8 @@ export class SpreadsheetApp {
     this.formulaBarCompletion?.destroy();
     this.wasmUnsubscribe?.();
     this.wasmUnsubscribe = null;
+    this.auditingUnsubscribe?.();
+    this.auditingUnsubscribe = null;
     this.wasmEngine?.terminate();
     this.wasmEngine = null;
     this.stopCommentPersistence?.();
@@ -806,6 +849,7 @@ export class SpreadsheetApp {
       this.renderGrid();
       this.renderCharts(renderMode === "full");
       this.renderReferencePreview();
+      this.renderAuditing();
       this.renderSelection();
       if (renderMode === "full") this.updateStatus();
     });
@@ -818,8 +862,9 @@ export class SpreadsheetApp {
   async whenIdle(): Promise<void> {
     while (true) {
       const wasm = this.wasmSyncPromise;
-      await Promise.all([this.idle.whenIdle(), wasm.catch(() => {})]);
-      if (this.wasmSyncPromise === wasm) return;
+      const auditing = this.auditingIdlePromise;
+      await Promise.all([this.idle.whenIdle(), wasm.catch(() => {}), auditing.catch(() => {})]);
+      if (this.wasmSyncPromise === wasm && this.auditingIdlePromise === auditing) return;
     }
   }
 
@@ -1201,6 +1246,44 @@ export class SpreadsheetApp {
     return this.referenceHighlights.length;
   }
 
+  getAuditingHighlights(): {
+    mode: "off" | AuditingMode;
+    transitive: boolean;
+    precedents: string[];
+    dependents: string[];
+    errors: { precedents: string | null; dependents: string | null };
+  } {
+    return {
+      mode: this.auditingMode,
+      transitive: this.auditingTransitive,
+      precedents: Array.from(this.auditingHighlights.precedents).sort(),
+      dependents: Array.from(this.auditingHighlights.dependents).sort(),
+      errors: { ...this.auditingErrors },
+    };
+  }
+
+  toggleAuditingPrecedents(): void {
+    this.toggleAuditingComponent("precedents");
+  }
+
+  toggleAuditingDependents(): void {
+    this.toggleAuditingComponent("dependents");
+  }
+
+  toggleAuditingTransitive(): void {
+    this.auditingTransitive = !this.auditingTransitive;
+    this.updateAuditingLegend();
+    this.scheduleAuditingUpdate();
+  }
+
+  clearAuditing(): void {
+    this.auditingMode = "off";
+    this.auditingHighlights = { precedents: new Set(), dependents: new Set() };
+    this.auditingErrors = { precedents: null, dependents: null };
+    this.updateAuditingLegend();
+    this.renderAuditing();
+  }
+
   toggleCommentsPanel(): void {
     this.commentsPanelVisible = !this.commentsPanelVisible;
     this.commentsPanel.style.display = this.commentsPanelVisible ? "flex" : "none";
@@ -1307,6 +1390,67 @@ export class SpreadsheetApp {
     tooltip.style.whiteSpace = "pre-wrap";
     tooltip.style.zIndex = "30";
     return tooltip;
+  }
+
+  private createAuditingLegend(): HTMLDivElement {
+    const legend = document.createElement("div");
+    legend.dataset.testid = "auditing-legend";
+    legend.style.position = "absolute";
+    legend.style.left = `${this.rowHeaderWidth + 10}px`;
+    legend.style.bottom = "10px";
+    legend.style.display = "none";
+    legend.style.padding = "6px 10px";
+    legend.style.border = "1px solid var(--border)";
+    legend.style.borderRadius = "8px";
+    legend.style.background = "var(--bg-tertiary)";
+    legend.style.color = "var(--text-primary)";
+    legend.style.fontSize = "12px";
+    legend.style.pointerEvents = "none";
+    legend.style.zIndex = "20";
+    return legend;
+  }
+
+  private updateAuditingLegend(): void {
+    if (this.auditingMode === "off") {
+      this.auditingLegend.style.display = "none";
+      this.auditingLegend.textContent = "";
+      return;
+    }
+
+    const wantsPrecedents = this.auditingMode === "precedents" || this.auditingMode === "both";
+    const wantsDependents = this.auditingMode === "dependents" || this.auditingMode === "both";
+
+    const swatch = (colorVar: string) =>
+      `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colorVar};margin-right:6px;"></span>`;
+
+    const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const entries: string[] = [];
+    if (wantsPrecedents) entries.push(`${swatch("var(--accent)")}Precedents`);
+    if (wantsDependents) entries.push(`${swatch("var(--success)")}Dependents`);
+
+    const modeText = entries.join(`<span style="margin:0 10px;"></span>`);
+    const transitive = this.auditingTransitive ? "Transitive" : "Direct";
+
+    const errors: string[] = [];
+    if (wantsPrecedents && this.auditingErrors.precedents)
+      errors.push(`Precedents: ${escapeHtml(this.auditingErrors.precedents)}`);
+    if (wantsDependents && this.auditingErrors.dependents)
+      errors.push(`Dependents: ${escapeHtml(this.auditingErrors.dependents)}`);
+
+    this.auditingLegend.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">${modeText}</div>
+        <span style="opacity:0.75">(${transitive})</span>
+      </div>
+      ${
+        errors.length > 0
+          ? `<div style="margin-top:6px;opacity:0.9;max-width:360px;white-space:pre-wrap;">${errors.join("\n")}</div>`
+          : ""
+      }
+    `;
+
+    this.auditingLegend.style.display = "block";
   }
 
   private hideCommentTooltip(): void {
@@ -1461,7 +1605,7 @@ export class SpreadsheetApp {
     this.height = rect.height;
     this.dpr = window.devicePixelRatio || 1;
 
-    for (const canvas of [this.gridCanvas, this.referenceCanvas, this.selectionCanvas]) {
+    for (const canvas of [this.gridCanvas, this.referenceCanvas, this.auditingCanvas, this.selectionCanvas]) {
       canvas.width = Math.floor(this.width * this.dpr);
       canvas.height = Math.floor(this.height * this.dpr);
       canvas.style.width = `${this.width}px`;
@@ -1469,7 +1613,7 @@ export class SpreadsheetApp {
     }
 
     // Reset transforms and apply DPR scaling so drawing code uses CSS pixels.
-    for (const ctx of [this.gridCtx, this.referenceCtx, this.selectionCtx]) {
+    for (const ctx of [this.gridCtx, this.referenceCtx, this.auditingCtx, this.selectionCtx]) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(this.dpr, this.dpr);
     }
@@ -1487,6 +1631,7 @@ export class SpreadsheetApp {
     this.renderGrid();
     this.renderCharts(true);
     this.renderReferencePreview();
+    this.renderAuditing();
     this.renderSelection();
     this.updateStatus();
   }
@@ -1810,6 +1955,30 @@ export class SpreadsheetApp {
     }
   }
 
+  private renderAuditing(): void {
+    this.auditingRenderer.clear(this.auditingCtx);
+
+    if (this.auditingMode === "off") return;
+
+    const clipRect = {
+      x: this.rowHeaderWidth,
+      y: this.colHeaderHeight,
+      width: this.viewportWidth(),
+      height: this.viewportHeight(),
+    };
+
+    this.auditingCtx.save();
+    this.auditingCtx.beginPath();
+    this.auditingCtx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+    this.auditingCtx.clip();
+
+    this.auditingRenderer.render(this.auditingCtx, this.auditingHighlights, {
+      getCellRect: (row, col) => this.getCellRect({ row, col }),
+    });
+
+    this.auditingCtx.restore();
+  }
+
   private renderSelection(): void {
     this.ensureViewportMappingCurrent();
     const clipRect = {
@@ -1881,6 +2050,8 @@ export class SpreadsheetApp {
     for (const listener of this.selectionListeners) {
       listener(this.selection);
     }
+
+    this.maybeScheduleAuditingUpdate();
   }
 
   private syncEngineNow(): void {
@@ -1890,6 +2061,7 @@ export class SpreadsheetApp {
   private onWindowKeyDown(e: KeyboardEvent): void {
     if (e.defaultPrevented) return;
     if (this.handleShowFormulasShortcut(e)) return;
+    if (this.handleAuditingShortcut(e)) return;
     this.handleUndoRedoShortcut(e);
   }
 
@@ -1912,6 +2084,184 @@ export class SpreadsheetApp {
     this.showFormulas = !this.showFormulas;
     this.refresh();
     return true;
+  }
+
+  private handleAuditingShortcut(e: KeyboardEvent): boolean {
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary) return false;
+    if (e.code !== "BracketLeft" && e.code !== "BracketRight") return false;
+
+    if (this.editor.isOpen()) return false;
+    if (this.formulaBar?.isEditing()) return false;
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
+    }
+
+    e.preventDefault();
+    this.toggleAuditingComponent(e.code === "BracketLeft" ? "precedents" : "dependents");
+    return true;
+  }
+
+  private toggleAuditingComponent(component: "precedents" | "dependents"): void {
+    const hasPrecedents = this.auditingMode === "precedents" || this.auditingMode === "both";
+    const hasDependents = this.auditingMode === "dependents" || this.auditingMode === "both";
+
+    const nextPrecedents = component === "precedents" ? !hasPrecedents : hasPrecedents;
+    const nextDependents = component === "dependents" ? !hasDependents : hasDependents;
+
+    const nextMode: "off" | AuditingMode =
+      nextPrecedents && nextDependents
+        ? "both"
+        : nextPrecedents
+          ? "precedents"
+          : nextDependents
+            ? "dependents"
+            : "off";
+
+    if (nextMode === this.auditingMode) return;
+    this.auditingMode = nextMode;
+    this.auditingErrors = { precedents: null, dependents: null };
+
+    if (nextMode === "off") {
+      this.auditingHighlights = { precedents: new Set(), dependents: new Set() };
+      this.updateAuditingLegend();
+      this.renderAuditing();
+      return;
+    }
+
+    this.updateAuditingLegend();
+    this.scheduleAuditingUpdate();
+    this.renderAuditing();
+  }
+
+  private auditingCacheKey(sheetId: string, row: number, col: number, transitive: boolean): string {
+    return `${sheetId}:${row},${col}:${transitive ? "t" : "d"}`;
+  }
+
+  private getTauriInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null {
+    const queued = (globalThis as any).__formulaQueuedInvoke;
+    if (typeof queued === "function") {
+      return queued;
+    }
+
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke;
+    if (typeof invoke !== "function") return null;
+    return invoke;
+  }
+
+  private maybeScheduleAuditingUpdate(): void {
+    if (this.auditingMode === "off") return;
+
+    if (this.dragState) {
+      this.auditingNeedsUpdateAfterDrag = true;
+      return;
+    }
+
+    const cell = this.selection.active;
+    const key = this.auditingCacheKey(this.sheetId, cell.row, cell.col, this.auditingTransitive);
+    if (key === this.auditingLastCellKey) return;
+
+    this.scheduleAuditingUpdate();
+  }
+
+  private scheduleAuditingUpdate(): void {
+    if (this.auditingMode === "off") return;
+    if (this.auditingUpdateScheduled) return;
+    this.auditingUpdateScheduled = true;
+
+    const update = new Promise<void>((resolve) => {
+      queueMicrotask(() => {
+        this.auditingUpdateScheduled = false;
+        this.updateAuditingForActiveCell()
+          .catch(() => {})
+          .finally(() => resolve());
+      });
+    });
+    this.auditingIdlePromise = update;
+  }
+
+  private async updateAuditingForActiveCell(): Promise<void> {
+    if (this.auditingMode === "off") return;
+
+    const invoke = this.getTauriInvoke();
+    const cell = this.selection.active;
+    const key = this.auditingCacheKey(this.sheetId, cell.row, cell.col, this.auditingTransitive);
+    const cellA1 = cellToA1(cell);
+
+    this.auditingLastCellKey = key;
+
+    const cached = this.auditingCache.get(key);
+    if (cached) {
+      this.applyAuditingEntry(cached, cellA1);
+      return;
+    }
+
+    if (!invoke) {
+      const entry: AuditingCacheEntry = {
+        precedents: [],
+        dependents: [],
+        precedentsError: "Auditing requires the desktop engine.",
+        dependentsError: "Auditing requires the desktop engine.",
+      };
+      this.auditingCache.set(key, entry);
+      this.applyAuditingEntry(entry, cellA1);
+      return;
+    }
+
+    const requestId = ++this.auditingRequestId;
+
+    const args = {
+      sheet_id: this.sheetId,
+      row: cell.row,
+      col: cell.col,
+      transitive: this.auditingTransitive,
+    };
+
+    let precedents: string[] = [];
+    let dependents: string[] = [];
+    let precedentsError: string | null = null;
+    let dependentsError: string | null = null;
+
+    try {
+      const payload = await invoke("get_precedents", args);
+      precedents = Array.isArray(payload) ? payload.map(String) : [];
+    } catch (err) {
+      precedentsError = String(err);
+      precedents = [];
+    }
+
+    try {
+      const payload = await invoke("get_dependents", args);
+      dependents = Array.isArray(payload) ? payload.map(String) : [];
+    } catch (err) {
+      dependentsError = String(err);
+      dependents = [];
+    }
+
+    const entry: AuditingCacheEntry = { precedents, dependents, precedentsError, dependentsError };
+    this.auditingCache.set(key, entry);
+
+    if (requestId !== this.auditingRequestId) return;
+    if (key !== this.auditingLastCellKey) return;
+
+    this.applyAuditingEntry(entry, cellA1);
+  }
+
+  private applyAuditingEntry(entry: AuditingCacheEntry, cellA1: string): void {
+    const engine = {
+      precedents: () => entry.precedents,
+      dependents: () => entry.dependents,
+    };
+
+    const mode = this.auditingMode === "off" ? "both" : this.auditingMode;
+    this.auditingHighlights = computeAuditingOverlays(engine, cellA1, mode, { transitive: this.auditingTransitive });
+    this.auditingErrors = { precedents: entry.precedentsError, dependents: entry.dependentsError };
+
+    this.updateAuditingLegend();
+    this.renderAuditing();
   }
 
   private handleUndoRedoShortcut(e: KeyboardEvent): boolean {
@@ -2975,7 +3325,17 @@ export class SpreadsheetApp {
         // Clear any preview overlay.
         this.renderSelection();
       }
+
+      if (this.auditingNeedsUpdateAfterDrag) {
+        this.auditingNeedsUpdateAfterDrag = false;
+        this.scheduleAuditingUpdate();
+      }
       return;
+    }
+
+    if (this.auditingNeedsUpdateAfterDrag) {
+      this.auditingNeedsUpdateAfterDrag = false;
+      this.scheduleAuditingUpdate();
     }
 
     if (state.mode === "formula" && this.formulaBar) {
@@ -3094,6 +3454,7 @@ export class SpreadsheetApp {
 
     if (this.handleUndoRedoShortcut(e)) return;
     if (this.handleShowFormulasShortcut(e)) return;
+    if (this.handleAuditingShortcut(e)) return;
     if (this.handleClipboardShortcut(e)) return;
 
     // Editing
