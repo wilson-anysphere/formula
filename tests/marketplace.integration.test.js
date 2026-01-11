@@ -1112,7 +1112,14 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
     assert.equal(extRes.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     const extEtag = extRes.headers.get("etag");
     assert.ok(extEtag);
-    await extRes.text();
+    const extBody = await extRes.json();
+    assert.ok(Array.isArray(extBody.versions));
+    const publishedVersion = extBody.versions.find((v) => v.version === manifest.version);
+    assert.ok(publishedVersion);
+    assert.equal(publishedVersion.yanked, false);
+    assert.equal(publishedVersion.scanStatus, "passed");
+    assert.ok(publishedVersion.signingKeyId);
+    assert.equal(publishedVersion.formatVersion, 2);
 
     const extRes304 = await fetch(extUrl, { headers: { "If-None-Match": extEtag } });
     assert.equal(extRes304.status, 304);
