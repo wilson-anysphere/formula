@@ -538,7 +538,11 @@ fn zip_entry_equals<R: Read + Seek>(
         Err(e) => return Err(e.into()),
     };
 
-    if entry.size() as usize != expected.len() {
+    let Ok(size) = usize::try_from(entry.size()) else {
+        // An override can't match an entry whose uncompressed size doesn't fit in memory.
+        return Ok(Some(false));
+    };
+    if size != expected.len() {
         return Ok(Some(false));
     }
 
