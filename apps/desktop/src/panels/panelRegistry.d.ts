@@ -38,3 +38,6 @@ export class PanelRegistry {
 
 export const panelRegistry: PanelRegistry;
 
+export function isPanelId(panelId: string): boolean;
+export function getPanelTitle(panelId: string): string;
+export const PANEL_REGISTRY: PanelRegistry;

@@ -16,3 +16,7 @@ export function effectiveRangeClassification(
   records: Array<{ selector: any; classification: any }>
 ): any;
 
+export function effectiveDocumentClassification(
+  documentId: string,
+  records: Array<{ selector: any; classification: any }>
+): any;
