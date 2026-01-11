@@ -75,3 +75,13 @@ fn detects_duplicates_case_insensitively_on_add_and_rename() {
     workbook.rename_sheet(data, "data").unwrap();
     assert_eq!(workbook.sheets[0].name, "data");
 }
+
+#[test]
+fn detects_duplicates_with_unicode_case_insensitive_matching() {
+    let mut workbook = Workbook::new();
+    workbook.add_sheet("Äbc").unwrap();
+    assert_eq!(
+        workbook.add_sheet("äbc"),
+        Err(SheetNameError::DuplicateName)
+    );
+}
