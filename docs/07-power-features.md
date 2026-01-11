@@ -335,9 +335,10 @@ In Formula, this is handled by a dependency-aware refresh orchestrator that:
 - Executes dependencies before dependents (topological ordering)
 - Shares a single execution session across the whole refresh so credentials/permissions are cached and prompts are minimized
 - Supports concurrency for independent subgraphs and cancellation/progress reporting per query
+- Cancels only downstream dependents on failure, while allowing independent subgraphs to continue (Excel-like Refresh All UX)
 
 ```js
-import { QueryEngine, RefreshOrchestrator } from "@formula/power-query";
+import { QueryEngine, RefreshOrchestrator } from "../packages/power-query/src/index.js";
 
 const engine = new QueryEngine({
   onCredentialRequest: async (connectorId, details) => {
