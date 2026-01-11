@@ -415,18 +415,11 @@ impl XlsbWorkbook {
             }
         };
 
-        // Identify which edits target existing `BrtCellIsst` (`0x0007`) cells so we can write a
-        // shared-string index instead of rewriting them as inline strings.
-        let mut text_targets = HashSet::new();
-        for edit in edits {
-            if matches!(edit.new_value, CellValue::Text(_)) {
-                text_targets.insert((edit.row, edit.col));
-            }
-        }
-        let cell_record_ids = if text_targets.is_empty() {
+        let targets: HashSet<(u32, u32)> = edits.iter().map(|e| (e.row, e.col)).collect();
+        let cell_record_ids = if targets.is_empty() {
             HashMap::new()
         } else {
-            sheet_cell_record_ids(&sheet_bytes, &text_targets)?
+            sheet_cell_record_ids(&sheet_bytes, &targets)?
         };
 
         let mut sst = SharedStringsWriter::new(shared_strings_bytes)?;
@@ -451,6 +444,22 @@ impl XlsbWorkbook {
                 _ => {}
             }
         }
+
+        let total_ref_delta: i64 = updated_edits
+            .iter()
+            .map(|edit| {
+                let coord = (edit.row, edit.col);
+                let old_uses_sst = matches!(cell_record_ids.get(&coord), Some(&biff12::STRING));
+                let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
+                    && edit.shared_string_index.is_some();
+                match (old_uses_sst, new_uses_sst) {
+                    (false, true) => 1,
+                    (true, false) => -1,
+                    _ => 0,
+                }
+            })
+            .sum();
+        sst.note_total_ref_delta(total_ref_delta)?;
 
         let updated_shared_strings_bytes = sst.into_bytes()?;
         let patched_sheet = patch_sheet_bin(&sheet_bytes, &updated_edits)?;
@@ -490,6 +499,97 @@ impl XlsbWorkbook {
             &HashMap::new(),
             &sheet_part,
             |input, output| patch_sheet_bin_streaming(input, output, edits),
+        )
+    }
+
+    /// Save the workbook with a set of edits for a single worksheet, patching the worksheet part
+    /// as a stream while updating `xl/sharedStrings.bin`.
+    ///
+    /// This avoids buffering `xl/worksheets/sheetN.bin` in memory (important for large sheets)
+    /// while still preserving shared-string (`BrtCellIsst`) storage for edited text cells.
+    pub fn save_with_cell_edits_streaming_shared_strings(
+        &self,
+        dest: impl AsRef<Path>,
+        sheet_index: usize,
+        edits: &[CellEdit],
+    ) -> Result<(), ParseError> {
+        let meta = self
+            .sheets
+            .get(sheet_index)
+            .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+        let sheet_part = meta.part_path.clone();
+
+        let shared_strings_bytes = match self.preserved_parts.get("xl/sharedStrings.bin") {
+            Some(bytes) => bytes.clone(),
+            None => {
+                let file = File::open(&self.path)?;
+                let mut zip = ZipArchive::new(file)?;
+                match read_zip_entry(&mut zip, "xl/sharedStrings.bin")? {
+                    Some(bytes) => bytes,
+                    None => {
+                        // Workbook has no shared string table. Fall back to the generic streaming
+                        // patcher, which may emit inline strings.
+                        return self.save_with_cell_edits_streaming(dest, sheet_index, edits);
+                    }
+                }
+            }
+        };
+
+        let targets: HashSet<(u32, u32)> = edits.iter().map(|e| (e.row, e.col)).collect();
+        let cell_record_ids = if targets.is_empty() {
+            HashMap::new()
+        } else if let Some(sheet_bytes) = self.preserved_parts.get(&sheet_part) {
+            sheet_cell_record_ids(sheet_bytes, &targets)?
+        } else {
+            let file = File::open(&self.path)?;
+            let mut zip = ZipArchive::new(file)?;
+            let mut entry = zip.by_name(&sheet_part)?;
+            sheet_cell_record_ids_streaming(&mut entry, &targets)?
+        };
+
+        let mut sst = SharedStringsWriter::new(shared_strings_bytes)?;
+
+        let mut updated_edits = edits.to_vec();
+        for edit in &mut updated_edits {
+            let CellValue::Text(text) = &edit.new_value else {
+                continue;
+            };
+
+            let coord = (edit.row, edit.col);
+            let record_id = cell_record_ids.get(&coord).copied();
+            if record_id.is_some_and(is_formula_cell_record) {
+                continue;
+            }
+
+            edit.shared_string_index = Some(sst.intern_plain(text)?);
+        }
+
+        let total_ref_delta: i64 = updated_edits
+            .iter()
+            .map(|edit| {
+                let coord = (edit.row, edit.col);
+                let old_uses_sst = matches!(cell_record_ids.get(&coord), Some(&biff12::STRING));
+                let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
+                    && edit.shared_string_index.is_some();
+                match (old_uses_sst, new_uses_sst) {
+                    (false, true) => 1,
+                    (true, false) => -1,
+                    _ => 0,
+                }
+            })
+            .sum();
+        sst.note_total_ref_delta(total_ref_delta)?;
+
+        let updated_shared_strings_bytes = sst.into_bytes()?;
+
+        self.save_with_part_overrides_streaming(
+            dest,
+            &HashMap::from([(
+                "xl/sharedStrings.bin".to_string(),
+                updated_shared_strings_bytes,
+            )]),
+            &sheet_part,
+            |input, output| patch_sheet_bin_streaming(input, output, &updated_edits),
         )
     }
 
@@ -977,6 +1077,87 @@ fn sheet_cell_record_ids(
     }
 
     Ok(found)
+}
+
+fn sheet_cell_record_ids_streaming<R: Read>(
+    sheet_bin: &mut R,
+    targets: &HashSet<(u32, u32)>,
+) -> Result<HashMap<(u32, u32), u32>, ParseError> {
+    let mut in_sheet_data = false;
+    let mut current_row = 0u32;
+    let mut found: HashMap<(u32, u32), u32> = HashMap::new();
+
+    loop {
+        let Some(id) = biff12_varint::read_record_id(sheet_bin)? else {
+            break;
+        };
+        let Some(len) = biff12_varint::read_record_len(sheet_bin)? else {
+            return Err(ParseError::UnexpectedEof);
+        };
+        let len = len as usize;
+
+        match id {
+            biff12::SHEETDATA => {
+                in_sheet_data = true;
+                skip_record_payload(sheet_bin, len)?;
+            }
+            biff12::SHEETDATA_END => {
+                in_sheet_data = false;
+                skip_record_payload(sheet_bin, len)?;
+            }
+            biff12::ROW if in_sheet_data => {
+                if len >= 4 {
+                    let mut buf = [0u8; 4];
+                    sheet_bin.read_exact(&mut buf)?;
+                    current_row = u32::from_le_bytes(buf);
+                    skip_record_payload(sheet_bin, len - 4)?;
+                } else {
+                    skip_record_payload(sheet_bin, len)?;
+                }
+            }
+            _ if in_sheet_data => {
+                if len >= 4 {
+                    let mut buf = [0u8; 4];
+                    sheet_bin.read_exact(&mut buf)?;
+                    let col = u32::from_le_bytes(buf);
+                    let coord = (current_row, col);
+                    if targets.contains(&coord) {
+                        found.insert(coord, id);
+                        if found.len() == targets.len() {
+                            skip_record_payload(sheet_bin, len - 4)?;
+                            break;
+                        }
+                    }
+                    skip_record_payload(sheet_bin, len - 4)?;
+                } else {
+                    skip_record_payload(sheet_bin, len)?;
+                }
+            }
+            _ => skip_record_payload(sheet_bin, len)?,
+        }
+    }
+
+    Ok(found)
+}
+
+fn skip_record_payload<R: Read>(r: &mut R, mut len: usize) -> Result<(), ParseError> {
+    let mut buf = [0u8; 16 * 1024];
+    while len > 0 {
+        let chunk_len = buf.len().min(len);
+        r.read_exact(&mut buf[..chunk_len])?;
+        len = len.saturating_sub(chunk_len);
+    }
+    Ok(())
+}
+
+fn is_formula_cell_record(id: u32) -> bool {
+    matches!(
+        id,
+        biff12::FORMULA_FLOAT
+            | biff12::FORMULA_STRING
+            | biff12::FORMULA_BOOL
+            | biff12::FORMULA_BOOLERR
+    )
 }
 
 fn worksheets_edited<R: Read + Seek>(

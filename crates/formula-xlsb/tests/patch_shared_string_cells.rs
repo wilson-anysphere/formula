@@ -62,6 +62,7 @@ fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Optio
 }
 
 struct SharedStringsInfo {
+    total_count: Option<u32>,
     unique_count: Option<u32>,
     strings: Vec<String>,
 }
@@ -72,6 +73,7 @@ fn read_shared_strings_info(shared_strings_bin: &[u8]) -> SharedStringsInfo {
     const SST_END: u32 = 0x01A0;
 
     let mut cursor = Cursor::new(shared_strings_bin);
+    let mut total_count = None;
     let mut unique_count = None;
     let mut strings = Vec::new();
 
@@ -91,7 +93,8 @@ fn read_shared_strings_info(shared_strings_bin: &[u8]) -> SharedStringsInfo {
 
         match id {
             SST if payload.len() >= 8 => {
-                unique_count = Some(u32::from_le_bytes(payload[0..4].try_into().unwrap()));
+                total_count = Some(u32::from_le_bytes(payload[0..4].try_into().unwrap()));
+                unique_count = Some(u32::from_le_bytes(payload[4..8].try_into().unwrap()));
             }
             SI if payload.len() >= 5 => {
                 let flags = payload[0];
@@ -113,6 +116,7 @@ fn read_shared_strings_info(shared_strings_bin: &[u8]) -> SharedStringsInfo {
     }
 
     SharedStringsInfo {
+        total_count,
         unique_count,
         strings,
     }
@@ -164,6 +168,11 @@ fn patching_shared_string_cell_keeps_it_as_string_record() {
         1,
         "expected A1 to reference shared string index 1"
     );
+
+    let shared_strings_bin = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    let info = read_shared_strings_info(&shared_strings_bin);
+    assert_eq!(info.total_count, Some(1));
+    assert_eq!(info.unique_count, Some(2));
 }
 
 #[test]
@@ -215,6 +224,7 @@ fn patching_shared_string_cell_appends_to_shared_strings_bin() {
 
     let shared_strings_bin = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
     let info = read_shared_strings_info(&shared_strings_bin);
+    assert_eq!(info.total_count, Some(1));
     assert_eq!(info.unique_count, Some(3));
     assert_eq!(info.strings.len(), 3);
     assert_eq!(info.strings[2], "New");
@@ -272,7 +282,8 @@ fn inserting_new_text_cell_uses_shared_string_record_and_updates_shared_strings_
 
     let shared_strings_bin = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
     let info = read_shared_strings_info(&shared_strings_bin);
+    assert_eq!(info.total_count, Some(2));
     assert_eq!(info.unique_count, Some(2));
     assert_eq!(info.strings.len(), 2);
     assert_eq!(info.strings[1], "New");
- }
+  }

@@ -324,6 +324,30 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             super::patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
+                    biff12::STRING => {
+                        if edit.new_formula.is_some() {
+                            return Err(Error::Io(io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                format!(
+                                    "attempted to set formula for non-formula cell at ({row}, {col})"
+                                ),
+                            )));
+                        }
+
+                        if super::value_edit_is_noop_shared_string(&payload, edit)? {
+                            write_raw_header(&mut writer, &header)?;
+                            writer.write_raw(&payload)?;
+                        } else {
+                            changed = true;
+                            // BrtCellIsst: [col: u32][style: u32][isst: u32]
+                            //
+                            // If the caller provided `shared_string_index`, `patch_value_cell`
+                            // keeps the cell as a shared-string reference. Otherwise it falls back
+                            // to writing an inline string because we cannot update
+                            // `xl/sharedStrings.bin` here.
+                            super::patch_value_cell(&mut writer, col, style, edit)?;
+                        }
+                    }
                     biff12::BOOL => {
                         if super::value_edit_is_noop_bool(&payload, edit)? {
                             write_raw_header(&mut writer, &header)?;

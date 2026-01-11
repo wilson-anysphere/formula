@@ -15,7 +15,7 @@ struct RecordRange {
 /// Shared strings (`xl/sharedStrings.bin`) patcher that preserves existing records byte-for-byte.
 ///
 /// The shared string table is a BIFF12 record stream containing:
-/// - `BrtSST` (`0x019F`) header with `[uniqueCount:u32][totalCount:u32]`
+/// - `BrtSST` (`0x019F`) header with `[totalCount:u32][uniqueCount:u32]`
 /// - `BrtSI` (`0x0013`) entries
 /// - `BrtSSTEnd` (`0x01A0`)
 ///
@@ -29,8 +29,14 @@ pub(crate) struct SharedStringsWriter {
     bytes: Vec<u8>,
     records: Vec<RecordRange>,
     sst_record_idx: usize,
-    sst_unique_count: u32,
+    /// Total number of worksheet cells that reference the shared string table (`cstTotal` /
+    /// `count` in XLSX).
     sst_total_count: u32,
+    /// Total number of unique string items present in the table (`cstUnique` / `uniqueCount` in
+    /// XLSX).
+    sst_unique_count: u32,
+    original_sst_total_count: u32,
+    original_sst_unique_count: u32,
     insert_record_idx: usize,
     plain_to_index: HashMap<String, u32>,
     base_si_count: u32,
@@ -44,8 +50,8 @@ impl SharedStringsWriter {
 
         let mut sst_record_idx: Option<usize> = None;
         let mut sst_end_record_idx: Option<usize> = None;
-        let mut sst_unique_count: u32 = 0;
         let mut sst_total_count: u32 = 0;
+        let mut sst_unique_count: u32 = 0;
 
         let mut seen_sst_end = false;
         let mut last_si_record_idx: Option<usize> = None;
@@ -88,8 +94,9 @@ impl SharedStringsWriter {
                     if payload.len() < 8 {
                         return Err(Error::UnexpectedEof);
                     }
-                    sst_unique_count = u32::from_le_bytes(payload[0..4].try_into().unwrap());
-                    sst_total_count = u32::from_le_bytes(payload[4..8].try_into().unwrap());
+                    // BrtSST: [cstTotal: u32][cstUnique: u32] (matches BIFF8 + XLSX `sst` attrs).
+                    sst_total_count = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                    sst_unique_count = u32::from_le_bytes(payload[4..8].try_into().unwrap());
                 }
                 biff12::SI if !seen_sst_end => {
                     if let Some(text) = parse_plain_si_text(&bytes[payload_start..payload_end]) {
@@ -128,8 +135,10 @@ impl SharedStringsWriter {
             bytes,
             records,
             sst_record_idx,
-            sst_unique_count,
             sst_total_count,
+            sst_unique_count,
+            original_sst_total_count: sst_total_count,
+            original_sst_unique_count: sst_unique_count,
             insert_record_idx,
             plain_to_index,
             base_si_count: si_index,
@@ -150,15 +159,46 @@ impl SharedStringsWriter {
         self.plain_to_index.insert(s.to_string(), idx);
         self.appended_plain.push(s.to_string());
 
-        // Best-effort: bump both counts when introducing a new unique string.
-        self.sst_unique_count = self.sst_unique_count.saturating_add(1);
-        self.sst_total_count = self.sst_total_count.saturating_add(1);
+        // New `BrtSI` record -> the table has one more unique string item.
+        let expected_unique_count = self
+            .base_si_count
+            .checked_add(self.appended_plain.len() as u32)
+            .ok_or(Error::UnexpectedEof)?;
+        self.sst_unique_count = self.sst_unique_count.max(expected_unique_count);
 
         Ok(idx)
     }
 
+    /// Adjust the `BrtSST` total reference count (`cstTotal`) by a signed delta.
+    pub(crate) fn note_total_ref_delta(&mut self, delta: i64) -> Result<(), Error> {
+        if delta == 0 {
+            return Ok(());
+        }
+
+        let current = self.sst_total_count as i64;
+        let updated = current
+            .checked_add(delta)
+            .ok_or_else(|| {
+                Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "sharedStrings totalCount overflow",
+                ))
+            })?;
+        if updated < 0 || updated > u32::MAX as i64 {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "sharedStrings totalCount out of range",
+            )));
+        }
+        self.sst_total_count = updated as u32;
+        Ok(())
+    }
+
     pub(crate) fn into_bytes(self) -> Result<Vec<u8>, Error> {
-        if self.appended_plain.is_empty() {
+        if self.appended_plain.is_empty()
+            && self.sst_total_count == self.original_sst_total_count
+            && self.sst_unique_count == self.original_sst_unique_count
+        {
             return Ok(self.bytes);
         }
 
@@ -187,8 +227,8 @@ impl SharedStringsWriter {
                     return Err(Error::UnexpectedEof);
                 }
                 let mut patched = payload.to_vec();
-                patched[0..4].copy_from_slice(&self.sst_unique_count.to_le_bytes());
-                patched[4..8].copy_from_slice(&self.sst_total_count.to_le_bytes());
+                patched[0..4].copy_from_slice(&self.sst_total_count.to_le_bytes());
+                patched[4..8].copy_from_slice(&self.sst_unique_count.to_le_bytes());
                 out.extend_from_slice(&patched);
             } else {
                 out.extend_from_slice(

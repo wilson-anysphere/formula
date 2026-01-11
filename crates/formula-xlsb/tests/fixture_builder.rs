@@ -167,7 +167,7 @@ impl XlsbFixtureBuilder {
         let shared_strings_bin = if self.shared_strings.is_empty() {
             None
         } else {
-            Some(build_shared_strings_bin(&self.shared_strings))
+            Some(build_shared_strings_bin(&self.shared_strings, &self.cells))
         };
 
         let content_types_xml = build_content_types_xml(shared_strings_bin.is_some());
@@ -516,14 +516,21 @@ fn build_sheet_bin(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> Vec<u8> {
     out
 }
 
-fn build_shared_strings_bin(strings: &[String]) -> Vec<u8> {
+fn build_shared_strings_bin(
+    strings: &[String],
+    cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>,
+) -> Vec<u8> {
     let mut out = Vec::<u8>::new();
 
-    let count = strings.len() as u32;
+    let unique_count = strings.len() as u32;
+    let total_count: u32 = cells
+        .values()
+        .map(|cols| cols.values().filter(|cell| matches!(cell, CellSpec::Sst(_))).count() as u32)
+        .sum();
     let mut sst = Vec::<u8>::new();
-    // uniqueCount, totalCount
-    sst.extend_from_slice(&count.to_le_bytes());
-    sst.extend_from_slice(&count.to_le_bytes());
+    // BrtSST: [totalCount][uniqueCount]
+    sst.extend_from_slice(&total_count.to_le_bytes());
+    sst.extend_from_slice(&unique_count.to_le_bytes());
     write_record(&mut out, biff12::SST, &sst);
 
     for s in strings {
