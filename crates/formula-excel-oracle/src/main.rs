@@ -201,6 +201,16 @@ fn coord_to_a1(row: u32, col: u32) -> String {
     format!("{}{}", col_to_name(col), row + 1)
 }
 
+fn range_to_a1(start: formula_engine::eval::CellAddr, end: formula_engine::eval::CellAddr) -> String {
+    let start_a1 = coord_to_a1(start.row, start.col);
+    let end_a1 = coord_to_a1(end.row, end.col);
+    if start == end {
+        start_a1
+    } else {
+        format!("{start_a1}:{end_a1}")
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -340,7 +350,8 @@ fn main() -> Result<()> {
             Value::Spill { .. } => "#SPILL!".to_string(),
         };
 
-        let result = match engine.spill_range(&default_sheet, &case.output_cell) {
+        let spill_range = engine.spill_range(&default_sheet, &case.output_cell);
+        let (result, address) = match spill_range {
             Some((start, end)) => {
                 let rows = (end.row - start.row + 1) as usize;
                 let cols = (end.col - start.col + 1) as usize;
@@ -353,16 +364,19 @@ fn main() -> Result<()> {
                     }
                     out_rows.push(row);
                 }
-                EncodedValue::Array { rows: out_rows }
+                (
+                    EncodedValue::Array { rows: out_rows },
+                    range_to_a1(start, end),
+                )
             }
-            None => value.clone().into(),
+            None => (value.clone().into(), case.output_cell.clone()),
         };
 
         results.push(ResultEntry {
             case_id: case.id,
             output_cell: case.output_cell.clone(),
             result,
-            address: case.output_cell,
+            address,
             display_text,
         });
     }
