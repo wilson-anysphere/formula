@@ -298,6 +298,12 @@ Build from the repo root:
 docker build -f services/sync-server/Dockerfile -t formula-sync-server .
 ```
 
+Force native modules (e.g. `leveldown`) to compile from source (useful when validating the node-gyp toolchain / no-prebuild scenarios):
+
+```bash
+docker build --build-arg npm_config_build_from_source=true -f services/sync-server/Dockerfile -t formula-sync-server .
+```
+
 Run (auth is required in production):
 
 ```bash
