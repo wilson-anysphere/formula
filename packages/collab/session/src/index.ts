@@ -27,6 +27,31 @@ import {
   parseCellKey as parseCellKeyImpl,
 } from "./cell-key.js";
 
+function getYMap(value: unknown): any | null {
+  if (value instanceof Y.Map) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (maybe.constructor?.name !== "YMap") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.keys !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  return maybe;
+}
+
+function getYArray(value: unknown): any | null {
+  if (value instanceof Y.Array) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (maybe.constructor?.name !== "YArray") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.toArray !== "function") return null;
+  if (typeof maybe.push !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return maybe;
+}
+
 function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
   // Yjs root types are schema-defined: you must know whether a key is a Map or
   // Array. When applying updates into a fresh Doc, root types can temporarily
@@ -38,15 +63,10 @@ function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
   // choosing a constructor.
   const existing = doc.share.get("comments");
   if (!existing) return doc.getMap("comments");
-
-  // When multiple `yjs` module instances are loaded (ESM vs CJS), roots can be
-  // valid Yjs types that fail `instanceof` checks. Avoid calling `doc.getMap`
-  // / `doc.getArray` in that case: Yjs does strict constructor equality checks
-  // and can throw when the existing root was created by a different module
-  // instance.
-  if (existing instanceof Y.Map || (existing as any)?.constructor?.name === "YMap") return existing as any;
-  if (existing instanceof Y.Array || (existing as any)?.constructor?.name === "YArray") return existing as any;
-
+  const existingMap = getYMap(existing);
+  if (existingMap) return existingMap;
+  const existingArray = getYArray(existing);
+  if (existingArray) return existingArray;
   const placeholder = existing as any;
   const hasStart = placeholder?._start != null; // sequence item => likely array
   const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
