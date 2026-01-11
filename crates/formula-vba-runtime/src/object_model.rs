@@ -77,6 +77,17 @@ pub trait Spreadsheet {
     fn next_used_col_in_row(&self, _sheet: usize, _row: u32, _start_col: u32) -> Option<u32> {
         None
     }
+
+    /// Return the coordinates of stored "used" cells that intersect the provided range.
+    ///
+    /// This is used for optimizing operations like `Cells.ClearContents` which would otherwise
+    /// require iterating over the entire worksheet (1M x 16k) even when only a handful of cells
+    /// are actually present in the backing data model.
+    ///
+    /// Coordinates are 1-based `(row, col)`.
+    fn used_cells_in_range(&self, _range: VbaRangeRef) -> Option<Vec<(u32, u32)>> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -523,6 +534,21 @@ impl Spreadsheet for InMemoryWorkbook {
                 }
             })
             .min()
+    }
+
+    fn used_cells_in_range(&self, range: VbaRangeRef) -> Option<Vec<(u32, u32)>> {
+        let sh = self.sheets.get(range.sheet)?;
+        let mut out = Vec::new();
+        for (&(row, col), cell) in &sh.cells {
+            if row < range.start_row || row > range.end_row || col < range.start_col || col > range.end_col {
+                continue;
+            }
+            if matches!(cell.value, VbaValue::Empty) && cell.formula.is_none() {
+                continue;
+            }
+            out.push((row, col));
+        }
+        Some(out)
     }
 }
 

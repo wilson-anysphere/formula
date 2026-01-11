@@ -2723,6 +2723,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {

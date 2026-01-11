@@ -444,6 +444,25 @@ impl Spreadsheet for ExecutionWorkbook {
             })
             .min()
     }
+
+    fn used_cells_in_range(&self, range: formula_vba_runtime::VbaRangeRef) -> Option<Vec<(u32, u32)>> {
+        let sh = self.sheets.get(range.sheet)?;
+        let mut out = Vec::new();
+        for (&(row, col), cell) in &sh.cells {
+            if row < range.start_row
+                || row > range.end_row
+                || col < range.start_col
+                || col > range.end_col
+            {
+                continue;
+            }
+            if matches!(cell.value, VbaValue::Empty) && cell.formula.is_none() {
+                continue;
+            }
+            out.push((row, col));
+        }
+        Some(out)
+    }
 }
 
 fn json_value_to_vba(value: Option<&serde_json::Value>) -> VbaValue {

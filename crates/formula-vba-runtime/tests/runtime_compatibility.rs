@@ -388,6 +388,32 @@ End Sub
 }
 
 #[test]
+fn cells_clear_contents_clears_used_cells_without_scanning_entire_sheet() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1") = 1
+    Range("B2") = 2
+    Cells.ClearContents
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program).with_sandbox_policy(VbaSandboxPolicy {
+        // Clearing `Cells` via a naive loop would require scanning 1M*16k cells and trip the
+        // sandbox limits. We expect an optimized used-cells path instead.
+        max_steps: 500,
+        ..VbaSandboxPolicy::default()
+    });
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(wb.get_value_a1("Sheet1", "A1").unwrap(), VbaValue::Empty);
+    assert_eq!(wb.get_value_a1("Sheet1", "B2").unwrap(), VbaValue::Empty);
+}
+
+#[test]
 fn rows_and_columns_count_match_excel_limits() {
     let code = r#"
 Option Explicit

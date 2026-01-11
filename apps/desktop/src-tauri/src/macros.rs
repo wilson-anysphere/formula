@@ -888,4 +888,34 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
 
         best
     }
+
+    fn used_cells_in_range(
+        &self,
+        range: formula_vba_runtime::VbaRangeRef,
+    ) -> Option<Vec<(u32, u32)>> {
+        let workbook = self.state.get_workbook().ok()?;
+        let sheet = workbook.sheets.get(range.sheet)?;
+
+        let mut out = Vec::new();
+        for (&(row0, col0), cell) in sheet.cells.iter() {
+            let row1 = (row0 + 1) as u32;
+            let col1 = (col0 + 1) as u32;
+            if row1 < range.start_row
+                || row1 > range.end_row
+                || col1 < range.start_col
+                || col1 > range.end_col
+            {
+                continue;
+            }
+            let has_content = cell.formula.is_some()
+                || cell.input_value.is_some()
+                || !matches!(cell.computed_value, CellScalar::Empty);
+            if !has_content {
+                continue;
+            }
+            out.push((row1, col1));
+        }
+
+        Some(out)
+    }
 }

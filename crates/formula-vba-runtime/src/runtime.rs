@@ -2151,10 +2151,17 @@ impl<'a> Executor<'a> {
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(end))))
                 }
                 "clearcontents" => {
-                    for r in range.start_row..=range.end_row {
-                        for c in range.start_col..=range.end_col {
+                    if let Some(cells) = self.sheet.used_cells_in_range(range) {
+                        for (r, c) in cells {
                             self.tick()?;
                             self.sheet.clear_cell_contents(range.sheet, r, c)?;
+                        }
+                    } else {
+                        for r in range.start_row..=range.end_row {
+                            for c in range.start_col..=range.end_col {
+                                self.tick()?;
+                                self.sheet.clear_cell_contents(range.sheet, r, c)?;
+                            }
                         }
                     }
                     Ok(VbaValue::Empty)
