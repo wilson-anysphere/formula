@@ -42,6 +42,12 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
   function renderPanelBody(panelId: string, body: HTMLDivElement) {
     if (panelId === PanelIds.AI_CHAT) {
+      // Ensure the React chat UI can own the full panel height (dock panels are flex columns).
+      body.style.flex = "1";
+      body.style.minHeight = "0";
+      body.style.padding = "0";
+      body.style.display = "flex";
+      body.style.flexDirection = "column";
       renderReactPanel(
         panelId,
         body,
