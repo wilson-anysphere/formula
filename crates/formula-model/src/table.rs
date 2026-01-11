@@ -103,7 +103,7 @@ impl Table {
     pub fn column_index(&self, name: &str) -> Option<u32> {
         self.columns
             .iter()
-            .position(|c| c.name == name)
+            .position(|c| c.name.eq_ignore_ascii_case(name))
             .map(|idx| idx as u32)
     }
 

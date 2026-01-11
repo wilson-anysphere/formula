@@ -244,6 +244,40 @@ fn workbook_find_table_is_case_insensitive() {
 }
 
 #[test]
+fn table_column_index_is_case_insensitive() {
+    let table = Table {
+        id: 1,
+        name: "Table1".into(),
+        display_name: "Table1".into(),
+        range: Range::from_a1("A1:B2").unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![
+            TableColumn {
+                id: 1,
+                name: "Col".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 2,
+                name: "Other".into(),
+                formula: None,
+                totals_formula: None,
+            },
+        ],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
+    };
+
+    assert_eq!(table.column_index("col"), Some(0));
+    assert_eq!(table.column_index("COL"), Some(0));
+    assert_eq!(table.column_index("oThEr"), Some(1));
+}
+
+#[test]
 fn error_strings_match_excel_spellings() {
     assert_eq!(ErrorValue::Div0.to_string(), "#DIV/0!");
     assert_eq!(ErrorValue::Name.to_string(), "#NAME?");
