@@ -1,7 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const { createExtensionPackage, loadExtensionManifest } = require("../../../shared/extension-package");
+const { createExtensionPackage, loadExtensionManifest, readExtensionPackage } = require("../../../shared/extension-package");
 const { signBytes } = require("../../../shared/crypto/signing");
 const { isValidSemver } = require("../../../shared/semver");
 
@@ -36,7 +36,7 @@ function validateManifest(manifest) {
   return true;
 }
 
-async function packageExtension(extensionDir) {
+async function packageExtension(extensionDir, { privateKeyPem } = {}) {
   const manifest = await loadExtensionManifest(extensionDir);
   validateManifest(manifest);
 
@@ -62,8 +62,15 @@ async function packageExtension(extensionDir) {
     throw error;
   }
 
-  const packageBytes = await createExtensionPackage(extensionDir);
-  return { manifest, packageBytes };
+  const packageBytes = await createExtensionPackage(extensionDir, {
+    formatVersion: 2,
+    privateKeyPem,
+  });
+
+  const parsed = readExtensionPackage(packageBytes);
+  const signatureBase64 = parsed?.signature?.signatureBase64 || null;
+
+  return { manifest, packageBytes, signatureBase64 };
 }
 
 async function signExtensionPackage(packageBytes, privateKeyPemOrPath) {
@@ -80,8 +87,12 @@ async function publishExtension({ extensionDir, marketplaceUrl, token, privateKe
   if (!token) throw new Error("token is required");
   if (!privateKeyPemOrPath) throw new Error("privateKeyPemOrPath is required");
 
-  const { manifest, packageBytes } = await packageExtension(extensionDir);
-  const signatureBase64 = await signExtensionPackage(packageBytes, privateKeyPemOrPath);
+  let privateKeyPem = privateKeyPemOrPath;
+  if (privateKeyPemOrPath.includes(path.sep) || privateKeyPemOrPath.includes(".pem")) {
+    privateKeyPem = await fs.readFile(privateKeyPemOrPath, "utf8");
+  }
+
+  const { manifest, packageBytes, signatureBase64 } = await packageExtension(extensionDir, { privateKeyPem });
 
   const response = await fetch(`${marketplaceUrl.replace(/\/$/, "")}/api/publish`, {
     method: "POST",

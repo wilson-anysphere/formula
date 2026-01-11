@@ -1,117 +1,60 @@
-const fs = require("node:fs/promises");
-const path = require("node:path");
-const zlib = require("node:zlib");
+const v1 = require("./v1");
+const v2 = require("./v2");
 
-const PACKAGE_FORMAT = "formula-extension-package";
-const PACKAGE_FORMAT_VERSION = 1;
-
-async function walkFiles(rootDir) {
-  const results = [];
-
-  async function visit(dir) {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const abs = path.join(dir, entry.name);
-      const rel = path.relative(rootDir, abs).replace(/\\\\/g, "/");
-
-      if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) continue;
-
-      if (entry.isDirectory()) {
-        if (entry.name === "node_modules" || entry.name === ".git") continue;
-        await visit(abs);
-        continue;
-      }
-
-      if (!entry.isFile()) continue;
-      results.push({ abs, rel });
-    }
+function detectExtensionPackageFormatVersion(packageBytes) {
+  if (!packageBytes || packageBytes.length < 2) {
+    throw new Error("Invalid extension package (empty)");
   }
 
-  await visit(rootDir);
-  results.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
-  return results;
+  // v1 packages are gzipped JSON.
+  if (packageBytes[0] === 0x1f && packageBytes[1] === 0x8b) return 1;
+
+  // v2 packages are deterministic tar archives with required entries.
+  return 2;
 }
 
-async function loadExtensionManifest(extensionDir) {
-  const manifestPath = path.join(extensionDir, "package.json");
-  const raw = await fs.readFile(manifestPath, "utf8");
-  return JSON.parse(raw);
-}
-
-async function createExtensionPackage(extensionDir) {
-  const manifest = await loadExtensionManifest(extensionDir);
-
-  const files = [];
-  const entries = await walkFiles(extensionDir);
-  for (const entry of entries) {
-    const data = await fs.readFile(entry.abs);
-    files.push({
-      path: entry.rel,
-      dataBase64: data.toString("base64"),
-    });
+async function createExtensionPackage(extensionDir, options = {}) {
+  const formatVersion = options.formatVersion ?? 2;
+  if (formatVersion === 1) {
+    return v1.createExtensionPackageV1(extensionDir);
   }
-
-  const bundle = {
-    format: PACKAGE_FORMAT,
-    formatVersion: PACKAGE_FORMAT_VERSION,
-    createdAt: new Date().toISOString(),
-    manifest,
-    files,
-  };
-
-  const jsonBytes = Buffer.from(JSON.stringify(bundle), "utf8");
-  return zlib.gzipSync(jsonBytes, { level: 9 });
+  if (formatVersion !== 2) {
+    throw new Error(`Unsupported extension package formatVersion: ${formatVersion}`);
+  }
+  return v2.createExtensionPackageV2(extensionDir, { privateKeyPem: options.privateKeyPem });
 }
 
 function readExtensionPackage(packageBytes) {
-  const jsonBytes = zlib.gunzipSync(packageBytes);
-  const parsed = JSON.parse(jsonBytes.toString("utf8"));
-
-  if (parsed?.format !== PACKAGE_FORMAT || parsed?.formatVersion !== PACKAGE_FORMAT_VERSION) {
-    throw new Error("Unsupported extension package format");
-  }
-
-  if (!Array.isArray(parsed.files) || typeof parsed.manifest !== "object" || !parsed.manifest) {
-    throw new Error("Invalid extension package contents");
-  }
-
-  return parsed;
-}
-
-function safeJoin(baseDir, relPath) {
-  const normalized = relPath.replace(/\\\\/g, "/");
-  if (normalized.startsWith("/") || normalized.includes("..")) {
-    throw new Error(`Invalid path in extension package: ${relPath}`);
-  }
-  const full = path.join(baseDir, normalized);
-  const relative = path.relative(baseDir, full);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`Path traversal in extension package: ${relPath}`);
-  }
-  return full;
+  const version = detectExtensionPackageFormatVersion(packageBytes);
+  if (version === 1) return v1.readExtensionPackageV1(packageBytes);
+  return v2.readExtensionPackageV2(packageBytes);
 }
 
 async function extractExtensionPackage(packageBytes, destDir) {
-  const bundle = readExtensionPackage(packageBytes);
-
-  await fs.mkdir(destDir, { recursive: true });
-
-  for (const file of bundle.files) {
-    if (!file?.path || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
-      throw new Error("Invalid file entry in extension package");
-    }
-    const outPath = safeJoin(destDir, file.path);
-    await fs.mkdir(path.dirname(outPath), { recursive: true });
-    await fs.writeFile(outPath, Buffer.from(file.dataBase64, "base64"));
-  }
-
-  return bundle.manifest;
+  const version = detectExtensionPackageFormatVersion(packageBytes);
+  if (version === 1) return v1.extractExtensionPackageV1(packageBytes, destDir);
+  return v2.extractExtensionPackageV2(packageBytes, destDir);
 }
 
 module.exports = {
+  detectExtensionPackageFormatVersion,
+
   createExtensionPackage,
-  extractExtensionPackage,
-  loadExtensionManifest,
   readExtensionPackage,
+  extractExtensionPackage,
+
+  // v1 exports (backward compatibility)
+  createExtensionPackageV1: v1.createExtensionPackageV1,
+  readExtensionPackageV1: v1.readExtensionPackageV1,
+  extractExtensionPackageV1: v1.extractExtensionPackageV1,
+  loadExtensionManifest: v1.loadExtensionManifest,
+
+  // v2 exports
+  createExtensionPackageV2: v2.createExtensionPackageV2,
+  readExtensionPackageV2: v2.readExtensionPackageV2,
+  extractExtensionPackageV2: v2.extractExtensionPackageV2,
+  verifyExtensionPackageV2: v2.verifyExtensionPackageV2,
+  createSignaturePayloadBytes: v2.createSignaturePayloadBytes,
+  canonicalJsonBytes: v2.canonicalJsonBytes,
 };
 

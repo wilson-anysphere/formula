@@ -274,6 +274,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           "Content-Length": pkg.bytes.length,
           "X-Package-Signature": pkg.signatureBase64,
           "X-Package-Sha256": pkg.sha256,
+          "X-Package-Format-Version": String(pkg.formatVersion ?? 1),
           "X-Publisher": pkg.publisher,
         });
         res.end(pkg.bytes);
@@ -304,13 +305,18 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         }
 
         const body = await readJsonBody(req, { limitBytes: 20 * 1024 * 1024 });
-        if (!body?.packageBase64 || !body?.signatureBase64) {
+        if (!body?.packageBase64) {
           statusCode = 400;
-          return sendJson(res, 400, { error: "packageBase64 and signatureBase64 are required" });
+          return sendJson(res, 400, { error: "packageBase64 is required" });
         }
 
         const packageBytes = Buffer.from(body.packageBase64, "base64");
-        const signatureBase64 = String(body.signatureBase64);
+        const isV1 = packageBytes.length >= 2 && packageBytes[0] === 0x1f && packageBytes[1] === 0x8b;
+        if (isV1 && !body.signatureBase64) {
+          statusCode = 400;
+          return sendJson(res, 400, { error: "signatureBase64 is required for v1 packages" });
+        }
+        const signatureBase64 = body.signatureBase64 ? String(body.signatureBase64) : null;
 
         const published = await store.publishExtension({
           publisher: publisherRecord.publisher,

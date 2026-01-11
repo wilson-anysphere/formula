@@ -4,6 +4,11 @@ const crypto = require("node:crypto");
 const zlib = require("node:zlib");
 
 const { verifyBytesSignature, sha256 } = require("../../../shared/crypto/signing");
+const {
+  detectExtensionPackageFormatVersion,
+  readExtensionPackageV2,
+  verifyExtensionPackageV2,
+} = require("../../../shared/extension-package");
 const { compareSemver, isValidSemver, maxSemver } = require("../../../shared/semver");
 
 const { SqliteFileDb } = require("./db/sqlite");
@@ -462,51 +467,105 @@ class MarketplaceStore {
     const publisherRecord = await this.getPublisher(publisher);
     if (!publisherRecord) throw new Error(`Unknown publisher: ${publisher}`);
 
-    const signatureOk = verifyBytesSignature(packageBytes, signatureBase64, publisherRecord.publicKeyPem);
-    if (!signatureOk) throw new Error("Package signature verification failed");
-
     const MAX_COMPRESSED_BYTES = 10 * 1024 * 1024;
     const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
     const MAX_UNPACKED_BYTES = 50 * 1024 * 1024;
     const MAX_FILES = 500;
 
-    if (packageBytes.length > MAX_COMPRESSED_BYTES) {
-      throw new Error("Package exceeds maximum compressed size");
+    const formatVersion = detectExtensionPackageFormatVersion(packageBytes);
+
+    /** @type {any} */
+    let manifest = null;
+    /** @type {{path: string, sha256: string, size: number}[]} */
+    let fileRecords = [];
+    let fileCount = 0;
+    let unpackedSize = 0;
+    let readme = "";
+    let storedSignatureBase64 = null;
+
+    if (formatVersion === 1) {
+      if (!signatureBase64) throw new Error("signatureBase64 is required for v1 extension packages");
+      if (packageBytes.length > MAX_COMPRESSED_BYTES) {
+        throw new Error("Package exceeds maximum compressed size");
+      }
+
+      const signatureOk = verifyBytesSignature(packageBytes, signatureBase64, publisherRecord.publicKeyPem);
+      if (!signatureOk) throw new Error("Package signature verification failed");
+      storedSignatureBase64 = String(signatureBase64);
+
+      const bundle = await readExtensionPackageSafe(packageBytes, { maxUncompressedBytes: MAX_UNCOMPRESSED_BYTES });
+      manifest = bundle.manifest;
+      validateManifest(manifest);
+
+      if (bundle.files.length > MAX_FILES) throw new Error("Extension package contains too many files");
+
+      const seen = new Set();
+      for (const file of bundle.files) {
+        if (!file?.path || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
+          throw new Error("Invalid file entry in extension package");
+        }
+        if (!isAllowedFilePath(file.path)) {
+          throw new Error(`Disallowed file type in extension package: ${file.path}`);
+        }
+
+        const normalizedPath = file.path.replace(/\\/g, "/");
+        if (seen.has(normalizedPath)) throw new Error(`Duplicate file in extension package: ${normalizedPath}`);
+        seen.add(normalizedPath);
+
+        const bytes = Buffer.from(file.dataBase64, "base64");
+        unpackedSize += bytes.length;
+        fileRecords.push({ path: normalizedPath, sha256: sha256(bytes), size: bytes.length });
+
+        if (normalizedPath.toLowerCase() === "readme.md") {
+          readme = bytes.toString("utf8");
+        }
+      }
+
+      fileCount = fileRecords.length;
+      if (unpackedSize > MAX_UNPACKED_BYTES) {
+        throw new Error("Package exceeds maximum uncompressed payload size");
+      }
+    } else if (formatVersion === 2) {
+      const verified = verifyExtensionPackageV2(packageBytes, publisherRecord.publicKeyPem);
+      manifest = verified.manifest;
+      storedSignatureBase64 = verified.signatureBase64;
+      fileRecords = verified.files;
+      fileCount = verified.fileCount;
+      unpackedSize = verified.unpackedSize;
+
+      if (fileCount > MAX_FILES) throw new Error("Extension package contains too many files");
+      if (unpackedSize > MAX_UNPACKED_BYTES) {
+        throw new Error("Package exceeds maximum uncompressed payload size");
+      }
+
+      for (const file of fileRecords) {
+        if (!isAllowedFilePath(file.path)) {
+          throw new Error(`Disallowed file type in extension package: ${file.path}`);
+        }
+      }
+
+      const parsed = readExtensionPackageV2(packageBytes);
+      for (const [relPath, bytes] of parsed.files.entries()) {
+        if (relPath.toLowerCase() === "readme.md") {
+          readme = bytes.toString("utf8");
+          break;
+        }
+      }
+    } else {
+      throw new Error(`Unsupported extension package formatVersion: ${formatVersion}`);
     }
 
-    const bundle = await readExtensionPackageSafe(packageBytes, { maxUncompressedBytes: MAX_UNCOMPRESSED_BYTES });
-    const manifest = bundle.manifest;
     validateManifest(manifest);
 
     if (manifest.publisher !== publisher) {
       throw new Error("Manifest publisher does not match authenticated publisher");
     }
 
-    for (const file of bundle.files) {
-      if (!file?.path || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
-        throw new Error("Invalid file entry in extension package");
-      }
-      if (!isAllowedFilePath(file.path)) {
-        throw new Error(`Disallowed file type in extension package: ${file.path}`);
-      }
-    }
-    if (bundle.files.length > MAX_FILES) throw new Error("Extension package contains too many files");
-
-    const unpackedBytes = bundle.files.reduce((total, file) => {
-      return total + Buffer.byteLength(String(file.dataBase64), "base64");
-    }, 0);
-    if (unpackedBytes > MAX_UNPACKED_BYTES) {
-      throw new Error("Package exceeds maximum uncompressed payload size");
-    }
-
     const id = extensionIdFromManifest(manifest);
     const version = manifest.version;
 
     const pkgSha = sha256(packageBytes);
-
-    const readmeEntry =
-      bundle.files.find((f) => typeof f?.path === "string" && f.path.toLowerCase() === "readme.md") || null;
-    const readme = readmeEntry ? Buffer.from(readmeEntry.dataBase64, "base64").toString("utf8") : "";
+    const filesJson = safeJsonStringify(fileRecords);
 
     const categories = normalizeStringArray(manifest.categories);
     const tags = normalizeStringArray(manifest.tags);
@@ -571,9 +630,23 @@ class MarketplaceStore {
       // Unique constraint on (extension_id, version) ensures concurrency safety.
       db.run(
         `INSERT INTO extension_versions
-          (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, uploaded_at, yanked, yanked_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
-        [id, version, pkgSha, signatureBase64, safeJsonStringify(manifest), readme, packageBytes, now]
+          (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, uploaded_at,
+           yanked, yanked_at, format_version, file_count, unpacked_size, files_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)`,
+        [
+          id,
+          version,
+          pkgSha,
+          String(storedSignatureBase64),
+          safeJsonStringify(manifest),
+          readme,
+          packageBytes,
+          now,
+          formatVersion,
+          fileCount,
+          unpackedSize,
+          filesJson,
+        ]
       );
     }).catch((err) => {
       if (String(err?.message || "").includes("UNIQUE constraint failed: extension_versions.extension_id, extension_versions.version")) {
@@ -885,7 +958,7 @@ class MarketplaceStore {
     const result = await this.db.withTransaction((db) => {
       const stmt = db.prepare(
         `SELECT e.publisher, e.blocked, e.malicious,
-                v.signature_base64, v.sha256, v.package_bytes, v.yanked
+                v.signature_base64, v.sha256, v.package_bytes, v.yanked, v.format_version
          FROM extensions e
          JOIN extension_versions v ON v.extension_id = e.id
          WHERE e.id = ? AND v.version = ? LIMIT 1`
@@ -908,6 +981,7 @@ class MarketplaceStore {
         bytes: Buffer.from(row.package_bytes),
         signatureBase64: String(row.signature_base64),
         sha256: String(row.sha256),
+        formatVersion: Number(row.format_version || 1),
         publisher: String(row.publisher),
       };
     });

@@ -46,9 +46,10 @@ export class MarketplaceClient {
 
     const signatureBase64 = response.headers.get("x-package-signature");
     const sha256 = response.headers.get("x-package-sha256");
+    const formatVersion = Number(response.headers.get("x-package-format-version") || "1");
     const publisher = response.headers.get("x-publisher");
     const bytes = Buffer.from(await response.arrayBuffer());
 
-    return { bytes, signatureBase64, sha256, publisher };
+    return { bytes, signatureBase64, sha256, formatVersion, publisher };
   }
 }
