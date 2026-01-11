@@ -24,7 +24,7 @@ async function copyDir(srcDir, destDir) {
   }
 }
 
-test("ExtensionHost.unloadExtension removes contributed commands/custom functions/menus", async (t) => {
+test("ExtensionHost.unloadExtension removes contributed commands/custom functions/menus/data connectors", async (t) => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-extension-host-unload-"));
   const permissionsStoragePath = path.join(tmpRoot, "permissions.json");
   const extensionStoragePath = path.join(tmpRoot, "storage.json");
@@ -66,17 +66,23 @@ test("ExtensionHost.unloadExtension removes contributed commands/custom function
 
   assert.equal(await host.executeCommand("sampleHello.sumSelection"), 10);
 
+  const connectorResult = await host.invokeDataConnector("sampleHello.connector", "testConnection", {});
+  assert.deepEqual(connectorResult, { success: true });
+
   const menus = host.getContributedMenus();
   assert.ok(menus["cell/context"]);
   assert.equal(menus["cell/context"].length, 1);
+
+  assert.ok(host.getContributedDataConnectors().some((c) => c.id === "sampleHello.connector"));
 
   await host.unloadExtension(extensionId);
 
   assert.deepEqual(host.listExtensions(), []);
   assert.deepEqual(host.getContributedCommands(), []);
   assert.deepEqual(host.getContributedMenus(), {});
+  assert.deepEqual(host.getContributedDataConnectors(), []);
 
   await assert.rejects(() => host.executeCommand("sampleHello.sumSelection"), /Unknown command/);
   await assert.rejects(() => host.invokeCustomFunction("SAMPLEHELLO_DOUBLE", 2), /Unknown custom function/);
+  await assert.rejects(() => host.invokeDataConnector("sampleHello.connector", "testConnection", {}), /Unknown data connector/);
 });
-

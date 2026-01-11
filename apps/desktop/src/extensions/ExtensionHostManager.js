@@ -231,6 +231,26 @@ export class ExtensionHostManager {
     return this._host.invokeCustomFunction(String(name), ...args);
   }
 
+  async invokeDataConnector(connectorId, method, ...args) {
+    return this._host.invokeDataConnector(String(connectorId), String(method), ...args);
+  }
+
+  async activateView(viewId) {
+    return this._host.activateView(String(viewId));
+  }
+
+  getPanel(panelId) {
+    return this._host.getPanel(String(panelId));
+  }
+
+  getPanelOutgoingMessages(panelId) {
+    return this._host.getPanelOutgoingMessages(String(panelId));
+  }
+
+  dispatchPanelMessage(panelId, message) {
+    return this._host.dispatchPanelMessage(String(panelId), message);
+  }
+
   listContributions() {
     return {
       commands: this._host.getContributedCommands(),
