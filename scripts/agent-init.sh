@@ -21,6 +21,19 @@ export MAKEFLAGS="${MAKEFLAGS:--j4}"
 export RUSTFLAGS="${RUSTFLAGS:--C codegen-units=4}"
 
 # ============================================================================
+# Cargo Home Isolation (CRITICAL - prevents cross-agent ~/.cargo lock contention)
+# ============================================================================
+
+# Cargo defaults to using ~/.cargo for registry/index/git caches. With many agents
+# building in parallel this creates heavy lock contention under ~/.cargo and can
+# make builds flaky/slow. Default to a repo-local CARGO_HOME to isolate agents,
+# but preserve any user/CI override.
+if [ -z "${CARGO_HOME:-}" ]; then
+  export CARGO_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/cargo-home"
+fi
+mkdir -p "$CARGO_HOME"
+
+# ============================================================================
 # Shared Caching (Optional - reduces disk duplication)
 # ============================================================================
 
@@ -68,6 +81,7 @@ echo "║  Agent Environment Initialized                                  ║"
 echo "╠════════════════════════════════════════════════════════════════╣"
 echo "║  NODE_OPTIONS:      ${NODE_OPTIONS}"
 echo "║  CARGO_BUILD_JOBS:  ${CARGO_BUILD_JOBS}"
+echo "║  CARGO_HOME:        ${CARGO_HOME}"
 echo "║  MAKEFLAGS:         ${MAKEFLAGS}"
 if [ -n "$DISPLAY" ]; then
 echo "║  DISPLAY:           ${DISPLAY}"

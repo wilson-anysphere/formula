@@ -10,6 +10,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
+# when many agents build in parallel. Preserve any user/CI override.
+if [ -z "${CARGO_HOME:-}" ]; then
+  export CARGO_HOME="$REPO_ROOT/target/cargo-home"
+fi
+mkdir -p "$CARGO_HOME"
 
 # Get smart job count
 if [ -x "$SCRIPT_DIR/smart-jobs.sh" ]; then

@@ -1,11 +1,10 @@
 #!/bin/bash
-# Memory-aware wrapper for cargo test
-# Usage: ./scripts/safe-cargo-test.sh [cargo test arguments...]
+# Memory-aware wrapper for cargo run
+# Usage: ./scripts/safe-cargo-run.sh [cargo run arguments...]
 #
 # Examples:
-#   ./scripts/safe-cargo-test.sh
-#   ./scripts/safe-cargo-test.sh --release
-#   ./scripts/safe-cargo-test.sh -p formula-engine -- --test-threads=4
+#   ./scripts/safe-cargo-run.sh -p formula-engine --bin perf_bench --release
+#   ./scripts/safe-cargo-run.sh --release -- --help
 
 set -e
 
@@ -26,5 +25,7 @@ else
   JOBS=${CARGO_BUILD_JOBS:-4}
 fi
 
-echo "🧪 Testing with -j${JOBS} (based on available memory)..."
-cargo test -j"$JOBS" "$@"
+# Print to stderr so stdout remains usable for program output (e.g. JSON).
+echo "🏃 Running with -j${JOBS} (based on available memory)..." >&2
+cargo run -j"$JOBS" "$@"
+

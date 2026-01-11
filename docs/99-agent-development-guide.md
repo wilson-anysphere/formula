@@ -46,8 +46,38 @@ Per-agent:        ~7 GB soft target
 # Add to ~/.bashrc or run at start of each session
 export NODE_OPTIONS="--max-old-space-size=3072"  # 3GB limit for Node
 export CARGO_BUILD_JOBS=4                         # Limit Rust parallelism
+export CARGO_HOME="$PWD/target/cargo-home"        # Repo-local Cargo home (avoids ~/.cargo lock contention)
 export MAKEFLAGS="-j4"                            # Limit make parallelism
 export RUSTFLAGS="-C codegen-units=4"             # Reduce Rust memory per crate
+```
+
+#### Cargo Home Isolation (Why `CARGO_HOME` is repo-local)
+
+By default, Cargo stores the registry index and git checkouts in `~/.cargo`. In this environment,
+**~200 agents build concurrently**, so sharing a single `~/.cargo` directory causes lock contention
+and flaky/slow builds.
+
+To eliminate cross-agent contention we default to a **per-repo Cargo home** at:
+
+```bash
+target/cargo-home
+```
+
+**Tradeoffs:**
+
+- **Pros**: Stable/fast parallel builds (no shared `~/.cargo` locks).
+- **Cons**: More disk usage and initial downloads (each repo has its own registry cache). This is
+  acceptable here because disk is abundant.
+- **Note**: Because the default lives under `target/`, deleting `target/` (or running `cargo clean`)
+  will also wipe the registry cache for that repo.
+
+**Override (CI / shared caching):**
+
+Set `CARGO_HOME` before sourcing `scripts/agent-init.sh` or running cargo, e.g.:
+
+```bash
+export CARGO_HOME="$HOME/.cargo"   # or a CI cache directory
+source scripts/agent-init.sh
 ```
 
 ### Memory-Safe Command Patterns
@@ -128,6 +158,7 @@ Disk is abundant (110TB). Don't worry about it, but be aware:
 
 - Large node_modules per repo (each agent has own copy)
 - Rust target directories (can be 5-20GB each)
+- Per-repo Cargo registry caches (when `CARGO_HOME=target/cargo-home`)
 - Generous caching
 - Build artifacts
 
@@ -315,6 +346,8 @@ set -e
 # Memory limits
 export NODE_OPTIONS="--max-old-space-size=3072"
 export CARGO_BUILD_JOBS=4
+export CARGO_HOME="$PWD/target/cargo-home"
+mkdir -p "$CARGO_HOME"
 export MAKEFLAGS="-j4"
 export RUSTFLAGS="-C codegen-units=4"
 
@@ -421,6 +454,8 @@ npx tsc --incremental                 # Preferred for large projects
 cargo build -j4                       # Safe
 cargo test -j4                        # Safe
 ./scripts/safe-cargo-build.sh        # Auto-detects
+./scripts/safe-cargo-test.sh         # Auto-detects
+./scripts/safe-cargo-run.sh --help   # Auto-detects (also used by perf benchmarks)
 
 # Testing with display
 xvfb-run npm run test:e2e            # For GUI tests

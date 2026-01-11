@@ -8,6 +8,9 @@ import { createCollaborationBenchmarks } from './benchmarks/collaboration.bench.
 import { createRenderBenchmarks } from './benchmarks/render.bench.ts';
 import { createStartupBenchmarks } from './benchmarks/startup.bench.ts';
 
+// Ensure paths are rooted at repo root even when invoked from elsewhere.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+
 type DetailedReport = {
   generatedAt: string;
   benchmarks: BenchmarkResult[];
@@ -49,7 +52,6 @@ function printSummary(results: BenchmarkResult[]): void {
 
 function runRustBenchmarks(): BenchmarkResult[] {
   const cargoArgs = [
-    'run',
     '-q',
     '-p',
     'formula-engine',
@@ -58,9 +60,10 @@ function runRustBenchmarks(): BenchmarkResult[] {
     '--release',
   ];
 
-  const proc = spawnSync('cargo', cargoArgs, {
+  const proc = spawnSync('bash', [resolve(repoRoot, 'scripts/safe-cargo-run.sh'), ...cargoArgs], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: repoRoot,
   });
 
   if (proc.error) throw proc.error;
@@ -110,8 +113,6 @@ async function main(): Promise<void> {
     value: r.p95,
   }));
 
-  // Ensure paths are rooted at repo root even when invoked from elsewhere.
-  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
   writeFileSync(resolve(repoRoot, details), JSON.stringify(report, null, 2));
   writeFileSync(resolve(repoRoot, output), JSON.stringify(actionResults, null, 2));
 
@@ -126,4 +127,3 @@ async function main(): Promise<void> {
 }
 
 await main();
-
