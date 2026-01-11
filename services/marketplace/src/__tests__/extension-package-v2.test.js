@@ -161,6 +161,36 @@ test("v2 checksum mismatch is detected", async () => {
   }
 });
 
+test("v2 rejects tar archives with trailing non-zero bytes after end marker", async () => {
+  const { dir } = await createTempExtensionDir();
+  const key = generateEd25519KeyPair();
+
+  try {
+    const pkg = await createExtensionPackageV2(dir, { privateKeyPem: key.privateKeyPem });
+    const tampered = Buffer.concat([pkg, Buffer.alloc(512, 0)]);
+    tampered[tampered.length - 1] = 0x01;
+    assert.throws(
+      () => verifyExtensionPackageV2(tampered, key.publicKeyPem),
+      /unexpected data after end-of-archive marker/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("v2 rejects tar archives whose length is not a multiple of 512", async () => {
+  const { dir } = await createTempExtensionDir();
+  const key = generateEd25519KeyPair();
+
+  try {
+    const pkg = await createExtensionPackageV2(dir, { privateKeyPem: key.privateKeyPem });
+    const tampered = Buffer.concat([pkg, Buffer.from([0x01])]);
+    assert.throws(() => verifyExtensionPackageV2(tampered, key.publicKeyPem), /invalid tar archive length/i);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("v2 rejects path traversal entries", async () => {
   const { dir } = await createTempExtensionDir();
   const key = generateEd25519KeyPair();

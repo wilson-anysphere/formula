@@ -221,13 +221,34 @@ function verifyTarChecksum(block) {
 }
 
 function* iterateTarEntries(archiveBytes) {
+  if (archiveBytes.length % TAR_BLOCK_SIZE !== 0) {
+    throw new Error("Invalid tar archive length (expected 512-byte blocks)");
+  }
   let offset = 0;
+  let sawEndMarker = false;
   while (offset + TAR_BLOCK_SIZE <= archiveBytes.length) {
     const header = archiveBytes.subarray(offset, offset + TAR_BLOCK_SIZE);
     offset += TAR_BLOCK_SIZE;
 
     // EOF blocks.
-    if (header.every((b) => b === 0)) break;
+    if (header.every((b) => b === 0)) {
+      sawEndMarker = true;
+
+      // v2 packages should terminate with at least two 512-byte zero blocks. We already consumed
+      // the first one as `header`, so require at least one more full block remaining.
+      if (archiveBytes.length - offset < TAR_BLOCK_SIZE) {
+        throw new Error("Invalid tar archive: missing end-of-archive marker");
+      }
+
+      // Ensure there is no trailing non-zero data after the end-of-archive marker; this prevents
+      // attackers from smuggling large unused payloads past size validation.
+      for (let i = offset; i < archiveBytes.length; i++) {
+        if (archiveBytes[i] !== 0) {
+          throw new Error("Invalid tar archive: unexpected data after end-of-archive marker");
+        }
+      }
+      break;
+    }
 
     if (!verifyTarChecksum(header)) {
       throw new Error("Invalid tar checksum");
@@ -253,6 +274,10 @@ function* iterateTarEntries(archiveBytes) {
     offset = dataStart + Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
 
     yield { name: fullName, size, typeflag, data };
+  }
+
+  if (!sawEndMarker) {
+    throw new Error("Invalid tar archive: missing end-of-archive marker");
   }
 }
 
