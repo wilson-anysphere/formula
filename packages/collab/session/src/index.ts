@@ -942,13 +942,15 @@ export function createCollabSession(options: CollabSessionOptions = {}): CollabS
 // Backwards-compatible alias (Task 133 naming).
 export const createSession = createCollabSession;
 
+export type DocumentControllerBinder = { destroy: () => void };
+
 export async function bindCollabSessionToDocumentController(options: {
   session: CollabSession;
   documentController: any;
   undoService?: { transact?: (fn: () => void) => void; origin?: any } | null;
   defaultSheetId?: string;
   userId?: string | null;
-}) {
+}): Promise<DocumentControllerBinder> {
   const { session, documentController, undoService, defaultSheetId, userId } = options ?? ({} as any);
   if (!session) throw new Error("bindCollabSessionToDocumentController requires { session }");
   if (!documentController)
@@ -975,5 +977,5 @@ export async function bindCollabSessionToDocumentController(options: {
     // helper to keep masking behavior consistent.
     maskCellValue: (value, cell) =>
       cell ? session.maskValueIfUnreadable({ ...cell, value }) : maskCellValue(value),
-  });
+  }) as DocumentControllerBinder;
 }
