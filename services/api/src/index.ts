@@ -4,6 +4,8 @@ import { createPool } from "./db/pool";
 import { runMigrations } from "./db/migrations";
 import { initOpenTelemetry } from "./observability/otel";
 import { runRetentionSweep } from "./retention";
+import { DbSiemConfigProvider } from "./siem/configProvider";
+import { SiemExportWorker } from "./siem/worker";
 
 const config = loadConfig();
 const otel = initOpenTelemetry({ serviceName: "api" });
@@ -31,6 +33,17 @@ async function main(): Promise<void> {
 
   const { buildApp } = await import("./app");
   const app = buildApp({ db: pool, config });
+
+  const siemWorker = new SiemExportWorker({
+    db: pool,
+    configProvider: new DbSiemConfigProvider(pool, app.log),
+    metrics: app.metrics,
+    logger: app.log
+  });
+  siemWorker.start();
+  app.addHook("onClose", async () => {
+    siemWorker.stop();
+  });
 
   if (config.retentionSweepIntervalMs) {
     const syncServerInternalUrl = config.syncServerInternalUrl;

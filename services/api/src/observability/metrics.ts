@@ -1,4 +1,4 @@
-import { Counter, Histogram, Registry } from "prom-client";
+import { Counter, Gauge, Histogram, Registry } from "prom-client";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { SEMATTRS_DB_OPERATION, SEMATTRS_DB_SYSTEM } from "@opentelemetry/semantic-conventions";
@@ -10,6 +10,10 @@ export type ApiMetrics = {
   dbQueriesTotal: Counter<"operation" | "status">;
   dbQueryDurationSeconds: Histogram<"operation" | "status">;
   authFailuresTotal: Counter<"reason">;
+  siemBatchesTotal: Counter<"status">;
+  siemEventsTotal: Counter<"status">;
+  siemBatchDurationSeconds: Histogram;
+  siemExportLagSeconds: Gauge;
 };
 
 const kReqStart = Symbol("api.metrics.start");
@@ -77,13 +81,44 @@ export function createMetrics(): ApiMetrics {
     registers: [registry]
   });
 
+  const siemBatchesTotal = new Counter({
+    name: "siem_batches_total",
+    help: "SIEM export batches processed",
+    labelNames: ["status"],
+    registers: [registry]
+  });
+
+  const siemEventsTotal = new Counter({
+    name: "siem_events_total",
+    help: "SIEM export events processed",
+    labelNames: ["status"],
+    registers: [registry]
+  });
+
+  const siemBatchDurationSeconds = new Histogram({
+    name: "siem_batch_duration_seconds",
+    help: "SIEM export batch duration (seconds)",
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    registers: [registry]
+  });
+
+  const siemExportLagSeconds = new Gauge({
+    name: "siem_export_lag_seconds",
+    help: "Approximate SIEM export lag (seconds)",
+    registers: [registry]
+  });
+
   return {
     registry,
     httpRequestsTotal,
     httpRequestDurationSeconds,
     dbQueriesTotal,
     dbQueryDurationSeconds,
-    authFailuresTotal
+    authFailuresTotal,
+    siemBatchesTotal,
+    siemEventsTotal,
+    siemBatchDurationSeconds,
+    siemExportLagSeconds
   };
 }
 
