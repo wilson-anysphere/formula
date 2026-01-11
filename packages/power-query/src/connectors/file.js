@@ -123,6 +123,28 @@ export async function* decodeBinaryTextStream(chunks, options = {}) {
 }
 
 /**
+ * Decode binary bytes into UTF-8 text.
+ *
+ * @param {Uint8Array} bytes
+ * @param {{ encoding?: string }} [options]
+ * @returns {string}
+ */
+export function decodeBinaryText(bytes, options = {}) {
+  const encoding = options.encoding ?? "utf-8";
+  if (typeof TextDecoder !== "undefined") {
+    const decoder = new TextDecoder(encoding);
+    return decoder.decode(bytes);
+  }
+
+  if (typeof Buffer !== "undefined") {
+    // eslint-disable-next-line no-undef
+    return Buffer.from(bytes).toString(encoding);
+  }
+
+  throw new Error("TextDecoder is not available in this environment");
+}
+
+/**
  * Incrementally parse CSV rows from an async iterable of text chunks.
  *
  * This is used by streaming query execution to avoid materializing a full CSV
@@ -505,8 +527,8 @@ export class FileConnector {
   /**
    * Materialize a full text file into a string.
    *
-   * Prefer `readText`, but fall back to concatenating `readTextStream` when only the streaming
-   * adapter is available.
+   * Prefer `readText`, but fall back to concatenating `readTextStream`/`readBinaryStream` (or decoding
+   * `readBinary`) when only those adapters are available.
    *
    * @private
    * @param {string} path
@@ -517,10 +539,23 @@ export class FileConnector {
     if (this.readText) {
       return this.readText(path);
     }
-    if (!this.readTextStream) {
-      if (!this.readBinaryStream) {
-        throw new Error("File source requires a FileConnector readText, readTextStream, or readBinaryStream adapter");
+
+    if (this.readTextStream) {
+      /** @type {string[]} */
+      const chunks = [];
+      for await (const chunk of this.readTextStream(path, { signal })) {
+        if (signal?.aborted) {
+          const err = new Error("Aborted");
+          err.name = "AbortError";
+          throw err;
+        }
+        chunks.push(chunk ?? "");
       }
+      return chunks.join("");
+    }
+
+    if (this.readBinaryStream) {
+      /** @type {string[]} */
       const chunks = [];
       for await (const chunk of decodeBinaryTextStream(this.readBinaryStream(path, { signal }), { signal })) {
         if (signal?.aborted) {
@@ -532,16 +567,17 @@ export class FileConnector {
       }
       return chunks.join("");
     }
-    /** @type {string[]} */
-    const chunks = [];
-    for await (const chunk of this.readTextStream(path, { signal })) {
+
+    if (this.readBinary) {
+      const bytes = await this.readBinary(path);
       if (signal?.aborted) {
         const err = new Error("Aborted");
         err.name = "AbortError";
         throw err;
       }
-      chunks.push(chunk ?? "");
+      return decodeBinaryText(bytes);
     }
-    return chunks.join("");
+
+    throw new Error("File source requires a FileConnector readText, readTextStream, readBinaryStream, or readBinary adapter");
   }
 }

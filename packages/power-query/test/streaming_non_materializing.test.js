@@ -158,6 +158,30 @@ test("executeQueryStreaming(..., materialize:false) can stream CSV from readBina
   assert.deepEqual(collectBatches(batches), [["A", "B"], [1, 2]]);
 });
 
+test("executeQueryStreaming(..., materialize:false) can stream CSV from readBinary", async () => {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode("A,B\n1,2\n");
+
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readBinary: async () => bytes,
+    },
+  });
+
+  const query = {
+    id: "q_binary_csv",
+    name: "Binary CSV",
+    source: { type: "csv", path: "/tmp/binary.csv", options: { hasHeaders: true } },
+    steps: [],
+  };
+
+  const batches = [];
+  const summary = await engine.executeQueryStreaming(query, {}, { batchSize: 5, materialize: false, onBatch: (b) => batches.push(b) });
+  assert.equal(summary.rowCount, 1);
+  assert.equal(summary.columnCount, 2);
+  assert.deepEqual(collectBatches(batches), [["A", "B"], [1, 2]]);
+});
+
 test("executeQueryStreaming(..., materialize:false) resolves table sources via tableAdapter when context.tables is missing", async () => {
   const engine = new QueryEngine({
     tableAdapter: {

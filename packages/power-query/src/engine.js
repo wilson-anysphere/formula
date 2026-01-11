@@ -5,7 +5,7 @@ import { DataTable, makeUniqueColumnNames } from "./table.js";
 import { hashValue } from "./cache/key.js";
 import { valueKey } from "./valueKey.js";
 import { deserializeAnyTable, deserializeTable, serializeAnyTable } from "./cache/serialize.js";
-import { FileConnector, decodeBinaryTextStream, parseCsvCell, parseCsvStream } from "./connectors/file.js";
+import { FileConnector, decodeBinaryText, decodeBinaryTextStream, parseCsvCell, parseCsvStream } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { ODataConnector } from "./connectors/odata.js";
 import { SqlConnector } from "./connectors/sql.js";
@@ -2697,7 +2697,8 @@ export class QueryEngine {
       query.source.type === "range" ||
       query.source.type === "table" ||
       query.source.type === "query" ||
-      (query.source.type === "csv" && Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText)) ||
+      (query.source.type === "csv" &&
+        Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText || fileConnector?.readBinary)) ||
       (query.source.type === "parquet" && Boolean(fileConnector?.openFile));
 
     if (!canStreamSteps || !canStreamSource) {
@@ -2993,10 +2994,16 @@ export class QueryEngine {
           ? (async function* () {
               yield await connector.readText(source.path);
             })()
+        : connector.readBinary
+          ? (async function* () {
+              const bytes = await connector.readBinary(source.path);
+              throwIfAborted(options.signal);
+              yield decodeBinaryText(bytes);
+            })()
           : null;
 
       if (!chunks) {
-        throw new Error("CSV source requires a FileConnector readText, readTextStream, or readBinaryStream adapter");
+        throw new Error("CSV source requires a FileConnector readText, readTextStream, readBinaryStream, or readBinary adapter");
       }
 
       const hasHeaders = source.options?.hasHeaders ?? true;
@@ -3133,7 +3140,8 @@ export class QueryEngine {
       query.source.type === "range" ||
       query.source.type === "table" ||
       query.source.type === "query" ||
-      (query.source.type === "csv" && Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText)) ||
+      (query.source.type === "csv" &&
+        Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText || fileConnector?.readBinary)) ||
       (query.source.type === "parquet" && Boolean(fileConnector?.openFile));
 
     if (!canStreamSteps || !canStreamSource) {
