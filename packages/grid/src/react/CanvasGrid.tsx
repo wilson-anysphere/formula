@@ -1511,6 +1511,94 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       return;
     }
 
+    const prevSelection = renderer.getSelection();
+    const prevRange = renderer.getSelectionRange();
+
+    const rangeArea = (range: CellRange) =>
+      Math.max(0, range.endRow - range.startRow) * Math.max(0, range.endCol - range.startCol);
+
+    // Excel-like behavior: Tab/Enter moves the active cell *within* the current selection range
+    // (wrapping) instead of collapsing selection.
+    if ((event.key === "Tab" || event.key === "Enter") && prevRange && rangeArea(prevRange) > 1) {
+      event.preventDefault();
+      keyboardAnchorRef.current = null;
+
+      const current = prevSelection ?? { row: prevRange.startRow, col: prevRange.startCol };
+      const activeRow = clamp(current.row, prevRange.startRow, prevRange.endRow - 1);
+      const activeCol = clamp(current.col, prevRange.startCol, prevRange.endCol - 1);
+      const backward = event.shiftKey;
+
+      let nextRow = activeRow;
+      let nextCol = activeCol;
+
+      if (event.key === "Tab") {
+        if (!backward) {
+          if (activeCol + 1 < prevRange.endCol) {
+            nextCol = activeCol + 1;
+          } else if (activeRow + 1 < prevRange.endRow) {
+            nextRow = activeRow + 1;
+            nextCol = prevRange.startCol;
+          } else {
+            nextRow = prevRange.startRow;
+            nextCol = prevRange.startCol;
+          }
+        } else {
+          if (activeCol - 1 >= prevRange.startCol) {
+            nextCol = activeCol - 1;
+          } else if (activeRow - 1 >= prevRange.startRow) {
+            nextRow = activeRow - 1;
+            nextCol = prevRange.endCol - 1;
+          } else {
+            nextRow = prevRange.endRow - 1;
+            nextCol = prevRange.endCol - 1;
+          }
+        }
+      } else {
+        if (!backward) {
+          if (activeRow + 1 < prevRange.endRow) {
+            nextRow = activeRow + 1;
+          } else if (activeCol + 1 < prevRange.endCol) {
+            nextRow = prevRange.startRow;
+            nextCol = activeCol + 1;
+          } else {
+            nextRow = prevRange.startRow;
+            nextCol = prevRange.startCol;
+          }
+        } else {
+          if (activeRow - 1 >= prevRange.startRow) {
+            nextRow = activeRow - 1;
+          } else if (activeCol - 1 >= prevRange.startCol) {
+            nextRow = prevRange.endRow - 1;
+            nextCol = activeCol - 1;
+          } else {
+            nextRow = prevRange.endRow - 1;
+            nextCol = prevRange.endCol - 1;
+          }
+        }
+      }
+
+      const ranges = renderer.getSelectionRanges();
+      const activeIndex = renderer.getActiveSelectionIndex();
+      renderer.setSelectionRanges(ranges, { activeIndex, activeCell: { row: nextRow, col: nextCol } });
+
+      renderer.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
+      syncScrollbars();
+
+      const nextSelection = renderer.getSelection();
+      const nextRange = renderer.getSelectionRange();
+
+      announceSelection(nextSelection, nextRange);
+
+      if (
+        (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+        (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+      ) {
+        onSelectionChangeRef.current?.(nextSelection);
+      }
+
+      return;
+    }
+
     let nextRow = active.row;
     let nextCol = active.col;
     let handled = true;
@@ -1579,10 +1667,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     nextRow = Math.max(0, Math.min(rowCount - 1, nextRow));
     nextCol = Math.max(0, Math.min(colCount - 1, nextCol));
 
-    const prevSelection = renderer.getSelection();
-    const prevRange = renderer.getSelectionRange();
+    const extendSelection = event.shiftKey && event.key !== "Tab" && event.key !== "Enter";
 
-    if (event.shiftKey) {
+    if (extendSelection) {
       const anchor = keyboardAnchorRef.current ?? prevSelection ?? active;
       if (!keyboardAnchorRef.current) keyboardAnchorRef.current = anchor;
 
