@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -60,7 +61,14 @@ function runRustBenchmarks(): BenchmarkResult[] {
     '--release',
   ];
 
-  const cargoHome = process.env.CARGO_HOME ?? resolve(repoRoot, 'target', 'cargo-home');
+  const defaultGlobalCargoHome = resolve(homedir(), '.cargo');
+  const cargoHome =
+    !process.env.CARGO_HOME ||
+    (!process.env.CI &&
+      !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
+      process.env.CARGO_HOME === defaultGlobalCargoHome)
+      ? resolve(repoRoot, 'target', 'cargo-home')
+      : process.env.CARGO_HOME!;
   mkdirSync(cargoHome, { recursive: true });
 
   const safeRun = resolve(repoRoot, 'scripts/safe-cargo-run.sh');

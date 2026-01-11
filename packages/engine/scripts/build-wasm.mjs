@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,7 +11,14 @@ const __dirname = path.dirname(__filename);
 // `packages/engine/scripts/*` → repo root
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
 
-const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
+const defaultGlobalCargoHome = path.join(os.homedir(), ".cargo");
+const cargoHome =
+  !process.env.CARGO_HOME ||
+  (!process.env.CI &&
+    !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
+    process.env.CARGO_HOME === defaultGlobalCargoHome)
+    ? path.join(repoRoot, "target", "cargo-home")
+    : process.env.CARGO_HOME;
 await mkdir(cargoHome, { recursive: true });
 const childEnv = { ...process.env, CARGO_HOME: cargoHome };
 const cargoBinDir = path.join(cargoHome, "bin");

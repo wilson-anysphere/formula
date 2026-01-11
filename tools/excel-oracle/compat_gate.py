@@ -125,7 +125,14 @@ def main() -> int:
 
     repo_root = Path(__file__).resolve().parents[2]
     env = os.environ.copy()
-    env.setdefault("CARGO_HOME", str(repo_root / "target" / "cargo-home"))
+    default_global_cargo_home = str(Path.home() / ".cargo")
+    cargo_home = env.get("CARGO_HOME")
+    if not cargo_home or (
+        not env.get("CI")
+        and not env.get("FORMULA_ALLOW_GLOBAL_CARGO_HOME")
+        and cargo_home == default_global_cargo_home
+    ):
+        env["CARGO_HOME"] = str(repo_root / "target" / "cargo-home")
     Path(env["CARGO_HOME"]).mkdir(parents=True, exist_ok=True)
 
     engine_cmd = [

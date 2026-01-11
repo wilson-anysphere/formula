@@ -1,12 +1,20 @@
 import { defineConfig, firefox } from "@playwright/test";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
-const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home-playwright");
+const defaultGlobalCargoHome = path.join(homedir(), ".cargo");
+const cargoHome =
+  !process.env.CARGO_HOME ||
+  (!process.env.CI &&
+    !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
+    process.env.CARGO_HOME === defaultGlobalCargoHome)
+    ? path.join(repoRoot, "target", "cargo-home-playwright")
+    : process.env.CARGO_HOME!;
 
 function stablePortFromString(input: string, { base = 4173, range = 1000 } = {}): number {
   // Deterministic port selection avoids collisions when multiple agents run Playwright tests

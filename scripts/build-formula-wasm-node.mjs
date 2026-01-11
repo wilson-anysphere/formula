@@ -1,12 +1,20 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
+import os from "node:os";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
-const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
+const defaultGlobalCargoHome = path.join(os.homedir(), ".cargo");
+const cargoHome =
+  !process.env.CARGO_HOME ||
+  (!process.env.CI &&
+    !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
+    process.env.CARGO_HOME === defaultGlobalCargoHome)
+    ? path.join(repoRoot, "target", "cargo-home")
+    : process.env.CARGO_HOME;
 mkdirSync(cargoHome, { recursive: true });
 const cargoBinDir = path.join(cargoHome, "bin");
 mkdirSync(cargoBinDir, { recursive: true });

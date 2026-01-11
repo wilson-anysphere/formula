@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -132,7 +133,14 @@ async function ensureBuilt({ repoRoot, binPath }) {
       return;
     } catch {
       // Build the oracle CLI once. Subsequent invocations will use the binary directly.
-      const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
+      const defaultGlobalCargoHome = path.join(os.homedir(), ".cargo");
+      const cargoHome =
+        !process.env.CARGO_HOME ||
+        (!process.env.CI &&
+          !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
+          process.env.CARGO_HOME === defaultGlobalCargoHome)
+          ? path.join(repoRoot, "target", "cargo-home")
+          : process.env.CARGO_HOME;
       await mkdir(cargoHome, { recursive: true });
       const baseEnv = { ...process.env, CARGO_HOME: cargoHome };
       try {

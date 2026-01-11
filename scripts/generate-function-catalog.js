@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +15,14 @@ const outputJsonPath = path.join(repoRoot, "shared", "functionCatalog.json");
 const outputModulePath = path.join(repoRoot, "shared", "functionCatalog.mjs");
 const outputTypesPath = path.join(repoRoot, "shared", "functionCatalog.mjs.d.ts");
 
-const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
+const defaultGlobalCargoHome = path.join(os.homedir(), ".cargo");
+const cargoHome =
+  !process.env.CARGO_HOME ||
+  (!process.env.CI &&
+    !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
+    process.env.CARGO_HOME === defaultGlobalCargoHome)
+    ? path.join(repoRoot, "target", "cargo-home")
+    : process.env.CARGO_HOME;
 await mkdir(cargoHome, { recursive: true });
 
 /**
