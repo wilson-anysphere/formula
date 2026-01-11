@@ -30,6 +30,18 @@ fn worksheet_cell_formula(sheet_xml: &str, cell_ref: &str) -> Option<String> {
     Some(f.text().unwrap_or_default().to_string())
 }
 
+fn worksheet_dimension_ref(sheet_xml: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+    let xml = std::str::from_utf8(sheet_xml)?;
+    let doc = roxmltree::Document::parse(xml)?;
+    Ok(doc
+        .root_element()
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "dimension")
+        .and_then(|n| n.attribute("ref"))
+        .unwrap_or("A1")
+        .to_string())
+}
+
 #[test]
 fn apply_cell_patches_preserves_unrelated_parts_for_xlsx() -> Result<(), Box<dyn std::error::Error>>
 {
@@ -98,6 +110,40 @@ fn apply_cell_patches_preserves_unknown_cell_types() -> Result<(), Box<dyn std::
         "expected patched worksheet xml to keep t=\"d\""
     );
 
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_updates_worksheet_dimension_when_range_expands(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/grouped-rows.xlsx");
+    let bytes = std::fs::read(&fixture)?;
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("Z100")?,
+        CellPatch::set_value(CellValue::Number(1.0)),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let out_bytes = pkg.write_to_bytes()?;
+    let pkg2 = XlsxPackage::from_bytes(&out_bytes)?;
+    let sheet_xml = pkg2
+        .part("xl/worksheets/sheet1.xml")
+        .expect("worksheet part exists");
+    assert_eq!(worksheet_dimension_ref(sheet_xml)?, "A1:Z100");
+
+    let tmpdir = tempfile::tempdir()?;
+    let out = tmpdir.path().join("patched.xlsx");
+    std::fs::write(&out, out_bytes)?;
+    let parts = diff_parts(&fixture, &out);
+    assert_eq!(
+        parts,
+        BTreeSet::from(["xl/worksheets/sheet1.xml".to_string()])
+    );
     Ok(())
 }
 
