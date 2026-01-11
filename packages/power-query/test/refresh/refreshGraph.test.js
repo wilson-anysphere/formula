@@ -81,6 +81,64 @@ test("RefreshOrchestrator: DAG ordering (B depends on A)", async () => {
   await handle.promise;
 });
 
+test("RefreshOrchestrator: merge dependency ordering (B merge depends on A)", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Key"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(
+    makeQuery("B", { type: "range", range: { values: [["Key"], [1]], hasHeaders: true } }, [
+      {
+        id: "merge",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "A", joinType: "left", leftKey: "Key", rightKey: "Key" },
+      },
+    ]),
+  );
+
+  const handle = orchestrator.refreshAll(["B"]);
+
+  assert.equal(engine.calls.length, 1);
+  assert.equal(engine.calls[0].queryId, "A");
+
+  engine.calls[0].deferred.resolve(makeResult("A"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(engine.calls.length, 2);
+  assert.equal(engine.calls[1].queryId, "B");
+
+  engine.calls[1].deferred.resolve(makeResult("B"));
+  await handle.promise;
+});
+
+test("RefreshOrchestrator: append dependency ordering (B append depends on A)", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(
+    makeQuery("B", { type: "range", range: { values: [["Value"], [2]], hasHeaders: true } }, [
+      {
+        id: "append",
+        name: "Append",
+        operation: { type: "append", queries: ["A"] },
+      },
+    ]),
+  );
+
+  const handle = orchestrator.refreshAll(["B"]);
+
+  assert.equal(engine.calls.length, 1);
+  assert.equal(engine.calls[0].queryId, "A");
+
+  engine.calls[0].deferred.resolve(makeResult("A"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(engine.calls.length, 2);
+  assert.equal(engine.calls[1].queryId, "B");
+
+  engine.calls[1].deferred.resolve(makeResult("B"));
+  await handle.promise;
+});
+
 test("RefreshOrchestrator: dedup shared dependency results (A only loads once)", async () => {
   let reads = 0;
   const engine = new QueryEngine({
