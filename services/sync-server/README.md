@@ -126,13 +126,32 @@ Notable metrics (prefix `sync_server_`):
 - `sync_server_retention_docs_purged_total{sweep=...}`
 - `sync_server_persistence_info{backend=...,encryption=...}`
 
-## Message size limits
+## Limits & hardening
 
-Set a hard maximum websocket message size with:
+- Hard maximum websocket message size:
 
 - `SYNC_SERVER_MAX_MESSAGE_BYTES` (default: `2097152` / 2 MiB)
 
-Enforced at the `ws` server (`maxPayload`) and defensively in the message handler.
+- Per-connection message rate limiting:
+
+  - `SYNC_SERVER_MAX_MESSAGES_PER_WINDOW`
+  - `SYNC_SERVER_MESSAGE_WINDOW_MS`
+
+- Per-document message rate limiting:
+
+  - `SYNC_SERVER_MAX_MESSAGES_PER_DOC_WINDOW`
+  - `SYNC_SERVER_DOC_MESSAGE_WINDOW_MS`
+
+- Awareness payload limits:
+
+  - `SYNC_SERVER_MAX_AWARENESS_STATE_BYTES`
+  - `SYNC_SERVER_MAX_AWARENESS_ENTRIES`
+
+- Optional JWT cell-range restriction enforcement (fail-closed):
+
+  - `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS` (default: `true` in production)
+
+Limits are enforced both at the `ws` server (`maxPayload`) and defensively in message handlers.
 
 ## Optional HTTPS/WSS mode
 

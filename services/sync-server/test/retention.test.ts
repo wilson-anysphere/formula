@@ -87,14 +87,14 @@ function seedUpdate(contents: string): Uint8Array {
   return Y.encodeStateAsUpdate(doc);
 }
 
-function createConfig(ttlMs: number): SyncServerConfig {
+function createConfig(ttlMs: number, dataDir: string): SyncServerConfig {
   return {
     host: "127.0.0.1",
     port: 0,
     trustProxy: false,
     gc: true,
     tls: null,
-    dataDir: ":memory:",
+    dataDir,
     disableDataDirLock: true,
     persistence: {
       backend: "leveldb",
@@ -103,6 +103,7 @@ function createConfig(ttlMs: number): SyncServerConfig {
       encryption: { mode: "off" },
     },
     auth: { mode: "opaque", token: "test-token" },
+    enforceRangeRestrictions: false,
     internalAdminToken: "admin-token",
     retention: { ttlMs, sweepIntervalMs: 0, tombstoneTtlMs: 7 * 24 * 60 * 60 * 1000 },
     limits: {
@@ -110,9 +111,13 @@ function createConfig(ttlMs: number): SyncServerConfig {
       maxConnectionsPerIp: 25,
       maxConnAttemptsPerWindow: 100,
       connAttemptWindowMs: 60_000,
-      maxMessageBytes: 4 * 1024 * 1024,
       maxMessagesPerWindow: 2_000,
       messageWindowMs: 10_000,
+      maxMessageBytes: 2 * 1024 * 1024,
+      maxAwarenessStateBytes: 64 * 1024,
+      maxAwarenessEntries: 10,
+      maxMessagesPerDocWindow: 10_000,
+      docMessageWindowMs: 10_000,
     },
     logLevel: "silent",
   };
@@ -173,9 +178,14 @@ function expectWebSocketUpgradeStatus(
 }
 
 test("retention sweep purges inactive docs (leveldb)", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
-  const server = createSyncServer(createConfig(1_000), logger, {
+  const server = createSyncServer(createConfig(1_000, dataDir), logger, {
     createLeveldbPersistence: () => ldb as any,
   });
 
@@ -217,11 +227,16 @@ test("retention sweep purges inactive docs (leveldb)", async (t) => {
 });
 
 test("retention sweep skips docs with active websocket connections", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
   const ldb = new InMemoryLeveldbPersistence();
   await ldb.storeUpdate("active-doc", seedUpdate("hi"));
 
   const logger = createLogger("silent");
-  const server = createSyncServer(createConfig(1_000), logger, {
+  const server = createSyncServer(createConfig(1_000, dataDir), logger, {
     createLeveldbPersistence: () => ldb as any,
   });
 
@@ -270,6 +285,11 @@ test("retention sweep skips docs with active websocket connections", async (t) =
 test(
   "rejects websocket upgrades while retention is purging a legacy (raw docName) document (leveldb hashing)",
   async (t) => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
+    t.after(async () => {
+      await rm(dataDir, { recursive: true, force: true });
+    });
+
     const docName = "legacy-doc";
 
     const ldb = new InMemoryLeveldbPersistence();
@@ -293,7 +313,7 @@ test(
     };
 
     const logger = createLogger("silent");
-    const baseConfig = createConfig(1_000);
+    const baseConfig = createConfig(1_000, dataDir);
     const server = createSyncServer(
       {
         ...baseConfig,
@@ -332,13 +352,19 @@ test(
 );
 
 test("pong-based lastSeen refresh uses persisted docName when docName hashing is enabled", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
+  const baseConfig = createConfig(60_000, dataDir);
   const server = createSyncServer(
     {
-      ...createConfig(60_000),
+      ...baseConfig,
       persistence: {
-        ...createConfig(60_000).persistence,
+        ...baseConfig.persistence,
         leveldbDocNameHashing: true,
       },
     },
@@ -373,11 +399,17 @@ test("pong-based lastSeen refresh uses persisted docName when docName hashing is
 });
 
 test("retention sweep endpoint returns 404 when internal admin token is disabled", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
+  const baseConfig = createConfig(1_000, dataDir);
   const server = createSyncServer(
     {
-      ...createConfig(1_000),
+      ...baseConfig,
       internalAdminToken: null,
     },
     logger,
@@ -401,9 +433,14 @@ test("retention sweep endpoint returns 404 when internal admin token is disabled
 });
 
 test("retention sweep endpoint returns 400 when retention TTL is disabled", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
-  const server = createSyncServer(createConfig(0), logger, {
+  const server = createSyncServer(createConfig(0, dataDir), logger, {
     createLeveldbPersistence: () => ldb as any,
   });
 
@@ -435,7 +472,7 @@ test("retention sweep purges docs using y-leveldb + level-mem (no native LevelDB
 
   let ldb: any;
   const logger = createLogger("silent");
-  const server = createSyncServer({ ...createConfig(1_000), dataDir }, logger, {
+  const server = createSyncServer(createConfig(1_000, dataDir), logger, {
     createLeveldbPersistence: (location: string) => {
       ldb = new LeveldbPersistence(location);
       return ldb;

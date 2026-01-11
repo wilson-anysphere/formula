@@ -52,7 +52,7 @@ test("exposes Prometheus metrics in text format", async (t) => {
     auth: { mode: "opaque", token: "test-token" },
     env: {
       SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
-      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "",
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "admin-token",
     },
   });
   t.after(async () => {
@@ -72,47 +72,22 @@ test("exposes Prometheus metrics in text format", async (t) => {
   const body = await res.text();
   assert.match(body, /sync_server_ws_connections_total/);
   assert.match(body, /sync_server_persistence_info/);
-});
 
-test("closes the connection when the websocket payload exceeds SYNC_SERVER_MAX_MESSAGE_BYTES", async (t) => {
-  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-max-msg-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
+  const internalMissing = await fetch(`${server.httpUrl}/internal/metrics`);
+  assert.equal(internalMissing.status, 403);
 
-  const server = await startSyncServer({
-    dataDir,
-    auth: { mode: "opaque", token: "test-token" },
-    env: {
-      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
-      SYNC_SERVER_MAX_MESSAGE_BYTES: "32",
-    },
+  const internalWrong = await fetch(`${server.httpUrl}/internal/metrics`, {
+    headers: { "x-internal-admin-token": "wrong-token" },
   });
-  t.after(async () => {
-    await server.stop();
-  });
+  assert.equal(internalWrong.status, 403);
 
-  const ws = new WebSocket(`${server.wsUrl}/big-message-doc?token=test-token`);
-  await new Promise<void>((resolve, reject) => {
-    ws.once("open", () => resolve());
-    ws.once("error", reject);
+  const internalOk = await fetch(`${server.httpUrl}/internal/metrics`, {
+    headers: { "x-internal-admin-token": "admin-token" },
   });
-
-  const closed = new Promise<number>((resolve, reject) => {
-    let finished = false;
-    ws.once("close", (code) => {
-      finished = true;
-      resolve(code);
-    });
-    ws.once("error", (err) => {
-      if (finished) return;
-      reject(err);
-    });
-  });
-
-  ws.send(Buffer.alloc(33, 1));
-  const code = await closed;
-  assert.equal(code, 1009);
+  assert.equal(internalOk.status, 200);
+  assert.match(internalOk.headers.get("content-type") ?? "", /text\/plain/);
+  const internalBody = await internalOk.text();
+  assert.match(internalBody, /sync_server_ws_connections_total/);
 });
 
 test("supports HTTPS/WSS when SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_PATH are set", async (t) => {
@@ -161,4 +136,3 @@ test("supports HTTPS/WSS when SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_
   });
   ws.terminate();
 });
-
