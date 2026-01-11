@@ -103,7 +103,10 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 current_row = Some(read_u32(payload, 0)?);
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
             }
-            biff12::NUM
+            biff12::BLANK
+            | biff12::BOOLERR
+            | biff12::BOOL
+            | biff12::NUM
             | biff12::FLOAT
             | biff12::STRING
             | biff12::CELL_ST
@@ -165,6 +168,51 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                     }
                     biff12::CELL_ST => {
                         if value_edit_is_noop_inline_string(payload, edit)? {
+                            writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else {
+                            if edit.new_formula.is_some() {
+                                return Err(Error::Io(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "attempted to set formula for non-formula cell at ({row}, {col})"
+                                    ),
+                                )));
+                            }
+                            patch_value_cell(&mut writer, col, style, edit)?;
+                        }
+                    }
+                    biff12::BOOL => {
+                        if value_edit_is_noop_bool(payload, edit)? {
+                            writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else {
+                            if edit.new_formula.is_some() {
+                                return Err(Error::Io(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "attempted to set formula for non-formula cell at ({row}, {col})"
+                                    ),
+                                )));
+                            }
+                            patch_value_cell(&mut writer, col, style, edit)?;
+                        }
+                    }
+                    biff12::BOOLERR => {
+                        if value_edit_is_noop_error(payload, edit)? {
+                            writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else {
+                            if edit.new_formula.is_some() {
+                                return Err(Error::Io(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "attempted to set formula for non-formula cell at ({row}, {col})"
+                                    ),
+                                )));
+                            }
+                            patch_value_cell(&mut writer, col, style, edit)?;
+                        }
+                    }
+                    biff12::BLANK => {
+                        if value_edit_is_noop_blank(edit) {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
                             if edit.new_formula.is_some() {
@@ -279,6 +327,27 @@ fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<b
     Ok(desired_bytes == raw)
 }
 
+fn value_edit_is_noop_bool(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    let desired = match &edit.new_value {
+        CellValue::Bool(v) => *v,
+        _ => return Ok(false),
+    };
+    let existing = read_u8(payload, 8)? != 0;
+    Ok(existing == desired)
+}
+
+fn value_edit_is_noop_error(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    let desired = match &edit.new_value {
+        CellValue::Error(v) => *v,
+        _ => return Ok(false),
+    };
+    Ok(read_u8(payload, 8)? == desired)
+}
+
+fn value_edit_is_noop_blank(edit: &CellEdit) -> bool {
+    matches!(edit.new_value, CellValue::Blank)
+}
+
 fn patch_value_cell<W: io::Write>(
     writer: &mut Biff12Writer<W>,
     col: u32,
@@ -286,12 +355,32 @@ fn patch_value_cell<W: io::Write>(
     edit: &CellEdit,
 ) -> Result<(), Error> {
     match &edit.new_value {
+        CellValue::Blank => {
+            let mut payload = [0u8; 8];
+            payload[0..4].copy_from_slice(&col.to_le_bytes());
+            payload[4..8].copy_from_slice(&style.to_le_bytes());
+            writer.write_record(biff12::BLANK, &payload)?;
+        }
         CellValue::Number(v) => {
             let mut payload = [0u8; 16];
             payload[0..4].copy_from_slice(&col.to_le_bytes());
             payload[4..8].copy_from_slice(&style.to_le_bytes());
             payload[8..16].copy_from_slice(&v.to_le_bytes());
             writer.write_record(biff12::FLOAT, &payload)?;
+        }
+        CellValue::Bool(v) => {
+            let mut payload = [0u8; 9];
+            payload[0..4].copy_from_slice(&col.to_le_bytes());
+            payload[4..8].copy_from_slice(&style.to_le_bytes());
+            payload[8] = u8::from(*v);
+            writer.write_record(biff12::BOOL, &payload)?;
+        }
+        CellValue::Error(v) => {
+            let mut payload = [0u8; 9];
+            payload[0..4].copy_from_slice(&col.to_le_bytes());
+            payload[4..8].copy_from_slice(&style.to_le_bytes());
+            payload[8] = *v;
+            writer.write_record(biff12::BOOLERR, &payload)?;
         }
         CellValue::Text(s) => {
             let char_len = s.encode_utf16().count();
@@ -308,15 +397,6 @@ fn patch_value_cell<W: io::Write>(
             writer.write_u32(col)?;
             writer.write_u32(style)?;
             writer.write_utf16_string(s)?;
-        }
-        other => {
-            return Err(Error::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "unsupported value {:?} for cell edit at ({}, {})",
-                    other, edit.row, edit.col
-                ),
-            )));
         }
     }
     Ok(())
@@ -422,6 +502,10 @@ fn read_u16(data: &[u8], offset: usize) -> Result<u16, Error> {
         .try_into()
         .unwrap();
     Ok(u16::from_le_bytes(bytes))
+}
+
+fn read_u8(data: &[u8], offset: usize) -> Result<u8, Error> {
+    Ok(*data.get(offset).ok_or(Error::UnexpectedEof)?)
 }
 
 fn read_u32(data: &[u8], offset: usize) -> Result<u32, Error> {
