@@ -1,8 +1,8 @@
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
 use crate::styles::StylesPart;
 use formula_model::{
-    normalize_formula_text, Cell, CellRef, CellValue, DefinedNameScope, Hyperlink, HyperlinkTarget,
-    Range, SheetVisibility, Workbook, Worksheet,
+    normalize_formula_text, Cell, CellRef, CellValue, DateSystem, DefinedNameScope, Hyperlink,
+    HyperlinkTarget, Range, SheetVisibility, Workbook, Worksheet,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -123,6 +123,11 @@ fn root_rels_xml() -> String {
 }
 
 fn workbook_xml(workbook: &Workbook) -> String {
+    let workbook_pr = match workbook.date_system {
+        DateSystem::Excel1900 => r#"<workbookPr/>"#.to_string(),
+        DateSystem::Excel1904 => r#"<workbookPr date1904="1"/>"#.to_string(),
+    };
+
     let mut sheets_xml = String::new();
     for (idx, sheet) in workbook.sheets.iter().enumerate() {
         let sheet_id = idx + 1;
@@ -145,12 +150,13 @@ fn workbook_xml(workbook: &Workbook) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  {}
   <sheets>
     {}
   </sheets>
   {}
 </workbook>"#,
-        sheets_xml, defined_names_xml
+        workbook_pr, sheets_xml, defined_names_xml
     )
 }
 

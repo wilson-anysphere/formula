@@ -193,7 +193,8 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
 
 fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Workbook, xlsb::Error> {
     use formula_model::{
-        normalize_formula_text, CellRef, CellValue, DateSystem, ErrorValue, Style, Workbook as ModelWorkbook,
+        normalize_formula_text, CellRef, CellValue, DateSystem, ErrorValue, SheetVisibility, Style,
+        Workbook as ModelWorkbook,
     };
 
     let mut out = ModelWorkbook::new();
@@ -280,6 +281,11 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");
+        sheet.visibility = match meta.visibility {
+            xlsb::SheetVisibility::Visible => SheetVisibility::Visible,
+            xlsb::SheetVisibility::Hidden => SheetVisibility::Hidden,
+            xlsb::SheetVisibility::VeryHidden => SheetVisibility::VeryHidden,
+        };
 
         wb.for_each_cell(sheet_index, |cell| {
             let cell_ref = CellRef::new(cell.row, cell.col);
@@ -297,7 +303,7 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
                     cell_ref,
                     CellValue::Error(ErrorValue::from_code(code).unwrap_or(ErrorValue::Unknown)),
                 ),
-            }
+            };
 
             // Cells with non-zero style ids must be stored, even if blank, matching
             // Excel's ability to format empty cells.
