@@ -28,7 +28,7 @@ function fatal(message) {
 // Validate `wasm-pack` is installed early with a good error message.
 {
   const check = spawnSync(wasmPackBin, ["--version"], { encoding: "utf8" });
-  if (check.error || check.status !== 0) {
+  if (check.error) {
     fatal(
       [
         "[formula] wasm-pack is required to build the Rust/WASM engine but was not found on PATH.",
@@ -39,6 +39,22 @@ function fatal(message) {
         "",
         `Original error: ${check.error.message}`
       ].join("\n")
+    );
+  }
+
+  if (check.status !== 0) {
+    const stderr = (check.stderr ?? "").trim();
+    const stdout = (check.stdout ?? "").trim();
+    fatal(
+      [
+        "[formula] wasm-pack is installed but failed to run.",
+        "",
+        `Exit status: ${check.status ?? "unknown"}${check.signal ? ` (signal ${check.signal})` : ""}`,
+        stdout ? `stdout:\n${stdout}` : null,
+        stderr ? `stderr:\n${stderr}` : null
+      ]
+        .filter(Boolean)
+        .join("\n")
     );
   }
 }
