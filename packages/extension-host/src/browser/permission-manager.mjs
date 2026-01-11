@@ -5,19 +5,59 @@ class PermissionError extends Error {
   }
 }
 
+function getDefaultLocalStorage() {
+  try {
+    if (typeof globalThis === "undefined") return null;
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
 class PermissionManager {
-  constructor({ prompt } = {}) {
+  constructor({ prompt, storage, storageKey = "formula.extensionHost.permissions" } = {}) {
     this._prompt = typeof prompt === "function" ? prompt : async () => false;
-    /** @type {Map<string, Set<string>>} */
-    this._granted = new Map();
+    this._storage = storage ?? getDefaultLocalStorage();
+    this._storageKey = String(storageKey);
+    this._loaded = false;
+    this._data = {};
+  }
+
+  _ensureLoaded() {
+    if (this._loaded) return;
+    this._loaded = true;
+
+    if (!this._storage) {
+      this._data = {};
+      return;
+    }
+
+    try {
+      const raw = this._storage.getItem(this._storageKey);
+      const parsed = raw ? JSON.parse(raw) : {};
+      this._data = parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      this._data = {};
+    }
+  }
+
+  _save() {
+    if (!this._storage) return;
+    try {
+      this._storage.setItem(this._storageKey, JSON.stringify(this._data));
+    } catch {
+      // Ignore storage failures (quota, disabled localStorage, etc.). Permissions
+      // still live in-memory for the lifetime of this host.
+    }
   }
 
   /**
    * @param {string} extensionId
    */
   async getGrantedPermissions(extensionId) {
-    const granted = this._granted.get(extensionId);
-    return new Set(granted ? [...granted] : []);
+    this._ensureLoaded();
+    const list = Array.isArray(this._data[extensionId]) ? this._data[extensionId] : [];
+    return new Set(list);
   }
 
   /**
@@ -25,6 +65,7 @@ class PermissionManager {
    * @param {string[]} permissions
    */
   async ensurePermissions({ extensionId, displayName, declaredPermissions }, permissions) {
+    this._ensureLoaded();
     const requested = Array.isArray(permissions) ? permissions : [];
     if (requested.length === 0) return true;
 
@@ -50,10 +91,10 @@ class PermissionManager {
     }
 
     for (const perm of needed) granted.add(perm);
-    this._granted.set(extensionId, granted);
+    this._data[extensionId] = [...granted].sort();
+    this._save();
     return true;
   }
 }
 
 export { PermissionError, PermissionManager };
-

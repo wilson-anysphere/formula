@@ -102,10 +102,105 @@ class InMemoryExtensionStorage {
   }
 }
 
+function getDefaultLocalStorage() {
+  try {
+    if (typeof globalThis === "undefined") return null;
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+class LocalStorageExtensionStorage {
+  /**
+   * @param {{ storage?: Storage | null, keyPrefix?: string }} [options]
+   */
+  constructor({ storage, keyPrefix = "formula.extensionHost.storage." } = {}) {
+    this._storage = storage ?? getDefaultLocalStorage();
+    this._keyPrefix = String(keyPrefix);
+    /** @type {Map<string, { target: Record<string, any>, proxy: any }>} */
+    this._stores = new Map();
+  }
+
+  _key(extensionId) {
+    return `${this._keyPrefix}${extensionId}`;
+  }
+
+  _load(extensionId) {
+    if (!this._storage) return {};
+    try {
+      const raw = this._storage.getItem(this._key(extensionId));
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      return parsed;
+    } catch {
+      return {};
+    }
+  }
+
+  _persist(extensionId, target) {
+    if (!this._storage) return;
+    this._storage.setItem(this._key(extensionId), JSON.stringify(target));
+  }
+
+  /**
+   * @param {string} extensionId
+   */
+  getExtensionStore(extensionId) {
+    const id = String(extensionId);
+    const existing = this._stores.get(id);
+    if (existing) return existing.proxy;
+
+    const target = this._load(id);
+    const persist = () => {
+      this._persist(id, target);
+    };
+
+    const proxy = new Proxy(target, {
+      set: (obj, prop, value) => {
+        const key = String(prop);
+        const prev = Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+        const hadPrev = Object.prototype.hasOwnProperty.call(obj, key);
+        obj[key] = value;
+        try {
+          persist();
+        } catch (err) {
+          if (!hadPrev) {
+            delete obj[key];
+          } else {
+            obj[key] = prev;
+          }
+          throw err;
+        }
+        return true;
+      },
+      deleteProperty: (obj, prop) => {
+        const key = String(prop);
+        const hadPrev = Object.prototype.hasOwnProperty.call(obj, key);
+        const prev = obj[key];
+        delete obj[key];
+        try {
+          persist();
+        } catch (err) {
+          if (hadPrev) obj[key] = prev;
+          throw err;
+        }
+        return true;
+      }
+    });
+
+    this._stores.set(id, { target, proxy });
+    return proxy;
+  }
+}
+
 class BrowserExtensionHost {
   constructor({
     engineVersion = "1.0.0",
     permissionPrompt,
+    permissionStorage,
+    permissionStorageKey,
     spreadsheetApi,
     clipboardApi,
     storageApi,
@@ -146,9 +241,18 @@ class BrowserExtensionHost {
       }
     };
 
-    this._storageApi = storageApi ?? new InMemoryExtensionStorage();
+    if (storageApi) {
+      this._storageApi = storageApi;
+    } else {
+      const ls = getDefaultLocalStorage();
+      this._storageApi = ls ? new LocalStorageExtensionStorage({ storage: ls }) : new InMemoryExtensionStorage();
+    }
 
-    this._permissionManager = new PermissionManager({ prompt: permissionPrompt });
+    this._permissionManager = new PermissionManager({
+      prompt: permissionPrompt,
+      storage: permissionStorage,
+      storageKey: permissionStorageKey
+    });
 
     this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
     this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
