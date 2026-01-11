@@ -49,6 +49,7 @@ const WORKSHEET_CONTENT_TYPE: &str =
 #[derive(Debug)]
 struct SheetStructurePlan {
     sheets: Vec<SheetMeta>,
+    cell_meta_sheet_ids: HashMap<WorksheetId, WorksheetId>,
 }
 
 fn sheet_state_from_visibility(visibility: SheetVisibility) -> Option<String> {
@@ -107,6 +108,17 @@ fn plan_sheet_structure(
             matched_meta_idxs.insert(idx);
             matched_meta_by_ws_id.insert(sheet.id, idx);
         }
+    }
+
+    let mut cell_meta_sheet_ids: HashMap<WorksheetId, WorksheetId> = HashMap::new();
+    for (worksheet_id, idx) in &matched_meta_by_ws_id {
+        let meta_sheet_id = doc
+            .meta
+            .sheets
+            .get(*idx)
+            .map(|meta| meta.worksheet_id)
+            .unwrap_or(*worksheet_id);
+        cell_meta_sheet_ids.insert(*worksheet_id, meta_sheet_id);
     }
 
     let removed: Vec<SheetMeta> = doc
@@ -202,6 +214,7 @@ fn plan_sheet_structure(
 
     Ok(SheetStructurePlan {
         sheets,
+        cell_meta_sheet_ids,
     })
 }
 
@@ -244,8 +257,11 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         }
     }
 
-    let (shared_strings_xml, shared_string_lookup) =
-        build_shared_strings_xml(doc, &sheet_plan.sheets)?;
+    let (shared_strings_xml, shared_string_lookup) = build_shared_strings_xml(
+        doc,
+        &sheet_plan.sheets,
+        &sheet_plan.cell_meta_sheet_ids,
+    )?;
     if is_new || !shared_string_lookup.is_empty() || parts.contains_key(&shared_strings_part_name) {
         parts.insert(shared_strings_part_name.clone(), shared_strings_xml);
     }
@@ -314,6 +330,7 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
                 orig,
                 &shared_string_lookup,
                 &style_to_xf,
+                &sheet_plan.cell_meta_sheet_ids,
             )?,
         );
     }
@@ -386,9 +403,32 @@ fn underline_key(underline: Underline) -> u8 {
     }
 }
 
+fn lookup_cell_meta<'a>(
+    doc: &'a XlsxDocument,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    worksheet_id: WorksheetId,
+    cell_ref: CellRef,
+) -> Option<&'a crate::CellMeta> {
+    let meta_sheet_id = cell_meta_sheet_ids
+        .get(&worksheet_id)
+        .copied()
+        .unwrap_or(worksheet_id);
+    doc.meta
+        .cell_meta
+        .get(&(meta_sheet_id, cell_ref))
+        .or_else(|| {
+            if meta_sheet_id != worksheet_id {
+                doc.meta.cell_meta.get(&(worksheet_id, cell_ref))
+            } else {
+                None
+            }
+        })
+}
+
 fn build_shared_strings_xml(
     doc: &XlsxDocument,
     sheets: &[SheetMeta],
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
 ) -> Result<(Vec<u8>, HashMap<SharedStringKey, u32>), WriteError> {
     let mut table: Vec<RichText> = doc.shared_strings.clone();
     let mut lookup: HashMap<SharedStringKey, u32> = HashMap::new();
@@ -409,7 +449,7 @@ fn build_shared_strings_xml(
         let mut cells: Vec<(CellRef, &formula_model::Cell)> = sheet.iter_cells().collect();
         cells.sort_by_key(|(r, _)| (r.row, r.col));
         for (cell_ref, cell) in cells {
-            let meta = doc.meta.cell_meta.get(&(sheet_meta.worksheet_id, cell_ref));
+            let meta = lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
             let kind = effective_value_kind(meta, cell);
             let CellValueKind::SharedString { .. } = kind else {
                 continue;
@@ -859,14 +899,30 @@ fn write_worksheet_xml(
     original: Option<&[u8]>,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
 ) -> Result<Vec<u8>, WriteError> {
     if let Some(original) = original {
-        return patch_worksheet_xml(doc, sheet_meta, sheet, original, shared_lookup, style_to_xf);
+        return patch_worksheet_xml(
+            doc,
+            sheet_meta,
+            sheet,
+            original,
+            shared_lookup,
+            style_to_xf,
+            cell_meta_sheet_ids,
+        );
     }
 
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
-    let sheet_data_xml =
-        render_sheet_data(doc, sheet_meta, sheet, shared_lookup, style_to_xf, None);
+    let sheet_data_xml = render_sheet_data(
+        doc,
+        sheet_meta,
+        sheet,
+        shared_lookup,
+        style_to_xf,
+        cell_meta_sheet_ids,
+        None,
+    );
 
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
@@ -886,6 +942,7 @@ fn patch_worksheet_xml(
     original: &[u8],
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
 ) -> Result<Vec<u8>, WriteError> {
     let (original_has_dimension, original_used_range) = scan_worksheet_xml(original)?;
     let new_used_range = dimension::worksheet_used_range(sheet);
@@ -902,6 +959,7 @@ fn patch_worksheet_xml(
         sheet,
         shared_lookup,
         style_to_xf,
+        cell_meta_sheet_ids,
         outline.as_ref(),
     );
 
@@ -1144,6 +1202,7 @@ fn render_sheet_data(
     sheet: &Worksheet,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     outline: Option<&Outline>,
 ) -> String {
     let mut out = String::new();
@@ -1215,7 +1274,7 @@ fn render_sheet_data(
             }
         }
 
-        let meta = doc.meta.cell_meta.get(&(sheet_meta.worksheet_id, cell_ref));
+        let meta = lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
         let value_kind = effective_value_kind(meta, cell);
 
         if !matches!(cell.value, CellValue::Empty) {

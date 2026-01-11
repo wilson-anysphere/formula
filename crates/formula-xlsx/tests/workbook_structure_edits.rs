@@ -359,4 +359,18 @@ fn preserves_sheet_ids_when_internal_ids_change() {
         rels.get("rId2").map(String::as_str),
         Some("worksheets/sheet2.xml")
     );
+    assert!(
+        !rels.values().any(|target| target == "sharedStrings.xml"),
+        "should not introduce sharedStrings relationship when original used inline strings"
+    );
+
+    let cursor = Cursor::new(&saved);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    assert!(
+        archive.by_name("xl/sharedStrings.xml").is_err(),
+        "should not create sharedStrings.xml when original used inline strings"
+    );
+
+    let content_types = String::from_utf8(zip_part(&saved, "[Content_Types].xml")).expect("utf8");
+    assert!(!content_types.contains("/xl/sharedStrings.xml"));
 }
