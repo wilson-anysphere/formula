@@ -2243,6 +2243,11 @@ export class SpreadsheetApp {
       return;
     }
 
+    if (x < this.rowHeaderWidth || y < this.colHeaderHeight) {
+      this.hideCommentTooltip();
+      return;
+    }
+
     const cell = this.cellFromPoint(x, y);
     const cellRef = cellToA1(cell);
     if (!this.commentCells.has(cellRef)) {
