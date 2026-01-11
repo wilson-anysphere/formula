@@ -839,6 +839,7 @@ impl AppState {
             .workbook
             .as_ref()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let date_system = workbook_date_system(workbook);
         let sheet = workbook
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
@@ -875,7 +876,8 @@ impl AppState {
 
         let addr = coord_to_a1(row, col);
         let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
-        let display_value = format_scalar_for_display(&value, cell.number_format.as_deref());
+        let display_value =
+            format_scalar_for_display_with_date_system(&value, cell.number_format.as_deref(), date_system);
         Ok(CellData {
             value,
             formula,
@@ -904,6 +906,7 @@ impl AppState {
             .workbook
             .as_ref()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let date_system = workbook_date_system(workbook);
         let sheet = workbook
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
@@ -938,7 +941,8 @@ impl AppState {
                 let cell = sheet.get_cell(r, c);
                 let addr = coord_to_a1(r, c);
                 let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
-                let display_value = format_scalar_for_display(&value, cell.number_format.as_deref());
+                let display_value =
+                    format_scalar_for_display_with_date_system(&value, cell.number_format.as_deref(), date_system);
 
                  let formula = if let Some(viewport) = viewport.as_ref() {
                       let cached = viewport
@@ -2201,6 +2205,7 @@ impl AppState {
             .workbook
             .as_mut()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let date_system = workbook_date_system(workbook);
         let mut updates = Vec::new();
 
         // Small number of sheets; keep this lookup simple and case-insensitive.
@@ -2231,7 +2236,11 @@ impl AppState {
             }
 
             cell.computed_value = new_value.clone();
-            let display_value = format_scalar_for_display(&new_value, cell.number_format.as_deref());
+            let display_value = format_scalar_for_display_with_date_system(
+                &new_value,
+                cell.number_format.as_deref(),
+                date_system,
+            );
             updates.push(CellUpdateData {
                 sheet_id: sheet.id.clone(),
                 row,
@@ -2316,6 +2325,7 @@ impl AppState {
             .workbook
             .as_mut()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let date_system = workbook_date_system(workbook);
         let mut updates = Vec::new();
 
         for sheet in &mut workbook.sheets {
@@ -2333,7 +2343,11 @@ impl AppState {
                 if new_value != cell.computed_value {
                     cell.computed_value = new_value.clone();
                     let display_value =
-                        format_scalar_for_display(&new_value, cell.number_format.as_deref());
+                        format_scalar_for_display_with_date_system(
+                            &new_value,
+                            cell.number_format.as_deref(),
+                            date_system,
+                        );
                     updates.push(CellUpdateData {
                         sheet_id: sheet_id.clone(),
                         row: *row,
@@ -2536,13 +2550,31 @@ fn refresh_pivot_registration(
     Ok(updates)
 }
 fn format_scalar_for_display(value: &CellScalar, number_format: Option<&str>) -> String {
+    format_scalar_for_display_with_date_system(value, number_format, formula_format::DateSystem::Excel1900)
+}
+
+fn format_scalar_for_display_with_date_system(
+    value: &CellScalar,
+    number_format: Option<&str>,
+    date_system: formula_format::DateSystem,
+) -> String {
     match (value, number_format) {
         (CellScalar::Number(n), Some(fmt)) => {
-            let formatted =
-                format_value(FormatValue::Number(*n), Some(fmt), &FormatOptions::default());
+            let options = FormatOptions {
+                date_system,
+                ..FormatOptions::default()
+            };
+            let formatted = format_value(FormatValue::Number(*n), Some(fmt), &options);
             formatted.text
         }
         (other, _) => other.display(),
+    }
+}
+
+fn workbook_date_system(workbook: &Workbook) -> formula_format::DateSystem {
+    match workbook.date_system {
+        formula_model::DateSystem::Excel1900 => formula_format::DateSystem::Excel1900,
+        formula_model::DateSystem::Excel1904 => formula_format::DateSystem::Excel1904,
     }
 }
 fn resolve_cell_ref(
@@ -2943,6 +2975,38 @@ mod tests {
             .expect("expected A1 update");
         assert_eq!(update.value, CellScalar::Number(2.5));
         assert_eq!(update.display_value, "2.50");
+    }
+
+    #[test]
+    fn display_value_respects_workbook_date_system_for_date_formats() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.date_system = formula_model::DateSystem::Excel1904;
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut cell = Cell::from_literal(Some(CellScalar::Number(0.0)));
+        cell.number_format = Some("m/d/yyyy".to_string());
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, cell);
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("get cell");
+        assert_eq!(cell.value, CellScalar::Number(0.0));
+
+        let expected = format_value(
+            FormatValue::Number(0.0),
+            Some("m/d/yyyy"),
+            &FormatOptions {
+                date_system: formula_format::DateSystem::Excel1904,
+                ..FormatOptions::default()
+            },
+        )
+        .text;
+        assert_eq!(cell.display_value, expected);
     }
 
     #[test]
