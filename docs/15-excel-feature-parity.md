@@ -298,7 +298,7 @@ This document tracks every Excel feature and our implementation status. Features
 | GROWTH | ⬜ | Array function |
 | HARMEAN | ⬜ | |
 | HYPGEOM.DIST | ⬜ | |
-| INTERCEPT | ⬜ | |
+| INTERCEPT | ✅ | |
 | KURT | ⬜ | |
 | LARGE | ✅ | P0 |
 | LINEST | ⬜ | Array function |
@@ -333,10 +333,10 @@ This document tracks every Excel feature and our implementation status. Features
 | QUARTILE.INC | ✅ | |
 | RANK.AVG | ✅ | |
 | RANK.EQ | ✅ | |
-| RSQ | ⬜ | |
+| RSQ | ✅ | |
 | SKEW | ⬜ | |
 | SKEW.P | ⬜ | |
-| SLOPE | ⬜ | |
+| SLOPE | ✅ | |
 | SMALL | ✅ | P0 |
 | STANDARDIZE | ⬜ | |
 | STDEV.P | ✅ | |

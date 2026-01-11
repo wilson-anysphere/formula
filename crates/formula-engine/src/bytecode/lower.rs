@@ -271,6 +271,7 @@ pub fn lower_canonical_expr(
         crate::Expr::Call(_) => Err(LowerError::Unsupported),
         crate::Expr::Postfix(_) => Err(LowerError::Unsupported),
         crate::Expr::NameRef(_)
+        | crate::Expr::Call(_)
         | crate::Expr::ColRef(_)
         | crate::Expr::RowRef(_)
         | crate::Expr::StructuredRef(_)

@@ -757,6 +757,17 @@ export default {
       ]
     },
     {
+      "name": "INTERCEPT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "IPMT",
       "min_args": 4,
       "max_args": 6,
@@ -1601,6 +1612,17 @@ export default {
       ]
     },
     {
+      "name": "RSQ",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "SCAN",
       "min_args": 2,
       "max_args": 3,
@@ -1673,6 +1695,17 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "SLOPE",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
       ]
     },
     {

@@ -500,3 +500,48 @@ pub fn correl(xs: &[f64], ys: &[f64]) -> Result<f64, ErrorKind> {
     }
     Ok(out)
 }
+
+pub fn rsq(xs: &[f64], ys: &[f64]) -> Result<f64, ErrorKind> {
+    let r = correl(xs, ys)?;
+    Ok(r * r)
+}
+
+pub fn slope(xs: &[f64], ys: &[f64]) -> Result<f64, ErrorKind> {
+    if xs.len() != ys.len() {
+        return Err(ErrorKind::NA);
+    }
+    if xs.len() < 2 {
+        return Err(ErrorKind::Div0);
+    }
+
+    let var_x = var_s(xs)?;
+    if var_x == 0.0 {
+        return Err(ErrorKind::Div0);
+    }
+
+    let cov = covariance_s(xs, ys)?;
+    let out = cov / var_x;
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
+pub fn intercept(xs: &[f64], ys: &[f64]) -> Result<f64, ErrorKind> {
+    if xs.len() != ys.len() {
+        return Err(ErrorKind::NA);
+    }
+    if xs.len() < 2 {
+        return Err(ErrorKind::Div0);
+    }
+
+    let (mean_x, mean_y) = paired_means(xs, ys)?;
+    let slope = slope(xs, ys)?;
+    let out = mean_y - slope * mean_x;
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}

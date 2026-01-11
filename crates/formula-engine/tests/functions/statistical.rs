@@ -121,6 +121,14 @@ fn pearson_is_alias_of_correl() {
 }
 
 #[test]
+fn rsq_slope_and_intercept_match_simple_regression() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=RSQ({1,2,3},{1,2,3})"), 1.0);
+    assert_number(&sheet.eval("=SLOPE({1,2,3},{1,2,3})"), 1.0);
+    assert_number(&sheet.eval("=INTERCEPT({1,2,3},{1,2,3})"), 0.0);
+}
+
+#[test]
 fn var_s_ignores_text_and_logicals_in_references() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

@@ -1156,6 +1156,84 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "RSQ",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: rsq_fn,
+    }
+}
+
+fn rsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    // Excel signature: RSQ(known_y's, known_x's)
+    let (xs, ys) = match collect_numeric_pairs(ctx, &args[1], &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::rsq(&xs, &ys) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "SLOPE",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: slope_fn,
+    }
+}
+
+fn slope_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    // Excel signature: SLOPE(known_y's, known_x's)
+    let (xs, ys) = match collect_numeric_pairs(ctx, &args[1], &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::slope(&xs, &ys) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "INTERCEPT",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: intercept_fn,
+    }
+}
+
+fn intercept_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    // Excel signature: INTERCEPT(known_y's, known_x's)
+    let (xs, ys) = match collect_numeric_pairs(ctx, &args[1], &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::intercept(&xs, &ys) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
 fn correl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let (xs, ys) = match collect_numeric_pairs(ctx, &args[0], &args[1]) {
         Ok(v) => v,
