@@ -153,6 +153,7 @@ fn streaming_shared_string_edit_updates_isst_and_preserves_counts() {
             col: 0,
             new_value: CellValue::Text("World".to_string()),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -190,6 +191,7 @@ fn streaming_shared_string_edit_appends_new_si_and_updates_unique_count() {
             col: 0,
             new_value: CellValue::Text("New".to_string()),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -229,6 +231,7 @@ fn streaming_shared_string_noop_is_lossless() {
             col: 0,
             new_value: CellValue::Text("Hello".to_string()),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -276,6 +279,7 @@ fn streaming_shared_string_total_count_updates_when_cell_leaves_sst() {
             col: 0,
             new_value: CellValue::Number(123.0),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -309,6 +313,7 @@ fn streaming_shared_string_total_count_updates_when_cell_enters_sst() {
             col: 1,
             new_value: CellValue::Text("World".to_string()),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
