@@ -11,8 +11,8 @@ pub mod information;
 pub mod lookup;
 pub mod math;
 pub mod text;
-
 pub(crate) mod array_lift;
+pub(crate) mod wildcard;
 
 // Built-in Excel-compatible functions registered with the inventory-backed
 // registry live in dedicated modules to avoid merge conflicts.

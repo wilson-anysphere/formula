@@ -1,4 +1,5 @@
 use formula_engine::functions::lookup;
+use formula_engine::Engine;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::TestSheet;
@@ -68,6 +69,161 @@ fn xmatch_and_xlookup_work_in_formulas_and_accept_xlfn_prefix() {
     assert_eq!(
         sheet.eval("=XLOOKUP(\"missing\", A1:A3, B1:B3)"),
         Value::Error(ErrorKind::NA)
+    );
+}
+
+#[test]
+fn xmatch_supports_searching_last_to_first() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 2.0);
+
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A3, 0, 1)"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A3, 0, -1)"), Value::Number(3.0));
+}
+
+#[test]
+fn xmatch_supports_wildcards_and_escapes() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "apple");
+    sheet.set("A2", "banana");
+    sheet.set("A3", "apricot");
+
+    assert_eq!(sheet.eval("=XMATCH(\"a*\", A1:A3, 2)"), Value::Number(1.0));
+
+    sheet.set("B1", "*");
+    sheet.set("B2", "?");
+    assert_eq!(sheet.eval("=XMATCH(\"~*\", B1:B2, 2)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=XMATCH(\"~?\", B1:B2, 2)"), Value::Number(2.0));
+}
+
+#[test]
+fn xmatch_supports_next_smaller_and_next_larger() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 3.0);
+    sheet.set("A3", 5.0);
+
+    assert_eq!(sheet.eval("=XMATCH(4, A1:A3, -1)"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=XMATCH(4, A1:A3, 1)"), Value::Number(3.0));
+    assert_eq!(sheet.eval("=XMATCH(0, A1:A3, -1)"), Value::Error(ErrorKind::NA));
+}
+
+#[test]
+fn xmatch_binary_search_modes() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 3.0);
+    sheet.set("A3", 5.0);
+    sheet.set("A4", 7.0);
+
+    assert_eq!(sheet.eval("=XMATCH(4, A1:A4, -1, 2)"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=XMATCH(4, A1:A4, 1, 2)"), Value::Number(3.0));
+    assert_eq!(sheet.eval("=XMATCH(5, A1:A4, 0, 2)"), Value::Number(3.0));
+
+    sheet.set("B1", 7.0);
+    sheet.set("B2", 5.0);
+    sheet.set("B3", 3.0);
+    sheet.set("B4", 1.0);
+
+    assert_eq!(sheet.eval("=XMATCH(4, B1:B4, -1, -2)"), Value::Number(3.0));
+    assert_eq!(sheet.eval("=XMATCH(4, B1:B4, 1, -2)"), Value::Number(2.0));
+}
+
+#[test]
+fn xlookup_supports_binary_search_mode() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 3.0);
+    sheet.set("A3", 5.0);
+    sheet.set("A4", 7.0);
+
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 30.0);
+    sheet.set("B3", 50.0);
+    sheet.set("B4", 70.0);
+
+    assert_eq!(
+        sheet.eval("=XLOOKUP(4, A1:A4, B1:B4, \"no\", -1, 2)"),
+        Value::Number(30.0)
+    );
+    assert_eq!(
+        sheet.eval("=XLOOKUP(4, A1:A4, B1:B4, \"no\", 1, 2)"),
+        Value::Number(50.0)
+    );
+}
+
+#[test]
+fn xlookup_spills_rows_and_columns_from_2d_return_arrays() {
+    let mut engine = Engine::new();
+
+    // Vertical lookup_array -> spill the matched row horizontally.
+    engine.set_cell_value("Sheet1", "A1", "A").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "B").unwrap();
+    engine.set_cell_value("Sheet1", "A3", "C").unwrap();
+
+    for (row, base) in [(1, 10.0), (2, 20.0), (3, 30.0)] {
+        engine.set_cell_value("Sheet1", &format!("B{row}"), base).unwrap();
+        engine.set_cell_value("Sheet1", &format!("C{row}"), base + 1.0).unwrap();
+        engine.set_cell_value("Sheet1", &format!("D{row}"), base + 2.0).unwrap();
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "F1", "=XLOOKUP(\"B\", A1:A3, B1:D3)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(21.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Number(22.0));
+
+    // Horizontal lookup_array -> spill the matched column vertically.
+    engine.set_cell_value("Sheet1", "A5", "A").unwrap();
+    engine.set_cell_value("Sheet1", "B5", "B").unwrap();
+    engine.set_cell_value("Sheet1", "C5", "C").unwrap();
+
+    // 3x3 return array under the headers in row 5.
+    for (row_off, base) in [(0, 100.0), (1, 110.0), (2, 120.0)] {
+        let row = 6 + row_off;
+        engine.set_cell_value("Sheet1", &format!("A{row}"), base).unwrap();
+        engine.set_cell_value("Sheet1", &format!("B{row}"), base + 10.0).unwrap();
+        engine.set_cell_value("Sheet1", &format!("C{row}"), base + 20.0).unwrap();
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "E5", "=XLOOKUP(\"B\", A5:C5, A6:C8)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "E5"), Value::Number(110.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E6"), Value::Number(120.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E7"), Value::Number(130.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E8"), Value::Blank);
+}
+
+#[test]
+fn xlookup_errors_on_mismatched_shapes_and_invalid_modes() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 3.0);
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+
+    // return_array is too short.
+    assert_eq!(sheet.eval("=XLOOKUP(2, A1:A3, B1:B2)"), Value::Error(ErrorKind::Value));
+
+    // Invalid match/search modes.
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A3, 3)"), Value::Error(ErrorKind::Value));
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A3, 0, 0)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=XLOOKUP(2, A1:A3, A1:A3, \"\", 3)"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=XLOOKUP(2, A1:A3, A1:A3, \"\", 0, 0)"),
+        Value::Error(ErrorKind::Value)
     );
 }
 

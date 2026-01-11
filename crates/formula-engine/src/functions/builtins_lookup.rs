@@ -343,34 +343,33 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
 
-    // Only the most common XMATCH mode is implemented for now:
-    // - match_mode = 0 (exact)
-    // - search_mode = 1 (first-to-last)
-    if let Some(expr) = args.get(2) {
-        let mode = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
-            Ok(n) => n,
+    let match_mode = match args.get(2) {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(n) => match lookup::MatchMode::try_from(n) {
+                Ok(m) => m,
+                Err(e) => return Value::Error(e),
+            },
             Err(e) => return Value::Error(e),
-        };
-        if mode != 0 {
-            return Value::Error(ErrorKind::Value);
-        }
-    }
-    if let Some(expr) = args.get(3) {
-        let mode = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
-            Ok(n) => n,
+        },
+        None => lookup::MatchMode::Exact,
+    };
+    let search_mode = match args.get(3) {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(n) => match lookup::SearchMode::try_from(n) {
+                Ok(m) => m,
+                Err(e) => return Value::Error(e),
+            },
             Err(e) => return Value::Error(e),
-        };
-        if mode != 1 {
-            return Value::Error(ErrorKind::Value);
-        }
-    }
+        },
+        None => lookup::SearchMode::FirstToLast,
+    };
 
     let lookup_values = match lookup_values {
         Some(values) => values,
         None => return Value::Error(ErrorKind::Value),
     };
 
-    match lookup::xmatch(&lookup_value, &lookup_values) {
+    match lookup::xmatch_with_modes(&lookup_value, &lookup_values, match_mode, search_mode) {
         Ok(pos) => Value::Number(pos as f64),
         Err(e) => Value::Error(e),
     }
@@ -405,67 +404,121 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let lookup_values = match ctx.eval_arg(&args[1]) {
-        ArgValue::Reference(r) => flatten_1d_values(ctx, r.normalized()),
-        ArgValue::Scalar(Value::Array(arr)) => {
-            if arr.rows == 1 || arr.cols == 1 {
-                Some(arr.values)
-            } else {
-                None
-            }
-        }
-        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
-        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
-    };
-    let return_values = match ctx.eval_arg(&args[2]) {
-        ArgValue::Reference(r) => flatten_1d_values(ctx, r.normalized()),
-        ArgValue::Scalar(Value::Array(arr)) => {
-            if arr.rows == 1 || arr.cols == 1 {
-                Some(arr.values)
-            } else {
-                None
-            }
-        }
-        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
-        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
-    };
-
     let if_not_found = args.get(3).map(|expr| eval_scalar_arg(ctx, expr));
 
-    // Only the most common XLOOKUP mode is implemented for now:
-    // - match_mode = 0 (exact)
-    // - search_mode = 1 (first-to-last)
-    if let Some(expr) = args.get(4) {
-        let mode = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
-            Ok(n) => n,
+    let match_mode = match args.get(4) {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(n) => match lookup::MatchMode::try_from(n) {
+                Ok(m) => m,
+                Err(e) => return Value::Error(e),
+            },
             Err(e) => return Value::Error(e),
+        },
+        None => lookup::MatchMode::Exact,
+    };
+    let search_mode = match args.get(5) {
+        Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(n) => match lookup::SearchMode::try_from(n) {
+                Ok(m) => m,
+                Err(e) => return Value::Error(e),
+            },
+            Err(e) => return Value::Error(e),
+        },
+        None => lookup::SearchMode::FirstToLast,
+    };
+
+    let (lookup_shape, lookup_values) = match ctx.eval_arg(&args[1]) {
+        ArgValue::Reference(r) => match flatten_1d_values_with_shape(ctx, r.normalized()) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Value),
+        },
+        ArgValue::Scalar(Value::Array(arr)) => match array_1d_with_shape(arr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
+        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+    };
+
+    let return_array = match ctx.eval_arg(&args[2]) {
+        ArgValue::Reference(r) => match reference_to_array(ctx, r.normalized()) {
+            Ok(arr) => arr,
+            Err(e) => return Value::Error(e),
+        },
+        ArgValue::Scalar(Value::Array(arr)) => arr,
+        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
+        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+    };
+
+    let lookup_len = lookup_values.len();
+    if lookup_len == 0 {
+        return match if_not_found {
+            Some(v) => v,
+            None => Value::Error(ErrorKind::NA),
         };
-        if mode != 0 {
-            return Value::Error(ErrorKind::Value);
-        }
     }
-    if let Some(expr) = args.get(5) {
-        let mode = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        if mode != 1 {
-            return Value::Error(ErrorKind::Value);
+
+    // Validate return_array shape:
+    // - vertical lookup_array (Nx1) requires return_array.rows == N; return spills horizontally.
+    // - horizontal lookup_array (1xN) requires return_array.cols == N; return spills vertically.
+    match lookup_shape {
+        XlookupVectorShape::Vertical => {
+            if return_array.rows != lookup_len {
+                return Value::Error(ErrorKind::Value);
+            }
+        }
+        XlookupVectorShape::Horizontal => {
+            if return_array.cols != lookup_len {
+                return Value::Error(ErrorKind::Value);
+            }
         }
     }
 
-    let lookup_values = match lookup_values {
-        Some(values) => values,
-        None => return Value::Error(ErrorKind::Value),
-    };
-    let return_values = match return_values {
-        Some(values) => values,
-        None => return Value::Error(ErrorKind::Value),
+    let match_pos = match lookup::xmatch_with_modes(&lookup_value, &lookup_values, match_mode, search_mode) {
+        Ok(pos) => pos,
+        Err(ErrorKind::NA) => {
+            return match if_not_found {
+                Some(v) => v,
+                None => Value::Error(ErrorKind::NA),
+            };
+        }
+        Err(e) => return Value::Error(e),
     };
 
-    match lookup::xlookup(&lookup_value, &lookup_values, &return_values, if_not_found) {
+    let idx = match usize::try_from(match_pos - 1) {
         Ok(v) => v,
-        Err(e) => Value::Error(e),
+        Err(_) => return Value::Error(ErrorKind::Value),
+    };
+
+    match lookup_shape {
+        XlookupVectorShape::Vertical => {
+            // Return the matched row.
+            if return_array.cols == 1 {
+                return return_array
+                    .get(idx, 0)
+                    .cloned()
+                    .unwrap_or(Value::Blank);
+            }
+            let mut values = Vec::with_capacity(return_array.cols);
+            for col in 0..return_array.cols {
+                values.push(return_array.get(idx, col).cloned().unwrap_or(Value::Blank));
+            }
+            Value::Array(Array::new(1, return_array.cols, values))
+        }
+        XlookupVectorShape::Horizontal => {
+            // Return the matched column.
+            if return_array.rows == 1 {
+                return return_array
+                    .get(0, idx)
+                    .cloned()
+                    .unwrap_or(Value::Blank);
+            }
+            let mut values = Vec::with_capacity(return_array.rows);
+            for row in 0..return_array.rows {
+                values.push(return_array.get(row, idx).cloned().unwrap_or(Value::Blank));
+            }
+            Value::Array(Array::new(return_array.rows, 1, values))
+        }
     }
 }
 
@@ -912,6 +965,72 @@ fn flatten_1d_values(ctx: &dyn FunctionContext, r: Reference) -> Option<Vec<Valu
             .map(|addr| ctx.get_cell_value(sheet_id, addr))
             .collect(),
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XlookupVectorShape {
+    Horizontal,
+    Vertical,
+}
+
+fn flatten_1d_with_shape(r: Reference) -> Option<(XlookupVectorShape, Vec<crate::eval::CellAddr>)> {
+    if r.start.row == r.end.row && r.start.col == r.end.col {
+        return Some((XlookupVectorShape::Vertical, vec![r.start]));
+    }
+    if r.start.row == r.end.row {
+        let cols = r.start.col..=r.end.col;
+        return Some((
+            XlookupVectorShape::Horizontal,
+            cols.map(|col| crate::eval::CellAddr { row: r.start.row, col }).collect(),
+        ));
+    }
+    if r.start.col == r.end.col {
+        let rows = r.start.row..=r.end.row;
+        return Some((
+            XlookupVectorShape::Vertical,
+            rows.map(|row| crate::eval::CellAddr { row, col: r.start.col }).collect(),
+        ));
+    }
+    None
+}
+
+fn flatten_1d_values_with_shape(ctx: &dyn FunctionContext, r: Reference) -> Option<(XlookupVectorShape, Vec<Value>)> {
+    let sheet_id = r.sheet_id;
+    let (shape, addrs) = flatten_1d_with_shape(r)?;
+    Some((
+        shape,
+        addrs
+            .into_iter()
+            .map(|addr| ctx.get_cell_value(sheet_id, addr))
+            .collect(),
+    ))
+}
+
+fn array_1d_with_shape(arr: Array) -> Result<(XlookupVectorShape, Vec<Value>), ErrorKind> {
+    if arr.rows == 1 && arr.cols == 1 {
+        return Ok((XlookupVectorShape::Vertical, arr.values));
+    }
+    if arr.rows == 1 {
+        return Ok((XlookupVectorShape::Horizontal, arr.values));
+    }
+    if arr.cols == 1 {
+        return Ok((XlookupVectorShape::Vertical, arr.values));
+    }
+    Err(ErrorKind::Value)
+}
+
+fn reference_to_array(ctx: &dyn FunctionContext, r: Reference) -> Result<Array, ErrorKind> {
+    let rows = usize::try_from(r.end.row - r.start.row + 1).map_err(|_| ErrorKind::Value)?;
+    let cols = usize::try_from(r.end.col - r.start.col + 1).map_err(|_| ErrorKind::Value)?;
+
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    for row in r.start.row..=r.end.row {
+        for col in r.start.col..=r.end.col {
+            values.push(ctx.get_cell_value(r.sheet_id, crate::eval::CellAddr { row, col }));
+        }
+    }
+
+    Ok(Array::new(rows, cols, values))
 }
 
 fn exact_match_values(lookup: &Value, values: &[Value]) -> Option<usize> {

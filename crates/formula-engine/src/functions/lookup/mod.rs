@@ -1,5 +1,6 @@
-use crate::functions::text;
 use crate::{ErrorKind, Value};
+use crate::functions::wildcard::wildcard_match;
+use std::cmp::Ordering;
 
 fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
     match (lookup_value, candidate) {
@@ -7,28 +8,289 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
         (Value::Text(a), Value::Text(b)) => a.eq_ignore_ascii_case(b),
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Error(a), Value::Error(b)) => a == b,
-        (Value::Number(a), Value::Text(b)) | (Value::Text(b), Value::Number(a)) => {
-            text::value(b).is_ok_and(|parsed| parsed == *a)
-        }
-        (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
-            (*b == 0.0 && !a) || (*b == 1.0 && *a)
-        }
         (Value::Blank, Value::Blank) => true,
         _ => false,
     }
 }
 
-/// XMATCH(lookup_value, lookup_array)
-///
-/// This implements the most common mode: exact match, searching first-to-last.
-/// Returns a 1-based index on success, or `#N/A` when no match is found.
-pub fn xmatch(lookup_value: &Value, lookup_array: &[Value]) -> Result<i32, ErrorKind> {
-    for (idx, candidate) in lookup_array.iter().enumerate() {
-        if values_equal_for_lookup(lookup_value, candidate) {
-            return Ok(i32::try_from(idx + 1).unwrap_or(i32::MAX));
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchMode {
+    /// 0: exact match
+    Exact,
+    /// -1: exact match or next smaller item
+    ExactOrNextSmaller,
+    /// 1: exact match or next larger item
+    ExactOrNextLarger,
+    /// 2: wildcard match (text patterns)
+    Wildcard,
+}
+
+impl TryFrom<i64> for MatchMode {
+    type Error = ErrorKind;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(MatchMode::Exact),
+            -1 => Ok(MatchMode::ExactOrNextSmaller),
+            1 => Ok(MatchMode::ExactOrNextLarger),
+            2 => Ok(MatchMode::Wildcard),
+            _ => Err(ErrorKind::Value),
         }
     }
-    Err(ErrorKind::NA)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchMode {
+    /// 1: search first-to-last
+    FirstToLast,
+    /// -1: search last-to-first
+    LastToFirst,
+    /// 2: binary search (ascending)
+    BinaryAscending,
+    /// -2: binary search (descending)
+    BinaryDescending,
+}
+
+impl TryFrom<i64> for SearchMode {
+    type Error = ErrorKind;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(SearchMode::FirstToLast),
+            -1 => Ok(SearchMode::LastToFirst),
+            2 => Ok(SearchMode::BinaryAscending),
+            -2 => Ok(SearchMode::BinaryDescending),
+            _ => Err(ErrorKind::Value),
+        }
+    }
+}
+
+fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
+    fn type_rank(v: &Value) -> u8 {
+        match v {
+            Value::Number(_) => 0,
+            Value::Text(_) => 1,
+            Value::Bool(_) => 2,
+            Value::Blank => 3,
+            Value::Error(_) => 4,
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => 5,
+        }
+    }
+
+    let ra = type_rank(a);
+    let rb = type_rank(b);
+    if ra != rb {
+        return ra.cmp(&rb);
+    }
+
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (Value::Text(x), Value::Text(y)) => x.to_ascii_uppercase().cmp(&y.to_ascii_uppercase()),
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Blank, Value::Blank) => Ordering::Equal,
+        (Value::Error(x), Value::Error(y)) => x.as_code().cmp(y.as_code()),
+        _ => Ordering::Equal,
+    }
+}
+
+fn lower_bound_by(values: &[Value], needle: &Value, cmp: impl Fn(&Value, &Value) -> Ordering) -> usize {
+    let mut lo = 0usize;
+    let mut hi = values.len();
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        match cmp(&values[mid], needle) {
+            Ordering::Less => lo = mid + 1,
+            Ordering::Equal | Ordering::Greater => hi = mid,
+        }
+    }
+    lo
+}
+
+/// XMATCH(lookup_value, lookup_array, [match_mode], [search_mode])
+///
+/// Returns a 1-based index on success, or `#N/A` when no match is found.
+pub fn xmatch_with_modes(
+    lookup_value: &Value,
+    lookup_array: &[Value],
+    match_mode: MatchMode,
+    search_mode: SearchMode,
+) -> Result<i32, ErrorKind> {
+    let pos = match search_mode {
+        SearchMode::FirstToLast => xmatch_linear(lookup_value, lookup_array, match_mode, false)?,
+        SearchMode::LastToFirst => xmatch_linear(lookup_value, lookup_array, match_mode, true)?,
+        SearchMode::BinaryAscending => xmatch_binary(lookup_value, lookup_array, match_mode, false)?,
+        SearchMode::BinaryDescending => xmatch_binary(lookup_value, lookup_array, match_mode, true)?,
+    };
+
+    let pos = pos.checked_add(1).unwrap_or(usize::MAX);
+    Ok(i32::try_from(pos).unwrap_or(i32::MAX))
+}
+
+fn xmatch_linear(
+    lookup_value: &Value,
+    lookup_array: &[Value],
+    match_mode: MatchMode,
+    reverse: bool,
+) -> Result<usize, ErrorKind> {
+    let iter: Box<dyn Iterator<Item = (usize, &Value)>> = if reverse {
+        Box::new(lookup_array.iter().enumerate().rev())
+    } else {
+        Box::new(lookup_array.iter().enumerate())
+    };
+
+    match match_mode {
+        MatchMode::Exact => {
+            for (idx, candidate) in iter {
+                if values_equal_for_lookup(lookup_value, candidate) {
+                    return Ok(idx);
+                }
+            }
+            Err(ErrorKind::NA)
+        }
+        MatchMode::Wildcard => {
+            // Excel applies wildcard matching to text patterns.
+            let pattern = match lookup_value.coerce_to_string() {
+                Ok(s) => s,
+                Err(e) => return Err(e),
+            };
+            for (idx, candidate) in iter {
+                let Some(text) = (match candidate {
+                    Value::Text(s) => Some(s.as_str()),
+                    Value::Blank => Some(""),
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                if wildcard_match(&pattern, text) {
+                    return Ok(idx);
+                }
+            }
+            Err(ErrorKind::NA)
+        }
+        MatchMode::ExactOrNextSmaller => {
+            let mut best: Option<usize> = None;
+            for (idx, candidate) in iter {
+                let ord = lookup_cmp(candidate, lookup_value);
+                if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, candidate) {
+                    return Ok(idx);
+                }
+                if ord == Ordering::Less {
+                    best = match best {
+                        None => Some(idx),
+                        Some(best_idx) => {
+                            let best_val = &lookup_array[best_idx];
+                            if lookup_cmp(candidate, best_val) == Ordering::Greater {
+                                Some(idx)
+                            } else {
+                                Some(best_idx)
+                            }
+                        }
+                    };
+                }
+            }
+            best.ok_or(ErrorKind::NA)
+        }
+        MatchMode::ExactOrNextLarger => {
+            let mut best: Option<usize> = None;
+            for (idx, candidate) in iter {
+                let ord = lookup_cmp(candidate, lookup_value);
+                if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, candidate) {
+                    return Ok(idx);
+                }
+                if ord == Ordering::Greater {
+                    best = match best {
+                        None => Some(idx),
+                        Some(best_idx) => {
+                            let best_val = &lookup_array[best_idx];
+                            if lookup_cmp(candidate, best_val) == Ordering::Less {
+                                Some(idx)
+                            } else {
+                                Some(best_idx)
+                            }
+                        }
+                    };
+                }
+            }
+            best.ok_or(ErrorKind::NA)
+        }
+    }
+}
+
+fn xmatch_binary(
+    lookup_value: &Value,
+    lookup_array: &[Value],
+    match_mode: MatchMode,
+    descending: bool,
+) -> Result<usize, ErrorKind> {
+    if lookup_array.is_empty() {
+        return Err(ErrorKind::NA);
+    }
+
+    if matches!(match_mode, MatchMode::Wildcard) {
+        return Err(ErrorKind::Value);
+    }
+
+    let cmp = if descending {
+        |a: &Value, b: &Value| lookup_cmp(b, a)
+    } else {
+        lookup_cmp
+    };
+
+    let effective_mode = if descending {
+        match match_mode {
+            MatchMode::Exact => MatchMode::Exact,
+            MatchMode::ExactOrNextSmaller => MatchMode::ExactOrNextLarger,
+            MatchMode::ExactOrNextLarger => MatchMode::ExactOrNextSmaller,
+            MatchMode::Wildcard => MatchMode::Wildcard,
+        }
+    } else {
+        match_mode
+    };
+
+    let lb = lower_bound_by(lookup_array, lookup_value, cmp);
+
+    match effective_mode {
+        MatchMode::Exact => {
+            if lb < lookup_array.len() && values_equal_for_lookup(lookup_value, &lookup_array[lb]) {
+                return Ok(lb);
+            }
+            Err(ErrorKind::NA)
+        }
+        MatchMode::ExactOrNextLarger => {
+            if lb < lookup_array.len() && values_equal_for_lookup(lookup_value, &lookup_array[lb]) {
+                return Ok(lb);
+            }
+            if lb < lookup_array.len() {
+                return Ok(lb);
+            }
+            Err(ErrorKind::NA)
+        }
+        MatchMode::ExactOrNextSmaller => {
+            if lb < lookup_array.len() && values_equal_for_lookup(lookup_value, &lookup_array[lb]) {
+                return Ok(lb);
+            }
+            if lb == 0 {
+                return Err(ErrorKind::NA);
+            }
+
+            let candidate_idx = lb - 1;
+            let candidate_val = &lookup_array[candidate_idx];
+            let first = lower_bound_by(lookup_array, candidate_val, cmp);
+            Ok(first)
+        }
+        MatchMode::Wildcard => Err(ErrorKind::Value),
+    }
+}
+
+/// XMATCH(lookup_value, lookup_array)
+///
+/// Wrapper for the default mode: exact match, searching first-to-last.
+pub fn xmatch(lookup_value: &Value, lookup_array: &[Value]) -> Result<i32, ErrorKind> {
+    xmatch_with_modes(lookup_value, lookup_array, MatchMode::Exact, SearchMode::FirstToLast)
 }
 
 /// XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found])
@@ -40,11 +302,30 @@ pub fn xlookup(
     return_array: &[Value],
     if_not_found: Option<Value>,
 ) -> Result<Value, ErrorKind> {
+    xlookup_with_modes(
+        lookup_value,
+        lookup_array,
+        return_array,
+        if_not_found,
+        MatchMode::Exact,
+        SearchMode::FirstToLast,
+    )
+}
+
+/// XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found], [match_mode], [search_mode])
+pub fn xlookup_with_modes(
+    lookup_value: &Value,
+    lookup_array: &[Value],
+    return_array: &[Value],
+    if_not_found: Option<Value>,
+    match_mode: MatchMode,
+    search_mode: SearchMode,
+) -> Result<Value, ErrorKind> {
     if lookup_array.len() != return_array.len() {
         return Err(ErrorKind::Value);
     }
 
-    match xmatch(lookup_value, lookup_array) {
+    match xmatch_with_modes(lookup_value, lookup_array, match_mode, search_mode) {
         Ok(pos) => {
             let idx = usize::try_from(pos - 1).map_err(|_| ErrorKind::Value)?;
             return_array.get(idx).cloned().ok_or(ErrorKind::Value)
