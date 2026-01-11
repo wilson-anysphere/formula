@@ -67,6 +67,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Check formula-engine builds for wasm32
+        run: cargo check -p formula-engine --target wasm32-unknown-unknown
+
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
