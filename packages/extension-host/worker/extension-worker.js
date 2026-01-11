@@ -203,7 +203,10 @@ function assertAllowedModuleRequest(request) {
 
   if (request === "@formula/extension-api" || request === "formula") return;
 
-  const isRelative = request.startsWith("./") || request.startsWith("../");
+  // Support both POSIX and Windows-style relative specifiers. Extensions may be authored
+  // using either `/` or `\\` separators, but we only permit relative filesystem imports.
+  const isRelative =
+    request.startsWith("./") || request.startsWith("../") || request.startsWith(".\\") || request.startsWith("..\\");
   if (!isRelative) {
     throw createSandboxError(
       `Only relative extension imports are allowed (attempted to require '${request}')`
