@@ -7,11 +7,19 @@ const REDACT_PATHS = [
   // Standard auth.
   "req.headers.authorization",
 
+  // Server auth config (defense-in-depth if config objects are ever logged).
+  "auth.token",
+  "config.auth.token",
+  "auth.secret",
+  "config.auth.secret",
+
   // Internal/admin auth (Task 168/172).
   "req.headers.x-internal-admin-token",
   'req.headers["x-internal-admin-token"]',
   "req.headers.x-sync-server-admin-token",
   'req.headers["x-sync-server-admin-token"]',
+  "internalAdminToken",
+  "config.internalAdminToken",
 
   // Encryption-at-rest (Task 169) — redact keys if a config object ever gets logged.
   "persistence.encryption.keyBase64",
