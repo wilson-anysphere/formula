@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
+import { deriveSecretStoreKey } from "../secrets/secretStore";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,8 +37,13 @@ describe("API keys", () => {
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
+      corsAllowedOrigins: [],
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
+      secretStoreKeys: {
+        currentKeyId: "legacy",
+        keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
+      },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null

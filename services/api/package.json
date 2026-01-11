@@ -10,6 +10,7 @@
     "migrate": "tsx src/scripts/migrate.ts",
     "retention:sweep": "tsx src/scripts/retention.ts",
     "keys:rotate": "tsx src/scripts/rotateKeys.ts",
+    "secrets:rotate": "tsx src/scripts/secretsRotate.ts",
     "versions:encrypt": "tsx src/scripts/encryptDocumentVersions.ts",
     "test": "vitest run",
     "test:watch": "vitest"

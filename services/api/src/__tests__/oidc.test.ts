@@ -9,7 +9,7 @@ import type { Pool } from "pg";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
-import { putSecret } from "../secrets/secretStore";
+import { deriveSecretStoreKey, putSecret } from "../secrets/secretStore";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -173,9 +173,13 @@ async function createTestApp(): Promise<{
     sessionCookieName: "formula_session",
     sessionTtlSeconds: 60 * 60,
     cookieSecure: false,
+    corsAllowedOrigins: [],
     syncTokenSecret: "test-sync-secret",
     syncTokenTtlSeconds: 60,
-    secretStoreKey: "test-secret-store-key",
+    secretStoreKeys: {
+      currentKeyId: "legacy",
+      keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
+    },
     localKmsMasterKey: "test-local-kms-master-key",
     awsKmsEnabled: false,
     retentionSweepIntervalMs: null
@@ -227,7 +231,7 @@ describe("OIDC SSO", () => {
         [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
       );
 
-      await putSecret(db, config.secretStoreKey, `oidc:${orgId}:mock`, provider.clientSecret);
+      await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, provider.clientSecret);
 
       const startRes = await app.inject({
         method: "GET",
@@ -331,7 +335,7 @@ describe("OIDC SSO", () => {
         [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
       );
 
-      await putSecret(db, config.secretStoreKey, `oidc:${orgId}:mock`, provider.clientSecret);
+      await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, provider.clientSecret);
 
       const spoofedForwarded = {
         host: "good.example",
@@ -483,7 +487,7 @@ describe("OIDC SSO", () => {
         `,
         [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
       );
-      await putSecret(db, config.secretStoreKey, `oidc:${orgId}:mock`, provider.clientSecret);
+      await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, provider.clientSecret);
 
       const startRes = await app.inject({ method: "GET", url: `/auth/oidc/${orgId}/mock/start` });
       const authUrl = new URL(startRes.headers.location as string);
@@ -538,7 +542,7 @@ describe("OIDC SSO", () => {
         `,
         [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), false]
       );
-      await putSecret(db, config.secretStoreKey, `oidc:${orgId}:mock`, provider.clientSecret);
+      await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, provider.clientSecret);
 
       const startRes = await app.inject({
         method: "GET",

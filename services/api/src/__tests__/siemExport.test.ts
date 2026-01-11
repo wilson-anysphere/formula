@@ -9,7 +9,7 @@ import { runMigrations } from "../db/migrations";
 import { createMetrics } from "../observability/metrics";
 import { DbSiemConfigProvider, type EnabledSiemOrg, type SiemConfigProvider } from "../siem/configProvider";
 import type { SiemEndpointConfig } from "../siem/types";
-import { putSecret } from "../secrets/secretStore";
+import { deriveSecretStoreKey, putSecret, type SecretStoreKeyring } from "../secrets/secretStore";
 import { SiemExportWorker } from "../siem/worker";
 
 function getMigrationsDir(): string {
@@ -316,8 +316,12 @@ describe("SIEM export worker", () => {
     const siem = await startSiemServer();
     try {
       const encryptionSecret = "test-secret-store-key";
+      const keyring: SecretStoreKeyring = {
+        currentKeyId: "legacy",
+        keys: { legacy: deriveSecretStoreKey(encryptionSecret) }
+      };
       const secretName = `siem:${orgId}:headerValue:authorization`;
-      await putSecret(db, encryptionSecret, secretName, "Splunk supersecret-token");
+      await putSecret(db, keyring, secretName, "Splunk supersecret-token");
 
       const storedConfig: SiemEndpointConfig = {
         endpointUrl: siem.url,
@@ -341,7 +345,7 @@ describe("SIEM export worker", () => {
       const metrics = createMetrics();
       const worker = new SiemExportWorker({
         db,
-        configProvider: new DbSiemConfigProvider(db, encryptionSecret, console),
+        configProvider: new DbSiemConfigProvider(db, keyring, console),
         metrics,
         logger: console,
         pollIntervalMs: 0

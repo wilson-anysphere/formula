@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import { getSecret } from "../secrets/secretStore";
+import { getSecret, type SecretStoreKeyring } from "../secrets/secretStore";
 import type { MaybeEncryptedSecret, SiemEndpointConfig, SiemAuthConfig } from "./types";
 
 export interface EnabledSiemOrg {
@@ -31,7 +31,7 @@ function parseConfig(raw: unknown): SiemEndpointConfig | null {
 
 async function resolveSecretValue(
   db: Pool,
-  encryptionSecret: string,
+  keyring: SecretStoreKeyring,
   value: MaybeEncryptedSecret | undefined
 ): Promise<string | undefined> {
   if (!value) return undefined;
@@ -39,7 +39,7 @@ async function resolveSecretValue(
 
   if ("secretRef" in value && typeof value.secretRef === "string") {
     try {
-      const resolved = await getSecret(db, encryptionSecret, value.secretRef);
+      const resolved = await getSecret(db, keyring, value.secretRef);
       return resolved ?? undefined;
     } catch {
       return undefined;
@@ -55,27 +55,27 @@ async function resolveSecretValue(
 
 async function resolveAuthSecrets(
   db: Pool,
-  encryptionSecret: string,
+  keyring: SecretStoreKeyring,
   auth: SiemAuthConfig | undefined
 ): Promise<SiemAuthConfig | undefined | null> {
   if (!auth) return undefined;
   if (auth.type === "none") return auth;
 
   if (auth.type === "bearer") {
-    const token = await resolveSecretValue(db, encryptionSecret, auth.token);
+    const token = await resolveSecretValue(db, keyring, auth.token);
     if (!token) return null;
     return { type: "bearer", token };
   }
 
   if (auth.type === "basic") {
-    const username = await resolveSecretValue(db, encryptionSecret, auth.username);
-    const password = await resolveSecretValue(db, encryptionSecret, auth.password);
+    const username = await resolveSecretValue(db, keyring, auth.username);
+    const password = await resolveSecretValue(db, keyring, auth.password);
     if (!username || !password) return null;
     return { type: "basic", username, password };
   }
 
   if (auth.type === "header") {
-    const value = await resolveSecretValue(db, encryptionSecret, auth.value);
+    const value = await resolveSecretValue(db, keyring, auth.value);
     if (!auth.name || !value) return null;
     return { type: "header", name: auth.name, value };
   }
@@ -86,7 +86,7 @@ async function resolveAuthSecrets(
 export class DbSiemConfigProvider implements SiemConfigProvider {
   constructor(
     private readonly db: Pool,
-    private readonly encryptionSecret: string,
+    private readonly keyring: SecretStoreKeyring,
     private readonly logger: { debug: (...args: any[]) => void; warn: (...args: any[]) => void } = console
   ) {}
 
@@ -106,7 +106,7 @@ export class DbSiemConfigProvider implements SiemConfigProvider {
         const config = parseConfig(row.config);
         if (!config) continue;
 
-        const resolvedAuth = await resolveAuthSecrets(this.db, this.encryptionSecret, config.auth);
+        const resolvedAuth = await resolveAuthSecrets(this.db, this.keyring, config.auth);
         if (resolvedAuth === null) {
           this.logger.warn({ orgId }, "siem_config_secret_resolution_failed");
           continue;

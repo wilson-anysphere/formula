@@ -4,7 +4,7 @@ import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
-import { deleteSecret, putSecret } from "../secrets/secretStore";
+import { deleteSecret, putSecret, type SecretStoreKeyring } from "../secrets/secretStore";
 import type { MaybeEncryptedSecret, SiemAuthConfig, SiemEndpointConfig } from "../siem/types";
 import { requireAuth } from "./auth";
 
@@ -201,13 +201,13 @@ type IncomingPutBody = z.infer<typeof PutBody>;
 
 async function storeAuth(options: {
   db: FastifyInstance["db"];
-  encryptionSecret: string;
+  keyring: SecretStoreKeyring;
   orgId: string;
   enabled: boolean;
   auth: IncomingSiemAuthConfig | undefined;
   existingAuth: SiemAuthConfig | undefined;
 }): Promise<SiemAuthConfig | undefined> {
-  const { db, encryptionSecret, orgId, enabled, auth, existingAuth } = options;
+  const { db, keyring, orgId, enabled, auth, existingAuth } = options;
   if (!auth) return undefined;
 
   if (auth.type === "none") return auth;
@@ -230,7 +230,7 @@ async function storeAuth(options: {
     }
 
     if (enabled) {
-      await putSecret(db, encryptionSecret, secretName, token);
+      await putSecret(db, keyring, secretName, token);
     }
 
     return { type: "bearer", token: { secretRef: secretName } };
@@ -259,7 +259,7 @@ async function storeAuth(options: {
       }
     } else {
       if (enabled) {
-        await putSecret(db, encryptionSecret, usernameName, username);
+        await putSecret(db, keyring, usernameName, username);
       }
       usernameRef = { secretRef: usernameName };
     }
@@ -278,7 +278,7 @@ async function storeAuth(options: {
       }
     } else {
       if (enabled) {
-        await putSecret(db, encryptionSecret, passwordName, password);
+        await putSecret(db, keyring, passwordName, password);
       }
       passwordRef = { secretRef: passwordName };
     }
@@ -307,7 +307,7 @@ async function storeAuth(options: {
     }
 
     if (enabled) {
-      await putSecret(db, encryptionSecret, secretName, auth.value);
+      await putSecret(db, keyring, secretName, auth.value);
     }
 
     return { type: "header", name: headerName, value: { secretRef: secretName } };
@@ -422,7 +422,7 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     try {
       storedAuth = await storeAuth({
         db: app.db,
-        encryptionSecret: app.config.secretStoreKey,
+        keyring: app.config.secretStoreKeys,
         orgId,
         enabled,
         auth: incomingConfig.auth,

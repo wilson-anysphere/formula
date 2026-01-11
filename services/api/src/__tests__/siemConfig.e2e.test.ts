@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
+import { deriveSecretStoreKey } from "../secrets/secretStore";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,9 +37,13 @@ describe("SIEM config routes", () => {
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
+      corsAllowedOrigins: [],
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
-      secretStoreKey: "test-secret-store-key",
+      secretStoreKeys: {
+        currentKeyId: "legacy",
+        keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
+      },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null
@@ -99,7 +104,7 @@ describe("SIEM config routes", () => {
     const secretRow = await db.query("SELECT encrypted_value FROM secrets WHERE name = $1", [secretName]);
     expect(secretRow.rowCount).toBe(1);
     const encrypted = secretRow.rows[0]!.encrypted_value as string;
-    expect(encrypted).toMatch(/^v1:/);
+    expect(encrypted).toMatch(/^v2:legacy:/);
     expect(encrypted).not.toContain(token);
 
     const getRes = await app.inject({
@@ -125,4 +130,3 @@ describe("SIEM config routes", () => {
     expect(remainingSecrets.rowCount).toBe(0);
   });
 });
-

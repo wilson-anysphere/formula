@@ -7,6 +7,7 @@ import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
 import { DbSiemConfigProvider } from "../siem/configProvider";
+import { deriveSecretStoreKey } from "../secrets/secretStore";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -42,9 +43,13 @@ describe("SIEM config", () => {
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
+      corsAllowedOrigins: [],
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
-      secretStoreKey: "test-secret-store-key",
+      secretStoreKeys: {
+        currentKeyId: "legacy",
+        keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
+      },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null
@@ -99,7 +104,7 @@ describe("SIEM config", () => {
 
     const secretRow = await db.query("SELECT encrypted_value FROM secrets WHERE name = $1", [secretName]);
     expect(secretRow.rowCount).toBe(1);
-    expect(secretRow.rows[0]!.encrypted_value).toMatch(/^v1:/);
+    expect(secretRow.rows[0]!.encrypted_value).toMatch(/^v2:legacy:/);
 
     const get = await app.inject({
       method: "GET",
@@ -162,7 +167,7 @@ describe("SIEM config", () => {
       }
     });
 
-    const provider = new DbSiemConfigProvider(db, config.secretStoreKey, app.log);
+    const provider = new DbSiemConfigProvider(db, config.secretStoreKeys, app.log);
     const enabled = await provider.listEnabledOrgs();
     const entry = enabled.find((row) => row.orgId === orgId);
     expect(entry).toBeTruthy();

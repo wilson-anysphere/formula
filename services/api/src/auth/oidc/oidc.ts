@@ -436,7 +436,7 @@ export async function oidcCallback(request: FastifyRequest, reply: FastifyReply)
   }
 
   const secretName = `oidc:${orgId}:${providerId}`;
-  const clientSecret = await getSecret(request.server.db, request.server.config.secretStoreKey, secretName);
+  const clientSecret = await getSecret(request.server.db, request.server.config.secretStoreKeys, secretName);
   if (!clientSecret) {
     reply.code(500).send({ error: "oidc_not_configured" });
     return;

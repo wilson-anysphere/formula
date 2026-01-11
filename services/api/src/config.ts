@@ -1,3 +1,5 @@
+import { deriveSecretStoreKey, type SecretStoreKeyring } from "./secrets/secretStore";
+
 export interface AppConfig {
   port: number;
   databaseUrl: string;
@@ -28,12 +30,14 @@ export interface AppConfig {
   syncTokenSecret: string;
   syncTokenTtlSeconds: number;
   /**
-   * Symmetric secret used to encrypt values stored in the database-backed secret
-   * store (`secrets` table).
+   * Keyring used to encrypt values stored in the database-backed secret store
+   * (`secrets` table).
    *
-   * Production deployments should set `SECRET_STORE_KEY` to a strong random value.
+   * Production deployments should use `SECRET_STORE_KEYS_JSON` so keys can be
+   * rotated without downtime. `SECRET_STORE_KEY` remains supported as a legacy
+   * single-key mode.
    */
-  secretStoreKey: string;
+  secretStoreKeys: SecretStoreKeyring;
   /**
    * Internal base URL for sync-server, used to purge persisted CRDT state when
    * documents are hard-deleted by retention policy.
@@ -118,6 +122,56 @@ function parseCorsAllowedOrigins(value: string | undefined, nodeEnv: string): st
   ];
 }
 
+function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): SecretStoreKeyring {
+  const rawJson = typeof env.SECRET_STORE_KEYS_JSON === "string" ? env.SECRET_STORE_KEYS_JSON.trim() : "";
+  if (rawJson.length > 0) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawJson) as unknown;
+    } catch (err) {
+      throw new Error(
+        `SECRET_STORE_KEYS_JSON must be valid JSON (${err instanceof Error ? err.message : "parse failed"})`
+      );
+    }
+
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("SECRET_STORE_KEYS_JSON must be a JSON object");
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const currentKeyId = record.currentKeyId;
+    const keysValue = record.keys;
+
+    if (typeof currentKeyId !== "string" || currentKeyId.trim().length === 0) {
+      throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must be a non-empty string");
+    }
+    if (!keysValue || typeof keysValue !== "object" || Array.isArray(keysValue)) {
+      throw new Error("SECRET_STORE_KEYS_JSON.keys must be an object mapping keyId -> base64 key");
+    }
+
+    const keys: Record<string, Buffer> = {};
+    for (const [keyId, value] of Object.entries(keysValue as Record<string, unknown>)) {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`SECRET_STORE_KEYS_JSON.keys.${keyId} must be a base64 string`);
+      }
+      const raw = Buffer.from(value, "base64");
+      if (raw.byteLength !== 32) {
+        throw new Error(`SECRET_STORE_KEYS_JSON.keys.${keyId} must decode to 32 bytes (got ${raw.byteLength})`);
+      }
+      keys[keyId] = raw;
+    }
+
+    if (!keys[currentKeyId]) {
+      throw new Error(`SECRET_STORE_KEYS_JSON currentKeyId=${currentKeyId} missing from keys`);
+    }
+
+    return { currentKeyId, keys };
+  }
+
+  const legacyKey = deriveSecretStoreKey(legacySecret);
+  return { currentKeyId: "legacy", keys: { legacy: legacyKey } };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = env.NODE_ENV ?? "development";
   const port = parseIntEnv(env.PORT, 3000);
@@ -136,7 +190,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS, nodeEnv);
   const syncTokenSecret = readStringEnv(env.SYNC_TOKEN_SECRET, DEV_SYNC_TOKEN_SECRET);
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
+
   const secretStoreKey = readStringEnv(env.SECRET_STORE_KEY, DEV_SECRET_STORE_KEY);
+  const secretStoreKeys = loadSecretStoreKeys(env, secretStoreKey);
+
   const syncServerInternalUrl = readStringEnv(env.SYNC_SERVER_INTERNAL_URL, "");
   const syncServerInternalAdminToken = readStringEnv(env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN, "");
   const localKmsMasterKey = readStringEnv(env.LOCAL_KMS_MASTER_KEY, DEV_LOCAL_KMS_MASTER_KEY);
@@ -159,7 +216,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     corsAllowedOrigins,
     syncTokenSecret,
     syncTokenTtlSeconds,
-    secretStoreKey,
+    secretStoreKeys,
     syncServerInternalUrl: syncServerInternalUrl.length > 0 ? syncServerInternalUrl : undefined,
     syncServerInternalAdminToken:
       syncServerInternalAdminToken.length > 0 ? syncServerInternalAdminToken : undefined,
@@ -180,7 +237,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
     const invalidSecrets: string[] = [];
     if (config.syncTokenSecret === DEV_SYNC_TOKEN_SECRET) invalidSecrets.push("SYNC_TOKEN_SECRET");
-    if (config.secretStoreKey === DEV_SECRET_STORE_KEY) invalidSecrets.push("SECRET_STORE_KEY");
+    if (rawJsonIsEmpty(env) && secretStoreKey === DEV_SECRET_STORE_KEY) invalidSecrets.push("SECRET_STORE_KEY");
     if (config.localKmsMasterKey === DEV_LOCAL_KMS_MASTER_KEY) invalidSecrets.push("LOCAL_KMS_MASTER_KEY");
     if (invalidSecrets.length > 0) {
       throw new Error(
@@ -195,3 +252,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   return config;
 }
+
+function rawJsonIsEmpty(env: NodeJS.ProcessEnv): boolean {
+  const rawJson = typeof env.SECRET_STORE_KEYS_JSON === "string" ? env.SECRET_STORE_KEYS_JSON.trim() : "";
+  return rawJson.length === 0;
+}
+

@@ -10,6 +10,7 @@ import jwt from "jsonwebtoken";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
+import { deriveSecretStoreKey } from "../secrets/secretStore";
 import { createLogger } from "../../../sync-server/src/logger";
 import { createSyncServer } from "../../../sync-server/src/server";
 import type { SyncServerConfig } from "../../../sync-server/src/config";
@@ -43,9 +44,13 @@ describe("API e2e: auth + RBAC + sync token", () => {
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
+      corsAllowedOrigins: [],
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
-      secretStoreKey: "test-secret-store-key",
+      secretStoreKeys: {
+        currentKeyId: "legacy",
+        keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
+      },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null

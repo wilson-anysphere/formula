@@ -6,6 +6,7 @@ import type { AppConfig } from "../config";
 import { createLogger } from "../observability/logger";
 import { initOpenTelemetry } from "../observability/otel";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
+import { deriveSecretStoreKey } from "../secrets/secretStore";
 
 describe("observability: request-id, log correlation, db spans", () => {
   let db: Pool;
@@ -28,9 +29,13 @@ describe("observability: request-id, log correlation, db spans", () => {
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
+      corsAllowedOrigins: [],
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
-      secretStoreKey: "test-secret-store-key",
+      secretStoreKeys: {
+        currentKeyId: "legacy",
+        keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
+      },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null
