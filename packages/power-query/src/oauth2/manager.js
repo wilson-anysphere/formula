@@ -530,10 +530,9 @@ export class OAuth2Manager {
  * @returns {number | null}
  */
 function parsePositiveInt(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
+  let parsed = null;
+  if (typeof value === "number") parsed = value;
+  if (typeof value === "string" && value.trim() !== "") parsed = Number(value);
+  if (parsed == null || !Number.isFinite(parsed) || parsed < 0) return null;
+  return parsed;
 }

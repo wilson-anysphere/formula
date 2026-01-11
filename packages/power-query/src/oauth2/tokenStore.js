@@ -40,9 +40,14 @@ import { hashValue } from "../cache/key.js";
  * @returns {{ scopes: string[], scopesHash: string }}
  */
 export function normalizeScopes(scopes) {
-  const normalized = Array.isArray(scopes) ? scopes.filter(Boolean).slice() : [];
+  const raw = Array.isArray(scopes) ? scopes : [];
+  const normalized = raw
+    .filter((s) => typeof s === "string")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
   normalized.sort();
-  return { scopes: normalized, scopesHash: hashValue(normalized.join(" ")) };
+  const deduped = Array.from(new Set(normalized));
+  return { scopes: deduped, scopesHash: hashValue(deduped.join(" ")) };
 }
 
 /**
@@ -111,4 +116,3 @@ export class InMemoryOAuthTokenStore {
     this.entries.delete(InMemoryOAuthTokenStore.keyString(key));
   }
 }
-
