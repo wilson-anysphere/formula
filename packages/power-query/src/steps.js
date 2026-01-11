@@ -1,4 +1,3 @@
-import { arrowTableFromColumns } from "../../data-io/src/index.js";
 import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable, inferColumnType, makeUniqueColumnNames } from "./table.js";
 import { compilePredicate } from "./predicate.js";

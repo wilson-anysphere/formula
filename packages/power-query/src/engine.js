@@ -1,5 +1,4 @@
 import { applyOperation } from "./steps.js";
-import { arrowTableToGridBatches, parquetToArrowTable } from "../../data-io/src/index.js";
 import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable } from "./table.js";
 
@@ -11,6 +10,23 @@ import { SqlConnector } from "./connectors/sql.js";
 import { QueryFoldingEngine } from "./folding/sql.js";
 import { normalizePostgresPlaceholders } from "./folding/placeholders.js";
 import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parquetProjection.js";
+
+/**
+ * Lazy-load Arrow/parquet helpers from `@formula/data-io`.
+ *
+ * Power Query's core engine can run without Arrow support (e.g. for CSV/API/SQL
+ * sources). Keeping this import lazy avoids hard-failing in environments where
+ * optional Arrow dependencies are not present.
+ *
+ * @returns {Promise<typeof import("../../data-io/src/index.js")>}
+ */
+let dataIoModulePromise = null;
+async function loadDataIoModule() {
+  if (!dataIoModulePromise) {
+    dataIoModulePromise = import("../../data-io/src/index.js");
+  }
+  return dataIoModulePromise;
+}
 
 /**
  * @typedef {import("./model.js").Query} Query
@@ -26,7 +42,26 @@ import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parqu
  * @typedef {{
  *   tables?: Record<string, ITable>;
  *   queries?: Record<string, Query>;
+ *   // Optional pre-computed query results that can be reused when resolving query
+ *   // references (source.type === "query") and merge/append dependencies. This is
+ *   // primarily used by dependency-aware refresh orchestration ("Refresh All") to
+ *   // avoid re-executing shared upstream queries.
+ *   queryResults?: Record<string, QueryExecutionResult>;
  * }} QueryExecutionContext
+ */
+
+/**
+ * Shared state for a group of query executions.
+ *
+ * A session allows the engine to reuse credential/permission prompts and other
+ * deterministic values (like the "current time") across multiple query
+ * executions.
+ *
+ * @typedef {{
+ *   credentialCache: Map<string, Promise<unknown>>;
+ *   permissionCache: Map<string, Promise<boolean>>;
+ *   now?: () => number;
+ * }} QueryExecutionSession
  */
 
 /**
@@ -242,21 +277,46 @@ export class QueryEngine {
    * @returns {Promise<QueryExecutionResult>}
    */
   async executeQueryWithMeta(query, context = {}, options = {}) {
-    /** @type {Map<string, Promise<unknown>>} */
-    const credentialCache = new Map();
-    /** @type {Map<string, Promise<boolean>>} */
-    const permissionCache = new Map();
+    const session = this.createSession();
+    return this.executeQueryWithMetaInSession(query, context, options, session);
+  }
 
-    const now = () => Date.now();
-    const result = await this.executeQueryInternal(
+  /**
+   * Create a shared execution session for running multiple queries.
+   *
+   * @param {{ now?: () => number }} [options]
+   * @returns {QueryExecutionSession}
+   */
+  createSession(options = {}) {
+    return {
+      credentialCache: new Map(),
+      permissionCache: new Map(),
+      now: options.now,
+    };
+  }
+
+  /**
+   * Execute a query with a shared session (credential/permission caches).
+   *
+   * This is the preferred entry point for dependency-aware "Refresh All"
+   * orchestration where multiple queries should share prompts and other
+   * deterministic state.
+   *
+   * @param {Query} query
+   * @param {QueryExecutionContext} [context]
+   * @param {ExecuteOptions} [options]
+   * @param {QueryExecutionSession} session
+   * @returns {Promise<QueryExecutionResult>}
+   */
+  async executeQueryWithMetaInSession(query, context = {}, options = {}, session) {
+    const now = session.now ?? (() => Date.now());
+    return this.executeQueryInternal(
       query,
       context,
       options,
-      { credentialCache, permissionCache, now },
+      { credentialCache: session.credentialCache, permissionCache: session.permissionCache, now },
       new Set([query.id]),
     );
-
-    return result;
   }
 
   /**
@@ -721,6 +781,28 @@ export class QueryEngine {
     }
 
     if (source.type === "query") {
+      if (callStack.has(source.queryId)) {
+        throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${source.queryId}`);
+      }
+
+      const existing = context.queryResults?.[source.queryId];
+      if (existing) {
+        const { table, meta: queryMeta } = existing;
+        const meta = {
+          refreshedAt: queryMeta.refreshedAt,
+          schema: queryMeta.outputSchema,
+          rowCount: queryMeta.outputRowCount,
+          rowCountEstimate: queryMeta.outputRowCount,
+          provenance: { kind: "query", queryId: source.queryId },
+        };
+        options.onProgress?.({
+          type: "source:complete",
+          queryId: Array.from(callStack).at(-1) ?? "<unknown>",
+          sourceType: source.type,
+        });
+        return { table, meta, sources: [meta, ...queryMeta.sources] };
+      }
+
       const target = context.queries?.[source.queryId];
       if (!target) throw new Error(`Unknown query '${source.queryId}'`);
       if (callStack.has(target.id)) {
@@ -759,6 +841,7 @@ export class QueryEngine {
       if (source.type === "parquet" && this.fileAdapter?.readBinary) {
         const bytes = await this.fileAdapter.readBinary(source.path);
         throwIfAborted(options.signal);
+        const { parquetToArrowTable } = await loadDataIoModule();
         const arrowTable = await parquetToArrowTable(bytes, source.options);
         const table = new ArrowTableAdapter(arrowTable);
         const meta = {
@@ -888,18 +971,36 @@ export class QueryEngine {
    * @returns {Promise<DataTable>}
    */
   async mergeTables(left, op, context, options = {}, state, callStack, sources = []) {
-    const query = context.queries?.[op.rightQuery];
-    if (!query) throw new Error(`Unknown query '${op.rightQuery}'`);
-    if (callStack?.has(query.id)) {
-      throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${query.id}`);
+    if (callStack?.has(op.rightQuery)) {
+      throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${op.rightQuery}`);
     }
-    const nextStack = callStack ? new Set(callStack) : new Set();
-    nextStack.add(query.id);
 
-    const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
-    const depState = state ?? { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
-    const { table: right, meta: rightMeta } = await this.executeQueryInternal(query, context, depOptions, depState, nextStack);
-    sources.push(...rightMeta.sources);
+    /** @type {ITable} */
+    let right;
+    /** @type {QueryExecutionMeta | null} */
+    let rightMeta = null;
+
+    const existing = context.queryResults?.[op.rightQuery];
+    if (existing) {
+      right = existing.table;
+      rightMeta = existing.meta;
+    } else {
+      const query = context.queries?.[op.rightQuery];
+      if (!query) throw new Error(`Unknown query '${op.rightQuery}'`);
+      if (callStack?.has(query.id)) {
+        throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${query.id}`);
+      }
+      const nextStack = callStack ? new Set(callStack) : new Set();
+      nextStack.add(query.id);
+
+      const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+      const depState = state ?? { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
+      const result = await this.executeQueryInternal(query, context, depOptions, depState, nextStack);
+      right = result.table;
+      rightMeta = result.meta;
+    }
+
+    if (rightMeta) sources.push(...rightMeta.sources);
 
     const leftKeyIdx = left.getColumnIndex(op.leftKey);
     const rightKeyIdx = right.getColumnIndex(op.rightKey);
@@ -1013,6 +1114,17 @@ export class QueryEngine {
   async appendTables(current, op, context, options = {}, state, callStack, sources = []) {
     const tables = [current];
     for (const id of op.queries) {
+      if (callStack?.has(id)) {
+        throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${id}`);
+      }
+
+      const existing = context.queryResults?.[id];
+      if (existing) {
+        sources.push(...existing.meta.sources);
+        tables.push(existing.table);
+        continue;
+      }
+
       const query = context.queries?.[id];
       if (!query) throw new Error(`Unknown query '${id}'`);
       if (callStack?.has(query.id)) {
@@ -1095,6 +1207,7 @@ async function* tableToGridBatches(table, options) {
       yield { rowOffset: 0, values: [table.columns.map((c) => c.name)] };
     }
 
+    const { arrowTableToGridBatches } = await loadDataIoModule();
     for await (const batch of arrowTableToGridBatches(table.table, { batchSize, includeHeader: false })) {
       yield { rowOffset: baseOffset + batch.rowOffset, values: batch.values };
     }

@@ -4,6 +4,7 @@ export { QueryEngine } from "./engine.js";
 export { applyOperation, compileRowFormula } from "./steps.js";
 export { QueryFoldingEngine } from "./folding/sql.js";
 export { RefreshManager, QueryScheduler } from "./refresh.js";
+export { RefreshOrchestrator, computeQueryDependencies } from "./refreshGraph.js";
 export { InMemorySheet, writeTableToSheet } from "./sheet.js";
 export { FileConnector, HttpConnector, SqlConnector, parseCsv, parseCsvCell } from "./connectors/index.js";
 export { CacheManager } from "./cache/cache.js";
