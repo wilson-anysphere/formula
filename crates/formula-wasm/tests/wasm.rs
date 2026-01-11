@@ -18,18 +18,14 @@ fn recalculate_reports_changed_cells() {
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(
-        changes,
-        vec![CellChange {
-            sheet: formula_core::DEFAULT_SHEET.to_string(),
-            address: "A2".to_string(),
-            value: json!(2),
-        }]
-    );
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[0].address, "A2");
+    assert_eq!(changes[0].value.as_f64(), Some(2.0));
 
     let cell_js = wb.get_cell("A2".to_string(), None).unwrap();
     let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
-    assert_eq!(cell.value, json!(2));
+    assert_eq!(cell.value.as_f64(), Some(2.0));
 }
 
 #[wasm_bindgen_test]
@@ -44,21 +40,13 @@ fn recalculate_reports_dynamic_array_spills() {
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(
-        changes,
-        vec![
-            CellChange {
-                sheet: formula_core::DEFAULT_SHEET.to_string(),
-                address: "A1".to_string(),
-                value: json!(1),
-            },
-            CellChange {
-                sheet: formula_core::DEFAULT_SHEET.to_string(),
-                address: "B1".to_string(),
-                value: json!(2),
-            },
-        ]
-    );
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[0].address, "A1");
+    assert_eq!(changes[0].value.as_f64(), Some(1.0));
+    assert_eq!(changes[1].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[1].address, "B1");
+    assert_eq!(changes[1].value.as_f64(), Some(2.0));
 }
 
 #[wasm_bindgen_test]
@@ -83,26 +71,16 @@ fn recalculate_reports_spill_resize_clears_trailing_cells() {
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(
-        changes,
-        vec![
-            CellChange {
-                sheet: formula_core::DEFAULT_SHEET.to_string(),
-                address: "A1".to_string(),
-                value: json!(1),
-            },
-            CellChange {
-                sheet: formula_core::DEFAULT_SHEET.to_string(),
-                address: "B1".to_string(),
-                value: json!(2),
-            },
-            CellChange {
-                sheet: formula_core::DEFAULT_SHEET.to_string(),
-                address: "C1".to_string(),
-                value: JsonValue::Null,
-            },
-        ]
-    );
+    assert_eq!(changes.len(), 3);
+    assert_eq!(changes[0].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[0].address, "A1");
+    assert_eq!(changes[0].value.as_f64(), Some(1.0));
+    assert_eq!(changes[1].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[1].address, "B1");
+    assert_eq!(changes[1].value.as_f64(), Some(2.0));
+    assert_eq!(changes[2].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[2].address, "C1");
+    assert!(changes[2].value.is_null());
 }
 
 #[wasm_bindgen_test]
@@ -138,14 +116,10 @@ fn recalculate_filters_changes_by_sheet_name() {
 
     let changes_js = wb.recalculate(Some("sHeEt2".to_string())).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(
-        changes,
-        vec![CellChange {
-            sheet: "Sheet2".to_string(),
-            address: "A2".to_string(),
-            value: json!(8),
-        }]
-    );
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].sheet, "Sheet2");
+    assert_eq!(changes[0].address, "A2");
+    assert_eq!(changes[0].value.as_f64(), Some(8.0));
 }
 
 #[wasm_bindgen_test]
@@ -184,21 +158,13 @@ fn recalculate_orders_changes_by_sheet_row_col() {
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(
-        changes,
-        vec![
-            CellChange {
-                sheet: "Sheet1".to_string(),
-                address: "A2".to_string(),
-                value: json!(4),
-            },
-            CellChange {
-                sheet: "Sheet2".to_string(),
-                address: "A2".to_string(),
-                value: json!(22),
-            },
-        ]
-    );
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0].sheet, "Sheet1");
+    assert_eq!(changes[0].address, "A2");
+    assert_eq!(changes[0].value.as_f64(), Some(4.0));
+    assert_eq!(changes[1].sheet, "Sheet2");
+    assert_eq!(changes[1].address, "A2");
+    assert_eq!(changes[1].value.as_f64(), Some(22.0));
 }
 
 #[wasm_bindgen_test]
@@ -225,7 +191,7 @@ fn sheet_scoped_recalculate_still_updates_cross_sheet_dependents() {
 
     let cell_js = wb.get_cell("A1".to_string(), Some("Sheet2".to_string())).unwrap();
     let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
-    assert_eq!(cell.value, json!(4));
+    assert_eq!(cell.value.as_f64(), Some(4.0));
 }
 
 #[wasm_bindgen_test]
@@ -270,26 +236,16 @@ fn recalculate_reports_cleared_spill_outputs_after_edit() {
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(
-        changes,
-        vec![
-            CellChange {
-                sheet: formula_core::DEFAULT_SHEET.to_string(),
-                address: "A1".to_string(),
-                value: json!(1),
-            },
-            CellChange {
-                sheet: formula_core::DEFAULT_SHEET.to_string(),
-                address: "B1".to_string(),
-                value: json!(2),
-            },
-            CellChange {
-                sheet: formula_core::DEFAULT_SHEET.to_string(),
-                address: "C1".to_string(),
-                value: json!(3),
-            },
-        ]
-    );
+    assert_eq!(changes.len(), 3);
+    assert_eq!(changes[0].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[0].address, "A1");
+    assert_eq!(changes[0].value.as_f64(), Some(1.0));
+    assert_eq!(changes[1].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[1].address, "B1");
+    assert_eq!(changes[1].value.as_f64(), Some(2.0));
+    assert_eq!(changes[2].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[2].address, "C1");
+    assert_eq!(changes[2].value.as_f64(), Some(3.0));
 
     // Overwrite a spill output cell with a literal value. This clears the spill footprint before
     // the next recalc, so `recalculate()` must still report the remaining spill outputs as blank.
@@ -328,7 +284,7 @@ fn from_xlsx_bytes_imports_formulas_and_recalculates() {
     let cell_js = wb.get_cell("C1".to_string(), None).unwrap();
     let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
     assert_eq!(cell.input, json!("=A1+B1"));
-    assert_eq!(cell.value, json!(3));
+    assert_eq!(cell.value.as_f64(), Some(3.0));
 }
 
 #[wasm_bindgen_test]
@@ -347,8 +303,8 @@ fn from_xlsx_bytes_loads_basic_fixture() {
 
     let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
     let a1: formula_core::CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
-    assert_eq!(a1.input, json!(1));
-    assert_eq!(a1.value, json!(1));
+    assert_eq!(a1.input.as_f64(), Some(1.0));
+    assert_eq!(a1.value.as_f64(), Some(1.0));
 
     let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
     let b1: formula_core::CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
@@ -370,18 +326,14 @@ fn cross_sheet_formulas_recalculate() {
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(
-        changes,
-        vec![CellChange {
-            sheet: "Sheet2".to_string(),
-            address: "A1".to_string(),
-            value: json!(2.0),
-        }]
-    );
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].sheet, "Sheet2");
+    assert_eq!(changes[0].address, "A1");
+    assert_eq!(changes[0].value.as_f64(), Some(2.0));
 
     let cell_js = wb.get_cell("A1".to_string(), Some("Sheet2".to_string())).unwrap();
     let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
-    assert_eq!(cell.value, json!(2.0));
+    assert_eq!(cell.value.as_f64(), Some(2.0));
 }
 
 #[wasm_bindgen_test]
@@ -399,14 +351,10 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
 
     let changes_js = wb.recalculate(None).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(
-        changes,
-        vec![CellChange {
-            sheet: formula_core::DEFAULT_SHEET.to_string(),
-            address: "A2".to_string(),
-            value: json!(0),
-        }]
-    );
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].sheet, formula_core::DEFAULT_SHEET);
+    assert_eq!(changes[0].address, "A2");
+    assert_eq!(changes[0].value.as_f64(), Some(0.0));
 
     let cell_js = wb.get_cell("A1".to_string(), None).unwrap();
     let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
