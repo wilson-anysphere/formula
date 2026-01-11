@@ -234,3 +234,36 @@ test("OAuth2Manager: refresh token survives store reload", async () => {
   assert.equal(token2.accessToken, "access-2");
   assert.equal(refreshCalls, 2);
 });
+
+test("OAuth2Manager: clears persisted refresh token when the server returns invalid_grant", async () => {
+  const store = new InMemoryOAuthTokenStore();
+  const now = () => 1_000;
+  const { scopesHash, scopes } = normalizeScopes(["read"]);
+  await store.set(
+    { providerId: "example", scopesHash },
+    { providerId: "example", scopesHash, scopes, refreshToken: "bad-refresh" },
+  );
+
+  let refreshCalls = 0;
+  /** @type {typeof fetch} */
+  const mockFetch = async (url, init) => {
+    if (url !== "https://auth.example/token") throw new Error(`Unexpected URL: ${url}`);
+    const body = init?.body;
+    const params = body instanceof URLSearchParams ? body : new URLSearchParams(String(body ?? ""));
+    assert.equal(params.get("grant_type"), "refresh_token");
+    refreshCalls++;
+    return jsonResponse({ error: "invalid_grant", error_description: "revoked" }, 400);
+  };
+
+  const manager = new OAuth2Manager({ tokenStore: store, fetch: mockFetch, now });
+  manager.registerProvider({ id: "example", clientId: "client", tokenEndpoint: "https://auth.example/token" });
+
+  await assert.rejects(
+    () => manager.getAccessToken({ providerId: "example", scopes: ["read"] }),
+    /Re-authentication is required/,
+  );
+  assert.equal(refreshCalls, 1);
+
+  const entry = await store.get({ providerId: "example", scopesHash });
+  assert.equal(entry, null);
+});

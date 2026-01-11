@@ -1,4 +1,4 @@
-import { OAuth2TokenClient } from "./tokenClient.js";
+import { OAuth2TokenClient, OAuth2TokenError } from "./tokenClient.js";
 import { InMemoryOAuthTokenStore, normalizeScopes } from "./tokenStore.js";
 import { createCodeChallenge, createCodeVerifier } from "./pkce.js";
 
@@ -232,14 +232,29 @@ export class OAuth2Manager {
       );
     }
 
-    const refreshed = await this.client.refreshToken({
-      tokenEndpoint: params.provider.tokenEndpoint,
-      clientId: params.provider.clientId,
-      clientSecret: params.provider.clientSecret,
-      refreshToken: cached.refreshToken,
-      scopes: params.scopes,
-      signal: params.signal,
-    });
+    /** @type {import("./tokenClient.js").OAuth2TokenResponse} */
+    let refreshed;
+    try {
+      refreshed = await this.client.refreshToken({
+        tokenEndpoint: params.provider.tokenEndpoint,
+        clientId: params.provider.clientId,
+        clientSecret: params.provider.clientSecret,
+        refreshToken: cached.refreshToken,
+        scopes: params.scopes,
+        signal: params.signal,
+      });
+    } catch (err) {
+      // If a refresh token has been revoked, clear persisted state so callers can
+      // fall back to an interactive/device-code flow.
+      if (err instanceof OAuth2TokenError && err.error === "invalid_grant") {
+        this.cache.delete(cacheKey);
+        await this.tokenStore.delete(params.storeKey);
+        throw new Error(`OAuth2 refresh token was rejected for provider '${params.provider.id}'. Re-authentication is required.`, {
+          cause: err,
+        });
+      }
+      throw err;
+    }
 
     const accessToken = refreshed.access_token;
     const expiresInSeconds = parsePositiveInt(refreshed.expires_in);
