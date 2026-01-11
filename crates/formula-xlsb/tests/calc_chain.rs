@@ -1,4 +1,4 @@
-use formula_xlsb::{CellValue, OpenOptions, XlsbWorkbook};
+use formula_xlsb::{biff12_varint, CellValue, OpenOptions, XlsbWorkbook};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Cursor, Read, Write};
@@ -68,27 +68,15 @@ fn build_fixture_with_calc_chain(base_bytes: &[u8]) -> Vec<u8> {
 }
 
 fn read_record_id(buf: &[u8]) -> Option<(u32, usize)> {
-    let mut v: u32 = 0;
-    for i in 0..4 {
-        let byte = *buf.get(i)?;
-        v |= (byte as u32) << (8 * i);
-        if byte & 0x80 == 0 {
-            return Some((v, i + 1));
-        }
-    }
-    None
+    let mut cursor = Cursor::new(buf);
+    let id = biff12_varint::read_record_id(&mut cursor).ok()??;
+    Some((id, cursor.position() as usize))
 }
 
 fn read_record_len(buf: &[u8]) -> Option<(u32, usize)> {
-    let mut v: u32 = 0;
-    for i in 0..4 {
-        let byte = *buf.get(i)?;
-        v |= ((byte & 0x7F) as u32) << (7 * i);
-        if byte & 0x80 == 0 {
-            return Some((v, i + 1));
-        }
-    }
-    None
+    let mut cursor = Cursor::new(buf);
+    let len = biff12_varint::read_record_len(&mut cursor).ok()??;
+    Some((len, cursor.position() as usize))
 }
 
 fn tweak_first_float_cell(sheet_bytes: &[u8]) -> Vec<u8> {
