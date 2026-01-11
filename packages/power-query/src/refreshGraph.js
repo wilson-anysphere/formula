@@ -203,7 +203,7 @@ function findCycle(graph) {
  *   engine: QueryEngine;
  *   getContext?: () => QueryExecutionContext;
  *   concurrency?: number;
- }} RefreshOrchestratorOptions
+ * }} RefreshOrchestratorOptions
  */
 
 /**
