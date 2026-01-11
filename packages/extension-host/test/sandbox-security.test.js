@@ -134,6 +134,16 @@ test("sandbox: blocks disallowed Node builtin modules (including subpaths)", asy
     { request: "node:_http_server", normalized: "_http_server" }
   ];
 
+  // Newer Node versions ship additional node:-only builtins. Keep the sandbox locked down
+  // while allowing the test suite to run across versions.
+  const hostBuiltins = require("node:module").builtinModules;
+  if (hostBuiltins.includes("node:sqlite")) {
+    denied.push({ request: "node:sqlite", normalized: "sqlite" });
+  }
+  if (hostBuiltins.includes("node:sea")) {
+    denied.push({ request: "node:sea", normalized: "sea" });
+  }
+
   for (const { request, normalized } of denied) {
     await assert.rejects(
       () => host.executeCommand("sandboxTest.require", request),
