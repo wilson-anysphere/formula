@@ -845,3 +845,34 @@ test("Sheet-qualified range suggestions require quotes for sheet names that star
     `Expected a quoted numeric sheet range suggestion, got: ${quotedSuggestions.map((s) => s.text).join(", ")}`
   );
 });
+
+test("Sheet-qualified ranges are not suggested when the sheet name prefix is incomplete (can't be a pure insertion)", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(She!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.equal(suggestions.length, 0);
+});

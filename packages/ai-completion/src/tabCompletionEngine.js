@@ -377,23 +377,22 @@ export class TabCompletionEngine {
     const sheetArg = splitSheetQualifiedArg(rawPrefix);
     if (sheetArg) {
       const typedQuoted = rawPrefix.startsWith("'");
-      const matchingSheets = sheetNames
+      const sheetName = sheetNames
         .filter((s) => typeof s === "string" && s.length > 0)
-        .filter((s) => startsWithIgnoreCase(s, sheetArg.sheetPrefix));
-
-      for (const sheetName of matchingSheets) {
-        if (needsSheetQuotes(sheetName) && !typedQuoted) continue;
-
-        const rangeCandidates = suggestRanges({
-          currentArgText: sheetArg.rangePrefix,
-          cellRef,
-          surroundingCells: context.surroundingCells,
-          sheetName,
-        });
-        for (const candidate of rangeCandidates) {
-          addReplacement(`${rawPrefix}${candidate.range.slice(sheetArg.rangePrefix.length)}`, {
-            confidence: Math.min(0.85, candidate.confidence + 0.05),
+        .find((s) => s.toLowerCase() === sheetArg.sheetPrefix.toLowerCase());
+      if (sheetName) {
+        if (!(needsSheetQuotes(sheetName) && !typedQuoted)) {
+          const rangeCandidates = suggestRanges({
+            currentArgText: sheetArg.rangePrefix,
+            cellRef,
+            surroundingCells: context.surroundingCells,
+            sheetName,
           });
+          for (const candidate of rangeCandidates) {
+            addReplacement(`${rawPrefix}${candidate.range.slice(sheetArg.rangePrefix.length)}`, {
+              confidence: Math.min(0.85, candidate.confidence + 0.05),
+            });
+          }
         }
       }
     }
