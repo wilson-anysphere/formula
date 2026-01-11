@@ -1,8 +1,8 @@
 import { createEngineClient, type CellChange, type CellScalar } from "@formula/engine";
 import type { CellRange } from "@formula/grid";
-import { CanvasGrid, GridPlaceholder, type GridApi } from "@formula/grid";
+import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
 import { range0ToA1, toA1 } from "@formula/spreadsheet-frontend";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { EngineCellProvider } from "./EngineCellProvider";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
@@ -34,6 +34,12 @@ function isFormulaInput(value: CellScalar): value is string {
 }
 
 export function App() {
+  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const perfMode = params?.has("perf") ?? false;
+  return perfMode ? <PerfGridApp /> : <EngineDemoApp />;
+}
+
+function EngineDemoApp() {
   const [engineStatus, setEngineStatus] = useState("starting…");
   const engineRef = useRef<ReturnType<typeof createEngineClient> | null>(null);
   const [provider, setProvider] = useState<EngineCellProvider | null>(null);
@@ -394,6 +400,40 @@ export function App() {
         ) : (
           <GridPlaceholder />
         )}
+      </div>
+    </div>
+  );
+}
+
+function PerfGridApp(): React.ReactElement {
+  // +1 for frozen header row/col.
+  const rowCount = 1_000_000 + 1;
+  const colCount = 100 + 1;
+  const frozenRows = 1;
+  const frozenCols = 1;
+
+  const apiRef = useRef<GridApi | null>(null);
+  const provider = useMemo(() => new MockCellProvider({ rowCount, colCount }), [rowCount, colCount]);
+
+  return (
+    <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
+      <h1 style={{ margin: 0 }}>Formula (Web Preview)</h1>
+      <p style={{ marginTop: 8, color: "#475569" }}>
+        Engine: <strong data-testid="engine-status">ready (mock)</strong>
+      </p>
+
+      <div data-testid="grid" style={{ marginTop: 16, height: 560 }}>
+        <CanvasGrid
+          provider={provider}
+          rowCount={rowCount}
+          colCount={colCount}
+          frozenRows={frozenRows}
+          frozenCols={frozenCols}
+          apiRef={(api) => {
+            apiRef.current = api;
+            (window as any).__gridApi = api;
+          }}
+        />
       </div>
     </div>
   );
