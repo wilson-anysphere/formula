@@ -663,8 +663,12 @@ fn render_smoke(doc: &formula_xlsx::XlsxDocument) -> Result<RenderDetails> {
         end_col,
     };
 
-    let col_widths_points = vec![64.0; end_col as usize];
-    let row_heights_points = vec![15.0; end_row as usize];
+    // Keep the smoke test cheap even for workbooks whose used range starts at very large
+    // row/column indexes. The print APIs treat missing widths/heights as 0.0 and we don't
+    // render cell text anyway, so a small fixed buffer is enough to validate "no panic +
+    // non-empty PDF output".
+    let col_widths_points = vec![64.0; max_cols as usize];
+    let row_heights_points = vec![15.0; max_rows as usize];
 
     let page_setup = formula_xlsx::print::PageSetup::default();
     let manual_breaks = formula_xlsx::print::ManualPageBreaks::default();

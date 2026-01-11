@@ -139,7 +139,16 @@ def _build_rust_helper() -> Path:
     """Build (or reuse) the Rust triage helper binary."""
 
     root = _repo_root()
-    target_dir = Path(os.environ.get("CARGO_TARGET_DIR") or (root / "target"))
+    target_dir_env = os.environ.get("CARGO_TARGET_DIR")
+    if target_dir_env:
+        target_dir = Path(target_dir_env)
+        # `cargo` interprets relative `CARGO_TARGET_DIR` paths relative to its working directory
+        # (we run it from `root`). Make sure we resolve the same way so `exe.exists()` works even
+        # when the caller runs this script from another CWD.
+        if not target_dir.is_absolute():
+            target_dir = root / target_dir
+    else:
+        target_dir = root / "target"
     exe = target_dir / "debug" / _rust_exe_name()
 
     try:
