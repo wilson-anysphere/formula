@@ -395,6 +395,10 @@ impl Workbook {
             self.defined_names.extend(duplicated);
         }
 
+        // The worksheet struct contains runtime-only caches (e.g. conditional formatting
+        // evaluation results). Since we mutate formulas/rules above, drop any copied caches.
+        new_sheet.clear_conditional_formatting_cache();
+
         // Excel inserts the copy immediately after the source sheet.
         self.sheets.insert(source_index + 1, new_sheet);
 
