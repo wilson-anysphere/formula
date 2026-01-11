@@ -1038,6 +1038,12 @@ impl AppState {
             .ok_or(AppStateError::NoWorkbookLoaded)?;
         self.engine = FormulaEngine::new();
 
+        // Create all sheets up-front so cross-sheet formula references resolve
+        // regardless of workbook sheet ordering.
+        for sheet in &workbook.sheets {
+            self.engine.ensure_sheet(&sheet.name);
+        }
+
         for sheet in &workbook.sheets {
             let sheet_name = &sheet.name;
             for ((row, col), cell) in sheet.cells_iter() {

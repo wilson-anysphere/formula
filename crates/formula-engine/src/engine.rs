@@ -203,6 +203,15 @@ impl Engine {
         &self.calc_settings
     }
 
+    /// Ensure a sheet exists in the workbook.
+    ///
+    /// This is useful for workbook load flows where formulas may refer to other sheets
+    /// that have not been populated yet; callers should create all sheets up-front
+    /// before setting formulas to ensure cross-sheet references resolve correctly.
+    pub fn ensure_sheet(&mut self, sheet: &str) {
+        self.workbook.ensure_sheet(sheet);
+    }
+
     pub fn set_calc_settings(&mut self, settings: CalcSettings) {
         self.calc_settings = settings;
     }
