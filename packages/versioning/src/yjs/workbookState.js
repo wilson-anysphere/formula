@@ -97,6 +97,34 @@ function commentSummaryFromValue(value, mapKey) {
 }
 
 /**
+ * Iterate legacy list items stored on a Map root (i.e. CRDT list items with
+ * `parentSub === null`).
+ *
+ * This happens if a document originally used the legacy Array schema, but the
+ * root was later instantiated as a Map (e.g. by calling `doc.getMap("comments")`
+ * first while the root was still an `AbstractType` placeholder). In that case
+ * the comments still exist in the CRDT but are invisible via `map.keys()`.
+ *
+ * @param {any} mapType
+ * @returns {Y.Map<any>[]} legacy comment maps
+ */
+function legacyListCommentsFromMapRoot(mapType) {
+  /** @type {Y.Map<any>[]} */
+  const out = [];
+  let item = mapType?._start ?? null;
+  while (item) {
+    if (!item.deleted && item.parentSub === null) {
+      const content = item.content?.getContent?.() ?? [];
+      for (const value of content) {
+        if (value instanceof Y.Map) out.push(value);
+      }
+    }
+    item = item.right;
+  }
+  return out;
+}
+
+/**
  * Extract a deterministic workbook state from a Yjs doc snapshot.
  *
  * @param {Y.Doc} doc
@@ -152,24 +180,31 @@ export function workbookStateFromYjsDoc(doc) {
     // appear as a generic `AbstractType` until a constructor is chosen.
     //
     // Importantly, calling `doc.getMap("comments")` on an Array-backed root can
-    // *silently* define it as a Map and make the array content inaccessible.
-    // To support both historical schemas (Map or Array) we peek at the
-    // underlying state before choosing a constructor.
-    const placeholder = doc.share.get("comments");
-    const hasStart = placeholder?._start != null; // sequence item => likely array
-    const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-    const kind = hasStart && mapSize === 0 ? "array" : "map";
+    // define it as a Map and make the array content inaccessible. To support
+    // both historical schemas (Map or Array) we peek at the underlying state
+    // before choosing a constructor.
+    const existing = doc.share.get("comments");
 
-    if (kind === "map") {
-      const commentsMap = doc.getMap("comments");
-      for (const key of Array.from(commentsMap.keys()).sort()) {
-        comments.set(key, commentSummaryFromValue(commentsMap.get(key), key));
+    // Canonical schema: Y.Map keyed by comment id.
+    if (existing instanceof Y.Map) {
+      const byId = new Map();
+      for (const key of Array.from(existing.keys()).sort()) {
+        byId.set(key, commentSummaryFromValue(existing.get(key), key));
       }
-    } else {
-      const commentsArray = doc.getArray("comments");
+      // Recovery: legacy list items stored on a Map root (see helper above).
+      for (const item of legacyListCommentsFromMapRoot(existing)) {
+        const id = coerceString(readYMapOrObject(item, "id"));
+        if (!id) continue;
+        if (byId.has(id)) continue;
+        byId.set(id, commentSummaryFromValue(item, id));
+      }
+      for (const id of Array.from(byId.keys()).sort()) {
+        comments.set(id, byId.get(id));
+      }
+    } else if (existing instanceof Y.Array) {
       /** @type {[string, CommentSummary][]} */
       const entries = [];
-      for (const item of commentsArray.toArray()) {
+      for (const item of existing.toArray()) {
         const id = coerceString(readYMapOrObject(item, "id"));
         if (!id) continue;
         entries.push([id, commentSummaryFromValue(item, id)]);
@@ -177,6 +212,41 @@ export function workbookStateFromYjsDoc(doc) {
       entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
       for (const [id, summary] of entries) {
         comments.set(id, summary);
+      }
+    } else {
+      const placeholder = existing;
+      const hasStart = placeholder?._start != null; // sequence item => likely array
+      const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+      const kind = hasStart && mapSize === 0 ? "array" : "map";
+
+      if (kind === "map") {
+        const commentsMap = doc.getMap("comments");
+        const byId = new Map();
+        for (const key of Array.from(commentsMap.keys()).sort()) {
+          byId.set(key, commentSummaryFromValue(commentsMap.get(key), key));
+        }
+        for (const item of legacyListCommentsFromMapRoot(commentsMap)) {
+          const id = coerceString(readYMapOrObject(item, "id"));
+          if (!id) continue;
+          if (byId.has(id)) continue;
+          byId.set(id, commentSummaryFromValue(item, id));
+        }
+        for (const id of Array.from(byId.keys()).sort()) {
+          comments.set(id, byId.get(id));
+        }
+      } else {
+        const commentsArray = doc.getArray("comments");
+        /** @type {[string, CommentSummary][]} */
+        const entries = [];
+        for (const item of commentsArray.toArray()) {
+          const id = coerceString(readYMapOrObject(item, "id"));
+          if (!id) continue;
+          entries.push([id, commentSummaryFromValue(item, id)]);
+        }
+        entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+        for (const [id, summary] of entries) {
+          comments.set(id, summary);
+        }
       }
     }
   }

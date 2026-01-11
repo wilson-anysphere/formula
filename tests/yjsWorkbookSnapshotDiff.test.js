@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import * as Y from "yjs";
 
 import { diffYjsWorkbookSnapshots } from "../packages/versioning/src/index.js";
+import { workbookStateFromYjsDoc } from "../packages/versioning/src/yjs/workbookState.js";
 
 test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
   const doc = new Y.Doc();
@@ -165,4 +166,36 @@ test("diffYjsWorkbookSnapshots supports comments stored as a Y.Array", () => {
   const sheet1Diff = diff.cellsBySheet.find((entry) => entry.sheetId === "sheet1")?.diff;
   assert.ok(sheet1Diff);
   assert.equal(sheet1Diff.moved.length, 1);
+});
+
+test("workbookStateFromYjsDoc supports legacy list comments stored inside a Y.Map root (clobbered schema)", () => {
+  const source = new Y.Doc();
+  const comments = source.getArray("comments");
+
+  const comment = new Y.Map();
+  comment.set("id", "c1");
+  comment.set("cellRef", "A1");
+  comment.set("content", "Original comment");
+  comment.set("resolved", false);
+  comment.set("replies", new Y.Array());
+  comments.push([comment]);
+
+  const snapshot = Y.encodeStateAsUpdate(source);
+
+  const doc = new Y.Doc();
+  Y.applyUpdate(doc, snapshot);
+
+  // Simulate the historical bug: instantiating as a map first makes the array
+  // inaccessible via `doc.getArray("comments")`, but the list items still exist.
+  doc.getMap("comments");
+
+  const state = workbookStateFromYjsDoc(doc);
+  assert.equal(state.comments.size, 1);
+  assert.deepEqual(state.comments.get("c1"), {
+    id: "c1",
+    cellRef: "A1",
+    content: "Original comment",
+    resolved: false,
+    repliesLength: 0,
+  });
 });
