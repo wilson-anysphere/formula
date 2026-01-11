@@ -175,4 +175,60 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await page.mouse.click(h4Center.x, h4Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("H4");
   await expect(page.getByTestId("formula-bar-value")).toHaveText("8");
+
+  // Multi-column series: J1:K2 = [[1,2],[3,4]] -> fill down to J4:K4.
+  const j1Center = await cellCenter(0, 9);
+  await page.mouse.click(j1Center.x, j1Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("J1");
+  await input.fill("1");
+  await input.press("Enter");
+
+  const k1Center = await cellCenter(0, 10);
+  await page.mouse.click(k1Center.x, k1Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("K1");
+  await input.fill("2");
+  await input.press("Enter");
+
+  const j2Center = await cellCenter(1, 9);
+  await page.mouse.click(j2Center.x, j2Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("J2");
+  await input.fill("3");
+  await input.press("Enter");
+
+  const k2Center = await cellCenter(1, 10);
+  await page.mouse.click(k2Center.x, k2Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("K2");
+  await input.fill("4");
+  await input.press("Enter");
+
+  await page.mouse.move(j1Center.x, j1Center.y);
+  await page.mouse.down();
+  await page.mouse.move(k2Center.x, k2Center.y);
+  await page.mouse.up();
+
+  const k2Handle = await fillHandleCenter();
+  const k4Center = await cellCenter(3, 10);
+  await page.mouse.move(k2Handle.x, k2Handle.y);
+  await page.mouse.down();
+  await page.mouse.move(k2Handle.x, k4Center.y);
+  await page.mouse.up();
+
+  const j3Center = await cellCenter(2, 9);
+  await page.mouse.click(j3Center.x, j3Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("J3");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("5");
+
+  const k3Center = await cellCenter(2, 10);
+  await page.mouse.click(k3Center.x, k3Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("K3");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("6");
+
+  const j4Center = await cellCenter(3, 9);
+  await page.mouse.click(j4Center.x, j4Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("J4");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("7");
+
+  await page.mouse.click(k4Center.x, k4Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("K4");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("8");
 });

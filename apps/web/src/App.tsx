@@ -568,45 +568,52 @@ function EngineDemoApp() {
     const sourceWidth = source0.endCol0Exclusive - source0.startCol0;
 
     const numericSeries = (() => {
-      const isVertical = direction === "down" || direction === "up";
-      const isHorizontal = direction === "left" || direction === "right";
+      const eps = 1e-9;
 
-      if (isVertical) {
-        if (sourceWidth !== 1 || sourceHeight < 2) return null;
-        const values: number[] = [];
-        for (let r = 0; r < sourceHeight; r++) {
-          const input = (sourceCells[r]?.[0]?.input ?? null) as CellScalar;
-          if (typeof input !== "number" || !Number.isFinite(input)) return null;
-          values.push(input);
-        }
-
+      const seriesFromValues = (values: number[]): { start: number; step: number } | null => {
+        if (values.length < 2) return null;
         const step = values[1] - values[0];
-        const eps = 1e-9;
         for (let i = 2; i < values.length; i++) {
           const delta = values[i] - values[i - 1]!;
           if (Math.abs(delta - step) > eps) return null;
         }
+        return { start: values[0]!, step };
+      };
 
-        return { axis: "row" as const, start: values[0]!, step };
+      const isVertical = direction === "down" || direction === "up";
+      if (isVertical && sourceHeight >= 2) {
+        const columns: Array<{ start: number; step: number } | null> = [];
+        for (let c = 0; c < sourceWidth; c++) {
+          const values: number[] = [];
+          for (let r = 0; r < sourceHeight; r++) {
+            const input = (sourceCells[r]?.[c]?.input ?? null) as CellScalar;
+            if (typeof input !== "number" || !Number.isFinite(input)) {
+              values.length = 0;
+              break;
+            }
+            values.push(input);
+          }
+          columns.push(values.length > 0 ? seriesFromValues(values) : null);
+        }
+        return columns.some((series) => series) ? ({ axis: "vertical" as const, columns } as const) : null;
       }
 
-      if (isHorizontal) {
-        if (sourceHeight !== 1 || sourceWidth < 2) return null;
-        const values: number[] = [];
-        for (let c = 0; c < sourceWidth; c++) {
-          const input = (sourceCells[0]?.[c]?.input ?? null) as CellScalar;
-          if (typeof input !== "number" || !Number.isFinite(input)) return null;
-          values.push(input);
+      const isHorizontal = direction === "left" || direction === "right";
+      if (isHorizontal && sourceWidth >= 2) {
+        const rows: Array<{ start: number; step: number } | null> = [];
+        for (let r = 0; r < sourceHeight; r++) {
+          const values: number[] = [];
+          for (let c = 0; c < sourceWidth; c++) {
+            const input = (sourceCells[r]?.[c]?.input ?? null) as CellScalar;
+            if (typeof input !== "number" || !Number.isFinite(input)) {
+              values.length = 0;
+              break;
+            }
+            values.push(input);
+          }
+          rows.push(values.length > 0 ? seriesFromValues(values) : null);
         }
-
-        const step = values[1] - values[0];
-        const eps = 1e-9;
-        for (let i = 2; i < values.length; i++) {
-          const delta = values[i] - values[i - 1]!;
-          if (Math.abs(delta - step) > eps) return null;
-        }
-
-        return { axis: "col" as const, start: values[0]!, step };
+        return rows.some((series) => series) ? ({ axis: "horizontal" as const, rows } as const) : null;
       }
 
       return null;
@@ -617,15 +624,22 @@ function EngineDemoApp() {
     const updates: Array<{ address: string; value: CellScalar; sheet: string }> = [];
     for (let row0 = fillArea0.startRow0; row0 < fillArea0.endRow0Exclusive; row0++) {
       for (let col0 = fillArea0.startCol0; col0 < fillArea0.endCol0Exclusive; col0++) {
-        if (numericSeries?.axis === "row") {
-          const k = row0 - source0.startRow0;
-          updates.push({ address: toA1(row0, col0), value: numericSeries.start + numericSeries.step * k, sheet: activeSheet });
-          continue;
+        if (numericSeries?.axis === "vertical") {
+          const series = numericSeries.columns[col0 - source0.startCol0];
+          if (series) {
+            const k = row0 - source0.startRow0;
+            updates.push({ address: toA1(row0, col0), value: series.start + series.step * k, sheet: activeSheet });
+            continue;
+          }
         }
-        if (numericSeries?.axis === "col") {
-          const k = col0 - source0.startCol0;
-          updates.push({ address: toA1(row0, col0), value: numericSeries.start + numericSeries.step * k, sheet: activeSheet });
-          continue;
+
+        if (numericSeries?.axis === "horizontal") {
+          const series = numericSeries.rows[row0 - source0.startRow0];
+          if (series) {
+            const k = col0 - source0.startCol0;
+            updates.push({ address: toA1(row0, col0), value: series.start + series.step * k, sheet: activeSheet });
+            continue;
+          }
         }
 
         const sourceRowOffset = mod(row0 - source0.startRow0, sourceHeight);
