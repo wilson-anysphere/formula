@@ -1804,6 +1804,7 @@ dependencies = [
  "encoding_rs",
  "formula-format",
  "formula-model",
+ "tempfile",
  "thiserror 2.0.17",
 ]
 

@@ -410,6 +410,24 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 "failed to read formulas for sheet `{sheet_name}`: {err}"
             ))),
         }
+
+        // `calamine` does not surface `BLANK` records via `used_cells()`, but Excel
+        // allows formatting empty cells. Apply any XF-derived number formats to
+        // the sheet even when the value is empty so those cells round-trip.
+        if let (Some(xf_style_ids), Some(sheet_cell_xfs)) = (xf_style_ids.as_deref(), sheet_cell_xfs)
+        {
+            for (&cell_ref, &xf_idx) in sheet_cell_xfs {
+                if cell_ref.row >= EXCEL_MAX_ROWS || cell_ref.col >= EXCEL_MAX_COLS {
+                    continue;
+                }
+                let style_id = xf_style_ids.get(xf_idx as usize).copied().flatten();
+                let Some(style_id) = style_id else {
+                    continue;
+                };
+                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                sheet.set_style_id(anchor, style_id);
+            }
+        }
     }
 
     Ok(XlsImportResult {
