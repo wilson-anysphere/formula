@@ -197,6 +197,67 @@ function addEventHandler(event, handler) {
   });
 }
 
+function attachNonEnumerableMethods(target, methods) {
+  if (!target || typeof target !== "object") return target;
+  if (!methods || typeof methods !== "object") return target;
+  for (const [name, fn] of Object.entries(methods)) {
+    if (typeof fn !== "function") continue;
+    if (Object.prototype.hasOwnProperty.call(target, name)) continue;
+    Object.defineProperty(target, name, { value: fn, enumerable: false });
+  }
+  return target;
+}
+
+function enhanceWorkbook(workbook) {
+  if (!workbook || typeof workbook !== "object") return workbook;
+  const obj = { ...workbook };
+
+  return attachNonEnumerableMethods(obj, {
+    async save() {
+      await rpcCall("workbook", "save", []);
+    },
+    async saveAs(workbookPath) {
+      await rpcCall("workbook", "saveAs", [String(workbookPath)]);
+      const updated = await rpcCall("workbook", "getActiveWorkbook", []);
+      if (updated && typeof updated === "object") {
+        obj.name = updated.name;
+        obj.path = updated.path;
+      }
+    },
+    async close() {
+      await rpcCall("workbook", "close", []);
+      const updated = await rpcCall("workbook", "getActiveWorkbook", []);
+      if (updated && typeof updated === "object") {
+        obj.name = updated.name;
+        obj.path = updated.path;
+      }
+    }
+  });
+}
+
+function enhanceSheet(sheet) {
+  if (!sheet || typeof sheet !== "object") return sheet;
+  const obj = { ...sheet };
+
+  return attachNonEnumerableMethods(obj, {
+    async activate() {
+      const updated = await rpcCall("sheets", "activateSheet", [obj.name]);
+      if (updated && typeof updated === "object") {
+        obj.id = updated.id;
+        obj.name = updated.name;
+      }
+      return obj;
+    },
+    async rename(newName) {
+      const from = obj.name;
+      const to = String(newName);
+      await rpcCall("sheets", "renameSheet", [from, to]);
+      obj.name = to;
+      return obj;
+    }
+  });
+}
+
 class DisposableImpl {
   constructor(disposeFn) {
     this._disposeFn = disposeFn;
@@ -274,15 +335,18 @@ const cells = {
 
 const workbook = {
   async getActiveWorkbook() {
-    return rpcCall("workbook", "getActiveWorkbook", []);
+    const result = await rpcCall("workbook", "getActiveWorkbook", []);
+    return enhanceWorkbook(result);
   },
 
   async openWorkbook(workbookPath) {
-    return rpcCall("workbook", "openWorkbook", [String(workbookPath)]);
+    const result = await rpcCall("workbook", "openWorkbook", [String(workbookPath)]);
+    return enhanceWorkbook(result);
   },
 
   async createWorkbook() {
-    return rpcCall("workbook", "createWorkbook", []);
+    const result = await rpcCall("workbook", "createWorkbook", []);
+    return enhanceWorkbook(result);
   },
 
   async save() {
@@ -300,19 +364,24 @@ const workbook = {
 
 const sheets = {
   async getActiveSheet() {
-    return rpcCall("sheets", "getActiveSheet", []);
+    const result = await rpcCall("sheets", "getActiveSheet", []);
+    return enhanceSheet(result);
   },
 
   async getSheet(name) {
-    return rpcCall("sheets", "getSheet", [String(name)]);
+    const result = await rpcCall("sheets", "getSheet", [String(name)]);
+    if (!result) return undefined;
+    return enhanceSheet(result);
   },
 
   async activateSheet(name) {
-    return rpcCall("sheets", "activateSheet", [String(name)]);
+    const result = await rpcCall("sheets", "activateSheet", [String(name)]);
+    return enhanceSheet(result);
   },
 
   async createSheet(name) {
-    return rpcCall("sheets", "createSheet", [String(name)]);
+    const result = await rpcCall("sheets", "createSheet", [String(name)]);
+    return enhanceSheet(result);
   },
 
   async renameSheet(oldName, newName) {

@@ -221,6 +221,64 @@ test("api surface: sheets.createSheet/renameSheet/getSheet manage workbook sheet
   assert.equal(result.missing, undefined);
 });
 
+test("api surface: sheet objects include activate/rename helpers", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sheet-object-helpers-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "sheetExt.objectHelpers";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "sheet-object-helpers-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Sheet Object Helpers" }] },
+      permissions: ["ui.commands", "sheets.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          const sheet = await formula.sheets.createSheet("Data");
+          const hasMethods = {
+            activate: typeof sheet.activate === "function",
+            rename: typeof sheet.rename === "function"
+          };
+
+          await sheet.rename("Data2");
+          await sheet.activate();
+          const active = await formula.sheets.getActiveSheet();
+          return { hasMethods, sheet, active };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result.hasMethods, { activate: true, rename: true });
+  assert.equal(result.sheet.name, "Data2");
+  assert.deepEqual(result.active, result.sheet);
+});
+
 test("permissions: sheets.createSheet requires sheets.manage", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sheets-deny-"));
   const extDir = path.join(dir, "ext");
@@ -834,6 +892,78 @@ test("api surface: workbook.saveAs updates workbook path and emits beforeSave", 
   assert.deepEqual(result, {
     evt: { workbook: { name: "Next.xlsx", path: nextPath } },
     workbook: { name: "Next.xlsx", path: nextPath }
+  });
+});
+
+test("api surface: workbook objects include save/saveAs/close helpers", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-object-helpers-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.objectHelpers";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-object-helpers-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook Object Helpers" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async (nextPath) => {
+          const workbook = await formula.workbook.getActiveWorkbook();
+          const hasMethods = {
+            save: typeof workbook.save === "function",
+            saveAs: typeof workbook.saveAs === "function",
+            close: typeof workbook.close === "function"
+          };
+
+          const beforeSavePromise = new Promise((resolve) => {
+            const disp = formula.events.onBeforeSave((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+
+          await workbook.saveAs(nextPath);
+          const evt = await beforeSavePromise;
+          const updated = await formula.workbook.getActiveWorkbook();
+          return { hasMethods, evt, updated };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const initialPath = path.join(dir, "Initial.xlsx");
+  host.openWorkbook(initialPath);
+
+  const nextPath = path.join(dir, "Next.xlsx");
+  const result = await host.executeCommand(commandId, nextPath);
+  assert.deepEqual(result, {
+    hasMethods: { save: true, saveAs: true, close: true },
+    evt: { workbook: { name: "Next.xlsx", path: nextPath } },
+    updated: { name: "Next.xlsx", path: nextPath }
   });
 });
 

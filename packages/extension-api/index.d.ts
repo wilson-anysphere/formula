@@ -16,11 +16,16 @@ export interface ExtensionContext {
 export interface Workbook {
   readonly name: string;
   readonly path?: string | null;
+  save(): Promise<void>;
+  saveAs(path: string): Promise<void>;
+  close(): Promise<void>;
 }
 
 export interface Sheet {
   readonly id: string;
   readonly name: string;
+  activate(): Promise<Sheet>;
+  rename(name: string): Promise<Sheet>;
 }
 
 export interface Range {
