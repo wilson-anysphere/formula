@@ -49,6 +49,11 @@ Build the WASM artifacts (requires `wasm-pack` on your `PATH`):
 pnpm build:wasm
 ```
 
+This command:
+
+- builds deterministic wasm-pack output into `packages/engine/pkg/`
+- copies runtime assets into `apps/web/public/engine/` and `apps/desktop/public/engine/` so the worker can import them from a stable URL: `/engine/formula_wasm.js`
+
 The web + desktop Vite entrypoints run this automatically via `predev`/`prebuild` so `createEngineClient()` can load the engine without extra manual steps.
 
 Smoke-check that the generated wrapper (`packages/engine/pkg/formula_wasm.js`) exists:
