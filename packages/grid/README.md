@@ -100,3 +100,48 @@ Dragging the fill handle:
 `target` is the full extended range **including** `source`.
 
 Note: `@formula/grid` only handles interaction + rendering. Consumers are responsible for actually writing filled values/formulas into their backing store.
+
+## Selection + keyboard navigation
+
+When the grid container is focused, `CanvasGrid` supports spreadsheet-like navigation and selection:
+
+- Arrow keys move the active cell.
+- Shift+arrows extends the active selection range.
+- Ctrl/Cmd+arrows jump to the first/last row/col (data region, excluding header row/col when `frozenRows/frozenCols` are used as headers).
+- PageUp/PageDown (and Alt+PageUp/PageDown for horizontal paging).
+- Home/End (+Ctrl/Cmd for absolute edges).
+- Tab/Enter move the active cell; when a multi-cell range is selected, Tab/Enter move *within* the selection range (wrapping) instead of collapsing it.
+- Ctrl/Cmd+A selects all; Ctrl/Cmd+Space selects a column; Shift+Space selects a row.
+- Header pointer selection (when headers are enabled): click corner header selects all; click row/col headers select entire row/column.
+- Ctrl/Cmd+click adds a new selection range (multi-range selection); Shift+click/drag extends the active range without clearing others.
+
+## `GridApi` (React)
+
+Pass `apiRef` to `CanvasGrid` to obtain an imperative API:
+
+```tsx
+const apiRef = useRef<GridApi | null>(null);
+<CanvasGrid apiRef={(api) => (apiRef.current = api)} {...props} />;
+```
+
+Notable helpers:
+
+- `scrollToCell(row, col, { align, padding })` keeps a cell in view.
+- `getCellRect(row, col)` returns a viewport-space rect.
+  - If the cell is part of a merged range, this returns the merged bounds when possible.
+  - If a merge crosses frozen boundaries (frozen vs scrollable quadrants), the merged bounds cannot be represented as a single viewport rect; in that case this falls back to the merged anchor cell rect.
+- Multi-range selection helpers: `setSelectionRanges`, `getSelectionRanges`, `getActiveSelectionRangeIndex`.
+
+## Merged cells
+
+To enable merged-cell rendering and interactions, implement one of these optional `CellProvider` methods:
+
+- `getMergedRangeAt(row, col) -> MergedCellRange | null`
+- `getMergedRangesInRange(range) -> MergedCellRange[]` (bulk API; recommended for performance)
+
+Notes:
+
+- Ranges use **exclusive end** coordinates (`endRow/endCol`).
+- The merged “anchor” is always the top-left cell (`startRow/startCol`).
+- The renderer only draws text for anchor cells and suppresses interior gridlines.
+- Keyboard navigation and `scrollToCell` treat merged ranges as a single cell (jumping over interior merged cells).
