@@ -7,7 +7,9 @@ import { valueKey } from "./valueKey.js";
 import { deserializeAnyTable, deserializeTable, serializeAnyTable } from "./cache/serialize.js";
 import { FileConnector } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
+import { ODataConnector } from "./connectors/odata.js";
 import { SqlConnector } from "./connectors/sql.js";
+import { ODataFoldingEngine, buildODataUrl } from "./folding/odata.js";
 import { QueryFoldingEngine } from "./folding/sql.js";
 import { normalizePostgresPlaceholders, normalizeSqlServerPlaceholders } from "./folding/placeholders.js";
 import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parquetProjection.js";
@@ -129,11 +131,20 @@ async function loadDataIoModule() {
  * @property {number} outputRowCount
  * @property {{ key: string; hit: boolean } | undefined} [cache]
  * @property {{
+ *   kind: "sql";
  *   dialect?: import("./folding/dialect.js").SqlDialectName;
  *   planType: "local" | "sql" | "hybrid";
  *   sql: string;
  *   params: unknown[];
  *   steps: import("./folding/sql.js").FoldingExplainStep[];
+ *   // Index within the executed step list where local execution begins.
+ *   // Only present for hybrid plans.
+ *   localStepOffset?: number;
+ * } | {
+ *   kind: "odata";
+ *   planType: "local" | "odata" | "hybrid";
+ *   url: string;
+ *   steps: import("./folding/odata.js").ODataFoldingExplainStep[];
  *   // Index within the executed step list where local execution begins.
  *   // Only present for hybrid plans.
  *   localStepOffset?: number;
@@ -178,7 +189,7 @@ async function loadDataIoModule() {
  *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
  * } | undefined} [fileAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `FileConnector`.
- * @property {Partial<{ file: FileConnector; http: HttpConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
+ * @property {Partial<{ file: FileConnector; http: HttpConnector; odata: ODataConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
  * @property {import("./cache/cache.js").CacheManager | undefined} [cache]
  * @property {number | undefined} [defaultCacheTtlMs]
  * @property {{ enabled?: boolean; dialect?: import("./folding/dialect.js").SqlDialectName | import("./folding/dialect.js").SqlDialect } | undefined} [sqlFolding]
@@ -326,10 +337,12 @@ export class QueryEngine {
         stat: options.fileAdapter?.stat,
       });
     const httpConnector = options.connectors?.http ?? new HttpConnector({ fetchTable: options.apiAdapter?.fetchTable });
+    const odataConnector = options.connectors?.odata ?? new ODataConnector();
     const sqlConnector = options.connectors?.sql ?? new SqlConnector({ querySql: options.databaseAdapter?.querySql });
 
     this.connectors.set(fileConnector.id, fileConnector);
     this.connectors.set(httpConnector.id, httpConnector);
+    this.connectors.set(odataConnector.id, odataConnector);
     this.connectors.set(sqlConnector.id, sqlConnector);
 
     if (options.connectors) {
@@ -347,6 +360,7 @@ export class QueryEngine {
     this.sqlFoldingEnabled = options.sqlFolding?.enabled ?? true;
     this.sqlFoldingDialect = options.sqlFolding?.dialect ?? null;
     this.foldingEngine = new QueryFoldingEngine();
+    this.odataFoldingEngine = new ODataFoldingEngine();
 
     /** @type {Map<string, Promise<{ columns: string[], types?: Record<string, import("./model.js").DataType> }>>} */
     this.databaseSchemaCache = new Map();
@@ -838,16 +852,30 @@ export class QueryEngine {
       foldedPlan = foldingExplain.plan;
     }
 
+    /** @type {import("./folding/odata.js").ODataFoldingExplainResult | null} */
+    let odataFoldingExplain = null;
+    /** @type {import("./folding/odata.js").CompiledODataPlan | null} */
+    let odataFoldedPlan = null;
+    if (query.source.type === "odata") {
+      odataFoldingExplain = this.odataFoldingEngine.explain({ ...query, steps });
+      odataFoldedPlan = odataFoldingExplain.plan;
+    }
+
     /** @type {string | null} */
     let executedSql = null;
     /** @type {unknown[] | null} */
     let executedParams = null;
+    /** @type {string | null} */
+    let executedUrl = null;
     /** @type {number | undefined} */
     let localStepOffset = undefined;
 
     if (query.source.type === "database") {
       executedSql = query.source.query;
       executedParams = [];
+    }
+    if (query.source.type === "odata") {
+      executedUrl = query.source.url;
     }
 
     if (foldedPlan && Array.isArray(foldedPlan.diagnostics) && (this.privacyMode === "warn" || this.privacyMode === "enforce")) {
@@ -917,6 +945,38 @@ export class QueryEngine {
           localStepOffset,
         );
       }
+    } else if (
+      odataFoldedPlan &&
+      (odataFoldedPlan.type === "odata" || odataFoldedPlan.type === "hybrid") &&
+      query.source.type === "odata"
+    ) {
+      let queryOptions = odataFoldedPlan.query;
+      if (odataFoldedPlan.type === "odata" && typeof options.limit === "number" && Number.isFinite(options.limit)) {
+        const limitTop = Math.max(0, Math.trunc(options.limit));
+        const existingTop =
+          typeof queryOptions.top === "number" && Number.isFinite(queryOptions.top) ? Math.max(0, Math.trunc(queryOptions.top)) : null;
+        queryOptions = { ...queryOptions, top: existingTop == null ? limitTop : Math.min(existingTop, limitTop) };
+      }
+
+      executedUrl = buildODataUrl(query.source.url, queryOptions);
+      const sourceResult = await this.loadODataFeedWithMeta(query.source, queryOptions, callStack, options, state);
+      sources.push(...sourceResult.sources);
+      table = sourceResult.table;
+
+      if (odataFoldedPlan.type === "hybrid" && odataFoldedPlan.localSteps.length > 0) {
+        const offset = steps.indexOf(odataFoldedPlan.localSteps[0]);
+        localStepOffset = offset >= 0 ? offset : 0;
+        table = await this.executeSteps(
+          table,
+          odataFoldedPlan.localSteps,
+          context,
+          options,
+          state,
+          callStack,
+          sources,
+          localStepOffset,
+        );
+      }
     } else {
       let source = query.source;
       if (source.type === "parquet" && this.fileAdapter?.readBinary) {
@@ -967,6 +1027,7 @@ export class QueryEngine {
       folding:
       foldingExplain && query.source.type === "database" && executedSql && executedParams
           ? {
+              kind: "sql",
               dialect: foldedDialect ? (typeof foldedDialect === "string" ? foldedDialect : foldedDialect.name) : undefined,
               planType: foldingExplain.plan.type,
               sql: executedSql,
@@ -974,7 +1035,15 @@ export class QueryEngine {
               steps: foldingExplain.steps,
               localStepOffset: foldingExplain.plan.type === "hybrid" ? localStepOffset : undefined,
             }
-          : undefined,
+          : odataFoldingExplain && query.source.type === "odata" && executedUrl
+            ? {
+                kind: "odata",
+                planType: odataFoldingExplain.plan.type,
+                url: executedUrl,
+                steps: odataFoldingExplain.steps,
+                localStepOffset: odataFoldingExplain.plan.type === "hybrid" ? localStepOffset : undefined,
+              }
+            : undefined,
     };
 
     // Ensure the final materialized table is tagged with the full source set so
@@ -1190,6 +1259,17 @@ export class QueryEngine {
       return;
     }
 
+    if (source.type === "odata") {
+      const connector = this.connectors.get("odata");
+      if (!connector || typeof connector.getSourceState !== "function") return;
+      const request = { url: source.url, headers: source.headers ?? {}, auth: source.auth, rowsPath: source.rowsPath ?? source.jsonPath };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("odata", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+      if (!out.has(sourceKey)) out.set(sourceKey, { connector, request, credentials });
+      return;
+    }
+
     if (source.type === "database") {
       const connector = this.connectors.get("sql");
       if (!connector || typeof connector.getSourceState !== "function") return;
@@ -1387,6 +1467,30 @@ export class QueryEngine {
       const cacheable = credentials == null || credentialId != null;
       return {
         type: "api",
+        sourceId,
+        privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
+        request: connector.getCacheKey(request),
+        credentialsHash: credentialId ? hashValue(credentialId) : null,
+        $cacheable: cacheable,
+      };
+    }
+
+    if (source.type === "odata") {
+      const connector = this.connectors.get("odata");
+      if (!connector) return { type: "odata", missingConnector: "odata" };
+      const sourceId = getSourceIdForQuerySource(source);
+      const request = {
+        url: source.url,
+        headers: source.headers ?? {},
+        auth: source.auth,
+        rowsPath: source.rowsPath ?? source.jsonPath,
+      };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("odata", request, state);
+      const credentialId = extractCredentialId(credentials);
+      const cacheable = credentials == null || credentialId != null;
+      return {
+        type: "odata",
         sourceId,
         privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
         request: connector.getCacheKey(request),
@@ -1723,6 +1827,44 @@ export class QueryEngine {
       return { table: result.table, meta, sources: [meta] };
     }
 
+    if (source.type === "odata") {
+      const connector = this.connectors.get("odata");
+      if (!connector) throw new Error("OData source requires an ODataConnector");
+      const request = {
+        url: source.url,
+        headers: source.headers ?? {},
+        auth: source.auth,
+        rowsPath: source.rowsPath ?? source.jsonPath,
+      };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("odata", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+
+      const cacheMode = options.cache?.mode ?? "use";
+      const cacheValidation = options.cache?.validation ?? "source-state";
+      /** @type {import("./connectors/types.js").SourceState} */
+      let sourceState = {};
+      if (this.cache && cacheMode !== "bypass" && cacheValidation === "source-state" && typeof connector.getSourceState === "function") {
+        try {
+          sourceState = await connector.getSourceState(request, { signal: options.signal, credentials, now: state.now });
+        } catch {
+          sourceState = {};
+        }
+      }
+
+      const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? source.url]);
+      const meta = {
+        ...result.meta,
+        sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
+        etag: sourceState.etag ?? result.meta.etag,
+        sourceKey,
+      };
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { table: result.table, meta, sources: [meta] };
+    }
+
     if (source.type === "database") {
       const connector = this.connectors.get("sql");
       if (!connector) throw new Error("Database source requires a SqlConnector");
@@ -1767,6 +1909,64 @@ export class QueryEngine {
     /** @type {never} */
     const exhausted = source;
     throw new Error(`Unsupported source type '${exhausted.type}'`);
+  }
+
+  /**
+   * Execute an OData feed request through the OData connector while preserving
+   * the normal source metadata/progress reporting.
+   *
+   * This is used by OData folding execution to run a folded query-options plan.
+   *
+   * @private
+   * @param {import("./model.js").ODataQuerySource} source
+   * @param {import("./folding/odata.js").ODataQueryOptions} query
+   * @param {Set<string>} callStack
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @returns {Promise<{ table: DataTable, meta: ConnectorMeta, sources: ConnectorMeta[] }>}
+   */
+  async loadODataFeedWithMeta(source, query, callStack, options, state) {
+    throwIfAborted(options.signal);
+    options.onProgress?.({ type: "source:start", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: "odata" });
+
+    const connector = this.connectors.get("odata");
+    if (!connector) throw new Error("OData source requires an ODataConnector");
+
+    const request = {
+      url: source.url,
+      headers: source.headers ?? {},
+      auth: source.auth,
+      rowsPath: source.rowsPath ?? source.jsonPath,
+      query,
+    };
+
+    await this.assertPermission(connector.permissionKind, { source, request }, state);
+    const credentials = await this.getCredentials("odata", request, state);
+    const sourceKey = buildConnectorSourceKey(connector, request);
+
+    const cacheMode = options.cache?.mode ?? "use";
+    const cacheValidation = options.cache?.validation ?? "source-state";
+    /** @type {import("./connectors/types.js").SourceState} */
+    let sourceState = {};
+    if (this.cache && cacheMode !== "bypass" && cacheValidation === "source-state" && typeof connector.getSourceState === "function") {
+      try {
+        sourceState = await connector.getSourceState(request, { signal: options.signal, credentials, now: state.now });
+      } catch {
+        sourceState = {};
+      }
+    }
+
+    const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+    this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? source.url]);
+    const meta = {
+      ...result.meta,
+      sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
+      etag: sourceState.etag ?? result.meta.etag,
+      sourceKey,
+    };
+
+    options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: "odata" });
+    return { table: result.table, meta, sources: [meta] };
   }
 
   /**
@@ -1868,6 +2068,8 @@ export class QueryEngine {
         ? "sql"
         : sourceType === "api"
           ? "http"
+          : sourceType === "odata"
+            ? "odata"
           : sourceType === "csv" || sourceType === "json" || sourceType === "parquet"
             ? "file"
             : null;

@@ -50,3 +50,18 @@ in
   const query2 = compileMToQuery(printed);
   assert.deepEqual(toJson(query2), toJson(query));
 });
+
+test("m_language round-trip: prettyPrintQueryToM (OData.Feed)", () => {
+  const script = `
+let
+  Source = OData.Feed("https://example.com/odata/Products", [Headers=[Authorization="Bearer token"]]),
+  #"Selected Columns" = Table.SelectColumns(Source, {"Id", "Name"})
+in
+  #"Selected Columns"
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});

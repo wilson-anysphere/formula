@@ -103,6 +103,15 @@ function sourceToM(source) {
       const optText = Object.keys(opts).length ? `, ${valueToM(opts)}` : "";
       return `Web.Contents(${escapeMString(source.url)}${optText})`;
     }
+    case "odata": {
+      const opts = {};
+      if (source.headers && Object.keys(source.headers).length) opts.Headers = source.headers;
+      if (source.auth) opts.Auth = source.auth;
+      if (source.rowsPath) opts.RowsPath = source.rowsPath;
+      if (source.jsonPath) opts.JsonPath = source.jsonPath;
+      const optText = Object.keys(opts).length ? `, ${valueToM(opts)}` : "";
+      return `OData.Feed(${escapeMString(source.url)}${optText})`;
+    }
     case "database": {
       const c = source.connection;
       if (c && typeof c === "object" && c.kind === "odbc") {

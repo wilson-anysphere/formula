@@ -139,6 +139,8 @@ export function getSourceIdForQuerySource(source) {
       return getFileSourceId(source.path);
     case "api":
       return getHttpSourceId(source.url);
+    case "odata":
+      return getHttpSourceId(source.url);
     case "database": {
       const connectionId = source.connectionId;
       if (typeof connectionId === "string" && connectionId.length > 0) return getSqlSourceId(connectionId);
@@ -178,6 +180,11 @@ export function getSourceIdForProvenance(provenance) {
       return typeof path === "string" ? getFileSourceId(path) : null;
     }
     case "http": {
+      // @ts-ignore - runtime indexing
+      const url = provenance.url;
+      return typeof url === "string" ? getHttpSourceId(url) : null;
+    }
+    case "odata": {
       // @ts-ignore - runtime indexing
       const url = provenance.url;
       return typeof url === "string" ? getHttpSourceId(url) : null;

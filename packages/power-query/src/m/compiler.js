@@ -294,6 +294,51 @@ function compileSourceFunctionCall(ctx, name, expr) {
       const source = { type: "api", url, method, headers: /** @type {any} */ (headers) };
       return { source, steps: [], schema: null };
     }
+    case "OData.Feed": {
+      const urlExpr = expr.args[0];
+      if (!urlExpr) ctx.error(expr, "OData.Feed requires a URL");
+      const url = expectText(ctx, urlExpr);
+      const options = expr.args[1] ? evaluateRecordOptions(ctx, expr.args[1]) : {};
+
+      const headersRaw = options.headers;
+      const headers = headersRaw && typeof headersRaw === "object" && !Array.isArray(headersRaw) ? headersRaw : undefined;
+
+      /**
+       * @param {unknown} input
+       * @returns {import("../model.js").APIQuerySource["auth"] | undefined}
+       */
+      const parseAuth = (input) => {
+        if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+        /** @type {any} */
+        const record = input;
+        /** @type {any} */
+        const normalized = {};
+        for (const [k, v] of Object.entries(record)) {
+          const key = k.toLowerCase();
+          if (key === "type") normalized.type = v;
+          if (key === "providerid") normalized.providerId = v;
+          if (key === "scopes") normalized.scopes = v;
+        }
+        if (String(normalized.type ?? "").toLowerCase() !== "oauth2") return undefined;
+        if (typeof normalized.providerId !== "string" || !normalized.providerId) return undefined;
+        return { type: "oauth2", providerId: normalized.providerId, scopes: normalized.scopes };
+      };
+
+      const auth = parseAuth(options.auth);
+      const rowsPath = typeof options.rowsPath === "string" ? options.rowsPath : undefined;
+      const jsonPath = typeof options.jsonPath === "string" ? options.jsonPath : undefined;
+
+      /** @type {QuerySource} */
+      const source = {
+        type: "odata",
+        url,
+        headers: /** @type {any} */ (headers),
+        auth,
+        ...(rowsPath ? { rowsPath } : {}),
+        ...(jsonPath ? { jsonPath } : {}),
+      };
+      return { source, steps: [], schema: null };
+    }
     case "Odbc.Query": {
       const connExpr = expr.args[0];
       const queryExpr = expr.args[1];
@@ -1455,7 +1500,7 @@ function evaluateCallConstant(ctx, name, expr) {
  *
  * @param {CompilerContext} ctx
  * @param {MExpression} expr
- * @returns {{ delimiter?: unknown; hasHeaders?: unknown; headers?: unknown; method?: unknown; query?: unknown }}
+ * @returns {{ delimiter?: unknown; hasHeaders?: unknown; headers?: unknown; method?: unknown; query?: unknown; auth?: unknown; jsonPath?: unknown; rowsPath?: unknown }}
  */
 function evaluateRecordOptions(ctx, expr) {
   const value = evaluateConstant(ctx, expr);
@@ -1472,6 +1517,9 @@ function evaluateRecordOptions(ctx, expr) {
     if (key === "method") normalized.method = v;
     if (key === "query") normalized.query = v;
     if (key === "headers") normalized.headers = v;
+    if (key === "auth") normalized.auth = v;
+    if (key === "jsonpath") normalized.jsonPath = v;
+    if (key === "rowspath") normalized.rowsPath = v;
   }
 
   return normalized;

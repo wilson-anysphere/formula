@@ -1,0 +1,22 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "odata",
+    "url": "https://example.com/odata/Products",
+    "headers": {
+      "Authorization": "Bearer token"
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["Id", "Name"]
+      }
+    }
+  ]
+}
+

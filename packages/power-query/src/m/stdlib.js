@@ -36,6 +36,7 @@ export const SOURCE_FUNCTIONS = new Set([
   "Csv.Document",
   "Json.Document",
   "Web.Contents",
+  "OData.Feed",
   "Odbc.Query",
   "Sql.Database",
   "Range.FromValues",

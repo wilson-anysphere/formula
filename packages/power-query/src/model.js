@@ -106,13 +106,40 @@
 
 /**
  * @typedef {{
+ *   type: "odata";
+ *   /**
+    * Entity set endpoint URL.
+    *
+    * Example: `https://services.odata.org/V4/OData/OData.svc/Products`
+    */
+ *   url: string;
+ *   headers?: Record<string, string>;
+ *   // Optional per-request auth configuration (same shape as `api` sources).
+ *   auth?: { type: "oauth2"; providerId: string; scopes?: string[] | string };
+ *   /**
+    * Optional JSON path selecting the rows array from the response payload.
+    *
+    * OData v4 responses typically wrap rows as `{ value: [...] }`, so the default
+    * is `"value"`.
+    */
+ *   rowsPath?: string;
+ *   /**
+    * Backwards/interop alias for `rowsPath`. When both are provided, `rowsPath`
+    * wins.
+    */
+ *   jsonPath?: string;
+ * }} ODataQuerySource
+ */
+
+/**
+ * @typedef {{
  *   type: "query";
  *   queryId: string;
  * }} QueryRefSource
  */
 
 /**
- * @typedef {RangeQuerySource | TableQuerySource | CSVQuerySource | JSONQuerySource | ParquetQuerySource | DatabaseQuerySource | APIQuerySource | QueryRefSource} QuerySource
+ * @typedef {RangeQuerySource | TableQuerySource | CSVQuerySource | JSONQuerySource | ParquetQuerySource | DatabaseQuerySource | APIQuerySource | ODataQuerySource | QueryRefSource} QuerySource
  */
 
 /**
