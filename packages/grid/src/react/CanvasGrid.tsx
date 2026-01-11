@@ -1541,71 +1541,112 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         keyboardAnchorRef.current = null;
 
         const backward = event.shiftKey;
-        const stepRowForward = mergedAtCell ? mergedAtCell.endRow : activeRow + 1;
-        const stepRowBackward = mergedAtCell ? mergedAtCell.startRow - 1 : activeRow - 1;
-        const stepColForward = mergedAtCell ? mergedAtCell.endCol : activeCol + 1;
-        const stepColBackward = mergedAtCell ? mergedAtCell.startCol - 1 : activeCol - 1;
 
-        let nextRow = activeRow;
-        let nextCol = activeCol;
+        // When selection ranges include merged cells, treat merged ranges as a *single* tab stop
+        // (the anchor cell) and skip over interior merged cells.
+        const getMergedRangeAt = (row: number, col: number) => providerRef.current.getMergedRangeAt?.(row, col) ?? null;
 
-        if (event.key === "Tab") {
-          if (!backward) {
-            if (stepColForward < prevRange.endCol) {
-              nextCol = stepColForward;
-            } else if (activeRow + 1 < prevRange.endRow) {
-              nextRow = activeRow + 1;
-              nextCol = prevRange.startCol;
+        const nextCellInRange = (): { row: number; col: number } => {
+          let nextRow = activeRow;
+          let nextCol = activeCol;
+          const maxIterations = Math.min(10_000, Math.max(1, rangeArea(prevRange)) + 10);
+
+          for (let iter = 0; iter < maxIterations; iter++) {
+            if (event.key === "Tab") {
+              nextCol += backward ? -1 : 1;
+              if (nextCol >= prevRange.endCol) {
+                nextCol = prevRange.startCol;
+                nextRow += 1;
+                if (nextRow >= prevRange.endRow) nextRow = prevRange.startRow;
+              } else if (nextCol < prevRange.startCol) {
+                nextCol = prevRange.endCol - 1;
+                nextRow -= 1;
+                if (nextRow < prevRange.startRow) nextRow = prevRange.endRow - 1;
+              }
             } else {
-              nextRow = prevRange.startRow;
-              nextCol = prevRange.startCol;
+              nextRow += backward ? -1 : 1;
+              if (nextRow >= prevRange.endRow) {
+                nextRow = prevRange.startRow;
+                nextCol += 1;
+                if (nextCol >= prevRange.endCol) nextCol = prevRange.startCol;
+              } else if (nextRow < prevRange.startRow) {
+                nextRow = prevRange.endRow - 1;
+                nextCol -= 1;
+                if (nextCol < prevRange.startCol) nextCol = prevRange.endCol - 1;
+              }
             }
-          } else {
-            if (stepColBackward >= prevRange.startCol) {
-              nextCol = stepColBackward;
-            } else if (activeRow - 1 >= prevRange.startRow) {
-              nextRow = activeRow - 1;
-              nextCol = prevRange.endCol - 1;
-            } else {
-              nextRow = prevRange.endRow - 1;
-              nextCol = prevRange.endCol - 1;
+
+            while (true) {
+              const merged = getMergedRangeAt(nextRow, nextCol);
+              if (!merged) break;
+              if (merged.startRow === nextRow && merged.startCol === nextCol) break;
+
+              if (event.key === "Tab") {
+                if (!backward) {
+                  nextCol = merged.endCol;
+                  if (nextCol >= prevRange.endCol) {
+                    nextCol = prevRange.startCol;
+                    nextRow += 1;
+                    if (nextRow >= prevRange.endRow) nextRow = prevRange.startRow;
+                  }
+                } else {
+                  if (nextRow === merged.startRow) {
+                    nextRow = merged.startRow;
+                    nextCol = merged.startCol;
+                    break;
+                  }
+                  nextCol = merged.startCol - 1;
+                  if (nextCol < prevRange.startCol) {
+                    nextCol = prevRange.endCol - 1;
+                    nextRow -= 1;
+                    if (nextRow < prevRange.startRow) nextRow = prevRange.endRow - 1;
+                  }
+                }
+              } else {
+                if (!backward) {
+                  nextRow = merged.endRow;
+                  if (nextRow >= prevRange.endRow) {
+                    nextRow = prevRange.startRow;
+                    nextCol += 1;
+                    if (nextCol >= prevRange.endCol) nextCol = prevRange.startCol;
+                  }
+                } else {
+                  if (nextCol === merged.startCol) {
+                    nextRow = merged.startRow;
+                    nextCol = merged.startCol;
+                    break;
+                  }
+                  nextRow = merged.startRow - 1;
+                  if (nextRow < prevRange.startRow) {
+                    nextRow = prevRange.endRow - 1;
+                    nextCol -= 1;
+                    if (nextCol < prevRange.startCol) nextCol = prevRange.endCol - 1;
+                  }
+                }
+              }
             }
+
+            return { row: nextRow, col: nextCol };
           }
-        } else {
-          if (!backward) {
-            if (stepRowForward < prevRange.endRow) {
-              nextRow = stepRowForward;
-            } else if (stepColForward < prevRange.endCol) {
-              nextRow = prevRange.startRow;
-              nextCol = stepColForward;
-            } else {
-              nextRow = prevRange.startRow;
-              nextCol = prevRange.startCol;
-            }
-          } else {
-            if (stepRowBackward >= prevRange.startRow) {
-              nextRow = stepRowBackward;
-            } else if (stepColBackward >= prevRange.startCol) {
-              nextRow = prevRange.endRow - 1;
-              nextCol = stepColBackward;
-            } else {
-              nextRow = prevRange.endRow - 1;
-              nextCol = prevRange.endCol - 1;
-            }
-          }
-        }
+
+          return { row: activeRow, col: activeCol };
+        };
+
+        const next = nextCellInRange();
 
         const ranges = renderer.getSelectionRanges();
         const activeIndex = renderer.getActiveSelectionIndex();
-        renderer.setSelectionRanges(ranges, { activeIndex, activeCell: { row: nextRow, col: nextCol } });
-
-        renderer.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
-        syncScrollbars();
+        renderer.setSelectionRanges(ranges, { activeIndex, activeCell: next });
 
         const nextSelection = renderer.getSelection();
         const nextRange = renderer.getSelectionRange();
 
         announceSelection(nextSelection, nextRange);
+
+        if (nextSelection) {
+          renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
+          syncScrollbars();
+        }
 
         if (
           (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
@@ -1721,13 +1762,15 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       renderer.setSelection({ row: nextRow, col: nextCol });
     }
 
-    renderer.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
-    syncScrollbars();
-
     const nextSelection = renderer.getSelection();
     const nextRange = renderer.getSelectionRange();
 
     announceSelection(nextSelection, nextRange);
+
+    if (nextSelection) {
+      renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
+      syncScrollbars();
+    }
 
     if (
       (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||

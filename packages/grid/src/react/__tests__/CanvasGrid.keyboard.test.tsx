@@ -368,6 +368,95 @@ describe("CanvasGrid keyboard navigation", () => {
     host.remove();
   });
 
+  it("skips merged cell interiors when navigating within a selection range", async () => {
+    const merged = { startRow: 0, endRow: 2, startCol: 0, endCol: 2 };
+    const provider = {
+      getCell: (row: number, col: number) => ({ row, col, value: `${row},${col}` }),
+      getMergedRangeAt: (row: number, col: number) =>
+        row >= merged.startRow && row < merged.endRow && col >= merged.startCol && col < merged.endCol ? merged : null,
+      getMergedRangesInRange: (range: { startRow: number; endRow: number; startCol: number; endCol: number }) =>
+        range.startRow < merged.endRow && range.endRow > merged.startRow && range.startCol < merged.endCol && range.endCol > merged.startCol
+          ? [merged]
+          : []
+    };
+
+    const apiRef = React.createRef<GridApi>();
+    const onSelectionChange = vi.fn();
+    const onSelectionRangeChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={provider}
+          rowCount={10}
+          colCount={10}
+          apiRef={apiRef}
+          onSelectionChange={onSelectionChange}
+          onSelectionRangeChange={onSelectionRangeChange}
+        />
+      );
+    });
+
+    await act(async () => {
+      apiRef.current?.setSelectionRange({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
+    });
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    container.focus();
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    });
+
+    // Skip over the merged range (A1:B2) and land on the first non-merged cell (C1).
+    expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 2 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
+
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    });
+
+    // Wrap to the next row start, which is inside the merge; skip to C2 instead.
+    expect(apiRef.current?.getSelection()).toEqual({ row: 1, col: 2 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
+
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    });
+
+    // Wrap back to the beginning.
+    expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 0 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
+
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+    });
+
+    // Backwards wraps to the last non-merged cell.
+    expect(apiRef.current?.getSelection()).toEqual({ row: 1, col: 2 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
   it("treats frozen header rows/cols as the navigation origin", async () => {
     const apiRef = React.createRef<GridApi>();
     const onSelectionChange = vi.fn();
