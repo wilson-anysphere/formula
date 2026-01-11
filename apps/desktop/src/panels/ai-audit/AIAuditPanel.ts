@@ -1,7 +1,7 @@
-import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
 import type { AIAuditEntry, AIAuditStore } from "@formula/ai-audit/browser";
 
 import { createAuditLogExport, downloadAuditLogExport } from "./exportAuditLog";
+import { getDesktopAIAuditStore } from "../../ai/audit/auditStore";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -97,6 +97,7 @@ function formatToolCall(call: AIAuditEntry["tool_calls"][number]): string {
 }
 
 function extractWorkbookId(entry: AIAuditEntry): string | null {
+  if (typeof entry.workbook_id === "string" && entry.workbook_id.trim()) return entry.workbook_id;
   const input = entry.input as unknown;
   if (!input || typeof input !== "object") return null;
   const obj = input as Record<string, unknown>;
@@ -137,7 +138,7 @@ export interface CreateAIAuditPanelOptions {
 }
 
 export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
-  const store = options.store ?? new LocalStorageAIAuditStore();
+  const store = options.store ?? getDesktopAIAuditStore();
 
   const sessionInput = el("input", {
     type: "text",
@@ -225,13 +226,10 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     const workbookId = workbookInput.value.trim() || undefined;
 
     try {
-      const entries = await store.listEntries({ session_id });
-      const filtered = workbookId
-        ? entries.filter((entry) => extractWorkbookId(entry) === workbookId)
-        : entries;
-      currentEntries = filtered;
-      entriesMeta.textContent = `Showing ${filtered.length} entr${filtered.length === 1 ? "y" : "ies"}.`;
-      renderEntries(filtered);
+      const entries = await store.listEntries({ session_id, workbook_id: workbookId });
+      currentEntries = entries;
+      entriesMeta.textContent = `Showing ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.`;
+      renderEntries(entries);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       currentEntries = [];

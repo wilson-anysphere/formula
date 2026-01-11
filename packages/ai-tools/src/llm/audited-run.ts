@@ -9,6 +9,7 @@ import { classifyQueryNeedsTools, verifyToolUsage, type VerificationResult } fro
 export interface AuditedRunOptions {
   audit_store: AIAuditStore;
   session_id: string;
+  workbook_id?: string;
   user_id?: string;
   mode: AIMode;
   input: unknown;
@@ -69,6 +70,7 @@ export async function runChatWithToolsAuditedVerified(
   const recorder = new AIAuditRecorder({
     store: params.audit.audit_store,
     session_id: params.audit.session_id,
+    workbook_id: params.audit.workbook_id,
     user_id: params.audit.user_id,
     mode: params.audit.mode,
     input: params.audit.input,

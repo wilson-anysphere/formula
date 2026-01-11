@@ -6,18 +6,33 @@ import { InMemoryBinaryStorage } from "./storage.js";
 
 type SqlJsDatabase = any;
 
+export interface SqliteAIAuditStoreRetention {
+  /**
+   * Maximum number of rows to keep (newest retained). If unset, rows are unbounded.
+   */
+  max_entries?: number;
+  /**
+   * Maximum age in milliseconds. Rows older than (now - max_age_ms) are deleted
+   * at write-time. If unset, age-based retention is disabled.
+   */
+  max_age_ms?: number;
+}
+
 export interface SqliteAIAuditStoreOptions {
   storage?: SqliteBinaryStorage;
   locateFile?: (file: string, prefix?: string) => string;
+  retention?: SqliteAIAuditStoreRetention;
 }
 
 export class SqliteAIAuditStore implements AIAuditStore {
   private readonly db: SqlJsDatabase;
   private readonly storage: SqliteBinaryStorage;
+  private readonly retention: SqliteAIAuditStoreRetention;
 
-  private constructor(db: SqlJsDatabase, storage: SqliteBinaryStorage) {
+  private constructor(db: SqlJsDatabase, storage: SqliteBinaryStorage, retention: SqliteAIAuditStoreRetention) {
     this.db = db;
     this.storage = storage;
+    this.retention = retention;
     this.ensureSchema();
   }
 
@@ -26,7 +41,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
     const SQL = await initSqlJs({ locateFile: options.locateFile ?? locateSqlJsFile });
     const existing = await storage.load();
     const db = existing ? new SQL.Database(existing) : new SQL.Database();
-    return new SqliteAIAuditStore(db, storage);
+    return new SqliteAIAuditStore(db, storage, options.retention ?? {});
   }
 
   async logEntry(entry: AIAuditEntry): Promise<void> {
@@ -36,6 +51,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
         id,
         timestamp_ms,
         session_id,
+        workbook_id,
         user_id,
         mode,
         input_json,
@@ -47,13 +63,14 @@ export class SqliteAIAuditStore implements AIAuditStore {
         tool_calls_json,
         verification_json,
         user_feedback
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
     );
 
     stmt.run([
       entry.id,
       entry.timestamp_ms,
       entry.session_id,
+      entry.workbook_id ?? null,
       entry.user_id ?? null,
       entry.mode,
       JSON.stringify(entry.input ?? null),
@@ -68,15 +85,34 @@ export class SqliteAIAuditStore implements AIAuditStore {
     ]);
     stmt.free();
 
+    this.enforceRetention();
     await this.persist();
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
     const params: any[] = [];
     let sql = "SELECT * FROM ai_audit_log";
+    const where: string[] = [];
     if (filters.session_id) {
-      sql += " WHERE session_id = ?";
+      where.push("session_id = ?");
       params.push(filters.session_id);
+    }
+    if (filters.workbook_id) {
+      where.push("workbook_id = ?");
+      params.push(filters.workbook_id);
+    }
+    if (filters.mode) {
+      const modes = Array.isArray(filters.mode) ? filters.mode : [filters.mode];
+      if (modes.length === 1) {
+        where.push("mode = ?");
+        params.push(modes[0]);
+      } else if (modes.length > 1) {
+        where.push(`mode IN (${modes.map(() => "?").join(", ")})`);
+        params.push(...modes);
+      }
+    }
+    if (where.length > 0) {
+      sql += ` WHERE ${where.join(" AND ")}`;
     }
     sql += " ORDER BY timestamp_ms DESC";
     if (typeof filters.limit === "number") {
@@ -102,6 +138,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
         id TEXT PRIMARY KEY,
         timestamp_ms INTEGER NOT NULL,
         session_id TEXT NOT NULL,
+        workbook_id TEXT,
         user_id TEXT,
         mode TEXT NOT NULL,
         input_json TEXT NOT NULL,
@@ -114,13 +151,45 @@ export class SqliteAIAuditStore implements AIAuditStore {
         verification_json TEXT,
         user_feedback TEXT
       );
-
-      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_session ON ai_audit_log(session_id);
-      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_timestamp ON ai_audit_log(timestamp_ms);
     `);
 
     // Migrate databases created before verification was tracked.
     ensureColumnExists(this.db, "ai_audit_log", "verification_json", "TEXT");
+    // Migrate databases created before workbook metadata was tracked.
+    ensureColumnExists(this.db, "ai_audit_log", "workbook_id", "TEXT");
+
+    // Indexes should be created after migrations (so older databases missing columns
+    // don't error when we try to index them).
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_session ON ai_audit_log(session_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_workbook ON ai_audit_log(workbook_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_mode ON ai_audit_log(mode);
+      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_timestamp ON ai_audit_log(timestamp_ms);
+    `);
+  }
+
+  private enforceRetention(): void {
+    const maxAgeMs = this.retention.max_age_ms;
+    if (typeof maxAgeMs === "number" && Number.isFinite(maxAgeMs) && maxAgeMs > 0) {
+      const cutoff = Date.now() - maxAgeMs;
+      const stmt = this.db.prepare("DELETE FROM ai_audit_log WHERE timestamp_ms < ?;");
+      stmt.run([cutoff]);
+      stmt.free();
+    }
+
+    const maxEntries = this.retention.max_entries;
+    if (typeof maxEntries === "number" && Number.isFinite(maxEntries) && maxEntries > 0) {
+      const stmt = this.db.prepare(`
+        DELETE FROM ai_audit_log
+        WHERE id IN (
+          SELECT id FROM ai_audit_log
+          ORDER BY timestamp_ms DESC
+          LIMIT -1 OFFSET ?
+        );
+      `);
+      stmt.run([Math.floor(maxEntries)]);
+      stmt.free();
+    }
   }
 
   private async persist(): Promise<void> {
@@ -157,6 +226,7 @@ function deserializeRow(row: any): AIAuditEntry {
     id: String(row.id),
     timestamp_ms: Number(row.timestamp_ms),
     session_id: String(row.session_id),
+    workbook_id: row.workbook_id ? String(row.workbook_id) : undefined,
     user_id: row.user_id ? String(row.user_id) : undefined,
     mode: row.mode as any,
     input: row.input_json ? safeJsonParse(row.input_json) : null,

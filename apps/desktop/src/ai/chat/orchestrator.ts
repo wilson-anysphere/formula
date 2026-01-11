@@ -1,6 +1,5 @@
 import type { LLMClient, LLMMessage } from "../../../../../packages/llm/src/types.js";
 
-import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/local-storage-store.js";
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 import type { AIAuditEntry, AuditListFilters } from "../../../../../packages/ai-audit/src/types.js";
 
@@ -23,6 +22,7 @@ import type { DocumentController } from "../../document/documentController.js";
 
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
+import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -92,8 +92,8 @@ export interface AiChatOrchestratorOptions {
   createChart?: SpreadsheetApi["createChart"];
 
   /**
-   * If not provided, defaults to `LocalStorageAIAuditStore` (with in-memory
-   * fallback in non-browser environments).
+   * If not provided, defaults to the desktop audit store (sqlite-backed with
+   * LocalStorage fallback).
    */
   auditStore?: AIAuditStore;
   sessionId?: string;
@@ -133,7 +133,7 @@ export interface AiChatOrchestratorOptions {
  * - Writes audited runs to an `AIAuditStore`
  */
 export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
-  const auditStore = options.auditStore ?? new LocalStorageAIAuditStore();
+  const auditStore = options.auditStore ?? getDesktopAIAuditStore();
   const sessionId = options.sessionId ?? createSessionId(options.workbookId);
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
@@ -223,6 +223,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         audit: {
           audit_store: capturingAuditStore,
           session_id: sessionId,
+          workbook_id: options.workbookId,
           mode: "chat",
           model: options.model,
           input: {

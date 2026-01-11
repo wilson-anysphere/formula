@@ -9,8 +9,15 @@ export class MemoryAIAuditStore implements AIAuditStore {
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
-    const { session_id, limit } = filters;
-    const results = session_id ? this.entries.filter((entry) => entry.session_id === session_id) : [...this.entries];
+    const { session_id, workbook_id, mode, limit } = filters;
+    let results = session_id ? this.entries.filter((entry) => entry.session_id === session_id) : [...this.entries];
+    if (workbook_id) {
+      results = results.filter((entry) => entry.workbook_id === workbook_id);
+    }
+    if (mode) {
+      const modes = Array.isArray(mode) ? mode : [mode];
+      results = results.filter((entry) => modes.includes(entry.mode));
+    }
     results.sort((a, b) => b.timestamp_ms - a.timestamp_ms);
     return typeof limit === "number" ? results.slice(0, limit) : results;
   }

@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../../../app/spreadsheetApp";
 
+import { LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
+import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
+import { createRequire } from "node:module";
+
 const OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
 
 function createInMemoryLocalStorage(): Storage {
@@ -93,6 +97,13 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
   });
 
   it("opens via Cmd/Ctrl+K, previews tool changes, gates approval, applies in one undo step, and audits", async () => {
+    const require = createRequire(import.meta.url);
+    const locateFile = (file: string) => require.resolve(`sql.js/dist/${file}`);
+    const auditStore = await SqliteAIAuditStore.create({
+      storage: new LocalStorageBinaryStorage("ai_audit_inline_edit_test"),
+      locateFile,
+    });
+
     const root = document.createElement("div");
     root.tabIndex = 0;
     root.getBoundingClientRect = () =>
@@ -144,7 +155,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     };
 
     const app = new SpreadsheetApp(root, status, {
-      inlineEdit: { llmClient, model: "unit-test-model" },
+      inlineEdit: { llmClient, model: "unit-test-model", auditStore },
     });
 
     // Select an empty range so preview diffs are deterministic (SpreadsheetApp seeds A/B columns).
@@ -190,15 +201,12 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     expect(doc.getCell("Sheet1", "C2").value).toBeNull();
     expect(doc.getCell("Sheet1", "C3").value).toBeNull();
 
-    const rawAudit = localStorage.getItem("formula_ai_audit_log_entries");
-    expect(rawAudit).toBeTruthy();
-    const auditEntries = JSON.parse(rawAudit!);
-    expect(Array.isArray(auditEntries)).toBe(true);
-    expect(auditEntries.length).toBeGreaterThan(0);
-    expect(auditEntries[0].mode).toBe("inline_edit");
-    expect(auditEntries[0].input?.workbookId).toBe("local-workbook");
-    expect(auditEntries[0].tool_calls?.[0]?.name).toBe("set_range");
-    expect(auditEntries[0].tool_calls?.[0]?.approved).toBe(true);
+    const entries = await auditStore.listEntries({ workbook_id: "local-workbook", mode: "inline_edit" });
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[0]?.mode).toBe("inline_edit");
+    expect((entries[0] as any)?.input?.workbookId).toBe("local-workbook");
+    expect(entries[0]?.tool_calls?.[0]?.name).toBe("set_range");
+    expect(entries[0]?.tool_calls?.[0]?.approved).toBe(true);
   });
 
   it("uses the OpenAIClient fallback when no inlineEdit llmClient is injected (localStorage key)", async () => {

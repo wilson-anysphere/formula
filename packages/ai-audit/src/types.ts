@@ -31,6 +31,13 @@ export interface AIAuditEntry {
   id: string;
   timestamp_ms: number;
   session_id: string;
+  /**
+   * Optional workbook identifier used for server-side filtering in audit stores.
+   *
+   * This is intentionally separate from `session_id` because sessions may be
+   * regenerated within a workbook (or shared across workbooks in some hosts).
+   */
+  workbook_id?: string;
   user_id?: string;
 
   mode: AIMode;
@@ -49,5 +56,7 @@ export interface AIAuditEntry {
 
 export interface AuditListFilters {
   session_id?: string;
+  workbook_id?: string;
+  mode?: AIMode | AIMode[];
   limit?: number;
 }

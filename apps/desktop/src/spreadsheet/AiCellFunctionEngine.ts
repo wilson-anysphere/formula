@@ -2,7 +2,6 @@ import type { LLMClient, LLMMessage } from "../../../../packages/llm/src/types.j
 import { OpenAIClient } from "../../../../packages/llm/src/openai.js";
 
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
-import { LocalStorageAIAuditStore } from "../../../../packages/ai-audit/src/local-storage-store.js";
 import { AIAuditRecorder } from "../../../../packages/ai-audit/src/recorder.js";
 
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
@@ -11,6 +10,7 @@ import { createDefaultOrgPolicy } from "../../../../packages/security/dlp/src/po
 import { DLP_DECISION, evaluatePolicy } from "../../../../packages/security/dlp/src/policyEngine.js";
 
 import type { AiFunctionEvaluator, CellValue, SpreadsheetValue } from "./evaluateFormula.js";
+import { getDesktopAIAuditStore } from "../ai/audit/auditStore.js";
 
 export const AI_CELL_PLACEHOLDER = "#GETTING_DATA";
 export const AI_CELL_DLP_ERROR = "#DLP!";
@@ -22,6 +22,7 @@ export interface AiCellFunctionEngineOptions {
   llmClient?: LLMClient;
   model?: string;
   auditStore?: AIAuditStore;
+  workbookId?: string;
   sessionId?: string;
   userId?: string;
   onUpdate?: () => void;
@@ -62,6 +63,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly llmClient: LLMClient;
   private readonly model: string;
   private readonly auditStore: AIAuditStore;
+  private readonly workbookId?: string;
   private readonly sessionId: string;
   private readonly userId?: string;
   private readonly onUpdate?: () => void;
@@ -80,8 +82,9 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   constructor(options: AiCellFunctionEngineOptions = {}) {
     this.llmClient = options.llmClient ?? createDefaultClient();
     this.model = options.model ?? "gpt-4o-mini";
-    this.auditStore = options.auditStore ?? new LocalStorageAIAuditStore();
-    this.sessionId = options.sessionId ?? createSessionId("workbook");
+    this.auditStore = options.auditStore ?? getDesktopAIAuditStore();
+    this.workbookId = options.workbookId;
+    this.sessionId = options.sessionId ?? createSessionId(options.workbookId ?? "workbook");
     this.userId = options.userId;
     this.onUpdate = options.onUpdate;
 
@@ -195,6 +198,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       prompt: params.prompt,
       inputs_hash: params.inputsHash,
       cell: params.cellAddress,
+      workbookId: this.workbookId,
       dlp: {
         decision: params.dlp.decision,
         selectionClassification: params.dlp.selectionClassification,
@@ -205,6 +209,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const recorder = new AIAuditRecorder({
       store: this.auditStore,
       session_id: this.sessionId,
+      workbook_id: this.workbookId,
       user_id: this.userId,
       mode: "cell_function",
       input: auditInput,
@@ -369,6 +374,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const recorder = new AIAuditRecorder({
       store: this.auditStore,
       session_id: this.sessionId,
+      workbook_id: this.workbookId,
       user_id: this.userId,
       mode: "cell_function",
       model: this.model,
@@ -377,6 +383,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         prompt: params.prompt,
         inputs_hash: params.inputsHash,
         cell: params.cellAddress,
+        workbookId: this.workbookId,
         dlp: params.dlp,
         blocked: true,
       },

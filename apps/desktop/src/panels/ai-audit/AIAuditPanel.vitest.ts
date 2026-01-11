@@ -1,18 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
 import type { AIAuditEntry } from "@formula/ai-audit/browser";
+import { InMemoryBinaryStorage } from "@formula/ai-audit/browser";
+import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
+
+import { createRequire } from "node:module";
 
 import { createAIAuditPanel } from "./AIAuditPanel";
 
 describe("AIAuditPanel", () => {
-  it("renders entries from a LocalStorageAIAuditStore (most recent first)", async () => {
-    const store = new LocalStorageAIAuditStore({ key: `ai_audit_test_${Math.random().toString(16).slice(2)}` });
+  it("renders entries from a SqliteAIAuditStore (most recent first) and filters by workbook_id", async () => {
+    const require = createRequire(import.meta.url);
+    const locateFile = (file: string) => require.resolve(`sql.js/dist/${file}`);
+
+    const store = await SqliteAIAuditStore.create({ storage: new InMemoryBinaryStorage(), locateFile });
 
     const older: AIAuditEntry = {
       id: "audit-older",
       timestamp_ms: 1700000000000,
       session_id: "session-1",
+      workbook_id: "workbook-1",
       mode: "chat",
       input: { message: "older" },
       model: "model-older",
@@ -32,6 +39,7 @@ describe("AIAuditPanel", () => {
       id: "audit-newer",
       timestamp_ms: 1700000005000,
       session_id: "session-1",
+      workbook_id: "workbook-1",
       mode: "chat",
       input: { message: "newer" },
       model: "model-newer",
@@ -47,13 +55,25 @@ describe("AIAuditPanel", () => {
       latency_ms: 123,
     };
 
+    const differentWorkbook: AIAuditEntry = {
+      id: "audit-other-workbook",
+      timestamp_ms: 1700000007000,
+      session_id: "session-2",
+      workbook_id: "workbook-2",
+      mode: "chat",
+      input: { message: "other workbook" },
+      model: "model-other-workbook",
+      tool_calls: [],
+    };
+
     await store.logEntry(older);
     await store.logEntry(newer);
+    await store.logEntry(differentWorkbook);
 
     const container = document.createElement("div");
     document.body.appendChild(container);
 
-    const panel = createAIAuditPanel({ container, store });
+    const panel = createAIAuditPanel({ container, store, initialWorkbookId: "workbook-1" });
     await panel.ready;
 
     const entries = container.querySelectorAll('[data-testid="ai-audit-entry"]');
@@ -76,5 +96,17 @@ describe("AIAuditPanel", () => {
     // Verification details should be surfaced.
     expect(container.querySelectorAll('[data-testid="ai-audit-verification"]')).toHaveLength(2);
     expect(container.textContent).toContain("Verification:");
+
+    // Switching the workbook filter should update the results.
+    const workbookInput = container.querySelector<HTMLInputElement>('[data-testid="ai-audit-filter-workbook"]');
+    expect(workbookInput).toBeTruthy();
+    if (!workbookInput) return;
+
+    workbookInput.value = "workbook-2";
+    await panel.refresh();
+
+    const filteredEntries = container.querySelectorAll('[data-testid="ai-audit-entry"]');
+    expect(filteredEntries).toHaveLength(1);
+    expect(container.textContent).toContain("model-other-workbook");
   });
 });

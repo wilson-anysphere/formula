@@ -32,9 +32,16 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
-    const { session_id, limit } = filters;
+    const { session_id, workbook_id, mode, limit } = filters;
     const entries = this.loadEntries();
-    const filtered = session_id ? entries.filter((entry) => entry.session_id === session_id) : entries.slice();
+    let filtered = session_id ? entries.filter((entry) => entry.session_id === session_id) : entries.slice();
+    if (workbook_id) {
+      filtered = filtered.filter((entry) => entry.workbook_id === workbook_id);
+    }
+    if (mode) {
+      const modes = Array.isArray(mode) ? mode : [mode];
+      filtered = filtered.filter((entry) => modes.includes(entry.mode));
+    }
     filtered.sort((a, b) => b.timestamp_ms - a.timestamp_ms);
     return typeof limit === "number" ? filtered.slice(0, limit) : filtered;
   }

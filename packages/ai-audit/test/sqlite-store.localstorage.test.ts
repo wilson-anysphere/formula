@@ -59,23 +59,24 @@ describe("SqliteAIAuditStore (jsdom + LocalStorageBinaryStorage)", () => {
         locateFile: (file: string) => (file.endsWith(".wasm") ? wasmDataUrl : file)
       });
 
-      const entry: AIAuditEntry = {
-        id: `entry_${Date.now()}`,
-        timestamp_ms: Date.now(),
-        session_id: "session-1",
-        mode: "chat",
-        input: { prompt: "hello" },
-        model: "unit-test-model",
-        tool_calls: []
-      };
+       const entry: AIAuditEntry = {
+         id: `entry_${Date.now()}`,
+         timestamp_ms: Date.now(),
+         session_id: "session-1",
+         workbook_id: "workbook-1",
+         mode: "chat",
+         input: { prompt: "hello" },
+         model: "unit-test-model",
+         tool_calls: []
+       };
 
       await store.logEntry(entry);
 
-      const roundTrip = await SqliteAIAuditStore.create({
-        storage,
-        locateFile: (file: string) => (file.endsWith(".wasm") ? wasmDataUrl : file)
-      });
-      const entries = await roundTrip.listEntries({ session_id: "session-1" });
+       const roundTrip = await SqliteAIAuditStore.create({
+         storage,
+         locateFile: (file: string) => (file.endsWith(".wasm") ? wasmDataUrl : file)
+       });
+       const entries = await roundTrip.listEntries({ session_id: "session-1", workbook_id: "workbook-1", mode: "chat" });
 
       expect(entries.length).toBe(1);
       expect(entries[0]!.id).toBe(entry.id);

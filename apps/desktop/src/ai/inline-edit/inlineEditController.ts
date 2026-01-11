@@ -8,9 +8,9 @@ import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src
 import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
 
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
-import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/local-storage-store.js";
 
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
+import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { InlineEditOverlay } from "./inlineEditOverlay";
 
 const OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
@@ -132,7 +132,7 @@ export class InlineEditController {
         }
       };
 
-      const auditStore = this.options.auditStore ?? new LocalStorageAIAuditStore();
+      const auditStore = this.options.auditStore ?? getDesktopAIAuditStore();
       const sessionId = createSessionId();
       const workbookId = this.options.workbookId ?? "local-workbook";
 
@@ -150,12 +150,13 @@ export class InlineEditController {
           tool_executor: abortableToolExecutor as any,
           messages,
            audit: {
-             audit_store: auditStore,
-             session_id: sessionId,
-             mode: "inline_edit",
-             input: { prompt: params.prompt, selection: selectionRef, workbookId, sheetId: params.sheetId },
-             model
-           },
+              audit_store: auditStore,
+              session_id: sessionId,
+              workbook_id: workbookId,
+              mode: "inline_edit",
+              input: { prompt: params.prompt, selection: selectionRef, workbookId, sheetId: params.sheetId },
+              model
+            },
           require_approval: async (call) => {
             this.overlay.setRunning("Generating preview…");
             throwIfAborted(signal);

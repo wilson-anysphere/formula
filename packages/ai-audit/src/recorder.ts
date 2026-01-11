@@ -4,6 +4,7 @@ import type { AIAuditEntry, AIMode, TokenUsage, ToolCallLog, UserFeedback, AIVer
 export interface AIAuditRecorderOptions {
   store: AIAuditStore;
   session_id: string;
+  workbook_id?: string;
   mode: AIMode;
   input: unknown;
   model: string;
@@ -34,6 +35,7 @@ export class AIAuditRecorder {
       id: createAuditId(),
       timestamp_ms: options.timestamp_ms ?? Date.now(),
       session_id: options.session_id,
+      workbook_id: options.workbook_id,
       user_id: options.user_id,
       mode: options.mode,
       input: options.input,

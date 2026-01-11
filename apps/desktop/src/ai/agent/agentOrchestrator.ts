@@ -11,6 +11,7 @@ import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spread
 import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/types.js";
 
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
+import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 
 export interface AgentApprovalRequest {
   call: ToolCall;
@@ -76,7 +77,7 @@ export interface RunAgentTaskParams {
   workbookId: string;
   documentController: DocumentController;
   llmClient: LLMClient;
-  auditStore: AIAuditStore;
+  auditStore?: AIAuditStore;
   /**
    * Default sheet used when tool calls omit a sheet prefix (e.g. "A1" instead of "Sheet2!A1").
    * Defaults to "Sheet1".
@@ -153,6 +154,8 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
   if (!goal) {
     return { status: "error", session_id: createSessionId("agent"), error: "Goal is required." };
   }
+
+  const auditStore = params.auditStore ?? getDesktopAIAuditStore();
 
   const maxIterations = params.maxIterations ?? 20;
   const maxDurationMs = params.maxDurationMs ?? 5 * 60 * 1000;
@@ -319,17 +322,18 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     };
 
     const result = await guard(
-      runChatWithToolsAudited({
-        client: wrappedClient,
-        tool_executor: wrappedToolExecutor,
-        messages,
-        audit: {
-          audit_store: params.auditStore,
-          session_id: sessionId,
-          mode: "agent",
-          input: { goal, constraints: params.constraints ?? [], workbookId: params.workbookId },
-          model: params.model ?? "unknown"
-        },
+        runChatWithToolsAudited({
+          client: wrappedClient,
+          tool_executor: wrappedToolExecutor,
+          messages,
+          audit: {
+            audit_store: auditStore,
+            session_id: sessionId,
+            workbook_id: params.workbookId,
+            mode: "agent",
+            input: { goal, constraints: params.constraints ?? [], workbookId: params.workbookId },
+            model: params.model ?? "unknown"
+          },
         max_iterations: maxIterations,
         require_approval: requireApproval,
         continue_on_approval_denied: params.continueOnApprovalDenied,
