@@ -138,7 +138,10 @@ fn pivot_star_schema_groups_by_multiple_dimensions_and_supports_nested_measures(
 fn pivot_star_schema_respects_dimension_filters() {
     let model = build_star_schema_model();
 
-    let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
+    let measures = vec![
+        PivotMeasure::new("Total Sales", "[Total Sales]").unwrap(),
+        PivotMeasure::new("Double Sales", "[Double Sales]").unwrap(),
+    ];
     let group_by = vec![GroupByColumn::new("Products", "Category")];
     let filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
 
@@ -146,8 +149,8 @@ fn pivot_star_schema_respects_dimension_filters() {
     assert_eq!(
         result.rows,
         vec![
-            vec![Value::from("A"), 12.0.into()],
-            vec![Value::from("B"), 5.0.into()],
+            vec![Value::from("A"), 12.0.into(), 24.0.into()],
+            vec![Value::from("B"), 5.0.into(), 10.0.into()],
         ]
     );
 }
