@@ -713,13 +713,23 @@ export class ToolExecutor {
     const cells = this.spreadsheet.readRange(range);
     const values: number[] = [];
     let redactedCellCount = 0;
+    const cellAllowedCache = new Map<string, boolean>();
+    const isAllowedCell = (row: number, col: number) => {
+      if (!dlp || dlp.decision.decision !== DLP_DECISION.REDACT) return true;
+      const key = `${row},${col}`;
+      const cached = cellAllowedCache.get(key);
+      if (cached !== undefined) return cached;
+      const allowed = this.isDlpCellAllowed(dlp, row, col);
+      cellAllowedCache.set(key, allowed);
+      return allowed;
+    };
     for (let r = 0; r < cells.length; r++) {
       const row = cells[r]!;
       for (let c = 0; c < row.length; c++) {
         if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
           const rowIndex = range.startRow + r;
           const colIndex = range.startCol + c;
-          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+          if (!isAllowedCell(rowIndex, colIndex)) {
             redactedCellCount++;
             continue;
           }
@@ -774,7 +784,14 @@ export class ToolExecutor {
             break;
           }
           const pairs: Array<[number, number]> = [];
-          for (const row of cells) {
+          for (let r = 0; r < cells.length; r++) {
+            const row = cells[r]!;
+            if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+              const rowIndex = range.startRow + r;
+              const leftAllowed = isAllowedCell(rowIndex, range.startCol);
+              const rightAllowed = isAllowedCell(rowIndex, range.startCol + 1);
+              if (!leftAllowed || !rightAllowed) continue;
+            }
             const left = toNumber(row[0]!);
             const right = toNumber(row[1]!);
             if (left === null || right === null) continue;
