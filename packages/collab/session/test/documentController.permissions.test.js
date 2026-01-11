@@ -61,7 +61,7 @@ test("CollabSession↔DocumentController binder masks unreadable remote values/f
         startRow: 0,
         startCol: 0,
         endRow: 0,
-        endCol: 0,
+        endCol: 1,
         readAllowlist: ["u-a"],
         editAllowlist: [],
       },
@@ -74,15 +74,26 @@ test("CollabSession↔DocumentController binder masks unreadable remote values/f
   const binderA = bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
   const binderB = bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
 
-  sessionA.setCellFormula("Sheet1:0:0", "=TOP_SECRET()");
+  sessionA.setCellValue("Sheet1:0:0", "super secret");
+  sessionA.setCellFormula("Sheet1:0:1", "=TOP_SECRET()");
 
   await waitForCondition(() => {
     const cellA = dcA.getCell("Sheet1", "A1");
-    return cellA.formula === "=TOP_SECRET()" && cellA.value == null;
+    return cellA.value === "super secret" && cellA.formula == null;
   });
 
   await waitForCondition(() => {
     const cellB = dcB.getCell("Sheet1", "A1");
+    return cellB.value === "###" && cellB.formula == null;
+  });
+
+  await waitForCondition(() => {
+    const cellA = dcA.getCell("Sheet1", "B1");
+    return cellA.formula === "=TOP_SECRET()" && cellA.value == null;
+  });
+
+  await waitForCondition(() => {
+    const cellB = dcB.getCell("Sheet1", "B1");
     return cellB.value === "###" && cellB.formula == null;
   });
 
