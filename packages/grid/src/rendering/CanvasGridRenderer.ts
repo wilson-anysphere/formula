@@ -47,6 +47,8 @@ interface Selection {
   col: number;
 }
 
+export type ScrollToCellAlign = "auto" | "start" | "center" | "end";
+
 function isSameCellRange(a: CellRange | null, b: CellRange | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -165,7 +167,8 @@ export class CanvasGridRenderer {
   };
 
   private selection: Selection | null = null;
-  private selectionRange: CellRange | null = null;
+  private selectionRanges: CellRange[] = [];
+  private activeSelectionIndex = 0;
   private rangeSelection: CellRange | null = null;
 
   private remotePresences: GridPresence[] = [];
@@ -337,43 +340,43 @@ export class CanvasGridRenderer {
   }
 
   setSelection(selection: Selection | null): void {
-    const previousRange = this.selectionRange;
-    this.selection = selection;
-    this.selectionRange = selection
-      ? {
-          startRow: selection.row,
-          endRow: selection.row + 1,
-          startCol: selection.col,
-          endCol: selection.col + 1
-        }
-      : null;
+    const nextRanges = selection
+      ? [
+          {
+            startRow: selection.row,
+            endRow: selection.row + 1,
+            startCol: selection.col,
+            endCol: selection.col + 1
+          }
+        ]
+      : [];
 
-    this.invalidateSelection(previousRange, this.selectionRange);
+    this.setSelectionRanges(nextRanges, { activeIndex: 0, activeCell: selection });
   }
 
-  setSelectionRange(range: CellRange | null): void {
-    const previousRange = this.selectionRange;
-    const normalized = range ? this.normalizeSelectionRange(range) : null;
-
-    if (!normalized) {
-      this.selection = null;
-      this.selectionRange = null;
-      this.invalidateSelection(previousRange, null);
-      return;
-    }
-
-    const active = this.selection ?? { row: normalized.startRow, col: normalized.startCol };
-    this.selection = {
-      row: clamp(active.row, normalized.startRow, normalized.endRow - 1),
-      col: clamp(active.col, normalized.startCol, normalized.endCol - 1)
-    };
-    this.selectionRange = normalized;
-
-    this.invalidateSelection(previousRange, normalized);
+  setSelectionRange(range: CellRange | null, options?: { activeCell?: Selection | null }): void {
+    this.setSelectionRanges(range ? [range] : null, { activeIndex: 0, activeCell: options?.activeCell ?? undefined });
   }
 
   getSelectionRange(): CellRange | null {
-    return this.selectionRange;
+    return this.selectionRanges.length === 0 ? null : { ...this.selectionRanges[this.activeSelectionIndex] };
+  }
+
+  getSelectionRanges(): CellRange[] {
+    return this.selectionRanges.map((range) => ({ ...range }));
+  }
+
+  getActiveSelectionIndex(): number {
+    return this.activeSelectionIndex;
+  }
+
+  setActiveSelectionIndex(index: number): void {
+    if (!Number.isFinite(index)) return;
+    if (this.selectionRanges.length === 0) return;
+    const next = clamp(Math.trunc(index), 0, this.selectionRanges.length - 1);
+    if (next === this.activeSelectionIndex) return;
+    this.activeSelectionIndex = next;
+    this.markSelectionDirty();
   }
 
   getSelection(): Selection | null {
@@ -385,7 +388,149 @@ export class CanvasGridRenderer {
     const normalized = range ? this.normalizeSelectionRange(range) : null;
     if (isSameCellRange(previousRange, normalized)) return;
     this.rangeSelection = normalized;
-    this.invalidateSelection(previousRange, normalized);
+    this.markSelectionDirty();
+  }
+
+  setSelectionRanges(
+    ranges: CellRange[] | null,
+    options?: { activeIndex?: number; activeCell?: Selection | null }
+  ): void {
+    const previousRanges = this.selectionRanges;
+    const previousActiveIndex = this.activeSelectionIndex;
+
+    const normalizedRanges = (ranges ?? [])
+      .map((range) => this.normalizeSelectionRange(range))
+      .filter((range): range is CellRange => range !== null);
+
+    if (normalizedRanges.length === 0) {
+      this.selection = null;
+      this.selectionRanges = [];
+      this.activeSelectionIndex = 0;
+      if (previousRanges.length > 0) this.markSelectionDirty();
+      return;
+    }
+
+    const requestedIndex = options?.activeIndex ?? this.activeSelectionIndex;
+    const activeIndex = clampIndex(requestedIndex, 0, normalizedRanges.length - 1);
+
+    const activeRange = normalizedRanges[activeIndex];
+    const requestedCell = options?.activeCell ?? undefined;
+    const previousCell = this.selection;
+    const baseCell = requestedCell ?? previousCell ?? { row: activeRange.startRow, col: activeRange.startCol };
+
+    this.selection = {
+      row: clamp(baseCell.row, activeRange.startRow, activeRange.endRow - 1),
+      col: clamp(baseCell.col, activeRange.startCol, activeRange.endCol - 1)
+    };
+    this.selectionRanges = normalizedRanges;
+    this.activeSelectionIndex = activeIndex;
+
+    const rangesChanged =
+      previousRanges.length !== normalizedRanges.length ||
+      previousRanges.some((range, idx) => !CanvasGridRenderer.rangesEqual(range, normalizedRanges[idx]!));
+
+    if (
+      rangesChanged ||
+      previousActiveIndex !== activeIndex
+    ) {
+      this.markSelectionDirty();
+    }
+  }
+
+  addSelectionRange(range: CellRange): void {
+    const normalized = this.normalizeSelectionRange(range);
+    if (!normalized) return;
+
+    const nextRanges = [...this.selectionRanges.map((r) => ({ ...r })), normalized];
+    const nextIndex = nextRanges.length - 1;
+    this.setSelectionRanges(nextRanges, { activeIndex: nextIndex, activeCell: { row: normalized.startRow, col: normalized.startCol } });
+  }
+
+  scrollToCell(row: number, col: number, opts?: { align?: ScrollToCellAlign; padding?: number }): void {
+    const viewport = this.scroll.getViewportState();
+    const { rowCount, colCount } = this.scroll.getCounts();
+
+    if (!Number.isFinite(row) || !Number.isFinite(col)) return;
+    if (rowCount === 0 || colCount === 0) return;
+
+    if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return;
+
+    const align = opts?.align ?? "auto";
+    const padding = Math.max(0, opts?.padding ?? 0);
+
+    const current = this.scroll.getScroll();
+    let targetX = current.x;
+    let targetY = current.y;
+
+    const colAxis = this.scroll.cols;
+    const rowAxis = this.scroll.rows;
+
+    const viewStartX = viewport.frozenWidth + padding;
+    const viewEndX = Math.max(viewStartX, viewport.width - padding);
+    const viewCenterX = viewport.frozenWidth + Math.max(0, viewport.width - viewport.frozenWidth) / 2;
+
+    if (col >= viewport.frozenCols) {
+      const colX = colAxis.positionOf(col);
+      const width = colAxis.getSize(col);
+      const cellX = colX - current.x;
+      const cellEnd = cellX + width;
+
+      if (align === "start") {
+        targetX = colX - viewStartX;
+      } else if (align === "end") {
+        targetX = colX + width - viewEndX;
+      } else if (align === "center") {
+        targetX = colX + width / 2 - viewCenterX;
+      } else {
+        if (cellX < viewStartX) {
+          targetX = colX - viewStartX;
+        } else if (cellEnd > viewEndX) {
+          targetX = colX + width - viewEndX;
+        }
+      }
+    }
+
+    const viewStartY = viewport.frozenHeight + padding;
+    const viewEndY = Math.max(viewStartY, viewport.height - padding);
+    const viewCenterY = viewport.frozenHeight + Math.max(0, viewport.height - viewport.frozenHeight) / 2;
+
+    if (row >= viewport.frozenRows) {
+      const rowY = rowAxis.positionOf(row);
+      const height = rowAxis.getSize(row);
+      const cellY = rowY - current.y;
+      const cellEnd = cellY + height;
+
+      if (align === "start") {
+        targetY = rowY - viewStartY;
+      } else if (align === "end") {
+        targetY = rowY + height - viewEndY;
+      } else if (align === "center") {
+        targetY = rowY + height / 2 - viewCenterY;
+      } else {
+        if (cellY < viewStartY) {
+          targetY = rowY - viewStartY;
+        } else if (cellEnd > viewEndY) {
+          targetY = rowY + height - viewEndY;
+        }
+      }
+    }
+
+    const { maxScrollX, maxScrollY } = this.scroll.getMaxScroll();
+    targetX = clamp(targetX, 0, maxScrollX);
+    targetY = clamp(targetY, 0, maxScrollY);
+
+    if (targetX !== current.x || targetY !== current.y) {
+      this.setScroll(targetX, targetY);
+    }
+  }
+
+  getCellRect(row: number, col: number): Rect | null {
+    const viewport = this.scroll.getViewportState();
+    return this.cellRectInViewport(row, col, viewport, { clampToViewport: false });
+  }
+
+  getViewportState(): GridViewportState {
+    return this.scroll.getViewportState();
   }
 
   setRemotePresences(presences: GridPresence[] | null): void {
@@ -1980,30 +2125,47 @@ export class CanvasGridRenderer {
       }
     }
 
-    const range = this.selectionRange;
-    if (!range) return;
+    if (this.selectionRanges.length === 0) return;
 
-    const rects = this.rangeToViewportRects(range, viewport);
-    if (rects.length === 0) return;
+    const activeRange = this.selectionRanges[this.activeSelectionIndex];
+    const inactiveRanges = this.selectionRanges.filter((_, idx) => idx !== this.activeSelectionIndex);
 
-    ctx.fillStyle = this.theme.selectionFill;
-    for (const rect of rects) {
-      const clipped = intersectRect(rect, intersection);
-      if (!clipped) continue;
-      ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+    const drawRange = (range: CellRange, options: { fillAlpha: number; strokeAlpha: number; strokeWidth: number }) => {
+      const rects = this.rangeToViewportRects(range, viewport);
+      if (rects.length === 0) return;
+
+      ctx.save();
+
+      ctx.fillStyle = this.theme.selectionFill;
+      ctx.globalAlpha = options.fillAlpha;
+      for (const rect of rects) {
+        const clipped = intersectRect(rect, intersection);
+        if (!clipped) continue;
+        ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+      }
+
+      ctx.strokeStyle = this.theme.selectionBorder;
+      ctx.globalAlpha = options.strokeAlpha;
+      ctx.lineWidth = options.strokeWidth;
+      const inset = options.strokeWidth / 2;
+      for (const rect of rects) {
+        if (!intersectRect(rect, intersection)) continue;
+        if (rect.width <= options.strokeWidth || rect.height <= options.strokeWidth) continue;
+        ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - options.strokeWidth, rect.height - options.strokeWidth);
+      }
+
+      ctx.restore();
+    };
+
+    for (const range of inactiveRanges) {
+      drawRange(range, { fillAlpha: 2 / 3, strokeAlpha: 0.8, strokeWidth: 1 });
     }
 
-    ctx.strokeStyle = this.theme.selectionBorder;
-    ctx.lineWidth = 2;
-    for (const rect of rects) {
-      if (!intersectRect(rect, intersection)) continue;
-      if (rect.width <= 2 || rect.height <= 2) continue;
-      ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
-    }
+    drawRange(activeRange, { fillAlpha: 1, strokeAlpha: 1, strokeWidth: 2 });
 
     const handleSize = 8;
-    const handleRow = range.endRow - 1;
-    const handleCol = range.endCol - 1;
+    const handleRow = activeRange.endRow - 1;
+    const handleCol = activeRange.endCol - 1;
     const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);
     if (!handleCellRect) return;
     if (handleCellRect.width < handleSize || handleCellRect.height < handleSize) return;
@@ -2142,18 +2304,18 @@ export class CanvasGridRenderer {
     ctx.stroke();
   }
 
-  private cellRectInViewport(row: number, col: number, viewport: GridViewportState): Rect | null {
+  private cellRectInViewport(
+    row: number,
+    col: number,
+    viewport: GridViewportState,
+    options?: { clampToViewport?: boolean }
+  ): Rect | null {
     const rowCount = this.getRowCount();
     const colCount = this.getColCount();
     if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return null;
 
     const rowAxis = this.scroll.rows;
     const colAxis = this.scroll.cols;
-
-    const frozenWidth = viewport.frozenWidth;
-    const frozenHeight = viewport.frozenHeight;
-    const absScrollX = frozenWidth + viewport.scrollX;
-    const absScrollY = frozenHeight + viewport.scrollY;
 
     const colX = colAxis.positionOf(col);
     const rowY = rowAxis.positionOf(row);
@@ -2163,27 +2325,17 @@ export class CanvasGridRenderer {
     let x: number;
     let y: number;
 
-    if (row < viewport.frozenRows && col < viewport.frozenCols) {
-      x = colX;
-      y = rowY;
-    } else if (row < viewport.frozenRows) {
-      x = colX - absScrollX + frozenWidth;
-      y = rowY;
-    } else if (col < viewport.frozenCols) {
-      x = colX;
-      y = rowY - absScrollY + frozenHeight;
-    } else {
-      x = colX - absScrollX + frozenWidth;
-      y = rowY - absScrollY + frozenHeight;
-    }
+    const scrollCols = col >= viewport.frozenCols;
+    const scrollRows = row >= viewport.frozenRows;
+    x = scrollCols ? colX - viewport.scrollX : colX;
+    y = scrollRows ? rowY - viewport.scrollY : rowY;
 
     const rect = { x, y, width, height };
 
+    if (options?.clampToViewport === false) return rect;
+
     const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
     const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
-    const scrollRows = row >= viewport.frozenRows;
-    const scrollCols = col >= viewport.frozenCols;
-
     const quadrantRect: Rect = {
       x: scrollCols ? frozenWidthClamped : 0,
       y: scrollRows ? frozenHeightClamped : 0,
@@ -2194,43 +2346,9 @@ export class CanvasGridRenderer {
     return intersectRect(rect, quadrantRect);
   }
 
-  private selectionOverlayRects(range: CellRange | null, viewport: GridViewportState): Rect[] {
-    if (!range) return [];
-
-    const rects = this.rangeToViewportRects(range, viewport);
-
-    const handleSize = 8;
-    const handleRow = range.endRow - 1;
-    const handleCol = range.endCol - 1;
-
-    const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);
-    if (handleCellRect && handleCellRect.width >= handleSize && handleCellRect.height >= handleSize) {
-      rects.push({
-        x: handleCellRect.x + handleCellRect.width - handleSize / 2,
-        y: handleCellRect.y + handleCellRect.height - handleSize / 2,
-        width: handleSize,
-        height: handleSize
-      });
-    }
-
-    return rects;
-  }
-
-  private invalidateSelection(previousRange: CellRange | null, nextRange: CellRange | null): void {
+  private markSelectionDirty(): void {
     const viewport = this.scroll.getViewportState();
-    const padding = 4;
-
-    const dirtyRects = [
-      ...this.selectionOverlayRects(previousRange, viewport),
-      ...this.selectionOverlayRects(nextRange, viewport)
-    ];
-
-    if (dirtyRects.length === 0) return;
-
-    for (const rect of dirtyRects) {
-      this.dirty.selection.markDirty(padRect(rect, padding));
-    }
-
+    this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
     this.requestRender();
   }
 

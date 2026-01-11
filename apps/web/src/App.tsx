@@ -4,6 +4,7 @@ import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@fo
 import { range0ToA1, toA1 } from "@formula/spreadsheet-frontend";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 
+import { CellEditorOverlay } from "./CellEditorOverlay";
 import { EngineCellProvider } from "./EngineCellProvider";
 import { serializeGridToHtmlTable } from "./clipboard/html";
 import { parseTsvToGrid, serializeGridToTsv } from "./clipboard/tsv";
@@ -46,6 +47,8 @@ function EngineDemoApp() {
   const gridApiRef = useRef<GridApi | null>(null);
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
   const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
+  const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
+  const editingCellOriginalDraftRef = useRef("");
 
   const activeAddress = (() => {
     if (!activeCell) return null;
@@ -218,7 +221,7 @@ function EngineDemoApp() {
       return;
     }
 
-    if (isFormulaEditing) {
+    if (isFormulaEditing || editingCell) {
       return;
     }
 
@@ -236,7 +239,7 @@ function EngineDemoApp() {
       .catch(() => {
         // Ignore selection reads while the engine is initializing/tearing down.
       });
-  }, [provider, activeAddress, activeSheet, isFormulaEditing]);
+  }, [provider, activeAddress, activeSheet, isFormulaEditing, editingCell]);
 
   const commitDraft = async () => {
     const engine = engineRef.current;
@@ -259,8 +262,58 @@ function EngineDemoApp() {
     setActiveValue(updated.value as CellScalar);
   };
 
+  const focusGrid = () => {
+    const host = gridContainerRef.current;
+    if (!host) return;
+    const grid = host.querySelector<HTMLElement>('[data-testid="canvas-grid"]');
+    grid?.focus({ preventScroll: true });
+  };
+
+  const beginCellEdit = (request: { row: number; col: number; initialKey?: string }) => {
+    if (!provider) return;
+
+    // Ensure React state matches the cell the grid intends to edit, even if the
+    // selection hasn't changed (e.g., F2 or type-to-edit).
+    setActiveCell({ row: request.row, col: request.col });
+    gridApiRef.current?.scrollToCell(request.row, request.col, { align: "auto", padding: 8 });
+
+    editingCellOriginalDraftRef.current = draftRef.current;
+    cellSyncTokenRef.current++;
+    rangeInsertionRef.current = null;
+
+    if (request.initialKey !== undefined) {
+      draftRef.current = request.initialKey;
+      setDraft(request.initialKey);
+    }
+
+    setEditingCell({ row: request.row, col: request.col });
+  };
+
+  const cancelCellEdit = () => {
+    const original = editingCellOriginalDraftRef.current;
+    setEditingCell(null);
+    draftRef.current = original;
+    setDraft(original);
+    requestAnimationFrame(() => focusGrid());
+  };
+
+  const commitCellEdit = async (nav: { deltaRow: number; deltaCol: number }) => {
+    if (!editingCell) return;
+    const from = editingCell;
+    await commitDraft();
+    setEditingCell(null);
+
+    const nextRow = Math.max(0, Math.min(rowCount - 1, from.row + nav.deltaRow));
+    const nextCol = Math.max(0, Math.min(colCount - 1, from.col + nav.deltaCol));
+    requestAnimationFrame(() => {
+      gridApiRef.current?.setSelection(nextRow, nextCol);
+      gridApiRef.current?.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
+      focusGrid();
+    });
+  };
+
   const onSelectionChange = (cell: { row: number; col: number } | null) => {
-    if (isFormulaEditing) return;
+    if (isFormulaEditing || editingCell) return;
     setActiveCell(cell);
   };
 
@@ -584,28 +637,49 @@ function EngineDemoApp() {
         onCopy={handleGridCopy}
         onCut={handleGridCut}
         onPaste={handleGridPaste}
-        style={{ marginTop: 16, height: 560 }}
+        style={{ marginTop: 16, height: 560, position: "relative" }}
       >
         {provider ? (
-          <CanvasGrid
-            provider={provider}
-            rowCount={rowCount}
-            colCount={colCount}
-            frozenRows={frozenRows}
-            frozenCols={frozenCols}
-            apiRef={(api) => {
-              gridApiRef.current = api;
-              const params = new URLSearchParams(window.location.search);
-              if (params.has("e2e") || params.has("perf")) {
-                (window as any).__gridApi = api;
-              }
-            }}
-            onSelectionChange={onSelectionChange}
-            interactionMode={isFormulaEditing ? "rangeSelection" : "default"}
-            onRangeSelectionStart={beginRangeSelection}
-            onRangeSelectionChange={updateRangeSelection}
-            onRangeSelectionEnd={endRangeSelection}
-          />
+          <>
+            <CanvasGrid
+              provider={provider}
+              rowCount={rowCount}
+              colCount={colCount}
+              frozenRows={frozenRows}
+              frozenCols={frozenCols}
+              apiRef={(api) => {
+                gridApiRef.current = api;
+                const params = new URLSearchParams(window.location.search);
+                if (params.has("e2e") || params.has("perf")) {
+                  (window as any).__gridApi = api;
+                }
+              }}
+              onSelectionChange={onSelectionChange}
+              onRequestCellEdit={(request) => {
+                if (editingCell) return;
+                beginCellEdit(request);
+              }}
+              interactionMode={isFormulaEditing ? "rangeSelection" : "default"}
+              onRangeSelectionStart={beginRangeSelection}
+              onRangeSelectionChange={updateRangeSelection}
+              onRangeSelectionEnd={endRangeSelection}
+            />
+            <CellEditorOverlay
+              gridApi={gridApiRef.current}
+              cell={editingCell}
+              value={draft}
+              onChange={(value) => {
+                setDraft(value);
+                draftRef.current = value;
+                cellSyncTokenRef.current++;
+                rangeInsertionRef.current = null;
+              }}
+              onCommit={(nav) => {
+                void commitCellEdit(nav);
+              }}
+              onCancel={cancelCellEdit}
+            />
+          </>
         ) : (
           <GridPlaceholder />
         )}

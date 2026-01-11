@@ -6,6 +6,9 @@ import type { GridTheme } from "../theme/GridTheme";
 import { resolveGridTheme } from "../theme/GridTheme";
 import { resolveGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
+import type { GridViewportState } from "../virtualization/VirtualScrollManager";
+
+export type ScrollToCellAlign = "auto" | "start" | "center" | "end";
 
 export interface GridApi {
   scrollTo(x: number, y: number): void;
@@ -15,10 +18,16 @@ export interface GridApi {
   setSelection(row: number, col: number): void;
   setSelectionRange(range: CellRange | null): void;
   getSelectionRange(): CellRange | null;
+  setSelectionRanges(ranges: CellRange[] | null, opts?: { activeIndex?: number }): void;
+  getSelectionRanges(): CellRange[];
+  getActiveSelectionRangeIndex(): number;
   clearSelection(): void;
   getSelection(): { row: number; col: number } | null;
   getPerfStats(): Readonly<GridPerfStats> | null;
   setPerfStatsEnabled(enabled: boolean): void;
+  scrollToCell(row: number, col: number, opts?: { align?: ScrollToCellAlign; padding?: number }): void;
+  getCellRect(row: number, col: number): { x: number; y: number; width: number; height: number } | null;
+  getViewportState(): GridViewportState | null;
   /**
    * Set a transient range selection overlay.
    *
@@ -63,6 +72,7 @@ export interface CanvasGridProps {
   onRangeSelectionStart?: (range: CellRange) => void;
   onRangeSelectionChange?: (range: CellRange) => void;
   onRangeSelectionEnd?: (range: CellRange) => void;
+  onRequestCellEdit?: (request: { row: number; col: number; initialKey?: string }) => void;
   style?: React.CSSProperties;
   ariaLabel?: string;
   ariaLabelledBy?: string;
@@ -157,16 +167,21 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const onRangeSelectionStartRef = useRef(props.onRangeSelectionStart);
   const onRangeSelectionChangeRef = useRef(props.onRangeSelectionChange);
   const onRangeSelectionEndRef = useRef(props.onRangeSelectionEnd);
+  const onRequestCellEditRef = useRef(props.onRequestCellEdit);
 
   onSelectionChangeRef.current = props.onSelectionChange;
   onSelectionRangeChangeRef.current = props.onSelectionRangeChange;
   onRangeSelectionStartRef.current = props.onRangeSelectionStart;
   onRangeSelectionChangeRef.current = props.onRangeSelectionChange;
   onRangeSelectionEndRef.current = props.onRangeSelectionEnd;
+  onRequestCellEditRef.current = props.onRequestCellEdit;
 
   const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
+  const keyboardAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const selectionPointerIdRef = useRef<number | null>(null);
   const transientRangeRef = useRef<CellRange | null>(null);
+  const lastPointerViewportRef = useRef<{ x: number; y: number } | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
 
   const frozenRows = props.frozenRows ?? 0;
   const frozenCols = props.frozenCols ?? 0;
@@ -257,124 +272,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     hThumb.style.transform = `translateX(${hThumbMetrics.offset}px)`;
   };
 
-  const scrollCellIntoView = (row: number, col: number) => {
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-
-    const viewport = renderer.scroll.getViewportState();
-    const scroll = renderer.scroll.getScroll();
-
-    let nextScrollX = scroll.x;
-    let nextScrollY = scroll.y;
-
-    const scrollableWidth = Math.max(0, viewport.width - viewport.frozenWidth);
-    const scrollableHeight = Math.max(0, viewport.height - viewport.frozenHeight);
-
-    if (row >= viewport.frozenRows && scrollableHeight > 0) {
-      const rowTop = renderer.scroll.rows.positionOf(row);
-      const rowBottom = rowTop + renderer.scroll.rows.getSize(row);
-
-      const absScrollTop = viewport.frozenHeight + scroll.y;
-      const absScrollBottom = absScrollTop + scrollableHeight;
-
-      if (rowTop < absScrollTop) {
-        nextScrollY = rowTop - viewport.frozenHeight;
-      } else if (rowBottom > absScrollBottom) {
-        nextScrollY = rowBottom - viewport.frozenHeight - scrollableHeight;
-      }
-    }
-
-    if (col >= viewport.frozenCols && scrollableWidth > 0) {
-      const colLeft = renderer.scroll.cols.positionOf(col);
-      const colRight = colLeft + renderer.scroll.cols.getSize(col);
-
-      const absScrollLeft = viewport.frozenWidth + scroll.x;
-      const absScrollRight = absScrollLeft + scrollableWidth;
-
-      if (colLeft < absScrollLeft) {
-        nextScrollX = colLeft - viewport.frozenWidth;
-      } else if (colRight > absScrollRight) {
-        nextScrollX = colRight - viewport.frozenWidth - scrollableWidth;
-      }
-    }
-
-    if (nextScrollX !== scroll.x || nextScrollY !== scroll.y) {
-      renderer.setScroll(nextScrollX, nextScrollY);
-      syncScrollbars();
-    }
-  };
-
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.defaultPrevented) return;
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-
-    if (interactionModeRef.current !== "default") return;
-
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    if (props.rowCount <= 0 || props.colCount <= 0) return;
-
-    let deltaRow = 0;
-    let deltaCol = 0;
-
-    switch (event.key) {
-      case "ArrowUp":
-        deltaRow = -1;
-        break;
-      case "ArrowDown":
-        deltaRow = 1;
-        break;
-      case "ArrowLeft":
-        deltaCol = -1;
-        break;
-      case "ArrowRight":
-        deltaCol = 1;
-        break;
-      default:
-        return;
-    }
-
-    event.preventDefault();
-
-    const previousSelection = renderer.getSelection();
-    const previousRange = renderer.getSelectionRange();
-
-    const base =
-      previousSelection ?? { row: clampIndex(frozenRowsRef.current, 0, props.rowCount - 1), col: clampIndex(frozenColsRef.current, 0, props.colCount - 1) };
-
-    const nextSelection = {
-      row: clampIndex(base.row + deltaRow, 0, props.rowCount - 1),
-      col: clampIndex(base.col + deltaCol, 0, props.colCount - 1)
-    };
-
-    renderer.setSelection(nextSelection);
-    const nextRange: CellRange = {
-      startRow: nextSelection.row,
-      endRow: nextSelection.row + 1,
-      startCol: nextSelection.col,
-      endCol: nextSelection.col + 1
-    };
-
-    announceSelection(nextSelection, nextRange);
-    scrollCellIntoView(nextSelection.row, nextSelection.col);
-
-    if (
-      (previousSelection?.row ?? null) !== nextSelection.row ||
-      (previousSelection?.col ?? null) !== nextSelection.col
-    ) {
-      onSelectionChangeRef.current?.(nextSelection);
-    }
-
-    if (
-      (previousRange?.startRow ?? null) !== nextRange.startRow ||
-      (previousRange?.endRow ?? null) !== nextRange.endRow ||
-      (previousRange?.startCol ?? null) !== nextRange.startCol ||
-      (previousRange?.endCol ?? null) !== nextRange.endCol
-    ) {
-      onSelectionRangeChangeRef.current?.(nextRange);
-    }
-  };
-
   useImperativeHandle(
     props.apiRef,
     (): GridApi => ({
@@ -404,22 +301,28 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const prevSelection = renderer.getSelection();
         const prevRange = renderer.getSelectionRange();
         renderer.setSelection({ row, col });
+        const nextSelection = renderer.getSelection();
+        const nextRange = renderer.getSelectionRange();
 
-        if (!prevSelection || prevSelection.row !== row || prevSelection.col !== col) {
-          announceSelection({ row, col }, { startRow: row, endRow: row + 1, startCol: col, endCol: col + 1 });
-          scrollCellIntoView(row, col);
-          onSelectionChangeRef.current?.({ row, col });
+        announceSelection(nextSelection, nextRange);
+        if (nextSelection) {
+          renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto" });
+          syncScrollbars();
         }
 
-        const nextRange: CellRange = { startRow: row, endRow: row + 1, startCol: col, endCol: col + 1 };
         if (
-          !prevRange ||
-          prevRange.startRow !== nextRange.startRow ||
-          prevRange.endRow !== nextRange.endRow ||
-          prevRange.startCol !== nextRange.startCol ||
-          prevRange.endCol !== nextRange.endCol
+          (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+          (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
         ) {
-          announceSelection({ row, col }, nextRange);
+          onSelectionChangeRef.current?.(nextSelection);
+        }
+
+        if (
+          (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+          (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+          (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+          (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+        ) {
           onSelectionRangeChangeRef.current?.(nextRange);
         }
       },
@@ -434,7 +337,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const nextRange = renderer.getSelectionRange();
 
         announceSelection(nextSelection, nextRange);
-        if (nextSelection) scrollCellIntoView(nextSelection.row, nextSelection.col);
+        if (nextSelection) {
+          renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto" });
+          syncScrollbars();
+        }
 
         if (
           (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
@@ -453,11 +359,45 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         }
       },
       getSelectionRange: () => rendererRef.current?.getSelectionRange() ?? null,
+      setSelectionRanges: (ranges, opts) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+
+        const prevSelection = renderer.getSelection();
+        const prevRange = renderer.getSelectionRange();
+        renderer.setSelectionRanges(ranges, { activeIndex: opts?.activeIndex });
+        const nextSelection = renderer.getSelection();
+        const nextRange = renderer.getSelectionRange();
+
+        announceSelection(nextSelection, nextRange);
+        if (nextSelection) {
+          renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto" });
+          syncScrollbars();
+        }
+
+        if (
+          (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+          (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+        ) {
+          onSelectionChangeRef.current?.(nextSelection);
+        }
+
+        if (
+          (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+          (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+          (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+          (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+        ) {
+          onSelectionRangeChangeRef.current?.(nextRange);
+        }
+      },
+      getSelectionRanges: () => rendererRef.current?.getSelectionRanges() ?? [],
+      getActiveSelectionRangeIndex: () => rendererRef.current?.getActiveSelectionIndex() ?? 0,
       clearSelection: () => {
         const renderer = rendererRef.current;
         const prevSelection = renderer?.getSelection() ?? null;
         const prevRange = renderer?.getSelectionRange() ?? null;
-        renderer?.setSelectionRange(null);
+        renderer?.setSelectionRanges(null);
         renderer?.setRangeSelection(null);
         announceSelection(null, null);
         if (prevSelection) onSelectionChangeRef.current?.(null);
@@ -466,6 +406,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       getSelection: () => rendererRef.current?.getSelection() ?? null,
       getPerfStats: () => rendererRef.current?.getPerfStats() ?? null,
       setPerfStatsEnabled: (enabled) => rendererRef.current?.setPerfStatsEnabled(enabled),
+      scrollToCell: (row, col, opts) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        renderer.scrollToCell(row, col, opts);
+        syncScrollbars();
+      },
+      getCellRect: (row, col) => rendererRef.current?.getCellRect(row, col) ?? null,
+      getViewportState: () => rendererRef.current?.getViewportState() ?? null,
       setRangeSelection: (range) => rendererRef.current?.setRangeSelection(range),
       setRemotePresences: (presences) => rendererRef.current?.setRemotePresences(presences),
       renderImmediately: () => rendererRef.current?.renderImmediately()
@@ -616,86 +564,24 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const selectionCanvas = selectionCanvasRef.current;
     if (!selectionCanvas) return;
 
-    const getPickedCell = (event: PointerEvent) => {
-      const renderer = rendererRef.current;
-      if (!renderer) return null;
-      const rect = selectionCanvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      return renderer.pickCellAt(x, y);
+    const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+    const stopAutoScroll = () => {
+      if (autoScrollFrameRef.current === null) return;
+      cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
     };
 
-    const onPointerDown = (event: PointerEvent) => {
+    const getViewportPoint = (event: { clientX: number; clientY: number }) => {
+      const rect = selectionCanvas.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    };
+
+    const applyDragRange = (picked: { row: number; col: number }) => {
       const renderer = rendererRef.current;
       if (!renderer) return;
-
-      event.preventDefault();
-      containerRef.current?.focus({ preventScroll: true });
-      const picked = getPickedCell(event);
-      if (!picked) return;
-
-      selectionAnchorRef.current = picked;
-      selectionPointerIdRef.current = event.pointerId;
-      selectionCanvas.setPointerCapture?.(event.pointerId);
-
-      if (interactionModeRef.current === "rangeSelection") {
-        const range: CellRange = {
-          startRow: picked.row,
-          endRow: picked.row + 1,
-          startCol: picked.col,
-          endCol: picked.col + 1
-        };
-
-        transientRangeRef.current = range;
-        renderer.setRangeSelection(range);
-        onRangeSelectionStartRef.current?.(range);
-        return;
-      }
-
-      transientRangeRef.current = null;
-        renderer.setRangeSelection(null);
-
-        const prevSelection = renderer.getSelection();
-        const prevRange = renderer.getSelectionRange();
-
-        renderer.setSelection(picked);
-
-        if (!prevSelection || prevSelection.row !== picked.row || prevSelection.col !== picked.col) {
-          announceSelection(picked, { startRow: picked.row, endRow: picked.row + 1, startCol: picked.col, endCol: picked.col + 1 });
-          onSelectionChangeRef.current?.(picked);
-        }
-
-        const nextRange: CellRange = {
-          startRow: picked.row,
-          endRow: picked.row + 1,
-        startCol: picked.col,
-        endCol: picked.col + 1
-      };
-        if (
-          !prevRange ||
-          prevRange.startRow !== nextRange.startRow ||
-          prevRange.endRow !== nextRange.endRow ||
-          prevRange.startCol !== nextRange.startCol ||
-          prevRange.endCol !== nextRange.endCol
-        ) {
-          announceSelection(picked, nextRange);
-          onSelectionRangeChangeRef.current?.(nextRange);
-        }
-      };
-
-    const onPointerMove = (event: PointerEvent) => {
-      const renderer = rendererRef.current;
-      if (!renderer) return;
-      if (selectionPointerIdRef.current === null) return;
-      if (event.pointerId !== selectionPointerIdRef.current) return;
-
-      event.preventDefault();
-
       const anchor = selectionAnchorRef.current;
       if (!anchor) return;
-
-      const picked = getPickedCell(event);
-      if (!picked) return;
 
       const range: CellRange = {
         startRow: Math.min(anchor.row, picked.row),
@@ -718,6 +604,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         transientRangeRef.current = range;
         renderer.setRangeSelection(range);
+        announceSelection(renderer.getSelection(), range);
         onRangeSelectionChangeRef.current?.(range);
         return;
       }
@@ -733,9 +620,180 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         return;
       }
 
-      renderer.setSelectionRange(range);
-      announceSelection(renderer.getSelection(), renderer.getSelectionRange());
-      onSelectionRangeChangeRef.current?.(range);
+      const ranges = renderer.getSelectionRanges();
+      const activeIndex = renderer.getActiveSelectionIndex();
+      const updatedRanges = ranges.length === 0 ? [range] : ranges;
+      updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = range;
+      renderer.setSelectionRanges(updatedRanges, { activeIndex });
+
+      const nextSelection = renderer.getSelection();
+      const nextRange = renderer.getSelectionRange();
+      announceSelection(nextSelection, nextRange);
+      onSelectionRangeChangeRef.current?.(nextRange ?? range);
+    };
+
+    const scheduleAutoScroll = () => {
+      if (autoScrollFrameRef.current !== null) return;
+
+      const tick = () => {
+        autoScrollFrameRef.current = null;
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        if (selectionPointerIdRef.current === null) return;
+
+        const point = lastPointerViewportRef.current;
+        if (!point) return;
+
+        const viewport = renderer.scroll.getViewportState();
+        if (viewport.width <= 0 || viewport.height <= 0) {
+          return;
+        }
+        const edge = 28;
+        const maxSpeed = 24;
+
+        const leftThreshold = viewport.frozenWidth + edge;
+        const topThreshold = viewport.frozenHeight + edge;
+
+        const leftFactor = clamp01((leftThreshold - point.x) / edge);
+        const rightFactor = clamp01((point.x - (viewport.width - edge)) / edge);
+        const topFactor = clamp01((topThreshold - point.y) / edge);
+        const bottomFactor = clamp01((point.y - (viewport.height - edge)) / edge);
+
+        const dx = viewport.maxScrollX > 0 ? (rightFactor - leftFactor) * maxSpeed : 0;
+        const dy = viewport.maxScrollY > 0 ? (bottomFactor - topFactor) * maxSpeed : 0;
+
+        if (dx === 0 && dy === 0) {
+          return;
+        }
+
+        const beforeScroll = renderer.scroll.getScroll();
+        renderer.scrollBy(dx, dy);
+        const afterScroll = renderer.scroll.getScroll();
+        syncScrollbars();
+
+        if (beforeScroll.x === afterScroll.x && beforeScroll.y === afterScroll.y) {
+          return;
+        }
+
+        const clampedX = Math.max(0, Math.min(viewport.width, point.x));
+        const clampedY = Math.max(0, Math.min(viewport.height, point.y));
+        const picked = renderer.pickCellAt(clampedX, clampedY);
+        if (picked) applyDragRange(picked);
+
+        autoScrollFrameRef.current = requestAnimationFrame(tick);
+      };
+
+      autoScrollFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+
+      event.preventDefault();
+      keyboardAnchorRef.current = null;
+      const point = getViewportPoint(event);
+      lastPointerViewportRef.current = point;
+
+      const picked = renderer.pickCellAt(point.x, point.y);
+      if (!picked) return;
+
+      selectionPointerIdRef.current = event.pointerId;
+      selectionCanvas.setPointerCapture?.(event.pointerId);
+
+      if (interactionModeRef.current === "rangeSelection") {
+        selectionAnchorRef.current = picked;
+        const range: CellRange = {
+          startRow: picked.row,
+          endRow: picked.row + 1,
+          startCol: picked.col,
+          endCol: picked.col + 1
+        };
+
+        transientRangeRef.current = range;
+        renderer.setRangeSelection(range);
+        announceSelection(renderer.getSelection(), range);
+        onRangeSelectionStartRef.current?.(range);
+        scheduleAutoScroll();
+        return;
+      }
+
+      containerRef.current?.focus({ preventScroll: true });
+      transientRangeRef.current = null;
+      renderer.setRangeSelection(null);
+
+      const prevSelection = renderer.getSelection();
+      const prevRange = renderer.getSelectionRange();
+
+      const isAdditive = event.metaKey || event.ctrlKey;
+      const isExtend = event.shiftKey;
+
+      if (isAdditive) {
+        selectionAnchorRef.current = picked;
+        renderer.addSelectionRange({
+          startRow: picked.row,
+          endRow: picked.row + 1,
+          startCol: picked.col,
+          endCol: picked.col + 1
+        });
+      } else if (isExtend && prevSelection) {
+        selectionAnchorRef.current = prevSelection;
+        const range: CellRange = {
+          startRow: Math.min(prevSelection.row, picked.row),
+          endRow: Math.max(prevSelection.row, picked.row) + 1,
+          startCol: Math.min(prevSelection.col, picked.col),
+          endCol: Math.max(prevSelection.col, picked.col) + 1
+        };
+        const ranges = renderer.getSelectionRanges();
+        const activeIndex = renderer.getActiveSelectionIndex();
+        const updatedRanges = ranges.length === 0 ? [range] : ranges;
+        updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = range;
+        renderer.setSelectionRanges(updatedRanges, { activeIndex });
+      } else {
+        selectionAnchorRef.current = picked;
+        renderer.setSelection(picked);
+      }
+
+      const nextSelection = renderer.getSelection();
+      const nextRange = renderer.getSelectionRange();
+
+      announceSelection(nextSelection, nextRange);
+
+      if (
+        (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+        (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+      ) {
+        onSelectionChangeRef.current?.(nextSelection);
+      }
+
+      if (
+        (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+        (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+        (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+        (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+      ) {
+        onSelectionRangeChangeRef.current?.(nextRange);
+      }
+
+      scheduleAutoScroll();
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      if (selectionPointerIdRef.current === null) return;
+      if (event.pointerId !== selectionPointerIdRef.current) return;
+
+      event.preventDefault();
+
+      const point = getViewportPoint(event);
+      lastPointerViewportRef.current = point;
+
+      const picked = renderer.pickCellAt(point.x, point.y);
+      if (!picked) return;
+
+      applyDragRange(picked);
+      scheduleAutoScroll();
     };
 
     const endDrag = (event: PointerEvent) => {
@@ -744,6 +802,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       selectionPointerIdRef.current = null;
       selectionAnchorRef.current = null;
+      lastPointerViewportRef.current = null;
+      stopAutoScroll();
 
       if (interactionModeRef.current === "rangeSelection") {
         const range = transientRangeRef.current;
@@ -757,16 +817,29 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       }
     };
 
+    const onDoubleClick = (event: MouseEvent) => {
+      if (interactionModeRef.current === "rangeSelection") return;
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      const point = getViewportPoint(event);
+      const picked = renderer.pickCellAt(point.x, point.y);
+      if (!picked) return;
+      onRequestCellEditRef.current?.({ row: picked.row, col: picked.col });
+    };
+
     selectionCanvas.addEventListener("pointerdown", onPointerDown);
     selectionCanvas.addEventListener("pointermove", onPointerMove);
     selectionCanvas.addEventListener("pointerup", endDrag);
     selectionCanvas.addEventListener("pointercancel", endDrag);
+    selectionCanvas.addEventListener("dblclick", onDoubleClick);
 
     return () => {
       selectionCanvas.removeEventListener("pointerdown", onPointerDown);
       selectionCanvas.removeEventListener("pointermove", onPointerMove);
       selectionCanvas.removeEventListener("pointerup", endDrag);
       selectionCanvas.removeEventListener("pointercancel", endDrag);
+      selectionCanvas.removeEventListener("dblclick", onDoubleClick);
+      stopAutoScroll();
     };
   }, []);
 
@@ -879,6 +952,151 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     return () => hThumb.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
+  const requestCellEdit = (options?: { initialKey?: string }) => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    const selection = renderer.getSelection();
+    if (!selection) return;
+    onRequestCellEditRef.current?.({ row: selection.row, col: selection.col, initialKey: options?.initialKey });
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+
+    if (interactionModeRef.current === "rangeSelection") return;
+
+    const selection = renderer.getSelection();
+    const { rowCount, colCount } = renderer.scroll.getCounts();
+    if (rowCount === 0 || colCount === 0) return;
+
+    const active =
+      selection ?? { row: clampIndex(frozenRowsRef.current, 0, rowCount - 1), col: clampIndex(frozenColsRef.current, 0, colCount - 1) };
+    const ctrlOrMeta = event.ctrlKey || event.metaKey;
+
+    if (event.key === "F2") {
+      event.preventDefault();
+      if (!selection) renderer.setSelection(active);
+      requestCellEdit();
+      return;
+    }
+
+    const isPrintable = event.key.length === 1 && !ctrlOrMeta && !event.altKey;
+    if (isPrintable) {
+      event.preventDefault();
+      if (!selection) renderer.setSelection(active);
+      requestCellEdit({ initialKey: event.key });
+      return;
+    }
+
+    let nextRow = active.row;
+    let nextCol = active.col;
+    let handled = true;
+
+    const viewport = renderer.scroll.getViewportState();
+    const pageRows = Math.max(1, viewport.main.rows.end - viewport.main.rows.start);
+
+    switch (event.key) {
+      case "ArrowUp":
+        nextRow = ctrlOrMeta ? 0 : active.row - 1;
+        break;
+      case "ArrowDown":
+        nextRow = ctrlOrMeta ? rowCount - 1 : active.row + 1;
+        break;
+      case "ArrowLeft":
+        nextCol = ctrlOrMeta ? 0 : active.col - 1;
+        break;
+      case "ArrowRight":
+        nextCol = ctrlOrMeta ? colCount - 1 : active.col + 1;
+        break;
+      case "PageUp":
+        nextRow = active.row - pageRows;
+        break;
+      case "PageDown":
+        nextRow = active.row + pageRows;
+        break;
+      case "Home":
+        if (ctrlOrMeta) {
+          nextRow = 0;
+          nextCol = 0;
+        } else {
+          nextCol = 0;
+        }
+        break;
+      case "End":
+        if (ctrlOrMeta) {
+          nextRow = rowCount - 1;
+          nextCol = colCount - 1;
+        } else {
+          nextCol = colCount - 1;
+        }
+        break;
+      case "Enter":
+        nextRow = active.row + (event.shiftKey ? -1 : 1);
+        break;
+      case "Tab":
+        nextCol = active.col + (event.shiftKey ? -1 : 1);
+        break;
+      default:
+        handled = false;
+    }
+
+    if (!handled) return;
+
+    event.preventDefault();
+
+    nextRow = Math.max(0, Math.min(rowCount - 1, nextRow));
+    nextCol = Math.max(0, Math.min(colCount - 1, nextCol));
+
+    const prevSelection = renderer.getSelection();
+    const prevRange = renderer.getSelectionRange();
+
+    if (event.shiftKey) {
+      const anchor = keyboardAnchorRef.current ?? prevSelection ?? active;
+      if (!keyboardAnchorRef.current) keyboardAnchorRef.current = anchor;
+
+      const range: CellRange = {
+        startRow: Math.min(anchor.row, nextRow),
+        endRow: Math.max(anchor.row, nextRow) + 1,
+        startCol: Math.min(anchor.col, nextCol),
+        endCol: Math.max(anchor.col, nextCol) + 1
+      };
+
+      const ranges = renderer.getSelectionRanges();
+      const activeIndex = renderer.getActiveSelectionIndex();
+      const updatedRanges = ranges.length === 0 ? [range] : ranges;
+      updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = range;
+      renderer.setSelectionRanges(updatedRanges, { activeIndex, activeCell: { row: nextRow, col: nextCol } });
+    } else {
+      keyboardAnchorRef.current = null;
+      renderer.setSelection({ row: nextRow, col: nextCol });
+    }
+
+    renderer.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
+    syncScrollbars();
+
+    const nextSelection = renderer.getSelection();
+    const nextRange = renderer.getSelectionRange();
+
+    announceSelection(nextSelection, nextRange);
+
+    if (
+      (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+      (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+    ) {
+      onSelectionChangeRef.current?.(nextSelection);
+    }
+
+    if (
+      (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+      (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+      (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+      (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+    ) {
+      onSelectionRangeChangeRef.current?.(nextRange);
+    }
+  };
+
   const containerStyle: React.CSSProperties = useMemo(
     () => ({
       position: "relative",
@@ -909,6 +1127,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       style={containerStyle}
       data-testid="canvas-grid"
       tabIndex={0}
+      role="grid"
+      aria-rowcount={props.rowCount}
+      aria-colcount={props.colCount}
       aria-label={ariaLabel}
       aria-labelledby={props.ariaLabelledBy}
       aria-describedby={statusId}
