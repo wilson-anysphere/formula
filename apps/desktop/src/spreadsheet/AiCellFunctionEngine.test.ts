@@ -10,6 +10,7 @@ import { CLASSIFICATION_LEVEL } from "../../../../packages/security/dlp/src/clas
 import { LocalClassificationStore } from "../../../../packages/security/dlp/src/classificationStore.js";
 import { createDefaultOrgPolicy } from "../../../../packages/security/dlp/src/policy.js";
 import { LocalPolicyStore } from "../../../../packages/security/dlp/src/policyStore.js";
+import { getAiDlpAuditLogger, resetAiDlpAuditLoggerForTests } from "../ai/dlp/aiDlp.js";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -52,6 +53,7 @@ function setBlockPolicy(workbookId: string): void {
 describe("AiCellFunctionEngine", () => {
   beforeEach(() => {
     globalThis.localStorage?.clear();
+    resetAiDlpAuditLoggerForTests();
   });
 
   it("returns #GETTING_DATA while pending and resolves via cache", async () => {
@@ -178,6 +180,12 @@ describe("AiCellFunctionEngine", () => {
     const entries = await auditStore.listEntries({ session_id: "dlp-block-session" });
     expect(entries).toHaveLength(1);
     expect((entries[0]?.input as any)?.blocked).toBe(true);
+
+    const input = entries[0]?.input as any;
+    const events = getAiDlpAuditLogger().list();
+    const dlpEvent = events.find((e: any) => e.details?.type === "ai.cell_function" && e.details?.documentId === workbookId);
+    expect(dlpEvent?.details?.inputs_hash).toBe(input?.inputs_hash);
+    expect(dlpEvent?.details?.prompt_hash).toBe(input?.prompt_hash);
   });
 
   it("does not persist restricted prompt text in audit logs for blocked runs", async () => {

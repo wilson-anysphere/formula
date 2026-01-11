@@ -187,6 +187,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       maxCellChars: this.maxCellChars,
     });
 
+    const promptHash = hashText(prompt);
+
     const cacheKey = `${this.model}\u0000${fn}\u0000${prompt}\u0000${inputsHash}`;
 
     if (decision.decision === DLP_DECISION.BLOCK) {
@@ -200,6 +202,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         decision,
         selectionClassification,
         redactedCellCount: redactedCount,
+        prompt_hash: promptHash,
+        inputs_hash: inputsHash,
         references,
       });
 
@@ -228,6 +232,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         decision,
         selectionClassification,
         redactedCellCount: redactedCount,
+        prompt_hash: promptHash,
+        inputs_hash: inputsHash,
         references,
       });
     }
