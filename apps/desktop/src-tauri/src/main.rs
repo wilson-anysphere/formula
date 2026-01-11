@@ -95,7 +95,7 @@ fn cell_update_from_state(update: CellUpdateData) -> commands::CellUpdate {
         col: update.col,
         value: update.value.as_json(),
         formula: update.formula,
-        display_value: update.value.display(),
+        display_value: update.display_value,
     }
 }
 
