@@ -152,7 +152,22 @@ The scheduler handles CPU contention well. The issue is that **parallelism corre
 | Make/CMake             | `-j4` to `-j8`   | Safe default                               |
 | npm scripts (parallel) | `-j4`            | `npm-run-all -p` or `concurrently`         |
 | Jest/Vitest            | `--maxWorkers=4` | Test parallelism                           |
+| `pnpm test:node`       | `FORMULA_NODE_TEST_CONCURRENCY=2` (default) | Avoids over-parallelizing heavyweight integration tests |
 | Likely solo operation  | `-j8` to `-j16`  | When you're confident few others compiling |
+
+### Node test runner concurrency
+
+`pnpm test:node` uses Node's built-in test runner (`node --test`). On high-core
+machines, Node defaults to running many test files in parallel, which can cause
+timeouts in heavier integration tests.
+
+The repo test wrapper (`scripts/run-node-tests.mjs`) caps test-file concurrency
+by default. To tune it explicitly:
+
+```bash
+FORMULA_NODE_TEST_CONCURRENCY=4 pnpm test:node
+# (or: NODE_TEST_CONCURRENCY=4)
+```
 
 
 ### Adaptive Parallelism Script
