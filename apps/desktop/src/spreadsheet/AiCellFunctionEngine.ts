@@ -72,6 +72,10 @@ export interface AiCellFunctionEngineOptions {
      * Hard cap on `inputs_preview` stored in the AI audit entry.
      */
     maxAuditPreviewChars?: number;
+    /**
+     * Hard cap on individual cell values serialized into prompts/audit previews.
+     */
+    maxCellChars?: number;
   };
 }
 
@@ -108,6 +112,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly maxInputCells: number;
   private readonly maxPromptChars: number;
   private readonly maxAuditPreviewChars: number;
+  private readonly maxCellChars: number;
 
   constructor(options: AiCellFunctionEngineOptions = {}) {
     this.llmClient = options.llmClient ?? createDefaultClient();
@@ -131,6 +136,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     this.maxInputCells = clampInt(options.limits?.maxInputCells ?? 200, { min: 1, max: 10_000 });
     this.maxPromptChars = clampInt(options.limits?.maxPromptChars ?? 25_000, { min: 1_000, max: 1_000_000 });
     this.maxAuditPreviewChars = clampInt(options.limits?.maxAuditPreviewChars ?? 2_000, { min: 200, max: 100_000 });
+    this.maxCellChars = clampInt(options.limits?.maxCellChars ?? 500, { min: 50, max: 100_000 });
 
     this.loadCacheFromStorage();
   }
@@ -548,8 +554,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       }
     }
 
-    const safePrompt = renderPromptArg(prompt);
-    const safeInputs = renderInputs(inputs);
+    const safePrompt = renderPromptArg(prompt, this.maxCellChars);
+    const safeInputs = renderInputs(inputs, this.maxCellChars);
     const inputsPreview =
       decision.decision === DLP_DECISION.BLOCK ? undefined : truncateText(stableJsonStringify(safeInputs), this.maxAuditPreviewChars);
 
@@ -635,23 +641,23 @@ function sheetIdFromCellRef(cellAddress?: string): string | null {
   return cellAddress.slice(0, bang);
 }
 
-function renderPromptArg(arg: ClassifiedArg): string {
+function renderPromptArg(arg: ClassifiedArg, maxCellChars: number): string {
   if (arg.kind === "range") {
-    const text = arg.items.map((item) => normalizeScalar(item.value)).join(", ");
+    const text = arg.items.map((item) => normalizeScalar(item.value, maxCellChars)).join(", ");
     return arg.truncated ? `${text} …` : text;
   }
-  return normalizeScalar(arg.items[0]?.value ?? null);
+  return normalizeScalar(arg.items[0]?.value ?? null, maxCellChars);
 }
 
-function renderInputs(args: ClassifiedArg[]): unknown {
+function renderInputs(args: ClassifiedArg[], maxCellChars: number): unknown {
   if (args.length === 0) return null;
-  if (args.length === 1) return renderInputArg(args[0]!);
-  return args.map((arg) => renderInputArg(arg));
+  if (args.length === 1) return renderInputArg(args[0]!, maxCellChars);
+  return args.map((arg) => renderInputArg(arg, maxCellChars));
 }
 
-function renderInputArg(arg: ClassifiedArg): unknown {
+function renderInputArg(arg: ClassifiedArg, maxCellChars: number): unknown {
   if (arg.kind === "range") {
-    const sample = arg.items.map((item) => normalizeScalar(item.value));
+    const sample = arg.items.map((item) => normalizeScalar(item.value, maxCellChars));
     if (!arg.truncated) return sample;
     return {
       truncated: true,
@@ -660,12 +666,12 @@ function renderInputArg(arg: ClassifiedArg): unknown {
       sample,
     };
   }
-  return normalizeScalar(arg.items[0]?.value ?? null);
+  return normalizeScalar(arg.items[0]?.value ?? null, maxCellChars);
 }
 
-function normalizeScalar(value: SpreadsheetValue): string {
+function normalizeScalar(value: SpreadsheetValue, maxChars: number): string {
   if (value === null) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return truncateText(value, maxChars);
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   return String(value);
