@@ -1,16 +1,16 @@
 import { createEngineClient } from "@formula/engine";
 import type { CellRange } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder } from "@formula/grid";
-import { EngineCellCache, EngineGridProvider } from "@formula/spreadsheet-frontend";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { rangeToA1 } from "./a1";
+import { EngineCellProvider } from "./EngineCellProvider";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
 
 export function App() {
   const [engineStatus, setEngineStatus] = useState("starting…");
   const engineRef = useRef<ReturnType<typeof createEngineClient> | null>(null);
-  const [provider, setProvider] = useState<EngineGridProvider | null>(null);
+  const [provider, setProvider] = useState<EngineCellProvider | null>(null);
   const [activeSheet, setActiveSheet] = useState("Sheet1");
   const previousSheetRef = useRef<string | null>(null);
 
@@ -140,8 +140,7 @@ export function App() {
         const b1 = await engine.getCell("B1");
         if (!cancelled) {
           setEngineStatus(`ready (B1=${b1.value === null ? "" : String(b1.value)})`);
-          const cache = new EngineCellCache(engine);
-          setProvider(new EngineGridProvider({ cache, rowCount, colCount, sheet: "Sheet1", headers: true }));
+          setProvider(new EngineCellProvider({ engine, rowCount, colCount, sheet: "Sheet1" }));
         }
       } catch (error) {
         if (!cancelled) {
