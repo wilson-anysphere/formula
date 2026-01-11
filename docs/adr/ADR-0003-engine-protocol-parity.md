@@ -75,7 +75,7 @@ This registry is what the formula parser/evaluator uses to resolve `SheetName!A1
 
 **Important: current implementation constraint**
 
-The current WASM demo engine (`crates/formula-core` via `crates/formula-wasm`) is sheet-name keyed and does not yet implement a `sheetId -> sheetName` registry. Until that exists, web and desktop parity assumes **`sheetId === sheetName`** for any sheet that participates in cross-sheet formulas.
+The current WASM engine (`crates/formula-wasm`, backed by `crates/formula-engine`) is sheet-name keyed and does not yet implement a `sheetId -> sheetName` registry. Until that exists, web and desktop parity assumes **`sheetId === sheetName`** for any sheet that participates in cross-sheet formulas.
 
 This is acceptable for the initial iteration because:
 
@@ -135,7 +135,7 @@ The canonical protocol is **typed scalar values**; formatting into display strin
 
 ### 5) Non-goals (first iteration)
 
-- **Full XLSX OPC part preservation in the web target** (the WASM engine cannot yet load XLSX bytes; see `crates/formula-wasm::fromXlsxBytes`).
+- **Full XLSX OPC part preservation in the web target**. The WASM engine can load `.xlsx` bytes via `crates/formula-wasm::fromXlsxBytes`, but it only imports the workbook model (values/formulas/basic metadata) and does not preserve arbitrary OPC parts on round-trip.
 - **VBA execution / macro enablement in web**.
 - **Chart/pivot fidelity parity** between web and desktop engines.
 - **Sheet rename parity without engine rebuild** (requires a sheet registry + formula rewrite plumbing).
@@ -156,4 +156,3 @@ The canonical protocol is **typed scalar values**; formatting into display strin
 4. **Centralize formula text conversions**:
    - Replace ad-hoc JS `normalizeFormulaText()` helpers with a shared implementation that matches
      `crates/formula-model/src/formula_text.rs` semantics (including edge cases like bare `"="`).
-
