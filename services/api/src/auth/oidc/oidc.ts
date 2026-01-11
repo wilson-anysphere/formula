@@ -82,6 +82,14 @@ function extractName(claims: Record<string, unknown>, email: string): string {
   return local && local.length > 0 ? local : "User";
 }
 
+function isValidProviderId(value: string): boolean {
+  return /^[a-z0-9_-]{1,64}$/.test(value);
+}
+
+function isValidOrgId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 function extractHost(request: FastifyRequest): string {
   // Only trust forwarded headers when the API is configured to trust the proxy.
   const trustProxy = Boolean(request.server.config.trustProxy);
@@ -398,6 +406,10 @@ export async function oidcStart(request: FastifyRequest, reply: FastifyReply): P
   const params = request.params as { orgId: string; provider: string };
   const orgId = params.orgId;
   const providerId = params.provider;
+  if (!isValidOrgId(orgId) || !isValidProviderId(providerId)) {
+    reply.code(400).send({ error: "invalid_request" });
+    return;
+  }
 
   // Best-effort cleanup so `oidc_auth_states` does not grow unbounded when sweeps are disabled.
   try {
@@ -477,6 +489,10 @@ export async function oidcCallback(request: FastifyRequest, reply: FastifyReply)
   const params = request.params as { orgId: string; provider: string };
   const orgId = params.orgId;
   const providerId = params.provider;
+  if (!isValidOrgId(orgId) || !isValidProviderId(providerId)) {
+    reply.code(400).send({ error: "invalid_request" });
+    return;
+  }
 
   const parsed = CallbackQuery.safeParse(request.query);
   if (!parsed.success) {

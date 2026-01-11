@@ -482,6 +482,39 @@ describe("OIDC SSO", () => {
     }
   }, 15_000);
 
+  it("rejects invalid orgId / providerId path params", async () => {
+    const { db, app } = await createTestApp();
+    try {
+      const invalidOrgStart = await app.inject({ method: "GET", url: "/auth/oidc/not-a-uuid/mock/start" });
+      expect(invalidOrgStart.statusCode).toBe(400);
+      expect((invalidOrgStart.json() as any).error).toBe("invalid_request");
+
+      const invalidProviderStart = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${crypto.randomUUID()}/Bad/start`
+      });
+      expect(invalidProviderStart.statusCode).toBe(400);
+      expect((invalidProviderStart.json() as any).error).toBe("invalid_request");
+
+      const invalidOrgCallback = await app.inject({
+        method: "GET",
+        url: "/auth/oidc/not-a-uuid/mock/callback?code=x&state=y"
+      });
+      expect(invalidOrgCallback.statusCode).toBe(400);
+      expect((invalidOrgCallback.json() as any).error).toBe("invalid_request");
+
+      const invalidProviderCallback = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${crypto.randomUUID()}/Bad/callback?code=x&state=y`
+      });
+      expect(invalidProviderCallback.statusCode).toBe(400);
+      expect((invalidProviderCallback.json() as any).error).toBe("invalid_request");
+    } finally {
+      await app.close();
+      await db.end();
+    }
+  });
+
   it("fails on invalid state", async () => {
     const { db, app } = await createTestApp();
     try {
