@@ -489,6 +489,7 @@ cargo test -j4                        # Safe
 ./scripts/safe-cargo-build.sh        # Auto-detects
 ./scripts/safe-cargo-test.sh         # Auto-detects
 ./scripts/safe-cargo-run.sh --help   # Auto-detects (also used by perf benchmarks)
+./scripts/safe-cargo-bench.sh        # Auto-detects
 
 # Testing with display
 xvfb-run npm run test:e2e            # For GUI tests
