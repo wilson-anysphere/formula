@@ -1098,3 +1098,33 @@ test("/readyz returns 503 when data dir locking is disabled", async (t) => {
   const body = (await res.json()) as { reason?: unknown };
   assert.equal(body.reason, "data_dir_lock_disabled");
 });
+
+test("removes data directory lock file on graceful shutdown", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-lock-cleanup-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+
+  const lockPath = path.join(dataDir, ".sync-server.lock");
+  const lockContents = await readFile(lockPath, "utf8");
+  assert.ok(lockContents.includes('"pid"'), "expected lock file to contain metadata");
+
+  await server.stop();
+
+  await waitForCondition(async () => {
+    try {
+      await readFile(lockPath, "utf8");
+      return false;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === "ENOENT";
+    }
+  }, 5_000);
+});

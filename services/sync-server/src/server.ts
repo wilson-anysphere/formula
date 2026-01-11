@@ -1189,18 +1189,49 @@ export function createSyncServer(
     },
 
     async stop() {
+      const errors: unknown[] = [];
+
       if (tombstoneSweepTimer) {
         clearInterval(tombstoneSweepTimer);
         tombstoneSweepTimer = null;
       }
-      if (tombstoneSweepInFlight) await tombstoneSweepInFlight;
+      if (tombstoneSweepInFlight) {
+        try {
+          await tombstoneSweepInFlight;
+        } catch (err) {
+          errors.push(err);
+          logger.warn({ err }, "shutdown_tombstone_sweep_failed");
+        }
+      }
 
-      for (const ws of wss.clients) ws.terminate();
+      try {
+        for (const ws of wss.clients) ws.terminate();
+      } catch (err) {
+        errors.push(err);
+        logger.warn({ err }, "shutdown_ws_terminate_failed");
+      }
 
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
-      await new Promise<void>((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve()))
-      );
+      try {
+        await new Promise<void>((resolve, reject) => {
+          try {
+            wss.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      } catch (err) {
+        errors.push(err);
+        logger.warn({ err }, "shutdown_wss_close_failed");
+      }
+
+      try {
+        await new Promise<void>((resolve, reject) =>
+          server.close((err) => (err ? reject(err) : resolve()))
+        );
+      } catch (err) {
+        errors.push(err);
+        logger.warn({ err }, "shutdown_http_close_failed");
+      }
 
       if (retentionSweepTimer) {
         clearInterval(retentionSweepTimer);
@@ -1208,18 +1239,29 @@ export function createSyncServer(
       }
 
       if (persistenceCleanup) {
-        await persistenceCleanup();
-        persistenceCleanup = null;
+        try {
+          await persistenceCleanup();
+        } catch (err) {
+          errors.push(err);
+          logger.warn({ err }, "shutdown_persistence_cleanup_failed");
+        } finally {
+          persistenceCleanup = null;
+        }
       }
 
       if (dataDirLock) {
         try {
           await dataDirLock.release();
         } catch (err) {
+          errors.push(err);
           logger.warn({ err }, "data_dir_lock_release_failed");
         } finally {
           dataDirLock = null;
         }
+      }
+
+      if (errors.length > 0) {
+        throw new AggregateError(errors, "sync-server shutdown failed");
       }
     },
 
