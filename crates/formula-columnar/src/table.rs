@@ -161,6 +161,14 @@ fn count_true_bits(data: &[u8], len: usize) -> u64 {
     count
 }
 
+fn bitvec_all_true(len: usize) -> BitVec {
+    let mut out = BitVec::with_capacity_bits(len);
+    for _ in 0..len {
+        out.push(true);
+    }
+    out
+}
+
 impl ColumnarTable {
     pub fn schema(&self) -> &[ColumnSchema] {
         &self.schema
@@ -802,54 +810,55 @@ impl MutableColumnarTable {
         }
     }
 
+    /// Compact overlay state into the underlying encoded pages.
+    ///
+    /// This rewrites only the pages that contain overlay edits and clears the overlay maps.
+    /// Appended (unflushed) rows are updated in-place in their per-column append buffers.
+    pub fn compact_in_place(&mut self) {
+        if self.overlay_cell_count() == 0 {
+            return;
+        }
+
+        let page = self.options.page_size_rows;
+        for col in 0..self.columns.len() {
+            if self.overlays[col].is_empty() {
+                continue;
+            }
+
+            let overlay_map = std::mem::take(&mut self.overlays[col]);
+            let mut by_chunk: HashMap<usize, Vec<(usize, Value)>> = HashMap::new();
+            for (row, value) in overlay_map {
+                let chunk_idx = row / page;
+                let in_chunk = row % page;
+                by_chunk.entry(chunk_idx).or_default().push((in_chunk, value));
+            }
+
+            let chunk_count = self.columns[col].chunk_count();
+            for (chunk_idx, updates) in by_chunk {
+                if chunk_idx < chunk_count {
+                    self.columns[col].apply_overlays_to_chunk(chunk_idx, &updates);
+                    self.cache
+                        .lock()
+                        .expect("columnar page cache poisoned")
+                        .remove_if(|key| key.col == col && key.chunk == chunk_idx);
+                } else if chunk_idx == chunk_count {
+                    self.columns[col].apply_overlays_to_current(&updates);
+                }
+            }
+        }
+    }
+
     /// Materialize overlays + append buffers into a compact immutable [`ColumnarTable`], and
     /// remove all overlay/delta state from `self`.
     pub fn compact(&mut self) -> ColumnarTable {
-        // Fast path: no overlays, just flush the append buffer.
-        if self.overlay_cell_count() == 0 {
-            self.flush_all();
-            for overlay in &mut self.overlays {
-                overlay.clear();
-            }
-            return self.to_columnar_table();
-        }
-
-        let mut rebuilt = MutableColumnarTable::new(self.schema.clone(), self.options);
-        let mut row_buf: Vec<Value> = Vec::with_capacity(self.columns.len());
-        for row in 0..self.rows {
-            row_buf.clear();
-            for col in 0..self.columns.len() {
-                row_buf.push(self.get_cell(row, col));
-            }
-            rebuilt.append_row(&row_buf);
-        }
-        rebuilt.flush_all();
-
-        let snapshot = rebuilt.to_columnar_table();
-        *self = rebuilt;
-        // Overlays are guaranteed empty after rebuild, but clear defensively.
-        for overlay in &mut self.overlays {
-            overlay.clear();
-        }
-
-        snapshot
+        self.compact_in_place();
+        self.flush_all();
+        self.to_columnar_table()
     }
 
     /// Consume the mutable table and return a compact immutable [`ColumnarTable`].
     pub fn freeze(mut self) -> ColumnarTable {
-        if self.overlay_cell_count() > 0 {
-            let mut builder = ColumnarTableBuilder::new(self.schema.clone(), self.options);
-            let mut row_buf: Vec<Value> = Vec::with_capacity(self.columns.len());
-            for row in 0..self.rows {
-                row_buf.clear();
-                for col in 0..self.columns.len() {
-                    row_buf.push(self.get_cell(row, col));
-                }
-                builder.append_row(&row_buf);
-            }
-            return builder.finalize();
-        }
-
+        self.compact_in_place();
         self.flush_all();
         self.into_columnar_table()
     }
@@ -1082,6 +1091,24 @@ impl MutableColumn {
             MutableColumn::Float(c) => c.apply_update(old, new),
             MutableColumn::Bool(c) => c.apply_update(old, new),
             MutableColumn::Dict(c) => c.apply_update(old, new),
+        }
+    }
+
+    fn apply_overlays_to_chunk(&mut self, chunk_idx: usize, updates: &[(usize, Value)]) {
+        match self {
+            MutableColumn::Int(c) => c.apply_overlays_to_chunk(chunk_idx, updates),
+            MutableColumn::Float(c) => c.apply_overlays_to_chunk(chunk_idx, updates),
+            MutableColumn::Bool(c) => c.apply_overlays_to_chunk(chunk_idx, updates),
+            MutableColumn::Dict(c) => c.apply_overlays_to_chunk(chunk_idx, updates),
+        }
+    }
+
+    fn apply_overlays_to_current(&mut self, updates: &[(usize, Value)]) {
+        match self {
+            MutableColumn::Int(c) => c.apply_overlays_to_current(updates),
+            MutableColumn::Float(c) => c.apply_overlays_to_current(updates),
+            MutableColumn::Bool(c) => c.apply_overlays_to_current(updates),
+            MutableColumn::Dict(c) => c.apply_overlays_to_current(updates),
         }
     }
 
@@ -1323,6 +1350,76 @@ impl MutableIntColumn {
         }
     }
 
+    fn apply_overlays_to_chunk(&mut self, chunk_idx: usize, updates: &[(usize, Value)]) {
+        let (len, mut values, mut validity) = match self.chunks.get(chunk_idx) {
+            Some(EncodedChunk::Int(c)) => (c.len, c.decode_i64(), c.validity.clone()),
+            _ => return,
+        };
+
+        for (in_chunk, value) in updates {
+            if *in_chunk >= len {
+                continue;
+            }
+            if let Some(v) = i64_from_value(value) {
+                values[*in_chunk] = v;
+                if let Some(validity) = &mut validity {
+                    validity.set(*in_chunk, true);
+                }
+            } else {
+                values[*in_chunk] = 0;
+                let validity = validity.get_or_insert_with(|| bitvec_all_true(len));
+                validity.set(*in_chunk, false);
+            }
+        }
+
+        let mut min_valid: Option<i64> = None;
+        for (idx, v) in values.iter().enumerate() {
+            let is_valid = validity.as_ref().map(|b| b.get(idx)).unwrap_or(true);
+            if is_valid {
+                min_valid = Some(min_valid.map(|m| m.min(*v)).unwrap_or(*v));
+            }
+        }
+        let min = min_valid.unwrap_or(0);
+
+        let offsets: Vec<u64> = values
+            .iter()
+            .enumerate()
+            .map(|(idx, v)| {
+                let is_valid = validity.as_ref().map(|b| b.get(idx)).unwrap_or(true);
+                if is_valid {
+                    (*v as i128 - min as i128) as u64
+                } else {
+                    0
+                }
+            })
+            .collect();
+
+        let offsets = U64SequenceEncoding::encode(&offsets);
+        let validity = validity.and_then(|v| (!v.all_true()).then_some(v));
+
+        self.chunks[chunk_idx] = EncodedChunk::Int(ValueEncodedChunk {
+            min,
+            len,
+            offsets,
+            validity,
+        });
+    }
+
+    fn apply_overlays_to_current(&mut self, updates: &[(usize, Value)]) {
+        for (in_chunk, value) in updates {
+            if *in_chunk >= self.current.len() {
+                continue;
+            }
+            if let Some(v) = i64_from_value(value) {
+                self.current[*in_chunk] = v;
+                self.validity.set(*in_chunk, true);
+            } else {
+                self.current[*in_chunk] = 0;
+                self.validity.set(*in_chunk, false);
+            }
+        }
+    }
+
     fn as_column(&self) -> Column {
         let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
         Column {
@@ -1530,6 +1627,51 @@ impl MutableFloatColumn {
         }
     }
 
+    fn apply_overlays_to_chunk(&mut self, chunk_idx: usize, updates: &[(usize, Value)]) {
+        let Some(chunk) = self.chunks.get_mut(chunk_idx) else {
+            return;
+        };
+        let EncodedChunk::Float(chunk) = chunk else {
+            return;
+        };
+
+        let len = chunk.values.len();
+        for (in_chunk, value) in updates {
+            if *in_chunk >= len {
+                continue;
+            }
+            if let Value::Number(v) = value {
+                chunk.values[*in_chunk] = *v;
+                if let Some(validity) = &mut chunk.validity {
+                    validity.set(*in_chunk, true);
+                }
+            } else {
+                chunk.values[*in_chunk] = 0.0;
+                let validity = chunk.validity.get_or_insert_with(|| bitvec_all_true(len));
+                validity.set(*in_chunk, false);
+            }
+        }
+
+        if chunk.validity.as_ref().is_some_and(|v| v.all_true()) {
+            chunk.validity = None;
+        }
+    }
+
+    fn apply_overlays_to_current(&mut self, updates: &[(usize, Value)]) {
+        for (in_chunk, value) in updates {
+            if *in_chunk >= self.current.len() {
+                continue;
+            }
+            if let Value::Number(v) = value {
+                self.current[*in_chunk] = *v;
+                self.validity.set(*in_chunk, true);
+            } else {
+                self.current[*in_chunk] = 0.0;
+                self.validity.set(*in_chunk, false);
+            }
+        }
+    }
+
     fn as_column(&self) -> Column {
         let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
         Column {
@@ -1729,6 +1871,54 @@ impl MutableBoolColumn {
             _ => {}
         }
         false
+    }
+
+    fn apply_overlays_to_chunk(&mut self, chunk_idx: usize, updates: &[(usize, Value)]) {
+        let (len, mut values, mut validity) = match self.chunks.get(chunk_idx) {
+            Some(EncodedChunk::Bool(c)) => (c.len, c.decode_bools(), c.validity.clone()),
+            _ => return,
+        };
+
+        for (in_chunk, value) in updates {
+            if *in_chunk >= len {
+                continue;
+            }
+            if let Value::Boolean(v) = value {
+                values.set(*in_chunk, *v);
+                if let Some(validity) = &mut validity {
+                    validity.set(*in_chunk, true);
+                }
+            } else {
+                values.set(*in_chunk, false);
+                let validity = validity.get_or_insert_with(|| bitvec_all_true(len));
+                validity.set(*in_chunk, false);
+            }
+        }
+
+        let mut data = vec![0u8; (len + 7) / 8];
+        for i in 0..len {
+            if values.get(i) {
+                data[i / 8] |= 1u8 << (i % 8);
+            }
+        }
+
+        let validity = validity.and_then(|v| (!v.all_true()).then_some(v));
+        self.chunks[chunk_idx] = EncodedChunk::Bool(BoolChunk { len, data, validity });
+    }
+
+    fn apply_overlays_to_current(&mut self, updates: &[(usize, Value)]) {
+        for (in_chunk, value) in updates {
+            if *in_chunk >= self.current.len() {
+                continue;
+            }
+            if let Value::Boolean(v) = value {
+                self.current.set(*in_chunk, *v);
+                self.validity.set(*in_chunk, true);
+            } else {
+                self.current.set(*in_chunk, false);
+                self.validity.set(*in_chunk, false);
+            }
+        }
     }
 
     fn as_column(&self) -> Column {
@@ -1986,6 +2176,51 @@ impl MutableDictColumn {
                 };
                 (self.min == Some(old_s.clone()) && new_s.as_ref() != old_s.as_ref())
                     || (self.max == Some(old_s.clone()) && new_s.as_ref() != old_s.as_ref())
+            }
+        }
+    }
+
+    fn apply_overlays_to_chunk(&mut self, chunk_idx: usize, updates: &[(usize, Value)]) {
+        let (len, mut indices, mut validity) = match self.chunks.get(chunk_idx) {
+            Some(EncodedChunk::Dict(c)) => (c.len, c.decode_indices(), c.validity.clone()),
+            _ => return,
+        };
+
+        for (in_chunk, value) in updates {
+            if *in_chunk >= len {
+                continue;
+            }
+            if let Value::String(s) = value {
+                let idx = self.intern(s.clone());
+                indices[*in_chunk] = idx;
+                if let Some(validity) = &mut validity {
+                    validity.set(*in_chunk, true);
+                }
+            } else {
+                indices[*in_chunk] = 0;
+                let validity = validity.get_or_insert_with(|| bitvec_all_true(len));
+                validity.set(*in_chunk, false);
+            }
+        }
+
+        let indices = U32SequenceEncoding::encode(&indices);
+        let validity = validity.and_then(|v| (!v.all_true()).then_some(v));
+
+        self.chunks[chunk_idx] = EncodedChunk::Dict(DictionaryEncodedChunk { len, indices, validity });
+    }
+
+    fn apply_overlays_to_current(&mut self, updates: &[(usize, Value)]) {
+        for (in_chunk, value) in updates {
+            if *in_chunk >= self.current.len() {
+                continue;
+            }
+            if let Value::String(s) = value {
+                let idx = self.intern(s.clone());
+                self.current[*in_chunk] = idx;
+                self.validity.set(*in_chunk, true);
+            } else {
+                self.current[*in_chunk] = 0;
+                self.validity.set(*in_chunk, false);
             }
         }
     }
