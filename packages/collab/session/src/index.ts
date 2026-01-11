@@ -853,7 +853,13 @@ export class CollabSession {
       // undo scope before that happens, comment edits won't be undoable.
       scope.add(getCommentsRootForUndoScope(this.doc));
 
-      const builtInScopeNames = new Set(["cells", "sheets", "metadata", "namedRanges", "comments"]);
+      // Root names that are either already part of the built-in undo scope, or
+      // should never be added via `undo.scopeNames`.
+      //
+      // `cellStructuralOps` is an internal log used by CellStructuralConflictMonitor.
+      // It is intentionally excluded from undo tracking so conflict detection
+      // metadata is never undone (which would break future conflict detection).
+      const builtInScopeNames = new Set(["cells", "sheets", "metadata", "namedRanges", "comments", "cellStructuralOps"]);
       for (const name of options.undo.scopeNames ?? []) {
         if (!name || builtInScopeNames.has(name)) continue;
         scope.add(this.doc.getMap(name));
