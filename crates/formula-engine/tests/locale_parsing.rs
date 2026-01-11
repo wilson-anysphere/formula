@@ -115,6 +115,15 @@ fn localized_boolean_keywords_are_not_translated_inside_structured_refs() {
 }
 
 #[test]
+fn localized_boolean_keywords_are_not_translated_in_3d_sheet_spans() {
+    // In de-DE, `WAHR` is the TRUE keyword, but it can also be a sheet name.
+    // Ensure we treat `WAHR:Sheet3!A1` as a 3D sheet span, not a boolean literal.
+    let localized = "=SUMME(WAHR:Sheet3!A1)";
+    let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();
+    assert_eq!(canonical, "=SUM(WAHR:Sheet3!A1)");
+}
+
+#[test]
 fn canonicalize_and_localize_error_literals() {
     let de = "=#WERT!";
     let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();

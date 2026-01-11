@@ -252,7 +252,40 @@ fn next_non_trivia_kind<'a>(tokens: &'a [Token], idx: usize) -> Option<&'a Token
 }
 
 fn is_sheet_prefix_ident(tokens: &[Token], idx: usize) -> bool {
-    matches!(next_non_trivia_kind(tokens, idx), Some(TokenKind::Bang))
+    match next_non_trivia_kind(tokens, idx) {
+        Some(TokenKind::Bang) => true,
+        // 3D sheet span: `Sheet1:Sheet3!A1`
+        Some(TokenKind::Colon) => {
+            // idx -> start sheet ident
+            // colon -> end sheet name
+            // bang -> reference separator
+            let mut colon_idx = idx + 1;
+            while matches!(
+                tokens.get(colon_idx).map(|t| &t.kind),
+                Some(TokenKind::Whitespace(_))
+            ) {
+                colon_idx += 1;
+            }
+            if !matches!(tokens.get(colon_idx).map(|t| &t.kind), Some(TokenKind::Colon)) {
+                return false;
+            }
+
+            let mut end_sheet_idx = colon_idx + 1;
+            while matches!(
+                tokens.get(end_sheet_idx).map(|t| &t.kind),
+                Some(TokenKind::Whitespace(_))
+            ) {
+                end_sheet_idx += 1;
+            }
+            match tokens.get(end_sheet_idx).map(|t| &t.kind) {
+                Some(TokenKind::Ident(_)) | Some(TokenKind::QuotedIdent(_)) => {}
+                _ => return false,
+            }
+
+            matches!(next_non_trivia_kind(tokens, end_sheet_idx), Some(TokenKind::Bang))
+        }
+        _ => false,
+    }
 }
 
 fn is_table_name_ident(tokens: &[Token], idx: usize) -> bool {
