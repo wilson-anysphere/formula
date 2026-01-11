@@ -74,6 +74,109 @@ fn cmp_key(a: &[Value], b: &[Value]) -> Ordering {
     a.len().cmp(&b.len())
 }
 
+enum GroupKeyAccessor<'a> {
+    Base { idx: usize },
+    Related {
+        from_idx: usize,
+        to_index: &'a std::collections::HashMap<Value, usize>,
+        to_table: &'a crate::model::Table,
+        to_column_idx: usize,
+    },
+}
+
+fn build_group_key_accessors<'a>(
+    model: &'a DataModel,
+    base_table: &'a str,
+    group_by: &'a [GroupByColumn],
+) -> DaxResult<( &'a crate::model::Table, Vec<GroupKeyAccessor<'a>>)> {
+    let base_table_ref = model
+        .table(base_table)
+        .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+
+    let mut accessors = Vec::with_capacity(group_by.len());
+    for col in group_by {
+        if col.table == base_table {
+            let idx = base_table_ref
+                .column_idx(&col.column)
+                .ok_or_else(|| DaxError::UnknownColumn {
+                    table: base_table.to_string(),
+                    column: col.column.clone(),
+                })?;
+            accessors.push(GroupKeyAccessor::Base { idx });
+            continue;
+        }
+
+        let rel_info = model
+            .relationships()
+            .iter()
+            .find(|rel| {
+                rel.rel.is_active && rel.rel.from_table == base_table && rel.rel.to_table == col.table
+            })
+            .ok_or_else(|| {
+                DaxError::Eval(format!(
+                    "no active relationship from {base_table} to {} for RELATED",
+                    col.table
+                ))
+            })?;
+
+        let from_idx = base_table_ref
+            .column_idx(&rel_info.rel.from_column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: base_table.to_string(),
+                column: rel_info.rel.from_column.clone(),
+            })?;
+
+        let to_table_ref = model
+            .table(&col.table)
+            .ok_or_else(|| DaxError::UnknownTable(col.table.clone()))?;
+        let to_column_idx = to_table_ref
+            .column_idx(&col.column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: col.table.clone(),
+                column: col.column.clone(),
+            })?;
+
+        accessors.push(GroupKeyAccessor::Related {
+            from_idx,
+            to_index: &rel_info.to_index,
+            to_table: to_table_ref,
+            to_column_idx,
+        });
+    }
+
+    Ok((base_table_ref, accessors))
+}
+
+fn fill_group_key(
+    accessors: &[GroupKeyAccessor<'_>],
+    base_table: &crate::model::Table,
+    row: usize,
+    out: &mut Vec<Value>,
+) {
+    out.clear();
+    for accessor in accessors {
+        let value = match accessor {
+            GroupKeyAccessor::Base { idx } => base_table.value_by_idx(row, *idx).unwrap_or(Value::Blank),
+            GroupKeyAccessor::Related {
+                from_idx,
+                to_index,
+                to_table,
+                to_column_idx,
+            } => {
+                let key = base_table.value_by_idx(row, *from_idx).unwrap_or(Value::Blank);
+                if key.is_blank() {
+                    Value::Blank
+                } else if let Some(&to_row) = to_index.get(&key) {
+                    to_table.value_by_idx(to_row, *to_column_idx).unwrap_or(Value::Blank)
+                } else {
+                    Value::Blank
+                }
+            }
+        };
+        out.push(value);
+    }
+}
+
 #[derive(Clone, Debug)]
 enum PlannedExpr {
     Const(Value),
@@ -449,11 +552,7 @@ fn pivot_planned_row_group_by(
     measures: &[PivotMeasure],
     filter: &FilterContext,
 ) -> DaxResult<Option<PivotResult>> {
-    let engine = DaxEngine::new();
-
-    let table_ref = model
-        .table(base_table)
-        .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+    let (table_ref, group_key_accessors) = build_group_key_accessors(model, base_table, group_by)?;
 
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
     let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
@@ -578,37 +677,11 @@ fn pivot_planned_row_group_by(
         .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
         .transpose()?;
 
-    let group_exprs: Vec<Expr> = group_by
-        .iter()
-        .map(|col| {
-            if col.table == base_table {
-                Expr::ColumnRef {
-                    table: col.table.clone(),
-                    column: col.column.clone(),
-                }
-            } else {
-                Expr::Call {
-                    name: "RELATED".to_string(),
-                    args: vec![Expr::ColumnRef {
-                        table: col.table.clone(),
-                        column: col.column.clone(),
-                    }],
-                }
-            }
-        })
-        .collect();
-
     let mut groups: HashMap<Vec<Value>, Vec<AggState>> = HashMap::new();
     let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
 
     let mut process_row = |row: usize| -> DaxResult<()> {
-        let mut row_ctx = RowContext::default();
-        row_ctx.push(base_table, row);
-
-        key_buf.clear();
-        for expr in &group_exprs {
-            key_buf.push(engine.evaluate_expr(model, expr, filter, &row_ctx)?);
-        }
+        fill_group_key(&group_key_accessors, table_ref, row, &mut key_buf);
 
         if let Some(states) = groups.get_mut(key_buf.as_slice()) {
             for (state, spec) in states.iter_mut().zip(&agg_specs) {
@@ -677,40 +750,15 @@ fn pivot_row_scan(
         .transpose()?;
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
     let mut groups: Vec<Vec<Value>> = Vec::new();
-    let group_exprs: Vec<Expr> = group_by
-        .iter()
-        .map(|col| {
-            if col.table == base_table {
-                Expr::ColumnRef {
-                    table: col.table.clone(),
-                    column: col.column.clone(),
-                }
-            } else {
-                Expr::Call {
-                    name: "RELATED".to_string(),
-                    args: vec![Expr::ColumnRef {
-                        table: col.table.clone(),
-                        column: col.column.clone(),
-                    }],
-                }
-            }
-        })
-        .collect();
+    let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by)?;
+    let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
 
     // Build the set of groups by scanning the base table rows. This ensures we only create
     // groups that actually exist in the fact table under the current filter context.
     let mut process_row = |row: usize| -> DaxResult<()> {
-        let mut row_ctx = RowContext::default();
-        row_ctx.push(base_table, row);
-
-        let mut key = Vec::with_capacity(group_by.len());
-        for expr in &group_exprs {
-            let value = engine.evaluate_expr(model, expr, filter, &row_ctx)?;
-            key.push(value);
-        }
-
-        if seen.insert(key.clone()) {
-            groups.push(key);
+        fill_group_key(&group_key_accessors, table_ref, row, &mut key_buf);
+        if seen.insert(key_buf.clone()) {
+            groups.push(key_buf.clone());
         }
         Ok(())
     };
