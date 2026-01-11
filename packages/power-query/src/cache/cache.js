@@ -5,7 +5,8 @@
  * - deterministic keys (caller provided)
  * - optional TTL
  * - pluggable storage backends (e.g. `MemoryCacheStore`, `FileSystemCacheStore`,
- *   and `EncryptedFileSystemCacheStore` for encrypted-at-rest Node caching)
+ *   `IndexedDBCacheStore`, and `EncryptedCacheStore` / `EncryptedFileSystemCacheStore`
+ *   for encrypted-at-rest caching)
  */
 
 /**
