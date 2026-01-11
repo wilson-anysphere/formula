@@ -157,6 +157,7 @@ impl Cell {
 pub struct CellData {
     pub value: CellScalar,
     pub formula: Option<String>,
+    pub display_value: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -166,6 +167,7 @@ pub struct CellUpdateData {
     pub col: usize,
     pub value: CellScalar,
     pub formula: Option<String>,
+    pub display_value: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -873,10 +875,11 @@ impl AppState {
 
         let addr = coord_to_a1(row, col);
         let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
-        let value = format_scalar_for_display(value, cell.number_format.as_deref());
+        let display_value = format_scalar_for_display(&value, cell.number_format.as_deref());
         Ok(CellData {
             value,
             formula,
+            display_value,
         })
     }
 
@@ -935,12 +938,12 @@ impl AppState {
                 let cell = sheet.get_cell(r, c);
                 let addr = coord_to_a1(r, c);
                 let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
-                let value = format_scalar_for_display(value, cell.number_format.as_deref());
+                let display_value = format_scalar_for_display(&value, cell.number_format.as_deref());
 
                  let formula = if let Some(viewport) = viewport.as_ref() {
-                     let cached = viewport
-                         .get(r as i64, c as i64)
-                         .and_then(|c| c.formula.as_ref())
+                      let cached = viewport
+                          .get(r as i64, c as i64)
+                          .and_then(|c| c.formula.as_ref())
                          .and_then(|f| {
                              let display = formula_model::display_formula_text(f);
                              if display.is_empty() {
@@ -957,6 +960,7 @@ impl AppState {
                 row_out.push(CellData {
                     value,
                     formula,
+                    display_value,
                 });
             }
             rows.push(row_out);
@@ -1008,6 +1012,7 @@ impl AppState {
                 col,
                 value: cell.value,
                 formula: cell.formula,
+                display_value: cell.display_value,
             });
         }
 
@@ -1110,6 +1115,7 @@ impl AppState {
                     col,
                     value: cell_data.value,
                     formula: cell_data.formula,
+                    display_value: cell_data.display_value,
                 });
             }
         }
@@ -1482,6 +1488,7 @@ impl AppState {
                     col,
                     value: cell.value,
                     formula: cell.formula,
+                    display_value: cell.display_value,
                 });
             }
         }
@@ -1569,6 +1576,7 @@ impl AppState {
                     col,
                     value: cell.value,
                     formula: cell.formula,
+                    display_value: cell.display_value,
                 });
             }
         }
@@ -1658,6 +1666,7 @@ impl AppState {
                     col: cell.col,
                     value: cell_data.value,
                     formula: cell_data.formula,
+                    display_value: cell_data.display_value,
                 });
             }
         }
@@ -1692,6 +1701,7 @@ impl AppState {
                     col: cell.col,
                     value: cell_data.value,
                     formula: cell_data.formula,
+                    display_value: cell_data.display_value,
                 });
             }
         }
@@ -2221,13 +2231,14 @@ impl AppState {
             }
 
             cell.computed_value = new_value.clone();
-            let display_value = format_scalar_for_display(new_value, cell.number_format.as_deref());
+            let display_value = format_scalar_for_display(&new_value, cell.number_format.as_deref());
             updates.push(CellUpdateData {
                 sheet_id: sheet.id.clone(),
                 row,
                 col,
-                value: display_value,
+                value: new_value,
                 formula: cell.formula.clone(),
+                display_value,
             });
         }
 
@@ -2322,13 +2333,14 @@ impl AppState {
                 if new_value != cell.computed_value {
                     cell.computed_value = new_value.clone();
                     let display_value =
-                        format_scalar_for_display(new_value, cell.number_format.as_deref());
+                        format_scalar_for_display(&new_value, cell.number_format.as_deref());
                     updates.push(CellUpdateData {
                         sheet_id: sheet_id.clone(),
                         row: *row,
                         col: *col,
-                        value: display_value,
+                        value: new_value,
                         formula: cell.formula.clone(),
+                        display_value,
                     });
                 }
             }
@@ -2486,6 +2498,7 @@ fn refresh_pivot_registration(
 
                 let desired_scalar = pivot_value_to_scalar(&pv);
                 let desired_opt = pivot_value_to_scalar_opt(&pv);
+                let display_value = format_scalar_for_display(&desired_scalar, None);
 
                 let existing = sheet.get_cell(row, col);
                 let changed =
@@ -2513,6 +2526,7 @@ fn refresh_pivot_registration(
                     col,
                     value: desired_scalar,
                     formula: None,
+                    display_value,
                 });
             }
         }
@@ -2521,14 +2535,14 @@ fn refresh_pivot_registration(
     pivot.last_output_range = Some(union_range);
     Ok(updates)
 }
-fn format_scalar_for_display(value: CellScalar, number_format: Option<&str>) -> CellScalar {
+fn format_scalar_for_display(value: &CellScalar, number_format: Option<&str>) -> String {
     match (value, number_format) {
         (CellScalar::Number(n), Some(fmt)) => {
             let formatted =
-                format_value(FormatValue::Number(n), Some(fmt), &FormatOptions::default());
-            CellScalar::Text(formatted.text)
+                format_value(FormatValue::Number(*n), Some(fmt), &FormatOptions::default());
+            formatted.text
         }
-        (other, _) => other,
+        (other, _) => other.display(),
     }
 }
 fn resolve_cell_ref(
@@ -2894,6 +2908,41 @@ mod tests {
         let b1_after = state.get_cell(&sheet_id, 0, 1).unwrap();
         assert_eq!(b1_after.value, CellScalar::Number(11.0));
         assert!(state.has_unsaved_changes());
+    }
+
+    #[test]
+    fn get_range_and_updates_preserve_typed_values_when_number_format_present() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut cell = Cell::from_literal(Some(CellScalar::Number(1.25)));
+        cell.number_format = Some("0.00".to_string());
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, cell);
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let a1 = state.get_cell(&sheet_id, 0, 0).expect("get A1");
+        assert_eq!(a1.value, CellScalar::Number(1.25));
+        assert_eq!(a1.display_value, "1.25");
+
+        let range = state.get_range(&sheet_id, 0, 0, 0, 0).expect("get range");
+        assert_eq!(range[0][0].value, CellScalar::Number(1.25));
+        assert_eq!(range[0][0].display_value, "1.25");
+
+        let updates = state
+            .set_cell(&sheet_id, 0, 0, Some(JsonValue::from(2.5)), None)
+            .expect("set cell");
+        let update = updates
+            .iter()
+            .find(|u| u.row == 0 && u.col == 0)
+            .expect("expected A1 update");
+        assert_eq!(update.value, CellScalar::Number(2.5));
+        assert_eq!(update.display_value, "2.50");
     }
 
     #[test]

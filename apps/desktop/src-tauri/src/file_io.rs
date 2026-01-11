@@ -1925,10 +1925,9 @@ mod tests {
             &FormatOptions::default(),
         )
         .text;
-        assert_eq!(
-            state.get_cell(&sheet_id, 0, 0).unwrap().value,
-            CellScalar::Text(expected)
-        );
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("get cell");
+        assert_eq!(cell.value, CellScalar::Number(44927.0));
+        assert_eq!(cell.display_value, expected);
     }
 
     #[test]
