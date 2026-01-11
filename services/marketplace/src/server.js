@@ -966,6 +966,37 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         }
       }
 
+      if (req.method === "GET" && url.pathname === "/api/admin/scans") {
+        route = "/api/admin/scans";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const status = url.searchParams.get("status");
+        const publisher = url.searchParams.get("publisher");
+        const extensionId = url.searchParams.get("extensionId");
+        const limit = Number(url.searchParams.get("limit") || "50");
+        const offset = Number(url.searchParams.get("offset") || "0");
+
+        statusCode = 200;
+        return sendJson(res, 200, {
+          scans: await store.listPackageScans({
+            status: status && status.trim() ? status : null,
+            publisher: publisher && publisher.trim() ? publisher : null,
+            extensionId: extensionId && extensionId.trim() ? extensionId : null,
+            limit,
+            offset,
+          }),
+        });
+      }
+
       if (req.method === "GET" && url.pathname === "/api/admin/audit") {
         route = "/api/admin/audit";
         res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);

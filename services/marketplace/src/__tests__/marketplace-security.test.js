@@ -86,6 +86,9 @@ test("publishing triggers a package scan record", async (t) => {
     assert.equal(publishAudit.actor, publisher);
     assert.equal(publishAudit.extensionId, published.id);
     assert.equal(publishAudit.version, published.version);
+
+    const scans = await store.listPackageScans({ status: "passed", limit: 50 });
+    assert.ok(scans.some((s) => s.extensionId === published.id && s.version === published.version));
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });
     await fs.rm(dir, { recursive: true, force: true });

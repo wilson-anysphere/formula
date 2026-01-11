@@ -157,6 +157,36 @@ function safeJsonStringify(value) {
   return JSON.stringify(value ?? null);
 }
 
+function normalizePackageScanFindings(findingsJson) {
+  /** @type {any} */
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(findingsJson || "null"));
+  } catch {
+    parsed = null;
+  }
+  if (Array.isArray(parsed)) {
+    parsed = {
+      formatVersion: null,
+      fileCount: null,
+      unpackedSize: null,
+      findings: parsed,
+    };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    parsed = {
+      formatVersion: null,
+      fileCount: null,
+      unpackedSize: null,
+      findings: [],
+    };
+  }
+  if (!Array.isArray(parsed.findings)) {
+    parsed.findings = [];
+  }
+  return parsed;
+}
+
 function randomId() {
   return crypto.randomUUID();
 }
@@ -1534,32 +1564,7 @@ class MarketplaceStore {
       const row = stmt.getAsObject();
       stmt.free();
 
-      /** @type {any} */
-      let findings = null;
-      try {
-        findings = JSON.parse(String(row.findings_json || "[]"));
-      } catch {
-        findings = null;
-      }
-      if (Array.isArray(findings)) {
-        findings = {
-          formatVersion: null,
-          fileCount: null,
-          unpackedSize: null,
-          findings,
-        };
-      }
-      if (!findings || typeof findings !== "object") {
-        findings = {
-          formatVersion: null,
-          fileCount: null,
-          unpackedSize: null,
-          findings: [],
-        };
-      }
-      if (!Array.isArray(findings.findings)) {
-        findings.findings = [];
-      }
+      const findings = normalizePackageScanFindings(row.findings_json);
 
       return {
         extensionId,
@@ -1568,6 +1573,55 @@ class MarketplaceStore {
         findings,
         scannedAt: row.scanned_at ? String(row.scanned_at) : null,
       };
+    });
+  }
+
+  async listPackageScans({ status = null, publisher = null, extensionId = null, limit = 50, offset = 0 } = {}) {
+    const boundedLimit = Math.max(1, Math.min(200, Number(limit) || 50));
+    const boundedOffset = Math.max(0, Number(offset) || 0);
+
+    return this.db.withRead((db) => {
+      const conditions = [];
+      const params = [];
+
+      if (status) {
+        conditions.push("s.status = ?");
+        params.push(String(status));
+      }
+      if (publisher) {
+        conditions.push("e.publisher = ?");
+        params.push(String(publisher));
+      }
+      if (extensionId) {
+        conditions.push("s.extension_id = ?");
+        params.push(String(extensionId));
+      }
+
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const stmt = db.prepare(
+        `SELECT s.extension_id, s.version, s.status, s.findings_json, s.scanned_at,
+                e.publisher
+         FROM package_scans s
+         JOIN extensions e ON e.id = s.extension_id
+         ${where}
+         ORDER BY s.scanned_at DESC
+         LIMIT ? OFFSET ?`
+      );
+      stmt.bind([...params, boundedLimit, boundedOffset]);
+      const out = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        out.push({
+          extensionId: String(row.extension_id),
+          version: String(row.version),
+          publisher: String(row.publisher),
+          status: String(row.status),
+          findings: normalizePackageScanFindings(row.findings_json),
+          scannedAt: row.scanned_at ? String(row.scanned_at) : null,
+        });
+      }
+      stmt.free();
+      return out;
     });
   }
 

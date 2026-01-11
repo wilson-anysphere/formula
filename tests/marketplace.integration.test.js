@@ -1096,6 +1096,14 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
 
     await publishExtension({ extensionDir: extSource, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath });
 
+    const scansRes = await fetch(`${baseUrl}/api/admin/scans?extensionId=${encodeURIComponent(extensionId)}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(scansRes.status, 200);
+    const scansBody = await scansRes.json();
+    assert.ok(Array.isArray(scansBody.scans));
+    assert.ok(scansBody.scans.some((scan) => scan.extensionId === extensionId && scan.status === "passed"));
+
     const extUrl = `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}`;
     const extRes = await fetch(extUrl);
     assert.equal(extRes.status, 200);
