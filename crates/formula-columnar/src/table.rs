@@ -1200,15 +1200,6 @@ impl MutableColumn {
         }
     }
 
-    fn as_column(&self) -> Column {
-        match self {
-            MutableColumn::Int(c) => c.as_column(),
-            MutableColumn::Float(c) => c.as_column(),
-            MutableColumn::Bool(c) => c.as_column(),
-            MutableColumn::Dict(c) => c.as_column(),
-        }
-    }
-
     fn into_column(self) -> Column {
         match self {
             MutableColumn::Int(c) => c.into_column(),
@@ -1565,17 +1556,6 @@ impl MutableIntColumn {
         }
     }
 
-    fn as_column(&self) -> Column {
-        let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
-        Column {
-            schema: self.schema.clone(),
-            chunks: self.chunks.clone(),
-            stats: self.stats(),
-            dictionary: None,
-            distinct,
-        }
-    }
-
     fn into_column(self) -> Column {
         let stats = self.stats();
         let distinct = (self.distinct_base == 0).then(|| self.distinct);
@@ -1843,17 +1823,6 @@ impl MutableFloatColumn {
         Column {
             schema: self.schema.clone(),
             chunks,
-            stats: self.stats(),
-            dictionary: None,
-            distinct,
-        }
-    }
-
-    fn as_column(&self) -> Column {
-        let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
-        Column {
-            schema: self.schema.clone(),
-            chunks: self.chunks.clone(),
             stats: self.stats(),
             dictionary: None,
             distinct,
@@ -2128,16 +2097,6 @@ impl MutableBoolColumn {
         Column {
             schema: self.schema.clone(),
             chunks,
-            stats: self.stats(),
-            dictionary: None,
-            distinct: None,
-        }
-    }
-
-    fn as_column(&self) -> Column {
-        Column {
-            schema: self.schema.clone(),
-            chunks: self.chunks.clone(),
             stats: self.stats(),
             dictionary: None,
             distinct: None,
@@ -2462,16 +2421,6 @@ impl MutableDictColumn {
         Column {
             schema: self.schema.clone(),
             chunks,
-            stats: self.stats(),
-            dictionary: Some(self.dictionary.clone()),
-            distinct: None,
-        }
-    }
-
-    fn as_column(&self) -> Column {
-        Column {
-            schema: self.schema.clone(),
-            chunks: self.chunks.clone(),
             stats: self.stats(),
             dictionary: Some(self.dictionary.clone()),
             distinct: None,
