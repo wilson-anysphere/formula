@@ -71,6 +71,24 @@ test("auto direction chooses rtl when the first strong character is Hebrew (numb
   assert.deepEqual(layout.lines.map((l) => l.text), ["123", "שלום", "עולם"]);
 });
 
+test("auto direction chooses ltr when the first strong character is Latin (mixed-script)", () => {
+  const measurer = makeMonospaceMeasurer();
+  const engine = new TextLayoutEngine(measurer);
+
+  const layout = engine.layout({
+    text: "Hello שלום",
+    font: { family: "Inter", sizePx: 10, weight: 400 },
+    maxWidth: 5,
+    wrapMode: "word",
+    align: "start",
+    direction: "auto",
+  });
+
+  assert.equal(layout.direction, "ltr");
+  assert.equal(layout.resolvedAlign, "left");
+  assert.deepEqual(layout.lines.map((l) => l.text), ["Hello", "שלום"]);
+});
+
 test("layout results are cached to avoid repeated measurement work", () => {
   const measurer = makeMonospaceMeasurer();
   const engine = new TextLayoutEngine(measurer);
