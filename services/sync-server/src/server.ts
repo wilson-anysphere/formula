@@ -20,7 +20,10 @@ import {
   type AuthContext,
 } from "./auth.js";
 import { ConnectionTracker, TokenBucketRateLimiter } from "./limits.js";
-import { FilePersistence } from "./persistence.js";
+import {
+  FilePersistence,
+  migrateLegacyPlaintextFilesToEncryptedFormat,
+} from "./persistence.js";
 import { Y } from "./yjs.js";
 import { installYwsSecurity } from "./ywsSecurity.js";
 
@@ -87,16 +90,31 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
     if (persistenceInitialized) return;
 
     if (config.persistence.backend === "file") {
+      if (config.persistence.encryption.mode === "keyring") {
+        await migrateLegacyPlaintextFilesToEncryptedFormat({
+          dir: config.dataDir,
+          logger,
+          keyRing: config.persistence.encryption.keyRing,
+        });
+      }
+
       persistenceInitialized = true;
       persistenceCleanup = null;
       setPersistence(
         new FilePersistence(
           config.dataDir,
           logger,
-          config.persistence.compactAfterUpdates
+          config.persistence.compactAfterUpdates,
+          config.persistence.encryption
         )
       );
-      logger.info({ dir: config.dataDir }, "persistence_file_enabled");
+      logger.info(
+        {
+          dir: config.dataDir,
+          encryption: config.persistence.encryption.mode,
+        },
+        "persistence_file_enabled"
+      );
       return;
     }
 
@@ -120,19 +138,35 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
           { err },
           "y-leveldb_not_installed_falling_back_to_file_persistence"
         );
+
+        if (config.persistence.encryption.mode === "keyring") {
+          await migrateLegacyPlaintextFilesToEncryptedFormat({
+            dir: config.dataDir,
+            logger,
+            keyRing: config.persistence.encryption.keyRing,
+          });
+        }
+
         persistenceInitialized = true;
         persistenceCleanup = null;
         setPersistence(
           new FilePersistence(
             config.dataDir,
             logger,
-            config.persistence.compactAfterUpdates
+            config.persistence.compactAfterUpdates,
+            config.persistence.encryption
           )
         );
         return;
       }
 
       throw err;
+    }
+
+    if (config.persistence.encryption.mode === "keyring") {
+      throw new Error(
+        "SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring is only supported with SYNC_SERVER_PERSISTENCE_BACKEND=file."
+      );
     }
 
     const isLockError = (err: unknown) => {

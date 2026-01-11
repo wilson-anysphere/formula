@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
+
+import { KeyRing } from "../../../packages/security/crypto/keyring.js";
 
 export type AuthMode =
   | {
@@ -22,6 +25,14 @@ export type SyncServerConfig = {
   persistence: {
     backend: "leveldb" | "file";
     compactAfterUpdates: number;
+    encryption:
+      | {
+          mode: "off";
+        }
+      | {
+          mode: "keyring";
+          keyRing: KeyRing;
+        };
   };
 
   auth: AuthMode;
@@ -49,6 +60,35 @@ function envInt(value: string | undefined, defaultValue: number): number {
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+function loadKeyRingFromEnv(): KeyRing {
+  const keyRingJsonEnv = process.env.SYNC_SERVER_ENCRYPTION_KEYRING_JSON;
+  const keyRingPath = process.env.SYNC_SERVER_ENCRYPTION_KEYRING_PATH;
+
+  let json: string | null = null;
+  if (keyRingJsonEnv && keyRingJsonEnv.trim().length > 0) {
+    json = keyRingJsonEnv;
+  } else if (keyRingPath && keyRingPath.trim().length > 0) {
+    json = readFileSync(keyRingPath, "utf8");
+  }
+
+  if (!json) {
+    throw new Error(
+      "SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring requires SYNC_SERVER_ENCRYPTION_KEYRING_JSON or SYNC_SERVER_ENCRYPTION_KEYRING_PATH."
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (err) {
+    throw new Error(
+      `Invalid KeyRing JSON (SYNC_SERVER_ENCRYPTION_KEYRING_JSON/SYNC_SERVER_ENCRYPTION_KEYRING_PATH): ${String(err)}`
+    );
+  }
+
+  return KeyRing.fromJSON(parsed);
+}
+
 export function loadConfigFromEnv(): SyncServerConfig {
   const nodeEnv = process.env.NODE_ENV ?? "development";
 
@@ -69,6 +109,17 @@ export function loadConfigFromEnv(): SyncServerConfig {
     process.env.SYNC_SERVER_PERSIST_COMPACT_AFTER_UPDATES,
     200
   );
+
+  const encryptionEnv = process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION ?? "off";
+  const encryptionMode =
+    encryptionEnv === "keyring" || encryptionEnv === "off" ? encryptionEnv : "off";
+  const encryption =
+    encryptionMode === "keyring"
+      ? {
+          mode: "keyring" as const,
+          keyRing: loadKeyRingFromEnv(),
+        }
+      : { mode: "off" as const };
 
   const opaqueToken = process.env.SYNC_SERVER_AUTH_TOKEN;
   const jwtSecret = process.env.SYNC_SERVER_JWT_SECRET;
@@ -99,7 +150,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
     trustProxy,
     gc,
     dataDir,
-    persistence: { backend, compactAfterUpdates },
+    persistence: { backend, compactAfterUpdates, encryption },
     auth,
     limits: {
       maxConnections: envInt(process.env.SYNC_SERVER_MAX_CONNECTIONS, 1000),

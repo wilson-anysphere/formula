@@ -94,6 +94,22 @@ You can switch persistence backends:
 - `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb` (default)
 - `SYNC_SERVER_PERSISTENCE_BACKEND=file` (portable fallback)
 
+#### Encryption at rest (file persistence)
+
+The `file` persistence backend supports **encryption at rest** (AES-256-GCM) for persisted `.yjs` documents.
+
+Enable:
+
+- `SYNC_SERVER_PERSISTENCE_BACKEND=file`
+- `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring`
+- Provide key material via **one** of:
+  - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON` (KeyRing JSON string), or
+  - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH` (path to a JSON file containing KeyRing JSON)
+
+When encryption is enabled, existing legacy plaintext `.yjs` files in `SYNC_SERVER_DATA_DIR` are migrated to the encrypted, append-only format **on startup** (atomic per file).
+
+Key rotation is operator-managed by replacing the KeyRing JSON (bumping `currentVersion` and adding a new key while keeping old key versions available for decryption).
+
 #### Auth (dev default)
 
 If no auth env vars are provided, the server starts with a **development token**:

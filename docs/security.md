@@ -49,6 +49,30 @@ Implementation:
 
 The included `LocalKmsProvider` is meant for tests and single-node dev. Production deployments should supply AWS/GCP/Azure implementations.
 
+### Sync server (Yjs persistence)
+
+`services/sync-server` supports **encryption at rest** for the `file` persistence backend (append-only `.yjs` update logs).
+
+Enable:
+
+- `SYNC_SERVER_PERSISTENCE_BACKEND=file`
+- `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring`
+- Provide key material via **one** of:
+  - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON` (KeyRing JSON string), or
+  - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH` (path to a JSON file containing KeyRing JSON)
+
+When enabled, plaintext `.yjs` files in `SYNC_SERVER_DATA_DIR` are migrated to the encrypted format on startup (write temp + rename, idempotent).
+
+On-disk format is a small, append-friendly container:
+
+- Header: `FMLYJS01` (8 bytes) + 1 byte flags (`bit0 = encrypted`) + 3 reserved bytes
+- Records: `[u32be recordLen][recordBytes...]`
+  - Encrypted record bytes: `[u32be keyVersion][12B iv][16B tag][ciphertext...]`
+
+Records use AES-256-GCM with an AAD context that includes a stable scope + schema version + `doc = sha256(docName)` so ciphertext cannot be swapped across documents.
+
+Key rotation is handled by replacing the KeyRing JSON with a new `currentVersion` + key while retaining older key versions so existing records remain decryptable until compaction rewrites them.
+
 ## Encryption in Transit
 
 Cloud services should enforce **TLS 1.3 minimum**.
