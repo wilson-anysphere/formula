@@ -33,6 +33,14 @@ test("utils/hash.js is browser-safe (no Node builtin crypto import)", async () =
   assert.ok(digest1.length === 64 || digest1.length === 16);
   assert.equal(digest1, digest2);
 
+  // When WebCrypto is available we should get a real SHA-256 digest.
+  if (globalThis.crypto?.subtle) {
+    assert.equal(
+      digest1,
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    );
+  }
+
   const sourcePath = fileURLToPath(new URL("../src/utils/hash.js", import.meta.url));
   const source = await readFile(sourcePath, "utf8");
   const nodeCryptoSpecifier = ["node", "crypto"].join(":");
