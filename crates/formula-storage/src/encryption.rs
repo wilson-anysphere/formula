@@ -417,6 +417,21 @@ mod tests {
     }
 
     #[test]
+    fn iv_tamper_detection_fails() {
+        let keyring = KeyRing::from_key(1, [9u8; KEY_LEN]);
+        let plaintext = b"more bytes";
+        let mut encrypted = encrypt_sqlite_bytes(plaintext, &keyring).expect("encrypt");
+
+        // Flip a bit in the IV/nonce.
+        encrypted[12] ^= 0b0000_0001;
+        let err = decrypt_sqlite_bytes(&encrypted, &keyring).expect_err("decrypt should fail");
+        match err {
+            EncryptionError::Aead => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn keyring_json_is_compatible_with_padded_and_unpadded_base64() {
         let keyring = KeyRing::from_key(1, [0u8; KEY_LEN]);
         let mut json: serde_json::Value =

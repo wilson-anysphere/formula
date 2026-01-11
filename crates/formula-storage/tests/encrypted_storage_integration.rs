@@ -1,5 +1,7 @@
 use formula_storage::encryption::is_encrypted_container;
-use formula_storage::{CellChange, CellData, CellRange, CellValue, InMemoryKeyProvider, Storage};
+use formula_storage::{
+    CellChange, CellData, CellRange, CellValue, InMemoryKeyProvider, KeyProvider, Storage,
+};
 use std::sync::Arc;
 use tempfile::tempdir;
 
@@ -99,3 +101,69 @@ fn plaintext_migrates_to_encrypted_on_first_persist() {
     assert_eq!(cells[0].1.value, CellValue::String("hello".to_string()));
 }
 
+#[test]
+fn encrypted_workbook_survives_key_rotation() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("workbook.formula");
+    let key_provider = Arc::new(InMemoryKeyProvider::default());
+
+    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let workbook = storage
+        .create_workbook("Book1", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet1", 0, None)
+        .expect("create sheet");
+    storage
+        .apply_cell_changes(&[CellChange {
+            sheet_id: sheet.id,
+            row: 2,
+            col: 3,
+            data: CellData {
+                value: CellValue::Number(123.0),
+                formula: None,
+                style: None,
+            },
+            user_id: None,
+        }])
+        .expect("apply cells");
+    storage.persist().expect("persist v1");
+    drop(storage);
+
+    let bytes_v1 = std::fs::read(&path).expect("read v1");
+    assert_eq!(&bytes_v1[..8], b"FMLENC01");
+    let key_version_v1 = u32::from_be_bytes(bytes_v1[8..12].try_into().expect("key version bytes"));
+    assert_eq!(key_version_v1, 1);
+
+    // Rotate keys in the provider while retaining old versions.
+    let mut ring = key_provider.keyring().expect("keyring should exist after persist");
+    ring.rotate();
+    key_provider.store_keyring(&ring).expect("store rotated keyring");
+
+    // Reopen with rotated keyring; should still decrypt v1.
+    let reopened = Storage::open_encrypted_path(&path, key_provider.clone()).expect("reopen encrypted");
+    let cells = reopened
+        .load_cells_in_range(sheet.id, CellRange::new(0, 10, 0, 10))
+        .expect("load cells");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].0, (2, 3));
+    assert_eq!(cells[0].1.value, CellValue::Number(123.0));
+
+    // Persist again; should now re-encrypt with key version 2.
+    reopened.persist().expect("persist v2");
+    drop(reopened);
+
+    let bytes_v2 = std::fs::read(&path).expect("read v2");
+    assert_eq!(&bytes_v2[..8], b"FMLENC01");
+    let key_version_v2 = u32::from_be_bytes(bytes_v2[8..12].try_into().expect("key version bytes"));
+    assert_eq!(key_version_v2, 2);
+
+    let reopened_again =
+        Storage::open_encrypted_path(&path, key_provider).expect("reopen after v2 persist");
+    let cells = reopened_again
+        .load_cells_in_range(sheet.id, CellRange::new(0, 10, 0, 10))
+        .expect("load cells");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].0, (2, 3));
+    assert_eq!(cells[0].1.value, CellValue::Number(123.0));
+}
