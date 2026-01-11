@@ -769,6 +769,90 @@ test("rate limiting: /api/search enforces per-IP limits", async () => {
   }
 });
 
+test("rate limiting: /api/publish enforces per-publisher token limits", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-publish-ratelimit-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({
+    dataDir,
+    adminToken,
+    rateLimits: { publishPerPublisherPerMinute: 2 },
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extA = path.join(tmpRoot, "ext-a");
+    const extB = path.join(tmpRoot, "ext-b");
+    const extC = path.join(tmpRoot, "ext-c");
+    await copyDir(sampleExtensionSrc, extA);
+    await copyDir(sampleExtensionSrc, extB);
+    await copyDir(sampleExtensionSrc, extC);
+    await writeManifestVersion(extB, "1.1.0");
+    await writeManifestVersion(extC, "1.2.0");
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extA, "package.json"), "utf8"));
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    const pkgA = await packageExtension(extA, { privateKeyPem });
+    const pkgB = await packageExtension(extB, { privateKeyPem });
+    const pkgC = await packageExtension(extC, { privateKeyPem });
+
+    for (const pkg of [pkgA, pkgB]) {
+      const res = await fetch(`${baseUrl}/api/publish`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${publisherToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ packageBase64: pkg.packageBytes.toString("base64") }),
+      });
+      assert.equal(res.status, 200);
+    }
+
+    const limited = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ packageBase64: pkgC.packageBytes.toString("base64") }),
+    });
+    assert.equal(limited.status, 429);
+    const retryAfter = Number(limited.headers.get("retry-after") || "0");
+    assert.ok(Number.isFinite(retryAfter) && retryAfter > 0);
+    // 2 requests/minute -> 1 token every ~30s. Keep a wide bound to avoid flakes.
+    assert.ok(retryAfter <= 35);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("search cursor pagination returns stable pages", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-cursor-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");
