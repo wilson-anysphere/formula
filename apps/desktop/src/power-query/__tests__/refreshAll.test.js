@@ -383,6 +383,41 @@ test("DesktopPowerQueryRefreshOrchestrator cancelQuery during refresh completion
   orchestrator.dispose();
 });
 
+test("DesktopPowerQueryRefreshOrchestrator notifies onSuccessfulRun for completed queries", async () => {
+  const table = DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
+  const engine = new ScriptedEngine({ q1: { table } });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  /** @type {Array<{ queryId: string, completedAtMs: number }>} */
+  const calls = [];
+
+  const orchestrator = new DesktopPowerQueryRefreshOrchestrator({
+    engine,
+    document: doc,
+    concurrency: 1,
+    batchSize: 1,
+    onSuccessfulRun: (queryId, completedAtMs) => {
+      calls.push({ queryId, completedAtMs });
+    },
+  });
+
+  orchestrator.registerQuery({
+    id: "q1",
+    name: "Q1",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  await orchestrator.refreshAll(["q1"]).promise;
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].queryId, "q1");
+  assert.ok(Number.isFinite(calls[0].completedAtMs));
+
+  orchestrator.dispose();
+});
+
 test("DesktopPowerQueryRefreshOrchestrator cancels downstream targets on dependency error but continues independent branches", async () => {
   const tableOther = DataTable.fromGrid([["Other"], ["ok"]], { hasHeaders: true, inferTypes: true });
 

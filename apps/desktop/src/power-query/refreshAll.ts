@@ -27,6 +27,13 @@ export type DesktopPowerQueryRefreshAllOptions = {
   concurrency?: number;
   /** Batch size for sheet writes. */
   batchSize?: number;
+  /**
+   * Optional callback invoked when a query successfully refreshes.
+   *
+   * The query editor uses this to keep scheduled refresh persistence (`lastRunAtMs`)
+   * in sync with dependency-aware refreshAll sessions.
+   */
+  onSuccessfulRun?: (queryId: string, completedAtMs: number) => void;
 };
 
 export type DesktopPowerQueryRefreshAllHandle = {
@@ -110,6 +117,7 @@ type ApplyControllerEntry = { sessionId: string; jobId: string; queryId: string;
 export class DesktopPowerQueryRefreshOrchestrator {
   doc: DocumentController;
   batchSize: number;
+  private readonly onSuccessfulRun: DesktopPowerQueryRefreshAllOptions["onSuccessfulRun"];
   emitter = new Emitter<DesktopPowerQueryEvent>();
   queries = new Map<string, Query>();
   applyControllers = new Map<string, ApplyControllerEntry>();
@@ -122,6 +130,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
   constructor(options: DesktopPowerQueryRefreshAllOptions) {
     this.doc = options.document;
     this.batchSize = options.batchSize ?? 1024;
+    this.onSuccessfulRun = options.onSuccessfulRun;
 
     // Force refreshes to bypass/overwrite cache entries, but still allow the engine
     // to use deterministic cache keys for subsequent "load to sheet" operations.
@@ -136,6 +145,18 @@ export class DesktopPowerQueryRefreshOrchestrator {
     this.orchestrator.onEvent((evt: RefreshGraphEvent) => {
       this.emitter.emit(evt);
       if (evt?.type === "completed") {
+        const queryId = evt?.job?.queryId;
+        const completedAt = evt?.job?.completedAt;
+        if (this.onSuccessfulRun && typeof queryId === "string" && completedAt instanceof Date) {
+          const completedAtMs = completedAt.getTime();
+          if (!Number.isNaN(completedAtMs)) {
+            try {
+              this.onSuccessfulRun(queryId, completedAtMs);
+            } catch {
+              // Best-effort: scheduled refresh persistence should never break refreshAll.
+            }
+          }
+        }
         void this.applyCompletedJob(evt);
       } else if (evt?.type === "cancelled") {
         this.emitApplyCancelled(evt);
