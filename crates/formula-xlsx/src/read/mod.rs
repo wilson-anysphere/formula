@@ -20,6 +20,7 @@ use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
 use crate::styles::StylesPart;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
+use crate::autofilter::{parse_worksheet_autofilter, AutoFilterParseError};
 use crate::{CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
@@ -323,6 +324,16 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             .map(|bytes| std::str::from_utf8(bytes))
             .transpose()?;
         ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
+
+        // Worksheet autoFilter.
+        ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).map_err(|err| match err {
+            AutoFilterParseError::Xml(e) => ReadError::Xml(e),
+            AutoFilterParseError::Attr(e) => ReadError::XmlAttr(e),
+            AutoFilterParseError::MissingRef => {
+                ReadError::InvalidRangeRef("missing worksheet autoFilter ref attribute".to_string())
+            }
+            AutoFilterParseError::InvalidRef(e) => ReadError::InvalidRangeRef(e.to_string()),
+        })?;
 
         parse_worksheet_into_model(
             ws,

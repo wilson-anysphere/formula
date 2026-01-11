@@ -19,6 +19,7 @@ use crate::path::{rels_for_part, resolve_target};
 use crate::recalc_policy::{apply_recalc_policy_to_parts, RecalcPolicyError};
 use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
 use crate::styles::XlsxStylesEditor;
+use crate::autofilter::AutoFilterParseError;
 use crate::{CellValueKind, DateSystem, RecalcPolicy, SheetMeta, XlsxDocument, XlsxError};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
@@ -493,49 +494,72 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
             .sheet(sheet_meta.worksheet_id)
             .ok_or_else(|| WriteError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "worksheet not found")))?;
         let orig = parts.get(&sheet_meta.path).map(|b| b.as_slice());
+        let is_new_sheet = orig.is_none();
         let rels_part = rels_for_part(&sheet_meta.path);
         let orig_rels = parts.get(&rels_part).map(|b| b.as_slice());
-
         let rels_xml = orig_rels
             .map(std::str::from_utf8)
             .transpose()
             .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
 
-        let (orig_tab_color, orig_merges, orig_hyperlinks, orig_views, orig_cols) = if let Some(orig) = orig {
-            let orig_xml = std::str::from_utf8(orig).map_err(|e| {
-                WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            })?;
-            let orig_tab_color = parse_sheet_tab_color(orig_xml)?;
-
-            let orig_views = parse_sheet_view_settings(orig_xml)?;
-            let orig_cols = parse_col_properties(orig_xml)?;
-
-            let orig_merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(orig_xml)
-                .map_err(|err| match err {
-                    crate::merge_cells::MergeCellsError::Xml(e) => WriteError::Xml(e),
-                    crate::merge_cells::MergeCellsError::Attr(e) => WriteError::XmlAttr(e),
-                    crate::merge_cells::MergeCellsError::Utf8(e) => WriteError::Io(
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-                    ),
-                    crate::merge_cells::MergeCellsError::InvalidRef(r) => WriteError::Io(
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, r),
-                    ),
-                    crate::merge_cells::MergeCellsError::Zip(e) => WriteError::Zip(e),
-                    crate::merge_cells::MergeCellsError::Io(e) => WriteError::Io(e),
+        let (orig_tab_color, orig_merges, orig_hyperlinks, orig_views, orig_cols, orig_autofilter) =
+            if let Some(orig) = orig {
+                let orig_xml = std::str::from_utf8(orig).map_err(|e| {
+                    WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
                 })?;
+                let orig_tab_color = parse_sheet_tab_color(orig_xml)?;
 
-            let orig_hyperlinks = crate::parse_worksheet_hyperlinks(orig_xml, rels_xml)?;
+                let orig_views = parse_sheet_view_settings(orig_xml)?;
+                let orig_cols = parse_col_properties(orig_xml)?;
 
-            (orig_tab_color, orig_merges, orig_hyperlinks, orig_views, orig_cols)
-        } else {
-            (
-                None,
-                Vec::new(),
-                Vec::new(),
-                SheetViewSettings::default(),
-                BTreeMap::new(),
-            )
-        };
+                let orig_merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(orig_xml)
+                    .map_err(|err| match err {
+                        crate::merge_cells::MergeCellsError::Xml(e) => WriteError::Xml(e),
+                        crate::merge_cells::MergeCellsError::Attr(e) => WriteError::XmlAttr(e),
+                        crate::merge_cells::MergeCellsError::Utf8(e) => WriteError::Io(
+                            std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+                        ),
+                        crate::merge_cells::MergeCellsError::InvalidRef(r) => WriteError::Io(
+                            std::io::Error::new(std::io::ErrorKind::InvalidData, r),
+                        ),
+                        crate::merge_cells::MergeCellsError::Zip(e) => WriteError::Zip(e),
+                        crate::merge_cells::MergeCellsError::Io(e) => WriteError::Io(e),
+                    })?;
+
+                let orig_hyperlinks = crate::parse_worksheet_hyperlinks(orig_xml, rels_xml)?;
+
+                let orig_autofilter = crate::autofilter::parse_worksheet_autofilter(orig_xml)
+                    .map_err(|err| match err {
+                        AutoFilterParseError::Xml(e) => WriteError::Xml(e),
+                        AutoFilterParseError::Attr(e) => WriteError::XmlAttr(e),
+                        AutoFilterParseError::MissingRef => WriteError::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "missing worksheet autoFilter ref attribute",
+                        )),
+                        AutoFilterParseError::InvalidRef(e) => WriteError::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            e.to_string(),
+                        )),
+                    })?;
+
+                (
+                    orig_tab_color,
+                    orig_merges,
+                    orig_hyperlinks,
+                    orig_views,
+                    orig_cols,
+                    orig_autofilter,
+                )
+            } else {
+                (
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                    SheetViewSettings::default(),
+                    BTreeMap::new(),
+                    None,
+                )
+            };
 
         let current_merges = normalize_merge_ranges(sheet.merged_regions.iter().map(|r| r.range));
         let orig_merges = normalize_merge_ranges(orig_merges.iter().copied());
@@ -553,6 +577,8 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         let cols_xml = render_cols(sheet);
         let cols_changed = &sheet.col_properties != &orig_cols;
 
+        let autofilter_changed = sheet.auto_filter.as_ref() != orig_autofilter.as_ref();
+
         let sheet_xml_bytes = write_worksheet_xml(
             doc,
             sheet_meta,
@@ -568,6 +594,7 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
             && !hyperlinks_changed
             && !views_changed
             && !cols_changed
+            && !autofilter_changed
         {
             parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
             continue;
@@ -577,22 +604,23 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
             .to_string();
 
         // Apply sheet-level metadata updates.
-        if orig.is_none() || tab_color_changed {
+        if is_new_sheet || tab_color_changed {
             sheet_xml = write_sheet_tab_color(&sheet_xml, sheet.tab_color.as_ref())?;
         }
-        if orig.is_none() || views_changed {
+        if is_new_sheet || views_changed {
             sheet_xml = update_sheet_views_xml(&sheet_xml, desired_views)?;
         }
-        if orig.is_none() || cols_changed {
+        if is_new_sheet || cols_changed {
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
         }
-        if orig.is_none() || merges_changed {
+        if is_new_sheet || merges_changed {
             sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;
         }
-        if orig.is_none() || hyperlinks_changed {
+        if is_new_sheet || hyperlinks_changed {
             sheet_xml = crate::update_worksheet_xml(&sheet_xml, &current_hyperlinks)?;
 
-            let updated_rels = crate::update_worksheet_relationships(rels_xml, &current_hyperlinks)?;
+            let updated_rels =
+                crate::update_worksheet_relationships(rels_xml, &current_hyperlinks)?;
             match updated_rels {
                 Some(xml) => {
                     parts.insert(rels_part, xml.into_bytes());
@@ -601,6 +629,12 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
                     parts.remove(&rels_part);
                 }
             }
+        }
+        if (is_new_sheet && sheet.auto_filter.is_some()) || autofilter_changed {
+            sheet_xml = crate::autofilter::write_worksheet_autofilter(
+                &sheet_xml,
+                sheet.auto_filter.as_ref(),
+            )?;
         }
 
         parts.insert(sheet_meta.path.clone(), sheet_xml.into_bytes());

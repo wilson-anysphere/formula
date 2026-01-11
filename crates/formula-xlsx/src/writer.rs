@@ -280,16 +280,36 @@ fn sheet_xml(
         )
     };
 
-    let mut xml = format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheetData>
-    {}
-  </sheetData>
-  {}
-</worksheet>"#,
-        sheet_data, table_parts_xml
-    );
+    let auto_filter_xml = if let Some(filter) = sheet.auto_filter.as_ref() {
+        crate::autofilter::write_autofilter(filter)
+            .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?
+    } else {
+        String::new()
+    };
+
+    let mut xml = String::new();
+    xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
+    xml.push('\n');
+    xml.push_str(r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#);
+    xml.push('\n');
+    xml.push_str("  <sheetData>\n");
+    if !sheet_data.is_empty() {
+        xml.push_str("    ");
+        xml.push_str(&sheet_data);
+        xml.push('\n');
+    }
+    xml.push_str("  </sheetData>\n");
+    if !auto_filter_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&auto_filter_xml);
+        xml.push('\n');
+    }
+    if !table_parts_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&table_parts_xml);
+        xml.push('\n');
+    }
+    xml.push_str("</worksheet>");
 
     if sheet.tab_color.is_some() {
         xml = crate::sheet_metadata::write_sheet_tab_color(&xml, sheet.tab_color.as_ref())

@@ -68,6 +68,19 @@ pub fn write_worksheet_autofilter(
             Event::End(ref e) if skip_depth > 0 => {
                 skip_depth = skip_depth.saturating_sub(1);
             }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if skip_depth == 0
+                    && !wrote_autofilter
+                    && filter.is_some()
+                    && matches!(
+                        e.local_name().as_ref(),
+                        b"mergeCells" | b"tableParts" | b"extLst"
+                    ) =>
+            {
+                write_autofilter_to(&mut writer, filter.unwrap())?;
+                wrote_autofilter = true;
+                writer.write_event(event.to_owned())?;
+            }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if !wrote_autofilter {
                     if let Some(filter) = filter {
@@ -150,5 +163,27 @@ mod tests {
             parsed.filter_columns[0].criteria,
             vec![FilterCriterion::Equals(FilterValue::Text("Alice".into()))]
         );
+    }
+
+    #[test]
+    fn inserts_autofilter_before_table_parts_when_missing() {
+        let worksheet_xml = r#"<worksheet><sheetData/><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>"#;
+        let filter = SheetAutoFilter {
+            range: Range::new(CellRef::new(0, 0), CellRef::new(2, 0)),
+            filter_columns: vec![FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".into()))],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            }],
+            sort_state: None,
+            raw_xml: Vec::new(),
+        };
+
+        let written = write_worksheet_autofilter(worksheet_xml, Some(&filter)).unwrap();
+        let auto_pos = written.find("<autoFilter").expect("autofilter inserted");
+        let table_pos = written.find("<tableParts").expect("tableParts exists");
+        assert!(auto_pos < table_pos, "expected autofilter before tableParts");
     }
 }
