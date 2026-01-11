@@ -75,6 +75,15 @@ fn na_function_returns_na_error() {
 }
 
 #[test]
+fn unknown_functions_return_name_error() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=NO_SUCH_FUNCTION(1)"),
+        Value::Error(ErrorKind::Name)
+    );
+}
+
+#[test]
 fn function_lookup_is_case_insensitive() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=sUm(1,2,3)"), 6.0);

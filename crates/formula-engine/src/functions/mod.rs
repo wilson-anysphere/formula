@@ -18,6 +18,7 @@ mod builtins_logical;
 mod builtins_lookup;
 mod builtins_math;
 mod builtins_text;
+mod builtins_array;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Volatility {
