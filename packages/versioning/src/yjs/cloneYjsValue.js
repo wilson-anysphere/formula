@@ -1,5 +1,39 @@
 import * as Y from "yjs";
 
+function isYMap(value) {
+  if (value instanceof Y.Map) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YMap") return false;
+  return typeof maybe.forEach === "function" && typeof maybe.get === "function" && typeof maybe.set === "function";
+}
+
+function isYArray(value) {
+  if (value instanceof Y.Array) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YArray") return false;
+  return (
+    typeof maybe.toArray === "function" &&
+    typeof maybe.get === "function" &&
+    typeof maybe.push === "function" &&
+    typeof maybe.delete === "function"
+  );
+}
+
+function isYText(value) {
+  if (value instanceof Y.Text) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YText") return false;
+  return (
+    typeof maybe.toDelta === "function" &&
+    typeof maybe.applyDelta === "function" &&
+    typeof maybe.insert === "function" &&
+    typeof maybe.delete === "function"
+  );
+}
+
 /**
  * Deep-clone a Yjs value from one document into a freshly-constructed Yjs type
  * (not yet integrated into any document).
@@ -11,7 +45,7 @@ import * as Y from "yjs";
  * @returns {any}
  */
 export function cloneYjsValue(value) {
-  if (value instanceof Y.Map) {
+  if (isYMap(value)) {
     const out = new Y.Map();
     value.forEach((v, k) => {
       out.set(k, cloneYjsValue(v));
@@ -19,7 +53,7 @@ export function cloneYjsValue(value) {
     return out;
   }
 
-  if (value instanceof Y.Array) {
+  if (isYArray(value)) {
     const out = new Y.Array();
     for (const item of value.toArray()) {
       out.push([cloneYjsValue(item)]);
@@ -27,7 +61,7 @@ export function cloneYjsValue(value) {
     return out;
   }
 
-  if (value instanceof Y.Text) {
+  if (isYText(value)) {
     const out = new Y.Text();
     // Preserve formatting by cloning the Y.Text delta instead of just its plain string.
     // Note: it's safe to call `applyDelta` on an un-integrated Y.Text, but you

@@ -5,6 +5,51 @@ import { cloneYjsValue } from "./cloneYjsValue.js";
  * @typedef {{ name: string, kind: "map" | "array" | "text" }} RootTypeSpec
  */
 
+function isYMap(value) {
+  if (value instanceof Y.Map) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YMap") return false;
+  return typeof maybe.forEach === "function" && typeof maybe.get === "function" && typeof maybe.set === "function";
+}
+
+function isYArray(value) {
+  if (value instanceof Y.Array) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YArray") return false;
+  return (
+    typeof maybe.toArray === "function" &&
+    typeof maybe.get === "function" &&
+    typeof maybe.push === "function" &&
+    typeof maybe.delete === "function"
+  );
+}
+
+function isYText(value) {
+  if (value instanceof Y.Text) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YText") return false;
+  return (
+    typeof maybe.toDelta === "function" &&
+    typeof maybe.applyDelta === "function" &&
+    typeof maybe.insert === "function" &&
+    typeof maybe.delete === "function"
+  );
+}
+
+function isYAbstractType(value) {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  // When different Yjs module instances are loaded (ESM vs CJS), `instanceof`
+  // checks can fail even though the object is a valid Yjs type. Use a small
+  // duck-type check so restores/snapshots work regardless of module loader.
+  if (maybe.constructor?.name === "AbstractType") return true;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
 /**
  * @param {any} value
  * @returns {string | null}
@@ -71,15 +116,15 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
    * @returns {RootTypeSpec["kind"] | null}
    */
   function rootKindFromValue(value) {
-    if (value instanceof Y.Map) return "map";
-    if (value instanceof Y.Array) return "array";
-    if (value instanceof Y.Text) return "text";
+    if (isYMap(value)) return "map";
+    if (isYArray(value)) return "array";
+    if (isYText(value)) return "text";
 
     // When applying a snapshot update into a doc that hasn't instantiated a
     // root type (via getMap/getArray/getText), Yjs represents that root as a
     // generic `AbstractType` placeholder. Infer the intended kind from the
     // placeholder's internal structure.
-    if (value instanceof Y.AbstractType) {
+    if (isYAbstractType(value)) {
       if (value._map instanceof Map && value._map.size > 0) {
         return "map";
       }
