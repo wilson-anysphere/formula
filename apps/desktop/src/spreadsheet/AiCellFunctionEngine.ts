@@ -155,7 +155,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     });
 
     const inputsHash = hashText(stableJsonStringify(inputs));
-    const cacheKey = `${fn}\u0000${prompt}\u0000${inputsHash}`;
+    const promptHash = hashText(prompt);
+    const cacheKey = `${fn}\u0000${promptHash}\u0000${inputsHash}`;
 
     if (decision.decision === DLP_DECISION.BLOCK) {
       this.dlpAuditLogger?.log({
@@ -258,6 +259,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const auditInput: any = {
       function: params.functionName,
       prompt: params.prompt,
+      prompt_hash: hashText(params.prompt),
       inputs_hash: params.inputsHash,
       inputs_preview: params.inputsPreview,
       cell: params.cellAddress,
