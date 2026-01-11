@@ -1,4 +1,6 @@
-use formula_model::{ArrayValue, CellRef, ErrorValue, RichText, SpillValue};
+use formula_model::{
+    ArrayValue, CellRef, ErrorValue, RichText, SheetNameError, SpillValue, EXCEL_MAX_SHEET_NAME_LEN,
+};
 use formula_storage::storage::StorageError;
 use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData, CellRange, CellValue, SheetVisibility,
@@ -543,6 +545,105 @@ fn sheet_names_are_unique_case_insensitive() {
         StorageError::DuplicateSheetName(name) => assert_eq!(name, "sheet1"),
         other => panic!("unexpected error: {other:?}"),
     }
+}
+
+#[test]
+fn sheet_names_match_excel_validation_rules() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+
+    assert!(matches!(
+        storage.create_sheet(workbook.id, "", 0, None),
+        Err(StorageError::EmptySheetName)
+    ));
+    assert!(matches!(
+        storage.create_sheet(workbook.id, "   ", 0, None),
+        Err(StorageError::EmptySheetName)
+    ));
+
+    for ch in [':', '\\', '/', '?', '*', '[', ']'] {
+        let storage = Storage::open_in_memory().expect("open storage");
+        let workbook = storage
+            .create_workbook("Book", None)
+            .expect("create workbook");
+        let name = format!("Bad{ch}Name");
+        assert!(matches!(
+            storage.create_sheet(workbook.id, &name, 0, None),
+            Err(StorageError::InvalidSheetName(
+                SheetNameError::InvalidCharacter(c)
+            )) if c == ch
+        ));
+    }
+
+    let max = "a".repeat(EXCEL_MAX_SHEET_NAME_LEN);
+    storage
+        .create_sheet(workbook.id, &max, 0, None)
+        .expect("max length ok");
+
+    let too_long = "a".repeat(EXCEL_MAX_SHEET_NAME_LEN + 1);
+    assert!(matches!(
+        storage.create_sheet(workbook.id, &too_long, 1, None),
+        Err(StorageError::InvalidSheetName(SheetNameError::TooLong))
+    ));
+
+    assert!(matches!(
+        storage.create_sheet(workbook.id, "'Leading", 2, None),
+        Err(StorageError::InvalidSheetName(
+            SheetNameError::LeadingOrTrailingApostrophe
+        ))
+    ));
+    assert!(matches!(
+        storage.create_sheet(workbook.id, "Trailing'", 3, None),
+        Err(StorageError::InvalidSheetName(
+            SheetNameError::LeadingOrTrailingApostrophe
+        ))
+    ));
+}
+
+#[test]
+fn sheet_names_are_unique_unicode_case_insensitive() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    storage
+        .create_sheet(workbook.id, "Äbc", 0, None)
+        .expect("create sheet");
+
+    let err = storage
+        .create_sheet(workbook.id, "äbc", 1, None)
+        .expect_err("duplicate");
+    assert!(matches!(err, StorageError::DuplicateSheetName(name) if name == "äbc"));
+}
+
+#[test]
+fn rename_sheet_validates_names_and_enforces_uniqueness() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let data = storage
+        .create_sheet(workbook.id, "Data", 0, None)
+        .expect("create sheet");
+    let summary = storage
+        .create_sheet(workbook.id, "Summary", 1, None)
+        .expect("create sheet");
+
+    let err = storage.rename_sheet(data.id, "Bad:Name").expect_err("invalid");
+    assert!(matches!(
+        err,
+        StorageError::InvalidSheetName(SheetNameError::InvalidCharacter(':'))
+    ));
+
+    let err = storage.rename_sheet(summary.id, "DATA").expect_err("duplicate");
+    assert!(matches!(err, StorageError::DuplicateSheetName(name) if name == "DATA"));
+
+    // Renaming the same sheet to a different case is allowed.
+    storage.rename_sheet(data.id, "data").expect("rename");
+    let loaded = storage.get_sheet_meta(data.id).expect("get sheet");
+    assert_eq!(loaded.name, "data");
 }
 
 #[test]

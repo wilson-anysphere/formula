@@ -2,13 +2,14 @@ use crate::schema;
 use crate::types::{
     CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
 };
-use formula_model::ErrorValue;
+use formula_model::{validate_sheet_name, ErrorValue, SheetNameError};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde_json::json;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -23,11 +24,26 @@ pub enum StorageError {
     SheetNotFound(Uuid),
     #[error("sheet name cannot be empty")]
     EmptySheetName,
+    #[error(transparent)]
+    InvalidSheetName(SheetNameError),
     #[error("sheet name already exists: {0}")]
     DuplicateSheetName(String),
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
+
+fn map_sheet_name_error(err: SheetNameError) -> StorageError {
+    match err {
+        SheetNameError::EmptyName => StorageError::EmptySheetName,
+        other => StorageError::InvalidSheetName(other),
+    }
+}
+
+fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
+    a.nfkc()
+        .flat_map(|c| c.to_uppercase())
+        .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
+}
 
 #[derive(Debug, Clone)]
 pub struct Storage {
@@ -158,21 +174,19 @@ impl Storage {
         // Ensure workbook exists.
         self.get_workbook(workbook_id)?;
 
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(StorageError::EmptySheetName);
-        }
+        validate_sheet_name(name).map_err(map_sheet_name_error)?;
 
         let conn = self.conn.lock().expect("storage mutex poisoned");
-        let exists: Option<String> = conn
-            .query_row(
-                "SELECT id FROM sheets WHERE workbook_id = ?1 AND name = ?2 COLLATE NOCASE LIMIT 1",
-                params![workbook_id.to_string(), name],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if exists.is_some() {
-            return Err(StorageError::DuplicateSheetName(name.to_string()));
+        let workbook_id_str = workbook_id.to_string();
+        {
+            let mut stmt = conn.prepare("SELECT name FROM sheets WHERE workbook_id = ?1")?;
+            let mut rows = stmt.query(params![&workbook_id_str])?;
+            while let Some(row) = rows.next()? {
+                let existing: String = row.get(0)?;
+                if sheet_name_eq_case_insensitive(&existing, name) {
+                    return Err(StorageError::DuplicateSheetName(name.to_string()));
+                }
+            }
         }
 
         let sheet = SheetMeta {
@@ -209,7 +223,7 @@ impl Storage {
             "#,
             params![
                 sheet.id.to_string(),
-                sheet.workbook_id.to_string(),
+                workbook_id_str,
                 &sheet.name,
                 sheet.position,
                 sheet.visibility.as_str(),
@@ -333,26 +347,23 @@ impl Storage {
 
     /// Rename a worksheet.
     pub fn rename_sheet(&self, sheet_id: Uuid, name: &str) -> Result<()> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(StorageError::EmptySheetName);
-        }
+        validate_sheet_name(name).map_err(map_sheet_name_error)?;
 
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
 
         let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
 
-        // Enforce Excel-style uniqueness (case-insensitive) within the workbook.
-        let existing: Option<String> = tx
-            .query_row(
-                "SELECT id FROM sheets WHERE workbook_id = ?1 AND name = ?2 COLLATE NOCASE AND id != ?3 LIMIT 1",
-                params![meta.workbook_id.to_string(), name, sheet_id.to_string()],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if existing.is_some() {
-            return Err(StorageError::DuplicateSheetName(name.to_string()));
+        // Enforce Excel-style uniqueness (Unicode-aware, case-insensitive) within the workbook.
+        {
+            let mut stmt = tx.prepare("SELECT name FROM sheets WHERE workbook_id = ?1 AND id != ?2")?;
+            let mut rows = stmt.query(params![meta.workbook_id.to_string(), sheet_id.to_string()])?;
+            while let Some(row) = rows.next()? {
+                let existing: String = row.get(0)?;
+                if sheet_name_eq_case_insensitive(&existing, name) {
+                    return Err(StorageError::DuplicateSheetName(name.to_string()));
+                }
+            }
         }
 
         tx.execute(
