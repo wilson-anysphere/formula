@@ -364,6 +364,13 @@ test("computeParquetRowLimit refuses to push down for merge/append", () => {
   );
 });
 
+test("computeParquetRowLimit refuses to push down for expandTableColumn", () => {
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_expand", name: "Expand", operation: { type: "expandTableColumn", column: "nested" } }], 100),
+    null,
+  );
+});
+
 test("computeParquetRowLimit pushes down through splitColumn when newColumns are provided", () => {
   assert.equal(
     computeParquetRowLimit([{ id: "s_split", name: "Split", operation: { type: "splitColumn", column: "id", delimiter: "-", newColumns: ["a", "b"] } }], 100),

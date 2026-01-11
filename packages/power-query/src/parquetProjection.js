@@ -385,6 +385,7 @@ const LIMIT_UNSAFE_OPS = new Set([
   "groupBy",
   "merge",
   "append",
+  "expandTableColumn",
   "pivot",
 ]);
 
