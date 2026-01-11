@@ -352,8 +352,13 @@ pub fn parse_a1(address: &str) -> Result<CellCoord, ()> {
     }
     let mut col: u32 = 0;
     let mut saw_letter = false;
+    let mut col_letters: usize = 0;
     while let Some(ch) = chars.peek().copied() {
         if ch.is_ascii_alphabetic() {
+            col_letters += 1;
+            if col_letters > 3 {
+                return Err(());
+            }
             saw_letter = true;
             let upper = ch.to_ascii_uppercase();
             col = col * 26 + (upper as u32 - 'A' as u32 + 1);
@@ -639,13 +644,49 @@ impl FormulaParser {
 
 fn parse_reference_token(token: &str) -> Result<CellCoord, &'static str> {
     parse_a1(token).map_err(|_| {
-        let stripped = token.replace('$', "");
-        if stripped.chars().any(|ch| ch.is_ascii_digit()) {
+        let stripped: String = token.chars().filter(|ch| *ch != '$').collect();
+        if looks_like_a1_reference(&stripped) {
             ERROR_REF
         } else {
             ERROR_NAME
         }
     })
+}
+
+fn looks_like_a1_reference(text: &str) -> bool {
+    // Match the JS evaluator's cell reference lexing rules:
+    // - 1-3 ASCII letters
+    // - followed by 1+ digits
+    // - nothing else
+    let mut chars = text.chars();
+    let mut letters = 0usize;
+    while let Some(ch) = chars.clone().next() {
+        if ch.is_ascii_alphabetic() {
+            letters += 1;
+            if letters > 3 {
+                return false;
+            }
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    if letters == 0 {
+        return false;
+    }
+
+    let mut digits = 0usize;
+    while let Some(ch) = chars.clone().next() {
+        if ch.is_ascii_digit() {
+            digits += 1;
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    digits > 0 && chars.next().is_none()
 }
 
 fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
@@ -1177,6 +1218,7 @@ mod tests {
         assert_eq!(parse_a1("$A$1"), Ok(CellCoord::new(1, 1)));
         assert_eq!(parse_a1("AA12"), Ok(CellCoord::new(12, 27)));
         assert_eq!(format_a1(CellCoord::new(12, 27)), "AA12");
+        assert_eq!(parse_a1("AAAA1"), Err(()));
     }
 
     #[test]
@@ -1295,6 +1337,15 @@ mod tests {
     fn dotted_function_names_fall_back_to_name_error() {
         let mut wb = Workbook::new();
         wb.set_cell("A1", json!("=_xlfn.SEQUENCE(1)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_NAME));
+    }
+
+    #[test]
+    fn long_column_names_fall_back_to_name_error() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("=SHEET1"), None).unwrap();
 
         wb.recalculate(None).unwrap();
         assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_NAME));
