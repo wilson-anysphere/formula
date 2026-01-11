@@ -586,6 +586,59 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("does not recursively fire Worksheet_SelectionChange when the event macro changes selection", async () => {
+    vi.useFakeTimers();
+
+    const calls: Array<{ cmd: string; args?: any }> = [];
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_selection_change") {
+        // Simulate the macro selecting a different range while the SelectionChange handler
+        // is running (this can cause recursion in Excel unless events are disabled).
+        app.emitSelection([{ startRow: 9, startCol: 9, endRow: 9, endCol: 9 }], { active: { row: 9, col: 9 } });
+        return { ok: true, output: [], updates: [] };
+      }
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    await flushMicrotasks();
+    calls.length = 0;
+
+    app.emitSelection([{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }]);
+    await vi.advanceTimersByTimeAsync(100);
+    await flushMicrotasks();
+
+    // Allow any follow-up timers to run; there should be no second SelectionChange macro.
+    await vi.advanceTimersByTimeAsync(200);
+    await flushMicrotasks();
+
+    const selectionCalls = calls.filter((c) => c.cmd === "fire_selection_change");
+    expect(selectionCalls).toHaveLength(1);
+
+    wiring.dispose();
+  });
+
   it("fires Workbook_BeforeClose via the best-effort helper and applies updates", async () => {
     const calls: Array<{ cmd: string; args?: any }> = [];
 

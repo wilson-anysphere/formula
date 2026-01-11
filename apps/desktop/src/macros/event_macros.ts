@@ -300,6 +300,12 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
   let disposed = false;
   let runningEventMacro = false;
+  let currentEventMacroKind:
+    | "workbook_open"
+    | "worksheet_change"
+    | "selection_change"
+    | "workbook_before_close"
+    | null = null;
   let applyingMacroUpdates = false;
   let eventsDisabled = false;
 
@@ -369,6 +375,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     }
 
     runningEventMacro = true;
+    currentEventMacroKind = kind;
     try {
       // Allow microtask-batched edits (e.g. `startWorkbookSync`) to enqueue into the backend
       // sync chain before we drain it, so event macros see the latest persisted workbook state.
@@ -419,6 +426,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       // The backend already returns `ok=true` when no event handler exists.
     } finally {
       runningEventMacro = false;
+      currentEventMacroKind = null;
       if (disposed) return;
 
       if (changeQueuedAfterMacro) {
@@ -721,6 +729,9 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (eventsDisabled) return;
     if (!eventsAllowed) return;
     if (applyingMacroUpdates) return;
+    // Avoid infinite recursion where a `Worksheet_SelectionChange` event macro changes the
+    // selection, which would ordinarily trigger another `Worksheet_SelectionChange`.
+    if (runningEventMacro && currentEventMacroKind === "selection_change") return;
 
     if (!sawInitialSelection) {
       sawInitialSelection = true;
