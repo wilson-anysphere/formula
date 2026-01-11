@@ -1,5 +1,6 @@
 import type { Query } from "../../../../packages/power-query/src/model.js";
 import type { QueryExecutionContext, QueryEngine } from "../../../../packages/power-query/src/engine.js";
+import type { QueryExecutionResult } from "../../../../packages/power-query/src/engine.js";
 import { RefreshOrchestrator } from "../../../../packages/power-query/src/refreshGraph.js";
 
 import type { DocumentController } from "../document/documentController.js";
@@ -42,7 +43,7 @@ export type DesktopPowerQueryRefreshAllHandle = {
   queryIds: string[];
   // Matches the core `RefreshOrchestrator` API shape: resolves with results for the
   // requested target query ids (not necessarily including dependencies).
-  promise: Promise<Record<string, any>>;
+  promise: Promise<Record<string, QueryExecutionResult>>;
   cancel: () => void;
   cancelQuery?: (queryId: string) => void;
 };
@@ -51,7 +52,7 @@ export type DesktopPowerQueryRefreshHandle = {
   id: string;
   sessionId: string;
   queryId: string;
-  promise: Promise<any>;
+  promise: Promise<QueryExecutionResult>;
   cancel: () => void;
 };
 
