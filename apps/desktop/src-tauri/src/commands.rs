@@ -1287,6 +1287,35 @@ pub struct MacroSelectionRect {
     pub end_col: usize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum MigrationTarget {
+    Python,
+    TypeScript,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationValidationMismatch {
+    pub sheet_id: String,
+    pub row: usize,
+    pub col: usize,
+    pub vba: CellValue,
+    pub script: CellValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationValidationReport {
+    pub ok: bool,
+    pub macro_id: String,
+    pub target: MigrationTarget,
+    pub mismatches: Vec<MigrationValidationMismatch>,
+    pub vba: MacroRunResult,
+    pub python: Option<PythonRunResult>,
+    pub error: Option<String>,
+}
+
 #[cfg(feature = "desktop")]
 fn workbook_identity_for_trust(workbook: &Workbook, workbook_id: Option<&str>) -> String {
     workbook
@@ -1626,6 +1655,132 @@ pub async fn run_python_script(
             max_memory_bytes,
             context,
         )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn validate_vba_migration(
+    workbook_id: Option<String>,
+    macro_id: String,
+    target: MigrationTarget,
+    code: String,
+    state: State<'_, SharedAppState>,
+    trust: State<'_, SharedMacroTrustStore>,
+) -> Result<MigrationValidationReport, String> {
+    let workbook_id_str = workbook_id.clone();
+    let shared = state.inner().clone();
+    let trust_shared = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use crate::macros::MacroExecutionOptions;
+        use std::collections::BTreeSet;
+
+        let (vba_blocked_result, workbook) = {
+            let mut state = shared.lock().unwrap();
+            let trust_store = trust_shared.lock().unwrap();
+
+            let blocked = {
+                let workbook_id = workbook_id_str.as_deref();
+                let workbook = state.get_workbook_mut().map_err(app_error)?;
+                enforce_macro_trust(workbook, workbook_id, &trust_store)?
+            };
+
+            let vba_blocked_result = blocked.map(macro_blocked_result);
+            let workbook = state.get_workbook_mut().map_err(app_error)?.clone();
+            (vba_blocked_result, workbook)
+        };
+
+        let mut vba_state = AppState::new();
+        vba_state.load_workbook(workbook.clone());
+
+        let mut script_state = AppState::new();
+        script_state.load_workbook(workbook);
+
+        let vba = if let Some(blocked_result) = vba_blocked_result {
+            blocked_result
+        } else {
+            match vba_state.run_macro(&macro_id, MacroExecutionOptions::default()) {
+                Ok(outcome) => macro_result_from_outcome(outcome),
+                Err(err) => MacroRunResult {
+                    ok: false,
+                    output: Vec::new(),
+                    updates: Vec::new(),
+                    error: Some(MacroError {
+                        message: err.to_string(),
+                        code: Some("macro_error".to_string()),
+                        blocked: None,
+                    }),
+                    permission_request: None,
+                },
+            }
+        };
+
+        let python = match target {
+            MigrationTarget::Python => Some(
+                crate::python::run_python_script(
+                    &mut script_state,
+                    &code,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .map_err(|e| e.to_string())?,
+            ),
+            MigrationTarget::TypeScript => None,
+        };
+
+        let mut mismatches = Vec::new();
+
+        if let Some(python_run) = python.as_ref() {
+            let mut touched = BTreeSet::<(String, usize, usize)>::new();
+            for update in &vba.updates {
+                touched.insert((update.sheet_id.clone(), update.row, update.col));
+            }
+            for update in &python_run.updates {
+                touched.insert((update.sheet_id.clone(), update.row, update.col));
+            }
+
+            for (sheet_id, row, col) in touched {
+                let vba_cell = cell_value_from_state(&vba_state, &sheet_id, row, col)?;
+                let script_cell = cell_value_from_state(&script_state, &sheet_id, row, col)?;
+                if vba_cell != script_cell {
+                    mismatches.push(MigrationValidationMismatch {
+                        sheet_id,
+                        row,
+                        col,
+                        vba: vba_cell,
+                        script: script_cell,
+                    });
+                }
+            }
+        }
+
+        let error = match target {
+            MigrationTarget::TypeScript => Some(
+                "TypeScript validation is not supported in the desktop backend yet (Python only)."
+                    .to_string(),
+            ),
+            MigrationTarget::Python if python.is_none() => Some("Python validation failed.".to_string()),
+            _ => None,
+        };
+
+        let ok = error.is_none()
+            && python.as_ref().map(|r| r.ok).unwrap_or(false)
+            && vba.ok
+            && mismatches.is_empty();
+
+        Ok(MigrationValidationReport {
+            ok,
+            macro_id,
+            target,
+            mismatches,
+            vba,
+            python,
+            error,
+        })
     })
     .await
     .map_err(|e| e.to_string())?

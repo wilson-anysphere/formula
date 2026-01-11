@@ -257,10 +257,17 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   const [apiKey, setApiKey] = useState<string | null>(() => loadApiKeyFromRuntime());
   const [draftKey, setDraftKey] = useState("");
 
+  const [entryPoint, setEntryPoint] = useState("Main");
+
+  const [conversionTarget, setConversionTarget] = useState<"python" | "typescript" | null>(null);
   const [conversionPrompt, setConversionPrompt] = useState("");
   const [conversionOutput, setConversionOutput] = useState("");
   const [conversionStatus, setConversionStatus] = useState<"idle" | "working" | "error">("idle");
   const [conversionError, setConversionError] = useState<string | null>(null);
+
+  const [validationStatus, setValidationStatus] = useState<"idle" | "working" | "error">("idle");
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [validationReport, setValidationReport] = useState<any>(null);
 
   const migrator = useMemo(() => {
     if (props.createMigrator) return props.createMigrator();
@@ -388,14 +395,19 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   }, [analysisScope, moduleAnalysis, projectSummary]);
 
   const canConvert = Boolean(selectedModule && migrator);
+  const canValidate = Boolean(conversionOutput && conversionTarget);
 
   const onConvert = useCallback(
     async (target: "python" | "typescript") => {
       if (!selectedModule || !migrator) return;
+      setConversionTarget(target);
       setConversionStatus("working");
       setConversionError(null);
       setConversionPrompt("");
       setConversionOutput("");
+      setValidationStatus("idle");
+      setValidationError(null);
+      setValidationReport(null);
 
       try {
         const result = await migrator.convertModule(selectedModule, { target });
@@ -409,6 +421,31 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
     },
     [migrator, selectedModule]
   );
+
+  const onValidate = useCallback(async () => {
+    if (!conversionTarget || !conversionOutput) return;
+    setValidationStatus("working");
+    setValidationError(null);
+    setValidationReport(null);
+    try {
+      const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
+      if (!invoke) {
+        throw new Error("Tauri invoke API not available");
+      }
+      const workbookId = props.workbookId ?? "local-workbook";
+      const report = await invoke("validate_vba_migration", {
+        workbook_id: workbookId,
+        macro_id: entryPoint.trim() || "Main",
+        target: conversionTarget,
+        code: conversionOutput,
+      });
+      setValidationReport(report);
+      setValidationStatus("idle");
+    } catch (err) {
+      setValidationStatus("error");
+      setValidationError(err instanceof Error ? err.message : String(err));
+    }
+  }, [conversionOutput, conversionTarget, entryPoint, props.workbookId]);
 
   async function copyToClipboard(text: string) {
     const clipboard = (globalThis.navigator as any)?.clipboard;
@@ -590,6 +627,16 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
             }}
           >
             <div style={{ fontWeight: 600, flex: 1 }}>Conversion</div>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+              Macro:
+              <input
+                value={entryPoint}
+                onChange={(e) => setEntryPoint(e.target.value)}
+                placeholder="Main"
+                style={{ ...monospace, padding: "4px 6px", width: 120 }}
+                data-testid="vba-entrypoint"
+              />
+            </label>
             <button
               type="button"
               data-testid="vba-convert-python"
@@ -605,6 +652,14 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
               disabled={!canConvert || conversionStatus === "working"}
             >
               Convert to TypeScript
+            </button>
+            <button
+              type="button"
+              data-testid="vba-validate"
+              onClick={() => void onValidate()}
+              disabled={!canValidate || validationStatus === "working"}
+            >
+              Validate
             </button>
             <button
               type="button"
@@ -691,6 +746,54 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
             >
               {conversionPrompt || "(no prompt yet)"}
             </pre>
+          </details>
+
+          <details style={{ borderTop: "1px solid var(--panel-border)" }} open={Boolean(validationReport || validationError)}>
+            <summary style={{ cursor: "pointer", padding: 10, fontWeight: 600 }}>Validation</summary>
+            <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+              {validationStatus === "working" ? <div style={{ fontSize: 12, opacity: 0.8 }}>Validating…</div> : null}
+              {validationError ? (
+                <div style={{ fontSize: 12, color: "var(--error)" }} data-testid="vba-validation-error">
+                  {validationError}
+                </div>
+              ) : null}
+              {validationReport ? (
+                <div data-testid="vba-validation-report">
+                  <div style={{ fontSize: 12 }}>
+                    Result:{" "}
+                    <span style={{ fontFamily: "monospace" }}>
+                      {validationReport.ok ? "ok" : "failed"}
+                      {Array.isArray(validationReport.mismatches)
+                        ? ` (${validationReport.mismatches.length} mismatches)`
+                        : ""}
+                    </span>
+                  </div>
+                  {validationReport.error ? (
+                    <div style={{ fontSize: 12, color: "var(--error)" }}>{String(validationReport.error)}</div>
+                  ) : null}
+                  {Array.isArray(validationReport.mismatches) && validationReport.mismatches.length > 0 ? (
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {validationReport.mismatches.slice(0, 50).map((m: any, idx: number) => (
+                        <li key={`${m.sheetId ?? m.sheet_id}-${m.row}-${m.col}-${idx}`} style={{ fontSize: 12 }}>
+                          <span style={{ fontFamily: "monospace" }}>
+                            {m.sheetId ?? m.sheet_id}:{Number(m.row) + 1},{Number(m.col) + 1}
+                          </span>
+                          : VBA={String(m.vba?.display_value ?? "")} / Script={String(m.script?.display_value ?? "")}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <details>
+                    <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Raw report</summary>
+                    <pre style={{ ...monospace, whiteSpace: "pre-wrap", margin: 0, paddingTop: 8 }}>
+                      {JSON.stringify(validationReport, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, opacity: 0.8 }}>No validation run.</div>
+              )}
+            </div>
           </details>
         </div>
 

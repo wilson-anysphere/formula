@@ -178,4 +178,93 @@ describe("VbaMigratePanel", () => {
     },
     10_000,
   );
+
+  it(
+    "can validate a Python conversion via the Tauri validate_vba_migration command",
+    async () => {
+      const invoke = vi.fn(async (cmd: string, args?: any) => {
+        if (cmd === "get_vba_project") {
+          return {
+            name: "ValidateProject",
+            constants: null,
+            references: [],
+            modules: [
+              {
+                name: "Module1",
+                module_type: "Standard",
+                code: ['Sub Main()', '  Range("A1").Value = 1', "End Sub"].join("\n"),
+              },
+            ],
+          };
+        }
+        if (cmd === "validate_vba_migration") {
+          return {
+            ok: true,
+            macroId: args?.macro_id,
+            target: args?.target,
+            mismatches: [],
+            vba: { ok: true, output: [], updates: [] },
+            python: { ok: true, stdout: "", stderr: "", updates: [] },
+            error: null,
+          };
+        }
+        throw new Error(`Unexpected command: ${cmd}`);
+      });
+
+      installTauriInvoke(invoke);
+
+      const llmComplete = vi.fn(async () => {
+        return ["sheet = formula.active_sheet", 'sheet["A1"] = 1'].join("\n");
+      });
+      const createMigrator = () => new VbaMigrator({ llm: { complete: llmComplete } as any });
+
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const root = createRoot(host);
+
+      await act(async () => {
+        root.render(React.createElement(VbaMigratePanel, { workbookId: "workbook-validate", createMigrator }));
+      });
+
+      await act(async () => {
+        await flushPromises();
+      });
+
+      const convertBtn = host.querySelector('[data-testid="vba-convert-python"]') as HTMLButtonElement | null;
+      expect(convertBtn).toBeInstanceOf(HTMLButtonElement);
+
+      await act(async () => {
+        convertBtn?.click();
+      });
+
+      const started = Date.now();
+      while (Date.now() - started < 5_000) {
+        const output = host.querySelector('[data-testid="vba-converted-code"]') as HTMLTextAreaElement | null;
+        if (output?.value) break;
+        await act(async () => {
+          await flushPromises();
+        });
+      }
+
+      const validateBtn = host.querySelector('[data-testid="vba-validate"]') as HTMLButtonElement | null;
+      expect(validateBtn).toBeInstanceOf(HTMLButtonElement);
+
+      await act(async () => {
+        validateBtn?.click();
+      });
+
+      const startedValidate = Date.now();
+      while (Date.now() - startedValidate < 5_000) {
+        if (host.querySelector('[data-testid="vba-validation-report"]')) break;
+        await act(async () => {
+          await flushPromises();
+        });
+      }
+
+      expect(invoke).toHaveBeenCalledWith("validate_vba_migration", expect.objectContaining({ workbook_id: "workbook-validate" }));
+      const report = host.querySelector('[data-testid="vba-validation-report"]');
+      expect(report?.textContent).toContain("ok");
+    },
+    15_000,
+  );
 });
