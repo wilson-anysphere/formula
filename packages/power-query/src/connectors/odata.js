@@ -417,13 +417,30 @@ export class ODataConnector {
     await applyOAuthHeader(false);
 
     const rowsPath = request.rowsPath ?? request.jsonPath ?? "value";
-
-    const limitRaw = typeof request.limit === "number" && Number.isFinite(request.limit) ? Math.max(0, Math.trunc(request.limit)) : null;
-    const topRaw =
-      typeof request.query?.top === "number" && Number.isFinite(request.query.top) ? Math.max(0, Math.trunc(request.query.top)) : null;
-    const limit = limitRaw == null ? topRaw : topRaw == null ? limitRaw : Math.min(limitRaw, topRaw);
-
     const initialUrl = buildODataUrl(request.url, request.query);
+
+    // Derive an effective row limit from either:
+    // - explicit connector `request.limit`
+    // - `$top` present in the final URL (either embedded in `request.url` or
+    //   provided via `request.query.top`)
+    //
+    // This ensures we stop following `@odata.nextLink` once the requested top-N
+    // rows have been collected, even when server-driven paging omits `$top` from
+    // the nextLink URL.
+    const limitRaw = typeof request.limit === "number" && Number.isFinite(request.limit) ? Math.max(0, Math.trunc(request.limit)) : null;
+    let topFromUrl = null;
+    try {
+      const parsed = new URL(initialUrl);
+      const raw = parsed.searchParams.get("$top");
+      if (typeof raw === "string" && raw.trim() !== "") {
+        const parsedTop = Number.parseInt(raw, 10);
+        if (Number.isFinite(parsedTop)) topFromUrl = Math.max(0, parsedTop);
+      }
+    } catch {
+      topFromUrl = null;
+    }
+
+    const limit = limitRaw == null ? topFromUrl : topFromUrl == null ? limitRaw : Math.min(limitRaw, topFromUrl);
 
     /** @type {unknown[]} */
     const allRows = [];

@@ -86,6 +86,44 @@ test("ODataConnector: respects $top for pagination short-circuiting", async () =
   ]);
 });
 
+test("ODataConnector: respects $top embedded in the URL for pagination short-circuiting", async () => {
+  /** @type {string[]} */
+  const urls = [];
+
+  const connector = new ODataConnector({
+    fetch: async (url) => {
+      urls.push(String(url));
+      if (urls.length === 1) {
+        return makeJsonResponse({
+          value: [{ Id: 1 }, { Id: 2 }],
+          "@odata.nextLink": "Products?$skiptoken=a",
+        });
+      }
+      if (urls.length === 2) {
+        return makeJsonResponse({
+          value: [{ Id: 3 }, { Id: 4 }],
+          "@odata.nextLink": "Products?$skiptoken=b",
+        });
+      }
+      if (urls.length === 3) {
+        return makeJsonResponse({
+          value: [{ Id: 5 }, { Id: 6 }],
+          "@odata.nextLink": "Products?$skiptoken=c",
+        });
+      }
+      return makeJsonResponse({
+        value: [{ Id: 7 }, { Id: 8 }],
+      });
+    },
+  });
+
+  const result = await connector.execute({ url: "https://example.com/odata/Products?$top=5" });
+  assert.equal(urls.length, 3, "expected pagination to stop once the URL's $top rows are collected");
+  assert.equal(urls[0], "https://example.com/odata/Products?$top=5");
+  assert.equal(urls[1], "https://example.com/odata/Products?$skiptoken=a");
+  assert.deepEqual(result.table.toGrid(), [["Id"], [1], [2], [3], [4], [5]]);
+});
+
 test("ODataConnector: tolerates payloads that are a single object (no value wrapper)", async () => {
   const connector = new ODataConnector({
     fetch: async () => makeJsonResponse({ Id: 1, Name: "A" }),
