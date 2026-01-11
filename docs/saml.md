@@ -39,6 +39,7 @@ MIIC...
 All endpoints require an authenticated **org admin**.
 
 - `GET /orgs/:orgId/saml/providers`
+- `GET /orgs/:orgId/saml/providers/:providerId`
 - `PUT /orgs/:orgId/saml/providers/:providerId`
 - `DELETE /orgs/:orgId/saml/providers/:providerId`
 

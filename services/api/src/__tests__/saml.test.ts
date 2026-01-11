@@ -257,6 +257,20 @@ describe("SAML provider admin APIs", () => {
       expect(putRes.statusCode).toBe(200);
       expect((putRes.json() as any).provider.providerId).toBe("okta");
 
+      const getProvider = await app.inject({
+        method: "GET",
+        url: `/orgs/${orgId}/saml/providers/okta`,
+        headers: { cookie }
+      });
+      expect(getProvider.statusCode).toBe(200);
+      expect((getProvider.json() as any).provider).toMatchObject({
+        providerId: "okta",
+        entryPoint: "http://idp.example.test/sso",
+        issuer: "http://sp.example.test/metadata",
+        idpIssuer: "https://idp.example.test/metadata",
+        enabled: true
+      });
+
       const putRes2 = await app.inject({
         method: "PUT",
         url: `/orgs/${orgId}/saml/providers/okta`,

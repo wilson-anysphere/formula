@@ -162,6 +162,50 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     });
   });
 
+  app.get(
+    "/orgs/:orgId/saml/providers/:providerId",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const orgId = (request.params as { orgId: string; providerId: string }).orgId;
+      const providerId = (request.params as { orgId: string; providerId: string }).providerId;
+      if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
+
+      const member = await requireOrgAdmin(request, reply, orgId);
+      if (!member) return;
+
+      const providerRes = await app.db.query<OrgSamlProviderRow>(
+        `
+          SELECT org_id, provider_id, entry_point, issuer, idp_issuer, idp_cert_pem,
+                 want_assertions_signed, want_response_signed, attribute_mapping,
+                 enabled, created_at, updated_at
+          FROM org_saml_providers
+          WHERE org_id = $1 AND provider_id = $2
+          LIMIT 1
+        `,
+        [orgId, providerId]
+      );
+      if (providerRes.rowCount !== 1) return reply.code(404).send({ error: "provider_not_found" });
+
+      const row = providerRes.rows[0]!;
+      return reply.send({
+        provider: {
+          orgId: row.org_id,
+          providerId: row.provider_id,
+          entryPoint: row.entry_point,
+          issuer: row.issuer,
+          idpIssuer: row.idp_issuer,
+          idpCertPem: row.idp_cert_pem,
+          wantAssertionsSigned: Boolean(row.want_assertions_signed),
+          wantResponseSigned: Boolean(row.want_response_signed),
+          attributeMapping: parseAttributeMapping(row.attribute_mapping) ?? row.attribute_mapping,
+          enabled: Boolean(row.enabled),
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
+        }
+      });
+    }
+  );
+
   app.put(
     "/orgs/:orgId/saml/providers/:providerId",
     { preHandler: requireAuth },
