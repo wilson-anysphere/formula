@@ -155,6 +155,34 @@ test("RefreshOrchestrator: runs independent queries concurrently", async () => {
   await handle.promise;
 });
 
+test("RefreshOrchestrator: refreshAll() with no queryIds refreshes all registered queries", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+  orchestrator.registerQuery(makeQuery("C", { type: "range", range: { values: [["Value"], [3]], hasHeaders: true } }));
+
+  const handle = orchestrator.refreshAll();
+
+  assert.equal(engine.calls.length, 2);
+  assert.deepEqual(new Set(engine.calls.map((c) => c.queryId)), new Set(["A", "C"]));
+
+  const callA = engine.calls.find((c) => c.queryId === "A");
+  assert.ok(callA);
+  callA.deferred.resolve(makeResult("A"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(engine.calls.length, 3);
+  const callB = engine.calls.find((c) => c.queryId === "B");
+  assert.ok(callB, "dependent query should be scheduled after its dependency completes");
+
+  const callC = engine.calls.find((c) => c.queryId === "C");
+  assert.ok(callC);
+  callB.deferred.resolve(makeResult("B"));
+  callC.deferred.resolve(makeResult("C"));
+  await handle.promise;
+});
+
 test("RefreshOrchestrator: dedup shared dependency results (A only loads once)", async () => {
   let reads = 0;
   const engine = new QueryEngine({
