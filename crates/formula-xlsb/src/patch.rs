@@ -17,6 +17,33 @@ pub struct CellEdit {
     pub new_formula: Option<Vec<u8>>,
 }
 
+#[cfg(feature = "write")]
+impl CellEdit {
+    /// Convenience helper for updating a formula cell from Excel formula text.
+    ///
+    /// `formula` may include a leading `=`.
+    pub fn with_formula_text(
+        row: u32,
+        col: u32,
+        new_value: CellValue,
+        formula: &str,
+    ) -> Result<Self, formula_biff::EncodeRgceError> {
+        let rgce = formula_biff::encode_rgce(formula)?;
+        Ok(Self {
+            row,
+            col,
+            new_value,
+            new_formula: Some(rgce),
+        })
+    }
+
+    /// Replace `new_formula` by encoding the provided formula text.
+    pub fn set_formula_text(&mut self, formula: &str) -> Result<(), formula_biff::EncodeRgceError> {
+        self.new_formula = Some(formula_biff::encode_rgce(formula)?);
+        Ok(())
+    }
+}
+
 /// Patch a worksheet stream (`xl/worksheets/sheetN.bin`) by rewriting only the targeted
 /// cell records inside `BrtSheetData`, while copying every other record byte-for-byte.
 ///

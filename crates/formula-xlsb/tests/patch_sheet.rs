@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Cursor, Read};
 
+use formula_biff::encode_rgce;
 use formula_xlsb::{patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
@@ -222,6 +223,49 @@ fn patch_sheet_bin_can_update_formula_rgce_bytes() {
     let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*3"));
     assert_eq!(formula.rgce.as_slice(), new_rgce.as_slice());
+}
+
+#[test]
+fn patch_sheet_bin_can_update_formula_from_text() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let wb = XlsbWorkbook::open(fixture).expect("open xlsb");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+
+    let rgce = encode_rgce("=IF(B1>0,B1*3,0)").expect("encode formula");
+
+    let sheet_bin = read_zip_part(fixture, &sheet_part);
+    let patched_sheet_bin = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 2,
+            new_value: CellValue::Number(1.0),
+            new_formula: Some(rgce),
+        }],
+    )
+    .expect("patch sheet bin");
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let out_path = tmpdir.path().join("patched-formula-text.xlsb");
+
+    wb.save_with_part_overrides(
+        &out_path,
+        &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
+    )
+    .expect("write patched workbook");
+
+    let patched = XlsbWorkbook::open(&out_path).expect("open patched workbook");
+    let patched_sheet = patched.read_sheet(0).expect("read patched sheet");
+
+    let formula_cell = patched_sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 2))
+        .expect("formula cell still present");
+
+    assert_eq!(formula_cell.value, CellValue::Number(1.0));
+    let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
+    assert_eq!(formula.text.as_deref(), Some("IF(B1>0,B1*3,0)"));
 }
 
 #[test]

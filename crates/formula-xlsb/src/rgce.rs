@@ -573,6 +573,39 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
                 stack.push(txt);
             }
+            0x21 | 0x41 | 0x61 => {
+                // PtgFunc: [iftab: u16] (argument count is implicit and fixed for the function).
+                if rgce.len().saturating_sub(i) < 2 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 2,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+
+                let iftab = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
+                i += 2;
+
+                let spec = formula_biff::function_spec_from_id(iftab)
+                    .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                if spec.min_args != spec.max_args {
+                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                }
+
+                let argc = spec.min_args as usize;
+                if stack.len() < argc {
+                    return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                }
+
+                let mut args = Vec::with_capacity(argc);
+                for _ in 0..argc {
+                    args.push(stack.pop().expect("len checked"));
+                }
+                args.reverse();
+
+                stack.push(format!("{}({})", spec.name, args.join(",")));
+            }
             0x22 | 0x42 | 0x62 => {
                 // PtgFuncVar: [argc: u8][iftab: u16]
                 if rgce.len().saturating_sub(i) < 3 {
@@ -680,10 +713,7 @@ fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
 }
 
 fn function_name(iftab: u16) -> Option<&'static str> {
-    match iftab {
-        0x0004 => Some("SUM"),
-        _ => None,
-    }
+    formula_biff::function_id_to_name(iftab)
 }
 
 /// 0-indexed cell coordinate used as the base for relative reference encoding.
