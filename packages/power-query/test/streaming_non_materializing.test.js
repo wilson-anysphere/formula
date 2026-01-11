@@ -182,6 +182,50 @@ test("executeQueryStreaming(..., materialize:false) can stream CSV from readBina
   assert.deepEqual(collectBatches(batches), [["A", "B"], [1, 2]]);
 });
 
+test("executeQueryStreaming(..., materialize:false) streams skip/reorder/combine/index operations without falling back to materialization", async () => {
+  const csvText = ["a,b,c", "1,2,3", "4,5,6", "7,8,9"].join("\n") + "\n";
+
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("readText should not be called in streaming mode");
+      },
+      readTextStream: async function* () {
+        yield csvText;
+      },
+    },
+  });
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readText: async () => csvText,
+    },
+  });
+
+  const query = {
+    id: "q_stream_extra_ops",
+    name: "Stream extra ops",
+    source: { type: "csv", path: "/tmp/extra.csv", options: { hasHeaders: true } },
+    steps: [
+      { id: "s_skip", name: "Skip", operation: { type: "skip", count: 1 } },
+      { id: "s_index", name: "Index", operation: { type: "addIndexColumn", name: "Index", initialValue: 0, increment: 1 } },
+      { id: "s_combine", name: "Combine", operation: { type: "combineColumns", columns: ["a", "b"], delimiter: ":", newColumnName: "ab" } },
+      { id: "s_reorder", name: "Reorder", operation: { type: "reorderColumns", columns: ["Index", "ab", "c"] } },
+      { id: "s_names", name: "Names", operation: { type: "transformColumnNames", transform: "upper" } },
+      { id: "s_take", name: "Take", operation: { type: "take", count: 1 } },
+    ],
+  };
+
+  const batches = [];
+  const summary = await engineStreaming.executeQueryStreaming(query, {}, { batchSize: 10, materialize: false, onBatch: (b) => batches.push(b) });
+  assert.equal(summary.rowCount, 1);
+  assert.equal(summary.columnCount, 3);
+
+  const streamed = collectBatches(batches);
+  const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
+
 test("executeQueryStreaming(..., materialize:false) resolves table sources via tableAdapter when context.tables is missing", async () => {
   const engine = new QueryEngine({
     tableAdapter: {

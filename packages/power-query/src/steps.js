@@ -1237,10 +1237,17 @@ export const STREAMABLE_OPERATION_TYPES = new Set([
   "changeType",
   "transformColumns",
   "take",
+  "skip",
+  "removeRows",
   "fillDown",
   "replaceValues",
   "removeRowsWithErrors",
   "distinctRows",
+  "reorderColumns",
+  "addIndexColumn",
+  "combineColumns",
+  "transformColumnNames",
+  "replaceErrorValues",
 ]);
 
 /**
@@ -1413,6 +1420,49 @@ export function compileStreamingPipeline(operations, inputColumns) {
         });
         break;
       }
+      case "skip": {
+        if (!Number.isFinite(op.count) || op.count < 0) {
+          throw new Error(`Invalid skip count '${op.count}'`);
+        }
+        let skipped = 0;
+        const skipCount = op.count;
+        transforms.push((rows) => {
+          const remaining = skipCount - skipped;
+          if (remaining <= 0) return { rows, done: false };
+          if (rows.length === 0) return { rows: [], done: false };
+          if (remaining >= rows.length) {
+            skipped += rows.length;
+            return { rows: [], done: false };
+          }
+          skipped = skipCount;
+          return { rows: rows.slice(remaining), done: false };
+        });
+        break;
+      }
+      case "removeRows": {
+        if (!Number.isFinite(op.offset) || op.offset < 0 || !Number.isFinite(op.count) || op.count < 0) {
+          throw new Error(`Invalid removeRows range (${op.offset}, ${op.count})`);
+        }
+        const start = Math.floor(op.offset);
+        const end = start + Math.floor(op.count);
+        let seen = 0;
+        transforms.push((rows) => {
+          if (rows.length === 0) return { rows: [], done: false };
+          const batchStart = seen;
+          const batchEnd = seen + rows.length;
+          seen = batchEnd;
+
+          // No overlap with the removal window.
+          if (batchEnd <= start || batchStart >= end) return { rows, done: false };
+
+          const prefixLen = Math.max(0, Math.min(rows.length, start - batchStart));
+          const suffixStart = Math.max(prefixLen, Math.min(rows.length, end - batchStart));
+          const prefix = prefixLen > 0 ? rows.slice(0, prefixLen) : [];
+          const suffix = suffixStart < rows.length ? rows.slice(suffixStart) : [];
+          return { rows: prefix.length === 0 ? suffix : prefix.concat(suffix), done: false };
+        });
+        break;
+      }
       case "fillDown": {
         const indices = op.columns.map((name) => getColumnIndex(name));
         /** @type {Map<number, unknown>} */
@@ -1471,6 +1521,145 @@ export function compileStreamingPipeline(operations, inputColumns) {
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
+          }),
+          done: false,
+        }));
+        break;
+      }
+      case "reorderColumns": {
+        const missingField = op.missingField ?? "error";
+        const specified = op.columns;
+        const seen = new Set();
+        /** @type {(number | null)[]} */
+        const order = [];
+        /** @type {string[]} */
+        const missingNames = [];
+
+        for (const name of specified) {
+          if (seen.has(name)) {
+            throw new Error(`Duplicate column name '${name}' in reorder list`);
+          }
+          seen.add(name);
+          const idx = columns.findIndex((c) => c.name === name);
+          if (idx >= 0) {
+            order.push(idx);
+            continue;
+          }
+          if (missingField === "ignore") continue;
+          if (missingField === "useNull") {
+            order.push(null);
+            missingNames.push(name);
+            continue;
+          }
+          throw new Error(`Unknown column '${name}'`);
+        }
+
+        for (let idx = 0; idx < columns.length; idx++) {
+          const name = columns[idx].name;
+          if (seen.has(name)) continue;
+          order.push(idx);
+        }
+
+        const outColumns = [];
+        let missingIndex = 0;
+        for (const idxOrNull of order) {
+          if (idxOrNull == null) {
+            outColumns.push({ name: missingNames[missingIndex++] ?? "", type: "any" });
+          } else {
+            outColumns.push(columns[idxOrNull]);
+          }
+        }
+
+        columns = outColumns;
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => ({
+          rows: rows.map((row) => order.map((idxOrNull) => (idxOrNull == null ? null : normalizeCell(row?.[idxOrNull])))),
+          done: false,
+        }));
+        break;
+      }
+      case "addIndexColumn": {
+        if (columnIndex.has(op.name)) {
+          throw new Error(`Column '${op.name}' already exists`);
+        }
+        let index = 0;
+        const initialValue = op.initialValue;
+        const increment = op.increment;
+        columns = [...columns, { name: op.name, type: "number" }];
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => ({
+          rows: rows.map((row) => [...row, initialValue + index++ * increment]),
+          done: false,
+        }));
+        break;
+      }
+      case "combineColumns": {
+        const indices = op.columns.map((name) => getColumnIndex(name));
+        const remove = new Set(indices);
+        const insertAt = Math.min(...indices);
+
+        if (columns.some((col, idx) => !remove.has(idx) && col.name === op.newColumnName)) {
+          throw new Error(`Column '${op.newColumnName}' already exists`);
+        }
+
+        const nextColumns = [];
+        for (let i = 0; i < columns.length; i++) {
+          if (i === insertAt) {
+            nextColumns.push({ name: op.newColumnName, type: "string" });
+          }
+          if (remove.has(i)) continue;
+          nextColumns.push(columns[i]);
+        }
+        columns = nextColumns;
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => ({
+          rows: rows.map((row) => {
+            const combined = indices.map((idx) => valueToString(row?.[idx])).join(op.delimiter);
+            const next = [];
+            for (let i = 0; i < row.length; i++) {
+              if (i === insertAt) {
+                next.push(combined);
+              }
+              if (remove.has(i)) continue;
+              next.push(normalizeCell(row?.[i]));
+            }
+            return next;
+          }),
+          done: false,
+        }));
+        break;
+      }
+      case "transformColumnNames": {
+        const rawNames = columns.map((col) => {
+          switch (op.transform) {
+            case "upper":
+              return col.name.toUpperCase();
+            case "lower":
+              return col.name.toLowerCase();
+            case "trim":
+              return col.name.trim();
+            default:
+              return col.name;
+          }
+        });
+        const names = makeUniqueColumnNames(rawNames);
+        columns = columns.map((col, idx) => ({ ...col, name: names[idx] }));
+        columnIndex = buildIndex(columns);
+        transforms.push((rows) => ({ rows, done: false }));
+        break;
+      }
+      case "replaceErrorValues": {
+        const replacements = op.replacements.map((r) => ({ idx: getColumnIndex(r.column), value: r.value }));
+        transforms.push((rows) => ({
+          rows: rows.map((row) => {
+            const next = row.slice();
+            for (const entry of replacements) {
+              if (next[entry.idx] instanceof Error) next[entry.idx] = entry.value;
+            }
+            return next;
           }),
           done: false,
         }));
