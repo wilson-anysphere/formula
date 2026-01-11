@@ -479,7 +479,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
           },
           resource: { type: "user", id: row.id },
           success: true,
-          details: { recoveryCodeId: usedRecoveryCodeId }
+          details: { recoveryCodeId: usedRecoveryCodeId, operation: "login" }
         })
       );
     }
@@ -642,6 +642,24 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       );
     }
 
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "auth.mfa_setup_started",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "user", id: request.user!.id },
+        success: true,
+        details: { method: "totp" }
+      })
+    );
+
     return reply.send({ secret, otpauthUrl });
   });
 
@@ -716,7 +734,6 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       if (txResult.error === "mfa_required") return reply.code(403).send({ error: "mfa_required" });
       return reply.code(400).send({ error: "invalid_code" });
     }
-
     await writeAuditEvent(
       app.db,
       createAuditEvent({
@@ -758,13 +775,23 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true });
   });
 
+  app.get("/auth/mfa/recovery-codes", { preHandler: [requireAuth, requireSessionAuth] }, async (request, reply) => {
+    const res = await app.db.query(
+      "SELECT COUNT(*) AS count FROM user_mfa_recovery_codes WHERE user_id = $1 AND used_at IS NULL",
+      [request.user!.id]
+    );
+    const remaining = res.rowCount === 1 ? Number((res.rows[0] as any).count ?? 0) : 0;
+    return reply.send({ remaining });
+  });
+
   const RecoveryCodesRegenerateBody = z
     .object({
       code: z.string().min(1).optional(),
-      recoveryCode: z.string().min(1).optional()
+      recoveryCode: z.string().min(1).optional(),
+      password: z.string().min(1).optional()
     })
-    .refine((value) => (value.code ? 1 : 0) + (value.recoveryCode ? 1 : 0) === 1, {
-      message: "code or recoveryCode is required"
+    .refine((value) => (value.code ? 1 : 0) + (value.recoveryCode ? 1 : 0) + (value.password ? 1 : 0) === 1, {
+      message: "code, recoveryCode, or password is required"
     });
 
   app.post(
@@ -773,11 +800,21 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     async (request, reply) => {
       if (!request.user!.mfaTotpEnabled) return reply.code(400).send({ error: "mfa_not_enabled" });
 
-      const parsed = RecoveryCodesRegenerateBody.safeParse(request.body);
+      const parsed = RecoveryCodesRegenerateBody.safeParse(request.body ?? {});
       if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
-      const codes = Array.from({ length: 10 }, () => generateRecoveryCode());
       const userId = request.user!.id;
+
+      if (parsed.data.password) {
+        const userRes = await app.db.query("SELECT password_hash FROM users WHERE id = $1", [userId]);
+        if (userRes.rowCount !== 1) return reply.code(404).send({ error: "user_not_found" });
+        const passwordHash = (userRes.rows[0] as any).password_hash as string | null;
+        if (!passwordHash) return reply.code(400).send({ error: "password_login_disabled" });
+        const ok = await verifyPassword(parsed.data.password, passwordHash);
+        if (!ok) return reply.code(400).send({ error: "invalid_credentials" });
+      }
+
+      const codes = Array.from({ length: 10 }, () => generateRecoveryCode());
 
       const txResult = await withTransaction(app.db, async (client) => {
         const totpCode = parsed.data.code?.trim();
@@ -791,9 +828,11 @@ export function registerAuthRoutes(app: FastifyInstance): void {
           const consumedId = await consumeRecoveryCode(client, userId, recoveryCode);
           if (!consumedId) return { ok: false as const, usedRecoveryCodeId: null };
           usedRecoveryCodeId = consumedId;
+          // Best-effort: ensure any legacy plaintext seed is migrated even if the user reauths via a recovery code.
+          await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, userId);
         } else {
-          // Should be unreachable due to request-body validation.
-          return { ok: false as const, usedRecoveryCodeId: null };
+          // Best-effort: ensure any legacy plaintext seed is migrated even if the user reauths via password.
+          await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, userId);
         }
 
         await deleteUnusedRecoveryCodes(client, userId);
@@ -811,7 +850,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       await writeAuditEvent(
         app.db,
         createAuditEvent({
-          eventType: "auth.mfa_recovery_codes_generated",
+          eventType: "auth.mfa_recovery_codes_regenerated",
           actor: { type: "user", id: userId },
           context: {
             userId,

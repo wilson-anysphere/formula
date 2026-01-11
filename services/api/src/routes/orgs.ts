@@ -144,6 +144,10 @@ async function requireOrgMember(
     reply.code(404).send({ error: "org_not_found" });
     return null;
   }
+  if (request.session && !(await requireOrgMfaSatisfied(request.server.db, orgId, request.user!))) {
+    reply.code(403).send({ error: "mfa_required" });
+    return null;
+  }
   return { role: membership.rows[0].role as OrgRole };
 }
 

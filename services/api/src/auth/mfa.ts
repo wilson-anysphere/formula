@@ -1,5 +1,5 @@
-import { authenticator } from "otplib";
 import crypto from "node:crypto";
+import { authenticator } from "otplib";
 import type { Pool } from "pg";
 import type { AuthenticatedUser } from "./sessions";
 
@@ -9,11 +9,7 @@ export function generateTotpSecret(): string {
   return authenticator.generateSecret();
 }
 
-export function buildOtpAuthUrl(params: {
-  issuer: string;
-  accountName: string;
-  secret: string;
-}): string {
+export function buildOtpAuthUrl(params: { issuer: string; accountName: string; secret: string }): string {
   return authenticator.keyuri(params.accountName, params.issuer, params.secret);
 }
 
@@ -31,11 +27,7 @@ export async function isMfaEnforcedForOrg(pool: Pool, orgId: string): Promise<bo
   return Boolean(result.rows[0]?.require_mfa);
 }
 
-export async function requireOrgMfaSatisfied(
-  pool: Pool,
-  orgId: string,
-  user: AuthenticatedUser
-): Promise<boolean> {
+export async function requireOrgMfaSatisfied(pool: Pool, orgId: string, user: AuthenticatedUser): Promise<boolean> {
   if (!(await isMfaEnforcedForOrg(pool, orgId))) return true;
   return Boolean(user.mfaTotpEnabled);
 }
@@ -54,6 +46,7 @@ export function hashRecoveryCode(code: string, saltHex?: string): string {
 export function verifyRecoveryCode(code: string, storedHash: string): boolean {
   const [algo, salt, digest] = storedHash.split(":");
   if (algo !== "sha256" || !salt || !digest) return false;
+
   const computed = crypto.createHash("sha256").update(salt, "utf8").update(code, "utf8").digest("hex");
   try {
     const a = Buffer.from(digest, "hex");

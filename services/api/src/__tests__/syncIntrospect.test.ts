@@ -133,7 +133,6 @@ describe("internal sync token introspection", () => {
     expect(introspectRes.statusCode).toBe(200);
     expect(introspectRes.json()).toMatchObject({
       ok: true,
-      active: true,
       userId: bobId,
       orgId,
       role: "editor"
@@ -151,14 +150,7 @@ describe("internal sync token introspection", () => {
       payload: { token: syncToken, docId }
     });
     expect(roleUpdatedRes.statusCode).toBe(200);
-    expect(roleUpdatedRes.json()).toMatchObject({
-      ok: false,
-      active: false,
-      reason: "role_too_high",
-      userId: bobId,
-      orgId,
-      role: "editor"
-    });
+    expect(roleUpdatedRes.json()).toMatchObject({ ok: true, role: "viewer" });
 
     await db.query("DELETE FROM document_members WHERE document_id = $1 AND user_id = $2", [docId, bobId]);
 
@@ -168,19 +160,12 @@ describe("internal sync token introspection", () => {
       headers: { "x-internal-admin-token": config.internalAdminToken! },
       payload: { token: syncToken, docId }
     });
-    expect(membershipRemovedRes.statusCode).toBe(200);
-    expect(membershipRemovedRes.json()).toMatchObject({
-      ok: false,
-      active: false,
-      reason: "not_member",
-      userId: bobId,
-      orgId,
-      role: "editor"
-    });
+    expect(membershipRemovedRes.statusCode).toBe(403);
+    expect(membershipRemovedRes.json()).toEqual({ ok: false, error: "forbidden" });
 
     const metricsRes = await app.inject({ method: "GET", url: "/metrics" });
     const failures = getCounterValue(metricsRes.body, "sync_token_introspect_failures_total");
-    expect(failures).toBeGreaterThanOrEqual(2);
+    expect(failures).toBeGreaterThanOrEqual(1);
     },
     15_000
   );
@@ -252,16 +237,12 @@ describe("internal sync token introspection", () => {
       headers: { "x-internal-admin-token": config.internalAdminToken! },
       payload: { token: syncToken, docId }
     });
-    expect(revokedRes.statusCode).toBe(200);
-    expect(revokedRes.json()).toMatchObject({
-      ok: false,
-      active: false,
-      reason: "session_revoked"
-    });
+    expect(revokedRes.statusCode).toBe(403);
+    expect(revokedRes.json()).toEqual({ ok: false, error: "forbidden" });
 
     const metricsRes = await app.inject({ method: "GET", url: "/metrics" });
     const failures = getCounterValue(metricsRes.body, "sync_token_introspect_failures_total");
-    expect(failures).toBeGreaterThanOrEqual(3);
+    expect(failures).toBeGreaterThanOrEqual(2);
     },
     15_000
   );

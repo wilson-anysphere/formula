@@ -13,3 +13,4 @@ CREATE TABLE IF NOT EXISTS user_mfa_recovery_codes (
 );
 
 CREATE INDEX IF NOT EXISTS user_mfa_recovery_codes_user_id_idx ON user_mfa_recovery_codes(user_id);
+CREATE INDEX IF NOT EXISTS user_mfa_recovery_codes_user_unused_idx ON user_mfa_recovery_codes(user_id, used_at);

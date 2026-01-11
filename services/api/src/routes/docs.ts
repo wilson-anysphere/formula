@@ -111,6 +111,10 @@ async function requireDocRole(
     reply.code(403).send({ error: "forbidden" });
     return null;
   }
+  if (request.session && !(await requireOrgMfaSatisfied(request.server.db, membership.orgId, request.user!))) {
+    reply.code(403).send({ error: "mfa_required" });
+    return null;
+  }
   return { orgId: membership.orgId, deletedAt: membership.deletedAt, role: membership.role };
 }
 
