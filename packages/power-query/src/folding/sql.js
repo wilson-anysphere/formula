@@ -499,7 +499,7 @@ export class QueryFoldingEngine {
       }
     }
 
-    if (!isSqlFoldableJoinComparer(merge.comparers ?? merge.comparer)) return null;
+    if (!isSqlFoldableJoinComparer(effectiveJoinComparer(merge))) return null;
 
     const join = joinTypeToSql(dialect, merge.joinType);
     if (!join) return null;
@@ -1020,7 +1020,7 @@ export class QueryFoldingEngine {
         const joinMode = operation.joinMode ?? "flat";
         if (joinMode !== "flat") return null;
 
-        if (!isSqlFoldableJoinComparer(operation.comparers ?? operation.comparer)) return null;
+        if (!isSqlFoldableJoinComparer(effectiveJoinComparer(operation))) return null;
 
         const leftKeys =
           Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
@@ -1242,7 +1242,7 @@ export class QueryFoldingEngine {
         const joinMode = operation.joinMode ?? "flat";
         if (joinMode !== "flat") return "unsupported_join_mode";
 
-        if (!isSqlFoldableJoinComparer(operation.comparers ?? operation.comparer)) return "unsupported_comparer";
+        if (!isSqlFoldableJoinComparer(effectiveJoinComparer(operation))) return "unsupported_comparer";
 
         const leftKeys =
           Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
@@ -1419,6 +1419,18 @@ function connectionsMatch(left, right) {
   // If only one side has an identity, be conservative and only allow folding
   // when both sides share the same (referentially equal) connection handle.
   return left.connection === right.connection;
+}
+
+/**
+ * Prefer per-key comparers when present; otherwise fall back to the scalar comparer.
+ *
+ * @param {{ comparer?: unknown; comparers?: unknown }} op
+ * @returns {unknown}
+ */
+function effectiveJoinComparer(op) {
+  const list = /** @type {any} */ (op).comparers;
+  if (Array.isArray(list) && list.length > 0) return list;
+  return /** @type {any} */ (op).comparer;
 }
 
 /**

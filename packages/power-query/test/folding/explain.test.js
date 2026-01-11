@@ -225,3 +225,46 @@ test("explain: merge with comparer is not folded (unsupported_comparer)", () => 
   assert.equal(explained.steps[1].status, "local");
   assert.equal(explained.steps[1].reason, "unsupported_comparer");
 });
+
+test("explain: merge with comparer list is not folded (unsupported_comparer)", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = { id: "db1" };
+
+  const right = {
+    id: "q_right_comparer_list",
+    name: "Scores",
+    source: { type: "database", connection, query: "SELECT * FROM scores", dialect: "postgres", columns: ["First", "Last", "Score"] },
+    steps: [],
+  };
+
+  const left = {
+    id: "q_left_comparer_list",
+    name: "People",
+    source: { type: "database", connection, query: "SELECT * FROM people", dialect: "postgres", columns: ["Id", "First", "Last"] },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "First", "Last"] } },
+      {
+        id: "l2",
+        name: "Merge (mixed)",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_comparer_list",
+          joinType: "inner",
+          leftKeys: ["First", "Last"],
+          rightKeys: ["First", "Last"],
+          joinMode: "flat",
+          comparers: [
+            { comparer: "ordinalIgnoreCase", caseSensitive: false },
+            { comparer: "ordinal", caseSensitive: true },
+          ],
+        },
+      },
+    ],
+  };
+
+  const explained = folding.explain(left, { dialect: "postgres", queries: { q_right_comparer_list: right } });
+  assert.equal(explained.plan.type, "hybrid");
+  assert.equal(explained.steps[0].status, "folded");
+  assert.equal(explained.steps[1].status, "local");
+  assert.equal(explained.steps[1].reason, "unsupported_comparer");
+});
