@@ -189,7 +189,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
     const promptHash = hashText(prompt);
 
-    const cacheKey = `${this.model}\u0000${fn}\u0000${prompt}\u0000${inputsHash}`;
+    const cacheKey = `${this.model}\u0000${fn}\u0000${promptHash}\u0000${inputsHash}`;
 
     if (decision.decision === DLP_DECISION.BLOCK) {
       dlp.auditLogger?.log({
