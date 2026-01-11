@@ -610,6 +610,7 @@ fn normalize_engine_value(value: &EngineValue) -> NormalizedValue {
         EngineValue::Reference(_)
         | EngineValue::ReferenceUnion(_)
         | EngineValue::Array(_)
+        | EngineValue::Lambda(_)
         | EngineValue::Spill { .. } => NormalizedValue::Blank,
     }
 }
