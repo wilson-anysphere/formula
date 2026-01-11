@@ -1,5 +1,6 @@
 use crate::{ErrorKind, Value};
 use crate::functions::wildcard::wildcard_match;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
@@ -158,14 +159,15 @@ fn xmatch_linear(
                 Err(e) => return Err(e),
             };
             for (idx, candidate) in iter {
-                let Some(text) = (match candidate {
-                    Value::Text(s) => Some(s.as_str()),
-                    Value::Blank => Some(""),
-                    _ => None,
-                }) else {
-                    continue;
+                let text = match candidate {
+                    Value::Error(_) => continue,
+                    Value::Text(s) => Cow::Borrowed(s.as_str()),
+                    other => match other.coerce_to_string() {
+                        Ok(s) => Cow::Owned(s),
+                        Err(_) => continue,
+                    },
                 };
-                if wildcard_match(&pattern, text) {
+                if wildcard_match(&pattern, text.as_ref()) {
                     return Ok(idx);
                 }
             }

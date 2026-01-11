@@ -99,6 +99,16 @@ fn xmatch_supports_wildcards_and_escapes() {
 }
 
 #[test]
+fn xmatch_wildcards_coerce_non_text_candidates_to_text() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 10.0);
+    sheet.set("A2", 20.0);
+    sheet.set("A3", 30.0);
+
+    assert_eq!(sheet.eval("=XMATCH(\"2*\", A1:A3, 2)"), Value::Number(2.0));
+}
+
+#[test]
 fn xmatch_supports_next_smaller_and_next_larger() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);
