@@ -982,7 +982,19 @@ pub(crate) fn is_valid_external_sheet_key(key: &str) -> bool {
     };
     let workbook = &key[1..end];
     let sheet = &key[end + 1..];
-    !workbook.is_empty() && !sheet.is_empty()
+    if workbook.is_empty() || sheet.is_empty() {
+        return false;
+    }
+
+    // Excel 3D sheet spans are written as `Sheet1:Sheet3!A1` and require workbook sheet order to
+    // expand. We currently cannot represent external-workbook 3D spans (`[Book]Sheet1:Sheet3!A1`)
+    // with the `ExternalValueProvider` interface, so treat these as invalid to surface `#REF!`
+    // rather than silently querying the provider with a misleading key.
+    if sheet.contains(':') {
+        return false;
+    }
+
+    true
 }
 
 impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
