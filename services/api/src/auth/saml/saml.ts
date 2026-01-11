@@ -148,6 +148,10 @@ function parseAttributeMapping(value: unknown): AttributeMapping | null {
   return { email, name, groups };
 }
 
+function isValidProviderId(value: string): boolean {
+  return /^[a-z0-9_-]{1,64}$/.test(value);
+}
+
 function extractPublicBaseUrl(request: FastifyRequest): string | null {
   const configured = request.server.config.publicBaseUrl;
   if (configured && configured.trim().length > 0) {
@@ -412,6 +416,10 @@ export async function samlStart(request: FastifyRequest, reply: FastifyReply): P
   const params = request.params as { orgId: string; provider: string };
   const orgId = params.orgId;
   const providerId = params.provider;
+  if (!isValidProviderId(providerId)) {
+    reply.code(400).send({ error: "invalid_request" });
+    return;
+  }
 
   const provider = await loadOrgProvider(request, orgId, providerId);
   if (!provider) {
@@ -497,6 +505,10 @@ export async function samlMetadata(request: FastifyRequest, reply: FastifyReply)
   const params = request.params as { orgId: string; provider: string };
   const orgId = params.orgId;
   const providerId = params.provider;
+  if (!isValidProviderId(providerId)) {
+    reply.code(400).send({ error: "invalid_request" });
+    return;
+  }
 
   const provider = await loadOrgProvider(request, orgId, providerId);
   if (!provider) {
@@ -538,6 +550,10 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
   const params = request.params as { orgId: string; provider: string };
   const orgId = params.orgId;
   const providerId = params.provider;
+  if (!isValidProviderId(providerId)) {
+    reply.code(400).send({ error: "invalid_request" });
+    return;
+  }
 
   const parsed = CallbackBody.safeParse(request.body);
   if (!parsed.success) {

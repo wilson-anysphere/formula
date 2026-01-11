@@ -27,6 +27,10 @@ type AttributeMapping = {
   groups?: string;
 };
 
+function isValidProviderId(value: string): boolean {
+  return /^[a-z0-9_-]{1,64}$/.test(value);
+}
+
 function parseAttributeMapping(value: unknown): AttributeMapping | null {
   if (!value) return null;
 
@@ -165,6 +169,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
       const params = request.params as { orgId: string; providerId: string };
       const orgId = params.orgId;
       const providerId = params.providerId;
+      if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
 
       const member = await requireOrgAdmin(request, reply, orgId);
       if (!member) return;
@@ -294,6 +299,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
       const params = request.params as { orgId: string; providerId: string };
       const orgId = params.orgId;
       const providerId = params.providerId;
+      if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
 
       const member = await requireOrgAdmin(request, reply, orgId);
       if (!member) return;
