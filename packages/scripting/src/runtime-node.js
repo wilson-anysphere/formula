@@ -1,13 +1,41 @@
 import { Worker } from "node:worker_threads";
 
 /**
+ * Node ScriptRuntime powered by a hardened sandbox (via @formula/security).
+ *
+ * This file is only exported from `@formula/scripting/node`.
+ */
+
+/**
  * @typedef {{ level: "log" | "info" | "warn" | "error", message: string }} ScriptConsoleEntry
- * @typedef {{ logs: ScriptConsoleEntry[], error?: { name?: string, message: string, stack?: string } }} ScriptRunResult
+ * @typedef {{ log: (event: any) => void }} AuditSink
+ * @typedef {{ type: string, id: string }} ScriptPrincipal
+ * @typedef {{
+ *   filesystem?: { read?: string[], readwrite?: string[] },
+ *   network?: { mode?: "none" | "allowlist" | "full", allowlist?: string[] },
+ *   clipboard?: boolean,
+ *   notifications?: boolean,
+ *   automation?: boolean,
+ * }} PermissionSnapshot
+ * @typedef {{
+ *   logs: ScriptConsoleEntry[],
+ *   audit: any[],
+ *   error?: { name?: string, message: string, stack?: string, code?: string, principal?: any, request?: any, reason?: string }
+ * }} ScriptRunResult
  * @typedef {import("./workbook.js").Workbook} Workbook
  */
 
-const WORKER_URL = new URL("./sandbox-worker.cjs", import.meta.url);
-const DEFAULT_TIMEOUT_MS = 5_000;
+const WORKER_URL = new URL("./sandbox-worker.node.js", import.meta.url);
+
+function defaultPermissionSnapshot() {
+  return {
+    filesystem: { read: [], readwrite: [] },
+    network: { mode: "none", allowlist: [] },
+    clipboard: false,
+    notifications: false,
+    automation: false,
+  };
+}
 
 export class ScriptRuntime {
   /**
@@ -19,41 +47,119 @@ export class ScriptRuntime {
 
   /**
    * @param {string} code
-   * @param {{ permissions?: any, timeoutMs?: number }=} options
+   * @param {{
+   *   timeoutMs?: number,
+   *   memoryMb?: number,
+   *   signal?: AbortSignal,
+   *   principal?: ScriptPrincipal,
+   *   permissions?: PermissionSnapshot,
+   *   permissionManager?: { getSnapshot: (principal: ScriptPrincipal) => PermissionSnapshot },
+   *   auditSink?: AuditSink,
+   * }} [options]
    * @returns {Promise<ScriptRunResult>}
-   *
-   * If execution exceeds `timeoutMs`, the worker is terminated and the promise
-   * resolves with a `ScriptRunResult` containing an error.
    */
-  async run(code, options) {
+  async run(code, options = {}) {
     const activeSheetName = this.workbook.getActiveSheet().name;
     const selection = this.workbook.getSelection();
 
     /** @type {ScriptConsoleEntry[]} */
     const logs = [];
+    /** @type {any[]} */
+    const audit = [];
+
+    const timeoutMs = options.timeoutMs ?? 5_000;
+    const memoryMb = options.memoryMb ?? 64;
+    const principal = options.principal ?? { type: "script", id: "anonymous" };
+    const permissions =
+      options.permissions ??
+      (options.permissionManager ? options.permissionManager.getSnapshot(principal) : defaultPermissionSnapshot());
 
     const worker = new Worker(WORKER_URL, {
-      workerData: {
-        activeSheetName,
-        selection,
-        permissions: options?.permissions,
+      type: "module",
+      resourceLimits: {
+        maxOldGenerationSizeMb: Math.max(16, Math.floor(memoryMb)),
+        maxYoungGenerationSizeMb: Math.max(16, Math.min(64, Math.floor(memoryMb / 4))),
       },
     });
 
-    const timeoutMs =
-      Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
-    let timeoutId;
-    let settled = false;
+    const unsubscribes = [
+      this.workbook.events.on("cellChanged", (evt) => {
+        worker.postMessage({ type: "event", eventType: "edit", payload: evt });
+      }),
+      this.workbook.events.on("formulaChanged", (evt) => {
+        worker.postMessage({ type: "event", eventType: "edit", payload: evt });
+      }),
+      this.workbook.events.on("selectionChanged", (evt) => {
+        worker.postMessage({ type: "event", eventType: "selectionChange", payload: evt });
+      }),
+      this.workbook.events.on("formatChanged", (evt) => {
+        worker.postMessage({ type: "event", eventType: "formatChange", payload: evt });
+      }),
+    ];
 
     const completion = new Promise((resolve) => {
+      let settled = false;
+
+      const cleanup = async () => {
+        for (const unsub of unsubscribes) unsub();
+        worker.removeAllListeners();
+        try {
+          await worker.terminate();
+        } catch {
+          // ignore
+        }
+      };
+
       const settle = async (result) => {
         if (settled) return;
         settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
-        worker.removeAllListeners();
-        await worker.terminate();
+        clearTimeout(timeout);
+        if (abortListener) {
+          try {
+            options.signal?.removeEventListener("abort", abortListener);
+          } catch {
+            // ignore
+          }
+        }
+        await cleanup();
         resolve(result);
       };
+
+      const onTimeout = () => {
+        audit.push({ eventType: "scripting.run.timeout", actor: principal, success: false, metadata: { timeoutMs } });
+        options.auditSink?.log?.({
+          eventType: "scripting.run.timeout",
+          actor: principal,
+          success: false,
+          metadata: { timeoutMs },
+        });
+        worker.postMessage({ type: "cancel" });
+        settle({ logs, audit, error: { name: "SandboxTimeoutError", message: `Script timed out after ${timeoutMs}ms` } });
+      };
+
+      const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? setTimeout(onTimeout, timeoutMs) : null;
+
+      /** @type {(() => void) | null} */
+      let abortListener = null;
+      if (options.signal) {
+        if (options.signal.aborted) {
+          worker.postMessage({ type: "cancel" });
+          settle({ logs, audit, error: { name: "AbortError", message: "Script execution cancelled" } });
+        } else {
+          abortListener = () => {
+            audit.push({ eventType: "scripting.run.cancelled", actor: principal, success: false, metadata: {} });
+            options.auditSink?.log?.({
+              eventType: "scripting.run.cancelled",
+              actor: principal,
+              success: false,
+              metadata: {},
+            });
+            worker.postMessage({ type: "cancel" });
+            settle({ logs, audit, error: { name: "AbortError", message: "Script execution cancelled" } });
+          };
+          options.signal.addEventListener("abort", abortListener, { once: true });
+        }
+      }
 
       worker.on("message", async (message) => {
         if (settled) return;
@@ -63,61 +169,106 @@ export class ScriptRuntime {
           return;
         }
 
+        if (message?.type === "output") {
+          const level = message.metadata?.method ?? (message.stream === "stderr" ? "error" : "log");
+          const text = String(message.text ?? "");
+          for (const line of text.split("\n")) {
+            const trimmed = line.trimEnd();
+            if (!trimmed) continue;
+            logs.push({ level, message: trimmed });
+          }
+          return;
+        }
+
+        if (message?.type === "audit") {
+          audit.push(message.event);
+          try {
+            options.auditSink?.log?.(message.event);
+          } catch {
+            // ignore audit failures
+          }
+          return;
+        }
+
+        if (message?.type === "limit") {
+          const event = {
+            eventType: "scripting.sandbox.limit",
+            actor: principal,
+            success: false,
+            metadata: message,
+          };
+          audit.push(event);
+          options.auditSink?.log?.(event);
+          return;
+        }
+
         if (message?.type === "rpc") {
+          const started = Date.now();
           try {
             const result = await this.handleRpc(message.method, message.params);
             if (settled) return;
             worker.postMessage({ type: "rpcResult", id: message.id, result });
+            const durationMs = Date.now() - started;
+            const entry = {
+              eventType: "scripting.rpc",
+              actor: principal,
+              success: true,
+              metadata: { method: message.method, durationMs },
+            };
+            audit.push(entry);
+            options.auditSink?.log?.(entry);
           } catch (err) {
             const serialized = serializeError(err);
             if (settled) return;
             worker.postMessage({ type: "rpcError", id: message.id, error: serialized });
+            const durationMs = Date.now() - started;
+            const entry = {
+              eventType: "scripting.rpc",
+              actor: principal,
+              success: false,
+              metadata: { method: message.method, durationMs, message: serialized.message },
+            };
+            audit.push(entry);
+            options.auditSink?.log?.(entry);
           }
           return;
         }
 
         if (message?.type === "result") {
-          await settle({ logs });
+          await settle({ logs, audit });
           return;
         }
 
         if (message?.type === "error") {
-          await settle({ logs, error: message.error });
+          await settle({ logs, audit, error: message.error });
         }
       });
 
       worker.on("error", async (err) => {
-        await settle({ logs, error: serializeError(err) });
+        await settle({ logs, audit, error: serializeError(err) });
       });
-
-      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-        timeoutId = setTimeout(() => {
-          void settle({
-            logs,
-            error: {
-              name: "ScriptTimeoutError",
-              message: `Script timed out after ${timeoutMs}ms`,
-            },
-          });
-        }, timeoutMs);
-      }
     });
 
-    worker.postMessage({ type: "run", code });
+    worker.postMessage({
+      type: "run",
+      code,
+      activeSheetName,
+      selection,
+      principal,
+      permissions,
+      timeoutMs,
+      memoryMb,
+    });
 
     return completion;
   }
 
   async handleRpc(method, params) {
     switch (method) {
-      case "ui.alert": {
-        throw new Error("ui.alert is not available in the Node ScriptRuntime");
-      }
-      case "ui.confirm": {
-        throw new Error("ui.confirm is not available in the Node ScriptRuntime");
-      }
+      case "ui.alert":
+      case "ui.confirm":
       case "ui.prompt": {
-        throw new Error("ui.prompt is not available in the Node ScriptRuntime");
+        throw new Error(`${method} is not available in the Node ScriptRuntime`);
       }
       case "range.getValues": {
         const { sheetName, address } = params;
@@ -126,6 +277,24 @@ export class ScriptRuntime {
       case "range.setValues": {
         const { sheetName, address, values } = params;
         this.workbook.getSheet(sheetName).getRange(address).setValues(values);
+        return null;
+      }
+      case "range.getFormulas": {
+        const { sheetName, address } = params;
+        return this.workbook.getSheet(sheetName).getRange(address).getFormulas();
+      }
+      case "range.setFormulas": {
+        const { sheetName, address, formulas } = params;
+        this.workbook.getSheet(sheetName).getRange(address).setFormulas(formulas);
+        return null;
+      }
+      case "range.getFormats": {
+        const { sheetName, address } = params;
+        return this.workbook.getSheet(sheetName).getRange(address).getFormats();
+      }
+      case "range.setFormats": {
+        const { sheetName, address, formats } = params;
+        this.workbook.getSheet(sheetName).getRange(address).setFormats(formats);
         return null;
       }
       case "range.getValue": {
@@ -146,6 +315,9 @@ export class ScriptRuntime {
         this.workbook.getSheet(sheetName).getRange(address).setFormat(format);
         return null;
       }
+      case "workbook.getSheets": {
+        return this.workbook.getSheets().map((sheet) => sheet.name);
+      }
       case "workbook.getActiveSheetName": {
         return this.workbook.getActiveSheet().name;
       }
@@ -157,6 +329,10 @@ export class ScriptRuntime {
         this.workbook.setSelection(sheetName, address);
         return null;
       }
+      case "sheet.getUsedRange": {
+        const { sheetName } = params;
+        return this.workbook.getSheet(sheetName).getUsedRange().address;
+      }
       default:
         throw new Error(`Unknown RPC method: ${method}`);
     }
@@ -165,10 +341,11 @@ export class ScriptRuntime {
 
 function serializeError(err) {
   if (err instanceof Error) {
-    return { message: err.message, name: err.name, stack: err.stack };
+    return { message: err.message, name: err.name, stack: err.stack, code: err.code };
   }
   if (typeof err === "string") {
     return { message: err };
   }
   return { message: "Unknown error" };
 }
+

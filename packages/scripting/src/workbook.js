@@ -60,6 +60,42 @@ export class Range {
     });
   }
 
+  getFormulas() {
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    const out = [];
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < cols; c++) {
+        row.push(this.sheet.getCellFormula(this.coords.startRow + r, this.coords.startCol + c));
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  setFormulas(formulas) {
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    if (formulas.length !== rows || formulas.some((row) => row.length !== cols)) {
+      throw new Error(
+        `setFormulas expected ${rows}x${cols} matrix for range ${this.address}, got ${formulas.length}x${formulas[0]?.length ?? 0}`,
+      );
+    }
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        this.sheet.setCellFormulaInternal(this.coords.startRow + r, this.coords.startCol + c, formulas[r][c]);
+      }
+    }
+
+    this.sheet.workbook.events.emit("formulaChanged", {
+      sheetName: this.sheet.name,
+      address: this.address,
+      formulas,
+    });
+  }
+
   getValue() {
     const values = this.getValues();
     if (values.length !== 1 || values[0].length !== 1) {
@@ -103,6 +139,43 @@ export class Range {
     const range = this.coords;
     return this.sheet.getCellFormat(range.startRow, range.startCol);
   }
+
+  getFormats() {
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    const out = [];
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < cols; c++) {
+        row.push({ ...this.sheet.getCellFormat(this.coords.startRow + r, this.coords.startCol + c) });
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  setFormats(formats) {
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    if (formats.length !== rows || formats.some((row) => row.length !== cols)) {
+      throw new Error(
+        `setFormats expected ${rows}x${cols} matrix for range ${this.address}, got ${formats.length}x${formats[0]?.length ?? 0}`,
+      );
+    }
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        this.sheet.setCellFormatInternal(this.coords.startRow + r, this.coords.startCol + c, formats[r][c]);
+      }
+    }
+
+    this.sheet.workbook.events.emit("formatChanged", {
+      sheetName: this.sheet.name,
+      address: this.address,
+      format: null,
+      formats,
+    });
+  }
 }
 
 export class Sheet {
@@ -113,7 +186,7 @@ export class Sheet {
   constructor(workbook, name) {
     this.workbook = workbook;
     this.name = name;
-    /** @type {Map<string, { value: any, format: Record<string, any> }>} */
+    /** @type {Map<string, { value: any, formula: string | null, format: Record<string, any> }>} */
     this.cells = new Map();
   }
 
@@ -123,11 +196,15 @@ export class Sheet {
   /** @type {string} */
   name;
 
-  /** @type {Map<string, { value: any, format: Record<string, any> }>} */
+  /** @type {Map<string, { value: any, formula: string | null, format: Record<string, any> }>} */
   cells;
 
   getRange(address) {
     return new Range(this, parseRangeAddress(address));
+  }
+
+  getCell(row, col) {
+    return new Range(this, { startRow: row, startCol: col, endRow: row, endCol: col });
   }
 
   setCellValue(address, value) {
@@ -138,29 +215,70 @@ export class Sheet {
     this.getRange(address).setValues(values);
   }
 
+  setCellFormula(address, formula) {
+    this.getRange(address).setFormulas([[formula]]);
+  }
+
+  getUsedRange() {
+    let minRow = Infinity;
+    let minCol = Infinity;
+    let maxRow = -1;
+    let maxCol = -1;
+
+    for (const [id, cell] of this.cells.entries()) {
+      const [rowStr, colStr] = id.split(",");
+      const row = Number.parseInt(rowStr, 10);
+      const col = Number.parseInt(colStr, 10);
+      const hasFormat = cell.format && Object.keys(cell.format).length > 0;
+      if (cell.value === null && cell.formula === null && !hasFormat) continue;
+      minRow = Math.min(minRow, row);
+      minCol = Math.min(minCol, col);
+      maxRow = Math.max(maxRow, row);
+      maxCol = Math.max(maxCol, col);
+    }
+
+    if (!Number.isFinite(minRow)) {
+      return this.getRange("A1");
+    }
+
+    return new Range(this, { startRow: minRow, startCol: minCol, endRow: maxRow, endCol: maxCol });
+  }
+
   getCellValue(row, col) {
-    return this.getCell(row, col).value;
+    return this.getCellState(row, col).value;
+  }
+
+  getCellFormula(row, col) {
+    return this.getCellState(row, col).formula;
   }
 
   getCellFormat(row, col) {
-    return this.getCell(row, col).format;
+    return this.getCellState(row, col).format;
   }
 
-  getCell(row, col) {
+  getCellState(row, col) {
     const id = key(row, col);
     const existing = this.cells.get(id);
     if (existing) return existing;
-    const created = { value: null, format: {} };
+    const created = { value: null, formula: null, format: {} };
     this.cells.set(id, created);
     return created;
   }
 
   setCellValueInternal(row, col, value) {
-    this.getCell(row, col).value = value;
+    const cell = this.getCellState(row, col);
+    cell.value = value;
+    cell.formula = null;
+  }
+
+  setCellFormulaInternal(row, col, formula) {
+    const cell = this.getCellState(row, col);
+    cell.formula = formula ?? null;
+    cell.value = null;
   }
 
   setCellFormatInternal(row, col, format) {
-    const cell = this.getCell(row, col);
+    const cell = this.getCellState(row, col);
     if (format == null) {
       cell.format = {};
       return;
@@ -213,6 +331,10 @@ export class Workbook {
     return sheet;
   }
 
+  getSheets() {
+    return [...this.sheets.values()];
+  }
+
   getActiveSheet() {
     if (!this.activeSheetName) {
       throw new Error("Workbook has no sheets");
@@ -251,7 +373,7 @@ export class Workbook {
     for (const [name, sheet] of this.sheets.entries()) {
       const sheetOut = {};
       for (const [k, v] of sheet.cells.entries()) {
-        sheetOut[k] = { value: v.value, format: { ...v.format } };
+        sheetOut[k] = { value: v.value, formula: v.formula, format: { ...v.format } };
       }
       out[name] = sheetOut;
     }

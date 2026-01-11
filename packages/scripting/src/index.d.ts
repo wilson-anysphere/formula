@@ -1,4 +1,5 @@
 export type CellValue = string | number | boolean | null;
+export type CellFormula = string | null;
 
 export interface CellFormat {
   [key: string]: any;
@@ -45,11 +46,17 @@ export class Range implements RangeLike {
   getValues(): CellValue[][];
   setValues(values: CellValue[][]): void;
 
+  getFormulas(): CellFormula[][];
+  setFormulas(formulas: CellFormula[][]): void;
+
+  getFormats(): CellFormat[][];
+  setFormats(formats: Partial<CellFormat>[][]): void;
+
   getValue(): CellValue;
   setValue(value: CellValue): void;
 
-  setFormat(format: Partial<CellFormat> | null): void;
   getFormat(): CellFormat;
+  setFormat(format: Partial<CellFormat> | null): void;
 }
 
 export class Sheet implements SheetLike {
@@ -57,11 +64,15 @@ export class Sheet implements SheetLike {
   readonly name: string;
 
   getRange(address: string): Range;
+  getCell(row: number, col: number): Range;
+  getUsedRange(): Range;
 
   setCellValue(address: string, value: CellValue): void;
   setRangeValues(address: string, values: CellValue[][]): void;
+  setCellFormula(address: string, formula: CellFormula): void;
 
   getCellValue(row: number, col: number): CellValue;
+  getCellFormula(row: number, col: number): CellFormula;
   getCellFormat(row: number, col: number): CellFormat;
 }
 
@@ -79,6 +90,7 @@ export class Workbook implements WorkbookLike {
 
   addSheet(name: string): Sheet;
   getSheet(name: string): Sheet;
+  getSheets(): Sheet[];
 
   getActiveSheet(): Sheet;
   setActiveSheet(name: string): void;
@@ -86,7 +98,7 @@ export class Workbook implements WorkbookLike {
   getSelection(): Selection;
   setSelection(sheetName: string, address: string): void;
 
-  snapshot(): Record<string, Record<string, { value: CellValue; format: Record<string, any> }>>;
+  snapshot(): Record<string, Record<string, { value: CellValue; formula: CellFormula; format: Record<string, any> }>>;
 }
 
 export function columnLabelToIndex(label: string): number;

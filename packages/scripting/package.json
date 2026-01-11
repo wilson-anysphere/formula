@@ -20,7 +20,14 @@
       "default": "./src/web.js"
     }
   },
+  "scripts": {
+    "test": "vitest run -c vitest.config.ts"
+  },
   "dependencies": {
+    "@formula/security": "workspace:*",
     "typescript": "^5.8.2"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.7"
   }
 }

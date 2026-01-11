@@ -26,7 +26,7 @@ test("scripting (node): allowlist mode rejects non-allowlisted hosts (fetch + We
 
   const runtime = new ScriptRuntime(workbook);
 
-  const allowlist = { network: "allowlist", networkAllowlist: ["localhost"] };
+  const allowlist = { network: { mode: "allowlist", allowlist: ["localhost"] } };
 
   const fetchResult = await runtime.run(
     `
@@ -42,15 +42,15 @@ export default async function main(ctx) {
 
   const wsResult = await runtime.run(
     `
-export default async function main() {
-  new WebSocket("wss://example.com");
-}
-`,
+ export default async function main() {
+   new WebSocket("wss://example.com");
+ }
+ `,
     { permissions: allowlist },
   );
 
   assert.ok(wsResult.error, "expected WebSocket to be blocked by allowlist");
-  assert.match(wsResult.error.message, /example\.com/i);
+  assert.match(wsResult.error.message, /WebSocket/i);
 });
 
 test("scripting (node): module scripts cannot import other modules", async () => {

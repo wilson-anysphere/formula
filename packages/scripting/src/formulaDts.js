@@ -15,6 +15,7 @@ export const FORMULA_API_DTS = `// Formula scripting API typings.
 
 declare namespace Formula {
   export type CellValue = string | number | boolean | null;
+  export type CellFormula = string | null;
 
   export interface CellFormat {
     [key: string]: any;
@@ -26,8 +27,16 @@ declare namespace Formula {
 
   export interface Range {
     readonly address: string;
+
     getValues(): Promise<CellValue[][]>;
     setValues(values: CellValue[][]): Promise<void>;
+
+    getFormulas(): Promise<CellFormula[][]>;
+    setFormulas(formulas: CellFormula[][]): Promise<void>;
+
+    getFormats(): Promise<CellFormat[][]>;
+    setFormats(formats: Partial<CellFormat>[][]): Promise<void>;
+
     getValue(): Promise<CellValue>;
     setValue(value: CellValue): Promise<void>;
     getFormat(): Promise<CellFormat>;
@@ -37,9 +46,12 @@ declare namespace Formula {
   export interface Sheet {
     readonly name: string;
     getRange(address: string): Range;
+    getCell(row: number, col: number): Range;
+    getUsedRange(): Promise<Range>;
   }
 
   export interface Workbook {
+    getSheets(): Promise<Sheet[]>;
     getSheet(name: string): Sheet;
     setSelection(sheetName: string, address: string): Promise<void>;
     getSelection(): Promise<{ sheetName: string; address: string }>;
@@ -53,11 +65,19 @@ declare namespace Formula {
     prompt(message: string, defaultValue?: string): Promise<string | null>;
   }
 
+  export interface ScriptEvents {
+    onEdit(handler: (event: any) => void | Promise<void>): () => void;
+    onSelectionChange(handler: (event: any) => void | Promise<void>): () => void;
+    onFormatChange(handler: (event: any) => void | Promise<void>): () => void;
+    flush(): Promise<void>;
+  }
+
   export interface ScriptContext {
     workbook: Workbook;
     activeSheet: Sheet;
     selection: Range;
     ui: UIHelpers;
+    events: ScriptEvents;
 
     // UI helpers (docs-style).
     alert(message: string): Promise<void>;
