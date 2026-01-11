@@ -399,6 +399,66 @@ test("install supports publisher signing key rotation via publisherKeys + per-ve
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
+test("install refuses when all publisher signing keys are revoked", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    publisherKeys: [{ id: "keyA", publicKeyPem: keys.publicKeyPem, revoked: true }],
+    publisherKeyIds: { "1.0.0": "keyA" },
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/all publisher signing keys are revoked/i);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install fails for packages signed by a revoked key even if other keys exist", async () => {
+  const keysA = generateEd25519KeyPair();
+  const keysB = generateEd25519KeyPair();
+
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keysA.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    // Simulate rotation where publisherPublicKeyPem is the *new* key, but the old key is revoked.
+    publicKeyPem: keysB.publicKeyPem,
+    publisherKeys: [
+      { id: "keyB", publicKeyPem: keysB.publicKeyPem, revoked: false },
+      { id: "keyA", publicKeyPem: keysA.publicKeyPem, revoked: true }
+    ],
+    publisherKeyIds: { "1.0.0": "keyA" },
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/signature verification failed/i);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
 test("supports importing extension API via the \"formula\" alias", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-alias-"));
