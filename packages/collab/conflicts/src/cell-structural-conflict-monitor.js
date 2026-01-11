@@ -375,7 +375,7 @@ export class CellStructuralConflictMonitor {
   _handleOpPair(oursOp, theirsOp) {
     if (!isCausallyConcurrent(oursOp, theirsOp)) return;
  
-    // move-destination conflict (same source moved to different destinations).
+    // move-related conflicts.
     if (oursOp.kind === "move" && theirsOp.kind === "move") {
       if (oursOp.fromCellKey === theirsOp.fromCellKey) {
         if (oursOp.toCellKey !== theirsOp.toCellKey) {
@@ -416,16 +416,184 @@ export class CellStructuralConflictMonitor {
             remote: theirsAsEdit
           });
         }
+        return;
+      }
+
+      // Two different sources moved into the same destination.
+      if (oursOp.toCellKey === theirsOp.toCellKey) {
+        const oursCell = normalizeCell(oursOp.cell);
+        const theirsCell = normalizeCell(theirsOp.cell);
+        if (cellsEqual(oursCell, theirsCell)) return;
+
+        const reason = didContentChange(oursCell, theirsCell) ? "content" : "format";
+
+        const oursAsEdit = {
+          kind: "edit",
+          userId: oursOp.userId,
+          cellKey: oursOp.toCellKey,
+          before: null,
+          after: oursCell
+        };
+        const theirsAsEdit = {
+          kind: "edit",
+          userId: theirsOp.userId,
+          cellKey: theirsOp.toCellKey,
+          before: null,
+          after: theirsCell
+        };
+
+        this._emitConflict({
+          type: "cell",
+          reason,
+          sourceCellKey: oursOp.toCellKey,
+          local: oursAsEdit,
+          remote: theirsAsEdit
+        });
+      }
+      return;
+    }
+
+    // Move vs delete: treat as a delete-vs-edit conflict at the destination.
+    if (oursOp.kind === "move" && theirsOp.kind === "delete") {
+      if (theirsOp.cellKey === oursOp.toCellKey) {
+        const oursAsEdit = {
+          kind: "edit",
+          userId: oursOp.userId,
+          cellKey: oursOp.toCellKey,
+          before: null,
+          after: normalizeCell(oursOp.cell)
+        };
+        this._emitConflict({
+          type: "cell",
+          reason: "delete-vs-edit",
+          sourceCellKey: oursOp.toCellKey,
+          local: oursAsEdit,
+          remote: theirsOp
+        });
+      } else if (
+        theirsOp.cellKey === oursOp.fromCellKey &&
+        (!oursOp.fingerprint || !theirsOp.fingerprint || oursOp.fingerprint === theirsOp.fingerprint)
+      ) {
+        const oursAsEdit = {
+          kind: "edit",
+          userId: oursOp.userId,
+          cellKey: oursOp.toCellKey,
+          before: null,
+          after: normalizeCell(oursOp.cell)
+        };
+        const theirsAsDelete = {
+          kind: "delete",
+          userId: theirsOp.userId,
+          cellKey: oursOp.toCellKey,
+          before: normalizeCell(oursOp.cell),
+          after: null
+        };
+        this._emitConflict({
+          type: "cell",
+          reason: "delete-vs-edit",
+          sourceCellKey: oursOp.toCellKey,
+          local: oursAsEdit,
+          remote: theirsAsDelete
+        });
+      }
+      return;
+    }
+    if (oursOp.kind === "delete" && theirsOp.kind === "move") {
+      if (oursOp.cellKey === theirsOp.toCellKey) {
+        const theirsAsEdit = {
+          kind: "edit",
+          userId: theirsOp.userId,
+          cellKey: theirsOp.toCellKey,
+          before: null,
+          after: normalizeCell(theirsOp.cell)
+        };
+        this._emitConflict({
+          type: "cell",
+          reason: "delete-vs-edit",
+          sourceCellKey: theirsOp.toCellKey,
+          local: oursOp,
+          remote: theirsAsEdit
+        });
+      } else if (
+        oursOp.cellKey === theirsOp.fromCellKey &&
+        (!oursOp.fingerprint || !theirsOp.fingerprint || oursOp.fingerprint === theirsOp.fingerprint)
+      ) {
+        const oursAsDelete = {
+          kind: "delete",
+          userId: oursOp.userId,
+          cellKey: theirsOp.toCellKey,
+          before: normalizeCell(theirsOp.cell),
+          after: null
+        };
+        const theirsAsEdit = {
+          kind: "edit",
+          userId: theirsOp.userId,
+          cellKey: theirsOp.toCellKey,
+          before: null,
+          after: normalizeCell(theirsOp.cell)
+        };
+        this._emitConflict({
+          type: "cell",
+          reason: "delete-vs-edit",
+          sourceCellKey: theirsOp.toCellKey,
+          local: oursAsDelete,
+          remote: theirsAsEdit
+        });
       }
       return;
     }
  
-    // move vs edit auto-merge (rename-aware).
+    // move vs edit: destination collisions surface conflicts; source edits are
+    // eligible for rename-aware auto-merge.
     if (oursOp.kind === "move" && theirsOp.kind === "edit") {
+      if (theirsOp.cellKey === oursOp.toCellKey) {
+        const oursCell = normalizeCell(oursOp.cell);
+        const theirsCell = normalizeCell(theirsOp.after);
+        if (!cellsEqual(oursCell, theirsCell)) {
+          const reason = didContentChange(oursCell, theirsCell) ? "content" : "format";
+          const oursAsEdit = {
+            kind: "edit",
+            userId: oursOp.userId,
+            cellKey: oursOp.toCellKey,
+            before: null,
+            after: oursCell
+          };
+          this._emitConflict({
+            type: "cell",
+            reason,
+            sourceCellKey: oursOp.toCellKey,
+            local: oursAsEdit,
+            remote: theirsOp
+          });
+        }
+        return;
+      }
       this._maybeAutoMergeMoveEdit({ move: oursOp, edit: theirsOp });
       return;
     }
     if (oursOp.kind === "edit" && theirsOp.kind === "move") {
+      if (oursOp.cellKey === theirsOp.toCellKey) {
+        const oursCell = normalizeCell(oursOp.after);
+        const theirsCell = normalizeCell(theirsOp.cell);
+        if (!cellsEqual(oursCell, theirsCell)) {
+          const reason = didContentChange(oursCell, theirsCell) ? "content" : "format";
+          const theirsAsEdit = {
+            kind: "edit",
+            userId: theirsOp.userId,
+            cellKey: theirsOp.toCellKey,
+            before: null,
+            after: theirsCell
+          };
+          this._emitConflict({
+            type: "cell",
+            reason,
+            sourceCellKey: theirsOp.toCellKey,
+            local: oursOp,
+            remote: theirsAsEdit
+          });
+        }
+        return;
+      }
       this._maybeAutoMergeMoveEdit({ move: theirsOp, edit: oursOp });
       return;
     }
@@ -465,35 +633,14 @@ export class CellStructuralConflictMonitor {
     // destination cell (same semantics as BranchService rename-aware merges).
     const touched = Array.isArray(edit.touchedCells) ? edit.touchedCells : [];
     if (touched.includes(move.toCellKey)) {
-      // Not safe to auto-merge when destination is also modified. Surface as a
-      // delete-vs-edit conflict on the source cell (the move implies deletion
-      // at the source).
-      const moveDelete = {
-        kind: "delete",
-        userId: move.userId,
-        beforeState: move.beforeState,
-        afterState: move.afterState,
-        touchedCells: move.touchedCells,
-        cellKey: move.fromCellKey,
-        before: move.cell ?? null,
-        after: null
-      };
- 
-      const oursIsEdit = edit.userId === this.localUserId;
- 
-      this._emitConflict({
-        type: "cell",
-        reason: "delete-vs-edit",
-        sourceCellKey: move.fromCellKey,
-        local: oursIsEdit ? edit : moveDelete,
-        remote: oursIsEdit ? moveDelete : edit
-      });
+      // Not safe to auto-merge when destination is also modified. Let the
+      // destination-level collision detection surface a conflict instead.
       return;
     }
  
     // Optional safety check: ensure the edit was applied to the same cell
     // content that was moved.
-    if (move.fingerprint && edit.beforeFingerprint && move.fingerprint !== edit.beforeFingerprint) {
+    if (move.fingerprint && move.fingerprint !== edit.beforeFingerprint) {
       return;
     }
  
@@ -832,28 +979,31 @@ export class CellStructuralConflictMonitor {
    /** @type {Array<any>} */
    const edits = [];
  
-   for (const diff of diffs) {
-     if (consumedFrom.has(diff.cellKey) || consumedAddrs.has(diff.cellKey)) continue;
- 
-     if (diff.before !== null && diff.after === null) {
-       deletes.push({ cellKey: diff.cellKey, before: diff.before, fingerprint: diff.beforeFingerprint });
-       continue;
-     }
- 
-     if (diff.before !== null && diff.after !== null) {
-       const contentChanged = didContentChange(diff.before, diff.after);
-       const formatChanged = didFormatChange(diff.before, diff.after);
-       edits.push({
-         cellKey: diff.cellKey,
-         before: diff.before,
-         after: diff.after,
-         beforeFingerprint: diff.beforeFingerprint,
-         afterFingerprint: diff.afterFingerprint,
-         contentChanged,
-         formatChanged
-       });
-     }
-   }
+    for (const diff of diffs) {
+      if (consumedFrom.has(diff.cellKey) || consumedAddrs.has(diff.cellKey)) continue;
+  
+      if (diff.before !== null && diff.after === null) {
+        deletes.push({ cellKey: diff.cellKey, before: diff.before, fingerprint: diff.beforeFingerprint });
+        continue;
+      }
+
+      // Treat additions and in-place edits as `edit` ops so we can detect
+      // destination collisions against moves (e.g. move X->Y vs someone typing
+      // into Y while offline).
+      if (diff.after !== null) {
+        const contentChanged = didContentChange(diff.before, diff.after);
+        const formatChanged = didFormatChange(diff.before, diff.after);
+        edits.push({
+          cellKey: diff.cellKey,
+          before: diff.before,
+          after: diff.after,
+          beforeFingerprint: diff.beforeFingerprint,
+          afterFingerprint: diff.afterFingerprint,
+          contentChanged,
+          formatChanged
+        });
+      }
+    }
  
    return {
      moves,
