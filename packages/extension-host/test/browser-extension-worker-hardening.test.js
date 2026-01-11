@@ -10,23 +10,6 @@ async function createTempDir(prefix) {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-async function ensureExtensionApiResolvable() {
-  const repoRoot = path.resolve(__dirname, "../../..");
-  const scopeDir = path.join(repoRoot, "node_modules", "@formula");
-  const linkPath = path.join(scopeDir, "extension-api");
-  const target = path.resolve(__dirname, "../../extension-api");
-
-  try {
-    await fs.lstat(linkPath);
-    return;
-  } catch {
-    // ignore
-  }
-
-  await fs.mkdir(scopeDir, { recursive: true });
-  await fs.symlink(target, linkPath, process.platform === "win32" ? "junction" : undefined);
-}
-
 async function writeFiles(rootDir, files) {
   for (const [relPath, contents] of Object.entries(files)) {
     const fullPath = path.join(rootDir, relPath);
@@ -50,12 +33,27 @@ async function activateExtensionWorker({
   sandbox,
   apiHandler
 }) {
-  await ensureExtensionApiResolvable();
   const extensionWorkerUrl = pathToFileURL(
     path.resolve(__dirname, "../src/browser/extension-worker.mjs")
   ).href;
 
   const wrapperDir = await createTempDir("formula-ext-worker-wrapper-");
+  const loaderPath = path.join(wrapperDir, "loader.mjs");
+  const extensionApiUrl = pathToFileURL(
+    path.resolve(__dirname, "../../extension-api/index.mjs")
+  ).href;
+  await fs.writeFile(
+    loaderPath,
+    `export async function resolve(specifier, context, nextResolve) {
+  if (specifier === "@formula/extension-api" || specifier === "formula") {
+    return { url: ${JSON.stringify(extensionApiUrl)}, shortCircuit: true };
+  }
+  return nextResolve(specifier, context);
+}
+`,
+    "utf8"
+  );
+
   const wrapperPath = path.join(wrapperDir, "wrapper.mjs");
   await fs.writeFile(
     wrapperPath,
@@ -111,7 +109,10 @@ parentPort.postMessage({ type: "__ready__" });
     "utf8"
   );
 
-  const worker = new Worker(pathToFileURL(wrapperPath), { type: "module" });
+  const worker = new Worker(pathToFileURL(wrapperPath), {
+    type: "module",
+    execArgv: ["--disable-warning=ExperimentalWarning", "--loader", pathToFileURL(loaderPath).href]
+  });
   const activationId = "activate-1";
 
   try {
