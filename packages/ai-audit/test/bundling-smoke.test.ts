@@ -63,6 +63,7 @@ describe("ai-audit browser bundling", () => {
       metafile: true,
       outdir,
       platform: "browser",
+      external: ["fs", "path", "crypto"],
       write: false,
       stdin: {
         sourcefile: "entry.js",
