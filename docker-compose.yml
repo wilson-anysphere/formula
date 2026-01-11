@@ -15,6 +15,11 @@ services:
       context: .
       dockerfile: services/api/Dockerfile
     environment:
+      # docker-compose.yml is intended for local development, so override the
+      # Dockerfile's `NODE_ENV=production`. Production config validation requires
+      # HTTPS-only cookies and non-dev secrets, which don't work on plain HTTP
+      # localhost setups.
+      NODE_ENV: "development"
       PORT: "3000"
       DATABASE_URL: postgres://postgres:postgres@db:5432/formula
       SESSION_COOKIE_NAME: formula_session
