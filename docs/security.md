@@ -69,6 +69,12 @@ pnpm -C services/sync-server -s keyring:validate --in keyring.json
 pnpm -C services/sync-server -s keyring:rotate --in keyring.json --out keyring.json
 ```
 
+For production images / built output, you can run the compiled entrypoint:
+
+```bash
+node services/sync-server/dist/keyring-cli.js generate > keyring.json
+```
+
 When enabled, plaintext `.yjs` files in `SYNC_SERVER_DATA_DIR` are migrated to the encrypted format on startup (write temp + rename, idempotent).
 
 On-disk format is a small, append-friendly container:

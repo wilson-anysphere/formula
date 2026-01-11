@@ -11,7 +11,10 @@
     "test": "node scripts/node-with-tsx.mjs --test test/*.test.ts",
     "keyring:generate": "node scripts/node-with-tsx.mjs src/keyring-cli.ts generate",
     "keyring:rotate": "node scripts/node-with-tsx.mjs src/keyring-cli.ts rotate",
-    "keyring:validate": "node scripts/node-with-tsx.mjs src/keyring-cli.ts validate"
+    "keyring:validate": "node scripts/node-with-tsx.mjs src/keyring-cli.ts validate",
+    "keyring:generate:dist": "node dist/keyring-cli.js generate",
+    "keyring:rotate:dist": "node dist/keyring-cli.js rotate",
+    "keyring:validate:dist": "node dist/keyring-cli.js validate"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

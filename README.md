@@ -178,6 +178,12 @@ pnpm -C services/sync-server -s keyring:validate --in keyring.json
 pnpm -C services/sync-server -s keyring:rotate --in keyring.json --out keyring.json
 ```
 
+In a built deployment you can run the compiled entrypoint directly:
+
+```bash
+node services/sync-server/dist/keyring-cli.js generate > keyring.json
+```
+
 Key rotation is operator-managed by replacing the KeyRing JSON (bumping `currentVersion` and adding a new key while keeping old key versions available for decryption).
 
 #### Encryption at rest (LevelDB persistence)

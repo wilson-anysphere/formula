@@ -3,7 +3,11 @@ import test from "node:test";
 
 import { KeyRing } from "../../../packages/security/crypto/keyring.js";
 
-import { generateKeyRingJson, rotateKeyRingJson } from "../src/keyring-cli.js";
+import {
+  generateKeyRingJson,
+  rotateKeyRingJson,
+  validateKeyRingJson,
+} from "../src/keyring-cli.js";
 
 test("keyring generate produces JSON parseable by KeyRing.fromJSON()", () => {
   const json = generateKeyRingJson();
@@ -26,3 +30,8 @@ test("keyring rotate increments currentVersion and preserves previous keys", () 
   assert.ok(typeof rotated.keys["2"] === "string" && rotated.keys["2"].length > 0);
 });
 
+test("keyring validate reports current and available versions", () => {
+  const json = generateKeyRingJson();
+  const summary = validateKeyRingJson(json);
+  assert.deepEqual(summary, { currentVersion: 1, availableVersions: [1] });
+});

@@ -85,6 +85,11 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  if (args.includes("--help") || args.includes("-h")) {
+    process.stdout.write(`${usage()}\n`);
+    return;
+  }
+
   if (cmd === "generate") {
     process.stdout.write(`${JSON.stringify(generateKeyRingJson(), null, 2)}\n`);
     return;
@@ -133,4 +138,3 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     process.exitCode = 1;
   }
 }
-
