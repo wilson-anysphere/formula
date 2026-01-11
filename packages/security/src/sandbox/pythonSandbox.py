@@ -291,10 +291,12 @@ def _main():
     except Exception:
         pass
 
-    # Import guardrails: keep ctypes blocked always; allow subprocess-style modules only if automation is granted.
-    blocked = {"ctypes"}
+    # Import guardrails:
+    # - ctypes (_ctypes) is always blocked (too powerful; breaks sandbox assumptions)
+    # - process-spawning internals are blocked unless automation is granted
+    blocked = {"ctypes", "_ctypes"}
     if permissions.get("automation") is not True:
-        blocked.update({"subprocess", "multiprocessing"})
+        blocked.update({"subprocess", "_posixsubprocess", "multiprocessing", "_multiprocessing"})
 
     original_import = builtins.__import__
 
