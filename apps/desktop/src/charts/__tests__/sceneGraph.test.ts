@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createDemoScene, renderSceneToCanvas, renderSceneToSvg } from "../scene/index.js";
+import { createDemoScene, path, renderSceneToCanvas, renderSceneToSvg } from "../scene/index.js";
 import type { Scene } from "../scene/index.js";
 
 function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: string[] } {
@@ -45,6 +45,7 @@ describe("charts scene graph", () => {
     expect(svg).toContain("<clipPath");
 
     expect(svg).toContain('clip-path="url(#clip0)"');
+    expect(svg).toMatch(/d="[^"]*Q/);
   });
 
   it("renders deterministically", () => {
@@ -79,6 +80,27 @@ describe("charts scene graph", () => {
     const { ctx, calls } = createStubCanvasContext();
     expect(() => renderSceneToCanvas(scene, ctx)).not.toThrow();
     expect(calls.length).toBeGreaterThan(0);
+    expect(calls).toContain("quadraticCurveTo");
+  });
+
+  it("supports cubic bezier paths", () => {
+    const curve = path().moveTo(0, 0).bezierCurveTo(10, 0, 10, 10, 20, 10).build();
+    const scene: Scene = {
+      nodes: [
+        {
+          kind: "path",
+          path: curve,
+          stroke: { paint: { color: "#000000" }, width: 1 },
+        },
+      ],
+    };
+
+    const svg = renderSceneToSvg(scene, { width: 20, height: 20 });
+    expect(svg).toMatch(/d="[^"]*C/);
+
+    const { ctx, calls } = createStubCanvasContext();
+    expect(() => renderSceneToCanvas(scene, ctx)).not.toThrow();
+    expect(calls).toContain("bezierCurveTo");
   });
 
   it("supports rounded rects + clip-shape transforms on Canvas", () => {
