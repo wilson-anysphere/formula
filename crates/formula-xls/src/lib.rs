@@ -157,12 +157,54 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let mut warnings = Vec::new();
     let mut merged_ranges = Vec::new();
 
-    match biff::read_workbook_globals_from_xls(path) {
-        Ok(globals) => out.date_system = globals.date_system,
-        Err(err) => warnings.push(ImportWarning::new(format!(
-            "failed to import `.xls` workbook globals: {err}"
-        ))),
-    }
+    let workbook_globals = match biff::read_workbook_globals_from_xls(path) {
+        Ok(globals) => {
+            out.date_system = globals.date_system;
+            Some(globals)
+        }
+        Err(err) => {
+            warnings.push(ImportWarning::new(format!(
+                "failed to import `.xls` workbook globals: {err}"
+            )));
+            None
+        }
+    };
+
+    let cell_xf_indices = match biff::read_cell_xf_indices_from_xls(path) {
+        Ok(xfs) => Some(xfs),
+        Err(err) => {
+            warnings.push(ImportWarning::new(format!(
+                "failed to import `.xls` cell styles: {err}"
+            )));
+            None
+        }
+    };
+
+    let xf_style_ids = if let Some(globals) = workbook_globals.as_ref() {
+        let mut cache: HashMap<String, u32> = HashMap::new();
+        let mut style_ids = Vec::with_capacity(globals.xf_count());
+        for xf_index in 0..globals.xf_count() as u32 {
+            let style_id = match globals.resolve_number_format_code(xf_index) {
+                Some(code) => {
+                    if let Some(existing) = cache.get(&code) {
+                        Some(*existing)
+                    } else {
+                        let style_id = out.intern_style(Style {
+                            number_format: Some(code.clone()),
+                            ..Default::default()
+                        });
+                        cache.insert(code, style_id);
+                        Some(style_id)
+                    }
+                }
+                None => None,
+            };
+            style_ids.push(style_id);
+        }
+        Some(style_ids)
+    } else {
+        None
+    };
 
     let date_time_styles = DateTimeStyleIds::new(&mut out);
 
@@ -218,6 +260,10 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         }
 
+        let sheet_cell_xfs = cell_xf_indices
+            .as_ref()
+            .and_then(|map| map.get(&sheet_name));
+
         match workbook.worksheet_range(&sheet_name) {
             Ok(range) => {
                 let range_start = range.start().unwrap_or((0, 0));
@@ -230,9 +276,15 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         continue;
                     };
 
-                    let Some((value, style_id)) = convert_value(value, date_time_styles) else {
+                    let Some((value, mut style_id)) = convert_value(value, date_time_styles) else {
                         continue;
                     };
+
+                    if let Some(resolved) =
+                        style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, cell_ref)
+                    {
+                        style_id = Some(resolved);
+                    }
 
                     let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                     sheet.set_value(anchor, value);
@@ -263,6 +315,12 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
                     let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                     sheet.set_formula(anchor, Some(normalized));
+
+                    if let Some(resolved) =
+                        style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, cell_ref)
+                    {
+                        sheet.set_style_id(anchor, resolved);
+                    }
                 }
             }
             Err(err) => warnings.push(ImportWarning::new(format!(
@@ -324,6 +382,15 @@ fn convert_value(
         Data::DateTimeIso(v) => Some((CellValue::String(v.clone()), None)),
         Data::DurationIso(v) => Some((CellValue::String(v.clone()), None)),
     }
+}
+
+fn style_id_for_cell_xf(
+    xf_style_ids: Option<&[Option<u32>]>,
+    sheet_cell_xfs: Option<&HashMap<CellRef, u16>>,
+    cell_ref: CellRef,
+) -> Option<u32> {
+    let xf_index = sheet_cell_xfs?.get(&cell_ref).copied()? as usize;
+    xf_style_ids?.get(xf_index).copied().flatten()
 }
 
 fn cell_error_to_error_value(err: calamine::CellErrorType) -> ErrorValue {

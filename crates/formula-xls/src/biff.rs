@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek};
 use std::path::Path;
 
-use formula_model::{ColProperties, DateSystem, RowProperties};
+use formula_model::{CellRef, ColProperties, DateSystem, RowProperties};
 
 #[derive(Debug, Default)]
 pub(crate) struct SheetRowColProperties {
@@ -98,6 +98,27 @@ pub(crate) fn read_row_col_properties_from_xls(
     Ok(out)
 }
 
+pub(crate) fn read_cell_xf_indices_from_xls(
+    path: &Path,
+) -> Result<HashMap<String, HashMap<CellRef, u16>>, String> {
+    let workbook_stream = read_workbook_stream_from_xls(path)?;
+    let biff = detect_biff_version(&workbook_stream);
+    let sheets = parse_biff_bound_sheets(&workbook_stream, biff)?;
+
+    let mut out = HashMap::new();
+    for (sheet_name, offset) in sheets {
+        if offset >= workbook_stream.len() {
+            return Err(format!(
+                "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
+            ));
+        }
+        let xfs = parse_biff_sheet_cell_xf_indices(&workbook_stream, offset)?;
+        out.insert(sheet_name, xfs);
+    }
+
+    Ok(out)
+}
+
 /// Workbook-global BIFF records needed for stable number format and date system import.
 #[derive(Debug, Clone)]
 pub(crate) struct BiffWorkbookGlobals {
@@ -154,6 +175,10 @@ impl BiffWorkbookGlobals {
         }
 
         Some(format!("__builtin_numFmtId:{num_fmt_id}"))
+    }
+
+    pub(crate) fn xf_count(&self) -> usize {
+        self.xfs.len()
     }
 }
 
@@ -370,6 +395,96 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     Ok(props)
 }
 
+pub(crate) fn parse_biff_sheet_cell_xf_indices(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<HashMap<CellRef, u16>, String> {
+    let mut out = HashMap::new();
+    let mut offset = start;
+
+    loop {
+        let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
+            break;
+        };
+        offset = offset
+            .checked_add(4)
+            .and_then(|o| o.checked_add(data.len()))
+            .ok_or_else(|| "BIFF record offset overflow".to_string())?;
+
+        match record_id {
+            // Cell records with a `Cell` header (rw, col, ixfe) [MS-XLS 2.5.14].
+            //
+            // We only care about extracting the XF index (`ixfe`) so we can resolve
+            // number formats from workbook globals.
+            0x0006 // FORMULA
+            | 0x0201 // BLANK
+            | 0x0203 // NUMBER
+            | 0x0204 // LABEL (BIFF5)
+            | 0x0205 // BOOLERR
+            | 0x027E // RK
+            | 0x00D6 // RSTRING
+            | 0x00FD => { // LABELSST
+                if data.len() < 6 {
+                    continue;
+                }
+                let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+                let col = u16::from_le_bytes([data[2], data[3]]) as u32;
+                let xf = u16::from_le_bytes([data[4], data[5]]);
+                out.insert(CellRef::new(row, col), xf);
+            }
+            // MULRK [MS-XLS 2.4.141]
+            0x00BD => {
+                if data.len() < 6 {
+                    continue;
+                }
+                let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+                let col_first = u16::from_le_bytes([data[2], data[3]]) as u32;
+                let col_last = u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]])
+                    as u32;
+                let rk_data = &data[4..data.len().saturating_sub(2)];
+                for (idx, chunk) in rk_data.chunks_exact(6).enumerate() {
+                    let col = match col_first.checked_add(idx as u32) {
+                        Some(col) => col,
+                        None => break,
+                    };
+                    if col > col_last {
+                        break;
+                    }
+                    let xf = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    out.insert(CellRef::new(row, col), xf);
+                }
+            }
+            // MULBLANK [MS-XLS 2.4.140]
+            0x00BE => {
+                if data.len() < 6 {
+                    continue;
+                }
+                let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+                let col_first = u16::from_le_bytes([data[2], data[3]]) as u32;
+                let col_last = u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]])
+                    as u32;
+                let xf_data = &data[4..data.len().saturating_sub(2)];
+                for (idx, chunk) in xf_data.chunks_exact(2).enumerate() {
+                    let col = match col_first.checked_add(idx as u32) {
+                        Some(col) => col,
+                        None => break,
+                    };
+                    if col > col_last {
+                        break;
+                    }
+                    let xf = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    out.insert(CellRef::new(row, col), xf);
+                }
+            }
+            // EOF terminates the sheet substream.
+            0x000A => break,
+            _ => {}
+        }
+    }
+
+    Ok(out)
+}
+
 pub(crate) fn read_biff_record(workbook_stream: &[u8], offset: usize) -> Option<(u16, &[u8])> {
     let header = workbook_stream.get(offset..offset + 4)?;
     let record_id = u16::from_le_bytes([header[0], header[1]]);
@@ -547,6 +662,52 @@ mod tests {
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);
         out
+    }
+
+    #[test]
+    fn parses_sheet_cell_xf_indices_including_mul_records() {
+        // NUMBER cell (A1) with xf=3.
+        let mut number_payload = vec![0u8; 14];
+        number_payload[0..2].copy_from_slice(&0u16.to_le_bytes()); // row
+        number_payload[2..4].copy_from_slice(&0u16.to_le_bytes()); // col
+        number_payload[4..6].copy_from_slice(&3u16.to_le_bytes()); // xf
+
+        // MULBLANK row=1, cols 0..2 with xf {10,11,12}.
+        let mut mulblank_payload = Vec::new();
+        mulblank_payload.extend_from_slice(&1u16.to_le_bytes()); // row
+        mulblank_payload.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        mulblank_payload.extend_from_slice(&10u16.to_le_bytes());
+        mulblank_payload.extend_from_slice(&11u16.to_le_bytes());
+        mulblank_payload.extend_from_slice(&12u16.to_le_bytes());
+        mulblank_payload.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+        // MULRK row=2, cols 1..2 with xf {20,21}.
+        let mut mulrk_payload = Vec::new();
+        mulrk_payload.extend_from_slice(&2u16.to_le_bytes()); // row
+        mulrk_payload.extend_from_slice(&1u16.to_le_bytes()); // colFirst
+        // cell 1: xf=20 + dummy rk value
+        mulrk_payload.extend_from_slice(&20u16.to_le_bytes());
+        mulrk_payload.extend_from_slice(&0u32.to_le_bytes());
+        // cell 2: xf=21 + dummy rk value
+        mulrk_payload.extend_from_slice(&21u16.to_le_bytes());
+        mulrk_payload.extend_from_slice(&0u32.to_le_bytes());
+        mulrk_payload.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+        let stream = [
+            record(0x0203, &number_payload),
+            record(0x00BE, &mulblank_payload),
+            record(0x00BD, &mulrk_payload),
+            record(0x000A, &[]),
+        ]
+        .concat();
+
+        let xfs = parse_biff_sheet_cell_xf_indices(&stream, 0).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(3));
+        assert_eq!(xfs.get(&CellRef::new(1, 0)).copied(), Some(10));
+        assert_eq!(xfs.get(&CellRef::new(1, 1)).copied(), Some(11));
+        assert_eq!(xfs.get(&CellRef::new(1, 2)).copied(), Some(12));
+        assert_eq!(xfs.get(&CellRef::new(2, 1)).copied(), Some(20));
+        assert_eq!(xfs.get(&CellRef::new(2, 2)).copied(), Some(21));
     }
 
     #[test]
