@@ -139,7 +139,16 @@ export function resolveGridThemeFromCssVars(element: HTMLElement): Partial<GridT
   try {
     for (const [key, value] of Object.entries(raw) as Array<[keyof GridTheme, string]>) {
       const resolvedValue = value.includes("var(") ? resolveCssVarValue(value, computedStyle) : value;
+      probe.style.backgroundColor = "";
       probe.style.backgroundColor = resolvedValue;
+
+      // If the assignment was rejected (invalid value), avoid returning a stale
+      // computed value from a previous iteration.
+      if (!probe.style.backgroundColor) {
+        resolved[key] = resolvedValue;
+        continue;
+      }
+
       const computed = view.getComputedStyle(probe).backgroundColor;
       const normalized = computed?.trim();
       resolved[key] = normalized ? normalized : resolvedValue;
