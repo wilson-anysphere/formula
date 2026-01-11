@@ -74,6 +74,18 @@ function isYArray(value) {
 }
 
 /**
+ * @param {import("yjs").Doc} doc
+ * @param {string} name
+ * @returns {any}
+ */
+function getMapRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (isYMap(existing)) return existing;
+  // Root is missing or still a placeholder; instantiate via Yjs' constructor.
+  return doc.getMap(name);
+}
+
+/**
  * @param {unknown} snapshot
  * @returns {Uint8Array}
  */
@@ -213,9 +225,9 @@ export class YjsVersionStore {
     }
 
     /** @type {Y.Map<any>} */
-    this.versions = this.doc.getMap("versions");
+    this.versions = getMapRoot(this.doc, "versions");
     /** @type {Y.Map<any>} */
-    this.meta = this.doc.getMap("versionsMeta");
+    this.meta = getMapRoot(this.doc, "versionsMeta");
   }
 
   /**
