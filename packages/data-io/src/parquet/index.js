@@ -42,8 +42,47 @@ function uint8ArrayToBase64(bytes) {
   return btoa(binary);
 }
 
-function arrowValueToCellValue(value) {
+function arrowValueToCellValue(value, type) {
   if (value === null || value === undefined) return null;
+
+  if (type?.typeId === arrow.Type.Date || type?.typeId === arrow.Type.Timestamp) {
+    if (value instanceof Date) return value;
+    const raw =
+      typeof value === 'number' && Number.isFinite(value)
+        ? value
+        : typeof value === 'bigint' &&
+            value <= Number.MAX_SAFE_INTEGER &&
+            value >= Number.MIN_SAFE_INTEGER
+          ? Number(value)
+          : null;
+    if (raw != null) {
+      let ms = raw;
+      if (type.typeId === arrow.Type.Date) {
+        ms = type.unit === arrow.DateUnit.DAY ? raw * 86400000 : raw;
+      } else {
+        switch (type.unit) {
+          case arrow.TimeUnit.SECOND:
+            ms = raw * 1000;
+            break;
+          case arrow.TimeUnit.MILLISECOND:
+            ms = raw;
+            break;
+          case arrow.TimeUnit.MICROSECOND:
+            ms = raw / 1000;
+            break;
+          case arrow.TimeUnit.NANOSECOND:
+            ms = raw / 1_000_000;
+            break;
+          default:
+            ms = raw;
+            break;
+        }
+      }
+      const date = new Date(ms);
+      if (!Number.isNaN(date.getTime())) return date;
+    }
+  }
+
   if (typeof value === 'bigint') {
     return value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER
       ? Number(value)
@@ -213,9 +252,8 @@ export async function* arrowTableToGridBatches(
       for (let rowIndex = batchStart; rowIndex < batchEnd; rowIndex++) {
         const row = new Array(columnCount);
         for (let colIndex = 0; colIndex < columnCount; colIndex++) {
-          row[colIndex] = arrowValueToCellValue(
-            recordBatch.getChildAt(colIndex).get(rowIndex)
-          );
+          const vector = recordBatch.getChildAt(colIndex);
+          row[colIndex] = arrowValueToCellValue(vector.get(rowIndex), vector.type);
         }
         rows[rowIndex - batchStart] = row;
       }
@@ -256,7 +294,7 @@ export class ArrowColumnarSheet {
   getCell(row, col) {
     if (row === 0) return this.columnNames[col] ?? null;
     const vector = this.table.getChildAt(col);
-    return arrowValueToCellValue(vector?.get(row - 1));
+    return arrowValueToCellValue(vector?.get(row - 1), vector?.type);
   }
 
   /**

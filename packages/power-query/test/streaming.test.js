@@ -107,3 +107,31 @@ test("executeQueryStreaming uses adapter column names for Arrow headers (renameC
   assert.deepEqual(grid[1], ["East", 100]);
   assert.deepEqual(grid[2], ["West", 200]);
 });
+
+test("executeQueryStreaming emits Arrow date values as Date objects", async () => {
+  const engine = new QueryEngine();
+  const arrowTable = new ArrowTableAdapter(
+    arrowTableFromColumns({
+      When: [new Date("2020-01-01T00:00:00.000Z"), new Date("2020-01-02T00:00:00.000Z")],
+      Value: [1, 2],
+    }),
+  );
+
+  const query = {
+    id: "q_stream_arrow_date",
+    name: "Stream Arrow Date",
+    source: { type: "table", table: "t" },
+    steps: [],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, { tables: { t: arrowTable } }, {
+    batchSize: 1,
+    onBatch: (batch) => batches.push(batch),
+  });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, { tables: { t: arrowTable } }, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+  assert.ok(streamed[1][0] instanceof Date);
+});

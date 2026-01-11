@@ -84,6 +84,26 @@ test("Arrow backend: changeType matches DataTable results", () => {
   assert.deepEqual(actual, expected);
 });
 
+test("Arrow backend: changeType to date matches DataTable results", () => {
+  const dataTable = DataTable.fromGrid(
+    [
+      ["When"],
+      ["2020-01-01T00:00:00.000Z"],
+      ["2020-01-02T00:00:00.000Z"],
+    ],
+    { hasHeaders: true, inferTypes: false },
+  );
+
+  const arrowTable = new ArrowTableAdapter(
+    arrowTableFromColumns({
+      When: ["2020-01-01T00:00:00.000Z", "2020-01-02T00:00:00.000Z"],
+    }),
+  );
+
+  const op = { type: "changeType", column: "When", newType: "date" };
+  assert.deepEqual(applyOperation(arrowTable, op).toGrid(), applyOperation(dataTable, op).toGrid());
+});
+
 test("Arrow backend: int64/BigInt values are normalized for aggregations", () => {
   const dataTable = DataTable.fromGrid(
     [
