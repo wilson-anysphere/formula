@@ -381,6 +381,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             sheets: sheet_meta,
             cell_meta,
         },
+        calc_affecting_edits: false,
     })
 }
 

@@ -23,9 +23,9 @@ pub mod autofilter;
 pub mod calc_settings;
 pub mod charts;
 pub mod comments;
-pub mod conditional_formatting;
 mod compare;
 mod content_types;
+pub mod conditional_formatting;
 mod formula_text;
 mod model_package;
 mod openxml;
@@ -196,6 +196,7 @@ pub struct XlsxDocument {
     /// Shared strings in the order they appeared in the file (if present).
     shared_strings: Vec<RichText>,
     meta: XlsxMeta,
+    calc_affecting_edits: bool,
 }
 
 impl XlsxDocument {
@@ -221,6 +222,7 @@ impl XlsxDocument {
                 sheets,
                 ..XlsxMeta::default()
             },
+            calc_affecting_edits: false,
         }
     }
 
@@ -287,7 +289,18 @@ impl XlsxDocument {
             return false;
         };
 
+        let had_formula_before = sheet.formula(cell).is_some()
+            || self
+                .meta
+                .cell_meta
+                .get(&(sheet_id, cell))
+                .and_then(|m| m.formula.as_ref())
+                .is_some_and(formula_meta_has_semantics);
+
         let Some(formula_display) = formula_display else {
+            if had_formula_before {
+                self.calc_affecting_edits = true;
+            }
             sheet.set_formula(cell, None);
 
             // Preserve `FormulaMeta.file_text` for master formulas so the writer can detect
@@ -329,6 +342,11 @@ impl XlsxDocument {
         };
 
         let display = crate::formula_text::normalize_display_formula(&formula_display);
+        if sheet.formula(cell).map(crate::formula_text::normalize_display_formula).as_deref()
+            != Some(display.as_str())
+        {
+            self.calc_affecting_edits = true;
+        }
         sheet.set_formula(cell, Some(display.clone()));
 
         let meta = self.meta.cell_meta.entry((sheet_id, cell)).or_default();
@@ -364,6 +382,13 @@ impl XlsxDocument {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
+        let had_formula_before = sheet.formula(cell).is_some()
+            || self
+                .meta
+                .cell_meta
+                .get(&(sheet_id, cell))
+                .and_then(|m| m.formula.as_ref())
+                .is_some_and(formula_meta_has_semantics);
         sheet.clear_cell(cell);
 
         // Keep formula metadata for cleared master formulas so the writer can detect formula
@@ -381,6 +406,10 @@ impl XlsxDocument {
             }
         } else {
             self.meta.cell_meta.remove(&(sheet_id, cell));
+        }
+
+        if had_formula_before {
+            self.calc_affecting_edits = true;
         }
         true
     }
@@ -405,4 +434,12 @@ fn cell_meta_from_value(value: &CellValue) -> (Option<CellValueKind>, Option<Str
         ),
         _ => (Some(CellValueKind::Number), None),
     }
+}
+
+fn formula_meta_has_semantics(meta: &FormulaMeta) -> bool {
+    !meta.file_text.is_empty()
+        || meta.t.is_some()
+        || meta.reference.is_some()
+        || meta.shared_index.is_some()
+        || meta.always_calc.is_some()
 }

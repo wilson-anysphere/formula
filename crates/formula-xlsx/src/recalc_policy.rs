@@ -3,37 +3,41 @@ use std::collections::BTreeMap;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, Writer};
 
-/// Policy describing how the writer should ensure Excel recalculates formulas after edits.
+/// Policy describing how writers should ensure Excel recalculates formulas after edits.
 ///
 /// Excel workbooks may contain both cached `<v>` values and an optional `xl/calcChain.xml`. If we
 /// edit formulas without updating the calc chain, Excel can open the file with stale calculation
 /// state. The safest approach is to drop the calc chain and request a full calculation on load.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecalcPolicy {
-    /// Preserve calculation metadata (do nothing).
-    Preserve,
-    /// Ensure `workbook.xml` has `calcPr fullCalcOnLoad="1"`.
-    ForceFullCalcOnLoad,
-    /// Remove `xl/calcChain.xml` and set `calcPr fullCalcOnLoad="1"`.
-    DropCalcChainAndForceFullCalcOnLoad,
+pub struct RecalcPolicy {
+    /// When a formula-affecting edit occurs, set `<calcPr fullCalcOnLoad="1"/>` in `xl/workbook.xml`.
+    pub force_full_calc_on_formula_change: bool,
+    /// When a formula-affecting edit occurs, remove `xl/calcChain.xml` and the associated metadata
+    /// entries from the package (`[Content_Types].xml` + `xl/_rels/workbook.xml.rels`).
+    pub drop_calc_chain_on_formula_change: bool,
+    /// When a formula-affecting edit occurs, clear cached `<v>` values for edited formula cells.
+    ///
+    /// This can help avoid Excel briefly displaying stale values before recalculation on open.
+    /// Default: `false`.
+    pub clear_cached_values_on_formula_change: bool,
+}
+
+impl RecalcPolicy {
+    /// Preserve existing calculation metadata (do nothing).
+    pub const PRESERVE: Self = Self {
+        force_full_calc_on_formula_change: false,
+        drop_calc_chain_on_formula_change: false,
+        clear_cached_values_on_formula_change: false,
+    };
 }
 
 impl Default for RecalcPolicy {
     fn default() -> Self {
-        Self::DropCalcChainAndForceFullCalcOnLoad
-    }
-}
-
-impl RecalcPolicy {
-    fn needs_full_calc_on_load(self) -> bool {
-        matches!(
-            self,
-            RecalcPolicy::ForceFullCalcOnLoad | RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
-        )
-    }
-
-    fn needs_drop_calc_chain(self) -> bool {
-        matches!(self, RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad)
+        Self {
+            force_full_calc_on_formula_change: true,
+            drop_calc_chain_on_formula_change: true,
+            clear_cached_values_on_formula_change: false,
+        }
     }
 }
 
@@ -51,18 +55,18 @@ pub(crate) fn apply_recalc_policy_to_parts(
     parts: &mut BTreeMap<String, Vec<u8>>,
     policy: RecalcPolicy,
 ) -> Result<(), RecalcPolicyError> {
-    if policy == RecalcPolicy::Preserve {
+    if !policy.force_full_calc_on_formula_change && !policy.drop_calc_chain_on_formula_change {
         return Ok(());
     }
 
-    if policy.needs_full_calc_on_load() {
+    if policy.force_full_calc_on_formula_change {
         if let Some(workbook_xml) = parts.get("xl/workbook.xml").cloned() {
             let updated = workbook_xml_force_full_calc_on_load(&workbook_xml)?;
             parts.insert("xl/workbook.xml".to_string(), updated);
         }
     }
 
-    if policy.needs_drop_calc_chain() {
+    if policy.drop_calc_chain_on_formula_change {
         parts.remove("xl/calcChain.xml");
 
         if let Some(rels_xml) = parts.get("xl/_rels/workbook.xml.rels").cloned() {
@@ -151,14 +155,14 @@ pub(crate) fn workbook_rels_remove_calc_chain(rels_xml: &[u8]) -> Result<Vec<u8>
         match event {
             Event::Eof => break,
             Event::Start(ref e) if e.name().as_ref() == b"Relationship" => {
-                if relationship_type_is(e, CALC_CHAIN_REL_TYPE)? {
+                if relationship_is_calc_chain(e, CALC_CHAIN_REL_TYPE)? {
                     skipping = true;
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
             }
             Event::Empty(ref e) if e.name().as_ref() == b"Relationship" => {
-                if !relationship_type_is(e, CALC_CHAIN_REL_TYPE)? {
+                if !relationship_is_calc_chain(e, CALC_CHAIN_REL_TYPE)? {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
@@ -174,14 +178,26 @@ pub(crate) fn workbook_rels_remove_calc_chain(rels_xml: &[u8]) -> Result<Vec<u8>
     Ok(writer.into_inner())
 }
 
-fn relationship_type_is(e: &BytesStart<'_>, expected: &str) -> Result<bool, RecalcPolicyError> {
+fn relationship_is_calc_chain(e: &BytesStart<'_>, expected_type: &str) -> Result<bool, RecalcPolicyError> {
+    let mut rel_type: Option<String> = None;
+    let mut target: Option<String> = None;
     for attr in e.attributes() {
         let attr = attr?;
-        if attr.key.as_ref() == b"Type" {
-            return Ok(attr.unescape_value()?.as_ref() == expected);
+        let value = attr.unescape_value()?.into_owned();
+        match attr.key.as_ref() {
+            b"Type" => rel_type = Some(value),
+            b"Target" => target = Some(value),
+            _ => {}
         }
     }
-    Ok(false)
+
+    if rel_type.as_deref() == Some(expected_type) {
+        return Ok(true);
+    }
+
+    Ok(target
+        .as_deref()
+        .is_some_and(|t| t.ends_with("calcChain.xml")))
 }
 
 pub(crate) fn content_types_remove_calc_chain(ct_xml: &[u8]) -> Result<Vec<u8>, RecalcPolicyError> {
@@ -225,7 +241,7 @@ fn override_part_name_is_calc_chain(e: &BytesStart<'_>) -> Result<bool, RecalcPo
         let attr = attr?;
         if attr.key.as_ref() == b"PartName" {
             let value = attr.unescape_value()?;
-            return Ok(value.as_ref() == "/xl/calcChain.xml" || value.as_ref() == "xl/calcChain.xml");
+            return Ok(value.as_ref().ends_with("calcChain.xml"));
         }
     }
     Ok(false)

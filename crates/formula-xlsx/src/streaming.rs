@@ -111,7 +111,7 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
         // calc on load is the safest behavior after formula edits.
         RecalcPolicy::default()
     } else {
-        RecalcPolicy::Preserve
+        RecalcPolicy::PRESERVE
     };
 
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
@@ -222,7 +222,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
     let recalc_policy = if saw_formula_patch {
         RecalcPolicy::default()
     } else {
-        RecalcPolicy::Preserve
+        RecalcPolicy::PRESERVE
     };
 
     patch_xlsx_streaming_with_archive(
@@ -364,7 +364,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
     let recalc_policy = if saw_formula_patch {
         RecalcPolicy::default()
     } else {
-        RecalcPolicy::Preserve
+        RecalcPolicy::PRESERVE
     };
 
     patch_xlsx_streaming_with_archive(
@@ -398,9 +398,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
 
         let name = file.name().to_string();
 
-        if recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
-            && name == "xl/calcChain.xml"
-        {
+        if recalc_policy.drop_calc_chain_on_formula_change && name == "xl/calcChain.xml" {
             // Drop calcChain.xml entirely when formulas change, matching the in-memory patcher.
             continue;
         }
@@ -444,22 +442,13 @@ fn maybe_patch_recalc_part(
     recalc_policy: RecalcPolicy,
 ) -> Result<Vec<u8>, StreamingPatchError> {
     match name {
-        "xl/workbook.xml"
-            if matches!(
-                recalc_policy,
-                RecalcPolicy::ForceFullCalcOnLoad | RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
-            ) =>
-        {
+        "xl/workbook.xml" if recalc_policy.force_full_calc_on_formula_change => {
             Ok(workbook_xml_force_full_calc_on_load(bytes)?)
         }
-        "xl/_rels/workbook.xml.rels"
-            if recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad =>
-        {
+        "xl/_rels/workbook.xml.rels" if recalc_policy.drop_calc_chain_on_formula_change => {
             Ok(workbook_rels_remove_calc_chain(bytes)?)
         }
-        "[Content_Types].xml"
-            if recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad =>
-        {
+        "[Content_Types].xml" if recalc_policy.drop_calc_chain_on_formula_change => {
             Ok(content_types_remove_calc_chain(bytes)?)
         }
         _ => Ok(bytes.to_vec()),
@@ -482,14 +471,10 @@ fn patch_recalc_part_from_file<R: Read>(
 
 fn should_patch_recalc_part(name: &str, recalc_policy: RecalcPolicy) -> bool {
     match name {
-        "xl/workbook.xml" => matches!(
-            recalc_policy,
-            RecalcPolicy::ForceFullCalcOnLoad | RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
-        ),
-        "xl/_rels/workbook.xml.rels" => {
-            recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
+        "xl/workbook.xml" => recalc_policy.force_full_calc_on_formula_change,
+        "xl/_rels/workbook.xml.rels" | "[Content_Types].xml" => {
+            recalc_policy.drop_calc_chain_on_formula_change
         }
-        "[Content_Types].xml" => recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad,
         _ => false,
     }
 }
