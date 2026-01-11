@@ -7,6 +7,10 @@ export default defineConfig({
     // Vitest will execute those files but report "No test suite found", causing
     // the run to fail.
     include: ["src/__tests__/**/*.test.ts"],
+    // This service includes several e2e-style integration tests that can take
+    // longer than Vitest's default 5s timeout, especially on shared CI runners.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     environment: "node"
   }
 });
