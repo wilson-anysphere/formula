@@ -337,7 +337,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
 
         const id = segments[2];
         const version = segments[4];
-        const pkgMeta = await store.getPackage(id, version, { includeBytes: false, incrementDownloadCount: false });
+        const pkgMeta = await store.getPackage(id, version, { includeBytes: false, includePath: true });
         if (!pkgMeta) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Not found" });
@@ -358,17 +358,11 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           return;
         }
 
-        const pkg = await store.getPackage(id, version, { includeBytes: false, includePath: true });
-        if (!pkg) {
-          statusCode = 404;
-          return sendJson(res, 404, { error: "Not found" });
-        }
-
         // Prefer streaming from disk to avoid buffering package bytes in memory.
-        if (pkg.packagePath) {
+        if (pkgMeta.packagePath) {
           let stat = null;
           try {
-            stat = await fs.promises.stat(pkg.packagePath);
+            stat = await fs.promises.stat(pkgMeta.packagePath);
           } catch {
             stat = null;
           }
@@ -377,26 +371,27 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
             return sendJson(res, 404, { error: "Not found" });
           }
 
+          await store.incrementDownloadCount(id);
           statusCode = 200;
           res.writeHead(200, {
             "Content-Type": "application/vnd.formula.extension-package",
             "Content-Length": stat.size,
             ETag: etag,
             "Cache-Control": CACHE_CONTROL_REVALIDATE,
-            "X-Package-Signature": pkg.signatureBase64,
-            "X-Package-Sha256": pkg.sha256,
-            "X-Package-Format-Version": String(pkg.formatVersion ?? 1),
-            "X-Publisher": pkg.publisher,
+            "X-Package-Signature": pkgMeta.signatureBase64,
+            "X-Package-Sha256": pkgMeta.sha256,
+            "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
+            "X-Publisher": pkgMeta.publisher,
           });
 
-          const stream = fs.createReadStream(pkg.packagePath);
+          const stream = fs.createReadStream(pkgMeta.packagePath);
           res.on("close", () => stream.destroy());
           stream.on("error", (error) => res.destroy(error));
           stream.pipe(res);
           return;
         }
 
-        const pkgBytes = await store.getPackage(id, version, { includeBytes: true, incrementDownloadCount: false });
+        const pkgBytes = await store.getPackage(id, version);
         if (!pkgBytes) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Not found" });
