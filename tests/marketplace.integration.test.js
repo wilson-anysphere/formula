@@ -1114,8 +1114,10 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
     assert.equal(dlRes.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     const pkgEtag = dlRes.headers.get("etag");
     const pkgSha = dlRes.headers.get("x-package-sha256");
+    const pkgKeyId = dlRes.headers.get("x-publisher-key-id");
     assert.ok(pkgEtag);
     assert.ok(pkgSha);
+    assert.ok(pkgKeyId);
     await dlRes.arrayBuffer();
 
     const dlRes304 = await fetch(dlUrl, { headers: { "If-None-Match": pkgEtag } });
@@ -1123,6 +1125,7 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
     assert.equal(dlRes304.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     assert.equal(dlRes304.headers.get("etag"), pkgEtag);
     assert.equal(dlRes304.headers.get("x-package-sha256"), pkgSha);
+    assert.equal(dlRes304.headers.get("x-publisher-key-id"), pkgKeyId);
     assert.equal(await dlRes304.arrayBuffer().then((b) => b.byteLength), 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));

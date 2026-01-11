@@ -90,6 +90,8 @@ Clients should verify packages using:
 
 Clients must **not** attempt verification with revoked keys.
 
+When all publisher keys are revoked, `publisherPublicKeyPem` is `null` and installs must fail (by design).
+
 ---
 
 ## Revocation semantics
@@ -105,4 +107,3 @@ Admin API (currently internal):
 ```
 POST /api/publishers/:publisher/keys/:id/revoke
 ```
-
