@@ -2,6 +2,7 @@ use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
 use crate::error::ExcelError;
+use crate::value::parse_number;
 use crate::simd::{self, CmpOp, NumericCriteria};
 use smallvec::SmallVec;
 use std::cmp::Ordering;
@@ -59,12 +60,12 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
     }
 }
 
-fn parse_number_from_text(s: &str) -> Option<f64> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed.parse::<f64>().ok()
+fn parse_number_from_text(s: &str) -> Result<f64, ErrorKind> {
+    parse_number(s, crate::value::NumberLocale::en_us()).map_err(|e| match e {
+        ExcelError::Div0 => ErrorKind::Value,
+        ExcelError::Value => ErrorKind::Value,
+        ExcelError::Num => ErrorKind::Num,
+    })
 }
 
 fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
@@ -72,7 +73,7 @@ fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
         Value::Number(n) => Ok(n),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
         Value::Empty => Ok(0.0),
-        Value::Text(s) => parse_number_from_text(&s).ok_or(ErrorKind::Value),
+        Value::Text(s) => parse_number_from_text(&s),
         Value::Error(e) => Err(e),
         // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
         Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
@@ -506,8 +507,8 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Empty => {}
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_number_from_text(s) {
-                Some(v) => sum += v,
-                None => return Value::Error(ErrorKind::Value),
+                Ok(v) => sum += v,
+                Err(e) => return Value::Error(e),
             },
         }
     }
@@ -545,11 +546,11 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Empty => {}
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_number_from_text(s) {
-                Some(v) => {
+                Ok(v) => {
                     sum += v;
                     count += 1;
                 }
-                None => return Value::Error(ErrorKind::Value),
+                Err(e) => return Value::Error(e),
             },
         }
     }
@@ -585,8 +586,8 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Empty => out = Some(out.map_or(0.0, |prev| prev.min(0.0))),
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_number_from_text(s) {
-                Some(v) => out = Some(out.map_or(v, |prev| prev.min(v))),
-                None => return Value::Error(ErrorKind::Value),
+                Ok(v) => out = Some(out.map_or(v, |prev| prev.min(v))),
+                Err(e) => return Value::Error(e),
             },
         }
     }
@@ -619,8 +620,8 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Empty => out = Some(out.map_or(0.0, |prev| prev.max(0.0))),
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_number_from_text(s) {
-                Some(v) => out = Some(out.map_or(v, |prev| prev.max(v))),
-                None => return Value::Error(ErrorKind::Value),
+                Ok(v) => out = Some(out.map_or(v, |prev| prev.max(v))),
+                Err(e) => return Value::Error(e),
             },
         }
     }
@@ -900,7 +901,11 @@ fn coerce_sumproduct_number(v: Value) -> Result<f64, ErrorKind> {
     match v {
         Value::Number(n) => Ok(n),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
-        Value::Text(s) => Ok(parse_number_from_text(&s).unwrap_or(0.0)),
+        Value::Text(s) => match parse_number_from_text(&s) {
+            Ok(n) => Ok(n),
+            Err(ErrorKind::Value) => Ok(0.0),
+            Err(e) => Err(e),
+        },
         Value::Empty => Ok(0.0),
         Value::Error(e) => Err(e),
         Value::Array(_) | Value::Range(_) => Err(ErrorKind::Value),

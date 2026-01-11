@@ -1,4 +1,5 @@
 use crate::error::{ExcelError, ExcelResult};
+use crate::value::parse_number_with_separators;
 
 /// VALUE(text)
 ///
@@ -25,66 +26,4 @@ pub fn numbervalue(
     parse_number_with_separators(number_text, decimal_separator, Some(group_separator))
 }
 
-fn parse_number_with_separators(
-    text: &str,
-    decimal_separator: char,
-    group_separator: Option<char>,
-) -> ExcelResult<f64> {
-    let mut s = text.trim();
-    if s.is_empty() {
-        return Err(ExcelError::Value);
-    }
-
-    let mut negative = false;
-    if s.starts_with('(') && s.ends_with(')') {
-        negative = true;
-        s = s[1..s.len() - 1].trim();
-    }
-
-    if let Some(rest) = s.strip_prefix('-') {
-        negative = !negative;
-        s = rest.trim_start();
-    } else if let Some(rest) = s.strip_prefix('+') {
-        s = rest.trim_start();
-    }
-
-    // Strip a small set of common currency symbols.
-    s = s
-        .trim_start_matches(|c: char| matches!(c, '$' | '€' | '£' | '¥'))
-        .trim();
-
-    let mut percent = false;
-    if let Some(rest) = s.strip_suffix('%') {
-        percent = true;
-        s = rest.trim_end();
-    }
-
-    let mut normalized = String::with_capacity(s.len());
-    for c in s.chars() {
-        if let Some(group) = group_separator {
-            if c == group {
-                continue;
-            }
-        }
-        if c == decimal_separator {
-            normalized.push('.');
-        } else if c.is_whitespace() {
-            continue;
-        } else {
-            normalized.push(c);
-        }
-    }
-
-    let mut number = normalized.parse::<f64>().map_err(|_| ExcelError::Value)?;
-    if percent {
-        number /= 100.0;
-    }
-    if negative {
-        number = -number;
-    }
-    if number.is_finite() {
-        Ok(number)
-    } else {
-        Err(ExcelError::Num)
-    }
-}
+// NOTE: Parsing logic is shared with implicit coercions in `crate::value`.

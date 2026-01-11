@@ -138,6 +138,14 @@ pub trait FunctionContext {
         None
     }
 
+    /// Locale used for implicit numeric coercion (text -> number).
+    ///
+    /// This is plumbed through evaluation so we can eventually respect workbook locale for
+    /// implicit coercions and for VALUE/NUMBERVALUE.
+    fn number_locale(&self) -> crate::value::NumberLocale {
+        crate::value::NumberLocale::en_us()
+    }
+
     /// Deterministic per-recalc random bits, scoped to the current cell evaluation.
     ///
     /// This is used by volatile worksheet RNG functions (e.g. RAND, RANDBETWEEN) so that

@@ -5105,6 +5105,7 @@ mod tests {
                 .single()
                 .unwrap(),
             recalc_id: 42,
+            number_locale: crate::value::NumberLocale::en_us(),
         };
 
         let levels_single = single

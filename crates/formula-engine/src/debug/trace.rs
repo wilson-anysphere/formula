@@ -1414,7 +1414,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 let (v, child) = self.eval_scalar(inner);
                 let out = match v {
                     Value::Error(e) => Value::Error(e),
-                    other => match coerce_to_number(&other) {
+                    other => match other.coerce_to_number() {
                         Ok(n) => match op {
                             UnaryOp::Plus => Value::Number(n),
                             UnaryOp::Minus => Value::Number(-n),
@@ -1460,7 +1460,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         },
                     );
                 }
-                let ln = match coerce_to_number(&l) {
+                let ln = match l.coerce_to_number() {
                     Ok(n) => n,
                     Err(e) => {
                         let out = Value::Error(e);
@@ -1476,7 +1476,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         );
                     }
                 };
-                let rn = match coerce_to_number(&r) {
+                let rn = match r.coerce_to_number() {
                     Ok(n) => n,
                     Err(e) => {
                         let out = Value::Error(e);
@@ -1685,7 +1685,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         if let Value::Error(e) = cond_val {
             return (Value::Error(e), vec![cond_trace]);
         }
-        let cond = match coerce_to_bool(&cond_val) {
+        let cond = match cond_val.coerce_to_bool() {
             Ok(b) => b,
             Err(e) => return (Value::Error(e), vec![cond_trace]),
         };
@@ -1741,9 +1741,11 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     Value::Bool(b) => acc += if b { 1.0 } else { 0.0 },
                     Value::Blank => {}
                     Value::Text(s) => {
-                        if let Some(n) = parse_number_from_text(&s) {
-                            acc += n;
-                        }
+                        let n = match Value::Text(s).coerce_to_number() {
+                            Ok(n) => n,
+                            Err(e) => return (Value::Error(e), traces),
+                        };
+                        acc += n;
                     }
                     Value::Reference(_) | Value::ReferenceUnion(_) => {
                         return (Value::Error(ErrorKind::Value), traces);
@@ -1816,7 +1818,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         if let Value::Error(e) = col_index_val {
             return (Value::Error(e), traces);
         }
-        let col_index_num = match coerce_to_number(&col_index_val) {
+        let col_index_num = match col_index_val.coerce_to_number() {
             Ok(n) => n,
             Err(e) => return (Value::Error(e), traces),
         };
@@ -1832,7 +1834,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             if let Value::Error(e) = v {
                 return (Value::Error(e), traces);
             }
-            match coerce_to_bool(&v) {
+            match v.coerce_to_bool() {
                 Ok(b) => b,
                 Err(e) => return (Value::Error(e), traces),
             }
@@ -1906,56 +1908,6 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 (Value::Error(ErrorKind::NA), traces)
             }
         }
-    }
-}
-
-fn parse_number_from_text(s: &str) -> Option<f64> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed.parse::<f64>().ok()
-}
-
-fn coerce_to_number(v: &Value) -> Result<f64, ErrorKind> {
-    match v {
-        Value::Number(n) => Ok(*n),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Blank => Ok(0.0),
-        Value::Text(s) => parse_number_from_text(s).ok_or(ErrorKind::Value),
-        Value::Error(e) => Err(*e),
-        Value::Array(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. }
-        | Value::Reference(_)
-        | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
-    }
-}
-
-fn coerce_to_bool(v: &Value) -> Result<bool, ErrorKind> {
-    match v {
-        Value::Bool(b) => Ok(*b),
-        Value::Number(n) => Ok(*n != 0.0),
-        Value::Blank => Ok(false),
-        Value::Text(s) => {
-            let t = s.trim();
-            if t.eq_ignore_ascii_case("TRUE") {
-                return Ok(true);
-            }
-            if t.eq_ignore_ascii_case("FALSE") {
-                return Ok(false);
-            }
-            if let Some(n) = parse_number_from_text(t) {
-                return Ok(n != 0.0);
-            }
-            Err(ErrorKind::Value)
-        }
-        Value::Error(e) => Err(*e),
-        Value::Array(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. }
-        | Value::Reference(_)
-        | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
     }
 }
 

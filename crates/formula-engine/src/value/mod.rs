@@ -2,10 +2,15 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::error::ExcelError;
+use crate::eval::CompiledExpr;
 use crate::functions::Reference;
 use formula_model::CellRef;
 
-use crate::eval::CompiledExpr;
+mod number_parse;
+
+pub use number_parse::NumberLocale;
+pub(crate) use number_parse::{parse_number, parse_number_with_separators};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
@@ -139,11 +144,15 @@ impl Value {
     }
 
     pub fn coerce_to_number(&self) -> Result<f64, ErrorKind> {
+        self.coerce_to_number_with_locale(NumberLocale::en_us())
+    }
+
+    pub fn coerce_to_number_with_locale(&self, locale: NumberLocale) -> Result<f64, ErrorKind> {
         match self {
             Value::Number(n) => Ok(*n),
             Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
             Value::Blank => Ok(0.0),
-            Value::Text(s) => parse_number_from_text(s).ok_or(ErrorKind::Value),
+            Value::Text(s) => parse_number(s, locale).map_err(map_excel_error),
             Value::Error(e) => Err(*e),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -159,6 +168,10 @@ impl Value {
     }
 
     pub fn coerce_to_bool(&self) -> Result<bool, ErrorKind> {
+        self.coerce_to_bool_with_locale(NumberLocale::en_us())
+    }
+
+    pub fn coerce_to_bool_with_locale(&self, locale: NumberLocale) -> Result<bool, ErrorKind> {
         match self {
             Value::Bool(b) => Ok(*b),
             Value::Number(n) => Ok(*n != 0.0),
@@ -171,10 +184,8 @@ impl Value {
                 if t.eq_ignore_ascii_case("FALSE") {
                     return Ok(false);
                 }
-                if let Some(n) = parse_number_from_text(t) {
-                    return Ok(n != 0.0);
-                }
-                Err(ErrorKind::Value)
+                let n = parse_number(t, locale).map_err(map_excel_error)?;
+                Ok(n != 0.0)
             }
             Value::Error(e) => Err(*e),
             Value::Reference(_)
@@ -201,26 +212,103 @@ impl Value {
     }
 }
 
-fn parse_number_from_text(s: &str) -> Option<f64> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return None;
+fn map_excel_error(error: ExcelError) -> ErrorKind {
+    match error {
+        ExcelError::Div0 => ErrorKind::Div0,
+        ExcelError::Value => ErrorKind::Value,
+        ExcelError::Num => ErrorKind::Num,
     }
-    trimmed.parse::<f64>().ok()
 }
 
 fn format_number_general(n: f64) -> String {
+    if !n.is_finite() {
+        return n.to_string();
+    }
+
+    // Excel does not surface a negative sign for zero under "General".
     if n == 0.0 {
         return "0".to_string();
     }
-    if n.fract() == 0.0 {
-        return format!("{:.0}", n);
-    }
-    let s = n.to_string();
-    if s == "-0" || s == "-0.0" {
-        "0".to_string()
+
+    let abs = n.abs();
+    // Approximate Excel's General switching thresholds:
+    // - Scientific when abs >= 1e11
+    // - Scientific when abs < 1e-9
+    let scientific = abs >= 1e11 || abs < 1e-9;
+    if scientific {
+        format_number_general_scientific(n)
     } else {
-        s
+        format_number_general_decimal(n)
+    }
+}
+
+fn format_number_general_decimal(n: f64) -> String {
+    let abs = n.abs();
+    let digits_before_decimal = if abs >= 1.0 {
+        // `log10` can be slightly off for some values; use it only for determining a reasonable
+        // fixed precision and rely on formatting+trimming for the final representation.
+        abs.log10().floor() as i32 + 1
+    } else {
+        0
+    };
+
+    let precision = (15 - digits_before_decimal).clamp(0, 15) as usize;
+    let mut out = format!("{:.*}", precision, n);
+    trim_trailing_decimal_zeros(&mut out);
+    out
+}
+
+fn format_number_general_scientific(n: f64) -> String {
+    let abs = n.abs();
+    // Compute exponent such that 1 <= mantissa < 10.
+    let mut exp = abs.log10().floor() as i32;
+    let mut mantissa = abs / 10_f64.powi(exp);
+    if mantissa < 1.0 {
+        exp -= 1;
+        mantissa *= 10.0;
+    } else if mantissa >= 10.0 {
+        exp += 1;
+        mantissa /= 10.0;
+    }
+
+    // Excel uses 15 significant digits.
+    let mut mantissa = (mantissa * 1e14).round() / 1e14;
+    if mantissa >= 10.0 {
+        mantissa /= 10.0;
+        exp += 1;
+    }
+
+    let mut mantissa_str = format!("{:.14}", mantissa);
+    trim_trailing_decimal_zeros(&mut mantissa_str);
+    if n.is_sign_negative() {
+        mantissa_str.insert(0, '-');
+    }
+
+    let exp_sign = if exp >= 0 { '+' } else { '-' };
+    let exp_abs = exp.unsigned_abs();
+    let exp_str = if exp_abs < 10 {
+        format!("0{exp_abs}")
+    } else {
+        exp_abs.to_string()
+    };
+
+    format!("{mantissa_str}E{exp_sign}{exp_str}")
+}
+
+fn trim_trailing_decimal_zeros(s: &mut String) {
+    if let Some(dot) = s.find('.') {
+        // Strip trailing zeros after the decimal point.
+        while s.ends_with('0') {
+            s.pop();
+        }
+        // Remove the decimal point if it is now the last character.
+        if s.len() == dot + 1 {
+            s.pop();
+        }
+    }
+
+    if s == "-0" {
+        *s = "0".to_string();
     }
 }
 
