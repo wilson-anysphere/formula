@@ -21,18 +21,45 @@ export function normalizeFilePath(input) {
   }
 
   // Lowercase Windows drive letters (C:\ -> c:/)
-  out = out.replace(/^([A-Za-z]):(?=\/|$)/, (_, drive) => `${drive.toLowerCase()}:`);
+  // Note: we lowercase even if the drive is not followed by a "/" so that
+  // `C:foo` (drive-relative) remains stable as well.
+  out = out.replace(/^([A-Za-z]):/, (_, drive) => `${drive.toLowerCase()}:`);
 
-  // Resolve "." / ".." segments.
+  // Resolve "." / ".." segments, treating absolute roots as non-pop-able.
+  //
+  // - POSIX absolute root: `/`
+  // - UNC root: `//server/share` (server + share are treated as the root)
+  // - Windows drive root: `c:/` (drive is treated as the root)
   const isUnc = out.startsWith("//");
-  const isAbs = isUnc || out.startsWith("/") || /^[a-z]:\//.test(out);
-  const parts = out.split("/").filter((p) => p.length > 0);
+  const isDriveAbs = /^[a-z]:\//.test(out);
+  const isAbs = isUnc || out.startsWith("/") || isDriveAbs;
+  const prefix = isUnc ? "//" : out.startsWith("/") ? "/" : "";
+
+  /** @type {string[]} */
+  const parts = [];
+  let protectedSegments = 0;
+
+  if (isUnc) {
+    parts.push(...out.slice(2).split("/").filter((p) => p.length > 0));
+    // Protect the `server/share` prefix so `..` cannot escape it (Windows semantics).
+    protectedSegments = Math.min(2, parts.length);
+  } else if (isDriveAbs) {
+    // Include the drive (e.g. `c:`) as a protected root segment.
+    parts.push(out.slice(0, 2));
+    parts.push(...out.slice(3).split("/").filter((p) => p.length > 0));
+    protectedSegments = 1;
+  } else if (out.startsWith("/")) {
+    parts.push(...out.slice(1).split("/").filter((p) => p.length > 0));
+  } else {
+    parts.push(...out.split("/").filter((p) => p.length > 0));
+  }
+
   /** @type {string[]} */
   const resolved = [];
   for (const part of parts) {
     if (part === ".") continue;
     if (part === "..") {
-      if (resolved.length > 0 && resolved[resolved.length - 1] !== "..") {
+      if (resolved.length > protectedSegments && resolved[resolved.length - 1] !== "..") {
         resolved.pop();
       } else if (!isAbs) {
         resolved.push("..");
@@ -42,7 +69,7 @@ export function normalizeFilePath(input) {
     resolved.push(part);
   }
 
-  const prefix = isAbs && !/^[a-z]:\//.test(out) ? (isUnc ? "//" : "/") : "";
+  if (isDriveAbs && resolved.length === 1) return `${resolved[0]}/`;
   return prefix + resolved.join("/");
 }
 

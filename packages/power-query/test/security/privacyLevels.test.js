@@ -507,3 +507,8 @@ test("privacy source ids: sql source ids are not double-prefixed", () => {
 test("privacy source ids: file source ids preserve UNC prefix", () => {
   assert.equal(getFileSourceId("\\\\server\\share\\dir\\..\\file.csv"), "//server/share/file.csv");
 });
+
+test("privacy source ids: file source ids do not allow .. to escape drive roots", () => {
+  assert.equal(getFileSourceId("C:\\dir\\..\\..\\file.csv"), "c:/file.csv");
+  assert.equal(getFileSourceId("C:\\..\\file.csv"), "c:/file.csv");
+});
