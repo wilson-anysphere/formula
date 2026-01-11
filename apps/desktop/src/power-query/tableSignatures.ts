@@ -66,8 +66,8 @@ function cellContentsEqual(before: any, after: any): boolean {
  * definition changes (resize / header rename), and definition changes also bump
  * `version`.
  *
- * QueryEngine uses the combined `${definitionHash}:${version}` signature to safely
- * cache table-source queries.
+ * QueryEngine uses the combined `${workbookHash}:${definitionHash}:${version}` signature to
+ * safely cache table-source queries (the workbook hash prevents cross-workbook collisions).
  */
 export class TableSignatureRegistry {
   #tablesByName = new Map<string, TableRegistryEntry>();
