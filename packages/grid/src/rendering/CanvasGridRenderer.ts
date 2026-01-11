@@ -2984,6 +2984,92 @@ export class CanvasGridRenderer {
       }
     }
 
+    // Primary selection overlays (normal grid selection). These intentionally
+    // render *below* formula reference highlights so references remain visible
+    // during formula range selection UX.
+    const selectionRanges = this.selectionRanges;
+    if (selectionRanges.length > 0) {
+      const activeIndex = this.activeSelectionIndex;
+      const activeRange = selectionRanges[activeIndex];
+
+      const drawRange = (range: CellRange, options: { fillAlpha: number; strokeAlpha: number; strokeWidth: number }) => {
+        const rects = this.rangeToViewportRects(range, viewport);
+        if (rects.length === 0) return;
+
+        ctx.save();
+
+        ctx.fillStyle = this.theme.selectionFill;
+        ctx.globalAlpha = options.fillAlpha;
+        for (const rect of rects) {
+          const clipped = intersectRect(rect, intersection);
+          if (!clipped) continue;
+          ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+        }
+
+        ctx.strokeStyle = this.theme.selectionBorder;
+        ctx.globalAlpha = options.strokeAlpha;
+        ctx.lineWidth = options.strokeWidth;
+        const inset = options.strokeWidth / 2;
+        for (const rect of rects) {
+          if (!intersectRect(rect, intersection)) continue;
+          if (rect.width <= options.strokeWidth || rect.height <= options.strokeWidth) continue;
+          ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - options.strokeWidth, rect.height - options.strokeWidth);
+        }
+
+        ctx.restore();
+      };
+
+      for (let i = 0; i < selectionRanges.length; i++) {
+        if (i === activeIndex) continue;
+        drawRange(selectionRanges[i], { fillAlpha: 2 / 3, strokeAlpha: 0.8, strokeWidth: 1 });
+      }
+
+      drawRange(activeRange, { fillAlpha: 1, strokeAlpha: 1, strokeWidth: 2 });
+
+      const handleSize = 8 * this.zoom;
+      const handleRow = activeRange.endRow - 1;
+      const handleCol = activeRange.endCol - 1;
+      const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);
+      if (handleCellRect && handleCellRect.width >= handleSize && handleCellRect.height >= handleSize) {
+        const handleRect: Rect = {
+          x: handleCellRect.x + handleCellRect.width - handleSize / 2,
+          y: handleCellRect.y + handleCellRect.height - handleSize / 2,
+          width: handleSize,
+          height: handleSize
+        };
+        const handleClipped = intersectRect(handleRect, intersection);
+        if (handleClipped) {
+          ctx.fillStyle = this.theme.selectionHandle;
+          ctx.fillRect(handleClipped.x, handleClipped.y, handleClipped.width, handleClipped.height);
+        }
+      }
+
+      const activeCell = this.selection;
+      const isSingleCell = activeRange.endRow - activeRange.startRow <= 1 && activeRange.endCol - activeRange.startCol <= 1;
+      if (activeCell && !isSingleCell) {
+        const merged = mergedIndex.rangeAt(activeCell);
+        const activeCellRange = merged ?? {
+          startRow: activeCell.row,
+          endRow: activeCell.row + 1,
+          startCol: activeCell.col,
+          endCol: activeCell.col + 1
+        };
+
+        const activeRects = this.rangeToViewportRects(activeCellRange, viewport);
+        if (activeRects.length > 0) {
+          ctx.strokeStyle = this.theme.selectionBorder;
+          ctx.lineWidth = 2;
+          for (const rect of activeRects) {
+            if (!intersectRect(rect, intersection)) continue;
+            if (rect.width <= 2 || rect.height <= 2) continue;
+            ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+          }
+        }
+      }
+    }
+
+    // Formula reference highlights: render on top of all selection overlays so
+    // colored outlines remain visible while editing formulas.
     if (this.referenceHighlights.length > 0) {
       const strokeRects = (rects: Rect[], lineWidth: number) => {
         const inset = lineWidth / 2;
@@ -3021,87 +3107,6 @@ export class CanvasGridRenderer {
       }
 
       ctx.restore();
-    }
-
-    if (this.selectionRanges.length === 0) return;
-
-    const selectionRanges = this.selectionRanges;
-    const activeIndex = this.activeSelectionIndex;
-    const activeRange = selectionRanges[activeIndex];
-
-    const drawRange = (range: CellRange, options: { fillAlpha: number; strokeAlpha: number; strokeWidth: number }) => {
-      const rects = this.rangeToViewportRects(range, viewport);
-      if (rects.length === 0) return;
-
-      ctx.save();
-
-      ctx.fillStyle = this.theme.selectionFill;
-      ctx.globalAlpha = options.fillAlpha;
-      for (const rect of rects) {
-        const clipped = intersectRect(rect, intersection);
-        if (!clipped) continue;
-        ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
-      }
-
-      ctx.strokeStyle = this.theme.selectionBorder;
-      ctx.globalAlpha = options.strokeAlpha;
-      ctx.lineWidth = options.strokeWidth;
-      const inset = options.strokeWidth / 2;
-      for (const rect of rects) {
-        if (!intersectRect(rect, intersection)) continue;
-        if (rect.width <= options.strokeWidth || rect.height <= options.strokeWidth) continue;
-        ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - options.strokeWidth, rect.height - options.strokeWidth);
-      }
-
-      ctx.restore();
-    };
-
-    for (let i = 0; i < selectionRanges.length; i++) {
-      if (i === activeIndex) continue;
-      drawRange(selectionRanges[i], { fillAlpha: 2 / 3, strokeAlpha: 0.8, strokeWidth: 1 });
-    }
-
-    drawRange(activeRange, { fillAlpha: 1, strokeAlpha: 1, strokeWidth: 2 });
-
-    const handleSize = 8 * this.zoom;
-    const handleRow = activeRange.endRow - 1;
-    const handleCol = activeRange.endCol - 1;
-    const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);
-    if (handleCellRect && handleCellRect.width >= handleSize && handleCellRect.height >= handleSize) {
-      const handleRect: Rect = {
-        x: handleCellRect.x + handleCellRect.width - handleSize / 2,
-        y: handleCellRect.y + handleCellRect.height - handleSize / 2,
-        width: handleSize,
-        height: handleSize
-      };
-      const handleClipped = intersectRect(handleRect, intersection);
-      if (handleClipped) {
-        ctx.fillStyle = this.theme.selectionHandle;
-        ctx.fillRect(handleClipped.x, handleClipped.y, handleClipped.width, handleClipped.height);
-      }
-    }
-
-    const activeCell = this.selection;
-    if (!activeCell) return;
-    if (activeRange.endRow - activeRange.startRow <= 1 && activeRange.endCol - activeRange.startCol <= 1) return;
-
-    const merged = mergedIndex.rangeAt(activeCell);
-    const activeCellRange = merged ?? {
-      startRow: activeCell.row,
-      endRow: activeCell.row + 1,
-      startCol: activeCell.col,
-      endCol: activeCell.col + 1
-    };
-
-    const activeRects = this.rangeToViewportRects(activeCellRange, viewport);
-    if (activeRects.length === 0) return;
-
-    ctx.strokeStyle = this.theme.selectionBorder;
-    ctx.lineWidth = 2;
-    for (const rect of activeRects) {
-      if (!intersectRect(rect, intersection)) continue;
-      if (rect.width <= 2 || rect.height <= 2) continue;
-      ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
     }
   }
 
