@@ -3,6 +3,10 @@ use crate::macros::{
     execute_invocation, MacroExecutionOptions, MacroExecutionOutcome, MacroHost, MacroHostError,
     MacroInfo, MacroInvocation,
 };
+use crate::persistence::{
+    open_memory_manager, open_storage, workbook_from_model, workbook_to_model, PersistentWorkbookState,
+    WorkbookPersistenceLocation,
+};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
 use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotValue};
@@ -18,13 +22,19 @@ use formula_engine::{
     Engine as FormulaEngine, ErrorKind, ExternalValueProvider, RecalcMode, Value as EngineValue,
 };
 use formula_format::{format_value, FormatOptions, Value as FormatValue};
+use formula_storage::{
+    AutoSaveConfig, AutoSaveManager, CellChange, CellData as StorageCellData,
+    CellRange as StorageCellRange, ImportModelWorkbookOptions,
+};
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppStateError {
@@ -49,6 +59,8 @@ pub enum AppStateError {
     Pivot(String),
     #[error("what-if analysis failed: {0}")]
     WhatIf(String),
+    #[error("persistence failed: {0}")]
+    Persistence(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -249,6 +261,7 @@ pub type SharedAppState = std::sync::Arc<std::sync::Mutex<AppState>>;
 
 pub struct AppState {
     workbook: Option<Workbook>,
+    persistent: Option<PersistentWorkbookState>,
     engine: FormulaEngine,
     dirty: bool,
     undo_stack: Vec<UndoEntry>,
@@ -268,6 +281,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             workbook: None,
+            persistent: None,
             engine: FormulaEngine::new(),
             dirty: false,
             undo_stack: Vec::new(),
@@ -429,6 +443,7 @@ impl AppState {
     pub fn load_workbook(&mut self, mut workbook: Workbook) -> WorkbookInfoData {
         workbook.ensure_sheet_ids();
         self.workbook = Some(workbook);
+        self.persistent = None;
         self.engine = FormulaEngine::new();
         self.scenario_manager = ScenarioManager::new();
         self.macro_host.invalidate();
@@ -444,6 +459,112 @@ impl AppState {
         self.redo_stack.clear();
         self.workbook_info()
             .expect("workbook_info should succeed right after load")
+    }
+
+    pub fn load_workbook_persistent(
+        &mut self,
+        workbook: Workbook,
+        location: WorkbookPersistenceLocation,
+    ) -> Result<WorkbookInfoData, AppStateError> {
+        if let WorkbookPersistenceLocation::OnDisk(path) = &location {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            }
+        }
+
+        let storage = open_storage(&location).map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+        let existing = storage
+            .list_workbooks()
+            .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+        let (workbook_id, sheet_metas, workbook_for_state) = if let Some(existing_meta) = existing.first()
+        {
+            let model = storage
+                .export_model_workbook(existing_meta.id)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            let mut recovered =
+                workbook_from_model(&model).map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+            // Carry over workbook-level metadata captured from the file we opened.
+            recovered.path = workbook.path.clone();
+            recovered.origin_path = workbook.origin_path.clone();
+            recovered.origin_xlsx_bytes = workbook.origin_xlsx_bytes.clone();
+            recovered.vba_project_bin = workbook.vba_project_bin.clone();
+            recovered.macro_fingerprint = workbook.macro_fingerprint.clone();
+            recovered.preserved_drawing_parts = workbook.preserved_drawing_parts.clone();
+            recovered.preserved_pivot_parts = workbook.preserved_pivot_parts.clone();
+            recovered.theme_palette = workbook.theme_palette.clone();
+            recovered.print_settings = workbook.print_settings.clone();
+            recovered.original_print_settings = workbook.original_print_settings.clone();
+
+            let sheet_metas = storage
+                .list_sheets(existing_meta.id)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            (existing_meta.id, sheet_metas, recovered)
+        } else {
+            let model =
+                workbook_to_model(&workbook).map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+            let name = workbook
+                .origin_path
+                .as_deref()
+                .or(workbook.path.as_deref())
+                .and_then(|p| Path::new(p).file_stem().and_then(|s| s.to_str()))
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("Workbook");
+
+            let workbook_meta = storage
+                .import_model_workbook(&model, ImportModelWorkbookOptions::new(name))
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            let sheet_metas = storage
+                .list_sheets(workbook_meta.id)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            (workbook_meta.id, sheet_metas, workbook)
+        };
+
+        let info = self.load_workbook(workbook_for_state);
+
+        let memory = open_memory_manager(storage.clone());
+        let autosave = tokio::runtime::Handle::try_current()
+            .ok()
+            .map(|_| Arc::new(AutoSaveManager::spawn(memory.clone(), AutoSaveConfig::default())));
+
+        let mut sheet_map = HashMap::<String, Uuid>::new();
+        if let Some(workbook) = self.workbook.as_ref() {
+            for sheet in &workbook.sheets {
+                if let Some(meta) = sheet_metas
+                    .iter()
+                    .find(|m| m.name.eq_ignore_ascii_case(&sheet.name))
+                {
+                    sheet_map.insert(sheet.id.clone(), meta.id);
+                }
+            }
+        }
+
+        self.persistent = Some(PersistentWorkbookState {
+            location,
+            storage,
+            memory,
+            autosave,
+            workbook_id,
+            sheet_map,
+        });
+
+        Ok(info)
+    }
+
+    pub fn autosave_manager(&self) -> Option<Arc<AutoSaveManager>> {
+        self.persistent.as_ref().and_then(|p| p.autosave.clone())
+    }
+
+    pub fn persistent_workbook_id(&self) -> Option<Uuid> {
+        self.persistent.as_ref().map(|p| p.workbook_id)
+    }
+
+    pub fn persistent_storage(&self) -> Option<formula_storage::Storage> {
+        self.persistent.as_ref().map(|p| p.storage.clone())
     }
 
     pub fn mark_saved(
@@ -582,12 +703,43 @@ impl AppState {
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
         let cell = sheet.get_cell(row, col);
+
+        let formula = if let Some(persistent) = self.persistent.as_ref() {
+            let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+                AppStateError::Persistence(format!(
+                    "missing persistence mapping for sheet id {sheet_id}"
+                ))
+            })?;
+            persistent
+                .memory
+                .load_visible_range(
+                    sheet_uuid,
+                    StorageCellRange::new(row as i64, row as i64, col as i64, col as i64),
+                )
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            let cached = persistent
+                .memory
+                .get_cached_cell(sheet_uuid, row as i64, col as i64)
+                .and_then(|c| c.formula)
+                .and_then(|f| {
+                    let display = formula_model::display_formula_text(&f);
+                    if display.is_empty() {
+                        None
+                    } else {
+                        Some(display)
+                    }
+                });
+            cached.or(cell.formula.clone())
+        } else {
+            cell.formula.clone()
+        };
+
         let addr = coord_to_a1(row, col);
         let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
         let value = format_scalar_for_display(value, cell.number_format.as_deref());
         Ok(CellData {
             value,
-            formula: cell.formula,
+            formula,
         })
     }
 
@@ -615,6 +767,30 @@ impl AppState {
         let sheet = workbook
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+
+        let (persistent, sheet_uuid) = if let Some(persistent) = self.persistent.as_ref() {
+            let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+                AppStateError::Persistence(format!(
+                    "missing persistence mapping for sheet id {sheet_id}"
+                ))
+            })?;
+            persistent
+                .memory
+                .load_visible_range(
+                    sheet_uuid,
+                    StorageCellRange::new(
+                        start_row as i64,
+                        end_row as i64,
+                        start_col as i64,
+                        end_col as i64,
+                    ),
+                )
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            (Some(persistent), Some(sheet_uuid))
+        } else {
+            (None, None)
+        };
+
         let mut rows = Vec::with_capacity(end_row - start_row + 1);
         for r in start_row..=end_row {
             let mut row_out = Vec::with_capacity(end_col - start_col + 1);
@@ -623,9 +799,28 @@ impl AppState {
                 let addr = coord_to_a1(r, c);
                 let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
                 let value = format_scalar_for_display(value, cell.number_format.as_deref());
+
+                 let formula = if let (Some(persistent), Some(sheet_uuid)) = (persistent, sheet_uuid) {
+                     let cached = persistent
+                         .memory
+                         .get_cached_cell(sheet_uuid, r as i64, c as i64)
+                         .and_then(|c| c.formula)
+                         .and_then(|f| {
+                             let display = formula_model::display_formula_text(&f);
+                             if display.is_empty() {
+                                 None
+                             } else {
+                                 Some(display)
+                             }
+                         });
+                     cached.or(cell.formula)
+                 } else {
+                     cell.formula
+                 };
+
                 row_out.push(CellData {
                     value,
-                    formula: cell.formula,
+                    formula,
                 });
             }
             rows.push(row_out);
@@ -1694,7 +1889,53 @@ impl AppState {
                 &snap.value,
                 &snap.formula,
             );
-        }
+
+            if let Some(persistent) = self.persistent.as_ref() {
+                let sheet_uuid = persistent.sheet_uuid(&snap.sheet_id).ok_or_else(|| {
+                    AppStateError::Persistence(format!(
+                        "missing persistence mapping for sheet id {}",
+                        snap.sheet_id
+                    ))
+                })?;
+
+                let value = snap
+                    .value
+                    .as_ref()
+                    .map(scalar_to_storage_value)
+                    .unwrap_or(formula_model::CellValue::Empty);
+                 let formula = snap
+                     .formula
+                     .as_deref()
+                     .and_then(formula_model::normalize_formula_text);
+                 let data = StorageCellData {
+                     value,
+                     formula,
+                     style: None,
+                 };
+                let change = CellChange {
+                    sheet_id: sheet_uuid,
+                    row: snap.row as i64,
+                    col: snap.col as i64,
+                    data,
+                    user_id: None,
+                };
+
+                 if let Some(autosave) = persistent.autosave.as_ref() {
+                     autosave
+                         .record_change(change)
+                         .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+                 } else {
+                     persistent
+                         .memory
+                         .record_change(change.clone())
+                         .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+                     persistent
+                         .storage
+                         .apply_cell_changes(&[change])
+                         .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+                 }
+             }
+         }
 
         Ok(())
     }
@@ -2134,6 +2375,19 @@ fn what_if_value_to_scalar(value: &WhatIfCellValue) -> Option<CellScalar> {
         WhatIfCellValue::Number(n) => Some(CellScalar::Number(*n)),
         WhatIfCellValue::Text(s) => Some(CellScalar::Text(s.clone())),
         WhatIfCellValue::Bool(b) => Some(CellScalar::Bool(*b)),
+    }
+}
+
+fn scalar_to_storage_value(value: &CellScalar) -> formula_model::CellValue {
+    match value {
+        CellScalar::Empty => formula_model::CellValue::Empty,
+        CellScalar::Number(n) => formula_model::CellValue::Number(*n),
+        CellScalar::Text(s) => formula_model::CellValue::String(s.clone()),
+        CellScalar::Bool(b) => formula_model::CellValue::Boolean(*b),
+        CellScalar::Error(e) => formula_model::CellValue::Error(
+            e.parse::<formula_model::ErrorValue>()
+                .unwrap_or(formula_model::ErrorValue::Unknown),
+        ),
     }
 }
 

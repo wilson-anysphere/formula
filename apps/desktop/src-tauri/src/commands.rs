@@ -234,7 +234,11 @@ pub struct PivotTableSummary {
 }
 
 #[cfg(feature = "desktop")]
-use crate::file_io::{read_csv, read_xlsx, write_xlsx};
+use crate::file_io::{read_csv, read_xlsx};
+#[cfg(feature = "desktop")]
+use crate::persistence::{
+    autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
+};
 #[cfg(feature = "desktop")]
 use crate::state::{AppState, AppStateError, CellUpdateData, SharedAppState};
 #[cfg(feature = "desktop")]
@@ -244,6 +248,8 @@ use crate::{
 };
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
+#[cfg(feature = "desktop")]
+use std::sync::Arc;
 #[cfg(feature = "desktop")]
 use tauri::State;
 
@@ -309,13 +315,20 @@ pub async fn open_workbook(
         "csv" => read_csv(path.clone()).await.map_err(|e| e.to_string())?,
         _ => read_xlsx(path.clone()).await.map_err(|e| e.to_string())?,
     };
+    let location = autosave_db_path_for_workbook(&path)
+        .map(WorkbookPersistenceLocation::OnDisk)
+        .unwrap_or(WorkbookPersistenceLocation::InMemory);
+
     let shared = state.inner().clone();
     let info = tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
-        state.load_workbook(workbook)
+        state
+            .load_workbook_persistent(workbook, location)
+            .map_err(app_error)
     })
     .await
     .map_err(|e| e.to_string())?;
+    let info = info?;
 
     Ok(WorkbookInfo {
         path: info.path,
@@ -335,15 +348,21 @@ pub async fn open_workbook(
 #[tauri::command]
 pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookInfo, String> {
     let shared = state.inner().clone();
+    let location = autosave_db_path_for_new_workbook()
+        .map(WorkbookPersistenceLocation::OnDisk)
+        .unwrap_or(WorkbookPersistenceLocation::InMemory);
     let info = tauri::async_runtime::spawn_blocking(move || {
         let mut workbook = crate::file_io::Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
 
         let mut state = shared.lock().unwrap();
-        state.load_workbook(workbook)
+        state
+            .load_workbook_persistent(workbook, location)
+            .map_err(app_error)
     })
     .await
     .map_err(|e| e.to_string())?;
+    let info = info?;
 
     Ok(WorkbookInfo {
         path: info.path,
@@ -480,21 +499,41 @@ pub async fn save_workbook(
     path: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
-    let (save_path, workbook) = {
+    let (save_path, workbook, storage, workbook_id, autosave) = {
         let state = state.inner().lock().unwrap();
         let workbook = state.get_workbook().map_err(app_error)?.clone();
+        let storage = state
+            .persistent_storage()
+            .ok_or_else(|| "no persistent storage available".to_string())?;
+        let workbook_id = state
+            .persistent_workbook_id()
+            .ok_or_else(|| "no persistent workbook id available".to_string())?;
+        let autosave = state.autosave_manager();
         let save_path = path
             .clone()
             .or_else(|| workbook.path.clone())
             .ok_or_else(|| "no save path provided".to_string())?;
-        (save_path, workbook)
+        (save_path, workbook, storage, workbook_id, autosave)
     };
 
     let save_path = coerce_save_path_to_xlsx(&save_path);
 
-    let written_bytes = write_xlsx(save_path.clone(), workbook)
-        .await
-        .map_err(|e| e.to_string())?;
+    if let Some(autosave) = autosave.as_ref() {
+        autosave.flush().await.map_err(|e| e.to_string())?;
+    }
+
+    let save_path_clone = save_path.clone();
+    let written_bytes = tauri::async_runtime::spawn_blocking(move || {
+        crate::persistence::write_xlsx_from_storage(
+            &storage,
+            workbook_id,
+            &workbook,
+            std::path::Path::new(&save_path_clone),
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     {
         let mut state = state.inner().lock().unwrap();

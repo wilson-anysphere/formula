@@ -1626,6 +1626,7 @@ dependencies = [
  "formula-engine",
  "formula-format",
  "formula-model",
+ "formula-storage",
  "formula-vba",
  "formula-vba-runtime",
  "formula-xlsb",
@@ -1643,6 +1644,8 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
+ "uuid",
  "xlsx-diff",
 ]
 

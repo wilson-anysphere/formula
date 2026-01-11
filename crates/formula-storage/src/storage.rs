@@ -345,6 +345,25 @@ impl Storage {
         row.ok_or(StorageError::WorkbookNotFound(id))
     }
 
+    pub fn list_workbooks(&self) -> Result<Vec<WorkbookMeta>> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut stmt = conn.prepare("SELECT id, name, metadata FROM workbooks ORDER BY created_at")?;
+        let rows = stmt.query_map([], |r| {
+            let id: String = r.get(0)?;
+            Ok(WorkbookMeta {
+                id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                name: r.get(1)?,
+                metadata: r.get(2)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     pub fn import_model_workbook(
         &self,
         workbook: &formula_model::Workbook,
