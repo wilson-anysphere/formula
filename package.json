@@ -21,7 +21,7 @@
     "test:sync": "pnpm -C services/sync-server test",
     "test:vitest": "vitest run",
     "test:node": "node scripts/run-node-tests.mjs",
-    "test:e2e": "pnpm -C apps/desktop test:e2e",
+    "test:e2e": "pnpm -C apps/web test:e2e && pnpm -C apps/desktop test:e2e",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs",
     "benchmark": "node --experimental-strip-types apps/desktop/tests/performance/run.ts",

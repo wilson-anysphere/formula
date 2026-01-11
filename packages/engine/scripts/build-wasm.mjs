@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,20 +10,48 @@ const __dirname = path.dirname(__filename);
 // `packages/engine/scripts/*` → repo root
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
 
-const cratePath = "crates/formula-wasm";
-const outDir = "packages/engine/pkg";
-const outName = "formula_wasm";
+const crateDir = path.join(repoRoot, "crates", "formula-wasm");
+const coreDir = path.join(repoRoot, "crates", "formula-core");
 
-const crateAbs = path.join(repoRoot, cratePath);
-const outDirAbs = path.join(repoRoot, outDir);
-const wrapperAbs = path.join(outDirAbs, `${outName}.js`);
-const wasmAbs = path.join(outDirAbs, `${outName}_bg.wasm`);
+const outDir = path.join(repoRoot, "packages", "engine", "pkg");
+const wrapper = path.join(outDir, "formula_wasm.js");
+const wasm = path.join(outDir, "formula_wasm_bg.wasm");
+
+const targets = [
+  path.join(repoRoot, "apps", "web", "public", "engine"),
+  path.join(repoRoot, "apps", "desktop", "public", "engine")
+];
 
 const wasmPackBin = process.platform === "win32" ? "wasm-pack.exe" : "wasm-pack";
 
 function fatal(message) {
   console.error(message);
   process.exit(1);
+}
+
+async function latestMtime(entryPath) {
+  const info = await stat(entryPath);
+  if (!info.isDirectory()) {
+    return info.mtimeMs;
+  }
+
+  let latest = info.mtimeMs;
+  const entries = await readdir(entryPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const childPath = path.join(entryPath, entry.name);
+    const mtime = await latestMtime(childPath);
+    latest = Math.max(latest, mtime);
+  }
+
+  return latest;
+}
+
+async function copyToPublic() {
+  for (const targetDir of targets) {
+    await mkdir(targetDir, { recursive: true });
+    await copyFile(wrapper, path.join(targetDir, "formula_wasm.js"));
+    await copyFile(wasm, path.join(targetDir, "formula_wasm_bg.wasm"));
+  }
 }
 
 // Validate `wasm-pack` is installed early with a good error message.
@@ -37,7 +66,7 @@ function fatal(message) {
         "  - cargo install wasm-pack",
         "  - https://rustwasm.github.io/wasm-pack/installer/",
         "",
-        `Original error: ${check.error.message}`
+        `Original error: ${check.error?.message ?? "unknown"}`
       ].join("\n")
     );
   }
@@ -60,24 +89,42 @@ function fatal(message) {
 }
 
 // Ensure the crate path exists (helps when running from unexpected working dirs).
-if (!existsSync(path.join(crateAbs, "Cargo.toml"))) {
-  fatal(`[formula] Expected WASM crate at ${cratePath} (relative to repo root), but it was not found.`);
+if (!existsSync(path.join(crateDir, "Cargo.toml"))) {
+  fatal(
+    `[formula] Expected WASM crate at ${path.relative(repoRoot, crateDir)} (relative to repo root), but it was not found.`
+  );
+}
+
+const outputExists = existsSync(wrapper) && existsSync(wasm);
+if (outputExists) {
+  const outputStamp = Math.min((await stat(wrapper)).mtimeMs, (await stat(wasm)).mtimeMs);
+  const sourceStamp = Math.max(
+    await latestMtime(crateDir),
+    await latestMtime(coreDir),
+    await latestMtime(path.join(repoRoot, "Cargo.lock"))
+  );
+
+  if (outputStamp >= sourceStamp) {
+    await copyToPublic();
+    process.exit(0);
+  }
 }
 
 // `wasm-pack` refuses to overwrite some files if the output already exists.
-rmSync(outDirAbs, { recursive: true, force: true });
+await rm(outDir, { recursive: true, force: true });
 
 const result = spawnSync(
   wasmPackBin,
   [
     "build",
-    crateAbs,
+    crateDir,
     "--target",
     "web",
+    "--release",
     "--out-dir",
-    outDirAbs,
+    outDir,
     "--out-name",
-    outName,
+    "formula_wasm",
     // Avoid generating a nested package.json in the output directory; consumers
     // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
     "--no-pack"
@@ -93,13 +140,11 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-if (!existsSync(wrapperAbs) || !existsSync(wasmAbs)) {
+if (!existsSync(wrapper) || !existsSync(wasm)) {
   const missing = [];
-  if (!existsSync(wrapperAbs)) missing.push(`Missing: ${path.relative(repoRoot, wrapperAbs)}`);
-  if (!existsSync(wasmAbs)) missing.push(`Missing: ${path.relative(repoRoot, wasmAbs)}`);
-  fatal(
-    ["[formula] wasm-pack completed but expected artifacts are missing.", ...missing].join("\n")
-  );
+  if (!existsSync(wrapper)) missing.push(`Missing: ${path.relative(repoRoot, wrapper)}`);
+  if (!existsSync(wasm)) missing.push(`Missing: ${path.relative(repoRoot, wasm)}`);
+  fatal(["[formula] wasm-pack completed but expected artifacts are missing.", ...missing].join("\n"));
 }
 
-console.log(`[formula] Built WASM package: ${path.relative(repoRoot, wrapperAbs)}`);
+await copyToPublic();

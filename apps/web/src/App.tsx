@@ -53,7 +53,7 @@ export function App() {
     <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ margin: 0 }}>Formula (Web Preview)</h1>
       <p style={{ marginTop: 8, color: "#475569" }}>
-        Engine: <strong>{engineStatus}</strong>
+        Engine: <strong data-testid="engine-status">{engineStatus}</strong>
       </p>
       <div style={{ marginTop: 16, height: 560 }}>
         {provider ? (
