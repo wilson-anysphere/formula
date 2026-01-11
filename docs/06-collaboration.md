@@ -62,7 +62,13 @@ interface SpreadsheetDoc {
   sheets: Y.Array<Y.Map<any>>;
   
   // Per-sheet cell data
-  // Key: "sheetId:row:col", Value: cell data
+  // Key: "sheetId:row:col", Value: cell data.
+  //
+  // Note: for enterprise "protected ranges" that must be truly confidential,
+  // cell contents are stored end-to-end encrypted under the `enc` field (see
+  // "Encrypted Cells" below). When `enc` is present, plaintext `value`/`formula`
+  // fields are omitted so unauthorized collaborators (and the sync server) cannot
+  // read protected content from the shared CRDT.
   cells: Y.Map<Y.Map<any>>;
   
   // Metadata
@@ -146,6 +152,38 @@ class CollaborativeDocument {
   }
 }
 ```
+
+### Encrypted Cells (Protected Ranges)
+
+Yjs updates are broadcast to all connected collaborators and the sync server
+cannot filter cell-level content per-connection. That means **client/UI masking
+alone is not sufficient** for confidential ranges.
+
+To provide real confidentiality, Formula supports optional **end-to-end
+encryption** of cell content *before* it enters the Yjs CRDT. Encrypted cell data
+is stored under the per-cell `enc` field:
+
+```ts
+// Stored under `cells.get(cellKey).get("enc")`
+type EncryptedCellPayloadV1 = {
+  v: 1,
+  alg: "AES-256-GCM",
+  keyId: string,
+  ivBase64: string,
+  tagBase64: string,
+  ciphertextBase64: string
+};
+```
+
+- Plaintext is JSON: `{ value, formula, format? }` (format is optional).
+- Plaintext `value` and `formula` keys are removed from the Yjs cell map when
+  `enc` is present.
+- AES-GCM Additional Authenticated Data (AAD) binds ciphertext to
+  `{ docId, sheetId, row, col }` to prevent replay across cells/docs.
+
+Clients that have the appropriate per-range key can decrypt and display the
+plaintext content; clients without the key see a fixed masked placeholder (e.g.
+`"###"`).
 
 ### Handling Formulas in CRDT
 
