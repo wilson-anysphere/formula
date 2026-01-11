@@ -1,5 +1,6 @@
 use formula_format::{
-    render_value, AlignmentHint, ColorOverride, DateSystem, FormatOptions, LiteralLayoutOp, Locale, Value,
+    builtin_format_code, builtin_format_code_with_locale, render_value, AlignmentHint, ColorOverride, DateSystem,
+    FormatOptions, LiteralLayoutOp, Locale, Value,
 };
 
 #[test]
@@ -66,6 +67,50 @@ fn accounting_underscores_and_fill_emit_layout_hints() {
             fill_with: '-'
         }]
     );
+}
+
+#[test]
+fn builtin_accounting_formats_emit_layout_hints_and_can_localize_currency() {
+    // Built-in id 44 is the standard accounting format with a currency symbol.
+    let fmt_en = builtin_format_code(44).expect("built-in 44");
+    let options_en = FormatOptions::default();
+    let rendered = render_value(Value::Number(1234.5), Some(fmt_en), &options_en);
+    assert!(
+        rendered.text.contains('$'),
+        "expected built-in accounting format to include a currency symbol: {:?}",
+        rendered.text
+    );
+    let hint = rendered.layout_hint.expect("expected layout hint for accounting format");
+    assert!(
+        hint.ops
+            .iter()
+            .any(|op| matches!(op, LiteralLayoutOp::Underscore { .. })),
+        "expected underscore ops in accounting format hint: {hint:?}"
+    );
+    assert!(
+        hint.ops.iter().any(|op| matches!(op, LiteralLayoutOp::Fill { .. })),
+        "expected fill ops in accounting format hint: {hint:?}"
+    );
+
+    // Locale-aware resolver should substitute currency symbol while numeric separators
+    // are driven by FormatOptions.locale.
+    let fmt_de = builtin_format_code_with_locale(44, Locale::de_de()).expect("built-in 44 de");
+    let options_de = FormatOptions {
+        locale: Locale::de_de(),
+        date_system: DateSystem::Excel1900,
+    };
+    let rendered = render_value(Value::Number(1234.5), Some(fmt_de.as_ref()), &options_de);
+    assert!(
+        rendered.text.contains('€'),
+        "expected localized accounting currency symbol: {:?}",
+        rendered.text
+    );
+    assert!(
+        rendered.text.contains("1.234,50"),
+        "expected localized separators in output: {:?}",
+        rendered.text
+    );
+    assert!(rendered.layout_hint.is_some());
 }
 
 #[test]
