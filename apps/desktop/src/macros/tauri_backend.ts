@@ -100,6 +100,19 @@ function normalizePermissionRequest(raw: any): MacroPermissionRequest | undefine
   const requested = Array.isArray(requestedRaw) ? requestedRaw.map(String) : [];
   return { reason, macroId, workbookOriginPath, requested: requested as MacroPermissionRequest["requested"] };
 }
+export type MacroSelectionRect = {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+};
+
+export type MacroUiContext = {
+  sheetId: string;
+  activeRow: number;
+  activeCol: number;
+  selection?: MacroSelectionRect | null;
+};
 
 export class TauriMacroBackend implements MacroBackend {
   private readonly invoke: TauriInvoke;
@@ -146,4 +159,44 @@ export class TauriMacroBackend implements MacroBackend {
         : undefined,
     };
   }
+
+  async setMacroUiContext(options: { workbookId: string } & MacroUiContext): Promise<void> {
+    const selection = options.selection
+      ? {
+          start_row: options.selection.startRow,
+          start_col: options.selection.startCol,
+          end_row: options.selection.endRow,
+          end_col: options.selection.endCol,
+        }
+      : null;
+
+    await this.invoke("set_macro_ui_context", {
+      workbook_id: options.workbookId,
+      sheet_id: options.sheetId,
+      active_row: options.activeRow,
+      active_col: options.activeCol,
+      selection,
+    });
+  }
+}
+
+export function wrapTauriMacroBackendWithUiContext(
+  backend: TauriMacroBackend,
+  getContext: () => MacroUiContext,
+  options: { beforeRunMacro?: () => Promise<void> } = {}
+): MacroBackend {
+  return {
+    listMacros: (workbookId) => backend.listMacros(workbookId),
+    getMacroSecurityStatus: (workbookId) => backend.getMacroSecurityStatus(workbookId),
+    setMacroTrust: (workbookId, decision) => backend.setMacroTrust(workbookId, decision),
+    runMacro: async (request) => {
+      if (options.beforeRunMacro) {
+        await options.beforeRunMacro();
+      }
+
+      const ctx = getContext();
+      await backend.setMacroUiContext({ workbookId: request.workbookId, ...ctx });
+      return backend.runMacro(request);
+    },
+  };
 }

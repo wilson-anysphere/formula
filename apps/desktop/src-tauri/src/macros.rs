@@ -1,5 +1,6 @@
 use crate::file_io::Workbook;
 use crate::state::{AppState, CellScalar, CellUpdateData};
+use formula_vba_runtime::Spreadsheet;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -60,6 +61,7 @@ pub struct MacroExecutionOutcome {
 pub struct MacroRuntimeContext {
     pub active_sheet: usize,
     pub active_cell: (u32, u32),
+    pub selection: Option<formula_vba_runtime::VbaRangeRef>,
 }
 
 impl Default for MacroRuntimeContext {
@@ -67,6 +69,7 @@ impl Default for MacroRuntimeContext {
         Self {
             active_sheet: 0,
             active_cell: (1, 1),
+            selection: None,
         }
     }
 }
@@ -113,6 +116,10 @@ impl MacroHost {
 
     pub fn set_runtime_context(&mut self, ctx: MacroRuntimeContext) {
         self.runtime_context = ctx;
+    }
+
+    pub(crate) fn sync_with_workbook(&mut self, workbook: &Workbook) {
+        self.refresh_if_needed(workbook);
     }
 
     fn refresh_if_needed(&mut self, workbook: &Workbook) {
@@ -357,25 +364,44 @@ pub fn execute_invocation(
     let mut sheet = AppStateSpreadsheet::new(state, ctx)
         .map_err(|err| MacroHostError::Runtime(err.to_string()))?;
 
-    let exec: Result<(), formula_vba_runtime::VbaError> = match &invocation {
+    let initial_selection = ctx
+        .selection
+        .filter(|sel| sel.sheet < sheet.sheet_count());
+    let exec: Result<formula_vba_runtime::ExecutionResult, formula_vba_runtime::VbaError> =
+        match &invocation {
         MacroInvocation::Procedure { macro_id } => {
-            runtime.execute(&mut sheet, macro_id, &[]).map(|_| ())
+            runtime.execute_with_selection(&mut sheet, macro_id, &[], initial_selection)
         }
-        MacroInvocation::WorkbookOpen => runtime.fire_workbook_open(&mut sheet),
-        MacroInvocation::WorkbookBeforeClose => runtime.fire_workbook_before_close(&mut sheet),
+        MacroInvocation::WorkbookOpen => {
+            runtime.fire_workbook_open_with_selection(&mut sheet, initial_selection)
+        }
+        MacroInvocation::WorkbookBeforeClose => runtime.fire_workbook_before_close_with_selection(
+            &mut sheet,
+            initial_selection,
+        ),
         MacroInvocation::WorksheetChange { target } => {
-            runtime.fire_worksheet_change(&mut sheet, *target)
+            runtime.fire_worksheet_change_with_selection(&mut sheet, *target, initial_selection)
         }
         MacroInvocation::SelectionChange { target } => {
-            runtime.fire_worksheet_selection_change(&mut sheet, *target)
+            runtime.fire_worksheet_selection_change_with_selection(
+                &mut sheet,
+                *target,
+                initial_selection,
+            )
         }
     };
 
     let output = sheet.take_output();
     let updates = dedup_updates(sheet.take_updates());
+    let selection = match &exec {
+        Ok(res) => res.selection,
+        Err(_) => initial_selection,
+    };
+    let selection = selection.filter(|sel| sel.sheet < sheet.sheet_count());
     let new_ctx = MacroRuntimeContext {
         active_sheet: sheet.active_sheet(),
         active_cell: sheet.active_cell(),
+        selection,
     };
 
     let (ok, error, permission_request) = match exec {

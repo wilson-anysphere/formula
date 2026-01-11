@@ -9,7 +9,14 @@ import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
-import { renderMacroRunner, TauriMacroBackend, WebMacroBackend, type MacroRunRequest, type MacroTrustDecision } from "./macros";
+import {
+  renderMacroRunner,
+  TauriMacroBackend,
+  WebMacroBackend,
+  wrapTauriMacroBackendWithUiContext,
+  type MacroRunRequest,
+  type MacroTrustDecision,
+} from "./macros";
 import { applyMacroCellUpdates } from "./macros/applyUpdates";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
@@ -347,6 +354,36 @@ if (
           const backend = (() => {
             try {
               const baseBackend = new TauriMacroBackend({ invoke: queuedInvoke ?? undefined });
+              const tauriBackend = wrapTauriMacroBackendWithUiContext(
+                baseBackend,
+                () => {
+                  const sheetId = app.getCurrentSheetId();
+                  const active = app.getActiveCell();
+                  const ranges = app.getSelectionRanges();
+                  const first =
+                    ranges[0] ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
+                  return {
+                    sheetId,
+                    activeRow: active.row,
+                    activeCol: active.col,
+                    selection: {
+                      startRow: first.startRow,
+                      startCol: first.startCol,
+                      endRow: first.endRow,
+                      endCol: first.endCol,
+                    },
+                  };
+                },
+                {
+                  beforeRunMacro: async () => {
+                    // Allow any microtask-batched workbook edits to enqueue before the macro runs
+                    // so backend state reflects the latest grid changes.
+                    await new Promise<void>((resolve) => queueMicrotask(resolve));
+                    await drainBackendSync();
+                  },
+                }
+              );
+
               const scriptBackend = new WebMacroBackend({
                 getDocumentController: () => app.getDocument(),
                 getActiveSheetId: () => app.getCurrentSheetId(),
@@ -381,11 +418,7 @@ if (
                     return scriptBackend.runMacro({ ...request, workbookId: scriptStorageId });
                   }
 
-                  // Allow any microtask-batched workbook edits to enqueue before the macro runs
-                  // so backend state reflects the latest grid changes.
-                  await new Promise<void>((resolve) => queueMicrotask(resolve));
-                  await drainBackendSync();
-                  return baseBackend.runMacro(request);
+                  return tauriBackend.runMacro(request);
                 },
               };
             } catch {

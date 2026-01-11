@@ -32,6 +32,7 @@ pub enum VbaError {
 #[derive(Debug, Default)]
 pub struct ExecutionResult {
     pub returned: Option<VbaValue>,
+    pub selection: Option<VbaRangeRef>,
 }
 
 #[derive(Debug, Default)]
@@ -76,6 +77,16 @@ impl VbaRuntime {
         entry: &str,
         args: &[VbaValue],
     ) -> Result<ExecutionResult, VbaError> {
+        self.execute_with_selection(spreadsheet, entry, args, None)
+    }
+
+    pub fn execute_with_selection(
+        &self,
+        spreadsheet: &mut dyn Spreadsheet,
+        entry: &str,
+        args: &[VbaValue],
+        selection: Option<VbaRangeRef>,
+    ) -> Result<ExecutionResult, VbaError> {
         let proc = self
             .program
             .get(entry)
@@ -87,16 +98,29 @@ impl VbaRuntime {
             spreadsheet,
             &self.sandbox,
             self.permission_checker.as_deref(),
+            selection,
         );
         exec.call_procedure(proc, args)
     }
 
     /// Convenience: execute `Workbook_Open` if present.
     pub fn fire_workbook_open(&self, spreadsheet: &mut dyn Spreadsheet) -> Result<(), VbaError> {
+        self.fire_workbook_open_with_selection(spreadsheet, None)
+            .map(|_| ())
+    }
+
+    pub fn fire_workbook_open_with_selection(
+        &self,
+        spreadsheet: &mut dyn Spreadsheet,
+        selection: Option<VbaRangeRef>,
+    ) -> Result<ExecutionResult, VbaError> {
         if self.program.get("workbook_open").is_some() {
-            self.execute(spreadsheet, "Workbook_Open", &[])?;
+            return self.execute_with_selection(spreadsheet, "Workbook_Open", &[], selection);
         }
-        Ok(())
+        Ok(ExecutionResult {
+            returned: None,
+            selection,
+        })
     }
 
     /// Convenience: execute `Workbook_BeforeClose` if present.
@@ -104,10 +128,27 @@ impl VbaRuntime {
         &self,
         spreadsheet: &mut dyn Spreadsheet,
     ) -> Result<(), VbaError> {
+        self.fire_workbook_before_close_with_selection(spreadsheet, None)
+            .map(|_| ())
+    }
+
+    pub fn fire_workbook_before_close_with_selection(
+        &self,
+        spreadsheet: &mut dyn Spreadsheet,
+        selection: Option<VbaRangeRef>,
+    ) -> Result<ExecutionResult, VbaError> {
         if self.program.get("workbook_beforeclose").is_some() {
-            self.execute(spreadsheet, "Workbook_BeforeClose", &[])?;
+            return self.execute_with_selection(
+                spreadsheet,
+                "Workbook_BeforeClose",
+                &[],
+                selection,
+            );
         }
-        Ok(())
+        Ok(ExecutionResult {
+            returned: None,
+            selection,
+        })
     }
 
     /// Fire `Worksheet_Change` if present.
@@ -116,16 +157,28 @@ impl VbaRuntime {
         spreadsheet: &mut dyn Spreadsheet,
         target: VbaRangeRef,
     ) -> Result<(), VbaError> {
+        self.fire_worksheet_change_with_selection(spreadsheet, target, None)
+            .map(|_| ())
+    }
+
+    pub fn fire_worksheet_change_with_selection(
+        &self,
+        spreadsheet: &mut dyn Spreadsheet,
+        target: VbaRangeRef,
+        selection: Option<VbaRangeRef>,
+    ) -> Result<ExecutionResult, VbaError> {
         if self.program.get("worksheet_change").is_some() {
-            self.execute(
+            return self.execute_with_selection(
                 spreadsheet,
                 "Worksheet_Change",
-                &[VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                    target,
-                )))],
-            )?;
+                &[VbaValue::Object(VbaObjectRef::new(VbaObject::Range(target)))],
+                selection,
+            );
         }
-        Ok(())
+        Ok(ExecutionResult {
+            returned: None,
+            selection,
+        })
     }
 
     /// Fire `Worksheet_SelectionChange` if present.
@@ -134,16 +187,28 @@ impl VbaRuntime {
         spreadsheet: &mut dyn Spreadsheet,
         target: VbaRangeRef,
     ) -> Result<(), VbaError> {
+        self.fire_worksheet_selection_change_with_selection(spreadsheet, target, None)
+            .map(|_| ())
+    }
+
+    pub fn fire_worksheet_selection_change_with_selection(
+        &self,
+        spreadsheet: &mut dyn Spreadsheet,
+        target: VbaRangeRef,
+        selection: Option<VbaRangeRef>,
+    ) -> Result<ExecutionResult, VbaError> {
         if self.program.get("worksheet_selectionchange").is_some() {
-            self.execute(
+            return self.execute_with_selection(
                 spreadsheet,
                 "Worksheet_SelectionChange",
-                &[VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                    target,
-                )))],
-            )?;
+                &[VbaValue::Object(VbaObjectRef::new(VbaObject::Range(target)))],
+                selection,
+            );
         }
-        Ok(())
+        Ok(ExecutionResult {
+            returned: None,
+            selection,
+        })
     }
 }
 
@@ -370,6 +435,7 @@ impl<'a> Executor<'a> {
         sheet: &'a mut dyn Spreadsheet,
         sandbox: &'a VbaSandboxPolicy,
         permission_checker: Option<&'a dyn PermissionChecker>,
+        selection: Option<VbaRangeRef>,
     ) -> Self {
         Self {
             program,
@@ -380,7 +446,7 @@ impl<'a> Executor<'a> {
             err_obj: VbaObjectRef::new(VbaObject::Err(VbaErrObject::default())),
             with_stack: Vec::new(),
             clipboard: None,
-            selection: None,
+            selection,
             start: Instant::now(),
             steps: 0,
         }
@@ -496,6 +562,7 @@ impl<'a> Executor<'a> {
                     .unwrap_or(VbaValue::Empty),
             );
         }
+        result.selection = self.selection;
         Ok(result)
     }
 

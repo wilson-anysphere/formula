@@ -224,3 +224,74 @@ End Sub
     assert_eq!(request.macro_id, "TryCreateObject");
     assert_eq!(request.requested, vec![MacroPermission::ObjectCreation]);
 }
+
+#[test]
+fn macro_ui_context_sets_active_sheet_cell_and_selection() {
+    let module_code = r#"
+Sub WriteActive()
+    ActiveCell.Value = "OK"
+End Sub
+
+Sub FillSelection()
+    Selection.Value = "S"
+End Sub
+"#;
+
+    let vba_bin = build_vba_project_bin(module_code);
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+    workbook.vba_project_bin = Some(vba_bin);
+
+    let mut state = AppState::new();
+    let info = state.load_workbook(workbook);
+    let sheet1_id = info.sheets[0].id.clone();
+    let sheet2_id = info.sheets[1].id.clone();
+
+    // Set UI context to Sheet2!C3 before running a macro that writes ActiveCell.
+    state
+        .set_macro_ui_context(&sheet2_id, 2, 2, None)
+        .expect("set macro ui context");
+    let outcome = state
+        .run_macro("WriteActive", MacroExecutionOptions::default())
+        .expect("WriteActive runs");
+    assert!(outcome.ok, "expected macro to succeed: {outcome:?}");
+    assert_eq!(
+        state.get_cell(&sheet2_id, 2, 2).unwrap().value,
+        CellScalar::Text("OK".to_string())
+    );
+    assert_eq!(
+        state.get_cell(&sheet1_id, 2, 2).unwrap().value,
+        CellScalar::Empty
+    );
+
+    // Selection should also reflect the UI before macro execution.
+    state
+        .set_macro_ui_context(
+            &sheet2_id,
+            1,
+            1,
+            Some(formula_desktop_tauri::state::CellRect {
+                start_row: 1,
+                start_col: 1,
+                end_row: 2,
+                end_col: 2,
+            }),
+        )
+        .expect("set selection context");
+    let selected = state
+        .run_macro("FillSelection", MacroExecutionOptions::default())
+        .expect("FillSelection runs");
+    assert!(selected.ok, "expected macro to succeed: {selected:?}");
+    for row in 1..=2 {
+        for col in 1..=2 {
+            assert_eq!(
+                state.get_cell(&sheet2_id, row, col).unwrap().value,
+                CellScalar::Text("S".to_string()),
+                "expected Sheet2!({}, {}) to be 'S'",
+                row,
+                col
+            );
+        }
+    }
+}

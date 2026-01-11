@@ -1,7 +1,7 @@
 use crate::file_io::Workbook;
 use crate::macros::{
     execute_invocation, MacroExecutionOptions, MacroExecutionOutcome, MacroHost, MacroHostError,
-    MacroInfo, MacroInvocation,
+    MacroInfo, MacroInvocation, MacroRuntimeContext,
 };
 use crate::persistence::{
     autosave_db_path_for_workbook, open_memory_manager, open_storage, workbook_from_model,
@@ -1687,6 +1687,66 @@ impl AppState {
             .as_ref()
             .ok_or(MacroHostError::NoWorkbookLoaded)?;
         self.macro_host.list_macros(workbook)
+    }
+
+    pub fn set_macro_ui_context(
+        &mut self,
+        sheet_id: &str,
+        active_row: usize,
+        active_col: usize,
+        selection: Option<CellRect>,
+    ) -> Result<(), MacroHostError> {
+        let workbook = self
+            .workbook
+            .as_ref()
+            .ok_or(MacroHostError::NoWorkbookLoaded)?;
+        let sheet_index = workbook
+            .sheets
+            .iter()
+            .position(|s| s.id == sheet_id)
+            .ok_or_else(|| MacroHostError::Runtime(format!("unknown sheet id: {sheet_id}")))?;
+
+        self.macro_host.sync_with_workbook(workbook);
+
+        let row = u32::try_from(active_row.saturating_add(1))
+            .map_err(|_| MacroHostError::Runtime("row index out of range".to_string()))?;
+        let col = u32::try_from(active_col.saturating_add(1))
+            .map_err(|_| MacroHostError::Runtime("col index out of range".to_string()))?;
+
+        let selection = match selection {
+            Some(rect) => {
+                if rect.start_row > rect.end_row || rect.start_col > rect.end_col {
+                    return Err(MacroHostError::Runtime(format!(
+                        "invalid range: start ({},{}) end ({},{})",
+                        rect.start_row, rect.start_col, rect.end_row, rect.end_col
+                    )));
+                }
+                let start_row = u32::try_from(rect.start_row.saturating_add(1))
+                    .map_err(|_| MacroHostError::Runtime("row index out of range".to_string()))?;
+                let start_col = u32::try_from(rect.start_col.saturating_add(1))
+                    .map_err(|_| MacroHostError::Runtime("col index out of range".to_string()))?;
+                let end_row = u32::try_from(rect.end_row.saturating_add(1))
+                    .map_err(|_| MacroHostError::Runtime("row index out of range".to_string()))?;
+                let end_col = u32::try_from(rect.end_col.saturating_add(1))
+                    .map_err(|_| MacroHostError::Runtime("col index out of range".to_string()))?;
+                Some(formula_vba_runtime::VbaRangeRef {
+                    sheet: sheet_index,
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                })
+            }
+            None => None,
+        };
+
+        self.macro_host.set_runtime_context(MacroRuntimeContext {
+            active_sheet: sheet_index,
+            active_cell: (row, col),
+            selection,
+        });
+
+        Ok(())
     }
 
     pub fn run_macro(

@@ -76,6 +76,7 @@ fn main() {
             commands::list_macros,
             commands::get_macro_security_status,
             commands::set_macro_trust,
+            commands::set_macro_ui_context,
             commands::run_macro,
             commands::run_python_script,
             commands::fire_workbook_open,

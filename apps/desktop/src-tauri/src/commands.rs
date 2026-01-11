@@ -1279,6 +1279,14 @@ pub struct PythonRunResult {
     pub error: Option<PythonError>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MacroSelectionRect {
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+}
+
 #[cfg(feature = "desktop")]
 fn workbook_identity_for_trust(workbook: &Workbook, workbook_id: Option<&str>) -> String {
     workbook
@@ -1531,6 +1539,30 @@ pub fn list_macros(
 
     let mut state = state.inner().lock().unwrap();
     state.list_macros().map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn set_macro_ui_context(
+    workbook_id: Option<String>,
+    sheet_id: String,
+    active_row: usize,
+    active_col: usize,
+    selection: Option<MacroSelectionRect>,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    let _ = workbook_id;
+    let mut state = state.inner().lock().unwrap();
+    let selection = selection.map(|rect| crate::state::CellRect {
+        start_row: rect.start_row,
+        start_col: rect.start_col,
+        end_row: rect.end_row,
+        end_col: rect.end_col,
+    });
+    state
+        .set_macro_ui_context(&sheet_id, active_row, active_col, selection)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg(feature = "desktop")]
