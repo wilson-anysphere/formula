@@ -75,7 +75,28 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Blank => {}
                 Value::Text(_) => return Value::Error(ErrorKind::Value),
-                Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => {
+                                any = true;
+                                if *n == 0.0 {
+                                    all_true = false;
+                                }
+                            }
+                            Value::Bool(b) => {
+                                any = true;
+                                if !*b {
+                                    all_true = false;
+                                }
+                            }
+                            // Text and blanks in arrays are ignored (same as references).
+                            Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+                Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
@@ -168,7 +189,27 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Blank => {}
                 Value::Text(_) => return Value::Error(ErrorKind::Value),
-                Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => {
+                                any = true;
+                                if *n != 0.0 {
+                                    any_true = true;
+                                }
+                            }
+                            Value::Bool(b) => {
+                                any = true;
+                                if *b {
+                                    any_true = true;
+                                }
+                            }
+                            Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+                Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {

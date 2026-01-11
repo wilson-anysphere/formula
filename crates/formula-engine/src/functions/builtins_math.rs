@@ -186,13 +186,24 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     for arg in args {
         match ctx.eval_arg(arg) {
-            ArgValue::Scalar(v) => {
-                let n = match v.coerce_to_number() {
-                    Ok(n) => n,
-                    Err(e) => return Value::Error(e),
-                };
-                best = Some(best.map(|b| b.min(n)).unwrap_or(n));
-            }
+            ArgValue::Scalar(v) => match v {
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => best = Some(best.map(|b| b.min(*n)).unwrap_or(*n)),
+                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+                other => {
+                    let n = match other.coerce_to_number() {
+                        Ok(n) => n,
+                        Err(e) => return Value::Error(e),
+                    };
+                    best = Some(best.map(|b| b.min(n)).unwrap_or(n));
+                }
+            },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(r.sheet_id, addr);
@@ -244,13 +255,24 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     for arg in args {
         match ctx.eval_arg(arg) {
-            ArgValue::Scalar(v) => {
-                let n = match v.coerce_to_number() {
-                    Ok(n) => n,
-                    Err(e) => return Value::Error(e),
-                };
-                best = Some(best.map(|b| b.max(n)).unwrap_or(n));
-            }
+            ArgValue::Scalar(v) => match v {
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => best = Some(best.map(|b| b.max(*n)).unwrap_or(*n)),
+                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+                other => {
+                    let n = match other.coerce_to_number() {
+                        Ok(n) => n,
+                        Err(e) => return Value::Error(e),
+                    };
+                    best = Some(best.map(|b| b.max(n)).unwrap_or(n));
+                }
+            },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(r.sheet_id, addr);
@@ -301,11 +323,20 @@ fn count_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut total = 0u64;
     for arg in args {
         match ctx.eval_arg(arg) {
-            ArgValue::Scalar(v) => {
-                if matches!(v, Value::Number(_)) {
-                    total += 1;
+            ArgValue::Scalar(v) => match v {
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        if matches!(v, Value::Number(_)) {
+                            total += 1;
+                        }
+                    }
                 }
-            }
+                other => {
+                    if matches!(other, Value::Number(_)) {
+                        total += 1;
+                    }
+                }
+            },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(r.sheet_id, addr);
@@ -344,9 +375,24 @@ inventory::submit! {
 }
 
 fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let ranges = match ctx.eval_arg(&args[0]) {
-        ArgValue::Reference(r) => vec![r],
-        ArgValue::ReferenceUnion(ranges) => ranges,
+    let values: Vec<Value> = match ctx.eval_arg(&args[0]) {
+        ArgValue::Reference(r) => {
+            let mut values = Vec::new();
+            for addr in r.iter_cells() {
+                values.push(ctx.get_cell_value(r.sheet_id, addr));
+            }
+            values
+        }
+        ArgValue::ReferenceUnion(ranges) => {
+            let mut values = Vec::new();
+            for r in ranges {
+                for addr in r.iter_cells() {
+                    values.push(ctx.get_cell_value(r.sheet_id, addr));
+                }
+            }
+            values
+        }
+        ArgValue::Scalar(Value::Array(arr)) => arr.values,
         ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
@@ -360,13 +406,10 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let mut count = 0u64;
-    for range in ranges {
-        for addr in range.iter_cells() {
-            let v = ctx.get_cell_value(range.sheet_id, addr);
-            if let Value::Number(n) = v {
-                if matches_numeric_criteria(n, criteria) {
-                    count += 1;
-                }
+    for v in values {
+        if let Value::Number(n) = v {
+            if matches_numeric_criteria(n, criteria) {
+                count += 1;
             }
         }
     }
@@ -388,36 +431,42 @@ inventory::submit! {
 }
 
 fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let a = match ctx.eval_arg(&args[0]) {
-        ArgValue::Reference(r) => r.normalized(),
-        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
-        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
-        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
-    };
-    let b = match ctx.eval_arg(&args[1]) {
-        ArgValue::Reference(r) => r.normalized(),
-        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
-        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
-        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
-    };
-
-    let rows_a = a.end.row - a.start.row + 1;
-    let cols_a = a.end.col - a.start.col + 1;
-    let rows_b = b.end.row - b.start.row + 1;
-    let cols_b = b.end.col - b.start.col + 1;
-    if rows_a != rows_b || cols_a != cols_b {
-        return Value::Error(ErrorKind::Value);
+    fn arg_to_values(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<Value>, Value> {
+        match arg {
+            ArgValue::Reference(r) => {
+                let r = r.normalized();
+                let rows = r.end.row - r.start.row + 1;
+                let cols = r.end.col - r.start.col + 1;
+                let len = (rows as usize).saturating_mul(cols as usize);
+                let mut values = Vec::with_capacity(len);
+                for addr in r.iter_cells() {
+                    values.push(ctx.get_cell_value(r.sheet_id, addr));
+                }
+                Ok(values)
+            }
+            ArgValue::ReferenceUnion(_) => Err(Value::Error(ErrorKind::Value)),
+            ArgValue::Scalar(Value::Array(arr)) => Ok(arr.values),
+            ArgValue::Scalar(Value::Error(e)) => Err(Value::Error(e)),
+            ArgValue::Scalar(v) => Ok(vec![v]),
+        }
     }
 
-    let len = (rows_a as usize).saturating_mul(cols_a as usize);
-    let mut va = Vec::with_capacity(len);
-    let mut vb = Vec::with_capacity(len);
-    for addr in a.iter_cells() {
-        va.push(ctx.get_cell_value(a.sheet_id, addr));
-    }
-    for addr in b.iter_cells() {
-        vb.push(ctx.get_cell_value(b.sheet_id, addr));
-    }
+    let va = match arg_to_values(ctx, ctx.eval_arg(&args[0])) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let vb = match arg_to_values(ctx, ctx.eval_arg(&args[1])) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    // SUMPRODUCT broadcasts 1x1 scalars to the other array length.
+    let (va, vb) = match (va.len(), vb.len()) {
+        (0, _) | (_, 0) => return Value::Error(ErrorKind::Value),
+        (1, len) if len != 1 => (vec![va[0].clone(); len], vb),
+        (len, 1) if len != 1 => (va, vec![vb[0].clone(); len]),
+        _ => (va, vb),
+    };
 
     match crate::functions::math::sumproduct(&[&va, &vb]) {
         Ok(v) => Value::Number(v),
@@ -485,11 +534,20 @@ fn counta_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut total = 0u64;
     for arg in args {
         match ctx.eval_arg(arg) {
-            ArgValue::Scalar(v) => {
-                if !matches!(v, Value::Blank) {
-                    total += 1;
+            ArgValue::Scalar(v) => match v {
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        if !matches!(v, Value::Blank) {
+                            total += 1;
+                        }
+                    }
                 }
-            }
+                other => {
+                    if !matches!(other, Value::Blank) {
+                        total += 1;
+                    }
+                }
+            },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(r.sheet_id, addr);
@@ -531,11 +589,24 @@ fn countblank_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut total = 0u64;
     for arg in args {
         match ctx.eval_arg(arg) {
-            ArgValue::Scalar(v) => {
-                if matches!(v, Value::Blank) || matches!(v, Value::Text(ref s) if s.is_empty()) {
-                    total += 1;
+            ArgValue::Scalar(v) => match v {
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        if matches!(v, Value::Blank)
+                            || matches!(v, Value::Text(ref s) if s.is_empty())
+                        {
+                            total += 1;
+                        }
+                    }
                 }
-            }
+                other => {
+                    if matches!(other, Value::Blank)
+                        || matches!(other, Value::Text(ref s) if s.is_empty())
+                    {
+                        total += 1;
+                    }
+                }
+            },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(r.sheet_id, addr);
