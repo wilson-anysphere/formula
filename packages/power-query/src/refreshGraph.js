@@ -300,7 +300,7 @@ export class RefreshOrchestrator {
         id: `${sessionId}:graph`,
         queryId,
         reason,
-        queuedAt: new Date(),
+        queuedAt: new Date(this.now()),
       };
       this.emitter.emit(
         "event",
@@ -453,7 +453,7 @@ export class RefreshOrchestrator {
      * @param {string} id
      */
     const emitSyntheticCancelled = (id) => {
-      const now = new Date();
+      const now = new Date(this.now());
       const job = { id: `${sessionId}:cancel_${id}`, queryId: id, reason, queuedAt: now, completedAt: now };
       const phase = targetSet.has(id) ? "target" : "dependency";
       this.emitter.emit(
