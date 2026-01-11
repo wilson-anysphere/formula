@@ -12,6 +12,8 @@ test("extension-api types file exports the expected surface", async () => {
     "export namespace cells",
     "function getRange(ref: string): Promise<Range>;",
     "function setRange(ref: string, values: CellValue[][]): Promise<void>;",
+    "readonly sheets: Sheet[];",
+    "readonly activeSheet: Sheet;",
     "export namespace sheets",
     "function createSheet(name: string): Promise<Sheet>;",
     "function deleteSheet(name: string): Promise<void>;",
@@ -23,4 +25,3 @@ test("extension-api types file exports the expected surface", async () => {
     assert.ok(text.includes(fragment), `Missing declaration fragment: ${fragment}`);
   }
 });
-

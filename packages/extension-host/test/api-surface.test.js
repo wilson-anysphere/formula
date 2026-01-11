@@ -600,7 +600,12 @@ test("api surface: workbook.openWorkbook emits workbookOpened with stable payloa
 
   const workbookPath = path.join(dir, "Book1.xlsx");
   const result = await host.executeCommand(commandId, workbookPath);
-  assert.deepEqual(result.workbook, { name: "Book1.xlsx", path: workbookPath });
+  assert.deepEqual(result.workbook, {
+    name: "Book1.xlsx",
+    path: workbookPath,
+    sheets: [{ id: "sheet1", name: "Sheet1" }],
+    activeSheet: { id: "sheet1", name: "Sheet1" }
+  });
   assert.deepEqual(result.evt, { workbook: result.workbook });
 });
 
@@ -758,7 +763,14 @@ test("events: workbook.save emits beforeSave with stable payload", async (t) => 
   const workbookPath = path.join(dir, "Book2.xlsx");
   host.openWorkbook(workbookPath);
   const evt = await host.executeCommand(commandId);
-  assert.deepEqual(evt, { workbook: { name: "Book2.xlsx", path: workbookPath } });
+  assert.deepEqual(evt, {
+    workbook: {
+      name: "Book2.xlsx",
+      path: workbookPath,
+      sheets: [{ id: "sheet1", name: "Sheet1" }],
+      activeSheet: { id: "sheet1", name: "Sheet1" }
+    }
+  });
 });
 
 test("api surface: config.onDidChange fires after config.update and value persists", async (t) => {
@@ -890,8 +902,20 @@ test("api surface: workbook.saveAs updates workbook path and emits beforeSave", 
   const result = await host.executeCommand(commandId, nextPath);
 
   assert.deepEqual(result, {
-    evt: { workbook: { name: "Next.xlsx", path: nextPath } },
-    workbook: { name: "Next.xlsx", path: nextPath }
+    evt: {
+      workbook: {
+        name: "Next.xlsx",
+        path: nextPath,
+        sheets: [{ id: "sheet1", name: "Sheet1" }],
+        activeSheet: { id: "sheet1", name: "Sheet1" }
+      }
+    },
+    workbook: {
+      name: "Next.xlsx",
+      path: nextPath,
+      sheets: [{ id: "sheet1", name: "Sheet1" }],
+      activeSheet: { id: "sheet1", name: "Sheet1" }
+    }
   });
 });
 
@@ -962,8 +986,20 @@ test("api surface: workbook objects include save/saveAs/close helpers", async (t
   const result = await host.executeCommand(commandId, nextPath);
   assert.deepEqual(result, {
     hasMethods: { save: true, saveAs: true, close: true },
-    evt: { workbook: { name: "Next.xlsx", path: nextPath } },
-    updated: { name: "Next.xlsx", path: nextPath }
+    evt: {
+      workbook: {
+        name: "Next.xlsx",
+        path: nextPath,
+        sheets: [{ id: "sheet1", name: "Sheet1" }],
+        activeSheet: { id: "sheet1", name: "Sheet1" }
+      }
+    },
+    updated: {
+      name: "Next.xlsx",
+      path: nextPath,
+      sheets: [{ id: "sheet1", name: "Sheet1" }],
+      activeSheet: { id: "sheet1", name: "Sheet1" }
+    }
   });
 });
 
@@ -1024,8 +1060,20 @@ test("api surface: workbook.close resets to default workbook and emits workbookO
 
   const result = await host.executeCommand(commandId);
   assert.deepEqual(result, {
-    evt: { workbook: { name: "MockWorkbook", path: null } },
-    workbook: { name: "MockWorkbook", path: null }
+    evt: {
+      workbook: {
+        name: "MockWorkbook",
+        path: null,
+        sheets: [{ id: "sheet1", name: "Sheet1" }],
+        activeSheet: { id: "sheet1", name: "Sheet1" }
+      }
+    },
+    workbook: {
+      name: "MockWorkbook",
+      path: null,
+      sheets: [{ id: "sheet1", name: "Sheet1" }],
+      activeSheet: { id: "sheet1", name: "Sheet1" }
+    }
   });
 });
 

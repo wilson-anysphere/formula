@@ -70,6 +70,10 @@ class InMemorySpreadsheet {
     return { id: sheet.id, name: sheet.name };
   }
 
+  listSheets() {
+    return this._sheets.map((sheet) => ({ id: sheet.id, name: sheet.name }));
+  }
+
   getSheet(name) {
     const sheet = this._sheets.find((s) => s.name === String(name));
     if (!sheet) return undefined;

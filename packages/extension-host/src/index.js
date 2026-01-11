@@ -246,7 +246,24 @@ class ExtensionHost {
     await Promise.all(tasks);
 
     // Extensions that activate on startup should receive an initial workbook event.
-    this._broadcastEvent("workbookOpened", { workbook: this._workbook });
+    this._broadcastEvent("workbookOpened", { workbook: this._getWorkbookSnapshot() });
+  }
+
+  _getWorkbookSnapshot() {
+    const sheets =
+      typeof this._spreadsheet.listSheets === "function" ? this._spreadsheet.listSheets() : [];
+    const normalizedSheets = Array.isArray(sheets) ? sheets : [];
+    const activeSheet =
+      typeof this._spreadsheet.getActiveSheet === "function"
+        ? this._spreadsheet.getActiveSheet()
+        : normalizedSheets[0] ?? { id: "sheet1", name: "Sheet1" };
+
+    return {
+      name: this._workbook.name,
+      path: this._workbook.path,
+      sheets: normalizedSheets,
+      activeSheet
+    };
   }
 
   openWorkbook(workbookPath) {
@@ -256,14 +273,15 @@ class ExtensionHost {
         ? "MockWorkbook"
         : path.basename(workbookPathStr);
     this._workbook = { name, path: workbookPathStr };
-    this._broadcastEvent("workbookOpened", { workbook: this._workbook });
-    return this._workbook;
+    const workbook = this._getWorkbookSnapshot();
+    this._broadcastEvent("workbookOpened", { workbook });
+    return workbook;
   }
 
   saveWorkbook() {
     // Stub implementation: the application will eventually perform real persistence
     // and may await extensions for edits. For now we just emit a stable event payload.
-    this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    this._broadcastEvent("beforeSave", { workbook: this._getWorkbookSnapshot() });
     return true;
   }
 
@@ -275,7 +293,7 @@ class ExtensionHost {
 
     const name = path.basename(workbookPathStr);
     this._workbook = { name, path: workbookPathStr };
-    this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    this._broadcastEvent("beforeSave", { workbook: this._getWorkbookSnapshot() });
     return true;
   }
 
@@ -812,7 +830,7 @@ class ExtensionHost {
   async _executeApi(namespace, method, args, extension) {
     switch (`${namespace}.${method}`) {
       case "workbook.getActiveWorkbook":
-        return this._workbook;
+        return this._getWorkbookSnapshot();
       case "workbook.openWorkbook":
         return this.openWorkbook(args[0]);
       case "workbook.createWorkbook":

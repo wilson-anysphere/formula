@@ -173,7 +173,33 @@ class BrowserExtensionHost {
         // ignore
       }
     }
-    return this._workbook;
+    return this._getWorkbookSnapshot();
+  }
+
+  _getWorkbookSnapshot() {
+    const externalSheets =
+      typeof this._spreadsheet.listSheets === "function" ? this._spreadsheet.listSheets() : null;
+    const sheets = Array.isArray(externalSheets)
+      ? externalSheets.map((s) => ({ id: s.id, name: s.name }))
+      : Array.isArray(this._sheets)
+        ? this._sheets.map((s) => ({ id: s.id, name: s.name }))
+        : [];
+
+    const externalActiveSheet =
+      typeof this._spreadsheet.getActiveSheet === "function" ? this._spreadsheet.getActiveSheet() : null;
+    const activeSheet =
+      externalActiveSheet && typeof externalActiveSheet === "object"
+        ? { id: externalActiveSheet.id, name: externalActiveSheet.name }
+        : sheets.find((s) => s.id === this._activeSheetId) ??
+          sheets[0] ??
+          { id: "sheet1", name: "Sheet1" };
+
+    return {
+      name: this._workbook.name,
+      path: this._workbook.path,
+      sheets,
+      activeSheet
+    };
   }
 
   openWorkbook(workbookPath) {
@@ -183,13 +209,14 @@ class BrowserExtensionHost {
         ? "MockWorkbook"
         : workbookPathStr.split(/[/\\]/).pop() ?? workbookPathStr;
     this._workbook = { name, path: workbookPathStr };
-    this._broadcastEvent("workbookOpened", { workbook: this._workbook });
-    return this._workbook;
+    const workbook = this._getWorkbookSnapshot();
+    this._broadcastEvent("workbookOpened", { workbook });
+    return workbook;
   }
 
   saveWorkbook() {
     // Browser host stub mirrors the Node host: emit a stable payload for beforeSave.
-    this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    this._broadcastEvent("beforeSave", { workbook: this._getWorkbookSnapshot() });
     return true;
   }
 
@@ -201,7 +228,7 @@ class BrowserExtensionHost {
 
     const name = workbookPathStr.split(/[/\\]/).pop() ?? workbookPathStr;
     this._workbook = { name, path: workbookPathStr };
-    this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    this._broadcastEvent("beforeSave", { workbook: this._getWorkbookSnapshot() });
     return true;
   }
 

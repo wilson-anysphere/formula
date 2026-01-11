@@ -16,6 +16,8 @@ export interface ExtensionContext {
 export interface Workbook {
   readonly name: string;
   readonly path?: string | null;
+  readonly sheets: Sheet[];
+  readonly activeSheet: Sheet;
   save(): Promise<void>;
   saveAs(path: string): Promise<void>;
   close(): Promise<void>;

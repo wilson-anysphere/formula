@@ -212,6 +212,13 @@ function enhanceWorkbook(workbook) {
   if (!workbook || typeof workbook !== "object") return workbook;
   const obj = { ...workbook };
 
+  if (Array.isArray(obj.sheets)) {
+    obj.sheets = obj.sheets.map((sheet) => enhanceSheet(sheet));
+  }
+  if (obj.activeSheet && typeof obj.activeSheet === "object") {
+    obj.activeSheet = enhanceSheet(obj.activeSheet);
+  }
+
   return attachNonEnumerableMethods(obj, {
     async save() {
       await rpcCall("workbook", "save", []);
@@ -222,6 +229,12 @@ function enhanceWorkbook(workbook) {
       if (updated && typeof updated === "object") {
         obj.name = updated.name;
         obj.path = updated.path;
+        if (Array.isArray(updated.sheets)) {
+          obj.sheets = updated.sheets.map((sheet) => enhanceSheet(sheet));
+        }
+        if (updated.activeSheet && typeof updated.activeSheet === "object") {
+          obj.activeSheet = enhanceSheet(updated.activeSheet);
+        }
       }
     },
     async close() {
@@ -230,6 +243,12 @@ function enhanceWorkbook(workbook) {
       if (updated && typeof updated === "object") {
         obj.name = updated.name;
         obj.path = updated.path;
+        if (Array.isArray(updated.sheets)) {
+          obj.sheets = updated.sheets.map((sheet) => enhanceSheet(sheet));
+        }
+        if (updated.activeSheet && typeof updated.activeSheet === "object") {
+          obj.activeSheet = enhanceSheet(updated.activeSheet);
+        }
       }
     }
   });
@@ -573,13 +592,31 @@ const events = {
     return addEventHandler("cellChanged", callback);
   },
   onSheetActivated(callback) {
-    return addEventHandler("sheetActivated", callback);
+    return addEventHandler("sheetActivated", (e) => {
+      if (e && typeof e === "object" && e.sheet && typeof e.sheet === "object") {
+        callback({ ...e, sheet: enhanceSheet(e.sheet) });
+        return;
+      }
+      callback(e);
+    });
   },
   onWorkbookOpened(callback) {
-    return addEventHandler("workbookOpened", callback);
+    return addEventHandler("workbookOpened", (e) => {
+      if (e && typeof e === "object" && e.workbook && typeof e.workbook === "object") {
+        callback({ ...e, workbook: enhanceWorkbook(e.workbook) });
+        return;
+      }
+      callback(e);
+    });
   },
   onBeforeSave(callback) {
-    return addEventHandler("beforeSave", callback);
+    return addEventHandler("beforeSave", (e) => {
+      if (e && typeof e === "object" && e.workbook && typeof e.workbook === "object") {
+        callback({ ...e, workbook: enhanceWorkbook(e.workbook) });
+        return;
+      }
+      callback(e);
+    });
   },
   onViewActivated(callback) {
     return addEventHandler("viewActivated", callback);
