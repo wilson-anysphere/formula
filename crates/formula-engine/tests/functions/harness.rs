@@ -1,4 +1,5 @@
 use formula_engine::date::ExcelDateSystem;
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{Engine, Value};
 
 pub struct TestSheet {
@@ -18,6 +19,10 @@ impl TestSheet {
 
     pub fn set_date_system(&mut self, system: ExcelDateSystem) {
         self.engine.set_date_system(system);
+    }
+
+    pub fn set_value_locale(&mut self, locale: ValueLocaleConfig) {
+        self.engine.set_value_locale(locale);
     }
 
     pub fn set(&mut self, addr: &str, value: impl Into<Value>) {

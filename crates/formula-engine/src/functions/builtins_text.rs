@@ -1,4 +1,3 @@
-use crate::coercion::ValueLocaleConfig;
 use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
 use crate::functions::array_lift;
@@ -417,7 +416,7 @@ fn value_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
     let now_utc = ctx.now_utc();
     let system = ctx.date_system();
 

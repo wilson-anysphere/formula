@@ -30,7 +30,11 @@ pub fn parse_value_text(
     now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
-    match crate::functions::text::numbervalue(text, Some(cfg.decimal_separator), Some(cfg.group_separator)) {
+    match super::number::parse_number_strict(
+        text,
+        cfg.separators.decimal_sep,
+        Some(cfg.separators.thousands_sep),
+    ) {
         Ok(n) => return Ok(n),
         Err(ExcelError::Num) => return Err(ExcelError::Num),
         Err(ExcelError::Div0) => return Err(ExcelError::Div0),
@@ -173,16 +177,22 @@ fn parse_numeric_3part_date(parts: &[&str], cfg: ValueLocaleConfig) -> ExcelResu
     }
 
     match cfg.date_order {
-        DateOrder::Mdy => {
+        DateOrder::MDY => {
             let month = parse_u8_component(a)?;
             let day = parse_u8_component(b)?;
             let year = parse_year_component(c)?;
             Ok((year, month, day))
         }
-        DateOrder::Dmy => {
+        DateOrder::DMY => {
             let day = parse_u8_component(a)?;
             let month = parse_u8_component(b)?;
             let year = parse_year_component(c)?;
+            Ok((year, month, day))
+        }
+        DateOrder::YMD => {
+            let year = parse_year_component(a)?;
+            let month = parse_u8_component(b)?;
+            let day = parse_u8_component(c)?;
             Ok((year, month, day))
         }
     }
@@ -194,12 +204,12 @@ fn parse_numeric_2part_date(parts: &[&str], cfg: ValueLocaleConfig, now_year: i3
     let b = parts[1].trim();
 
     match cfg.date_order {
-        DateOrder::Mdy => {
+        DateOrder::MDY | DateOrder::YMD => {
             let month = parse_u8_component(a)?;
             let day = parse_u8_component(b)?;
             Ok((now_year, month, day))
         }
-        DateOrder::Dmy => {
+        DateOrder::DMY => {
             let day = parse_u8_component(a)?;
             let month = parse_u8_component(b)?;
             Ok((now_year, month, day))
@@ -526,7 +536,7 @@ mod tests {
     fn respects_dmy_order() {
         let now = Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap();
         let cfg = ValueLocaleConfig {
-            date_order: DateOrder::Dmy,
+            date_order: DateOrder::DMY,
             ..ValueLocaleConfig::en_us()
         };
         let serial =

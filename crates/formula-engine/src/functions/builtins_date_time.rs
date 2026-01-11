@@ -236,7 +236,7 @@ inventory::submit! {
 }
 
 fn hour_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
     map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
         Ok((h, _, _)) => Value::Number(h as f64),
         Err(e) => Value::Error(e),
@@ -258,7 +258,7 @@ inventory::submit! {
 }
 
 fn minute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
     map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
         Ok((_, m, _)) => Value::Number(m as f64),
         Err(e) => Value::Error(e),
@@ -280,7 +280,7 @@ inventory::submit! {
 }
 
 fn second_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
     map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
         Ok((_, _, s)) => Value::Number(s as f64),
         Err(e) => Value::Error(e),
@@ -302,7 +302,7 @@ inventory::submit! {
 }
 
 fn timevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
     map_unary(eval_scalar_arg(ctx, &args[0]), |v| match timevalue_from_value(&v, cfg) {
         Ok(n) => Value::Number(n),
         Err(e) => Value::Error(e),
@@ -326,7 +326,7 @@ inventory::submit! {
 fn datevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
     map_unary(eval_scalar_arg(ctx, &args[0]), |v| match datevalue_from_value(&v, system, cfg, now_utc) {
         Ok(n) => Value::Number(n as f64),
         Err(e) => Value::Error(e),
@@ -352,7 +352,7 @@ fn days_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let start_date = eval_scalar_arg(ctx, &args[1]);
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
     broadcast_map2(end_date, start_date, |end_date, start_date| {
         let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
             Ok(v) => v,
@@ -390,7 +390,7 @@ fn days360_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
 
     broadcast_map3(start_date, end_date, method, |start_date, end_date, method| {
         let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
@@ -436,7 +436,7 @@ fn yearfrac_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
 
     broadcast_map3(start_date, end_date, basis, |start_date, end_date, basis| {
         let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
@@ -484,7 +484,7 @@ fn datedif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let unit = eval_scalar_arg(ctx, &args[2]);
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
-    let cfg = ValueLocaleConfig::en_us();
+    let cfg = ctx.value_locale();
 
     broadcast_map3(start_date, end_date, unit, |start_date, end_date, unit| {
         let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {

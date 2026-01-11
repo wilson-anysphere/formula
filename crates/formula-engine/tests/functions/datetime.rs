@@ -1,4 +1,5 @@
 use formula_engine::date::ExcelDateSystem;
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
@@ -134,6 +135,18 @@ fn value_parses_datetime_text() {
         sheet.eval("=VALUE(\"2020-01-01 1:30 PM\")"),
         sheet.eval("=DATEVALUE(\"2020-01-01\")+TIMEVALUE(\"1:30 PM\")")
     );
+}
+
+#[test]
+fn value_locale_controls_numeric_and_date_order_parsing() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+
+    assert_eq!(
+        sheet.eval("=DATEVALUE(\"1/2/2020\")"),
+        sheet.eval("=DATE(2020,2,1)")
+    );
+    assert_number(&sheet.eval("=VALUE(\"1,5\")"), 1.5);
 }
 
 #[test]
