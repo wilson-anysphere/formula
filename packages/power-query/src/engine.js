@@ -2601,6 +2601,32 @@ export class QueryEngine {
   }
 
   /**
+   * @overload
+   * @param {Query} query
+   * @param {QueryExecutionContext} [context]
+   * @param {ExecuteOptions & {
+   *   batchSize?: number;
+   *   includeHeader?: boolean;
+   *   materialize: false;
+   *   onBatch: (batch: { rowOffset: number; values: unknown[][] }) => Promise<void> | void;
+   * }} options
+   * @returns {Promise<{ schema: SchemaInfo; rowCount: number; columnCount: number }>}
+   */
+
+  /**
+   * @overload
+   * @param {Query} query
+   * @param {QueryExecutionContext} [context]
+   * @param {ExecuteOptions & {
+   *   batchSize?: number;
+   *   includeHeader?: boolean;
+   *   materialize?: true;
+   *   onBatch: (batch: { rowOffset: number; values: unknown[][] }) => Promise<void> | void;
+   * }} options
+   * @returns {Promise<ITable>}
+   */
+
+  /**
    * Execute a query and stream the resulting grid batches to `onBatch`.
    *
    * This is intended for progressively populating a spreadsheet-like UI without needing to
