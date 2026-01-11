@@ -2,4 +2,6 @@ packages:
   - "apps/*"
   - "packages/*"
   - "packages/*/*"
+  # wasm-pack output (generated)
+  - "!packages/engine/pkg"
   - "services/*"
