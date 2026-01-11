@@ -29,7 +29,7 @@ function cellValueToPlainText(cell) {
     return value.text;
   }
 
-  if (typeof value === "string" && (value.startsWith("=") || value.startsWith("'"))) {
+  if (typeof value === "string" && (value.trimStart().startsWith("=") || value.startsWith("'"))) {
     // Escape TSV so we don't accidentally treat literal strings (e.g. "=literal") as formulas
     // when parsing the clipboard text back into a cell grid.
     return `'${value}`;
@@ -73,8 +73,9 @@ export function parseTsvToCellGrid(tsv) {
         return { value: raw.slice(1), formula: null, format: null };
       }
 
-      if (raw.startsWith("=") && raw.length > 1) {
-        return { value: null, formula: raw, format: null };
+      const trimmed = raw.trimStart();
+      if (trimmed.startsWith("=")) {
+        return { value: null, formula: trimmed, format: null };
       }
 
       const parsed = parseScalar(raw);

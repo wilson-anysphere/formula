@@ -46,7 +46,7 @@ function cellInputFromState(state) {
   // This scripting surface treats strings that start with "=" as formulas on write. To allow
   // round-tripping literal strings that start with "=", we re-add the leading apostrophe when
   // reading from the DocumentController (which strips it during input normalization).
-  if (typeof value === "string" && value.startsWith("=")) {
+  if (typeof value === "string" && value.trimStart().startsWith("=")) {
     return `'${value}`;
   }
   return value;

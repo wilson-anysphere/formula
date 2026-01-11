@@ -236,7 +236,7 @@ export function pasteClipboardContent(doc, sheetId, start, content, options = {}
       if (mode === "formats") return { format: cell.format ?? null };
 
       // mode === "all"
-      if (cell.formula != null) return { formula: cell.formula, format: cell.format ?? null };
+      if (cell.formula != null) return { formula: cell.formula, value: null, format: cell.format ?? null };
       return { value: cell.value ?? null, format: cell.format ?? null };
     })
   );

@@ -34,8 +34,9 @@ export function importCsvToCellGrid(csvText, options = {}) {
     return Array.from({ length: columnCount }, (_, col) => {
       const raw = row[col] ?? "";
 
-      if (raw.startsWith("=") && raw.length > 1) {
-        return { value: null, formula: raw, format: null };
+      const trimmed = raw.trimStart();
+      if (trimmed.startsWith("=")) {
+        return { value: null, formula: trimmed, format: null };
       }
 
       const parsed = parseCellWithColumnType(raw, columnTypes[col] ?? "string");
@@ -62,7 +63,7 @@ export function importCsvIntoDocument(doc, sheetId, start, csvText, options = {}
 
   const values = grid.map((row) =>
     row.map((cell) => {
-      if (cell.formula != null) return { formula: cell.formula, format: cell.format };
+      if (cell.formula != null) return { formula: cell.formula, value: null, format: cell.format };
       return { value: cell.value, format: cell.format };
     })
   );

@@ -33,6 +33,19 @@ test("CSV import infers column types and preserves header strings", () => {
   assert.equal(grid[1][3].format.numberFormat, "yyyy-mm-dd");
 });
 
+test("CSV import treats leading whitespace before '=' as a formula indicator", () => {
+  const csv = "col\n  =SUM(A1:A2)\n=\n";
+  const { grid } = importCsvToCellGrid(csv, { delimiter: "," });
+
+  assert.equal(grid[0][0].value, "col");
+
+  assert.equal(grid[1][0].formula, "=SUM(A1:A2)");
+  assert.equal(grid[1][0].value, null);
+
+  assert.equal(grid[2][0].formula, "=");
+  assert.equal(grid[2][0].value, null);
+});
+
 test("CSV export quotes fields when needed", () => {
   const csv = exportCellGridToCsv(
     [

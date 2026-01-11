@@ -15,6 +15,20 @@ test("clipboard TSV parses numbers, formulas, and trailing newline", () => {
   assert.equal(grid[1][1].value, null);
 });
 
+test("clipboard TSV treats leading whitespace before '=' as a formula indicator", () => {
+  const grid = parseTsvToCellGrid("  =SUM(A1:A2)");
+  assert.equal(grid.length, 1);
+  assert.equal(grid[0][0].formula, "=SUM(A1:A2)");
+  assert.equal(grid[0][0].value, null);
+});
+
+test("clipboard TSV treats bare '=' as a formula input (cleared by downstream normalization)", () => {
+  const grid = parseTsvToCellGrid("=");
+  assert.equal(grid.length, 1);
+  assert.equal(grid[0][0].formula, "=");
+  assert.equal(grid[0][0].value, null);
+});
+
 test("clipboard TSV serializes to tab-separated lines", () => {
   const tsv = serializeCellGridToTsv([
     [{ value: "A" }, { value: 1 }],
@@ -35,4 +49,13 @@ test("clipboard TSV serializes formulas and escapes leading '='/' in strings", (
   assert.equal(grid[0][0].formula, "=A1*2");
   assert.equal(grid[0][1].value, "=literal");
   assert.equal(grid[0][2].value, "'leading");
+});
+
+test("clipboard TSV escapes values that would otherwise look like formulas", () => {
+  const tsv = serializeCellGridToTsv([[{ value: " =literal" }]]);
+  assert.equal(tsv, "' =literal");
+
+  const grid = parseTsvToCellGrid(tsv);
+  assert.equal(grid[0][0].value, " =literal");
+  assert.equal(grid[0][0].formula, null);
 });

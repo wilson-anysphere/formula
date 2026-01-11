@@ -189,7 +189,7 @@ export function generatePythonMacro(actions) {
         let value = action.value;
         if (typeof value === "string") {
           const trimmed = value.trimStart();
-          if (!value.startsWith("'") && trimmed.startsWith("=") && trimmed.length > 1) {
+          if (!value.startsWith("'") && trimmed.startsWith("=")) {
             // Python treats single-cell strings that start with "=" as formulas. When the recorder
             // captured this as a *value* write, preserve it as literal text by prefixing Excel's
             // apostrophe escape.
