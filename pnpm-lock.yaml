@@ -68,6 +68,9 @@ importers:
       '@formula/fill-engine':
         specifier: workspace:*
         version: link:../../packages/fill-engine
+      '@formula/grid':
+        specifier: workspace:*
+        version: link:../../packages/grid
       '@formula/python-runtime':
         specifier: workspace:*
         version: link:../../packages/python-runtime

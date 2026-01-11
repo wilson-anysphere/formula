@@ -21,6 +21,7 @@
     "@formula/data-io": "workspace:*",
     "@formula/engine": "workspace:*",
     "@formula/fill-engine": "workspace:*",
+    "@formula/grid": "workspace:*",
     "@formula/python-runtime": "workspace:*",
     "@formula/scripting": "workspace:*",
     "@formula/spreadsheet-frontend": "workspace:*",

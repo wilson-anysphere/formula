@@ -1,8 +1,9 @@
 /**
  * Minimal audit logger for DLP/AI decisions.
  *
- * In production this would integrate with the enterprise audit log pipeline. Here we
- * keep the surface area small and deterministic for unit testing.
+ * NOTE: This module must run in both Node (unit tests) and browser-like runtimes
+ * (desktop/webview + Playwright). Keep it dependency-free and avoid importing
+ * Node-only CommonJS helpers.
  */
 const AUDIT_EVENT_SCHEMA_VERSION = 1;
 

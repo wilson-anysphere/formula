@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
   await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 }
 
@@ -16,6 +17,7 @@ async function toggleShowFormulas(page: import("@playwright/test").Page): Promis
 test.describe("show formulas", () => {
   test("renders computed values by default and toggles formula text via Ctrl/Cmd+`", async ({ page }) => {
     await gotoDesktop(page);
+    await waitForIdle(page);
 
     // Seed A1=1 and A2=2.
     await page.click("#grid", { position: { x: 53, y: 29 } });
@@ -56,6 +58,7 @@ test.describe("show formulas", () => {
 
   test("selection renderer keeps drawing ranges when endpoints are offscreen", async ({ page }) => {
     await gotoDesktop(page);
+    await waitForIdle(page);
 
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;

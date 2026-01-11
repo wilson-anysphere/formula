@@ -53,6 +53,10 @@ import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadshe
 import { shiftA1References } from "@formula/spreadsheet-frontend";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
+import type { CellRange as GridCellRange } from "@formula/grid";
+import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
+import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
+import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
@@ -242,6 +246,7 @@ export class SpreadsheetApp {
   private readonly idle = new IdleTracker();
   private readonly computedValues = new Map<string, SpreadsheetValue>();
   private uiReady = false;
+  private readonly gridMode: DesktopGridMode;
   private readonly engine = new IdleTrackingEngine(
     new MockEngine(),
     this.idle,
@@ -252,6 +257,10 @@ export class SpreadsheetApp {
   private readonly searchWorkbook = new DocumentWorkbookAdapter({ document: this.document });
   private readonly aiCellFunctions: AiCellFunctionEngine;
   private limits: GridLimits;
+  private sharedGrid: DesktopSharedGrid | null = null;
+  private sharedProvider: DocumentCellProvider | null = null;
+  private readonly commentMeta = new Map<string, { resolved: boolean }>();
+  private sharedGridSelectionSyncInProgress = false;
 
   private wasmEngine: EngineClient | null = null;
   private wasmSyncSuspended = false;
@@ -417,6 +426,7 @@ export class SpreadsheetApp {
       };
     } = {}
   ) {
+    this.gridMode = resolveDesktopGridMode();
     this.limits = opts.limits ?? { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 };
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
     this.currentUser = { id: "local", name: t("chat.role.user") };
@@ -582,6 +592,7 @@ export class SpreadsheetApp {
         if (next) this.selection = next;
         this.ensureActiveCellVisible();
         this.scrollCellIntoView(this.selection.active);
+        if (this.sharedGrid) this.syncSharedGridSelectionFromState();
         this.refresh();
         this.focus();
       },
@@ -613,16 +624,119 @@ export class SpreadsheetApp {
       auditStore: opts.inlineEdit?.auditStore
     });
 
-    this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e), { signal: this.domAbort.signal });
-    this.root.addEventListener("pointermove", (e) => this.onPointerMove(e), { signal: this.domAbort.signal });
-    this.root.addEventListener("pointerup", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
-    this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
-    this.root.addEventListener("pointerleave", () => {
-      this.hideCommentTooltip();
-      this.root.style.cursor = "";
-    }, { signal: this.domAbort.signal });
-    this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
-    this.root.addEventListener("wheel", (e) => this.onWheel(e), { passive: false, signal: this.domAbort.signal });
+    if (this.gridMode === "shared") {
+      const headerRows = 1;
+      const headerCols = 1;
+      this.sharedProvider = new DocumentCellProvider({
+        document: this.document,
+        getSheetId: () => this.sheetId,
+        headerRows,
+        headerCols,
+        rowCount: this.limits.maxRows + headerRows,
+        colCount: this.limits.maxCols + headerCols,
+        showFormulas: () => this.showFormulas,
+        getComputedValue: (cell) => this.getCellComputedValue(cell),
+        getCommentMeta: (cellRef) => this.commentMeta.get(cellRef) ?? null
+      });
+
+      this.sharedGrid = new DesktopSharedGrid({
+        container: this.root,
+        provider: this.sharedProvider,
+        rowCount: this.limits.maxRows + headerRows,
+        colCount: this.limits.maxCols + headerCols,
+        frozenRows: headerRows,
+        frozenCols: headerCols,
+        defaultRowHeight: this.cellHeight,
+        defaultColWidth: this.cellWidth,
+        enableResize: true,
+        enableKeyboard: false,
+        canvases: { grid: this.gridCanvas, content: this.referenceCanvas, selection: this.selectionCanvas },
+        scrollbars: {
+          vTrack: this.vScrollbarTrack,
+          vThumb: this.vScrollbarThumb,
+          hTrack: this.hScrollbarTrack,
+          hThumb: this.hScrollbarThumb
+        },
+        callbacks: {
+          onScroll: (scroll, viewport) => {
+            this.scrollX = scroll.x;
+            this.scrollY = scroll.y;
+            const frozenWidth = Math.min(viewport.frozenWidth, viewport.width);
+            const frozenHeight = Math.min(viewport.frozenHeight, viewport.height);
+            this.chartLayer.style.left = `${frozenWidth}px`;
+            this.chartLayer.style.top = `${frozenHeight}px`;
+            this.hideCommentTooltip();
+            this.renderCharts(false);
+            this.renderAuditing();
+            this.renderSelection();
+          },
+          onSelectionChange: () => {
+            if (this.sharedGridSelectionSyncInProgress) return;
+            this.syncSelectionFromSharedGrid();
+            this.updateStatus();
+          },
+          onSelectionRangeChange: () => {
+            if (this.sharedGridSelectionSyncInProgress) return;
+            this.syncSelectionFromSharedGrid();
+            this.updateStatus();
+          },
+          onRequestCellEdit: (request) => {
+            this.openEditorFromSharedGrid(request);
+          },
+          onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
+          onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
+          onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd()
+        }
+      });
+
+      // Match the legacy header sizing so existing click offsets and overlays stay aligned.
+      this.sharedGrid.renderer.setColWidth(0, this.rowHeaderWidth);
+      this.sharedGrid.renderer.setRowHeight(0, this.colHeaderHeight);
+
+      // Keep legacy overlay ordering: charts above cells, selection above charts.
+      this.chartLayer.style.zIndex = "2";
+      this.selectionCanvas.style.zIndex = "3";
+    }
+
+    if (this.gridMode === "shared") {
+      // Shared-grid mode uses the CanvasGridRenderer selection layer, but we still
+      // need pointer movement for comment tooltips.
+      this.root.addEventListener("pointermove", (e) => this.onSharedPointerMove(e), { signal: this.domAbort.signal });
+      this.root.addEventListener("pointerleave", () => this.hideCommentTooltip(), { signal: this.domAbort.signal });
+      this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
+    } else {
+      this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e), { signal: this.domAbort.signal });
+      this.root.addEventListener("pointermove", (e) => this.onPointerMove(e), { signal: this.domAbort.signal });
+      this.root.addEventListener("pointerup", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
+      this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
+      this.root.addEventListener(
+        "pointerleave",
+        () => {
+          this.hideCommentTooltip();
+          this.root.style.cursor = "";
+        },
+        { signal: this.domAbort.signal }
+      );
+      this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
+      this.root.addEventListener("wheel", (e) => this.onWheel(e), { passive: false, signal: this.domAbort.signal });
+
+      this.vScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "y"), {
+        passive: false,
+        signal: this.domAbort.signal
+      });
+      this.hScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "x"), {
+        passive: false,
+        signal: this.domAbort.signal
+      });
+      this.vScrollbarTrack.addEventListener("pointerdown", (e) => this.onScrollbarTrackPointerDown(e, "y"), {
+        passive: false,
+        signal: this.domAbort.signal
+      });
+      this.hScrollbarTrack.addEventListener("pointerdown", (e) => this.onScrollbarTrackPointerDown(e, "x"), {
+        passive: false,
+        signal: this.domAbort.signal
+      });
+    }
 
     // If the user copies/cuts from an input/contenteditable (formula bar, comments, etc),
     // the system clipboard content changes and any prior "internal copy" context used for
@@ -646,23 +760,6 @@ export class SpreadsheetApp {
         { signal: this.domAbort.signal }
       );
     }
-
-    this.vScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "y"), {
-      passive: false,
-      signal: this.domAbort.signal
-    });
-    this.hScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "x"), {
-      passive: false,
-      signal: this.domAbort.signal
-    });
-    this.vScrollbarTrack.addEventListener("pointerdown", (e) => this.onScrollbarTrackPointerDown(e, "y"), {
-      passive: false,
-      signal: this.domAbort.signal
-    });
-    this.hScrollbarTrack.addEventListener("pointerdown", (e) => this.onScrollbarTrackPointerDown(e, "x"), {
-      passive: false,
-      signal: this.domAbort.signal
-    });
 
     if (typeof window !== "undefined") {
       this.windowKeyDownListener = (e) => this.onWindowKeyDown(e);
@@ -699,6 +796,7 @@ export class SpreadsheetApp {
       this.formulaBar = new FormulaBarView(opts.formulaBar, {
         onBeginEdit: () => {
           this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
+          this.syncSharedGridInteractionMode();
         },
         onGoTo: (reference) => this.goTo(reference),
         onCommit: (text) => this.commitFormulaBar(text),
@@ -710,7 +808,22 @@ export class SpreadsheetApp {
                 end: { row: range.end.row, col: range.end.col }
               }
             : null;
-         this.renderReferencePreview();
+          if (this.sharedGrid) {
+            this.syncSharedGridInteractionMode();
+            if (range) {
+              const gridRange = this.gridRangeFromDocRange({
+                startRow: range.start.row,
+                endRow: range.end.row,
+                startCol: range.start.col,
+                endCol: range.end.col
+              });
+              this.sharedGrid.setRangeSelection(gridRange);
+            } else {
+              this.sharedGrid.clearRangeSelection();
+            }
+          } else {
+            this.renderReferencePreview();
+          }
         },
         onReferenceHighlights: (highlights) => {
           this.referenceHighlightsSource = highlights;
@@ -785,6 +898,10 @@ export class SpreadsheetApp {
 
     // Initial layout + render.
     this.onResize();
+    if (this.sharedGrid) {
+      // Ensure the shared renderer selection layer matches the app selection model.
+      this.syncSharedGridSelectionFromState();
+    }
     this.uiReady = true;
   }
 
@@ -796,6 +913,9 @@ export class SpreadsheetApp {
       this.commentsDocUpdateListener = null;
     }
     this.formulaBarCompletion?.destroy();
+    this.sharedGrid?.destroy();
+    this.sharedGrid = null;
+    this.sharedProvider = null;
     this.wasmUnsubscribe?.();
     this.wasmUnsubscribe = null;
     this.auditingUnsubscribe?.();
@@ -860,6 +980,11 @@ export class SpreadsheetApp {
   }
 
   async whenIdle(): Promise<void> {
+    // `wasmSyncPromise` and `auditingIdlePromise` are growing promise chains (see `enqueueWasmSync`
+    // and `scheduleAuditingUpdate`). While awaiting them, additional work can be appended
+    // (e.g. a batched `setCells` update queued after an engine apply). Loop until both
+    // chains stabilize so callers (notably Playwright) can reliably await the
+    // "no more background work pending" condition.
     while (true) {
       const wasm = this.wasmSyncPromise;
       const auditing = this.auditingIdlePromise;
@@ -886,6 +1011,40 @@ export class SpreadsheetApp {
 
   getScroll(): { x: number; y: number } {
     return { x: this.scrollX, y: this.scrollY };
+  }
+
+  getGridMode(): DesktopGridMode {
+    return this.gridMode;
+  }
+
+  /**
+   * Test-only helper: returns the viewport-relative rect for a cell address.
+   */
+  getCellRectA1(a1: string): { x: number; y: number; width: number; height: number } | null {
+    const cell = parseA1(a1);
+    const rect = this.getCellRect(cell);
+    if (!rect) return null;
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }
+
+  /**
+   * Returns grid renderer perf stats (shared grid only).
+   */
+  getGridPerfStats(): unknown {
+    if (!this.sharedGrid) return null;
+    const stats = this.sharedGrid.getPerfStats();
+    return {
+      enabled: stats.enabled,
+      lastFrameMs: stats.lastFrameMs,
+      cellsPainted: stats.cellsPainted,
+      cellFetches: stats.cellFetches,
+      dirtyRects: { ...stats.dirtyRects },
+      blitUsed: stats.blitUsed
+    };
+  }
+
+  setGridPerfStatsEnabled(enabled: boolean): void {
+    this.sharedGrid?.setPerfStatsEnabled(enabled);
   }
 
   addChart(spec: CreateChartSpec): CreateChartResult {
@@ -1085,6 +1244,14 @@ export class SpreadsheetApp {
     this.renderGrid();
     this.renderCharts(true);
     this.renderReferencePreview();
+    if (this.sharedGrid) {
+      // Switching sheets updates the provider data source but does not emit document
+      // changes. Force a full redraw so the CanvasGridRenderer pulls from the new
+      // sheet's data.
+      this.sharedProvider?.invalidateAll();
+      this.syncSharedGridSelectionFromState();
+    }
+    this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
   }
@@ -1101,12 +1268,14 @@ export class SpreadsheetApp {
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
       this.renderGrid();
       this.renderCharts(true);
+      this.sharedProvider?.invalidateAll();
       sheetChanged = true;
     }
     this.selection = setActiveCell(this.selection, { row: target.row, col: target.col }, this.limits);
     this.ensureActiveCellVisible();
     const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (didScroll) this.ensureViewportMappingCurrent();
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
@@ -1130,6 +1299,7 @@ export class SpreadsheetApp {
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
       this.renderGrid();
       this.renderCharts(true);
+      this.sharedProvider?.invalidateAll();
       sheetChanged = true;
     }
     const active = { row: target.range.startRow, col: target.range.startCol };
@@ -1144,7 +1314,8 @@ export class SpreadsheetApp {
     // become "lost" offscreen.
     const didScrollCell = this.scrollCellIntoView(this.selection.active);
     const didScroll = didScrollRange || didScrollCell;
-    if (didScroll) this.ensureViewportMappingCurrent();
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
@@ -1169,6 +1340,185 @@ export class SpreadsheetApp {
     return () => this.selectionListeners.delete(listener);
   }
 
+  private sharedHeaderRows(): number {
+    return this.sharedGrid ? 1 : 0;
+  }
+
+  private sharedHeaderCols(): number {
+    return this.sharedGrid ? 1 : 0;
+  }
+
+  private docCellFromGridCell(cell: { row: number; col: number }): CellCoord {
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    return { row: Math.max(0, cell.row - headerRows), col: Math.max(0, cell.col - headerCols) };
+  }
+
+  private gridCellFromDocCell(cell: CellCoord): { row: number; col: number } {
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    return { row: cell.row + headerRows, col: cell.col + headerCols };
+  }
+
+  private gridRangeFromDocRange(range: Range): GridCellRange {
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    return {
+      startRow: range.startRow + headerRows,
+      endRow: range.endRow + headerRows + 1,
+      startCol: range.startCol + headerCols,
+      endCol: range.endCol + headerCols + 1
+    };
+  }
+
+  private docRangeFromGridRange(range: GridCellRange): Range {
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    return {
+      startRow: Math.max(0, range.startRow - headerRows),
+      endRow: Math.max(0, range.endRow - headerRows - 1),
+      startCol: Math.max(0, range.startCol - headerCols),
+      endCol: Math.max(0, range.endCol - headerCols - 1)
+    };
+  }
+
+  private syncSelectionFromSharedGrid(): void {
+    if (!this.sharedGrid) return;
+    const selection = this.sharedGrid.renderer.getSelection();
+    const ranges = this.sharedGrid.renderer.getSelectionRanges();
+    const activeIndex = this.sharedGrid.renderer.getActiveSelectionIndex();
+
+    if (!selection || ranges.length === 0) {
+      this.selection = createSelection({ row: 0, col: 0 }, this.limits);
+      return;
+    }
+
+    const docActive = this.docCellFromGridCell(selection);
+    const docRanges = ranges.map((r) => this.docRangeFromGridRange(r));
+    const activeRangeIndex = Math.max(0, Math.min(docRanges.length - 1, activeIndex));
+    const anchor = { ...docActive };
+
+    this.selection = buildSelection(
+      {
+        ranges: docRanges,
+        active: docActive,
+        anchor,
+        activeRangeIndex
+      },
+      this.limits
+    );
+  }
+
+  private syncSharedGridSelectionFromState(): void {
+    if (!this.sharedGrid) return;
+    const gridRanges = this.selection.ranges.map((r) => this.gridRangeFromDocRange(r));
+    const gridActive = this.gridCellFromDocCell(this.selection.active);
+    this.sharedGridSelectionSyncInProgress = true;
+    try {
+      this.sharedGrid.setSelectionRanges(gridRanges, { activeIndex: this.selection.activeRangeIndex, activeCell: gridActive });
+      this.scrollX = this.sharedGrid.getScroll().x;
+      this.scrollY = this.sharedGrid.getScroll().y;
+    } finally {
+      this.sharedGridSelectionSyncInProgress = false;
+    }
+  }
+
+  private openEditorFromSharedGrid(request: { row: number; col: number; initialKey?: string }): void {
+    if (!this.sharedGrid) return;
+    if (this.editor.isOpen()) return;
+    const docCell = this.docCellFromGridCell({ row: request.row, col: request.col });
+    const rect = this.sharedGrid.getCellRect(request.row, request.col);
+    if (!rect) return;
+    const initialValue = request.initialKey ?? this.getCellInputText(docCell);
+    this.editor.open(docCell, rect, initialValue, { cursor: "end" });
+  }
+
+  private syncSharedGridInteractionMode(): void {
+    if (!this.sharedGrid) return;
+    const mode = this.formulaBar?.isFormulaEditing() ? "rangeSelection" : "default";
+    this.sharedGrid.setInteractionMode(mode);
+  }
+
+  private onSharedRangeSelectionStart(range: GridCellRange): void {
+    if (!this.formulaBar) return;
+    this.syncSharedGridInteractionMode();
+    const docRange = this.docRangeFromGridRange(range);
+    const rangeSheetId = this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+    this.formulaBar.beginRangeSelection({
+      start: { row: docRange.startRow, col: docRange.startCol },
+      end: { row: docRange.endRow, col: docRange.endCol }
+    }, rangeSheetId);
+  }
+
+  private onSharedRangeSelectionChange(range: GridCellRange): void {
+    if (!this.formulaBar) return;
+    this.syncSharedGridInteractionMode();
+    const docRange = this.docRangeFromGridRange(range);
+    const rangeSheetId = this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+    this.formulaBar.updateRangeSelection({
+      start: { row: docRange.startRow, col: docRange.startCol },
+      end: { row: docRange.endRow, col: docRange.endCol }
+    }, rangeSheetId);
+  }
+
+  private onSharedRangeSelectionEnd(): void {
+    if (!this.formulaBar) return;
+    this.formulaBar.endRangeSelection();
+    this.formulaBar.focus();
+  }
+
+  private onSharedPointerMove(e: PointerEvent): void {
+    if (!this.sharedGrid) return;
+    if (this.commentsPanelVisible) {
+      this.hideCommentTooltip();
+      return;
+    }
+    if (this.editor.isOpen()) {
+      this.hideCommentTooltip();
+      return;
+    }
+    if (e.buttons !== 0) {
+      this.hideCommentTooltip();
+      return;
+    }
+
+    const rootRect = this.root.getBoundingClientRect();
+    const x = e.clientX - rootRect.left;
+    const y = e.clientY - rootRect.top;
+    if (x < 0 || y < 0 || x > rootRect.width || y > rootRect.height) {
+      this.hideCommentTooltip();
+      return;
+    }
+
+    const canvasRect = this.selectionCanvas.getBoundingClientRect();
+    const vx = e.clientX - canvasRect.left;
+    const vy = e.clientY - canvasRect.top;
+    const picked = this.sharedGrid.renderer.pickCellAt(vx, vy);
+    if (!picked) {
+      this.hideCommentTooltip();
+      return;
+    }
+
+    const docCell = this.docCellFromGridCell(picked);
+    const cellRef = cellToA1(docCell);
+    if (!this.commentCells.has(cellRef)) {
+      this.hideCommentTooltip();
+      return;
+    }
+
+    const comments = this.commentManager.listForCell(cellRef);
+    const preview = comments[0]?.content ?? "";
+    if (!preview) {
+      this.hideCommentTooltip();
+      return;
+    }
+
+    this.commentTooltip.textContent = preview;
+    this.commentTooltip.style.left = `${x + 12}px`;
+    this.commentTooltip.style.top = `${y + 12}px`;
+    this.commentTooltip.style.display = "block";
+  }
+
   private goTo(reference: string): void {
     try {
       const parsed = parseGoTo(reference, { workbook: this.searchWorkbook, currentSheetName: this.sheetId });
@@ -1189,11 +1539,6 @@ export class SpreadsheetApp {
     await this.whenIdle();
     const cell = parseA1(a1);
     return this.getCellDisplayValue(cell);
-  }
-
-  getCellRectA1(a1: string): { x: number; y: number; width: number; height: number } | null {
-    const cell = parseA1(a1);
-    return this.getCellRect(cell);
   }
 
   getFillHandleRect(): { x: number; y: number; width: number; height: number } | null {
@@ -1459,9 +1804,20 @@ export class SpreadsheetApp {
 
   private reindexCommentCells(): void {
     this.commentCells.clear();
+    this.commentMeta.clear();
     for (const comment of this.commentManager.listAll()) {
       this.commentCells.add(comment.cellRef);
+      const existing = this.commentMeta.get(comment.cellRef);
+      if (!existing) {
+        this.commentMeta.set(comment.cellRef, { resolved: Boolean(comment.resolved) });
+      } else {
+        // Treat the cell as resolved only if all comment threads on the cell are resolved.
+        existing.resolved = existing.resolved && Boolean(comment.resolved);
+      }
     }
+
+    // The shared renderer caches cell metadata, so comment indicator updates require a provider invalidation.
+    this.sharedProvider?.invalidateAll();
   }
 
   private renderCommentsPanel(): void {
@@ -1605,6 +1961,40 @@ export class SpreadsheetApp {
     this.height = rect.height;
     this.dpr = window.devicePixelRatio || 1;
 
+    if (this.sharedGrid) {
+      // The shared grid owns the main canvas layers, but we still render auditing overlays
+      // on a separate canvas (and keep chart DOM overlays positioned relative to the frozen headers).
+      this.auditingCanvas.width = Math.floor(this.width * this.dpr);
+      this.auditingCanvas.height = Math.floor(this.height * this.dpr);
+      this.auditingCanvas.style.width = `${this.width}px`;
+      this.auditingCanvas.style.height = `${this.height}px`;
+      this.auditingCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.auditingCtx.scale(this.dpr, this.dpr);
+
+      this.sharedGrid.resize(this.width, this.height, this.dpr);
+      const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+      const frozenWidth = Math.min(viewport.frozenWidth, viewport.width);
+      const frozenHeight = Math.min(viewport.frozenHeight, viewport.height);
+
+      // Charts should scroll with the grid but stay clipped under headers.
+      this.chartLayer.style.left = `${frozenWidth}px`;
+      this.chartLayer.style.top = `${frozenHeight}px`;
+      this.chartLayer.style.right = "0";
+      this.chartLayer.style.bottom = "0";
+      this.chartLayer.style.overflow = "hidden";
+
+      // Keep our legacy scroll coordinates in sync for chart positioning helpers.
+      const scroll = this.sharedGrid.getScroll();
+      this.scrollX = scroll.x;
+      this.scrollY = scroll.y;
+
+      this.renderCharts(true);
+      this.renderAuditing();
+      this.renderSelection();
+      this.updateStatus();
+      return;
+    }
+
     for (const canvas of [this.gridCanvas, this.referenceCanvas, this.auditingCanvas, this.selectionCanvas]) {
       canvas.width = Math.floor(this.width * this.dpr);
       canvas.height = Math.floor(this.height * this.dpr);
@@ -1637,6 +2027,12 @@ export class SpreadsheetApp {
   }
 
   private renderGrid(): void {
+    if (this.sharedGrid) {
+      // Shared-grid mode renders via CanvasGridRenderer. The legacy renderer must
+      // not clear or paint over the canvases.
+      return;
+    }
+
     this.ensureViewportMappingCurrent();
 
     const ctx = this.gridCtx;
@@ -1863,17 +2259,71 @@ export class SpreadsheetApp {
       width = emuToPx(anchor.cxEmu);
       height = emuToPx(anchor.cyEmu);
     } else if (anchor.kind === "oneCell") {
-      left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu);
-      top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu);
-      width = emuToPx(anchor.cxEmu);
-      height = emuToPx(anchor.cyEmu);
+      if (this.sharedGrid) {
+        const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+        const headerRows = this.sharedHeaderRows();
+        const headerCols = this.sharedHeaderCols();
+        const gridRow = anchor.fromRow + headerRows;
+        const gridCol = anchor.fromCol + headerCols;
+        const { rowCount, colCount } = this.sharedGrid.renderer.scroll.getCounts();
+        if (gridRow < 0 || gridRow >= rowCount || gridCol < 0 || gridCol >= colCount) return null;
+
+        left =
+          this.sharedGrid.renderer.scroll.cols.positionOf(gridCol) -
+          viewport.frozenWidth +
+          emuToPx(anchor.fromColOffEmu ?? 0);
+        top =
+          this.sharedGrid.renderer.scroll.rows.positionOf(gridRow) -
+          viewport.frozenHeight +
+          emuToPx(anchor.fromRowOffEmu ?? 0);
+        width = emuToPx(anchor.cxEmu ?? 0);
+        height = emuToPx(anchor.cyEmu ?? 0);
+      } else {
+        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu);
+        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu);
+        width = emuToPx(anchor.cxEmu);
+        height = emuToPx(anchor.cyEmu);
+      }
     } else if (anchor.kind === "twoCell") {
-      left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu);
-      top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu);
-      const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToPx(anchor.toColOffEmu);
-      const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToPx(anchor.toRowOffEmu);
-      width = Math.max(0, right - left);
-      height = Math.max(0, bottom - top);
+      if (this.sharedGrid) {
+        const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+        const headerRows = this.sharedHeaderRows();
+        const headerCols = this.sharedHeaderCols();
+        const fromRow = anchor.fromRow + headerRows;
+        const fromCol = anchor.fromCol + headerCols;
+        const toRow = anchor.toRow + headerRows;
+        const toCol = anchor.toCol + headerCols;
+        const { rowCount, colCount } = this.sharedGrid.renderer.scroll.getCounts();
+        if (fromRow < 0 || fromRow >= rowCount || toRow < 0 || toRow >= rowCount) return null;
+        if (fromCol < 0 || fromCol >= colCount || toCol < 0 || toCol >= colCount) return null;
+
+        left =
+          this.sharedGrid.renderer.scroll.cols.positionOf(fromCol) -
+          viewport.frozenWidth +
+          emuToPx(anchor.fromColOffEmu ?? 0);
+        top =
+          this.sharedGrid.renderer.scroll.rows.positionOf(fromRow) -
+          viewport.frozenHeight +
+          emuToPx(anchor.fromRowOffEmu ?? 0);
+        const right =
+          this.sharedGrid.renderer.scroll.cols.positionOf(toCol) -
+          viewport.frozenWidth +
+          emuToPx(anchor.toColOffEmu ?? 0);
+        const bottom =
+          this.sharedGrid.renderer.scroll.rows.positionOf(toRow) -
+          viewport.frozenHeight +
+          emuToPx(anchor.toRowOffEmu ?? 0);
+
+        width = Math.max(0, right - left);
+        height = Math.max(0, bottom - top);
+      } else {
+        left = this.visualIndexForCol(anchor.fromCol) * this.cellWidth + emuToPx(anchor.fromColOffEmu);
+        top = this.visualIndexForRow(anchor.fromRow) * this.cellHeight + emuToPx(anchor.fromRowOffEmu);
+        const right = this.visualIndexForCol(anchor.toCol) * this.cellWidth + emuToPx(anchor.toColOffEmu);
+        const bottom = this.visualIndexForRow(anchor.toRow) * this.cellHeight + emuToPx(anchor.toRowOffEmu);
+        width = Math.max(0, right - left);
+        height = Math.max(0, bottom - top);
+      }
     } else {
       return null;
     }
@@ -1980,6 +2430,17 @@ export class SpreadsheetApp {
   }
 
   private renderSelection(): void {
+    if (this.sharedGrid) {
+      // Selection rendering is handled by the shared CanvasGridRenderer selection layer.
+      // We still need to keep the in-place editor aligned when the viewport scrolls or resizes.
+      if (this.editor.isOpen()) {
+        const gridCell = this.gridCellFromDocCell(this.selection.active);
+        const rect = this.sharedGrid.getCellRect(gridCell.row, gridCell.col);
+        if (rect) this.editor.reposition(rect);
+      }
+      return;
+    }
+
     this.ensureViewportMappingCurrent();
     const clipRect = {
       x: this.rowHeaderWidth,
@@ -2082,6 +2543,7 @@ export class SpreadsheetApp {
 
     e.preventDefault();
     this.showFormulas = !this.showFormulas;
+    this.sharedProvider?.invalidateAll();
     this.refresh();
     return true;
   }
@@ -2322,10 +2784,20 @@ export class SpreadsheetApp {
   }
 
   private viewportWidth(): number {
+    if (this.sharedGrid) {
+      const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+      const frozenWidth = Math.min(viewport.frozenWidth, viewport.width);
+      return Math.max(0, viewport.width - frozenWidth);
+    }
     return Math.max(0, this.width - this.rowHeaderWidth);
   }
 
   private viewportHeight(): number {
+    if (this.sharedGrid) {
+      const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+      const frozenHeight = Math.min(viewport.frozenHeight, viewport.height);
+      return Math.max(0, viewport.height - frozenHeight);
+    }
     return Math.max(0, this.height - this.colHeaderHeight);
   }
 
@@ -2338,14 +2810,26 @@ export class SpreadsheetApp {
   }
 
   private maxScrollX(): number {
+    if (this.sharedGrid) {
+      return this.sharedGrid.renderer.scroll.getViewportState().maxScrollX;
+    }
     return Math.max(0, this.contentWidth() - this.viewportWidth());
   }
 
   private maxScrollY(): number {
+    if (this.sharedGrid) {
+      return this.sharedGrid.renderer.scroll.getViewportState().maxScrollY;
+    }
     return Math.max(0, this.contentHeight() - this.viewportHeight());
   }
 
   private clampScroll(): void {
+    if (this.sharedGrid) {
+      const scroll = this.sharedGrid.getScroll();
+      this.scrollX = scroll.x;
+      this.scrollY = scroll.y;
+      return;
+    }
     const maxX = this.maxScrollX();
     const maxY = this.maxScrollY();
     this.scrollX = Math.min(Math.max(0, this.scrollX), maxX);
@@ -2353,6 +2837,15 @@ export class SpreadsheetApp {
   }
 
   private setScroll(nextX: number, nextY: number): boolean {
+    if (this.sharedGrid) {
+      const before = this.sharedGrid.getScroll();
+      this.sharedGrid.scrollTo(nextX, nextY);
+      const after = this.sharedGrid.getScroll();
+      this.scrollX = after.x;
+      this.scrollY = after.y;
+      return before.x !== after.x || before.y !== after.y;
+    }
+
     const prevX = this.scrollX;
     const prevY = this.scrollY;
     this.scrollX = nextX;
@@ -2441,6 +2934,10 @@ export class SpreadsheetApp {
   }
 
   private syncScrollbars(): void {
+    if (this.sharedGrid) {
+      this.sharedGrid.syncScrollbars();
+      return;
+    }
     const maxX = this.maxScrollX();
     const maxY = this.maxScrollY();
     const showH = maxX > 0;
@@ -2596,6 +3093,16 @@ export class SpreadsheetApp {
   }
 
   private scrollCellIntoView(cell: CellCoord, paddingPx = 8): boolean {
+    if (this.sharedGrid) {
+      const before = this.sharedGrid.getScroll();
+      const gridCell = this.gridCellFromDocCell(cell);
+      this.sharedGrid.scrollToCell(gridCell.row, gridCell.col, { align: "auto", padding: paddingPx });
+      const after = this.sharedGrid.getScroll();
+      this.scrollX = after.x;
+      this.scrollY = after.y;
+      return before.x !== after.x || before.y !== after.y;
+    }
+
     const visualRow = this.rowToVisual.get(cell.row);
     const visualCol = this.colToVisual.get(cell.col);
     if (visualRow === undefined || visualCol === undefined) return false;
@@ -2629,6 +3136,21 @@ export class SpreadsheetApp {
   }
 
   private scrollRangeIntoView(range: Range, paddingPx = 8): boolean {
+    if (this.sharedGrid) {
+      const before = this.sharedGrid.getScroll();
+      const start = this.gridCellFromDocCell({ row: range.startRow, col: range.startCol });
+      const end = this.gridCellFromDocCell({ row: range.endRow, col: range.endCol });
+      const pad = Math.max(0, paddingPx);
+      // Best-effort: attempt to bring both the start and end cells into view.
+      // If the range is larger than the viewport this will still keep the active cell visible.
+      this.sharedGrid.scrollToCell(start.row, start.col, { align: "start", padding: pad });
+      this.sharedGrid.scrollToCell(end.row, end.col, { align: "end", padding: pad });
+      const after = this.sharedGrid.getScroll();
+      this.scrollX = after.x;
+      this.scrollY = after.y;
+      return before.x !== after.x || before.y !== after.y;
+    }
+
     const startRow = Math.max(0, Math.min(this.limits.maxRows - 1, range.startRow));
     const endRow = Math.max(0, Math.min(this.limits.maxRows - 1, range.endRow));
     const startCol = Math.max(0, Math.min(this.limits.maxCols - 1, range.startCol));
@@ -2773,6 +3295,7 @@ export class SpreadsheetApp {
     this.rebuildAxisVisibilityCache();
     this.ensureActiveCellVisible();
     this.scrollCellIntoView(this.selection.active);
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
     this.refresh();
     this.focus();
   }
@@ -2889,6 +3412,14 @@ export class SpreadsheetApp {
   }
 
   private getCellRect(cell: CellCoord) {
+    if (this.sharedGrid) {
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+      const gridRow = cell.row + headerRows;
+      const gridCol = cell.col + headerCols;
+      return this.sharedGrid.getCellRect(gridRow, gridCol);
+    }
+
     if (cell.row < 0 || cell.row >= this.limits.maxRows) return null;
     if (cell.col < 0 || cell.col >= this.limits.maxCols) return null;
 
@@ -3510,6 +4041,7 @@ export class SpreadsheetApp {
     if (primary && (e.key === "a" || e.key === "A")) {
       e.preventDefault();
       this.selection = selectAll(this.limits);
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
       this.renderSelection();
       this.updateStatus();
       return;
@@ -3519,6 +4051,7 @@ export class SpreadsheetApp {
       // Ctrl+Space selects entire column.
       e.preventDefault();
       this.selection = selectColumns(this.selection, this.selection.active.col, this.selection.active.col, {}, this.limits);
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
       this.renderSelection();
       this.updateStatus();
       return;
@@ -3528,6 +4061,7 @@ export class SpreadsheetApp {
       // Shift+Space selects entire row.
       e.preventDefault();
       this.selection = selectRows(this.selection, this.selection.active.row, this.selection.active.row, {}, this.limits);
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
       this.renderSelection();
       this.updateStatus();
       return;
@@ -3598,7 +4132,8 @@ export class SpreadsheetApp {
 
       this.ensureActiveCellVisible();
       const didScroll = this.scrollCellIntoView(this.selection.active);
-      if (didScroll) this.ensureViewportMappingCurrent();
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+      else if (didScroll) this.ensureViewportMappingCurrent();
       this.renderSelection();
       this.updateStatus();
       if (didScroll) this.refresh("scroll");
@@ -3621,7 +4156,8 @@ export class SpreadsheetApp {
         : setActiveCell(this.selection, { row, col }, this.limits);
       this.ensureActiveCellVisible();
       const didScroll = this.scrollCellIntoView(this.selection.active);
-      if (didScroll) this.ensureViewportMappingCurrent();
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+      else if (didScroll) this.ensureViewportMappingCurrent();
       this.renderSelection();
       this.updateStatus();
       if (didScroll) this.refresh("scroll");
@@ -3651,7 +4187,8 @@ export class SpreadsheetApp {
     e.preventDefault();
     this.selection = next;
     const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (didScroll) this.ensureViewportMappingCurrent();
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
     if (didScroll) this.refresh("scroll");
@@ -3990,6 +4527,8 @@ export class SpreadsheetApp {
       }
 
       let value = ref.value;
+      // Some engine implementations omit `value` entirely to represent an empty cell.
+      // Treat missing values as null so we don't keep stale computed results around.
       if (value === undefined) value = null;
       if (value !== null && typeof value !== "number" && typeof value !== "string" && typeof value !== "boolean") {
         continue;
@@ -4094,6 +4633,11 @@ export class SpreadsheetApp {
     this.referenceHighlights = [];
     this.referenceHighlightsSource = [];
 
+    if (this.sharedGrid) {
+      this.syncSharedGridInteractionMode();
+      this.sharedGrid.clearRangeSelection();
+    }
+
     // Restore focus + selection to the original edit cell, even if the user
     // navigated to another sheet while picking ranges.
     this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
@@ -4108,6 +4652,11 @@ export class SpreadsheetApp {
     this.referenceHighlights = [];
     this.referenceHighlightsSource = [];
 
+    if (this.sharedGrid) {
+      this.syncSharedGridInteractionMode();
+      this.sharedGrid.clearRangeSelection();
+    }
+
     if (target) {
       // Restore the original edit location (sheet + cell).
       this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
@@ -4115,6 +4664,10 @@ export class SpreadsheetApp {
       return;
     }
 
+    this.ensureActiveCellVisible();
+    const didScroll = this.scrollCellIntoView(this.selection.active);
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
@@ -4151,6 +4704,12 @@ export class SpreadsheetApp {
   }
 
   private renderReferencePreview(): void {
+    if (this.sharedGrid) {
+      // Reference previews are rendered via the shared grid's `rangeSelection` overlay.
+      // The legacy implementation paints onto the content canvas, which would clobber cell text.
+      return;
+    }
+
     const ctx = this.referenceCtx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
