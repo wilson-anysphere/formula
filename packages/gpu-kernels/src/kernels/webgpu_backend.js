@@ -91,15 +91,15 @@ export class WebGpuBackend {
  *    reduceMin_f32: GPUComputePipeline,
  *    reduceMax_f32: GPUComputePipeline,
  *    reduceSumproduct_f32: GPUComputePipeline,
- *    groupByClear: GPUComputePipeline,
- *    groupByCount: GPUComputePipeline,
- *    groupBySum_f32: GPUComputePipeline,
- *    groupByMin_f32: GPUComputePipeline,
- *    groupByMax_f32: GPUComputePipeline,
- *    hashJoinClear: GPUComputePipeline,
- *    hashJoinBuild: GPUComputePipeline,
- *    hashJoinCount: GPUComputePipeline,
- *    hashJoinFill: GPUComputePipeline,
+ *    groupByClear?: GPUComputePipeline,
+ *    groupByCount?: GPUComputePipeline,
+ *    groupBySum_f32?: GPUComputePipeline,
+ *    groupByMin_f32?: GPUComputePipeline,
+ *    groupByMax_f32?: GPUComputePipeline,
+ *    hashJoinClear?: GPUComputePipeline,
+ *    hashJoinBuild?: GPUComputePipeline,
+ *    hashJoinCount?: GPUComputePipeline,
+ *    hashJoinFill?: GPUComputePipeline,
  *    mmult_f32: GPUComputePipeline,
  *    histogram_f32: GPUComputePipeline,
  *    bitonicSort_f32: GPUComputePipeline,
@@ -146,40 +146,14 @@ export class WebGpuBackend {
       }
       supportsF64 = supportsF64 && (device.features?.has?.("shader-f64") ?? false);
 
-      const [
-        reduceSumSrc,
-        reduceMinSrc,
-        reduceMaxSrc,
-        reduceSumproductSrc,
-        mmultSrc,
-        histogramSrc,
-        bitonicSortSrc,
-        groupByClearSrc,
-        groupByCountSrc,
-        groupBySumSrc,
-        groupByMinSrc,
-        groupByMaxSrc,
-        hashJoinClearSrc,
-        hashJoinBuildSrc,
-        hashJoinCountSrc,
-        hashJoinFillSrc
-      ] = await Promise.all([
+      const [reduceSumSrc, reduceMinSrc, reduceMaxSrc, reduceSumproductSrc, mmultSrc, histogramSrc, bitonicSortSrc] = await Promise.all([
         loadTextResource(new URL("./wgsl/reduce_sum.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_min.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_max.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_sumproduct.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/mmult.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/histogram.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/bitonic_sort.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/groupby_clear.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/groupby_count.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/groupby_sum_f32.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/groupby_min_f32.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/groupby_max_f32.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/hash_join_clear.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/hash_join_build.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/hash_join_count.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/hash_join_fill.wgsl", import.meta.url))
+        loadTextResource(new URL("./wgsl/bitonic_sort.wgsl", import.meta.url))
       ]);
 
       const reduceSum_f32 = device.createComputePipeline({
@@ -238,77 +212,105 @@ export class WebGpuBackend {
         }
       });
 
-      const groupByClear = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: groupByClearSrc }),
-          entryPoint: "main"
-        }
-      });
+      /** @type {GPUComputePipeline | undefined} */
+      let groupByClear;
+      /** @type {GPUComputePipeline | undefined} */
+      let groupByCount;
+      /** @type {GPUComputePipeline | undefined} */
+      let groupBySum_f32;
+      /** @type {GPUComputePipeline | undefined} */
+      let groupByMin_f32;
+      /** @type {GPUComputePipeline | undefined} */
+      let groupByMax_f32;
+      /** @type {GPUComputePipeline | undefined} */
+      let hashJoinClear;
+      /** @type {GPUComputePipeline | undefined} */
+      let hashJoinBuild;
+      /** @type {GPUComputePipeline | undefined} */
+      let hashJoinCount;
+      /** @type {GPUComputePipeline | undefined} */
+      let hashJoinFill;
 
-      const groupByCount = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: groupByCountSrc }),
-          entryPoint: "main"
-        }
-      });
+      // Optional pipelines: failures here should not take down the entire WebGPU
+      // backend (core reductions/sort/histogram/MMULT should still work).
+      try {
+        const [groupByClearSrc, groupByCountSrc, groupBySumSrc, groupByMinSrc, groupByMaxSrc] = await Promise.all([
+          loadTextResource(new URL("./wgsl/groupby_clear.wgsl", import.meta.url)),
+          loadTextResource(new URL("./wgsl/groupby_count.wgsl", import.meta.url)),
+          loadTextResource(new URL("./wgsl/groupby_sum_f32.wgsl", import.meta.url)),
+          loadTextResource(new URL("./wgsl/groupby_min_f32.wgsl", import.meta.url)),
+          loadTextResource(new URL("./wgsl/groupby_max_f32.wgsl", import.meta.url))
+        ]);
 
-      const groupBySum_f32 = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: groupBySumSrc }),
-          entryPoint: "main"
-        }
-      });
+        try {
+          groupByClear = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: groupByClearSrc }), entryPoint: "main" }
+          });
+        } catch {}
+        try {
+          groupByCount = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: groupByCountSrc }), entryPoint: "main" }
+          });
+        } catch {}
+        try {
+          groupBySum_f32 = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: groupBySumSrc }), entryPoint: "main" }
+          });
+        } catch {}
+        try {
+          groupByMin_f32 = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: groupByMinSrc }), entryPoint: "main" }
+          });
+        } catch {}
+        try {
+          groupByMax_f32 = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: groupByMaxSrc }), entryPoint: "main" }
+          });
+        } catch {}
+      } catch {
+        // Ignore optional shader load failures.
+      }
 
-      const groupByMin_f32 = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: groupByMinSrc }),
-          entryPoint: "main"
-        }
-      });
+      try {
+        const [hashJoinClearSrc, hashJoinBuildSrc, hashJoinCountSrc, hashJoinFillSrc] = await Promise.all([
+          loadTextResource(new URL("./wgsl/hash_join_clear.wgsl", import.meta.url)),
+          loadTextResource(new URL("./wgsl/hash_join_build.wgsl", import.meta.url)),
+          loadTextResource(new URL("./wgsl/hash_join_count.wgsl", import.meta.url)),
+          loadTextResource(new URL("./wgsl/hash_join_fill.wgsl", import.meta.url))
+        ]);
 
-      const groupByMax_f32 = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: groupByMaxSrc }),
-          entryPoint: "main"
-        }
-      });
-
-      const hashJoinClear = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: hashJoinClearSrc }),
-          entryPoint: "main"
-        }
-      });
-
-      const hashJoinBuild = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: hashJoinBuildSrc }),
-          entryPoint: "main"
-        }
-      });
-
-      const hashJoinCount = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: hashJoinCountSrc }),
-          entryPoint: "main"
-        }
-      });
-
-      const hashJoinFill = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: device.createShaderModule({ code: hashJoinFillSrc }),
-          entryPoint: "main"
-        }
-      });
+        try {
+          hashJoinClear = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: hashJoinClearSrc }), entryPoint: "main" }
+          });
+        } catch {}
+        try {
+          hashJoinBuild = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: hashJoinBuildSrc }), entryPoint: "main" }
+          });
+        } catch {}
+        try {
+          hashJoinCount = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: hashJoinCountSrc }), entryPoint: "main" }
+          });
+        } catch {}
+        try {
+          hashJoinFill = device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: hashJoinFillSrc }), entryPoint: "main" }
+          });
+        } catch {}
+      } catch {
+        // Ignore optional shader load failures.
+      }
 
       /** @type {WebGpuBackend["pipelines"]} */
       const pipelines = {
@@ -442,6 +444,12 @@ export class WebGpuBackend {
   }
 
   diagnostics() {
+    const hasGroupByCount = Boolean(this.pipelines.groupByClear && this.pipelines.groupByCount);
+    const hasGroupBySum = Boolean(this.pipelines.groupByClear && this.pipelines.groupBySum_f32);
+    const hasGroupByMin = Boolean(this.pipelines.groupByClear && this.pipelines.groupByMin_f32);
+    const hasGroupByMax = Boolean(this.pipelines.groupByClear && this.pipelines.groupByMax_f32);
+    const hasHashJoin = Boolean(this.pipelines.hashJoinClear && this.pipelines.hashJoinBuild && this.pipelines.hashJoinCount && this.pipelines.hashJoinFill);
+
     return {
       kind: this.kind,
       adapterInfo: typeof this.adapter.requestAdapterInfo === "function" ? "available" : "unavailable",
@@ -452,11 +460,11 @@ export class WebGpuBackend {
         sumproduct: true,
         average: true,
         count: true,
-        groupByCount: true,
-        groupBySum: true,
-        groupByMin: true,
-        groupByMax: true,
-        hashJoin: true,
+        groupByCount: hasGroupByCount,
+        groupBySum: hasGroupBySum,
+        groupByMin: hasGroupByMin,
+        groupByMax: hasGroupByMax,
+        hashJoin: hasHashJoin,
         mmult: true,
         sort: true,
         histogram: true
@@ -468,11 +476,11 @@ export class WebGpuBackend {
         sumproduct: Boolean(this.pipelines.reduceSumproduct_f64 && this.pipelines.reduceSum_f64),
         average: Boolean(this.pipelines.reduceSum_f64),
         count: Boolean(this.pipelines.reduceSum_f64),
-        groupByCount: true,
+        groupByCount: hasGroupByCount,
         groupBySum: false,
         groupByMin: false,
         groupByMax: false,
-        hashJoin: true,
+        hashJoin: hasHashJoin,
         mmult: Boolean(this.pipelines.mmult_f64),
         sort: Boolean(this.pipelines.bitonicSort_f64),
         histogram: Boolean(this.pipelines.histogram_f64)
@@ -1022,6 +1030,9 @@ export class WebGpuBackend {
    */
   async groupByCount(keys) {
     this._ensureNotDisposed();
+    if (!this.pipelines.groupByClear || !this.pipelines.groupByCount) {
+      throw new Error("WebGPU backend does not support groupByCount");
+    }
 
     const signedKeys = keys instanceof Int32Array;
     const keysU32 = toUint32Keys(keys);
@@ -1160,6 +1171,9 @@ export class WebGpuBackend {
    */
   async groupBySum(keys, values, opts) {
     this._ensureNotDisposed();
+    if (!this.pipelines.groupByClear || !this.pipelines.groupBySum_f32) {
+      throw new Error("WebGPU backend does not support groupBySum");
+    }
     const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
     const requested = opts.precision ?? "auto";
     const dtype = requested === "auto" ? dtypeOf(values) : requested;
@@ -1321,6 +1335,9 @@ export class WebGpuBackend {
    */
   async groupByMin(keys, values, opts) {
     this._ensureNotDisposed();
+    if (!this.pipelines.groupByClear || !this.pipelines.groupByMin_f32) {
+      throw new Error("WebGPU backend does not support groupByMin");
+    }
     const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
     const requested = opts.precision ?? "auto";
     const dtype = requested === "auto" ? dtypeOf(values) : requested;
@@ -1483,6 +1500,9 @@ export class WebGpuBackend {
    */
   async groupByMax(keys, values, opts) {
     this._ensureNotDisposed();
+    if (!this.pipelines.groupByClear || !this.pipelines.groupByMax_f32) {
+      throw new Error("WebGPU backend does not support groupByMax");
+    }
     const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
     const requested = opts.precision ?? "auto";
     const dtype = requested === "auto" ? dtypeOf(values) : requested;
@@ -1645,6 +1665,9 @@ export class WebGpuBackend {
    */
   async hashJoin(leftKeys, rightKeys, opts = {}) {
     this._ensureNotDisposed();
+    if (!this.pipelines.hashJoinClear || !this.pipelines.hashJoinBuild || !this.pipelines.hashJoinCount || !this.pipelines.hashJoinFill) {
+      throw new Error("WebGPU backend does not support hashJoin");
+    }
 
     if (leftKeys.length > 0 && rightKeys.length > 0) {
       const leftSigned = leftKeys instanceof Int32Array;
