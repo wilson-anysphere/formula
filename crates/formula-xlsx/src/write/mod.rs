@@ -269,6 +269,7 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
 
     for sheet in &doc.workbook.sheets {
         let sheet_id = sheet.id;
+        let shared_formulas = shared_formula_groups(doc, sheet_id);
         for (cell_ref, cell) in sheet.iter_cells() {
             let Some(formula) = cell.formula.as_deref() else {
                 continue;
@@ -278,12 +279,31 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
             }
 
             seen.insert((sheet_id, cell_ref));
-            let baseline = doc
+            let baseline_meta = doc
                 .meta
                 .cell_meta
                 .get(&(sheet_id, cell_ref))
-                .and_then(|m| m.formula.as_ref())
-                .map(|f| f.file_text.as_str());
+                .and_then(|m| m.formula.as_ref());
+
+            // `read` expands textless shared-formula follower cells into explicit formulas in the
+            // in-memory model. Those synthesized formulas should not count as edits when deciding
+            // whether we need to drop `xl/calcChain.xml`.
+            if let Some(meta) = baseline_meta {
+                if meta.t.as_deref() == Some("shared")
+                    && meta.file_text.is_empty()
+                    && meta.shared_index.is_some()
+                {
+                    if let Some(si) = meta.shared_index {
+                        if let Some(expected) = shared_formula_expected(&shared_formulas, si, cell_ref) {
+                            if expected == strip_leading_equals(formula) {
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let baseline = baseline_meta.map(|f| f.file_text.as_str());
             if formula_text_differs(baseline, Some(formula)) {
                 return true;
             }

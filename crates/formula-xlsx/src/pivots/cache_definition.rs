@@ -183,3 +183,67 @@ fn parse_bool(value: &str) -> Option<bool> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn parses_named_source_when_ref_missing() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheSource type="worksheet">
+    <worksheetSource name="MyNamedRange"/>
+  </cacheSource>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
+        assert_eq!(def.worksheet_source_sheet, None);
+        assert_eq!(def.worksheet_source_ref.as_deref(), Some("MyNamedRange"));
+        assert!(def.cache_fields.is_empty());
+    }
+
+    #[test]
+    fn handles_missing_cache_fields() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheSource type="worksheet">
+    <worksheetSource sheet="Sheet1" ref="A1:B2"/>
+  </cacheSource>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
+        assert_eq!(def.worksheet_source_sheet.as_deref(), Some("Sheet1"));
+        assert_eq!(def.worksheet_source_ref.as_deref(), Some("A1:B2"));
+        assert!(def.cache_fields.is_empty());
+    }
+
+    #[test]
+    fn parses_cache_source_type_case_insensitively() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheSource type="Worksheet"/>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
+    }
+
+    #[test]
+    fn preserves_unknown_cache_source_type() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheSource type="WeIrD"/>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(
+            def.cache_source_type,
+            PivotCacheSourceType::Unknown("WeIrD".to_string())
+        );
+    }
+}
