@@ -348,9 +348,17 @@ export class OllamaChatClient {
 
               if (typeof args === "string" && args.length > 0) {
                 const prev = state.args;
-                // Best-effort diffing: Ollama may stream the full argument string repeatedly.
-                const delta = args.startsWith(prev) ? args.slice(prev.length) : args;
-                state.args = args;
+                // Best-effort diffing: Ollama may stream the full argument string repeatedly
+                // (cumulative), or it may stream deltas. Maintain a reconstructed args string
+                // so we can handle either case (and even a mix) without duplicating content.
+                let delta = args;
+                if (typeof prev === "string" && args.startsWith(prev)) {
+                  delta = args.slice(prev.length);
+                  state.args = args;
+                } else {
+                  state.args = (prev ?? "") + args;
+                }
+
                 if (delta) {
                   if (state.started && state.id) {
                     yield { type: "tool_call_delta", id: state.id, delta };
