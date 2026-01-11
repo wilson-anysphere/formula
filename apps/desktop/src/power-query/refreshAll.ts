@@ -47,6 +47,14 @@ export type DesktopPowerQueryRefreshAllHandle = {
   cancelQuery?: (queryId: string) => void;
 };
 
+export type DesktopPowerQueryRefreshHandle = {
+  id: string;
+  sessionId: string;
+  queryId: string;
+  promise: Promise<any>;
+  cancel: () => void;
+};
+
 class Emitter<T> {
   listeners: Set<(payload: T) => void> = new Set();
 
@@ -218,6 +226,39 @@ export class DesktopPowerQueryRefreshOrchestrator {
       cancel,
       cancelQuery,
     };
+  }
+
+  /**
+   * Dependency-aware equivalent to `RefreshManager.triggerOnOpen`.
+   *
+   * Refreshes all registered queries whose refreshPolicy is `{ type: "on-open" }`
+   * (or a single query when an id is provided).
+   */
+  triggerOnOpen(queryId?: string): DesktopPowerQueryRefreshAllHandle {
+    if (queryId) {
+      const query = this.queries.get(queryId);
+      if (!query || query.refreshPolicy?.type !== "on-open") {
+        // Match core behavior: silently ignore unknown ids or non on-open policies.
+        return this.refreshAll([], "on-open");
+      }
+      return this.refreshAll([queryId], "on-open");
+    }
+
+    const ids = [];
+    for (const [id, query] of this.queries) {
+      if (query.refreshPolicy?.type === "on-open") ids.push(id);
+    }
+    return this.refreshAll(ids, "on-open");
+  }
+
+  /**
+   * Refresh a single query (and its dependencies) while returning a single-query promise.
+   */
+  refresh(queryId: string, reason: DesktopPowerQueryRefreshReason = "manual"): DesktopPowerQueryRefreshHandle {
+    const handle = this.refreshAll([queryId], reason);
+    const promise = handle.promise.then((results) => results?.[queryId]);
+    promise.catch(() => {});
+    return { id: handle.sessionId, sessionId: handle.sessionId, queryId, promise, cancel: handle.cancel };
   }
 
   dispose(): void {
