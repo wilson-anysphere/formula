@@ -1,9 +1,11 @@
+use formula_columnar::{
+    ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions,
+};
 use formula_dax::{
     pivot, Cardinality, CrossFilterDirection, DataModel, FilterContext, GroupByColumn,
     PivotMeasure, Relationship, Table, Value,
 };
 use pretty_assertions::assert_eq;
-use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use std::sync::Arc;
 
 fn build_star_schema_model() -> DataModel {
@@ -303,6 +305,66 @@ fn pivot_star_schema_respects_dimension_filters() {
 }
 
 #[test]
+fn pivot_includes_blank_group_for_unmatched_relationship_keys() {
+    let mut model = DataModel::new();
+
+    let mut customers = Table::new("Customers", vec!["CustomerId", "Region"]);
+    customers.push_row(vec![1.into(), "East".into()]).unwrap();
+    customers.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(customers).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "CustomerId", "Amount"]);
+    sales
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    sales
+        .push_row(vec![101.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    sales
+        .push_row(vec![102.into(), 999.into(), 7.0.into()])
+        .unwrap();
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Customers".into(),
+            from_table: "Sales".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_measure("Total Sales", "SUM(Sales[Amount])")
+        .unwrap();
+
+    let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
+    let group_by = vec![GroupByColumn::new("Customers", "Region")];
+
+    let result = pivot(
+        &model,
+        "Sales",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Value::Blank, 7.0.into()],
+            vec![Value::from("East"), 10.0.into()],
+            vec![Value::from("West"), 5.0.into()],
+        ]
+    );
+}
+
+#[test]
 fn pivot_star_schema_columnar_matches_in_memory() {
     let vec_model = build_star_schema_model();
     let col_model = build_star_schema_columnar_model();
@@ -334,7 +396,8 @@ fn pivot_star_schema_columnar_matches_in_memory() {
     .unwrap();
     assert_eq!(vec_result, col_result);
 
-    let east_filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
     let vec_result = pivot(&vec_model, "Sales", &group_by, &measures, &east_filter).unwrap();
     let col_result = pivot(&col_model, "Sales", &group_by, &measures, &east_filter).unwrap();
     assert_eq!(vec_result, col_result);
