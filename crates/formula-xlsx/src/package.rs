@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Read, Write};
 
 use quick_xml::events::{BytesStart, Event};
@@ -17,7 +17,7 @@ use crate::sheet_metadata::{
 };
 use crate::RecalcPolicy;
 use crate::theme::{parse_theme_palette, ThemePalette};
-use formula_model::{StyleTable, TabColor};
+use formula_model::{CellRef, CellValue, SheetVisibility, StyleTable, TabColor};
 
 #[derive(Debug, Error)]
 pub enum XlsxError {
@@ -43,6 +43,83 @@ pub enum XlsxError {
     InvalidSheetId,
     #[error("hyperlink error: {0}")]
     Hyperlink(String),
+    #[error(transparent)]
+    StreamingPatch(#[from] Box<crate::streaming::StreamingPatchError>),
+}
+
+impl From<crate::streaming::StreamingPatchError> for XlsxError {
+    fn from(err: crate::streaming::StreamingPatchError) -> Self {
+        Self::StreamingPatch(Box::new(err))
+    }
+}
+
+/// Resolved metadata for a workbook sheet and its corresponding worksheet part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorksheetPartInfo {
+    pub name: String,
+    pub sheet_id: u32,
+    pub rel_id: String,
+    pub visibility: SheetVisibility,
+    /// ZIP entry name for the worksheet XML (e.g. `xl/worksheets/sheet1.xml`).
+    pub worksheet_part: String,
+}
+
+/// Select a target worksheet for a cell patch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CellPatchSheet {
+    /// Identify the sheet by workbook sheet name (e.g. `"Sheet1"`).
+    SheetName(String),
+    /// Identify the sheet by its worksheet XML part name (e.g. `"xl/worksheets/sheet1.xml"`).
+    WorksheetPart(String),
+}
+
+/// A single cell edit to apply to an [`XlsxPackage`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CellPatch {
+    pub sheet: CellPatchSheet,
+    pub cell: CellRef,
+    pub value: CellValue,
+    /// Optional formula to write into the `<f>` element. Leading `=` is permitted.
+    pub formula: Option<String>,
+}
+
+impl CellPatch {
+    pub fn new(
+        sheet: CellPatchSheet,
+        cell: CellRef,
+        value: CellValue,
+        formula: Option<String>,
+    ) -> Self {
+        Self {
+            sheet,
+            cell,
+            value,
+            formula,
+        }
+    }
+
+    pub fn for_sheet_name(
+        sheet_name: impl Into<String>,
+        cell: CellRef,
+        value: CellValue,
+        formula: Option<String>,
+    ) -> Self {
+        Self::new(CellPatchSheet::SheetName(sheet_name.into()), cell, value, formula)
+    }
+
+    pub fn for_worksheet_part(
+        worksheet_part: impl Into<String>,
+        cell: CellRef,
+        value: CellValue,
+        formula: Option<String>,
+    ) -> Self {
+        Self::new(
+            CellPatchSheet::WorksheetPart(worksheet_part.into()),
+            cell,
+            value,
+            formula,
+        )
+    }
 }
 
 impl From<RecalcPolicyError> for XlsxError {
@@ -149,6 +226,118 @@ impl XlsxPackage {
         let cursor = zip.finish()?;
         w.write_all(&cursor.into_inner())?;
         Ok(())
+    }
+
+    /// Return the ordered workbook sheets with their resolved worksheet part paths.
+    ///
+    /// This reads `xl/workbook.xml` for the `<sheet>` list and `xl/_rels/workbook.xml.rels`
+    /// to resolve each sheet's `r:id` relationship to a concrete worksheet XML part name.
+    pub fn worksheet_parts(&self) -> Result<Vec<WorksheetPartInfo>, XlsxError> {
+        let sheets = self.workbook_sheets()?;
+
+        let rels_bytes = self
+            .part("xl/_rels/workbook.xml.rels")
+            .ok_or_else(|| XlsxError::MissingPart("xl/_rels/workbook.xml.rels".to_string()))?;
+        let relationships = crate::openxml::parse_relationships(rels_bytes)?;
+        let rel_by_id: HashMap<String, crate::openxml::Relationship> = relationships
+            .into_iter()
+            .map(|rel| (rel.id.clone(), rel))
+            .collect();
+
+        let mut out = Vec::with_capacity(sheets.len());
+        for sheet in sheets {
+            let rel = rel_by_id.get(&sheet.rel_id).ok_or_else(|| {
+                XlsxError::Invalid(format!("missing relationship for {}", sheet.rel_id))
+            })?;
+            let worksheet_part = crate::path::resolve_target("xl/workbook.xml", &rel.target);
+            out.push(WorksheetPartInfo {
+                name: sheet.name,
+                sheet_id: sheet.sheet_id,
+                rel_id: sheet.rel_id,
+                visibility: sheet.visibility,
+                worksheet_part,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Apply a set of cell edits to the package, rewriting only the targeted worksheet XML parts.
+    ///
+    /// All non-targeted parts are copied byte-for-byte from the original package.
+    pub fn apply_cell_patches_to_bytes(&self, patches: &[CellPatch]) -> Result<Vec<u8>, XlsxError> {
+        let mut sheet_name_to_part: HashMap<String, String> = HashMap::new();
+        if patches
+            .iter()
+            .any(|p| matches!(p.sheet, CellPatchSheet::SheetName(_)))
+        {
+            for entry in self.worksheet_parts()? {
+                sheet_name_to_part.insert(entry.name, entry.worksheet_part);
+            }
+        }
+
+        let mut patches_by_part: HashMap<String, BTreeMap<(u32, u32), crate::streaming::WorksheetCellPatch>> =
+            HashMap::new();
+
+        for patch in patches {
+            let worksheet_part = match &patch.sheet {
+                CellPatchSheet::WorksheetPart(part) => part.clone(),
+                CellPatchSheet::SheetName(name) => sheet_name_to_part.get(name).cloned().ok_or_else(|| {
+                    XlsxError::Invalid(format!("unknown sheet name {name}"))
+                })?,
+            };
+
+            patches_by_part
+                .entry(worksheet_part.clone())
+                .or_default()
+                .insert(
+                    (patch.cell.row, patch.cell.col),
+                    crate::streaming::WorksheetCellPatch::new(
+                        worksheet_part,
+                        patch.cell,
+                        patch.value.clone(),
+                        patch.formula.clone(),
+                    ),
+                );
+        }
+
+        let mut patches_by_part: HashMap<String, Vec<crate::streaming::WorksheetCellPatch>> = patches_by_part
+            .into_iter()
+            .map(|(part, cells)| (part, cells.into_values().collect()))
+            .collect();
+        for patches in patches_by_part.values_mut() {
+            patches.sort_by_key(|p| (p.cell.row, p.cell.col));
+        }
+
+        for part in patches_by_part.keys() {
+            if !self.parts.contains_key(part) {
+                return Err(crate::streaming::StreamingPatchError::MissingWorksheetPart(
+                    part.clone(),
+                )
+                .into());
+            }
+        }
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in &self.parts {
+            zip.start_file(name, options)?;
+            if let Some(sheet_patches) = patches_by_part.get(name) {
+                crate::streaming::patch_worksheet_xml_streaming(
+                    Cursor::new(bytes.as_slice()),
+                    &mut zip,
+                    name,
+                    sheet_patches,
+                )?;
+            } else {
+                zip.write_all(bytes)?;
+            }
+        }
+
+        let cursor = zip.finish()?;
+        Ok(cursor.into_inner())
     }
 
     /// Parse pivot-related parts (pivot tables + pivot caches) from the package.

@@ -67,7 +67,7 @@ pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
 };
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
-pub use package::{XlsxError, XlsxPackage};
+pub use package::{CellPatch as PackageCellPatch, CellPatchSheet, WorksheetPartInfo, XlsxError, XlsxPackage};
 pub use patch::{CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches};
 pub use pivots::{
     cache_records::{pivot_cache_datetime_to_naive_date, PivotCacheRecordsReader, PivotCacheValue},
