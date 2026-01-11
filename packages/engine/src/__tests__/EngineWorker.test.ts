@@ -147,6 +147,27 @@ describe("EngineWorker RPC", () => {
     expect((requests[0].params as any).bytes).toEqual(bytes);
   });
 
+  it("flushes pending setCell batches before loading workbook from xlsx bytes", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    // Simulate a caller firing-and-forgetting setCell; loadWorkbookFromXlsxBytes must
+    // flush the pending microtask-batched setCells before replacing the workbook.
+    void engine.setCell("A1", 1);
+
+    await engine.loadWorkbookFromXlsxBytes(new Uint8Array([1, 2, 3, 4]));
+
+    const methods = worker.received
+      .filter((msg): msg is RpcRequest => msg.type === "request")
+      .map((msg) => msg.method);
+
+    expect(methods).toEqual(["setCells", "loadFromXlsxBytes"]);
+  });
+
   it("supports request cancellation via AbortSignal", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
