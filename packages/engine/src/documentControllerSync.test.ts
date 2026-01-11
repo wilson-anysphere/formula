@@ -36,10 +36,16 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     doc.setCellValue("Sheet1", "A1", 1);
     doc.setCellFormula("Sheet1", "A2", "A1*2");
 
+    const calls: string[] = [];
     const engine = {
-      loadWorkbookFromJson: vi.fn(async () => {}),
+      loadWorkbookFromJson: vi.fn(async () => {
+        calls.push("loadWorkbookFromJson");
+      }),
       setCell: vi.fn(async () => {}),
-      recalculate: vi.fn(async () => []),
+      recalculate: vi.fn(async () => {
+        calls.push("recalculate");
+        return [];
+      }),
     };
 
     await engineHydrateFromDocument(engine, doc);
@@ -49,9 +55,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     expect(JSON.parse(String(serialized))).toEqual(exportDocumentToEngineWorkbookJson(doc));
 
     expect(engine.recalculate).toHaveBeenCalledTimes(1);
-    expect(engine.loadWorkbookFromJson.mock.invocationCallOrder[0]).toBeLessThan(
-      engine.recalculate.mock.invocationCallOrder[0],
-    );
+    expect(calls).toEqual(["loadWorkbookFromJson", "recalculate"]);
   });
 
   it("applies incremental deltas without emitting format-only updates", async () => {
