@@ -634,10 +634,24 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    fn build_package(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in files {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        zip.finish().unwrap().into_inner()
+    }
+
     fn build_minimal_package() -> Vec<u8> {
         let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
     <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
   </sheets>
@@ -978,5 +992,83 @@ mod tests {
 
         crate::macro_strip::validate_opc_relationships(pkg2.parts_map())
             .expect("stripped package relationships are consistent");
+    }
+
+    #[test]
+    fn remove_vba_project_strips_worksheet_rid_references() {
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <controls>
+    <control r:id="rIdA"/>
+  </controls>
+</worksheet>"#;
+
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdA" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/control" Target="../activeX/activeX1.xml"/>
+</Relationships>"#;
+
+        let bytes = build_package(&[
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/worksheets/_rels/sheet1.xml.rels", rels_xml.as_bytes()),
+            ("xl/activeX/activeX1.xml", b"<activeX/>"),
+        ]);
+
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.remove_vba_project().expect("strip macros");
+
+        let updated_rels =
+            std::str::from_utf8(pkg.part("xl/worksheets/_rels/sheet1.xml.rels").unwrap()).unwrap();
+        assert!(!updated_rels.contains("rIdA"));
+
+        let updated_sheet =
+            std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+        assert!(!updated_sheet.contains("rIdA"));
+        assert!(!updated_sheet.contains("<control r:id"));
+
+        assert!(pkg.part("xl/activeX/activeX1.xml").is_none());
+    }
+
+    #[test]
+    fn remove_vba_project_strips_vml_rid_references() {
+        let vml_xml = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xml xmlns:v="urn:schemas-microsoft-com:vml"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <v:shape id="_x0000_s1025" type="#_x0000_t75">
+    <o:OLEObject r:id="rIdOle"/>
+  </v:shape>
+  <v:shape id="_x0000_s1026" type="#_x0000_t75">
+    <x:ClientData ObjectType="Note"></x:ClientData>
+  </v:shape>
+</xml>"##;
+
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdOle" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/activeXControlBinary" Target="../activeX/activeX1.bin"/>
+</Relationships>"#;
+
+        let bytes = build_package(&[
+            ("xl/drawings/vmlDrawing1.vml", vml_xml.as_bytes()),
+            ("xl/drawings/_rels/vmlDrawing1.vml.rels", rels_xml.as_bytes()),
+            ("xl/activeX/activeX1.bin", b"dummy-bin"),
+        ]);
+
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.remove_vba_project().expect("strip macros");
+
+        let updated_rels =
+            std::str::from_utf8(pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap()).unwrap();
+        assert!(!updated_rels.contains("rIdOle"));
+
+        let updated_vml =
+            std::str::from_utf8(pkg.part("xl/drawings/vmlDrawing1.vml").unwrap()).unwrap();
+        assert!(!updated_vml.contains("rIdOle"));
+        assert!(!updated_vml.contains("OLEObject"));
+        assert!(updated_vml.contains("ObjectType=\"Note\""));
+
+        assert!(pkg.part("xl/activeX/activeX1.bin").is_none());
     }
 }

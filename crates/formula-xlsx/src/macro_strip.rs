@@ -116,8 +116,15 @@ fn clean_relationship_parts(
             continue;
         };
 
-        if let Some(updated) = strip_deleted_relationships(&rels_name, &source_part, &bytes, delete_parts)? {
-            parts.insert(rels_name, updated);
+        let (updated, removed_ids) =
+            strip_deleted_relationships(&rels_name, &source_part, &bytes, delete_parts)?;
+
+        if let Some(updated) = updated {
+            parts.insert(rels_name.clone(), updated);
+        }
+
+        if !removed_ids.is_empty() {
+            strip_source_relationship_references(parts, &source_part, &removed_ids)?;
         }
     }
 
@@ -145,13 +152,14 @@ fn strip_deleted_relationships(
     source_part: &str,
     xml: &[u8],
     delete_parts: &BTreeSet<String>,
-) -> Result<Option<Vec<u8>>, XlsxError> {
+) -> Result<(Option<Vec<u8>>, BTreeSet<String>), XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
 
     let mut buf = Vec::new();
     let mut changed = false;
+    let mut removed_ids = BTreeSet::new();
     let mut skip_depth = 0usize;
 
     loop {
@@ -175,6 +183,9 @@ fn strip_deleted_relationships(
             Event::Empty(e) if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" => {
                 if should_remove_relationship(rels_part_name, source_part, &e, delete_parts)? {
                     changed = true;
+                    if let Some(id) = relationship_id(&e)? {
+                        removed_ids.insert(id);
+                    }
                     buf.clear();
                     continue;
                 }
@@ -183,6 +194,9 @@ fn strip_deleted_relationships(
             Event::Start(e) if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" => {
                 if should_remove_relationship(rels_part_name, source_part, &e, delete_parts)? {
                     changed = true;
+                    if let Some(id) = relationship_id(&e)? {
+                        removed_ids.insert(id);
+                    }
                     skip_depth = 1;
                     buf.clear();
                     continue;
@@ -195,11 +209,13 @@ fn strip_deleted_relationships(
         buf.clear();
     }
 
-    if changed {
-        Ok(Some(writer.into_inner()))
+    let updated = if changed {
+        Some(writer.into_inner())
     } else {
-        Ok(None)
-    }
+        None
+    };
+
+    Ok((updated, removed_ids))
 }
 
 fn should_remove_relationship(
@@ -244,6 +260,16 @@ fn should_remove_relationship(
     let target = strip_fragment(&target);
     let resolved = resolve_target_for_source(source_part, target);
     Ok(delete_parts.contains(&resolved))
+}
+
+fn relationship_id(e: &BytesStart<'_>) -> Result<Option<String>, XlsxError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Id") {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
+        }
+    }
+    Ok(None)
 }
 
 fn strip_content_types(xml: &[u8], delete_parts: &BTreeSet<String>) -> Result<Option<Vec<u8>>, XlsxError> {
@@ -419,6 +445,108 @@ fn resolve_target_for_source(source_part: &str, target: &str) -> String {
     } else {
         crate::path::resolve_target(source_part, target)
     }
+}
+
+fn strip_source_relationship_references(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    source_part: &str,
+    removed_ids: &BTreeSet<String>,
+) -> Result<(), XlsxError> {
+    if source_part.is_empty()
+        || !(source_part.ends_with(".xml") || source_part.ends_with(".vml"))
+        || removed_ids.is_empty()
+    {
+        return Ok(());
+    }
+
+    let Some(xml) = parts.get(source_part).cloned() else {
+        return Ok(());
+    };
+
+    if let Some(updated) = strip_relationship_id_references(&xml, removed_ids)? {
+        parts.insert(source_part.to_string(), updated);
+    }
+
+    Ok(())
+}
+
+fn strip_relationship_id_references(
+    xml: &[u8],
+    removed_ids: &BTreeSet<String>,
+) -> Result<Option<Vec<u8>>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+
+    let mut buf = Vec::new();
+    let mut changed = false;
+    let mut skip_depth = 0usize;
+
+    loop {
+        let ev = reader.read_event_into(&mut buf)?;
+
+        if skip_depth > 0 {
+            match ev {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth -= 1,
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+            continue;
+        }
+
+        match ev {
+            Event::Eof => break,
+            Event::Start(e) => {
+                if element_has_removed_relationship_id(&e, removed_ids)? {
+                    changed = true;
+                    skip_depth = 1;
+                    buf.clear();
+                    continue;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(e) => {
+                if element_has_removed_relationship_id(&e, removed_ids)? {
+                    changed = true;
+                    buf.clear();
+                    continue;
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    if changed {
+        Ok(Some(writer.into_inner()))
+    } else {
+        Ok(None)
+    }
+}
+
+fn element_has_removed_relationship_id(
+    e: &BytesStart<'_>,
+    removed_ids: &BTreeSet<String>,
+) -> Result<bool, XlsxError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+        if !key.contains(&b':') {
+            continue;
+        }
+        if !crate::openxml::local_name(key).eq_ignore_ascii_case(b"id") {
+            continue;
+        }
+        let value = attr.unescape_value()?;
+        if removed_ids.contains(value.as_ref()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
