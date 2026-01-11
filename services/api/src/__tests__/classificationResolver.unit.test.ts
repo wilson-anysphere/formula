@@ -242,4 +242,104 @@ describe("classificationResolver: selector precedence", () => {
     const aggregate = await getAggregateClassificationForRange(db, docId, "Sheet1", 0, 0, 0, 0);
     expect(aggregate).toEqual({ level: "Restricted", labels: ["Cell", "Doc", "PII"] });
   });
+
+  it("falls back to sheet classification when no more specific selector matches", async () => {
+    const sheetSelector = { scope: "sheet", documentId: docId, sheetId: "Sheet1" };
+    const sheetKey = await insertClassification(sheetSelector, { level: "Confidential", labels: ["Sheet"] });
+
+    const cellSelector = { scope: "cell", documentId: docId, sheetId: "Sheet1", row: 0, col: 0 };
+    const resolved = await getEffectiveClassificationForSelector(db, docId, cellSelector);
+    expect(resolved).toEqual({
+      classification: { level: "Confidential", labels: ["Sheet"] },
+      source: { scope: "sheet", selectorKey: sheetKey }
+    });
+  });
+
+  it("column classification overrides sheet/document even if less restrictive", async () => {
+    await insertClassification({ scope: "document", documentId: docId }, { level: "Restricted", labels: ["Doc"] });
+    await insertClassification(
+      { scope: "sheet", documentId: docId, sheetId: "Sheet1" },
+      { level: "Confidential", labels: ["Sheet"] }
+    );
+
+    const columnSelector = { scope: "column", documentId: docId, sheetId: "Sheet1", columnIndex: 0 };
+    const columnKey = await insertClassification(columnSelector, { level: "Internal", labels: ["Col"] });
+
+    const cellSelector = { scope: "cell", documentId: docId, sheetId: "Sheet1", row: 5, col: 0 };
+    const resolved = await getEffectiveClassificationForSelector(db, docId, cellSelector);
+    expect(resolved).toEqual({
+      classification: { level: "Internal", labels: ["Col"] },
+      source: { scope: "column", selectorKey: columnKey }
+    });
+  });
+
+  it("range classification overrides column classification for a cell", async () => {
+    await insertClassification(
+      { scope: "column", documentId: docId, sheetId: "Sheet1", columnIndex: 1 },
+      { level: "Restricted", labels: ["ColumnRestricted"] }
+    );
+
+    const rangeSelector = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 1 }, end: { row: 2, col: 1 } }
+    };
+    const rangeKey = await insertClassification(rangeSelector, { level: "Internal", labels: ["RangeOverride"] });
+
+    const cellSelector = { scope: "cell", documentId: docId, sheetId: "Sheet1", row: 1, col: 1 };
+    const resolved = await getEffectiveClassificationForSelector(db, docId, cellSelector);
+    expect(resolved).toEqual({
+      classification: { level: "Internal", labels: ["RangeOverride"] },
+      source: { scope: "range", selectorKey: rangeKey }
+    });
+  });
+
+  it("returns Public/default when no classifications exist", async () => {
+    const resolved = await getEffectiveClassificationForSelector(db, docId, {
+      scope: "cell",
+      documentId: docId,
+      sheetId: "Sheet1",
+      row: 0,
+      col: 0
+    });
+    expect(resolved).toEqual({
+      classification: { level: "Public", labels: [] },
+      source: { scope: "default", selectorKey: "default" }
+    });
+  });
+
+  it("range selector falls back to column classification only when it is a single column", async () => {
+    const columnSelector = { scope: "column", documentId: docId, sheetId: "Sheet1", columnIndex: 0 };
+    const columnKey = await insertClassification(columnSelector, { level: "Confidential", labels: ["Col"] });
+
+    const singleColumnRange = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 0 }, end: { row: 3, col: 0 } }
+    };
+    const resolvedSingle = await getEffectiveClassificationForSelector(db, docId, singleColumnRange);
+    expect(resolvedSingle).toEqual({
+      classification: { level: "Confidential", labels: ["Col"] },
+      source: { scope: "column", selectorKey: columnKey }
+    });
+
+    await insertClassification(
+      { scope: "sheet", documentId: docId, sheetId: "Sheet1" },
+      { level: "Internal", labels: ["Sheet"] }
+    );
+
+    const multiColumnRange = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } }
+    };
+    const resolvedMulti = await getEffectiveClassificationForSelector(db, docId, multiColumnRange);
+    expect(resolvedMulti).toMatchObject({
+      classification: { level: "Internal", labels: ["Sheet"] },
+      source: { scope: "sheet" }
+    });
+  });
 });
