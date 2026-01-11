@@ -7,6 +7,7 @@ import { DocumentController } from "../../document/documentController.js";
 import { MockEngine } from "../../document/engine.js";
 
 import { DesktopPowerQueryRefreshOrchestrator } from "../refreshAll.ts";
+import { DesktopPowerQueryRefreshManager } from "../refresh.ts";
 
 function makeMeta(queryId, table) {
   return {
@@ -73,6 +74,10 @@ class ScriptedEngine {
 
     const table = script.table ?? DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
     return { table, meta: makeMeta(query.id, table) };
+  }
+
+  async executeQueryWithMeta(query, context, options) {
+    return this.executeQueryWithMetaInSession(query, context, options);
   }
 }
 
@@ -316,6 +321,90 @@ test("DesktopPowerQueryRefreshOrchestrator shares apply serialization across ins
 
   orch1.dispose();
   orch2.dispose();
+});
+
+test("DesktopPowerQueryRefreshOrchestrator shares apply serialization with DesktopPowerQueryRefreshManager", async () => {
+  const bigTable = DataTable.fromGrid(
+    [["A"], ...Array.from({ length: 50 }, (_, i) => [i + 1])],
+    { hasHeaders: true, inferTypes: true },
+  );
+  const smallTable = DataTable.fromGrid([["B"], ["ok"]], { hasHeaders: true, inferTypes: true });
+
+  const engine = new ScriptedEngine({
+    q1: { table: bigTable },
+    q2: { table: smallTable },
+  });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 1, batchSize: 1 });
+  const orch = new DesktopPowerQueryRefreshOrchestrator({ engine, document: doc, concurrency: 1, batchSize: 1 });
+
+  mgr.registerQuery({
+    id: "q1",
+    name: "Q1",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  orch.registerQuery({
+    id: "q2",
+    name: "Q2",
+    source: { type: "range", range: { values: [["Y"], [2]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 3 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  const handle1 = mgr.refresh("q1");
+
+  let orchHandle = null;
+  const applied = new Promise((resolve, reject) => {
+    /** @type {Set<string>} */
+    const done = new Set();
+    let started = false;
+
+    const maybeDone = () => {
+      if (done.size !== 2) return;
+      unsubMgr();
+      unsubOrch();
+      resolve(undefined);
+    };
+
+    const unsubMgr = mgr.onEvent((evt) => {
+      if (evt.type === "apply:error") reject(evt.error);
+      if (evt.type === "apply:progress" && evt.queryId === "q1" && !started) {
+        started = true;
+        orchHandle = orch.refreshAll(["q2"]);
+        orchHandle.promise.catch(() => {});
+      }
+      if (evt.type === "apply:completed" && evt.queryId === "q1") {
+        done.add("q1");
+        maybeDone();
+      }
+    });
+
+    const unsubOrch = orch.onEvent((evt) => {
+      if (evt.type === "apply:error") reject(evt.error);
+      if (evt.type === "apply:completed" && evt.queryId === "q2") {
+        done.add("q2");
+        maybeDone();
+      }
+    });
+  });
+
+  await handle1.promise;
+  await applied;
+  if (orchHandle) await orchHandle.promise;
+
+  assert.equal(doc.history.length, 2);
+  assert.equal(doc.batchDepth, 0);
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, "A");
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 3 }).value, "B");
+
+  mgr.dispose();
+  orch.dispose();
 });
 
 test("DesktopPowerQueryRefreshOrchestrator cancelQuery aborts the apply phase for that query only", async () => {
