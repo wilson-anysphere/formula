@@ -255,6 +255,34 @@ fn parse_unquoted_sheet_spec(formula: &str, start: usize) -> Option<(usize, &str
     None
 }
 
+fn parse_error_literal(formula: &str, start: usize) -> Option<(usize, &str)> {
+    let bytes = formula.as_bytes();
+    if bytes.get(start) != Some(&b'#') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < bytes.len() {
+        let ch = formula[i..].chars().next()?;
+        match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '/' | '_' | '.' => {
+                i += ch.len_utf8();
+            }
+            '!' | '?' => {
+                i += ch.len_utf8();
+                break;
+            }
+            _ => break,
+        }
+    }
+
+    if i == start + 1 {
+        return None;
+    }
+
+    Some((i, &formula[start..i]))
+}
+
 /// Rewrite all sheet references inside a formula when a sheet is renamed.
 ///
 /// This is intentionally conservative: it only rewrites tokens that *parse* as
@@ -290,6 +318,14 @@ pub fn rewrite_sheet_names_in_formula(formula: &str, old_name: &str, new_name: &
             out.push('"');
             i += 1;
             continue;
+        }
+
+        if bytes[i] == b'#' {
+            if let Some((next, raw)) = parse_error_literal(formula, i) {
+                out.push_str(raw);
+                i = next;
+                continue;
+            }
         }
 
         if bytes[i] == b'\'' {
@@ -463,6 +499,22 @@ mod tests {
         assert_eq!(
             rewrite_sheet_names_in_formula("=Table1[Sheet1]", "Sheet1", "Data"),
             "=Table1[Sheet1]"
+        );
+    }
+
+    #[test]
+    fn rewrite_does_not_touch_error_literals() {
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=#REF!", "REF", "Data"),
+            "=#REF!"
+        );
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=#VALUE!+VALUE!A1", "VALUE", "Data"),
+            "=#VALUE!+Data!A1"
+        );
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=#SPILL!+SPILL!A1", "SPILL", "Data"),
+            "=#SPILL!+Data!A1"
         );
     }
 
