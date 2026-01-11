@@ -214,8 +214,7 @@ by default**.
 
 Enable by setting:
 
-- `SYNC_SERVER_INTERNAL_ADMIN_TOKEN` (preferred), or
-- `INTERNAL_ADMIN_TOKEN` (fallback for multi-service deployments)
+- `SYNC_SERVER_INTERNAL_ADMIN_TOKEN`
 
 All internal endpoints require:
 
