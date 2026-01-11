@@ -356,6 +356,7 @@ fn patcher_updates_cached_string_with_reserved_flags_and_4byte_extra() {
         col: 0,
         new_value: CellValue::Text("World".to_string()),
         new_formula: None,
+        shared_string_index: None,
     };
     let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
 

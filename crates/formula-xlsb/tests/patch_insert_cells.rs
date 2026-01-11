@@ -47,6 +47,7 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
             col: 3,
             new_value: CellValue::Number(99.0),
             new_formula: None,
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
@@ -107,6 +108,7 @@ fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
             col: 10,
             new_value: CellValue::Number(42.0),
             new_formula: None,
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
