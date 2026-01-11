@@ -66,6 +66,16 @@ fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
         .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
 }
 
+fn parse_optional_json_value(raw: Option<String>) -> Option<serde_json::Value> {
+    raw.and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        serde_json::from_str(trimmed).ok()
+    })
+}
+
 #[derive(Clone)]
 pub struct Storage {
     conn: Arc<Mutex<Connection>>,
@@ -349,10 +359,11 @@ impl Storage {
                 params![id.to_string()],
                 |r| {
                     let id: String = r.get(0)?;
+                    let metadata_raw: Option<String> = r.get::<_, Option<String>>(2).ok().flatten();
                     Ok(WorkbookMeta {
                         id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                         name: r.get(1)?,
-                        metadata: r.get(2)?,
+                        metadata: parse_optional_json_value(metadata_raw),
                     })
                 },
             )
@@ -366,10 +377,11 @@ impl Storage {
         let mut stmt = conn.prepare("SELECT id, name, metadata FROM workbooks ORDER BY created_at")?;
         let rows = stmt.query_map([], |r| {
             let id: String = r.get(0)?;
+            let metadata_raw: Option<String> = r.get::<_, Option<String>>(2).ok().flatten();
             Ok(WorkbookMeta {
                 id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                 name: r.get(1)?,
-                metadata: r.get(2)?,
+                metadata: parse_optional_json_value(metadata_raw),
             })
         })?;
 
@@ -1065,6 +1077,7 @@ impl Storage {
             let id: String = r.get(0)?;
             let workbook_id: String = r.get(1)?;
             let visibility: String = r.get(4)?;
+            let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
             Ok(SheetMeta {
                 id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                 workbook_id: Uuid::parse_str(&workbook_id)
@@ -1078,7 +1091,7 @@ impl Storage {
                 frozen_rows: r.get(8)?,
                 frozen_cols: r.get(9)?,
                 zoom: r.get(10)?,
-                metadata: r.get(11)?,
+                metadata: parse_optional_json_value(metadata_raw),
             })
         })?;
 
@@ -1115,6 +1128,7 @@ impl Storage {
                     let id: String = r.get(0)?;
                     let workbook_id: String = r.get(1)?;
                     let visibility: String = r.get(4)?;
+                    let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
                     Ok(SheetMeta {
                         id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                         workbook_id: Uuid::parse_str(&workbook_id)
@@ -1128,7 +1142,7 @@ impl Storage {
                         frozen_rows: r.get(8)?,
                         frozen_cols: r.get(9)?,
                         zoom: r.get(10)?,
-                        metadata: r.get(11)?,
+                        metadata: parse_optional_json_value(metadata_raw),
                     })
                 },
             )
@@ -1634,6 +1648,7 @@ impl Storage {
             let id: String = r.get(0)?;
             let workbook_id: String = r.get(1)?;
             let visibility: String = r.get(4)?;
+            let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
             Ok(SheetMeta {
                 id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                 workbook_id: Uuid::parse_str(&workbook_id)
@@ -1647,7 +1662,7 @@ impl Storage {
                 frozen_rows: r.get(8)?,
                 frozen_cols: r.get(9)?,
                 zoom: r.get(10)?,
-                metadata: r.get(11)?,
+                metadata: parse_optional_json_value(metadata_raw),
             })
         })?;
 
@@ -1683,6 +1698,7 @@ impl Storage {
                     let id: String = r.get(0)?;
                     let workbook_id: String = r.get(1)?;
                     let visibility: String = r.get(4)?;
+                    let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
                     Ok(SheetMeta {
                         id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                         workbook_id: Uuid::parse_str(&workbook_id)
@@ -1696,7 +1712,7 @@ impl Storage {
                         frozen_rows: r.get(8)?,
                         frozen_cols: r.get(9)?,
                         zoom: r.get(10)?,
-                        metadata: r.get(11)?,
+                        metadata: parse_optional_json_value(metadata_raw),
                     })
                 },
             )
