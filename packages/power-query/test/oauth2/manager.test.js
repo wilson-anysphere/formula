@@ -268,6 +268,34 @@ test("OAuth2Manager: clears persisted refresh token when the server returns inva
   assert.equal(entry, null);
 });
 
+test("OAuth2Manager: preserves refresh token when the server returns an empty refresh_token", async () => {
+  const store = new InMemoryOAuthTokenStore();
+  const now = () => 1_000;
+  const { scopesHash, scopes } = normalizeScopes(["read"]);
+  await store.set(
+    { providerId: "example", scopesHash },
+    { providerId: "example", scopesHash, scopes, refreshToken: "refresh-1" },
+  );
+
+  /** @type {typeof fetch} */
+  const mockFetch = async () =>
+    jsonResponse({
+      access_token: "access-1",
+      token_type: "Bearer",
+      expires_in: 3600,
+      refresh_token: "",
+    });
+
+  const manager = new OAuth2Manager({ tokenStore: store, fetch: mockFetch, now });
+  manager.registerProvider({ id: "example", clientId: "client", tokenEndpoint: "https://auth.example/token" });
+
+  const token = await manager.getAccessToken({ providerId: "example", scopes: ["read"] });
+  assert.equal(token.accessToken, "access-1");
+
+  const entry = await store.get({ providerId: "example", scopesHash });
+  assert.equal(entry?.refreshToken, "refresh-1");
+});
+
 test("OAuth2Manager: authorization code exchange is not skipped by an in-flight refresh", async () => {
   const store = new InMemoryOAuthTokenStore();
   const now = () => 1_000;
