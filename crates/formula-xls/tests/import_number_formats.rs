@@ -143,6 +143,20 @@ fn warns_on_out_of_range_xf_indices() {
 }
 
 #[test]
+fn warns_on_out_of_range_xf_indices_without_number_formats() {
+    let bytes = xls_fixture_builder::build_out_of_range_xf_no_formats_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    assert!(
+        result.warnings.iter().any(|w| w.message.contains(
+            "skipped 1 cells in sheet `OutOfRangeXFNoFormats` with out-of-range XF indices"
+        )),
+        "missing out-of-range XF warning; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
 fn chooses_deterministic_style_when_merged_anchor_is_missing() {
     let bytes = xls_fixture_builder::build_merged_non_anchor_conflicting_blank_formats_fixture_xls();
     let result = import_fixture(&bytes);
