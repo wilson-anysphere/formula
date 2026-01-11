@@ -98,8 +98,11 @@ export interface AiChatOrchestratorOptions {
   sessionId?: string;
 
   /**
-   * If provided, used to build schema-first workbook RAG context per message.
-   * When omitted, context injection is disabled.
+   * Context builder used to produce schema-first + RAG workbook context per message.
+   *
+   * If omitted, the orchestrator will create a default `ContextManager`:
+   * - If `ragStore` + `embedder` are provided, those are used (e.g. persistent store).
+   * - Otherwise an in-memory RAG index is used (deterministic HashEmbedder + InMemoryVectorStore).
    */
   contextManager?: ContextManager;
   ragStore?: any;
