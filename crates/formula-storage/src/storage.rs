@@ -845,7 +845,7 @@ impl Storage {
             sheet.id = sheet_id;
             sheet.name = name.clone();
             sheet.visibility = storage_sheet_visibility_to_model(&visibility_raw);
-            sheet.xlsx_sheet_id = xlsx_sheet_id.map(|v| v as u32);
+            sheet.xlsx_sheet_id = xlsx_sheet_id.and_then(|v| u32::try_from(v).ok());
             sheet.xlsx_rel_id = xlsx_rel_id;
             sheet.frozen_rows = frozen_rows.max(0) as u32;
             sheet.frozen_cols = frozen_cols.max(0) as u32;
