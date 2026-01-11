@@ -1,3 +1,13 @@
+/**
+ * Scalar cell input/value transported over the worker RPC boundary.
+ *
+ * `null` represents an empty cell. When used as an *input* (e.g. `setCell("A1", null)`),
+ * the engine should clear the stored cell entry (sparse semantics) rather than storing
+ * an explicit blank.
+ *
+ * Workbook JSON exports should omit empty cells entirely instead of emitting `"A1": null`
+ * entries to keep payloads compact.
+ */
 export type CellScalar = number | string | boolean | null;
 
 export interface CellData {
