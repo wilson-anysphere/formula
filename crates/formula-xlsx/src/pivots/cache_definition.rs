@@ -4,7 +4,7 @@ use std::io::Cursor;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
-use crate::{XlsxError, XlsxPackage};
+use crate::{XlsxDocument, XlsxError, XlsxPackage};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PivotCacheDefinition {
@@ -74,6 +74,43 @@ impl XlsxPackage {
         part_name: &str,
     ) -> Result<Option<PivotCacheDefinition>, XlsxError> {
         let Some(bytes) = self.part(part_name) else {
+            return Ok(None);
+        };
+        Ok(Some(parse_pivot_cache_definition(bytes)?))
+    }
+}
+
+impl XlsxDocument {
+    /// Parse every pivot cache definition part preserved in the document.
+    ///
+    /// Returns a sorted list of `(part_name, parsed_definition)` pairs.
+    pub fn pivot_cache_definitions(&self) -> Result<Vec<(String, PivotCacheDefinition)>, XlsxError> {
+        let mut paths: BTreeSet<String> = BTreeSet::new();
+        for name in self.parts().keys() {
+            if name.starts_with("xl/pivotCache/")
+                && name.contains("pivotCacheDefinition")
+                && name.ends_with(".xml")
+            {
+                paths.insert(name.to_string());
+            }
+        }
+
+        let mut out = Vec::new();
+        for path in paths {
+            let Some(bytes) = self.parts().get(&path) else {
+                continue;
+            };
+            out.push((path, parse_pivot_cache_definition(bytes)?));
+        }
+        Ok(out)
+    }
+
+    /// Parse a single pivot cache definition part preserved in the document.
+    pub fn pivot_cache_definition(
+        &self,
+        part_name: &str,
+    ) -> Result<Option<PivotCacheDefinition>, XlsxError> {
+        let Some(bytes) = self.parts().get(part_name) else {
             return Ok(None);
         };
         Ok(Some(parse_pivot_cache_definition(bytes)?))

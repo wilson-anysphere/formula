@@ -1,4 +1,4 @@
-use formula_xlsx::{PivotCacheSourceType, XlsxPackage};
+use formula_xlsx::{load_from_bytes, PivotCacheSourceType, XlsxPackage};
 
 const FIXTURE: &[u8] = include_bytes!("fixtures/pivot-fixture.xlsx");
 
@@ -23,3 +23,16 @@ fn parses_pivot_cache_definition_worksheet_source_and_fields() {
     assert_eq!(names, vec!["Region", "Product", "Sales"]);
 }
 
+#[test]
+fn parses_pivot_cache_definition_from_document_parts() {
+    let doc = load_from_bytes(FIXTURE).expect("load fixture");
+    let defs = doc
+        .pivot_cache_definitions()
+        .expect("parse pivot cache definitions");
+
+    assert_eq!(defs.len(), 1);
+    let def = &defs[0].1;
+    assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
+    assert_eq!(def.worksheet_source_sheet.as_deref(), Some("Sheet1"));
+    assert_eq!(def.worksheet_source_ref.as_deref(), Some("A1:C5"));
+}
