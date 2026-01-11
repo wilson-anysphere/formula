@@ -1924,6 +1924,58 @@ mod tests {
     }
 
     #[test]
+    fn save_as_xlsx_drops_macros_and_prevents_resurrection() {
+        use formula_xlsx::XlsxPackage;
+
+        let fixture_path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsm fixture");
+        assert!(
+            workbook.vba_project_bin.is_some(),
+            "fixture should contain vbaProject.bin"
+        );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let tmp_dir = tempfile::tempdir().expect("temp dir");
+        let xlsx_path = tmp_dir.path().join("converted.xlsx");
+        let workbook_to_save = state.get_workbook().expect("workbook").clone();
+        write_xlsx_blocking(&xlsx_path, &workbook_to_save).expect("write as xlsx");
+
+        let saved_bytes = Arc::<[u8]>::from(std::fs::read(&xlsx_path).expect("read saved xlsx"));
+        state
+            .mark_saved(
+                Some(xlsx_path.to_string_lossy().to_string()),
+                Some(saved_bytes),
+            )
+            .expect("mark saved");
+
+        assert!(
+            state
+                .get_workbook()
+                .expect("workbook after save")
+                .vba_project_bin
+                .is_none(),
+            "expected in-memory macro payload to be cleared after saving as .xlsx"
+        );
+
+        // Ensure macros can't come back if we later save as `.xlsm` (matches Excel's behavior).
+        let xlsm_path = tmp_dir.path().join("converted.xlsm");
+        let workbook_to_save = state.get_workbook().expect("workbook").clone();
+        write_xlsx_blocking(&xlsm_path, &workbook_to_save).expect("write as xlsm");
+
+        let written_bytes = std::fs::read(&xlsm_path).expect("read saved xlsm");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse saved xlsm");
+        assert!(
+            written_pkg.vba_project_bin().is_none(),
+            "expected vbaProject.bin to remain absent after converting to .xlsx"
+        );
+    }
+
+    #[test]
     fn sheet_print_settings_lookup_is_case_insensitive() {
         let mut sheets = vec![default_sheet_print_settings("sheet1".to_string())];
         ensure_sheet_print_settings(&mut sheets, "Sheet1");
