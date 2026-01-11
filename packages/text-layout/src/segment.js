@@ -2,25 +2,9 @@ const NON_BREAKING_SPACES = new Set(["\u00A0", "\u202F", "\u2060"]);
 const WHITESPACE_RE = /\s/u;
 
 import GraphemeSplitter from "grapheme-splitter";
+import LineBreaker from "linebreak";
 
 const GRAPHEME_SPLITTER = new GraphemeSplitter();
-
-/** @type {Map<string, Intl.Segmenter>} */
-const SEGMENTER_CACHE = new Map();
-
-/**
- * @param {string | undefined} locale
- * @param {"grapheme" | "word"} granularity
- */
-function getSegmenter(locale, granularity) {
-  const normalizedLocale = locale ?? "und";
-  const key = `${granularity}:${normalizedLocale}`;
-  const cached = SEGMENTER_CACHE.get(key);
-  if (cached) return cached;
-  const segmenter = new Intl.Segmenter(normalizedLocale, { granularity });
-  SEGMENTER_CACHE.set(key, segmenter);
-  return segmenter;
-}
 
 /**
  * @param {string} ch
@@ -74,31 +58,27 @@ export function wordBreakPositions(text, locale) {
   const breaks = [];
   const wordBreakSet = new Set();
 
-  if (typeof Intl === "undefined" || typeof Intl.Segmenter === "undefined") {
-    // Best-effort fallback:
-    // - break before runs of breakable whitespace (so the whitespace is excluded from the line),
-    // - otherwise allow breaks at every grapheme boundary.
-    for (let i = 0; i < text.length; i++) {
-      if (!isBreakableWhitespaceChar(text[i])) continue;
-      breaks.push(i);
-      wordBreakSet.add(i);
-      while (i + 1 < text.length && isBreakableWhitespaceChar(text[i + 1])) i++;
-    }
-    for (const b of graphemeBreakPositions(text, locale)) breaks.push(b);
-  } else {
-    const segmenter = getSegmenter(locale, "word");
-    for (const seg of segmenter.segment(text)) {
-      // For whitespace, break at the *start* of the whitespace segment so trailing whitespace is
-      // excluded from the rendered line (and can be skipped when starting the next line).
-      if (WHITESPACE_RE.test(seg.segment) && isBreakableWhitespaceSegment(seg.segment)) {
-        breaks.push(seg.index);
-        wordBreakSet.add(seg.index);
-        continue;
-      }
+  // Use the Unicode Line Breaking Algorithm (UAX #14). This provides high-quality word-ish break
+  // opportunities for scripts with and without whitespace, and behaves well around punctuation/emoji.
+  //
+  // Note: The line breaker reports break opportunities *after* the character at `position - 1`. For
+  // whitespace this would keep trailing spaces at the end of the line. We map any break that lands
+  // after a run of breakable whitespace to the *start* of that whitespace run so lines exclude
+  // trailing whitespace and the engine can skip it on the next line.
+  const breaker = new LineBreaker(text);
+  for (let brk = breaker.nextBreak(); brk; brk = breaker.nextBreak()) {
+    let pos = brk.position;
+    if (pos <= 0) continue;
+    if (pos > text.length) pos = text.length;
 
-      // Otherwise break at segment boundaries (UAX #29 word boundaries).
-      breaks.push(seg.index + seg.segment.length);
+    if (pos > 0 && isBreakableWhitespaceChar(text[pos - 1])) {
+      let start = pos - 1;
+      while (start > 0 && isBreakableWhitespaceChar(text[start - 1])) start--;
+      pos = start;
+      wordBreakSet.add(pos);
     }
+
+    breaks.push(pos);
   }
 
   // Ensure final break and make monotonic.

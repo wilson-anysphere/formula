@@ -134,6 +134,22 @@ test("word wrap falls back to char wrapping when there are no word break opportu
   assert.deepEqual(layout.lines.map((l) => l.text), ["supe", "rlon", "g"]);
 });
 
+test("word wrap uses Unicode line breaking to keep punctuation with the previous word", () => {
+  const measurer = makeMonospaceMeasurer();
+  const engine = new TextLayoutEngine(measurer);
+
+  const layout = engine.layout({
+    text: "Hello,world",
+    font: { family: "Inter", sizePx: 10, weight: 400 },
+    maxWidth: 6,
+    wrapMode: "word",
+    align: "left",
+    direction: "ltr",
+  });
+
+  assert.deepEqual(layout.lines.map((l) => l.text), ["Hello,", "world"]);
+});
+
 test("maxLines truncates and applies ellipsis within maxWidth", () => {
   const measurer = makeMonospaceMeasurer();
   const engine = new TextLayoutEngine(measurer);
