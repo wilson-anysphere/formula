@@ -204,6 +204,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       const latency = formatLatency(entry);
       const stats = [tokenUsage, latency].filter(Boolean).join(" • ");
       const verificationNode = renderVerification(entry);
+      const workbookId = extractWorkbookId(entry);
 
       const toolsNode =
         toolCalls.length === 0
@@ -225,6 +226,9 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
             `${formatTimestamp(entry.timestamp_ms)} • ${entry.mode} • ${entry.model}`,
           ]),
           el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [`session_id: ${entry.session_id}`]),
+          el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [
+            `workbook_id: ${workbookId ?? "—"}`,
+          ]),
           ...(stats ? [el("div", { style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;" }, [stats])] : []),
           ...(verificationNode ? [verificationNode] : []),
           toolsNode,

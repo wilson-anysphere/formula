@@ -36,7 +36,7 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
     const entries = this.loadEntries();
     let filtered = session_id ? entries.filter((entry) => entry.session_id === session_id) : entries.slice();
     if (workbook_id) {
-      filtered = filtered.filter((entry) => entry.workbook_id === workbook_id);
+      filtered = filtered.filter((entry) => matchesWorkbookFilter(entry, workbook_id));
     }
     if (mode) {
       const modes = Array.isArray(mode) ? mode : [mode];
@@ -135,4 +135,16 @@ function cloneAuditEntry(entry: AIAuditEntry): AIAuditEntry {
     // Last resort: return as-is (audit entries should be JSON-serializable in practice).
     return entry;
   }
+}
+
+function matchesWorkbookFilter(entry: AIAuditEntry, workbookId: string): boolean {
+  if (typeof entry.workbook_id === "string" && entry.workbook_id.trim()) {
+    return entry.workbook_id === workbookId;
+  }
+
+  const input = entry.input as unknown;
+  if (!input || typeof input !== "object") return false;
+  const obj = input as Record<string, unknown>;
+  const legacyWorkbookId = obj.workbook_id ?? obj.workbookId;
+  return typeof legacyWorkbookId === "string" ? legacyWorkbookId === workbookId : false;
 }

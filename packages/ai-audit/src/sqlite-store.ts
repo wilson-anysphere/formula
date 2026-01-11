@@ -28,6 +28,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
   private readonly db: SqlJsDatabase;
   private readonly storage: SqliteBinaryStorage;
   private readonly retention: SqliteAIAuditStoreRetention;
+  private schemaDirty: boolean = false;
 
   private constructor(db: SqlJsDatabase, storage: SqliteBinaryStorage, retention: SqliteAIAuditStoreRetention) {
     this.db = db;
@@ -41,11 +42,25 @@ export class SqliteAIAuditStore implements AIAuditStore {
     const SQL = await initSqlJs({ locateFile: options.locateFile ?? locateSqlJsFile });
     const existing = await storage.load();
     const db = existing ? new SQL.Database(existing) : new SQL.Database();
-    return new SqliteAIAuditStore(db, storage, options.retention ?? {});
+    const store = new SqliteAIAuditStore(db, storage, options.retention ?? {});
+    // Persist schema migrations/backfills eagerly for existing databases so that
+    // upgraded clients won't need to redo work on every load.
+    if (existing && store.schemaDirty) {
+      try {
+        await store.persist();
+      } catch {
+        // Persistence is best-effort; if it fails (e.g. read-only storage), the
+        // in-memory migration/backfill still allows workbook filtering to work
+        // for the current session.
+      }
+      store.schemaDirty = false;
+    }
+    return store;
   }
 
   async logEntry(entry: AIAuditEntry): Promise<void> {
     const tokenUsage = normalizeTokenUsage(entry.token_usage);
+    const workbookId = entry.workbook_id ?? extractWorkbookIdFromInput(entry.input) ?? extractWorkbookIdFromSessionId(entry.session_id);
     const stmt = this.db.prepare(
       `INSERT INTO ai_audit_log (
         id,
@@ -70,7 +85,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
       entry.id,
       entry.timestamp_ms,
       entry.session_id,
-      entry.workbook_id ?? null,
+      workbookId ?? null,
       entry.user_id ?? null,
       entry.mode,
       JSON.stringify(entry.input ?? null),
@@ -154,9 +169,17 @@ export class SqliteAIAuditStore implements AIAuditStore {
     `);
 
     // Migrate databases created before verification was tracked.
-    ensureColumnExists(this.db, "ai_audit_log", "verification_json", "TEXT");
+    if (ensureColumnExists(this.db, "ai_audit_log", "verification_json", "TEXT")) {
+      this.schemaDirty = true;
+    }
     // Migrate databases created before workbook metadata was tracked.
-    ensureColumnExists(this.db, "ai_audit_log", "workbook_id", "TEXT");
+    if (ensureColumnExists(this.db, "ai_audit_log", "workbook_id", "TEXT")) {
+      this.schemaDirty = true;
+    }
+
+    if (backfillLegacyWorkbookIds(this.db)) {
+      this.schemaDirty = true;
+    }
 
     // Indexes should be created after migrations (so older databases missing columns
     // don't error when we try to index them).
@@ -270,9 +293,87 @@ function safeJsonParse(value: string): unknown {
   }
 }
 
-function ensureColumnExists(db: SqlJsDatabase, table: string, column: string, type: string): void {
-  if (tableHasColumn(db, table, column)) return;
+const AI_AUDIT_SCHEMA_VERSION = 1;
+
+function backfillLegacyWorkbookIds(db: SqlJsDatabase): boolean {
+  const version = getUserVersion(db);
+  if (version >= AI_AUDIT_SCHEMA_VERSION) return false;
+
+  let didChange = false;
+  db.run("BEGIN TRANSACTION;");
+  const selectStmt = db.prepare(
+    "SELECT id, session_id, input_json FROM ai_audit_log WHERE workbook_id IS NULL OR workbook_id = '';",
+  );
+  const updateStmt = db.prepare("UPDATE ai_audit_log SET workbook_id = ? WHERE id = ?;");
+  try {
+    while (selectStmt.step()) {
+      const row = selectStmt.getAsObject() as any;
+      const workbookId =
+        extractWorkbookIdFromInputJson(row.input_json) ?? extractWorkbookIdFromSessionId(String(row.session_id ?? ""));
+      if (!workbookId) continue;
+      updateStmt.run([workbookId, String(row.id)]);
+      didChange = true;
+    }
+
+    setUserVersion(db, AI_AUDIT_SCHEMA_VERSION);
+    didChange = true;
+    db.run("COMMIT;");
+    return didChange;
+  } catch (err) {
+    try {
+      db.run("ROLLBACK;");
+    } catch {
+      // ignore rollback failures
+    }
+    throw err;
+  } finally {
+    selectStmt.free();
+    updateStmt.free();
+  }
+}
+
+function getUserVersion(db: SqlJsDatabase): number {
+  const stmt = db.prepare("PRAGMA user_version;");
+  try {
+    if (!stmt.step()) return 0;
+    const row = stmt.getAsObject() as any;
+    const value = row?.user_version ?? 0;
+    const num = Number(value);
+    return Number.isFinite(num) ? Math.trunc(num) : 0;
+  } finally {
+    stmt.free();
+  }
+}
+
+function setUserVersion(db: SqlJsDatabase, version: number): void {
+  const normalized = Number.isFinite(version) ? Math.max(0, Math.trunc(version)) : 0;
+  db.run(`PRAGMA user_version = ${normalized};`);
+}
+
+function extractWorkbookIdFromInput(input: unknown): string | null {
+  if (!input || typeof input !== "object") return null;
+  const obj = input as Record<string, unknown>;
+  const workbookId = obj.workbook_id ?? obj.workbookId;
+  return typeof workbookId === "string" && workbookId.trim() ? workbookId : null;
+}
+
+function extractWorkbookIdFromInputJson(encoded: unknown): string | null {
+  if (typeof encoded !== "string") return null;
+  const parsed = safeJsonParse(encoded);
+  return extractWorkbookIdFromInput(parsed);
+}
+
+function extractWorkbookIdFromSessionId(sessionId: string): string | null {
+  const match = sessionId.match(/^([^:]+):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
+  if (!match) return null;
+  const workbookId = match[1];
+  return workbookId && workbookId.trim() ? workbookId : null;
+}
+
+function ensureColumnExists(db: SqlJsDatabase, table: string, column: string, type: string): boolean {
+  if (tableHasColumn(db, table, column)) return false;
   db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type};`);
+  return true;
 }
 
 function tableHasColumn(db: SqlJsDatabase, table: string, column: string): boolean {

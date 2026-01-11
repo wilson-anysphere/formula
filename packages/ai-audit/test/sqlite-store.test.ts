@@ -1,10 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import initSqlJs from "sql.js";
 import { InMemoryBinaryStorage } from "../src/storage.js";
 import { SqliteAIAuditStore } from "../src/sqlite-store.js";
+import { locateSqlJsFileNode } from "../src/sqlite-store.node.js";
 import type { AIAuditEntry } from "../src/types.js";
 
 describe("SqliteAIAuditStore", () => {
+  const SQL_PROMISE = initSqlJs({ locateFile: locateSqlJsFileNode });
+
+  async function createLegacyDatabaseBytes(setup: (db: any) => void): Promise<Uint8Array> {
+    const SQL = await SQL_PROMISE;
+    const db = new SQL.Database();
+    setup(db);
+    return db.export() as Uint8Array;
+  }
+
   it("persists entries to sqlite via a binary storage adapter", async () => {
     const storage = new InMemoryBinaryStorage();
     const store = await SqliteAIAuditStore.create({ storage });
@@ -143,5 +154,142 @@ describe("SqliteAIAuditStore", () => {
 
     const entries = await store.listEntries();
     expect(entries.map((e) => e.id)).toEqual([freshId]);
+  });
+
+  it("backfills legacy workbook_id values from input_json on first open", async () => {
+    const storage = new InMemoryBinaryStorage();
+    const legacyId = randomUUID();
+
+    await storage.save(
+      await createLegacyDatabaseBytes((db) => {
+        db.run(`
+          CREATE TABLE ai_audit_log (
+            id TEXT PRIMARY KEY,
+            timestamp_ms INTEGER NOT NULL,
+            session_id TEXT NOT NULL,
+            user_id TEXT,
+            mode TEXT NOT NULL,
+            input_json TEXT NOT NULL,
+            model TEXT NOT NULL,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            total_tokens INTEGER,
+            latency_ms INTEGER,
+            tool_calls_json TEXT NOT NULL,
+            user_feedback TEXT
+          );
+        `);
+
+        db.run(
+          `
+            INSERT INTO ai_audit_log (
+              id,
+              timestamp_ms,
+              session_id,
+              user_id,
+              mode,
+              input_json,
+              model,
+              prompt_tokens,
+              completion_tokens,
+              total_tokens,
+              latency_ms,
+              tool_calls_json,
+              user_feedback
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+          `,
+          [
+            legacyId,
+            1700000000000,
+            "session-legacy",
+            null,
+            "chat",
+            JSON.stringify({ prompt: "hello", workbookId: "workbook-legacy" }),
+            "unit-test-model",
+            null,
+            null,
+            null,
+            null,
+            "[]",
+            null
+          ],
+        );
+      }),
+    );
+
+    const store = await SqliteAIAuditStore.create({ storage, locateFile: locateSqlJsFileNode });
+    const entries = await store.listEntries({ workbook_id: "workbook-legacy" });
+
+    expect(entries.map((e) => e.id)).toEqual([legacyId]);
+    expect(entries[0]!.workbook_id).toBe("workbook-legacy");
+  });
+
+  it("backfills legacy workbook_id values from session_id when input_json is missing/malformed", async () => {
+    const storage = new InMemoryBinaryStorage();
+    const legacyId = randomUUID();
+    const workbookId = "workbook-from-session";
+
+    await storage.save(
+      await createLegacyDatabaseBytes((db) => {
+        db.run(`
+          CREATE TABLE ai_audit_log (
+            id TEXT PRIMARY KEY,
+            timestamp_ms INTEGER NOT NULL,
+            session_id TEXT NOT NULL,
+            user_id TEXT,
+            mode TEXT NOT NULL,
+            input_json TEXT NOT NULL,
+            model TEXT NOT NULL,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            total_tokens INTEGER,
+            latency_ms INTEGER,
+            tool_calls_json TEXT NOT NULL,
+            user_feedback TEXT
+          );
+        `);
+
+        db.run(
+          `
+            INSERT INTO ai_audit_log (
+              id,
+              timestamp_ms,
+              session_id,
+              user_id,
+              mode,
+              input_json,
+              model,
+              prompt_tokens,
+              completion_tokens,
+              total_tokens,
+              latency_ms,
+              tool_calls_json,
+              user_feedback
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+          `,
+          [
+            legacyId,
+            1700000000000,
+            `${workbookId}:550e8400-e29b-41d4-a716-446655440000`,
+            null,
+            "chat",
+            "{not-valid-json",
+            "unit-test-model",
+            null,
+            null,
+            null,
+            null,
+            "[]",
+            null
+          ],
+        );
+      }),
+    );
+
+    const store = await SqliteAIAuditStore.create({ storage, locateFile: locateSqlJsFileNode });
+    const entries = await store.listEntries({ workbook_id: workbookId });
+
+    expect(entries.map((e) => e.id)).toEqual([legacyId]);
+    expect(entries[0]!.workbook_id).toBe(workbookId);
   });
 });
