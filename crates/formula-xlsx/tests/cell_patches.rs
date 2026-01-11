@@ -29,7 +29,8 @@ fn apply_cell_patches_preserves_unrelated_parts_for_xlsx() -> Result<(), Box<dyn
 
     let mut patches = WorkbookCellPatches::default();
     patches.set_cell(
-        "Sheet1",
+        // Sheet names are case-insensitive in Excel; allow patches keyed by any casing.
+        "sheet1",
         CellRef::from_a1("A1")?,
         CellPatch::set_value(CellValue::Number(42.0)),
     );

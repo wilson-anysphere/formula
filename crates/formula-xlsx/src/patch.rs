@@ -222,9 +222,10 @@ pub(crate) fn apply_cell_patches_to_package(
             continue;
         }
 
+        // Excel treats sheet names as case-insensitive; accept patches keyed by any casing.
         let sheet = workbook_sheets
             .iter()
-            .find(|s| s.name == sheet_name)
+            .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
             .ok_or_else(|| XlsxError::Invalid(format!("unknown sheet name: {sheet_name}")))?;
 
         let worksheet_part = resolve_worksheet_part(pkg, sheet)?;
