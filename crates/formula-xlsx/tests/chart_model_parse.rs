@@ -2,11 +2,11 @@ use formula_model::charts::{AxisKind, AxisPosition, ChartKind, LegendPosition, S
 use formula_xlsx::drawingml::charts::parse_chart_space;
 use formula_xlsx::XlsxPackage;
 
-const FIXTURE_BAR: &[u8] = include_bytes!("../../../fixtures/xlsx/charts/bar.xlsx");
-const FIXTURE_LINE: &[u8] = include_bytes!("../../../fixtures/xlsx/charts/line.xlsx");
-const FIXTURE_PIE: &[u8] = include_bytes!("../../../fixtures/xlsx/charts/pie.xlsx");
-const FIXTURE_SCATTER: &[u8] = include_bytes!("../../../fixtures/xlsx/charts/scatter.xlsx");
-const FIXTURE_BASIC_CHART: &[u8] = include_bytes!("../../../fixtures/xlsx/charts/basic-chart.xlsx");
+const FIXTURE_BAR: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/bar.xlsx");
+const FIXTURE_LINE: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/line.xlsx");
+const FIXTURE_PIE: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/pie.xlsx");
+const FIXTURE_SCATTER: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/scatter.xlsx");
+const FIXTURE_BASIC_CHART: &[u8] = include_bytes!("../../../fixtures/charts/xlsx/basic-chart.xlsx");
 
 fn parse_fixture(bytes: &[u8]) -> formula_model::charts::ChartModel {
     let pkg = XlsxPackage::from_bytes(bytes).expect("open xlsx fixture");

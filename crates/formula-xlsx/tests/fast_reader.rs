@@ -144,7 +144,7 @@ fn fast_reader_matches_full_reader_for_values_and_formulas() {
 #[test]
 fn fast_reader_does_not_require_unmodeled_parts() {
     let bytes =
-        std::fs::read(fixture_path("fixtures/xlsx/charts/basic-chart.xlsx")).expect("read fixture");
+        std::fs::read(fixture_path("fixtures/charts/xlsx/basic-chart.xlsx")).expect("read fixture");
     let workbook = formula_xlsx::read_workbook_model_from_bytes(&bytes)
         .expect("fast reader should ignore chart/drawing parts");
     assert_eq!(workbook.sheets.len(), 1);

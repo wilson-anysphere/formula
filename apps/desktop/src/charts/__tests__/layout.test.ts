@@ -83,7 +83,7 @@ function extractXmlText(xml: string, tag: string): string[] {
 }
 
 function parseChartModelFromFixture(fixtureFile: string, chartKind: ChartModel["chartType"]["kind"]): ChartModel {
-  const fixtureUrl = new URL(`../../../../../fixtures/xlsx/charts/${fixtureFile}`, import.meta.url);
+  const fixtureUrl = new URL(`../../../../../fixtures/charts/xlsx/${fixtureFile}`, import.meta.url);
   const bytes = readFileSync(fixtureUrl);
   const entries = parseZipEntries(bytes);
 
