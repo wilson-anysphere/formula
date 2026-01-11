@@ -146,14 +146,18 @@ fn is_signature_component(component: &str) -> bool {
 
 fn signature_path_rank(path: &str) -> u8 {
     // Lower = higher priority.
-    let last = path.split('/').last().unwrap_or(path);
-    let trimmed = last.trim_start_matches(|c: char| c <= '\u{001F}');
-    match trimmed {
-        "DigitalSignature" => 0,
-        "DigitalSignatureEx" => 1,
-        "DigitalSignatureExt" => 2,
-        _ => 3,
-    }
+    path.split('/')
+        .map(|component| {
+            let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
+            match trimmed {
+                "DigitalSignature" => 0,
+                "DigitalSignatureEx" => 1,
+                "DigitalSignatureExt" => 2,
+                _ => 3,
+            }
+        })
+        .min()
+        .unwrap_or(3)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
