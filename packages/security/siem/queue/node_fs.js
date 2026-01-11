@@ -407,6 +407,9 @@ export class NodeFsOfflineAuditQueue {
         if (error?.code === "ENOENT") return;
         throw error;
       }
+
+      await safeUnlink(this.lockPath);
+      await safeUnlink(this.enqueueLockPath);
     });
   }
 
