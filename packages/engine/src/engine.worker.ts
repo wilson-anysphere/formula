@@ -42,7 +42,21 @@ async function loadWasmModule(moduleUrl: string): Promise<WasmModule> {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore - `moduleUrl` is runtime-defined (Vite dev server / asset URL).
   const mod = (await import(/* @vite-ignore */ moduleUrl)) as WasmModule;
-  await mod.default?.(wasmBinaryUrl ?? undefined);
+  const init = mod.default;
+  if (init) {
+    if (wasmBinaryUrl) {
+      // wasm-bindgen >=0.2.105 prefers an object parameter, but older versions
+      // accepted `module_or_path` directly. Try the modern form first to avoid
+      // a noisy console warning, then fall back for compatibility.
+      try {
+        await init({ module_or_path: wasmBinaryUrl });
+      } catch {
+        await init(wasmBinaryUrl);
+      }
+    } else {
+      await init();
+    }
+  }
   return mod;
 }
 
