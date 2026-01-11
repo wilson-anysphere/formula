@@ -6,52 +6,60 @@
  */
 export const FORMULA_API_DTS = `// Auto-generated/hand-maintained Formula scripting API typings.
 // This file is intended to be loaded into Monaco as an extra lib.
+//
+// NOTE: We intentionally avoid declaring a global \`interface Range\` because it
+// would merge with the DOM \`Range\` type. Instead, spreadsheet types live under
+// \`Formula.*\` and we provide a global \`ScriptContext\` alias for convenience.
 
-type CellValue = string | number | boolean | null;
+declare namespace Formula {
+  export type CellValue = string | number | boolean | null;
 
-interface CellFormat {
-  bold?: boolean;
-  italic?: boolean;
-  numberFormat?: string;
-  backgroundColor?: string;
+  export interface CellFormat {
+    bold?: boolean;
+    italic?: boolean;
+    numberFormat?: string;
+    backgroundColor?: string;
+  }
+
+  export interface Range {
+    readonly address: string;
+    getValues(): Promise<CellValue[][]>;
+    setValues(values: CellValue[][]): Promise<void>;
+    getValue(): Promise<CellValue>;
+    setValue(value: CellValue): Promise<void>;
+    getFormat(): Promise<CellFormat>;
+    setFormat(format: Partial<CellFormat>): Promise<void>;
+  }
+
+  export interface Sheet {
+    readonly name: string;
+    getRange(address: string): Range;
+  }
+
+  export interface Workbook {
+    getSheet(name: string): Sheet;
+    setSelection(sheetName: string, address: string): Promise<void>;
+    getSelection(): Promise<{ sheetName: string; address: string }>;
+    getActiveSheetName(): Promise<string>;
+  }
+
+  export interface UIHelpers {
+    log(...args: unknown[]): void;
+  }
+
+  export interface ScriptContext {
+    workbook: Workbook;
+    activeSheet: Sheet;
+    selection: Range;
+    ui: UIHelpers;
+
+    // Network + logging helpers (subject to ScriptRuntime permissions).
+    fetch: typeof fetch;
+    console: Console;
+  }
 }
 
-interface Range {
-  readonly address: string;
-  getValues(): Promise<CellValue[][]>;
-  setValues(values: CellValue[][]): Promise<void>;
-  getValue(): Promise<CellValue>;
-  setValue(value: CellValue): Promise<void>;
-  getFormat(): Promise<CellFormat>;
-  setFormat(format: Partial<CellFormat>): Promise<void>;
-}
-
-interface Sheet {
-  readonly name: string;
-  getRange(address: string): Range;
-}
-
-interface Workbook {
-  getSheet(name: string): Sheet;
-  setSelection(sheetName: string, address: string): Promise<void>;
-  getSelection(): Promise<{ sheetName: string; address: string }>;
-  getActiveSheetName(): Promise<string>;
-}
-
-interface UIHelpers {
-  log(...args: unknown[]): void;
-}
-
-interface ScriptContext {
-  workbook: Workbook;
-  activeSheet: Sheet;
-  selection: Range;
-  ui: UIHelpers;
-
-  // Network + logging helpers (subject to ScriptRuntime permissions).
-  fetch: typeof fetch;
-  console: Console;
-}
+type ScriptContext = Formula.ScriptContext;
 
 declare const ctx: ScriptContext;
 `; 
