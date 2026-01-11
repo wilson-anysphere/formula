@@ -393,8 +393,17 @@ describe("SIEM export worker", () => {
         expect(siem.requests[0]!.body).not.toContain("__audit");
         if (format === "cef") {
           expect(siem.requests[0]!.body).toContain("CEF:0|");
+          expect(siem.requests[0]!.body).toContain("cs5Label=resourceName");
+          expect(siem.requests[0]!.body).toContain("cs5=Q1 Plan");
+          expect(siem.requests[0]!.body).toContain("cs7Label=requestId");
+          expect(siem.requests[0]!.body).toContain("cs7=req_123");
+          expect(siem.requests[0]!.body).toContain("cs8Label=traceId");
+          expect(siem.requests[0]!.body).toContain("cs8=trace_abc");
         } else {
           expect(siem.requests[0]!.body).toContain("LEEF:2.0|");
+          expect(siem.requests[0]!.body).toContain("resourceName=Q1 Plan");
+          expect(siem.requests[0]!.body).toContain("requestId=req_123");
+          expect(siem.requests[0]!.body).toContain("traceId=trace_abc");
         }
       } finally {
         await siem.close();
