@@ -195,12 +195,19 @@ fn lower_sheet_reference(
         (Some(book), Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
             SheetRef::SheetRange { start, end } => {
-                SheetReference::External(format!("[{book}]{start}:{end}"))
+                if start.eq_ignore_ascii_case(end) {
+                    SheetReference::External(format!("[{book}]{start}"))
+                } else {
+                    SheetReference::External(format!("[{book}]{start}:{end}"))
+                }
             }
         },
         (Some(book), None) => SheetReference::External(format!("[{book}]")),
         (None, Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::Sheet(sheet.clone()),
+            SheetRef::SheetRange { start, end } if start.eq_ignore_ascii_case(end) => {
+                SheetReference::Sheet(start.clone())
+            }
             SheetRef::SheetRange { start, end } => SheetReference::SheetRange(start.clone(), end.clone()),
         },
         (None, None) => SheetReference::Current,
@@ -755,7 +762,11 @@ fn compile_sheet_reference(
         (Some(book), Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
             SheetRef::SheetRange { start, end } => {
-                SheetReference::External(format!("[{book}]{start}:{end}"))
+                if start.eq_ignore_ascii_case(end) {
+                    SheetReference::External(format!("[{book}]{start}"))
+                } else {
+                    SheetReference::External(format!("[{book}]{start}:{end}"))
+                }
             }
         },
         (Some(book), None) => SheetReference::External(format!("[{book}]")),
@@ -764,6 +775,11 @@ fn compile_sheet_reference(
                 .map(SheetReference::Sheet)
                 .unwrap_or_else(|| SheetReference::External(sheet.clone())),
             SheetRef::SheetRange { start, end } => {
+                if start.eq_ignore_ascii_case(end) {
+                    return resolve_sheet(start)
+                        .map(SheetReference::Sheet)
+                        .unwrap_or_else(|| SheetReference::External(start.clone()));
+                }
                 let start_id = resolve_sheet(start);
                 let end_id = resolve_sheet(end);
                 match (start_id, end_id) {

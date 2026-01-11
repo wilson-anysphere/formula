@@ -268,6 +268,7 @@ pub fn lower_canonical_expr(
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(BytecodeExpr::FuncCall { func, args })
         }
+        crate::Expr::Call(_) => Err(LowerError::Unsupported),
         crate::Expr::Postfix(_) => Err(LowerError::Unsupported),
         crate::Expr::NameRef(_)
         | crate::Expr::ColRef(_)

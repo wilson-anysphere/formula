@@ -322,12 +322,19 @@ fn lower_sheet_reference(
         (None, None) => SheetReference::Current,
         (None, Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(s) => SheetReference::Sheet(s.clone()),
+            SheetRef::SheetRange { start, end } if start.eq_ignore_ascii_case(end) => {
+                SheetReference::Sheet(start.clone())
+            }
             SheetRef::SheetRange { start, end } => SheetReference::SheetRange(start.clone(), end.clone()),
         },
         (Some(book), Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
             SheetRef::SheetRange { start, end } => {
-                SheetReference::External(format!("[{book}]{start}:{end}"))
+                if start.eq_ignore_ascii_case(end) {
+                    SheetReference::External(format!("[{book}]{start}"))
+                } else {
+                    SheetReference::External(format!("[{book}]{start}:{end}"))
+                }
             }
         },
         (Some(book), None) => SheetReference::External(format!("[{book}]")),
