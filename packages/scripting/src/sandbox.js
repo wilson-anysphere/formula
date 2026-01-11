@@ -195,7 +195,20 @@ async function __flushEvents() {
  * @param {string} code
  */
 function isModuleScript(code) {
-  return /\bexport\s+default\b/.test(code);
+  // Module detection must ignore comments/strings and treat any top-level export as
+  // a module script (not just `export default`). This is relied upon by the node
+  // ScriptRuntime to provide clearer errors when users paste module-style code.
+  const source = ts.createSourceFile("user-script.ts", code, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+
+  for (const statement of source.statements) {
+    if (ts.isExportAssignment(statement) || ts.isExportDeclaration(statement)) return true;
+
+    // `export default function ...`, `export const ...`, etc.
+    const modifiers = statement.modifiers ?? [];
+    if (modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) return true;
+  }
+
+  return false;
 }
 
 function findUnsupportedModuleSyntax(code) {

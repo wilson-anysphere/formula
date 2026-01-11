@@ -111,6 +111,45 @@ test("PresenceManager.subscribe evicts stale remote presences without remote awa
   unsubscribe();
 });
 
+test("PresenceManager.subscribe eviction timer accounts for remote users on other sheets", () => {
+  const scheduler = new FakeScheduler();
+  const hub = new InMemoryAwarenessHub();
+  const awarenessA = hub.createAwareness(1);
+  const awarenessB = hub.createAwareness(2);
+
+  const presenceA = new PresenceManager(awarenessA, {
+    user: { id: "u1", name: "Ada", color: "#ff2d55" },
+    activeSheet: "Sheet1",
+    throttleMs: 0,
+    staleAfterMs: 100,
+    now: () => scheduler.now(),
+    setTimeout: scheduler.setTimeout.bind(scheduler),
+    clearTimeout: scheduler.clearTimeout.bind(scheduler),
+  });
+
+  new PresenceManager(awarenessB, {
+    user: { id: "u2", name: "Grace", color: "#4c8bf5" },
+    activeSheet: "Sheet2",
+    throttleMs: 0,
+    now: () => scheduler.now(),
+    setTimeout: scheduler.setTimeout.bind(scheduler),
+    clearTimeout: scheduler.clearTimeout.bind(scheduler),
+  });
+
+  /** @type {string[][]} */
+  const updates = [];
+  const unsubscribe = presenceA.subscribe(() => {
+    updates.push(presenceA.getRemotePresences({ includeOtherSheets: true }).map((presence) => presence.id));
+  });
+
+  assert.deepEqual(updates, [["u2"]]);
+
+  scheduler.advance(101);
+  assert.deepEqual(updates, [["u2"], []]);
+
+  unsubscribe();
+});
+
 test("PresenceManager.getRemotePresences can include users on other sheets", () => {
   const hub = new InMemoryAwarenessHub();
   const awarenessA = hub.createAwareness(1);

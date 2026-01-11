@@ -165,7 +165,11 @@ export class PresenceManager {
     if (this._listeners.size === 0) return;
     const presences = this.getRemotePresences();
     for (const listener of this._listeners) listener(presences);
-    this._scheduleStaleEviction(presences);
+    // Schedule stale eviction across *all* remote presences (not just the current active
+    // sheet) so consumers can call `getRemotePresences({ includeOtherSheets: true })`
+    // inside a subscription callback and still have stale clients removed even when
+    // there are no active-sheet users.
+    this._scheduleStaleEviction(this.getRemotePresences({ includeOtherSheets: true }));
   }
 
   /**
@@ -188,7 +192,7 @@ export class PresenceManager {
 
     const presences = this.getRemotePresences();
     listener(presences);
-    this._scheduleStaleEviction(presences);
+    this._scheduleStaleEviction(this.getRemotePresences({ includeOtherSheets: true }));
 
     return () => {
       this._listeners.delete(listener);
