@@ -10,7 +10,7 @@ import WebSocket from "ws";
 import { createLogger } from "../src/logger.js";
 import { createSyncServer } from "../src/server.js";
 import type { SyncServerConfig } from "../src/config.js";
-import { getAvailablePort, waitForCondition, waitForProviderSync } from "./test-helpers.ts";
+import { waitForCondition, waitForProviderSync } from "./test-helpers.ts";
 import { WebsocketProvider, Y } from "./yjs-interop.ts";
 
 async function expectConditionToStayFalse(
@@ -114,10 +114,9 @@ test("auth:introspect enforces roles and caches introspection results", async (t
   assert.ok(addr && typeof addr !== "string");
   const introspectUrl = `http://127.0.0.1:${addr.port}`;
 
-  const port = await getAvailablePort();
   const config: SyncServerConfig = {
     host: "127.0.0.1",
-    port,
+    port: 0,
     trustProxy: false,
     gc: true,
     tls: null,

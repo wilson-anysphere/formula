@@ -12,7 +12,6 @@ import WebSocket from "ws";
 import { WebsocketProvider, Y } from "./yjs-interop.ts";
 
 import {
-  getAvailablePort,
   startSyncServer,
   waitForCondition,
   waitForProviderSync,
@@ -199,11 +198,7 @@ function buildAwarenessMessage(entries: {
 test("syncs between two clients and persists encrypted state across restart", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
-  const wsUrl = `ws://127.0.0.1:${port}`;
-
   let server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -211,6 +206,8 @@ test("syncs between two clients and persists encrypted state across restart", as
       SYNC_SERVER_ENCRYPTION_KEYRING_JSON: TEST_KEYRING_JSON,
     },
   });
+  const port = server.port;
+  const wsUrl = server.wsUrl;
   t.after(async () => {
     await server.stop();
   });
@@ -305,13 +302,9 @@ test(
   async (t) => {
     const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-    const port = await getAvailablePort();
-    const wsUrl = `ws://127.0.0.1:${port}`;
-
     const keyBase64 = Buffer.alloc(32, 5).toString("base64");
 
     let server = await startSyncServer({
-      port,
       dataDir,
       auth: { mode: "opaque", token: "test-token" },
       env: {
@@ -323,6 +316,8 @@ test(
         SYNC_SERVER_ENCRYPTION_KEYRING_PATH: "",
       },
     });
+    const port = server.port;
+    const wsUrl = server.wsUrl;
     t.after(async () => {
       await server.stop();
     });
@@ -418,11 +413,7 @@ test(
 test("purges persisted documents via internal admin API", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
-  const wsUrl = `ws://127.0.0.1:${port}`;
-
   let server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -432,6 +423,8 @@ test("purges persisted documents via internal admin API", async (t) => {
       SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
     },
   });
+  const port = server.port;
+  const wsUrl = server.wsUrl;
   t.after(async () => {
     await server.stop();
   });
@@ -585,15 +578,13 @@ test("purges persisted documents via internal admin API", async (t) => {
 test("migrates legacy plaintext persistence files to encrypted format", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
-  const wsUrl = `ws://127.0.0.1:${port}`;
-
   let server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: { SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off" },
   });
+  const port = server.port;
+  const wsUrl = server.wsUrl;
   t.after(async () => {
     await server.stop();
   });
@@ -672,9 +663,6 @@ test("migrates legacy plaintext persistence files to encrypted format", async (t
 test("supports KeyRing rotation for encrypted file persistence", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
-  const wsUrl = `ws://127.0.0.1:${port}`;
-
   const docName = "rotation-doc";
   const secretText = "rotation-secret: hello world 0123456789 abcdef";
 
@@ -691,7 +679,6 @@ test("supports KeyRing rotation for encrypted file persistence", async (t) => {
   });
 
   let server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -699,6 +686,8 @@ test("supports KeyRing rotation for encrypted file persistence", async (t) => {
       SYNC_SERVER_ENCRYPTION_KEYRING_JSON: keyRingV1,
     },
   });
+  const port = server.port;
+  const wsUrl = server.wsUrl;
   t.after(async () => {
     await server.stop();
   });
@@ -817,11 +806,7 @@ test("loads KeyRing from SYNC_SERVER_ENCRYPTION_KEYRING_PATH", async (t) => {
   const keyRingPath = path.join(dataDir, "keyring.json");
   await writeFile(keyRingPath, TEST_KEYRING_JSON);
 
-  const port = await getAvailablePort();
-  const wsUrl = `ws://127.0.0.1:${port}`;
-
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -830,6 +815,7 @@ test("loads KeyRing from SYNC_SERVER_ENCRYPTION_KEYRING_PATH", async (t) => {
       SYNC_SERVER_ENCRYPTION_KEYRING_PATH: keyRingPath,
     },
   });
+  const wsUrl = server.wsUrl;
   t.after(async () => {
     await server.stop();
   });
@@ -873,8 +859,6 @@ test(
       await rm(dataDir, { recursive: true, force: true });
     });
 
-    const port = await getAvailablePort();
-
     const serviceDir = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       ".."
@@ -891,7 +875,7 @@ test(
         NODE_ENV: "production",
         LOG_LEVEL: "silent",
         SYNC_SERVER_HOST: "127.0.0.1",
-        SYNC_SERVER_PORT: String(port),
+        SYNC_SERVER_PORT: "0",
         SYNC_SERVER_DATA_DIR: dataDir,
         SYNC_SERVER_AUTH_TOKEN: "test-token",
         SYNC_SERVER_JWT_SECRET: "",
@@ -932,13 +916,10 @@ test(
 test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
-
   const secret = "test-secret";
   const docName = "permissions-doc";
 
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret, audience: "formula-sync" },
   });
@@ -1020,13 +1001,10 @@ test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) =>
 test("sanitizes awareness identity and blocks clientID spoofing", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
-
   const secret = "test-secret";
   const docName = "awareness-doc";
 
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret, audience: "formula-sync" },
   });
@@ -1314,9 +1292,6 @@ test("sanitizes awareness identity and blocks clientID spoofing", async (t) => {
 test("refuses to start a second server using the same data directory", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-lock-"));
 
-  const port1 = await getAvailablePort();
-  const port2 = await getAvailablePort();
-
   const serviceDir = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     ".."
@@ -1325,7 +1300,6 @@ test("refuses to start a second server using the same data directory", async (t)
   const nodeWithTsx = path.join(serviceDir, "scripts", "node-with-tsx.mjs");
 
   const server1 = await startSyncServer({
-    port: port1,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -1348,7 +1322,7 @@ test("refuses to start a second server using the same data directory", async (t)
       NODE_ENV: "test",
       LOG_LEVEL: "silent",
       SYNC_SERVER_HOST: "127.0.0.1",
-      SYNC_SERVER_PORT: String(port2),
+      SYNC_SERVER_PORT: "0",
       SYNC_SERVER_DATA_DIR: dataDir,
       SYNC_SERVER_AUTH_TOKEN: "test-token",
       SYNC_SERVER_JWT_SECRET: "",
@@ -1399,8 +1373,6 @@ test("does not treat lock from another host as stale", async (t) => {
     })}\n`
   );
 
-  const port = await getAvailablePort();
-
   const serviceDir = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     ".."
@@ -1417,7 +1389,7 @@ test("does not treat lock from another host as stale", async (t) => {
       NODE_ENV: "test",
       LOG_LEVEL: "silent",
       SYNC_SERVER_HOST: "127.0.0.1",
-      SYNC_SERVER_PORT: String(port),
+      SYNC_SERVER_PORT: "0",
       SYNC_SERVER_DATA_DIR: dataDir,
       SYNC_SERVER_AUTH_TOKEN: "test-token",
       SYNC_SERVER_JWT_SECRET: "",

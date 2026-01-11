@@ -9,7 +9,6 @@ import WebSocket from "ws";
 import { WebsocketProvider, Y } from "./yjs-interop.ts";
 
 import {
-  getAvailablePort,
   startSyncServer,
   waitForCondition,
   waitForProviderSync,
@@ -81,9 +80,7 @@ function encodeWebsocketAwarenessMessage(awarenessUpdate: Uint8Array): Uint8Arra
 test("rejects JWT when docId mismatches path", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
   });
@@ -137,9 +134,7 @@ test("rejects JWT when docId mismatches path", async (t) => {
 test("viewer can sync but cannot write", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
   });
@@ -222,9 +217,7 @@ test("viewer can sync but cannot write", async (t) => {
 test("awareness sanitizes presence.id and blocks clientID spoof", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
   });

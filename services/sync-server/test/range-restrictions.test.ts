@@ -15,7 +15,6 @@ import {
 } from "../../../packages/collab/persistence/src/file-format.js";
 
 import {
-  getAvailablePort,
   startSyncServer,
   waitForCondition,
   waitForProviderSync,
@@ -147,9 +146,7 @@ async function loadPersistedDoc(dataDir: string, docName: string): Promise<Y.Doc
 test("forbidden cell write is rejected and connection closed", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
     env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
@@ -249,9 +246,7 @@ test("forbidden cell write is rejected and connection closed", async (t) => {
 test("allowed cell write is accepted and syncs", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
     env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
@@ -330,9 +325,7 @@ test("allowed cell write is accepted and syncs", async (t) => {
 test("allowed offline edit syncs on reconnect (shadow state seeded from server doc)", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
     env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
@@ -436,9 +429,7 @@ test("allowed offline edit syncs on reconnect (shadow state seeded from server d
 test("strict mode rejects updates when cell keys cannot be parsed", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
     env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
@@ -523,9 +514,7 @@ test("rangeRestrictions: rejects invalid numeric cell keys (Infinity) without cr
     await rm(dataDir, { recursive: true, force: true });
   });
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
     env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
