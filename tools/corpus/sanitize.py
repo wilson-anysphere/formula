@@ -865,6 +865,27 @@ def _cell_in_bounds(row: int, col: int, bounds: tuple[int, int, int, int]) -> bo
     return r1 <= row <= r2 and c1 <= col <= c2
 
 
+def _bounds_intersect(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+    ar1, ar2, ac1, ac2 = a
+    br1, br2, bc1, bc2 = b
+    return not (ar2 < br1 or ar1 > br2 or ac2 < bc1 or ac1 > bc2)
+
+
+def _table_context_for_sqref(sqref: str, *, table_contexts: list[TableContext]) -> TableContext | None:
+    if not sqref or not table_contexts:
+        return None
+    for token in sqref.split():
+        bounds = _a1_range_to_bounds(token)
+        if not bounds:
+            continue
+        for ctx in table_contexts:
+            if _bounds_intersect(
+                bounds, (ctx.start_row, ctx.end_row, ctx.start_col, ctx.end_col)
+            ):
+                return ctx
+    return None
+
+
 def _rewrite_formula_table_column_references(
     formula: str, *, table_column_rename_map: dict[str, dict[str, str]]
 ) -> str:
@@ -951,6 +972,73 @@ def _sanitize_formula_cells_in_worksheet(
             if not loc or _looks_like_external_url(loc):
                 continue
             hl.attrib["location"] = _rewrite_formula_sheet_references(loc, sheet_rename_map=sheet_rename_map)
+
+    # Data validation rules can embed plaintext lists and user-visible prompts/errors.
+    if options.redact_cell_values or options.hash_strings or options.scrub_metadata:
+        for dv in root.iter():
+            if dv.tag.split("}")[-1] != "dataValidation":
+                continue
+
+            if options.scrub_metadata or options.hash_strings:
+                for attr in ("prompt", "error", "promptTitle", "errorTitle"):
+                    if attr in dv.attrib and dv.attrib[attr]:
+                        dv.attrib[attr] = _sanitize_text(dv.attrib[attr], options=options)
+
+            ctx = None
+            if table_contexts:
+                ctx = _table_context_for_sqref(dv.attrib.get("sqref", ""), table_contexts=table_contexts)
+
+            for child in dv:
+                local = child.tag.split("}")[-1]
+                if local not in {"formula1", "formula2"}:
+                    continue
+                if not child.text:
+                    continue
+                child.text = _sanitize_formula_text(
+                    child.text,
+                    options=options,
+                    sheet_rename_map=sheet_rename_map,
+                    table_rename_map=table_rename_map,
+                    table_column_rename_map=table_column_rename_map,
+                )
+                if ctx:
+                    child.text = _rewrite_unqualified_structured_refs(child.text, column_map=ctx.column_map)
+
+    # Conditional formatting formulas can contain string literals and structured references.
+    if options.redact_cell_values or options.hash_strings:
+        for cf in root.iter():
+            if cf.tag.split("}")[-1] != "conditionalFormatting":
+                continue
+            ctx = None
+            if table_contexts:
+                ctx = _table_context_for_sqref(cf.attrib.get("sqref", ""), table_contexts=table_contexts)
+            for formula_el in cf.iter():
+                if formula_el.tag.split("}")[-1] != "formula":
+                    continue
+                if not formula_el.text:
+                    continue
+                formula_el.text = _sanitize_formula_text(
+                    formula_el.text,
+                    options=options,
+                    sheet_rename_map=sheet_rename_map,
+                    table_rename_map=table_rename_map,
+                    table_column_rename_map=table_column_rename_map,
+                )
+                if ctx:
+                    formula_el.text = _rewrite_unqualified_structured_refs(
+                        formula_el.text, column_map=ctx.column_map
+                    )
+
+    # AutoFilter criteria can cache plaintext filter values even after cells are redacted.
+    if options.redact_cell_values or options.hash_strings:
+        for af in root.iter():
+            if af.tag.split("}")[-1] != "autoFilter":
+                continue
+            for child in af.iter():
+                if child is af:
+                    continue
+                if "val" in child.attrib and child.attrib["val"]:
+                    child.attrib["val"] = _sanitize_text(child.attrib["val"], options=options)
 
 
 def scan_xlsx_bytes_for_leaks(
