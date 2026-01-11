@@ -24,9 +24,25 @@ function getYMap(value) {
 }
 
 /**
+ * Normalize a formula to the canonical representation used throughout the app:
+ * - trim leading whitespace
+ * - ensure it starts with "="
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function normalizeFormula(value) {
+  if (value == null) return null;
+  const trimmed = String(value).trimStart();
+  if (trimmed === "") return null;
+  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+}
+
+/**
  * Supports:
  * - `${sheetId}:${row}:${col}`
  * - `${sheetId}:${row},${col}`
+ * - `r{row}c{col}` (unit-test convenience; assumed to be in Sheet1)
  *
  * @param {string} key
  * @returns {{ sheetId: string, row: number, col: number } | null}
@@ -55,6 +71,15 @@ function parseCellKey(key) {
     return { sheetId, row, col };
   }
 
+  const m = key.match(/^r(\d+)c(\d+)$/);
+  if (m) {
+    const row = Number(m[1]);
+    const col = Number(m[2]);
+    if (!Number.isInteger(row) || row < 0) return null;
+    if (!Number.isInteger(col) || col < 0) return null;
+    return { sheetId: "Sheet1", row, col };
+  }
+
   return null;
 }
 
@@ -66,8 +91,7 @@ function extractCell(cellData) {
   const cellMap = getYMap(cellData);
   if (!cellMap) return null;
 
-  const formulaRaw = cellMap.get("formula");
-  const formula = typeof formulaRaw === "string" ? formulaRaw.trim() : "";
+  const formula = normalizeFormula(cellMap.get("formula"));
   const value = cellMap.get("value");
 
   // `format` is the canonical field (Task 18). `style` is accepted as a legacy alias.
@@ -128,8 +152,7 @@ function normalizeDocumentCell(value) {
   /** @type {Cell} */
   const out = {};
 
-  const formulaRaw = cell.formula;
-  const formula = typeof formulaRaw === "string" ? formulaRaw.trim() : "";
+  const formula = normalizeFormula(cell.formula);
   if (formula) out.formula = formula;
 
   const v = cell.value;
