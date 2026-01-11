@@ -5,7 +5,7 @@
 //! - Streaming ingestion (build chunks incrementally; never materialize a full cell grid).
 //! - Virtualization-friendly access (`get_cell` / `get_range`) backed by an LRU of decoded chunks.
 //! - Scan APIs for analytics-style operations.
-//! - Incremental refresh workflows via [`MutableColumnarTable`] + `compact()` / `freeze()`.
+//! - Incremental refresh workflows via [`MutableColumnarTable`] + `compact_in_place()` / `compact()` / `freeze()`.
 //!
 //! ## Incremental refresh
 //!
