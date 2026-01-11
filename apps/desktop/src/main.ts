@@ -927,17 +927,16 @@ async function handleNewWorkbook(): Promise<void> {
   const ok = await confirmDiscardDirtyState("create a new workbook");
   if (!ok) return;
 
-  // Ensure any scheduled workbook IPC flush runs before we replace the backend workbook.
-  await new Promise<void>((resolve) => queueMicrotask(resolve));
-
   const hadActiveWorkbook = activeWorkbook != null;
 
   workbookSync?.stop();
   workbookSync = null;
 
   try {
-    await pendingBackendSync;
-    pendingBackendSync = Promise.resolve();
+    // Allow any microtask-batched workbook edits to enqueue into the backend queue,
+    // then drain the queue fully before replacing the backend workbook state.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await drainBackendSync();
 
     activeWorkbook = await tauriBackend.newWorkbook();
     await loadWorkbookIntoDocument(activeWorkbook);
