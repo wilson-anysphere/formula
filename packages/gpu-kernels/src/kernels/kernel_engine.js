@@ -807,6 +807,9 @@ export class KernelEngine {
     }
 
     const joinType = opts.joinType ?? "inner";
+    if (joinType !== "inner" && joinType !== "left") {
+      throw new Error(`hashJoin joinType must be "inner" | "left", got ${String(joinType)}`);
+    }
     if (leftKeys.length === 0) {
       this._lastKernelBackend.hashJoin = "cpu";
       this._lastKernelPrecision.hashJoin = "u32";

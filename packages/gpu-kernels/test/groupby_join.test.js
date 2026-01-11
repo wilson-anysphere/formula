@@ -167,6 +167,15 @@ test("KernelEngine: hashJoin left join passes options through (CPU backend)", as
   assert.deepEqual(Array.from(out.rightIndex), [0xffff_ffff, 0]);
 });
 
+test("KernelEngine: hashJoin rejects invalid joinType", async () => {
+  const engine = new KernelEngine({ precision: "excel", gpu: { enabled: false } });
+  await assert.rejects(
+    // @ts-ignore
+    () => engine.hashJoin(new Uint32Array([1]), new Uint32Array(), { joinType: "outer" }),
+    /hashJoin joinType must be/
+  );
+});
+
 test("group-by/hashJoin: supports key 0xFFFF_FFFF (u32 max) in unsigned mode", async () => {
   const cpu = new CpuBackend();
   const k = 0xffff_ffff;
