@@ -9,8 +9,8 @@ use crate::types::{
     SheetMeta, SheetVisibility, Style as StorageStyle, WorkbookMeta,
 };
 use formula_model::{
-    rewrite_sheet_names_in_formula, validate_sheet_name, DefinedName, DefinedNameScope, ErrorValue,
-    SheetNameError,
+    rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula, validate_sheet_name,
+    DefinedName, DefinedNameScope, ErrorValue, SheetNameError,
 };
 use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
@@ -1236,6 +1236,34 @@ impl Storage {
         let tx = conn.transaction()?;
 
         let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        let (deleted_model_sheet_id, sheet_order, ordered_sheet_ids) = {
+            let (model_sheet_id,): (Option<i64>,) = tx.query_row(
+                "SELECT model_sheet_id FROM sheets WHERE id = ?1",
+                params![sheet_id.to_string()],
+                |r| Ok((r.get(0)?,)),
+            )?;
+
+            let mut sheet_order = Vec::new();
+            let mut ordered_sheet_ids = Vec::new();
+            let mut stmt = tx.prepare(
+                r#"
+                SELECT name, model_sheet_id
+                FROM sheets
+                WHERE workbook_id = ?1
+                ORDER BY position
+                "#,
+            )?;
+            let mut rows = stmt.query(params![meta.workbook_id.to_string()])?;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(0)?;
+                let model_sheet_id: Option<i64> = row.get(1)?;
+                let parsed = model_sheet_id.and_then(|id| u32::try_from(id).ok());
+                sheet_order.push(name.clone());
+                ordered_sheet_ids.push((name, parsed));
+            }
+
+            (model_sheet_id.and_then(|id| u32::try_from(id).ok()), sheet_order, ordered_sheet_ids)
+        };
 
         // Remove sheet-scoped named ranges that use the sheet name as their scope identifier.
         tx.execute(
@@ -1257,6 +1285,15 @@ impl Storage {
         tx.execute(
             "DELETE FROM sheets WHERE id = ?1",
             params![sheet_id.to_string()],
+        )?;
+
+        rewrite_sheet_delete_references_tx(
+            &tx,
+            meta.workbook_id,
+            &meta.name,
+            &sheet_order,
+            deleted_model_sheet_id,
+            &ordered_sheet_ids,
         )?;
 
         // Renormalize remaining sheet positions.
@@ -2243,7 +2280,457 @@ fn rewrite_sheet_rename_references_tx(
         }
     }
 
+    rewrite_sheet_metadata_json_for_rename_tx(tx, &workbook_id_str, old_name, new_name)?;
+
     Ok(())
+}
+
+fn rewrite_sheet_metadata_json_for_rename_tx(
+    tx: &Transaction<'_>,
+    workbook_id: &str,
+    old_name: &str,
+    new_name: &str,
+) -> Result<()> {
+    let mut select_stmt = tx.prepare(
+        r#"
+        SELECT id, model_sheet_json
+        FROM sheets
+        WHERE workbook_id = ?1
+          AND model_sheet_json IS NOT NULL
+        "#,
+    )?;
+    let mut update_stmt = tx.prepare("UPDATE sheets SET model_sheet_json = ?1 WHERE id = ?2")?;
+
+    let mut rows = select_stmt.query(params![workbook_id])?;
+    while let Some(row) = rows.next()? {
+        let sheet_id: String = row.get(0)?;
+        let json: serde_json::Value = row.get(1)?;
+        let Ok(mut sheet) = serde_json::from_value::<formula_model::Worksheet>(json) else {
+            continue;
+        };
+
+        if sheet_name_eq_case_insensitive(&sheet.name, old_name) {
+            sheet.name = new_name.to_string();
+        }
+
+        rewrite_sheet_references_in_sheet_metadata_for_rename(&mut sheet, old_name, new_name);
+        let updated = worksheet_metadata_json(&sheet)?;
+        update_stmt.execute(params![updated, sheet_id])?;
+    }
+
+    Ok(())
+}
+
+fn rewrite_sheet_references_in_sheet_metadata_for_rename(
+    sheet: &mut formula_model::Worksheet,
+    old_name: &str,
+    new_name: &str,
+) {
+    for table in &mut sheet.tables {
+        for column in &mut table.columns {
+            if let Some(formula) = column.formula.as_mut() {
+                *formula = rewrite_sheet_names_in_formula(formula, old_name, new_name);
+            }
+            if let Some(formula) = column.totals_formula.as_mut() {
+                *formula = rewrite_sheet_names_in_formula(formula, old_name, new_name);
+            }
+        }
+    }
+
+    for rule in &mut sheet.conditional_formatting_rules {
+        rewrite_cf_rule_kind_for_rename(&mut rule.kind, old_name, new_name);
+    }
+
+    for link in &mut sheet.hyperlinks {
+        if let formula_model::HyperlinkTarget::Internal { sheet: target, .. } = &mut link.target {
+            if sheet_name_eq_case_insensitive(target, old_name) {
+                *target = new_name.to_string();
+            }
+        }
+    }
+
+    for assignment in &mut sheet.data_validations {
+        rewrite_data_validation_for_rename(&mut assignment.validation, old_name, new_name);
+    }
+}
+
+fn rewrite_cf_rule_kind_for_rename(
+    kind: &mut formula_model::CfRuleKind,
+    old_name: &str,
+    new_name: &str,
+) {
+    match kind {
+        formula_model::CfRuleKind::CellIs { formulas, .. } => {
+            for formula in formulas {
+                *formula = rewrite_sheet_names_in_formula(formula, old_name, new_name);
+            }
+        }
+        formula_model::CfRuleKind::Expression { formula } => {
+            *formula = rewrite_sheet_names_in_formula(formula, old_name, new_name);
+        }
+        formula_model::CfRuleKind::DataBar(rule) => {
+            rewrite_cfvo_for_rename(&mut rule.min, old_name, new_name);
+            rewrite_cfvo_for_rename(&mut rule.max, old_name, new_name);
+        }
+        formula_model::CfRuleKind::ColorScale(rule) => {
+            for cfvo in &mut rule.cfvos {
+                rewrite_cfvo_for_rename(cfvo, old_name, new_name);
+            }
+        }
+        formula_model::CfRuleKind::IconSet(rule) => {
+            for cfvo in &mut rule.cfvos {
+                rewrite_cfvo_for_rename(cfvo, old_name, new_name);
+            }
+        }
+        formula_model::CfRuleKind::TopBottom(_)
+        | formula_model::CfRuleKind::UniqueDuplicate(_)
+        | formula_model::CfRuleKind::Unsupported { .. } => {}
+    }
+}
+
+fn rewrite_cfvo_for_rename(cfvo: &mut formula_model::Cfvo, old_name: &str, new_name: &str) {
+    if cfvo.type_ != formula_model::CfvoType::Formula {
+        return;
+    }
+    let Some(value) = cfvo.value.as_mut() else {
+        return;
+    };
+    *value = rewrite_sheet_names_in_formula(value, old_name, new_name);
+}
+
+fn normalize_validation_formula(formula: &str) -> &str {
+    let trimmed = formula.trim();
+    trimmed.strip_prefix('=').unwrap_or(trimmed).trim()
+}
+
+fn validation_formula_is_literal_list(formula: &str) -> bool {
+    let s = normalize_validation_formula(formula);
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 && bytes.first() == Some(&b'"') && bytes.last() == Some(&b'"') {
+        return true;
+    }
+    s.contains(',') || s.contains(';')
+}
+
+fn rewrite_data_validation_for_rename(
+    validation: &mut formula_model::DataValidation,
+    old_name: &str,
+    new_name: &str,
+) {
+    let formula1_is_literal_list = validation.kind == formula_model::DataValidationKind::List
+        && validation_formula_is_literal_list(&validation.formula1);
+
+    if !formula1_is_literal_list && !validation.formula1.is_empty() {
+        validation.formula1 =
+            rewrite_sheet_names_in_formula(&validation.formula1, old_name, new_name);
+    }
+    if let Some(formula2) = validation.formula2.as_mut() {
+        *formula2 = rewrite_sheet_names_in_formula(formula2, old_name, new_name);
+    }
+}
+
+fn rewrite_sheet_delete_references_tx(
+    tx: &Transaction<'_>,
+    workbook_id: Uuid,
+    deleted_name: &str,
+    sheet_order: &[String],
+    deleted_model_sheet_id: Option<u32>,
+    ordered_sheet_ids: &[(String, Option<u32>)],
+) -> Result<()> {
+    let workbook_id_str = workbook_id.to_string();
+
+    // Update formulas stored in the cell grid (including formulas on other sheets that reference
+    // the deleted sheet).
+    {
+        let mut select_stmt = tx.prepare(
+            r#"
+            SELECT c.sheet_id, c.row, c.col, c.formula
+            FROM cells c
+            JOIN sheets s ON s.id = c.sheet_id
+            WHERE s.workbook_id = ?1
+              AND c.formula IS NOT NULL
+            "#,
+        )?;
+        let mut update_stmt =
+            tx.prepare("UPDATE cells SET formula = ?1 WHERE sheet_id = ?2 AND row = ?3 AND col = ?4")?;
+
+        let mut rows = select_stmt.query(params![&workbook_id_str])?;
+        while let Some(row) = rows.next()? {
+            let sheet_id: String = row.get(0)?;
+            let row_idx: i64 = row.get(1)?;
+            let col_idx: i64 = row.get(2)?;
+            let formula: String = row.get(3)?;
+            let rewritten =
+                rewrite_deleted_sheet_references_in_formula(&formula, deleted_name, sheet_order);
+            if rewritten != formula {
+                update_stmt.execute(params![rewritten, sheet_id, row_idx, col_idx])?;
+            }
+        }
+    }
+
+    // Update named range references (legacy table) so `get_named_range` remains correct.
+    {
+        let mut select_stmt = tx.prepare(
+            r#"
+            SELECT name, scope, reference
+            FROM named_ranges
+            WHERE workbook_id = ?1
+            "#,
+        )?;
+        let mut update_stmt = tx.prepare(
+            "UPDATE named_ranges SET reference = ?1 WHERE workbook_id = ?2 AND name = ?3 AND scope = ?4",
+        )?;
+
+        let mut rows = select_stmt.query(params![&workbook_id_str])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            let scope: String = row.get(1)?;
+            let reference: String = row.get(2)?;
+            let rewritten = rewrite_deleted_sheet_references_in_formula(
+                &reference,
+                deleted_name,
+                sheet_order,
+            );
+            if rewritten != reference {
+                update_stmt.execute(params![rewritten, &workbook_id_str, name, scope])?;
+            }
+        }
+    }
+
+    // Keep workbook-level JSON columns in sync so `export_model_workbook` round-trips correctly.
+    {
+        let defined_names: Option<serde_json::Value> = tx.query_row(
+            "SELECT defined_names FROM workbooks WHERE id = ?1",
+            params![&workbook_id_str],
+            |r| r.get(0),
+        )?;
+        if let Some(raw) = defined_names {
+            if let Ok(mut names) = serde_json::from_value::<Vec<DefinedName>>(raw) {
+                let mut changed = false;
+                if let Some(deleted_id) = deleted_model_sheet_id {
+                    let before = names.len();
+                    names.retain(|n| n.scope != DefinedNameScope::Sheet(deleted_id));
+                    changed |= names.len() != before;
+                }
+
+                for name in &mut names {
+                    let rewritten = rewrite_deleted_sheet_references_in_formula(
+                        &name.refers_to,
+                        deleted_name,
+                        sheet_order,
+                    );
+                    if rewritten != name.refers_to {
+                        name.refers_to = rewritten;
+                        changed = true;
+                    }
+                }
+
+                if changed {
+                    let updated = (!names.is_empty()).then_some(serde_json::to_value(&names)?);
+                    tx.execute(
+                        "UPDATE workbooks SET defined_names = ?1 WHERE id = ?2",
+                        params![updated, &workbook_id_str],
+                    )?;
+                }
+            }
+        }
+    }
+
+    {
+        let print_settings: Option<serde_json::Value> = tx.query_row(
+            "SELECT print_settings FROM workbooks WHERE id = ?1",
+            params![&workbook_id_str],
+            |r| r.get(0),
+        )?;
+        if let Some(raw) = print_settings {
+            if let Ok(mut settings) =
+                serde_json::from_value::<formula_model::WorkbookPrintSettings>(raw)
+            {
+                let before = settings.sheets.len();
+                settings
+                    .sheets
+                    .retain(|s| !sheet_name_eq_case_insensitive(&s.sheet_name, deleted_name));
+                if settings.sheets.len() != before {
+                    let updated =
+                        (!settings.is_empty()).then_some(serde_json::to_value(&settings)?);
+                    tx.execute(
+                        "UPDATE workbooks SET print_settings = ?1 WHERE id = ?2",
+                        params![updated, &workbook_id_str],
+                    )?;
+                }
+            }
+        }
+    }
+
+    {
+        let view: Option<serde_json::Value> = tx.query_row(
+            "SELECT view FROM workbooks WHERE id = ?1",
+            params![&workbook_id_str],
+            |r| r.get(0),
+        )?;
+        if let Some(raw) = view {
+            if let Ok(mut view) = serde_json::from_value::<formula_model::WorkbookView>(raw) {
+                if let Some(deleted_id) = deleted_model_sheet_id {
+                    if view.active_sheet_id == Some(deleted_id) {
+                        let idx = ordered_sheet_ids
+                            .iter()
+                            .position(|(name, id)| {
+                                sheet_name_eq_case_insensitive(name, deleted_name)
+                                    || id == &Some(deleted_id)
+                            });
+                        if let Some(idx) = idx {
+                            let replacement = if idx + 1 < ordered_sheet_ids.len() {
+                                ordered_sheet_ids[idx + 1].1
+                            } else if idx > 0 {
+                                ordered_sheet_ids[idx - 1].1
+                            } else {
+                                None
+                            };
+                            view.active_sheet_id = replacement;
+                        } else {
+                            view.active_sheet_id = None;
+                        }
+
+                        let updated = (view != formula_model::WorkbookView::default())
+                            .then_some(serde_json::to_value(&view)?);
+                        tx.execute(
+                            "UPDATE workbooks SET view = ?1 WHERE id = ?2",
+                            params![updated, &workbook_id_str],
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+
+    rewrite_sheet_metadata_json_for_delete_tx(tx, &workbook_id_str, deleted_name, sheet_order)?;
+
+    Ok(())
+}
+
+fn rewrite_sheet_metadata_json_for_delete_tx(
+    tx: &Transaction<'_>,
+    workbook_id: &str,
+    deleted_name: &str,
+    sheet_order: &[String],
+) -> Result<()> {
+    let mut select_stmt = tx.prepare(
+        r#"
+        SELECT id, model_sheet_json
+        FROM sheets
+        WHERE workbook_id = ?1
+          AND model_sheet_json IS NOT NULL
+        "#,
+    )?;
+    let mut update_stmt = tx.prepare("UPDATE sheets SET model_sheet_json = ?1 WHERE id = ?2")?;
+
+    let mut rows = select_stmt.query(params![workbook_id])?;
+    while let Some(row) = rows.next()? {
+        let sheet_id: String = row.get(0)?;
+        let json: serde_json::Value = row.get(1)?;
+        let Ok(mut sheet) = serde_json::from_value::<formula_model::Worksheet>(json) else {
+            continue;
+        };
+
+        rewrite_sheet_references_in_sheet_metadata_for_delete(&mut sheet, deleted_name, sheet_order);
+        let updated = worksheet_metadata_json(&sheet)?;
+        update_stmt.execute(params![updated, sheet_id])?;
+    }
+
+    Ok(())
+}
+
+fn rewrite_sheet_references_in_sheet_metadata_for_delete(
+    sheet: &mut formula_model::Worksheet,
+    deleted_name: &str,
+    sheet_order: &[String],
+) {
+    for table in &mut sheet.tables {
+        for column in &mut table.columns {
+            if let Some(formula) = column.formula.as_mut() {
+                *formula =
+                    rewrite_deleted_sheet_references_in_formula(formula, deleted_name, sheet_order);
+            }
+            if let Some(formula) = column.totals_formula.as_mut() {
+                *formula =
+                    rewrite_deleted_sheet_references_in_formula(formula, deleted_name, sheet_order);
+            }
+        }
+    }
+
+    for rule in &mut sheet.conditional_formatting_rules {
+        rewrite_cf_rule_kind_for_delete(&mut rule.kind, deleted_name, sheet_order);
+    }
+
+    for assignment in &mut sheet.data_validations {
+        rewrite_data_validation_for_delete(&mut assignment.validation, deleted_name, sheet_order);
+    }
+}
+
+fn rewrite_cf_rule_kind_for_delete(
+    kind: &mut formula_model::CfRuleKind,
+    deleted_name: &str,
+    sheet_order: &[String],
+) {
+    match kind {
+        formula_model::CfRuleKind::CellIs { formulas, .. } => {
+            for formula in formulas {
+                *formula =
+                    rewrite_deleted_sheet_references_in_formula(formula, deleted_name, sheet_order);
+            }
+        }
+        formula_model::CfRuleKind::Expression { formula } => {
+            *formula =
+                rewrite_deleted_sheet_references_in_formula(formula, deleted_name, sheet_order);
+        }
+        formula_model::CfRuleKind::DataBar(rule) => {
+            rewrite_cfvo_for_delete(&mut rule.min, deleted_name, sheet_order);
+            rewrite_cfvo_for_delete(&mut rule.max, deleted_name, sheet_order);
+        }
+        formula_model::CfRuleKind::ColorScale(rule) => {
+            for cfvo in &mut rule.cfvos {
+                rewrite_cfvo_for_delete(cfvo, deleted_name, sheet_order);
+            }
+        }
+        formula_model::CfRuleKind::IconSet(rule) => {
+            for cfvo in &mut rule.cfvos {
+                rewrite_cfvo_for_delete(cfvo, deleted_name, sheet_order);
+            }
+        }
+        formula_model::CfRuleKind::TopBottom(_)
+        | formula_model::CfRuleKind::UniqueDuplicate(_)
+        | formula_model::CfRuleKind::Unsupported { .. } => {}
+    }
+}
+
+fn rewrite_cfvo_for_delete(cfvo: &mut formula_model::Cfvo, deleted_name: &str, sheet_order: &[String]) {
+    if cfvo.type_ != formula_model::CfvoType::Formula {
+        return;
+    }
+    let Some(value) = cfvo.value.as_mut() else {
+        return;
+    };
+    *value = rewrite_deleted_sheet_references_in_formula(value, deleted_name, sheet_order);
+}
+
+fn rewrite_data_validation_for_delete(
+    validation: &mut formula_model::DataValidation,
+    deleted_name: &str,
+    sheet_order: &[String],
+) {
+    let formula1_is_literal_list = validation.kind == formula_model::DataValidationKind::List
+        && validation_formula_is_literal_list(&validation.formula1);
+
+    if !formula1_is_literal_list && !validation.formula1.is_empty() {
+        validation.formula1 = rewrite_deleted_sheet_references_in_formula(
+            &validation.formula1,
+            deleted_name,
+            sheet_order,
+        );
+    }
+    if let Some(formula2) = validation.formula2.as_mut() {
+        *formula2 = rewrite_deleted_sheet_references_in_formula(formula2, deleted_name, sheet_order);
+    }
 }
 
 fn get_or_insert_style_component_tx(

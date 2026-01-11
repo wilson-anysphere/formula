@@ -1,14 +1,15 @@
 use formula_model::{
     Cell, CellRef, CfRule, CfRuleKind, CfRuleSchema, DataValidation, DataValidationKind,
-    DefinedNameScope, Hyperlink, HyperlinkTarget, Range,
+    DefinedNameScope, Range,
 };
 use formula_storage::{ImportModelWorkbookOptions, Storage};
 
 #[test]
-fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
+fn delete_sheet_rewrites_references_in_formulas_and_metadata() {
     let mut workbook = formula_model::Workbook::new();
     let data_id = workbook.add_sheet("Data").expect("add sheet Data");
     let summary_id = workbook.add_sheet("Summary").expect("add sheet Summary");
+    workbook.add_sheet("Other").expect("add sheet Other");
 
     workbook
         .create_defined_name(
@@ -31,7 +32,6 @@ fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
         )
         .expect("create sheet defined name");
 
-    // Add print settings so we can validate they get renamed too.
     assert!(
         workbook.set_sheet_print_area(
             data_id,
@@ -40,7 +40,6 @@ fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
         "set print area"
     );
 
-    // Formula in Summary referencing the sheet we're going to rename.
     {
         let sheet = workbook.sheet_mut(summary_id).expect("summary sheet");
         sheet.set_cell(
@@ -80,14 +79,6 @@ fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
             },
             dependencies: Vec::new(),
         });
-
-        sheet.hyperlinks.push(Hyperlink::for_cell(
-            CellRef::new(0, 0),
-            HyperlinkTarget::Internal {
-                sheet: "Data".to_string(),
-                cell: CellRef::new(0, 0),
-            },
-        ));
     }
 
     let storage = Storage::open_in_memory().expect("open storage");
@@ -102,17 +93,21 @@ fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
         .expect("data sheet")
         .id;
 
-    storage
-        .rename_sheet(data_sheet_uuid, "Renamed")
-        .expect("rename sheet");
+    storage.delete_sheet(data_sheet_uuid).expect("delete sheet");
 
-    // Sheet-scoped named ranges should now use the new sheet name as their scope identifier.
     assert!(storage
-        .get_named_range(meta.id, "MyLocal", "Renamed")
+        .get_named_range(meta.id, "MyLocal", "Data")
         .expect("get local range")
-        .is_some());
+        .is_none());
+
+    let renamed = storage
+        .get_named_range(meta.id, "MyRange", "workbook")
+        .expect("get range")
+        .expect("workbook range exists");
+    assert_eq!(renamed.reference, "#REF!");
 
     let exported = storage.export_model_workbook(meta.id).expect("export");
+    assert!(exported.sheets.iter().all(|s| s.name != "Data"));
 
     let summary_sheet = exported
         .sheets
@@ -123,14 +118,14 @@ fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
         .cell(CellRef::new(0, 0))
         .and_then(|c| c.formula.as_deref())
         .expect("formula exists");
-    assert_eq!(formula, "Renamed!A1");
+    assert_eq!(formula, "#REF!");
 
     let dv_formula = summary_sheet
         .data_validations
         .first()
         .map(|dv| dv.validation.formula1.as_str())
         .expect("data validation exists");
-    assert_eq!(dv_formula, "Renamed!A1");
+    assert_eq!(dv_formula, "#REF!");
 
     let cf_formula = summary_sheet
         .conditional_formatting_rules
@@ -140,37 +135,17 @@ fn rename_sheet_rewrites_cell_formulas_and_defined_names() {
             _ => None,
         })
         .expect("conditional formatting rule exists");
-    assert_eq!(cf_formula, "Renamed!A1=1");
-
-    let hyperlink_target = summary_sheet
-        .hyperlinks
-        .first()
-        .and_then(|link| match &link.target {
-            HyperlinkTarget::Internal { sheet, .. } => Some(sheet.as_str()),
-            _ => None,
-        })
-        .expect("hyperlink exists");
-    assert_eq!(hyperlink_target, "Renamed");
+    assert_eq!(cf_formula, "#REF!=1");
 
     assert!(exported.defined_names.iter().any(|n| {
-        n.name == "MyRange" && n.scope == DefinedNameScope::Workbook && n.refers_to == "Renamed!$A$1"
+        n.name == "MyRange" && n.scope == DefinedNameScope::Workbook && n.refers_to == "#REF!"
     }));
-
-    let renamed_sheet_id = exported
-        .sheets
-        .iter()
-        .find(|s| s.name == "Renamed")
-        .expect("renamed sheet")
-        .id;
-    assert!(exported.defined_names.iter().any(|n| {
-        n.name == "MyLocal"
-            && n.scope == DefinedNameScope::Sheet(renamed_sheet_id)
-            && n.refers_to == "Renamed!$A$2"
-    }));
+    assert!(exported.defined_names.iter().all(|n| n.name != "MyLocal"));
 
     assert!(exported
         .print_settings
         .sheets
         .iter()
-        .any(|s| s.sheet_name == "Renamed"));
+        .all(|s| s.sheet_name != "Data"));
 }
+
