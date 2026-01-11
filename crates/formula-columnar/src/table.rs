@@ -2620,6 +2620,52 @@ impl<'a> TableScan<'a> {
         }
         out
     }
+
+    pub fn filter_in_string(&self, col: usize, values: &[&str]) -> Vec<usize> {
+        if values.is_empty() {
+            return Vec::new();
+        }
+
+        let Some(column) = self.table.columns.get(col) else {
+            return Vec::new();
+        };
+        let Some(dict) = column.dictionary.as_ref() else {
+            return Vec::new();
+        };
+
+        use std::collections::HashSet;
+        let want: HashSet<&str> = values.iter().copied().collect();
+        if want.is_empty() {
+            return Vec::new();
+        }
+
+        let mut targets: HashSet<u32> = HashSet::new();
+        for (idx, s) in dict.iter().enumerate() {
+            if want.contains(s.as_ref()) {
+                targets.insert(idx as u32);
+            }
+        }
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let mut out = Vec::new();
+        for (chunk_idx, chunk) in column.chunks.iter().enumerate() {
+            let EncodedChunk::Dict(c) = chunk else {
+                continue;
+            };
+            let base = chunk_idx * self.table.options.page_size_rows;
+            for i in 0..c.len {
+                if c.validity.as_ref().is_some_and(|v| !v.get(i)) {
+                    continue;
+                }
+                if targets.contains(&c.indices.get(i)) {
+                    out.push(base + i);
+                }
+            }
+        }
+        out
+    }
 }
 
 pub struct ColumnarTableBuilder {

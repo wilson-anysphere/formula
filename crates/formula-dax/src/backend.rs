@@ -911,8 +911,6 @@ impl TableBackend for ColumnarTableBackend {
     }
 
     fn filter_in(&self, idx: usize, values: &[Value]) -> Option<Vec<usize>> {
-        use std::collections::HashSet;
-
         if values.is_empty() {
             return Some(Vec::new());
         }
@@ -920,6 +918,18 @@ impl TableBackend for ColumnarTableBackend {
             return None;
         }
 
+        if values.iter().all(|v| matches!(v, Value::Text(_))) {
+            let strs: Vec<&str> = values
+                .iter()
+                .filter_map(|v| match v {
+                    Value::Text(s) => Some(s.as_ref()),
+                    _ => None,
+                })
+                .collect();
+            return Some(self.table.scan().filter_in_string(idx, &strs));
+        }
+
+        use std::collections::HashSet;
         let targets: HashSet<Value> = values.iter().cloned().collect();
         let row_count = self.table.row_count();
 
