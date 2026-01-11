@@ -134,3 +134,26 @@ test("SearchSession: uses options.signal when no signal is passed to methods", a
 
   await assert.rejects(session.findNext(), (err) => err?.name === "AbortError");
 });
+
+test("WorkbookSearchIndex: auto strategy does not build a full-sheet index for small selections", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+
+  // Create a large used range so a sheet-scope search would normally index.
+  sheet.setValue(0, 0, "needle");
+  sheet.setValue(999, 999, "haystack");
+
+  const index = new WorkbookSearchIndex(wb); // autoThresholdCells defaults to 50k
+
+  const session = new SearchSession(wb, "needle", {
+    scope: "selection",
+    currentSheetName: "Sheet1",
+    selectionRanges: [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }], // A1 only
+    index,
+    indexStrategy: "auto",
+  });
+
+  const m = await session.findNext();
+  assert.equal(m.address, "Sheet1!A1");
+  assert.equal(index.getSheetModeIndex("Sheet1", "values:display"), null);
+});

@@ -26,6 +26,25 @@ function normalizeForIndex(text) {
   return String(text).toLowerCase();
 }
 
+function estimateRangeCellCount(range) {
+  if (!range) return 0;
+  const rows = range.endRow - range.startRow + 1;
+  const cols = range.endCol - range.startCol + 1;
+  if (rows <= 0 || cols <= 0) return 0;
+  const n = rows * cols;
+  if (!Number.isFinite(n) || n < 0) return Number.MAX_SAFE_INTEGER;
+  return n;
+}
+
+function estimateRangesCellCount(ranges) {
+  let total = 0;
+  for (const r of ranges ?? []) {
+    total += estimateRangeCellCount(r);
+    if (total >= Number.MAX_SAFE_INTEGER) return Number.MAX_SAFE_INTEGER;
+  }
+  return total;
+}
+
 function computeGrams(text, gramLength) {
   const s = String(text);
   if (s.length < gramLength) return [];
@@ -233,7 +252,10 @@ export class WorkbookSearchIndex {
 
     if (!currentSheetName) throw new Error("Search scope requires currentSheetName");
     const sheet = getSheetByName(this.workbook, currentSheetName);
-    const estimate = this._estimateUsedRangeCellCount(sheet);
+    const estimate =
+      scope === "selection"
+        ? estimateRangesCellCount(options.selectionRanges ?? [])
+        : this._estimateUsedRangeCellCount(sheet);
     if (estimate < this.autoThresholdCells) return null;
 
     await this.ensureSheetModeBuilt(currentSheetName, modeKey, options, {

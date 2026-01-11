@@ -148,9 +148,17 @@ export class SearchSession {
               candidates = index.queryCandidates(segment.sheetName, query, { lookIn, valueMode, useWildcards });
             } else if (indexStrategy === "auto") {
               const before = index.getSheetModeIndex(segment.sheetName, modeKey)?.stats.cellsVisited ?? 0;
+              const scopeForIndex = this.options.scope === "selection" ? "selection" : "sheet";
+              const selectionRangesForIndex =
+                scopeForIndex === "selection" ? segment.ranges : this.options.selectionRanges;
               const res = await index.ensureIndexForQuery(
                 query,
-                { ...this.options, scope: "sheet", currentSheetName: segment.sheetName },
+                {
+                  ...this.options,
+                  scope: scopeForIndex,
+                  currentSheetName: segment.sheetName,
+                  selectionRanges: selectionRangesForIndex,
+                },
                 { signal: effectiveSignal, timeBudgetMs, scheduler, checkEvery },
               );
               if (res) {

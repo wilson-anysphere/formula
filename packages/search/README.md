@@ -44,6 +44,7 @@ const index = new WorkbookSearchIndex(workbook);
 const session = new SearchSession(workbook, "needle", {
   scope: "workbook",
   currentSheetName: "Sheet1",
+  from: { sheetName: "Sheet1", row: 0, col: 0 }, // optional starting cursor (exclusive)
   lookIn: "values",
   valueMode: "display",
 
@@ -56,6 +57,7 @@ const session = new SearchSession(workbook, "needle", {
 });
 
 await session.findNext(); // => { sheetName, row, col, address, text, wrapped }
+await session.findNext({ signal: abortController.signal }); // per-call override (optional)
 await session.findPrev();
 await session.replaceNext("replacement");
 ```
@@ -67,6 +69,7 @@ await session.replaceNext("replacement");
   scope: "selection" | "sheet" | "workbook",
   currentSheetName: "Sheet1",
   selectionRanges: [{ startRow, endRow, startCol, endCol }],
+  from: { sheetName, row, col }, // optional (SearchSession only)
 
   lookIn: "values" | "formulas",
   valueMode: "display" | "raw", // when lookIn = "values"
@@ -75,6 +78,7 @@ await session.replaceNext("replacement");
   matchEntireCell: boolean,
   useWildcards: boolean,
   searchOrder: "byRows" | "byColumns",
+  wrap: boolean,
 
   // performance / cancellation
   // (internally yields based on elapsed time, not iteration counts)
