@@ -45,10 +45,14 @@ describe("formula helpers", () => {
       expect(isFormulaInput("   =1+1")).toBe(true);
     });
 
+    it("does not treat a bare '=' as formula input", () => {
+      expect(isFormulaInput("=")).toBe(false);
+      expect(isFormulaInput("   =   ")).toBe(false);
+    });
+
     it("does not treat arbitrary strings as formulas", () => {
       expect(isFormulaInput("1+1")).toBe(false);
       expect(isFormulaInput("SUM(A1:A3)")).toBe(false);
     });
   });
 });
-

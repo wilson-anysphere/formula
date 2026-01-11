@@ -28,10 +28,6 @@ if (!childEnv.PATH?.split(path.delimiter).includes(cargoBinDir)) {
 }
 
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
-const coreDir = path.join(repoRoot, "crates", "formula-core");
-const engineDir = path.join(repoRoot, "crates", "formula-engine");
-const xlsxDir = path.join(repoRoot, "crates", "formula-xlsx");
-const modelDir = path.join(repoRoot, "crates", "formula-model");
 
 const outDir = path.join(repoRoot, "packages", "engine", "pkg");
 // Note: `wasm-pack build --out-dir` is documented as a *relative* path and is
@@ -184,7 +180,7 @@ if (!existsSync(path.join(crateDir, "Cargo.toml"))) {
 const outputExists = existsSync(wrapper) && existsSync(wasm);
 if (outputExists) {
   const outputStamp = Math.min((await stat(wrapper)).mtimeMs, (await stat(wasm)).mtimeMs);
-  const dependencyCrates = await collectDependencyCrates([crateDir, coreDir, engineDir, xlsxDir, modelDir]);
+  const dependencyCrates = await collectDependencyCrates([crateDir]);
 
   let sourceStamp = await latestMtime(path.join(repoRoot, "Cargo.lock"));
   for (const dependencyCrate of dependencyCrates) {
