@@ -94,6 +94,12 @@ test("Yjs↔DocumentController binder encrypts protected cell contents and masks
   assert.equal(controllerB.getCell("Sheet1", "A1").value, "###");
   assert.equal(controllerB.getCell("Sheet1", "A1").formula, null);
 
+  // Unauthorized clients should not be able to mutate encrypted cells. The binder
+  // should revert local DocumentController edits and avoid writing plaintext into Yjs.
+  controllerB.setCellValue("Sheet1", "A1", "hacked");
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "###", 10_000);
+  assert.equal(controllerA.getCell("Sheet1", "A1").value, "top-secret");
+
   // Raw Yjs should not contain plaintext.
   const cellMap = docA.getMap("cells").get("Sheet1:0:0");
   assert.ok(cellMap, "expected Yjs cell map to exist");
@@ -101,6 +107,7 @@ test("Yjs↔DocumentController binder encrypts protected cell contents and masks
   assert.equal(cellMap.get("formula"), undefined);
   assert.ok(cellMap.get("enc"), "expected encrypted payload under `enc`");
   assert.equal(JSON.stringify(cellMap.toJSON()).includes("top-secret"), false);
+  assert.equal(JSON.stringify(cellMap.toJSON()).includes("hacked"), false);
 
   // Now "grant" the key by rebinding on B.
   binderB.destroy();
