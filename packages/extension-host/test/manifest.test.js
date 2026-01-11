@@ -63,6 +63,25 @@ test("manifest validation: activation event must reference contributed command",
   );
 });
 
+test("manifest validation: activation event must reference contributed data connector", () => {
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.js",
+          engines: { formula: "^1.0.0" },
+          activationEvents: ["onDataConnector:missing.connector"],
+          contributes: { dataConnectors: [] }
+        },
+        { engineVersion: "1.0.0", enforceEngine: true }
+      ),
+    /unknown data connector/
+  );
+});
+
 test("manifest validation: invalid permission rejected", () => {
   assert.throws(
     () =>
