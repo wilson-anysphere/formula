@@ -5,8 +5,8 @@ use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, PostfixOp, RangeRef, SheetReference,
     UnaryOp,
 };
-use crate::SheetRef;
 use crate::value::ErrorKind;
+use crate::SheetRef;
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use thiserror::Error;
 

@@ -3,8 +3,8 @@ use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, CompiledExpr, Expr, NameRef, PostfixOp, RangeRef, SheetReference,
     UnaryOp,
 };
-use crate::SheetRef;
 use crate::value::ErrorKind;
+use crate::SheetRef;
 
 /// Excel limits (0-indexed).
 ///
@@ -211,7 +211,9 @@ fn lower_sheet_reference(
             SheetRef::SheetRange { start, end } if start.eq_ignore_ascii_case(end) => {
                 SheetReference::Sheet(start.clone())
             }
-            SheetRef::SheetRange { start, end } => SheetReference::SheetRange(start.clone(), end.clone()),
+            SheetRef::SheetRange { start, end } => {
+                SheetReference::SheetRange(start.clone(), end.clone())
+            }
         },
         (None, None) => SheetReference::Current,
     }
@@ -868,18 +870,10 @@ fn try_compile_static_range_ref(
 
     match explicit_sheet {
         SheetReference::Sheet(merged_sheet) => {
-            let left_op = try_compile_static_range_operand(
-                left,
-                merged_sheet,
-                current_cell,
-                resolve_sheet,
-            )?;
-            let right_op = try_compile_static_range_operand(
-                right,
-                merged_sheet,
-                current_cell,
-                resolve_sheet,
-            )?;
+            let left_op =
+                try_compile_static_range_operand(left, merged_sheet, current_cell, resolve_sheet)?;
+            let right_op =
+                try_compile_static_range_operand(right, merged_sheet, current_cell, resolve_sheet)?;
             if left_op.sheet != right_op.sheet {
                 return None;
             }

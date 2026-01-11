@@ -1,5 +1,5 @@
 use super::ast::{BinaryOp, Expr as BytecodeExpr, Function, UnaryOp};
-use super::value::{Ref, RangeRef, Value};
+use super::value::{RangeRef, Ref, Value};
 use std::sync::Arc;
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
@@ -109,12 +109,22 @@ fn lower_range_endpoint(
         crate::Expr::ColRef(r) => {
             let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
             validate_prefix(&prefix, current_sheet, resolve_sheet)?;
-            Ok((prefix, RangeEndpoint::Col { col: lower_coord(&r.col, origin.col) }))
+            Ok((
+                prefix,
+                RangeEndpoint::Col {
+                    col: lower_coord(&r.col, origin.col),
+                },
+            ))
         }
         crate::Expr::RowRef(r) => {
             let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
             validate_prefix(&prefix, current_sheet, resolve_sheet)?;
-            Ok((prefix, RangeEndpoint::Row { row: lower_coord(&r.row, origin.row) }))
+            Ok((
+                prefix,
+                RangeEndpoint::Row {
+                    row: lower_coord(&r.row, origin.row),
+                },
+            ))
         }
         _ => Err(LowerError::Unsupported),
     }
@@ -141,7 +151,8 @@ fn lower_range_ref(
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Result<BytecodeExpr, LowerError> {
     let (left_prefix, left_ep) = lower_range_endpoint(left, origin, current_sheet, resolve_sheet)?;
-    let (right_prefix, right_ep) = lower_range_endpoint(right, origin, current_sheet, resolve_sheet)?;
+    let (right_prefix, right_ep) =
+        lower_range_endpoint(right, origin, current_sheet, resolve_sheet)?;
     let merged_prefix = merge_range_prefix(&left_prefix, &right_prefix)?;
     validate_prefix(&merged_prefix, current_sheet, resolve_sheet)?;
 
@@ -192,7 +203,9 @@ pub fn lower_canonical_expr(
             resolve_sheet,
         )?)),
         crate::Expr::Binary(b) => match b.op {
-            crate::BinaryOp::Range => lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet),
+            crate::BinaryOp::Range => {
+                lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
+            }
             crate::BinaryOp::Add
             | crate::BinaryOp::Sub
             | crate::BinaryOp::Mul

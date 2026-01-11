@@ -24,6 +24,29 @@ fn lambda_can_be_called_via_let_binding() {
 }
 
 #[test]
+fn lambda_can_be_called_inline() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(&sheet.eval("=LAMBDA(x,x+1)(2)"), 3.0);
+    assert_number(&sheet.eval("=LAMBDA(x,LAMBDA(y,x+y))(1)(2)"), 3.0);
+}
+
+#[test]
+fn let_result_can_be_invoked_as_lambda() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=LET(f,LAMBDA(x,x+1),f)(2)"), 3.0);
+}
+
+#[test]
+fn parenthesized_lambda_invocation_preserves_recursion() {
+    let mut sheet = TestSheet::new();
+    assert_number(
+        &sheet.eval("=LET(FACT,LAMBDA(n,IF(n<=1,1,n*FACT(n-1))),(FACT)(5))"),
+        120.0,
+    );
+}
+
+#[test]
 fn lambda_captures_lexical_env() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=LET(a,10,f,LAMBDA(x,a+x),f(5))"), 15.0);
