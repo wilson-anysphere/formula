@@ -101,10 +101,11 @@ test("buildWorkbookContext: redacts sensitive workbook chunks when policy allows
 
   assert.match(out.promptContext, /## dlp/i);
   assert.match(out.promptContext, /\[REDACTED_(EMAIL|SSN)\]/);
+  assert.ok(out.retrieved.length > 0);
+  assert.equal(out.retrieved[0].metadata.text, undefined);
   assert.equal(auditEvents.length, 1);
   assert.equal(auditEvents[0].type, "ai.workbook_context");
   assert.equal(auditEvents[0].documentId, workbook.id);
   assert.equal(auditEvents[0].decision.decision, "redact");
   assert.equal(auditEvents[0].redactedChunkCount, 1);
 });
-

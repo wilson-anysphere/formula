@@ -400,10 +400,16 @@ export class ContextManager {
 
       if (redacted) redactedChunkCount += 1;
 
+      // Do not return the raw chunk text stored in vector-store metadata. The prompt-safe
+      // `text` field is already provided separately, and returning unredacted metadata
+      // creates an easy footgun for callers that might serialize metadata into cloud LLM
+      // prompts.
+      const { text: _metaText, ...safeMeta } = meta;
+
       return {
         id: hit.id,
         score: hit.score,
-        metadata: meta,
+        metadata: safeMeta,
         text: outText,
         dlp: classifyText(outText),
       };
