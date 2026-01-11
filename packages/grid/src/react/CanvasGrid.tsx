@@ -1654,6 +1654,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       role="grid"
       aria-rowcount={props.rowCount}
       aria-colcount={props.colCount}
+      aria-multiselectable="true"
       aria-label={ariaLabel}
       aria-labelledby={props.ariaLabelledBy}
       aria-describedby={statusId}
