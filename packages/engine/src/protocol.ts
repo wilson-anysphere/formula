@@ -28,6 +28,14 @@ export interface InitMessage {
    * `worker not initialized`.
    */
   wasmModuleUrl: string;
+  /**
+   * Optional URL to the `.wasm` binary.
+   *
+   * If provided, the worker will pass it to the wasm-bindgen init function.
+   * This can be useful when bundlers fingerprint assets such that the wrapper
+   * can't reliably derive the `.wasm` URL from its own `import.meta.url`.
+   */
+  wasmBinaryUrl?: string;
 }
 
 export interface ReadyMessage {

@@ -69,6 +69,7 @@ export class EngineWorker {
   static async connect(options: {
     worker: WorkerLike;
     wasmModuleUrl?: string;
+    wasmBinaryUrl?: string;
     channelFactory?: () => MessageChannelLike;
   }): Promise<EngineWorker> {
     const channel = options.channelFactory?.() ?? new MessageChannel();
@@ -89,7 +90,8 @@ export class EngineWorker {
     const initMessage: InitMessage = {
       type: "init",
       port: channel.port2,
-      wasmModuleUrl: options.wasmModuleUrl ?? ""
+      wasmModuleUrl: options.wasmModuleUrl ?? "",
+      wasmBinaryUrl: options.wasmBinaryUrl
     };
     worker.postMessage(initMessage, [channel.port2]);
 

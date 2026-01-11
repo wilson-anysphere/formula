@@ -33,6 +33,8 @@ Build the WASM artifacts (requires `wasm-pack` on your `PATH`):
 pnpm build:wasm
 ```
 
+The web + desktop Vite entrypoints run this automatically via `predev`/`prebuild` so `createEngineClient()` can load the engine without extra manual steps.
+
 Smoke-check that the generated wrapper (`packages/engine/pkg/formula_wasm.js`) exists:
 
 ```bash

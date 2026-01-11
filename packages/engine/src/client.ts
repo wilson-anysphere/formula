@@ -1,4 +1,5 @@
 import type { CellChange, CellData, CellScalar, RpcOptions } from "./protocol";
+import { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm";
 import { EngineWorker } from "./worker/EngineWorker";
 
 export interface EngineClient {
@@ -28,7 +29,7 @@ export interface EngineClient {
   terminate(): void;
 }
 
-export function createEngineClient(options?: { wasmModuleUrl?: string }): EngineClient {
+export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinaryUrl?: string }): EngineClient {
   if (typeof Worker === "undefined") {
     throw new Error("createEngineClient() requires a Worker-capable environment");
   }
@@ -38,6 +39,9 @@ export function createEngineClient(options?: { wasmModuleUrl?: string }): Engine
   const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
     type: "module"
   });
+
+  const wasmModuleUrl = options?.wasmModuleUrl ?? defaultWasmModuleUrl();
+  const wasmBinaryUrl = options?.wasmBinaryUrl ?? defaultWasmBinaryUrl();
 
   let enginePromise: Promise<EngineWorker> | null = null;
   let engine: EngineWorker | null = null;
@@ -49,7 +53,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string }): Engine
     }
     enginePromise = EngineWorker.connect({
       worker,
-      wasmModuleUrl: options?.wasmModuleUrl
+      wasmModuleUrl,
+      wasmBinaryUrl
     });
     void enginePromise
       .then((connected) => {

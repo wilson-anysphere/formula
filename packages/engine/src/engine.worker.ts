@@ -19,7 +19,7 @@ type WasmWorkbookInstance = {
 };
 
 type WasmModule = {
-  default?: () => Promise<void> | void;
+  default?: (module_or_path?: unknown) => Promise<void> | void;
   WasmWorkbook: {
     new (): WasmWorkbookInstance;
     fromJson(json: string): WasmWorkbookInstance;
@@ -28,6 +28,7 @@ type WasmModule = {
 
 let port: MessagePort | null = null;
 let wasmModuleUrl: string | null = null;
+let wasmBinaryUrl: string | null = null;
 let workbook: WasmWorkbookInstance | null = null;
 
 let cancelledRequests = new Set<number>();
@@ -41,7 +42,7 @@ async function loadWasmModule(moduleUrl: string): Promise<WasmModule> {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore - `moduleUrl` is runtime-defined (Vite dev server / asset URL).
   const mod = (await import(/* @vite-ignore */ moduleUrl)) as WasmModule;
-  await mod.default?.();
+  await mod.default?.(wasmBinaryUrl ?? undefined);
   return mod;
 }
 
@@ -184,6 +185,7 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
 
   port = msg.port;
   wasmModuleUrl = msg.wasmModuleUrl;
+  wasmBinaryUrl = msg.wasmBinaryUrl ?? null;
 
   port.start?.();
   port.addEventListener("message", (inner: MessageEvent<unknown>) => {
@@ -192,4 +194,3 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
 
   postMessageToMain({ type: "ready" });
 });
-

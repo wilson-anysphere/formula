@@ -1,7 +1,10 @@
+import wasmModuleUrl from "../pkg/formula_wasm.js?url";
+import wasmBinaryUrl from "../pkg/formula_wasm_bg.wasm?url";
+
 export function defaultWasmModuleUrl(): string {
-  return new URL("../pkg/formula_wasm.js", import.meta.url).toString();
+  return wasmModuleUrl;
 }
 
 export function defaultWasmBinaryUrl(): string {
-  return new URL("../pkg/formula_wasm_bg.wasm", import.meta.url).toString();
+  return wasmBinaryUrl;
 }
