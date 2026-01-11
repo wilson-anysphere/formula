@@ -106,3 +106,31 @@ test("non-strict mode allows legacy plaintext reads (migration compatibility)", 
       .equals(DEFAULT_LEVELDB_VALUE_MAGIC)
   );
 });
+
+test("non-strict mode still rejects truncated encrypted records", async (t) => {
+  const keyRing = createTestKeyRing();
+  const encryptedLevel = createEncryptedLevelAdapter({
+    keyRing,
+    strict: false,
+    magic: DEFAULT_LEVELDB_VALUE_MAGIC,
+  })(levelMem as any);
+
+  const db = encryptedLevel(`mem-${Date.now()}-${Math.random().toString(16).slice(2)}`, {
+    valueEncoding: RAW_VALUE_ENCODING,
+  });
+  t.after(async () => {
+    await db.close();
+  });
+
+  // Corrupt/truncated value that still contains the magic header.
+  await db.put(
+    "truncated",
+    Buffer.concat([DEFAULT_LEVELDB_VALUE_MAGIC, Buffer.alloc(1)]),
+    { valueEncoding: RAW_VALUE_ENCODING }
+  );
+
+  await assert.rejects(
+    db.get("truncated"),
+    /Encrypted LevelDB value is truncated \(missing header bytes\)/
+  );
+});
