@@ -33,6 +33,35 @@ fn recalculate_reports_changed_cells() {
 }
 
 #[wasm_bindgen_test]
+fn recalculate_reports_dynamic_array_spills() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_str("=SEQUENCE(1,2)"),
+        None,
+    )
+    .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(
+        changes,
+        vec![
+            CellChange {
+                sheet: formula_core::DEFAULT_SHEET.to_string(),
+                address: "A1".to_string(),
+                value: json!(1),
+            },
+            CellChange {
+                sheet: formula_core::DEFAULT_SHEET.to_string(),
+                address: "B1".to_string(),
+                value: json!(2),
+            },
+        ]
+    );
+}
+
+#[wasm_bindgen_test]
 fn from_xlsx_bytes_imports_formulas_and_recalculates() {
     let bytes = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
