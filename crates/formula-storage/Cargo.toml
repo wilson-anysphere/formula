@@ -20,4 +20,3 @@ tempfile = "3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time"] }
-tempfile = "3"
