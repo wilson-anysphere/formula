@@ -654,7 +654,9 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
 
             return DataTable.fromGrid(grid, { hasHeaders: true, inferTypes: true });
           },
-          // Extension point: add `getTableSignature` once we can surface stable workbook table versions.
+          // Note: table source cache safety is handled via `QueryExecutionContext.getTableSignature`
+          // (see `getContextForDocument` in this module), which incorporates a per-table signature
+          // into the Power Query cache key.
         }
       : undefined;
 
