@@ -410,11 +410,17 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 if cell_ref.row >= EXCEL_MAX_ROWS || cell_ref.col >= EXCEL_MAX_COLS {
                     continue;
                 }
+                // For merged regions, the model only stores value/style on the
+                // top-left anchor. Avoid applying the style from a non-anchor cell
+                // to the anchor.
+                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                if anchor != cell_ref {
+                    continue;
+                }
                 let style_id = xf_style_ids.get(xf_idx as usize).copied().flatten();
                 let Some(style_id) = style_id else {
                     continue;
                 };
-                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                 sheet.set_style_id(anchor, style_id);
             }
         }
