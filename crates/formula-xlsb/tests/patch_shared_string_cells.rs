@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{Cursor, Read};
+use std::path::{Path, PathBuf};
 
 use formula_xlsb::{biff12_varint, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
@@ -7,6 +8,19 @@ use tempfile::tempdir;
 
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
+
+fn rich_shared_strings_fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rich_shared_strings.xlsb")
+}
+
+fn format_report(report: &xlsx_diff::DiffReport) -> String {
+    report
+        .differences
+        .iter()
+        .map(|d| d.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 fn read_zip_part(path: &str, part_path: &str) -> Vec<u8> {
     let file = File::open(path).expect("open xlsb");
@@ -287,3 +301,51 @@ fn inserting_new_text_cell_uses_shared_string_record_and_updates_shared_strings_
     assert_eq!(info.strings.len(), 2);
     assert_eq!(info.strings[1], "New");
   }
+
+#[test]
+fn patching_rich_shared_string_noop_is_lossless() {
+    let fixture_path = rich_shared_strings_fixture_path();
+    let wb = XlsbWorkbook::open(&fixture_path).expect("open xlsb fixture");
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let output_path = tmpdir.path().join("output.xlsb");
+
+    wb.save_with_cell_edits_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("Hello Bold".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_shared_strings");
+
+    let report = xlsx_diff::diff_workbooks(&fixture_path, &output_path).expect("diff workbooks");
+    assert!(
+        report.is_empty(),
+        "expected no OPC part diffs for no-op rich-SST edit, got:\n{}",
+        format_report(&report)
+    );
+
+    let sheet_bin = read_zip_part(output_path.to_str().unwrap(), "xl/worksheets/sheet1.bin");
+    let (id, payload) = find_cell_record(&sheet_bin, 0, 0).expect("find A1 record");
+    assert_eq!(id, 0x0007, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+        0,
+        "expected A1 to continue referencing shared string index 0"
+    );
+
+    let shared_strings_out =
+        read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    let shared_strings_in =
+        read_zip_part(fixture_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    assert_eq!(
+        shared_strings_out, shared_strings_in,
+        "expected sharedStrings.bin bytes to be identical for a no-op rich shared-string edit"
+    );
+}
