@@ -1330,6 +1330,97 @@ test("QueryEngine: treats conditional HTTP 304 responses as cache hits", async (
   );
 });
 
+test("QueryEngine: caches ETag from GET when HEAD probes omit it", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  const etag = '"v1"';
+  let getCount = 0;
+  /** @type {number[]} */
+  const headStatuses = [];
+  /** @type {Array<Record<string, string> | undefined>} */
+  const headHeaders = [];
+
+  /**
+   * @param {{
+   *   status?: number;
+   *   headers?: Record<string, string>;
+   *   body?: string;
+   * }} init
+   */
+  function makeResponse(init = {}) {
+    const status = init.status ?? 200;
+    const headers = new Map(Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+    const body = init.body ?? "";
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: {
+        get(name) {
+          return headers.get(String(name).toLowerCase()) ?? null;
+        },
+      },
+      async text() {
+        return body;
+      },
+      async json() {
+        return JSON.parse(body);
+      },
+    };
+  }
+
+  /** @type {typeof fetch} */
+  const fetchMock = async (_url, init) => {
+    const method = String(init?.method ?? "GET").toUpperCase();
+    if (method === "HEAD") {
+      // @ts-ignore - fetch init headers are passed as a plain object in tests.
+      headHeaders.push(init?.headers);
+      const ifNoneMatch = Object.entries(/** @type {any} */ (init?.headers ?? {})).find(([name]) => name.toLowerCase() === "if-none-match")?.[1];
+      if (ifNoneMatch === etag) {
+        headStatuses.push(304);
+        return makeResponse({ status: 304 });
+      }
+      // Simulate a service that supports conditional requests but does not include ETag/Last-Modified on 200 HEAD responses.
+      headStatuses.push(200);
+      return makeResponse();
+    }
+    getCount += 1;
+    return makeResponse({
+      headers: { "content-type": "application/json", etag },
+      body: JSON.stringify([{ id: getCount }]),
+    });
+  };
+
+  const engine = new QueryEngine({
+    cache,
+    defaultCacheTtlMs: 10_000,
+    connectors: { http: new HttpConnector({ fetch: fetchMock }) },
+  });
+
+  const query = {
+    id: "q_http_etag_from_get",
+    name: "HTTP (ETag from GET)",
+    source: { type: "api", url: "https://example.com/data", method: "GET", headers: {} },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(getCount, 1);
+  assert.deepEqual(headStatuses, [200]);
+  assert.equal(first.meta.sources[0]?.etag, etag);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(getCount, 1, "cache hit should avoid refetching when conditional HEAD returns 304");
+  assert.deepEqual(headStatuses, [200, 304]);
+  assert.equal(
+    Object.entries(headHeaders[1] ?? {}).find(([name]) => name.toLowerCase() === "if-none-match")?.[1],
+    etag,
+  );
+});
+
 test("QueryEngine: sends If-Modified-Since when cached Last-Modified exists but no ETag", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store, now: () => 0 });

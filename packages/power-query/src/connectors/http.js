@@ -402,6 +402,8 @@ export class HttpConnector {
     let table;
     /** @type {Date | undefined} */
     let sourceTimestamp;
+    /** @type {string | undefined} */
+    let etag;
 
     if (this.fetchTable) {
       const shouldRetry = (err) => {
@@ -440,6 +442,9 @@ export class HttpConnector {
 
       if (!response.ok) throw new Error(`HTTP ${response.status} for ${request.url}`);
 
+      const nextEtag = response.headers.get("etag");
+      if (typeof nextEtag === "string" && nextEtag !== "") etag = nextEtag;
+
       const lastModified = response.headers.get("last-modified");
       if (lastModified) {
         const parsed = new Date(lastModified);
@@ -477,6 +482,7 @@ export class HttpConnector {
       meta: {
         refreshedAt: new Date(now()),
         sourceTimestamp,
+        etag,
         schema: { columns: table.columns, inferred: true },
         rowCount: table.rows.length,
         rowCountEstimate: table.rows.length,
