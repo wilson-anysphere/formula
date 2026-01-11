@@ -44,8 +44,11 @@ export function setFillColor(doc, sheetId, range, argb) {
   );
 }
 
-export function applyAllBorders(doc, sheetId, range, { style = "thin", color = "#FF000000" } = {}) {
-  const edge = { style, color };
+const DEFAULT_BORDER_ARGB = "FF000000";
+
+export function applyAllBorders(doc, sheetId, range, { style = "thin", color } = {}) {
+  const resolvedColor = color ?? `#${DEFAULT_BORDER_ARGB}`;
+  const edge = { style, color: resolvedColor };
   doc.setRangeFormat(
     sheetId,
     range,
@@ -79,4 +82,3 @@ export function applyNumberFormatPreset(doc, sheetId, range, preset) {
   if (!code) throw new Error(`Unknown number format preset: ${preset}`);
   doc.setRangeFormat(sheetId, range, { numberFormat: code }, { label: "Number format" });
 }
-

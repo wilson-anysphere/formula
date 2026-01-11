@@ -122,12 +122,17 @@ export class DrawingOverlay {
 
       // Placeholder rendering for shapes/charts/unknown.
       ctx.save();
-      ctx.strokeStyle = obj.kind.type === "chart" ? "#7c3aed" : "#0ea5e9";
+      const chartStroke = resolveCssVar("--chart-series-1", "blue");
+      const shapeStroke = resolveCssVar("--chart-series-2", "cyan");
+      const labelColor = resolveCssVar("--text-primary", "black");
+
+      ctx.strokeStyle = obj.kind.type === "chart" ? chartStroke : shapeStroke;
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 2]);
       ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
       ctx.setLineDash([]);
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillStyle = labelColor;
+      ctx.globalAlpha = 0.6;
       ctx.font = "12px sans-serif";
       ctx.fillText(obj.kind.type, screenRect.x + 4, screenRect.y + 14);
       ctx.restore();
@@ -171,7 +176,10 @@ function intersects(a: Rect, b: Rect): boolean {
 
 function drawSelection(ctx: CanvasRenderingContext2D, rect: Rect): void {
   ctx.save();
-  ctx.strokeStyle = "#0e65eb";
+  const borderColor = resolveCssVar("--selection-border", "blue");
+  const handleBg = resolveCssVar("--bg-primary", "white");
+
+  ctx.strokeStyle = borderColor;
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
   ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
@@ -185,8 +193,8 @@ function drawSelection(ctx: CanvasRenderingContext2D, rect: Rect): void {
     { x: rect.x, y: rect.y + rect.height },
   ];
 
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "#0e65eb";
+  ctx.fillStyle = handleBg;
+  ctx.strokeStyle = borderColor;
   ctx.lineWidth = 1;
   for (const p of points) {
     ctx.beginPath();
@@ -195,4 +203,14 @@ function drawSelection(ctx: CanvasRenderingContext2D, rect: Rect): void {
     ctx.stroke();
   }
   ctx.restore();
+}
+
+function resolveCssVar(name: string, fallback: string): string {
+  try {
+    if (typeof document === "undefined") return fallback;
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value.length ? value : fallback;
+  } catch {
+    return fallback;
+  }
 }

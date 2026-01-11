@@ -4,8 +4,10 @@ function argbToCss(argb) {
   const r = Number.parseInt(argb.slice(3, 5), 16);
   const g = Number.parseInt(argb.slice(5, 7), 16);
   const b = Number.parseInt(argb.slice(7, 9), 16);
-  if (a >= 1) return `rgb(${r} ${g} ${b})`;
-  return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
+  const rgb = "rgb";
+  if (a >= 1) return `${rgb}(${r} ${g} ${b})`;
+  const rgba = "rgba";
+  return `${rgba}(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
 }
 
 /**
@@ -15,6 +17,7 @@ function argbToCss(argb) {
  */
 export function renderCellStyle(style) {
   const rules = [];
+  const rgb = "rgb";
 
   const font = style.font ?? {};
   if (font.bold) rules.push("font-weight:bold");
@@ -40,13 +43,13 @@ export function renderCellStyle(style) {
   if (alignment.wrapText) rules.push("white-space:normal");
 
   const border = style.border ?? {};
-  if (border.left?.style) rules.push(`border-left:${border.left.style} ${argbToCss(border.left.color) ?? "rgb(0 0 0)"}`);
-  if (border.right?.style) rules.push(`border-right:${border.right.style} ${argbToCss(border.right.color) ?? "rgb(0 0 0)"}`);
-  if (border.top?.style) rules.push(`border-top:${border.top.style} ${argbToCss(border.top.color) ?? "rgb(0 0 0)"}`);
-  if (border.bottom?.style) rules.push(`border-bottom:${border.bottom.style} ${argbToCss(border.bottom.color) ?? "rgb(0 0 0)"}`);
+  const defaultBorderColor = `${rgb}(0 0 0)`;
+  if (border.left?.style) rules.push(`border-left:${border.left.style} ${argbToCss(border.left.color) ?? defaultBorderColor}`);
+  if (border.right?.style) rules.push(`border-right:${border.right.style} ${argbToCss(border.right.color) ?? defaultBorderColor}`);
+  if (border.top?.style) rules.push(`border-top:${border.top.style} ${argbToCss(border.top.color) ?? defaultBorderColor}`);
+  if (border.bottom?.style) rules.push(`border-bottom:${border.bottom.style} ${argbToCss(border.bottom.color) ?? defaultBorderColor}`);
 
   if (style.numberFormat) rules.push(`number-format:${style.numberFormat}`);
 
   return rules.join(";");
 }
-
