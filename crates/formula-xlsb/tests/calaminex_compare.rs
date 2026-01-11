@@ -275,9 +275,10 @@ fn compare_fixture(path: &Path) {
             assert_eq!(
                 decoded_norm,
                 cal_norm,
-                "fixture {} sheet {sheet_name} cell {}\ncalamine: {cal_formula}\nformula-xlsb: {decoded_text}",
+                "fixture {} sheet {sheet_name} cell {}\ncalamine: {cal_formula}\nformula-xlsb: {decoded_text}\nrgce={}",
                 path.display(),
-                format_a1(row, col)
+                format_a1(row, col),
+                format_hex(&decoded.rgce)
             );
         }
     }
@@ -486,5 +487,20 @@ fn normalize_formula_preserves_string_literals_and_quoted_identifiers() {
     assert_eq!(
         normalize_formula_for_compare("='My Sheet' ! a1"),
         "='My Sheet'!A1"
+    );
+}
+
+#[test]
+fn normalize_formula_is_case_insensitive_outside_literals() {
+    assert_eq!(normalize_formula_for_compare("=sum(a1)"), "=SUM(A1)");
+    assert_eq!(normalize_formula_for_compare("=Sheet1!a1"), "=SHEET1!A1");
+}
+
+#[test]
+fn normalize_formula_preserves_case_inside_literals() {
+    assert_eq!(normalize_formula_for_compare("=\"aBc\""), "=\"aBc\"");
+    assert_eq!(
+        normalize_formula_for_compare("='MiXeD Sheet'!A1"),
+        "='MiXeD Sheet'!A1"
     );
 }
