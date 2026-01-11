@@ -90,6 +90,23 @@ export CARGO_HOME="$HOME/.cargo"   # or a CI cache directory
 source scripts/agent-init.sh
 ```
 
+#### Note on `sccache` (Rust compiler wrapper)
+
+Some environments configure Cargo globally with `build.rustc-wrapper = "sccache"` (for example via
+`~/.cargo/config.toml`). If the shared `sccache` server crashes or becomes unreachable you may see
+errors like:
+
+```text
+sccache: error: failed to execute compile
+sccache: caused by: Failed to read response header
+```
+
+In that case, bypass the wrapper for the failing command:
+
+```bash
+CARGO_BUILD_RUSTC_WRAPPER= RUSTC_WRAPPER= cargo test -p formula-engine
+```
+
 ### Memory-Safe Command Patterns
 
 #### npm/pnpm/yarn
