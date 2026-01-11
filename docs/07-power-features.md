@@ -394,6 +394,8 @@ Cache stores:
 - `FileSystemCacheStore`: Node persistence (`<hash>.json` + `<hash>.bin` for Arrow IPC bytes)
 - `EncryptedFileSystemCacheStore`: Node persistence with encryption-at-rest (AES-256-GCM) and the same `.bin` blob strategy for Arrow IPC bytes
 
+Note: Node-only helpers are also available from the `../packages/power-query/src/node.js` entrypoint (for example `EncryptedFileSystemCacheStore`).
+
 Example (in-memory caching):
 
 ```js
