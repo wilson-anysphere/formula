@@ -421,6 +421,52 @@ describe("ToolExecutor", () => {
     expect(result.error?.message).toMatch(/too large/i);
   });
 
+  it("fetch_external_data streams response bodies and reports actual byte length when content-length is missing", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, {
+      allow_external_data: true,
+      allowed_external_hosts: ["example.com"],
+      max_external_bytes: 100
+    });
+
+    const payload = "hello";
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(payload));
+        controller.close();
+      }
+    });
+
+    const fetchMock = vi.fn(async () => {
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "content-type": "text/plain"
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://example.com/stream-ok",
+        destination: "Sheet1!A1",
+        transform: "raw_text"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("fetch_external_data");
+    if (!result.ok || result.tool !== "fetch_external_data") throw new Error("Unexpected tool result");
+    if (!result.data) throw new Error("Expected fetch_external_data to return data");
+
+    expect(result.data.content_length_bytes).toBe(Buffer.byteLength(payload));
+    expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBe(payload);
+  });
+
   it("fetch_external_data enforces max_external_bytes while streaming even when content-length is underreported", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, {
