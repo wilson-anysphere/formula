@@ -228,9 +228,10 @@ impl MemoryManager {
                 return;
             }
 
-            let area = (row_end - row_start + 1)
-                .saturating_mul(col_end - col_start + 1)
-                .max(0) as usize;
+            let row_len = row_end.saturating_sub(row_start).saturating_add(1);
+            let col_len = col_end.saturating_sub(col_start).saturating_add(1);
+            let area_i64 = row_len.saturating_mul(col_len);
+            let area = usize::try_from(area_i64).unwrap_or(usize::MAX);
 
             // Heuristic: for dense pages and large intersections, iterating the
             // `HashMap` and filtering is cheaper than hashing every coord. For
@@ -440,8 +441,8 @@ impl MemoryManager {
     }
 
     fn page_key_for_cell(&self, sheet_id: Uuid, row: i64, col: i64) -> PageKey {
-        let rows = self.config.rows_per_page as i64;
-        let cols = self.config.cols_per_page as i64;
+        let rows = self.rows_per_page_i64();
+        let cols = self.cols_per_page_i64();
         PageKey {
             sheet_id,
             page_row: row.div_euclid(rows),
@@ -450,8 +451,8 @@ impl MemoryManager {
     }
 
     fn page_range(&self, key: PageKey) -> CellRange {
-        let rows = self.config.rows_per_page as i64;
-        let cols = self.config.cols_per_page as i64;
+        let rows = self.rows_per_page_i64();
+        let cols = self.cols_per_page_i64();
         let row_start = key.page_row.saturating_mul(rows);
         let col_start = key.page_col.saturating_mul(cols);
         CellRange::new(
@@ -463,8 +464,8 @@ impl MemoryManager {
     }
 
     fn page_keys_for_range(&self, sheet_id: Uuid, range: CellRange) -> Vec<PageKey> {
-        let rows = self.config.rows_per_page as i64;
-        let cols = self.config.cols_per_page as i64;
+        let rows = self.rows_per_page_i64();
+        let cols = self.cols_per_page_i64();
 
         let page_row_start = range.row_start.div_euclid(rows);
         let page_row_end = range.row_end.div_euclid(rows);
@@ -482,6 +483,14 @@ impl MemoryManager {
             }
         }
         keys
+    }
+
+    fn rows_per_page_i64(&self) -> i64 {
+        i64::try_from(self.config.rows_per_page).unwrap_or(i64::MAX).max(1)
+    }
+
+    fn cols_per_page_i64(&self) -> i64 {
+        i64::try_from(self.config.cols_per_page).unwrap_or(i64::MAX).max(1)
     }
 
     fn insert_page_locked(
