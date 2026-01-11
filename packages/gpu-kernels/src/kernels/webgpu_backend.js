@@ -874,6 +874,7 @@ export class WebGpuBackend {
    * @param {GpuVector} vec
    */
   async sumVector(vec) {
+    this._precisionUsed.add(vec.dtype);
     const reduced = await this._reduce(vec.buffer, vec.length, vec.dtype, "sum");
     const out = await this._readbackTypedArray(reduced, vec.dtype === "f64" ? Float64Array : Float32Array);
     if (reduced !== vec.buffer) reduced.destroy();
@@ -884,6 +885,7 @@ export class WebGpuBackend {
    * @param {GpuVector} vec
    */
   async minVector(vec) {
+    this._precisionUsed.add(vec.dtype);
     const reduced = await this._reduce(vec.buffer, vec.length, vec.dtype, "min");
     const out = await this._readbackTypedArray(reduced, vec.dtype === "f64" ? Float64Array : Float32Array);
     if (reduced !== vec.buffer) reduced.destroy();
@@ -894,6 +896,7 @@ export class WebGpuBackend {
    * @param {GpuVector} vec
    */
   async maxVector(vec) {
+    this._precisionUsed.add(vec.dtype);
     const reduced = await this._reduce(vec.buffer, vec.length, vec.dtype, "max");
     const out = await this._readbackTypedArray(reduced, vec.dtype === "f64" ? Float64Array : Float32Array);
     if (reduced !== vec.buffer) reduced.destroy();
@@ -908,6 +911,7 @@ export class WebGpuBackend {
     if (a.dtype !== b.dtype) throw new Error(`SUMPRODUCT dtype mismatch: ${a.dtype} vs ${b.dtype}`);
     if (a.length !== b.length) throw new Error(`SUMPRODUCT length mismatch: ${a.length} vs ${b.length}`);
 
+    this._precisionUsed.add(a.dtype);
     const reduced = await this._reduceSumproduct(a.buffer, b.buffer, a.length, a.dtype);
     const out = await this._readbackTypedArray(reduced, a.dtype === "f64" ? Float64Array : Float32Array);
     reduced.destroy();
