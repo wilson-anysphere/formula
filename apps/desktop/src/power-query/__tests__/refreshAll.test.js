@@ -596,6 +596,128 @@ test("DesktopPowerQueryRefreshOrchestrator notifies onSuccessfulRun for complete
   orchestrator.dispose();
 });
 
+test("DesktopPowerQueryRefreshOrchestrator triggerOnOpen refreshes on-open queries and their dependencies", async () => {
+  const tableBase = DataTable.fromGrid([["Base"], ["b1"]], { hasHeaders: true, inferTypes: true });
+  const tableOo1 = DataTable.fromGrid([["OO1"], ["o1"]], { hasHeaders: true, inferTypes: true });
+  const tableOo2 = DataTable.fromGrid([["OO2"], ["o2"]], { hasHeaders: true, inferTypes: true });
+
+  const engine = new ScriptedEngine({
+    base: { table: tableBase },
+    oo1: { table: tableOo1 },
+    oo2: { table: tableOo2 },
+  });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const orchestrator = new DesktopPowerQueryRefreshOrchestrator({ engine, document: doc, concurrency: 1, batchSize: 1 });
+
+  orchestrator.registerQuery({
+    id: "base",
+    name: "Base",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  });
+
+  orchestrator.registerQuery({
+    id: "oo1",
+    name: "On Open 1",
+    source: { type: "query", queryId: "base" },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "on-open" },
+  });
+
+  orchestrator.registerQuery({
+    id: "oo2",
+    name: "On Open 2",
+    source: { type: "query", queryId: "base" },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 3 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "on-open" },
+  });
+
+  const applied = new Promise((resolve) => {
+    const done = new Set();
+    const unsub = orchestrator.onEvent((evt) => {
+      if (evt.type === "apply:completed" && (evt.queryId === "oo1" || evt.queryId === "oo2")) {
+        done.add(evt.queryId);
+        if (done.size === 2) {
+          unsub();
+          resolve(undefined);
+        }
+      }
+    });
+  });
+
+  const handle = orchestrator.triggerOnOpen();
+  const results = await handle.promise;
+  await applied;
+
+  assert.ok(results.oo1);
+  assert.ok(results.oo2);
+  assert.equal(results.base, undefined);
+
+  // Shared dependency should execute once and before both targets.
+  assert.equal(engine.calls.filter((id) => id === "base").length, 1);
+  assert.ok(engine.calls.indexOf("base") < engine.calls.indexOf("oo1"));
+  assert.ok(engine.calls.indexOf("base") < engine.calls.indexOf("oo2"));
+
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, "OO1");
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 3 }).value, "OO2");
+
+  orchestrator.dispose();
+});
+
+test("DesktopPowerQueryRefreshOrchestrator refresh() returns the single-query result", async () => {
+  const tableBase = DataTable.fromGrid([["Base"], ["b1"]], { hasHeaders: true, inferTypes: true });
+  const tableTarget = DataTable.fromGrid([["Target"], ["t1"]], { hasHeaders: true, inferTypes: true });
+
+  const engine = new ScriptedEngine({
+    base: { table: tableBase },
+    target: { table: tableTarget },
+  });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const orchestrator = new DesktopPowerQueryRefreshOrchestrator({ engine, document: doc, concurrency: 1, batchSize: 1 });
+
+  orchestrator.registerQuery({
+    id: "base",
+    name: "Base",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  });
+
+  orchestrator.registerQuery({
+    id: "target",
+    name: "Target",
+    source: { type: "query", queryId: "base" },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  const applied = new Promise((resolve) => {
+    const unsub = orchestrator.onEvent((evt) => {
+      if (evt.type === "apply:completed" && evt.queryId === "target") {
+        unsub();
+        resolve(undefined);
+      }
+    });
+  });
+
+  const handle = orchestrator.refresh("target");
+  const result = await handle.promise;
+  await applied;
+
+  assert.equal(result.meta.queryId, "target");
+  assert.deepEqual(engine.calls, ["base", "target"]);
+
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, "Target");
+
+  orchestrator.dispose();
+});
+
 test("DesktopPowerQueryRefreshOrchestrator cancels downstream targets on dependency error but continues independent branches", async () => {
   const tableOther = DataTable.fromGrid([["Other"], ["ok"]], { hasHeaders: true, inferTypes: true });
 
