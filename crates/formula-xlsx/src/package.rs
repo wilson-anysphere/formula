@@ -465,26 +465,7 @@ impl XlsxPackage {
     ///
     /// This is used when saving a macro-enabled workbook (`.xlsm`) as `.xlsx`.
     pub fn remove_vba_project(&mut self) -> Result<(), XlsxError> {
-        self.parts.remove("xl/vbaProject.bin");
-        self.parts.remove("xl/_rels/vbaProject.bin.rels");
-
-        // Drop the VBA relationship from workbook.xml.rels (if present).
-        if let Some(rels_bytes) = self.parts.get("xl/_rels/workbook.xml.rels").cloned() {
-            let updated = remove_relationship_type(
-                &rels_bytes,
-                "http://schemas.microsoft.com/office/2006/relationships/vbaProject",
-            )?;
-            self.set_part("xl/_rels/workbook.xml.rels", updated);
-        }
-
-        // Remove the content type override for vbaProject.bin and convert the workbook content
-        // type back to a standard `.xlsx`.
-        if let Some(ct_bytes) = self.parts.get("[Content_Types].xml").cloned() {
-            let updated = remove_vba_content_types(&ct_bytes)?;
-            self.set_part("[Content_Types].xml", updated);
-        }
-
-        Ok(())
+        crate::macro_strip::strip_macros(&mut self.parts)
     }
 }
 
@@ -565,87 +546,6 @@ fn patched_workbook_pr(e: &BytesStart<'_>, date_system: DateSystem) -> Result<By
 
 fn local_name(name: &[u8]) -> &[u8] {
     name.rsplit(|&b| b == b':').next().unwrap_or(name)
-}
-
-fn remove_relationship_type(xml: &[u8], rel_type: &str) -> Result<Vec<u8>, XlsxError> {
-    let mut reader = XmlReader::from_reader(xml);
-    reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
-    let mut buf = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Eof => break,
-            Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
-                let mut type_match = false;
-                for attr in e.attributes().with_checks(false) {
-                    let attr = attr?;
-                    if attr.key.as_ref() == b"Type" && attr.unescape_value()?.as_ref() == rel_type {
-                        type_match = true;
-                        break;
-                    }
-                }
-                if !type_match {
-                    writer.write_event(Event::Empty(e.to_owned()))?;
-                }
-            }
-            ev => writer.write_event(ev.into_owned())?,
-        }
-        buf.clear();
-    }
-
-    Ok(writer.into_inner())
-}
-
-fn remove_vba_content_types(xml: &[u8]) -> Result<Vec<u8>, XlsxError> {
-    let mut reader = XmlReader::from_reader(xml);
-    reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
-    let mut buf = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Eof => break,
-            Event::Empty(e) if e.name().as_ref() == b"Override" => {
-                let mut part_name: Option<String> = None;
-                let mut content_type: Option<String> = None;
-                for attr in e.attributes().with_checks(false) {
-                    let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"PartName" => part_name = Some(attr.unescape_value()?.into_owned()),
-                        b"ContentType" => content_type = Some(attr.unescape_value()?.into_owned()),
-                        _ => {}
-                    }
-                }
-
-                if part_name.as_deref() == Some("/xl/vbaProject.bin") {
-                    continue;
-                }
-
-                // Convert macro-enabled workbook content type back to `.xlsx`.
-                if part_name.as_deref() == Some("/xl/workbook.xml")
-                    && content_type
-                        .as_deref()
-                        .is_some_and(|ct| ct.contains("macroEnabled.main+xml"))
-                {
-                    let mut updated = BytesStart::new("Override");
-                    updated.push_attribute(("PartName", "/xl/workbook.xml"));
-                    updated.push_attribute((
-                        "ContentType",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
-                    ));
-                    writer.write_event(Event::Empty(updated))?;
-                    continue;
-                }
-
-                writer.write_event(Event::Empty(e.to_owned()))?;
-            }
-            ev => writer.write_event(ev.into_owned())?,
-        }
-        buf.clear();
-    }
-
-    Ok(writer.into_inner())
 }
 
 fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
@@ -876,5 +776,203 @@ mod tests {
 
         let rels = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
         assert!(!rels.contains("relationships/vbaProject"));
+    }
+
+    fn build_synthetic_macro_package() -> Vec<u8> {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/>
+  <Override PartName="/xl/vbaProjectSignature.bin" ContentType="application/vnd.ms-office.vbaProjectSignature"/>
+  <Override PartName="/xl/vbaData.xml" ContentType="application/vnd.ms-office.vbaData+xml"/>
+  <Override PartName="/customUI/customUI.xml" ContentType="application/xml"/>
+  <Override PartName="/customUI/customUI14.xml" ContentType="application/xml"/>
+  <Override PartName="/xl/activeX/activeX1.xml" ContentType="application/vnd.ms-office.activeX+xml"/>
+  <Override PartName="/xl/ctrlProps/ctrlProp1.xml" ContentType="application/vnd.ms-office.activeX+xml"/>
+  <Override PartName="/xl/embeddings/oleObject1.bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>
+</Types>"#;
+
+        let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2006/relationships/ui/extensibility" Target="customUI/customUI.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.microsoft.com/office/2007/relationships/ui/extensibility" Target="customUI/customUI14.xml"/>
+</Relationships>"#;
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        let sheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/activeXControl" Target="../activeX/activeX1.xml#_x0000_s1025"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2006/relationships/ctrlProp" Target="../ctrlProps/ctrlProp1.xml"/>
+</Relationships>"#;
+
+        let vba_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+        let custom_ui_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui"></customUI>"#;
+
+        let custom_ui_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="image1.png"/>
+</Relationships>"#;
+
+        let activex_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ax:ocx xmlns:ax="http://schemas.microsoft.com/office/2006/activeX"></ax:ocx>"#;
+
+        let activex_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/activeXControlBinary" Target="activeX1.bin"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="../embeddings/oleObject1.bin"/>
+</Relationships>"#;
+
+        let ctrl_props_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ctrlProp xmlns="http://schemas.microsoft.com/office/2006/activeX"></ctrlProp>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("[Content_Types].xml", options).unwrap();
+        zip.write_all(content_types.as_bytes()).unwrap();
+
+        zip.start_file("_rels/.rels", options).unwrap();
+        zip.write_all(root_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+            .unwrap();
+        zip.write_all(sheet_rels.as_bytes()).unwrap();
+
+        zip.start_file("customUI/customUI.xml", options).unwrap();
+        zip.write_all(custom_ui_xml.as_bytes()).unwrap();
+
+        zip.start_file("customUI/customUI14.xml", options).unwrap();
+        zip.write_all(custom_ui_xml.as_bytes()).unwrap();
+
+        zip.start_file("customUI/_rels/customUI.xml.rels", options)
+            .unwrap();
+        zip.write_all(custom_ui_rels.as_bytes()).unwrap();
+
+        zip.start_file("customUI/image1.png", options).unwrap();
+        zip.write_all(b"not-a-real-png").unwrap();
+
+        zip.start_file("xl/vbaProject.bin", options).unwrap();
+        zip.write_all(b"fake-vba-project").unwrap();
+
+        zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+        zip.write_all(vba_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+        zip.write_all(b"fake-signature").unwrap();
+
+        zip.start_file("xl/vbaData.xml", options).unwrap();
+        zip.write_all(b"<vbaData/>").unwrap();
+
+        zip.start_file("xl/activeX/activeX1.xml", options).unwrap();
+        zip.write_all(activex_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/activeX/_rels/activeX1.xml.rels", options)
+            .unwrap();
+        zip.write_all(activex_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/activeX/activeX1.bin", options).unwrap();
+        zip.write_all(b"activex-binary").unwrap();
+
+        zip.start_file("xl/embeddings/oleObject1.bin", options).unwrap();
+        zip.write_all(b"ole-embedding").unwrap();
+
+        zip.start_file("xl/ctrlProps/ctrlProp1.xml", options).unwrap();
+        zip.write_all(ctrl_props_xml.as_bytes()).unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn remove_vba_project_strips_macro_part_graph_and_repairs_relationships() {
+        let bytes = build_synthetic_macro_package();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.remove_vba_project().expect("strip macros");
+
+        // Round-trip through ZIP writing to ensure we didn't leave any dangling references.
+        let written = pkg.write_to_bytes().expect("write stripped pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read stripped pkg");
+
+        for removed in [
+            "xl/vbaProject.bin",
+            "xl/_rels/vbaProject.bin.rels",
+            "xl/vbaProjectSignature.bin",
+            "xl/vbaData.xml",
+            "customUI/customUI.xml",
+            "customUI/customUI14.xml",
+            "customUI/_rels/customUI.xml.rels",
+            "customUI/image1.png",
+            "xl/activeX/activeX1.xml",
+            "xl/activeX/_rels/activeX1.xml.rels",
+            "xl/activeX/activeX1.bin",
+            "xl/ctrlProps/ctrlProp1.xml",
+            // Child part referenced only by the removed ActiveX graph.
+            "xl/embeddings/oleObject1.bin",
+        ] {
+            assert!(
+                pkg2.part(removed).is_none(),
+                "expected {removed} to be removed"
+            );
+        }
+
+        let ct = std::str::from_utf8(pkg2.part("[Content_Types].xml").unwrap()).unwrap();
+        assert!(!ct.contains("macroEnabled.main+xml"));
+        assert!(!ct.contains("vbaProject.bin"));
+        assert!(!ct.contains("customUI/customUI.xml"));
+        assert!(!ct.contains("customUI/customUI14.xml"));
+        assert!(!ct.contains("activeX1.xml"));
+        assert!(!ct.contains("ctrlProp1.xml"));
+
+        // Relationship parts should no longer mention the stripped macro graph.
+        for (name, bytes) in pkg2.parts() {
+            if !name.ends_with(".rels") {
+                continue;
+            }
+            let xml = std::str::from_utf8(bytes).unwrap();
+            assert!(!xml.contains("vbaProject"));
+            assert!(!xml.contains("customUI"));
+            assert!(!xml.contains("activeX"));
+            assert!(!xml.contains("ctrlProps"));
+        }
+
+        crate::macro_strip::validate_opc_relationships(pkg2.parts_map())
+            .expect("stripped package relationships are consistent");
     }
 }

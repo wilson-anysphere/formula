@@ -1,0 +1,506 @@
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
+
+use crate::package::XlsxError;
+
+const CUSTOM_UI_REL_TYPES: [&str; 2] = [
+    "http://schemas.microsoft.com/office/2006/relationships/ui/extensibility",
+    "http://schemas.microsoft.com/office/2007/relationships/ui/extensibility",
+];
+
+pub(crate) fn strip_macros(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
+    let delete_parts = compute_macro_delete_set(parts)?;
+
+    for part in &delete_parts {
+        parts.remove(part);
+    }
+
+    clean_relationship_parts(parts, &delete_parts)?;
+    clean_content_types(parts, &delete_parts)?;
+
+    Ok(())
+}
+
+fn compute_macro_delete_set(parts: &BTreeMap<String, Vec<u8>>) -> Result<BTreeSet<String>, XlsxError> {
+    let mut delete = BTreeSet::new();
+
+    // VBA project payloads.
+    delete.insert("xl/vbaProject.bin".to_string());
+    delete.insert("xl/vbaData.xml".to_string());
+    delete.insert("xl/vbaProjectSignature.bin".to_string());
+
+    // Ribbon customizations.
+    for name in parts.keys() {
+        if name.starts_with("customUI/") {
+            delete.insert(name.clone());
+        }
+    }
+
+    // ActiveX controls.
+    for name in parts.keys() {
+        if name.starts_with("xl/activeX/") || name.starts_with("xl/ctrlProps/") {
+            delete.insert(name.clone());
+        }
+    }
+
+    // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
+    if let Some(rels_bytes) = parts.get("xl/_rels/vbaProject.bin.rels") {
+        let targets = parse_internal_relationship_targets(rels_bytes, "xl/vbaProject.bin")?;
+        delete.extend(targets);
+    }
+
+    // Build a relationship graph so we can delete any extra parts that are only
+    // referenced by macro-related parts (e.g. `xl/embeddings/*` referenced by ActiveX rels).
+    let graph = RelationshipGraph::build(parts)?;
+    delete_orphan_targets(&graph, &mut delete);
+
+    // If a part is deleted, its relationship part must also be deleted.
+    //
+    // (Skip `.rels` because relationship parts don't have relationship parts of their own.)
+    let rels_to_remove: Vec<String> = delete
+        .iter()
+        .filter(|name| !name.ends_with(".rels"))
+        .map(|name| crate::path::rels_for_part(name))
+        .collect();
+    delete.extend(rels_to_remove);
+
+    Ok(delete)
+}
+
+fn delete_orphan_targets(graph: &RelationshipGraph, delete: &mut BTreeSet<String>) {
+    let mut queue: VecDeque<String> = delete.iter().cloned().collect();
+    while let Some(source) = queue.pop_front() {
+        let Some(targets) = graph.outgoing.get(&source) else {
+            continue;
+        };
+        for target in targets {
+            if delete.contains(target) {
+                continue;
+            }
+            let Some(inbound) = graph.inbound.get(target) else {
+                continue;
+            };
+            // Only delete parts that are referenced *exclusively* by parts we're already deleting.
+            if inbound.iter().all(|src| delete.contains(src)) {
+                delete.insert(target.clone());
+                queue.push_back(target.clone());
+            }
+        }
+    }
+}
+
+fn clean_relationship_parts(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    delete_parts: &BTreeSet<String>,
+) -> Result<(), XlsxError> {
+    let rels_names: Vec<String> = parts
+        .keys()
+        .filter(|name| name.ends_with(".rels"))
+        .cloned()
+        .collect();
+
+    for rels_name in rels_names {
+        let Some(source_part) = source_part_from_rels_part(&rels_name) else {
+            continue;
+        };
+
+        // If the relationship source is gone, remove the `.rels` part as well.
+        if !source_part.is_empty() && !parts.contains_key(&source_part) {
+            parts.remove(&rels_name);
+            continue;
+        }
+
+        let Some(bytes) = parts.get(&rels_name).cloned() else {
+            continue;
+        };
+
+        if let Some(updated) = strip_deleted_relationships(&rels_name, &source_part, &bytes, delete_parts)? {
+            parts.insert(rels_name, updated);
+        }
+    }
+
+    Ok(())
+}
+
+fn clean_content_types(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    delete_parts: &BTreeSet<String>,
+) -> Result<(), XlsxError> {
+    let ct_name = "[Content_Types].xml";
+    let Some(existing) = parts.get(ct_name).cloned() else {
+        return Ok(());
+    };
+
+    if let Some(updated) = strip_content_types(&existing, delete_parts)? {
+        parts.insert(ct_name.to_string(), updated);
+    }
+
+    Ok(())
+}
+
+fn strip_deleted_relationships(
+    rels_part_name: &str,
+    source_part: &str,
+    xml: &[u8],
+    delete_parts: &BTreeSet<String>,
+) -> Result<Option<Vec<u8>>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+
+    let mut buf = Vec::new();
+    let mut changed = false;
+    let mut skip_depth = 0usize;
+
+    loop {
+        let ev = reader.read_event_into(&mut buf)?;
+
+        if skip_depth > 0 {
+            match ev {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => {
+                    skip_depth -= 1;
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+            continue;
+        }
+
+        match ev {
+            Event::Eof => break,
+            Event::Empty(e) if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" => {
+                if should_remove_relationship(rels_part_name, source_part, &e, delete_parts)? {
+                    changed = true;
+                    buf.clear();
+                    continue;
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            Event::Start(e) if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" => {
+                if should_remove_relationship(rels_part_name, source_part, &e, delete_parts)? {
+                    changed = true;
+                    skip_depth = 1;
+                    buf.clear();
+                    continue;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    if changed {
+        Ok(Some(writer.into_inner()))
+    } else {
+        Ok(None)
+    }
+}
+
+fn should_remove_relationship(
+    rels_part_name: &str,
+    source_part: &str,
+    e: &BytesStart<'_>,
+    delete_parts: &BTreeSet<String>,
+) -> Result<bool, XlsxError> {
+    let mut target = None;
+    let mut target_mode = None;
+    let mut rel_type = None;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match crate::openxml::local_name(attr.key.as_ref()) {
+            b"Target" => target = Some(attr.unescape_value()?.into_owned()),
+            b"TargetMode" => target_mode = Some(attr.unescape_value()?.into_owned()),
+            b"Type" => rel_type = Some(attr.unescape_value()?.into_owned()),
+            _ => {}
+        }
+    }
+
+    if target_mode
+        .as_deref()
+        .is_some_and(|mode| mode.eq_ignore_ascii_case("External"))
+    {
+        return Ok(false);
+    }
+
+    if rels_part_name == "_rels/.rels"
+        && rel_type
+            .as_deref()
+            .is_some_and(|ty| CUSTOM_UI_REL_TYPES.iter().any(|known| ty == *known))
+    {
+        return Ok(true);
+    }
+
+    let Some(target) = target else {
+        return Ok(false);
+    };
+
+    let target = strip_fragment(&target);
+    let resolved = resolve_target_for_source(source_part, target);
+    Ok(delete_parts.contains(&resolved))
+}
+
+fn strip_content_types(xml: &[u8], delete_parts: &BTreeSet<String>) -> Result<Option<Vec<u8>>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+
+    let mut buf = Vec::new();
+    let mut changed = false;
+    let mut skip_depth = 0usize;
+
+    loop {
+        let ev = reader.read_event_into(&mut buf)?;
+
+        if skip_depth > 0 {
+            match ev {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth -= 1,
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+            continue;
+        }
+
+        match ev {
+            Event::Eof => break,
+            Event::Empty(e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
+                if let Some(updated) = patched_override(&e, delete_parts)? {
+                    if updated.is_none() {
+                        changed = true;
+                        buf.clear();
+                        continue;
+                    }
+                    if let Some(updated) = updated {
+                        changed = true;
+                        writer.write_event(Event::Empty(updated))?;
+                        buf.clear();
+                        continue;
+                    }
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            Event::Start(e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
+                // `<Override>` parts are expected to be empty, but handle the non-empty form just
+                // in case by skipping the entire element when needed.
+                if let Some(updated) = patched_override(&e, delete_parts)? {
+                    if updated.is_none() {
+                        changed = true;
+                        skip_depth = 1;
+                        buf.clear();
+                        continue;
+                    }
+                    if let Some(updated) = updated {
+                        changed = true;
+                        writer.write_event(Event::Start(updated))?;
+                        buf.clear();
+                        continue;
+                    }
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    if changed {
+        Ok(Some(writer.into_inner()))
+    } else {
+        Ok(None)
+    }
+}
+
+// Returns:
+// - Ok(None) -> keep original
+// - Ok(Some(None)) -> remove element
+// - Ok(Some(Some(updated))) -> replace element
+fn patched_override(
+    e: &BytesStart<'_>,
+    delete_parts: &BTreeSet<String>,
+) -> Result<Option<Option<BytesStart<'static>>>, XlsxError> {
+    let mut part_name = None;
+    let mut content_type = None;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match crate::openxml::local_name(attr.key.as_ref()) {
+            b"PartName" => part_name = Some(attr.unescape_value()?.into_owned()),
+            b"ContentType" => content_type = Some(attr.unescape_value()?.into_owned()),
+            _ => {}
+        }
+    }
+
+    let Some(part_name) = part_name else {
+        return Ok(None);
+    };
+
+    let normalized = part_name.strip_prefix('/').unwrap_or(part_name.as_str());
+    if delete_parts.contains(normalized) {
+        return Ok(Some(None));
+    }
+
+    let Some(content_type) = content_type else {
+        return Ok(None);
+    };
+
+    if content_type.contains("macroEnabled.main+xml") {
+        let mut updated = BytesStart::new("Override");
+        updated.push_attribute(("PartName", part_name.as_str()));
+        updated.push_attribute((
+            "ContentType",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+        ));
+        return Ok(Some(Some(updated.into_owned())));
+    }
+
+    Ok(None)
+}
+
+fn parse_internal_relationship_targets(xml: &[u8], source_part: &str) -> Result<Vec<String>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e)
+                if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" =>
+            {
+                let mut target = None;
+                let mut target_mode = None;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    match crate::openxml::local_name(attr.key.as_ref()) {
+                        b"Target" => target = Some(attr.unescape_value()?.into_owned()),
+                        b"TargetMode" => target_mode = Some(attr.unescape_value()?.into_owned()),
+                        _ => {}
+                    }
+                }
+
+                if target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.eq_ignore_ascii_case("External"))
+                {
+                    continue;
+                }
+
+                let Some(target) = target else {
+                    continue;
+                };
+                let target = strip_fragment(&target);
+                out.push(resolve_target_for_source(source_part, target));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn strip_fragment(target: &str) -> &str {
+    target.split_once('#').map(|(base, _)| base).unwrap_or(target)
+}
+
+fn resolve_target_for_source(source_part: &str, target: &str) -> String {
+    if source_part.is_empty() {
+        crate::path::resolve_target("", target)
+    } else {
+        crate::path::resolve_target(source_part, target)
+    }
+}
+
+fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
+    if rels_part == "_rels/.rels" {
+        return Some(String::new());
+    }
+
+    if let Some(rels_file) = rels_part.strip_prefix("_rels/") {
+        let rels_file = rels_file.strip_suffix(".rels")?;
+        return Some(rels_file.to_string());
+    }
+
+    let (dir, rels_file) = rels_part.rsplit_once("/_rels/")?;
+    let rels_file = rels_file.strip_suffix(".rels")?;
+
+    if dir.is_empty() {
+        return Some(rels_file.to_string());
+    }
+
+    Some(format!("{dir}/{rels_file}"))
+}
+
+struct RelationshipGraph {
+    outgoing: BTreeMap<String, BTreeSet<String>>,
+    inbound: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl RelationshipGraph {
+    fn build(parts: &BTreeMap<String, Vec<u8>>) -> Result<Self, XlsxError> {
+        let mut outgoing: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut inbound: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+        for (rels_part, bytes) in parts {
+            if !rels_part.ends_with(".rels") {
+                continue;
+            }
+
+            let Some(source_part) = source_part_from_rels_part(rels_part) else {
+                continue;
+            };
+
+            // Ignore orphan `.rels` parts; they'll be removed during cleanup.
+            if !source_part.is_empty() && !parts.contains_key(&source_part) {
+                continue;
+            }
+
+            let targets = parse_internal_relationship_targets(bytes, &source_part)?;
+            for target in targets {
+                outgoing.entry(source_part.clone()).or_default().insert(target.clone());
+                inbound.entry(target).or_default().insert(source_part.clone());
+            }
+        }
+
+        Ok(Self { outgoing, inbound })
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn validate_opc_relationships(parts: &BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
+    for rels_part in parts.keys().filter(|name| name.ends_with(".rels")) {
+        let Some(source_part) = source_part_from_rels_part(rels_part) else {
+            continue;
+        };
+
+        if !source_part.is_empty() && !parts.contains_key(&source_part) {
+            return Err(XlsxError::Invalid(format!(
+                "orphan relationship part {rels_part} (missing source {source_part})"
+            )));
+        }
+
+        let xml = parts
+            .get(rels_part)
+            .ok_or_else(|| XlsxError::MissingPart(rels_part.to_string()))?;
+        let targets = parse_internal_relationship_targets(xml, &source_part)?;
+        for target in targets {
+            if !parts.contains_key(&target) {
+                return Err(XlsxError::Invalid(format!(
+                    "relationship target {target} referenced from {rels_part} is missing"
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
