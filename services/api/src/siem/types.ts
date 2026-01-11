@@ -8,8 +8,8 @@ export type MaybeEncryptedSecret =
       secretRef: string;
     }
   | {
-      // Minimal placeholder for encrypted secrets until the API secret store lands.
-      // The secret store task will define the canonical format.
+      // Backwards-compatible placeholder for configs written before the API
+      // secret store existed. New configs should use `secretRef`.
       encrypted: string;
     }
   | {

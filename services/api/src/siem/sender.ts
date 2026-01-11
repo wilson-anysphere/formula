@@ -67,13 +67,14 @@ async function resolveSecret(value: MaybeEncryptedSecret | undefined): Promise<s
   }
 
   if ("encrypted" in value && typeof value.encrypted === "string") {
-    // Placeholder until the encrypted secret store task lands. In the interim,
-    // configs may store plaintext here (or self-encrypted values).
+    // Backwards-compatible placeholder for configs written before the API secret
+    // store existed (or for self-encrypted/legacy configs).
     return value.encrypted;
   }
 
   if ("ciphertext" in value && typeof value.ciphertext === "string") {
-    // Placeholder until the encrypted secret store task lands.
+    // Backwards-compatible placeholder for configs written before the API secret
+    // store existed (or for self-encrypted/legacy configs).
     return value.ciphertext;
   }
 
