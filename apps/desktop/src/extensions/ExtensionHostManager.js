@@ -198,6 +198,11 @@ export class ExtensionHostManager {
         continue;
       }
 
+      if (installed[ext.id]?.corrupted) {
+        toUnload.push(ext.id);
+        continue;
+      }
+
       const expectedVersion = installed[ext.id]?.version;
       const loadedVersion = ext.manifest?.version;
       if (expectedVersion && loadedVersion && expectedVersion !== loadedVersion) {
@@ -216,13 +221,25 @@ export class ExtensionHostManager {
     }
 
     for (const id of toReload) {
-      await this.reloadExtension(id);
+      if (installed[id]?.corrupted) continue;
+      try {
+        await this.reloadExtension(id);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(`Failed to reload extension ${id}: ${String(error?.message ?? error)}`);
+      }
     }
 
     for (const id of toLoad) {
       // Reuse reloadExtension() so we always run integrity checks before loading
       // new installed extensions into the runtime.
-      await this.reloadExtension(id);
+      if (installed[id]?.corrupted) continue;
+      try {
+        await this.reloadExtension(id);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn(`Failed to load extension ${id}: ${String(error?.message ?? error)}`);
+      }
     }
   }
 

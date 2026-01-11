@@ -116,8 +116,10 @@ test("ExtensionHostManager.startup skips corrupted installs instead of throwing"
 
   assert.equal(await runtime.executeCommand("good.hello"), "hi");
 
+  // Sync should also not throw and should keep the corrupted install quarantined.
+  await assert.doesNotReject(() => runtime.syncInstalledExtensions());
+
   const updated = JSON.parse(await fs.readFile(statePath, "utf8"));
   assert.equal(updated.installed[badId].corrupted, true);
   assert.match(String(updated.installed[badId].corruptedReason), /Missing integrity metadata/i);
 });
-
