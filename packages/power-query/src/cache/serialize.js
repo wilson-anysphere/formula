@@ -69,6 +69,19 @@ function serializeCell(value) {
   if (value instanceof Uint8Array) {
     return { [TYPE_KEY]: "bytes", value: bytesToBase64(value) };
   }
+  if (value instanceof DataTable || value instanceof ArrowTableAdapter) {
+    // Nested tables (e.g. Table.NestedJoin) can appear as cell values. Serialize them
+    // with the same versioned table format used for top-level cache entries so
+    // cached results roundtrip correctly.
+    //
+    // When Arrow IPC support is unavailable, materialize Arrow tables into row
+    // arrays so lightweight environments can still cache nested-join results.
+    const table =
+      value instanceof ArrowTableAdapter && !arrowTableToIPC
+        ? new DataTable(value.columns, Array.from(value.iterRows()))
+        : value;
+    return { [TYPE_KEY]: "table", value: serializeAnyTable(table) };
+  }
   if (typeof value === "number" && !Number.isFinite(value)) {
     // JSON does not support NaN/Infinity; tag them so roundtrips preserve values.
     return { [TYPE_KEY]: "number", value: String(value) };
@@ -86,6 +99,15 @@ function serializeCell(value) {
  */
 function deserializeCell(value) {
   if (value && typeof value === "object" && !Array.isArray(value)) {
+    // @ts-ignore - runtime
+    if (value[TYPE_KEY] === "table" && value.value) {
+      try {
+        // @ts-ignore - runtime
+        return deserializeAnyTable(value.value);
+      } catch {
+        return value;
+      }
+    }
     // @ts-ignore - runtime
     if (value[TYPE_KEY] === "date" && typeof value.value === "string") {
       const parsed = new Date(value.value);
