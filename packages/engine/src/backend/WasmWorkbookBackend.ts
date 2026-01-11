@@ -1,7 +1,7 @@
 import type { EngineClient } from "../client";
 import type { CellScalar } from "../protocol";
 import { fromA1, toA1, toA1Range } from "./a1";
-import { isFormulaInput, normalizeFormulaText } from "./formula";
+import { isFormulaInput, normalizeFormulaTextOpt } from "./formula";
 import type { RangeCellEdit, RangeData, SheetInfo, SheetUsedRange, WorkbookBackend, WorkbookInfo } from "./workbookBackend";
 
 type UsedRangeState = {
@@ -25,10 +25,8 @@ function coerceToScalar(value: unknown): CellScalar {
 }
 
 function cellEditToEngineScalar(edit: RangeCellEdit): CellScalar {
-  const formula = typeof edit.formula === "string" ? edit.formula.trim() : "";
-  if (formula !== "") {
-    return normalizeFormulaText(edit.formula ?? "");
-  }
+  const formula = typeof edit.formula === "string" ? normalizeFormulaTextOpt(edit.formula) : null;
+  if (formula != null) return formula;
   return coerceToScalar(edit.value);
 }
 
@@ -127,7 +125,7 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     const values = result.map((row) =>
       row.map((cell) => {
         const input = cell?.input ?? null;
-        const formula = isFormulaInput(input) ? input.trimStart() : null;
+        const formula = isFormulaInput(input) ? normalizeFormulaTextOpt(input) : null;
         const value = cell?.value ?? null;
         return { value, formula, display_value: String(value ?? "") };
       }),

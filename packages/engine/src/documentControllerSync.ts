@@ -1,6 +1,6 @@
 import type { CellChange } from "./protocol";
 import { toA1 } from "./backend/a1";
-import { normalizeFormulaText } from "./backend/formula";
+import { normalizeFormulaTextOpt } from "./backend/formula";
 
 export type EngineCellScalar = number | string | boolean | null;
 
@@ -57,8 +57,9 @@ function coerceDocumentValueToScalar(value: unknown): EngineCellScalar | null {
 }
 
 function cellStateToEngineInput(cell: DocumentCellState): EngineCellScalar | null {
-  if (typeof cell.formula === "string" && cell.formula.trim() !== "") {
-    return normalizeFormulaText(cell.formula);
+  if (typeof cell.formula === "string") {
+    const normalized = normalizeFormulaTextOpt(cell.formula);
+    if (normalized != null) return normalized;
   }
   return coerceDocumentValueToScalar(cell.value);
 }
