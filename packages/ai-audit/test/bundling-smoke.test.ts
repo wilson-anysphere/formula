@@ -7,6 +7,14 @@ import { promises as fs } from "node:fs";
 
 import { build } from "esbuild";
 
+type OutputImport = { path: string };
+type MetafileOutput = { imports: OutputImport[] };
+
+function collectOutputImports(result: { metafile?: { outputs?: Record<string, MetafileOutput> } }): OutputImport[] {
+  const outputs = result.metafile?.outputs ?? ({} as Record<string, MetafileOutput>);
+  return Object.values(outputs).flatMap((output) => output.imports);
+}
+
 describe("ai-audit browser bundling", () => {
   it("bundles the browser entrypoints without pulling in sql.js or Node-only modules", async () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
@@ -38,7 +46,7 @@ describe("ai-audit browser bundling", () => {
     expect(inputFiles.some((file) => file.includes("sqlite-store"))).toBe(false);
     expect(inputFiles.some((file) => file.includes("storage.node"))).toBe(false);
 
-    const outputImports = Object.values(result.metafile?.outputs ?? {}).flatMap((output) => output.imports);
+    const outputImports = collectOutputImports(result);
     expect(outputImports.some((imp) => imp.path.startsWith("node:"))).toBe(false);
   });
 
@@ -71,7 +79,7 @@ describe("ai-audit browser bundling", () => {
     expect(inputFiles.some((file) => file.includes("sql.js"))).toBe(true);
     expect(inputFiles.some((file) => file.includes("storage.node"))).toBe(false);
 
-    const outputImports = Object.values(result.metafile?.outputs ?? {}).flatMap((output) => output.imports);
+    const outputImports = collectOutputImports(result);
     expect(outputImports.some((imp) => imp.path.startsWith("node:"))).toBe(false);
   });
 });

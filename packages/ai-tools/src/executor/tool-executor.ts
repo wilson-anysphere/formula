@@ -990,7 +990,7 @@ export class ToolExecutor {
         endCol: destination.col
       });
       return {
-        url: currentUrl.toString(),
+        url: safeUrlForProvenance(currentUrl),
         destination: formatA1Cell(destination),
         written_cells: 1,
         shape: { rows: 1, cols: 1 },
@@ -1016,7 +1016,7 @@ export class ToolExecutor {
     this.refreshPivotsForRange(range);
 
     return {
-      url: currentUrl.toString(),
+      url: safeUrlForProvenance(currentUrl),
       destination: formatA1Cell(destination),
       written_cells: table.length * (table[0]?.length ?? 0),
       shape: { rows: table.length, cols: table[0]?.length ?? 0 },
@@ -1811,6 +1811,12 @@ function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw toolError("permission_denied", `External protocol "${url.protocol}" is not supported for fetch_external_data.`);
   }
+  if (url.username || url.password) {
+    throw toolError(
+      "permission_denied",
+      "External URLs with embedded credentials are not supported for fetch_external_data. Pass credentials via headers instead."
+    );
+  }
   if (allowedHosts.length > 0 && !allowedHosts.includes(url.host)) {
     throw toolError("permission_denied", `External host "${url.host}" is not in the allowlist for fetch_external_data.`);
   }
@@ -1818,6 +1824,46 @@ function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
 
 function isRedirectStatus(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+function safeUrlForProvenance(url: URL): string {
+  const sanitized = new URL(url.toString());
+  // Avoid leaking userinfo and fragments into tool results / audit logs.
+  sanitized.username = "";
+  sanitized.password = "";
+  sanitized.hash = "";
+
+  if (sanitized.search) {
+    const params = new URLSearchParams(sanitized.search);
+    const keys = Array.from(new Set(Array.from(params.keys())));
+    for (const key of keys) {
+      if (!isSensitiveQueryParam(key)) continue;
+      const count = params.getAll(key).length;
+      params.delete(key);
+      for (let i = 0; i < count; i++) params.append(key, "REDACTED");
+    }
+    const next = params.toString();
+    sanitized.search = next ? `?${next}` : "";
+  }
+
+  return sanitized.toString();
+}
+
+function isSensitiveQueryParam(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return (
+    normalized === "key" ||
+    normalized === "api_key" ||
+    normalized === "apikey" ||
+    normalized === "token" ||
+    normalized === "access_token" ||
+    normalized === "auth" ||
+    normalized === "authorization" ||
+    normalized === "signature" ||
+    normalized === "sig" ||
+    normalized === "password" ||
+    normalized === "secret"
+  );
 }
 
 async function readResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array> {

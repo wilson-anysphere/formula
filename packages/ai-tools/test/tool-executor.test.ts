@@ -730,4 +730,60 @@ describe("ToolExecutor", () => {
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("permission_denied");
   });
+
+  it("fetch_external_data rejects URLs with embedded credentials", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["example.com"] });
+
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch should not be called for credentialed URLs");
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://user:pass@example.com/data",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+  });
+
+  it("fetch_external_data redacts sensitive query parameters in returned url metadata", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
+
+    const payload = JSON.stringify([{ foo: "bar" }]);
+    const fetchMock = vi.fn(async () => {
+      return new Response(payload, {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com/data?api_key=SECRET&city=berlin",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("fetch_external_data");
+    if (!result.ok || result.tool !== "fetch_external_data") throw new Error("Unexpected tool result");
+    if (!result.data) throw new Error("Expected fetch_external_data to return data");
+
+    expect(result.data.url).toContain("api_key=REDACTED");
+    expect(result.data.url).toContain("city=berlin");
+    expect(result.data.url).not.toContain("SECRET");
+  });
 });
