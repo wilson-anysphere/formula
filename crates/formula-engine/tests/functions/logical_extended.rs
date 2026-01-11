@@ -125,6 +125,26 @@ fn choose_spills_and_truncates_index() {
 }
 
 #[test]
+fn choose_is_lazy_in_array_mode() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CHOOSE({1,1}, 10, 1/0)");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_number(&sheet.get("B1"), 10.0);
+}
+
+#[test]
+fn choose_returns_value_error_for_invalid_indices_per_element() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CHOOSE({1,0}, 10, 20)");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::Value));
+}
+
+#[test]
 fn choose_broadcasts_1x1_index_arrays_to_array_results() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=CHOOSE({1}, {10,20}, {30,40})");
