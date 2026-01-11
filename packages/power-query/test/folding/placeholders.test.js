@@ -26,8 +26,12 @@ test("placeholders: converts placeholders following LIKE/LIMIT/CASE keywords", (
   );
 });
 
+test("placeholders: rewrites placeholders inside CAST()", () => {
+  const sql = 'SELECT CAST(? AS DOUBLE PRECISION) AS n, CAST(? AS TEXT) AS s';
+  assert.equal(normalizePostgresPlaceholders(sql, 2), 'SELECT CAST($1 AS DOUBLE PRECISION) AS n, CAST($2 AS TEXT) AS s');
+});
+
 test("placeholders: ignores question marks inside comments", () => {
   const sql = "SELECT * FROM t -- ? comment\nWHERE a = ? /* ? block */";
   assert.equal(normalizePostgresPlaceholders(sql, 1), "SELECT * FROM t -- ? comment\nWHERE a = $1 /* ? block */");
 });
-
