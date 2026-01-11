@@ -936,7 +936,9 @@ fn build_num_fmt_element(id: u16, code: &str) -> XmlElement {
 
 fn builtin_num_fmt_code(id: u16) -> Option<&'static str> {
     match id {
-        7 => Some("$#,##0.00"),
+        // Built-in currency format. Note that Excel's built-in table includes
+        // an underscore alignment token and a negative-section in parentheses.
+        7 => Some("$#,##0.00_);($#,##0.00)"),
         9 => Some("0%"),
         14 => Some("m/d/yyyy"),
         _ => None,
@@ -945,7 +947,7 @@ fn builtin_num_fmt_code(id: u16) -> Option<&'static str> {
 
 fn builtin_num_fmt_id_for_code(code: &str) -> Option<u16> {
     match code {
-        "$#,##0.00" => Some(7),
+        "$#,##0.00" | "$#,##0.00_);($#,##0.00)" => Some(7),
         "0%" => Some(9),
         "m/d/yyyy" => Some(14),
         _ => None,
