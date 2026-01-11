@@ -1184,20 +1184,31 @@ fn exact_match_values(lookup: &Value, values: &[Value]) -> Option<usize> {
 }
 
 fn approximate_match_values(lookup: &Value, values: &[Value], ascending: bool) -> Option<usize> {
-    let mut best: Option<usize> = None;
-    for (idx, v) in values.iter().enumerate() {
+    if values.is_empty() {
+        return None;
+    }
+
+    // Excel's approximate matching behaves like a binary search over a sorted array:
+    // - ascending: last index where value <= lookup
+    // - descending: last index where value >= lookup
+    let mut lo = 0usize;
+    let mut hi = values.len();
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let v = &values[mid];
         let ok = if ascending {
             excel_le(v, lookup)?
         } else {
             excel_ge(v, lookup)?
         };
         if ok {
-            best = Some(idx);
+            lo = mid + 1;
         } else {
-            break;
+            hi = mid;
         }
     }
-    best
+
+    lo.checked_sub(1)
 }
 
 fn exact_match_in_first_col(
@@ -1315,34 +1326,49 @@ fn approximate_match_in_first_col(
     lookup: &Value,
     table: &Reference,
 ) -> Option<u32> {
-    let mut best: Option<u32> = None;
-    let rows = table.start.row..=table.end.row;
-    for (idx, row) in rows.enumerate() {
+    let len = (table.end.row - table.start.row + 1) as usize;
+    if len == 0 {
+        return None;
+    }
+
+    // Find the insertion point after the last key that is <= lookup.
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
         let addr = crate::eval::CellAddr {
-            row,
+            row: table.start.row + mid as u32,
             col: table.start.col,
         };
         let key = ctx.get_cell_value(&table.sheet_id, addr);
         if excel_le(&key, lookup)? {
-            best = Some(idx as u32);
+            lo = mid + 1;
         } else {
-            break;
+            hi = mid;
         }
     }
-    best
+
+    lo.checked_sub(1).map(|idx| idx as u32)
 }
 
 fn approximate_match_in_first_col_array(lookup: &Value, table: &Array) -> Option<u32> {
-    let mut best: Option<u32> = None;
-    for row in 0..table.rows {
-        let key = table.get(row, 0).unwrap_or(&Value::Blank);
+    if table.rows == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = table.rows;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let key = table.get(mid, 0).unwrap_or(&Value::Blank);
         if excel_le(key, lookup)? {
-            best = Some(row as u32);
+            lo = mid + 1;
         } else {
-            break;
+            hi = mid;
         }
     }
-    best
+
+    lo.checked_sub(1).map(|idx| idx as u32)
 }
 
 fn approximate_match_in_first_row(
@@ -1350,34 +1376,48 @@ fn approximate_match_in_first_row(
     lookup: &Value,
     table: &Reference,
 ) -> Option<u32> {
-    let mut best: Option<u32> = None;
-    let cols = table.start.col..=table.end.col;
-    for (idx, col) in cols.enumerate() {
+    let len = (table.end.col - table.start.col + 1) as usize;
+    if len == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
         let addr = crate::eval::CellAddr {
             row: table.start.row,
-            col,
+            col: table.start.col + mid as u32,
         };
         let key = ctx.get_cell_value(&table.sheet_id, addr);
         if excel_le(&key, lookup)? {
-            best = Some(idx as u32);
+            lo = mid + 1;
         } else {
-            break;
+            hi = mid;
         }
     }
-    best
+
+    lo.checked_sub(1).map(|idx| idx as u32)
 }
 
 fn approximate_match_in_first_row_array(lookup: &Value, table: &Array) -> Option<u32> {
-    let mut best: Option<u32> = None;
-    for col in 0..table.cols {
-        let key = table.get(0, col).unwrap_or(&Value::Blank);
+    if table.cols == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = table.cols;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let key = table.get(0, mid).unwrap_or(&Value::Blank);
         if excel_le(key, lookup)? {
-            best = Some(col as u32);
+            lo = mid + 1;
         } else {
-            break;
+            hi = mid;
         }
     }
-    best
+
+    lo.checked_sub(1).map(|idx| idx as u32)
 }
 
 fn exact_match_1d(
@@ -1415,21 +1455,28 @@ fn approximate_match_1d(
     values: &[crate::eval::CellAddr],
     ascending: bool,
 ) -> Option<usize> {
-    let mut best: Option<usize> = None;
-    for (idx, addr) in values.iter().enumerate() {
-        let v = ctx.get_cell_value(sheet_id, *addr);
+    if values.is_empty() {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = values.len();
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let v = ctx.get_cell_value(sheet_id, values[mid]);
         let ok = if ascending {
             excel_le(&v, lookup)?
         } else {
             excel_ge(&v, lookup)?
         };
         if ok {
-            best = Some(idx);
+            lo = mid + 1;
         } else {
-            break;
+            hi = mid;
         }
     }
-    best
+
+    lo.checked_sub(1)
 }
 
 fn text_eq_case_insensitive(a: &str, b: &str) -> bool {

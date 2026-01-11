@@ -504,6 +504,35 @@ fn match_and_vlookup_approximate_handle_sorted_mixed_type_arrays() {
 }
 
 #[test]
+fn match_and_vlookup_approximate_handle_duplicates_like_sorted_insertion_points() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 2.0);
+    sheet.set("A4", 2.0);
+    sheet.set("A5", 3.0);
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("B3", 30.0);
+    sheet.set("B4", 40.0);
+    sheet.set("B5", 50.0);
+
+    // Ascending approximate: insertion point for 2.5 is after the last 2.
+    assert_eq!(sheet.eval("=MATCH(2.5, A1:A5, 1)"), Value::Number(4.0));
+    assert_eq!(sheet.eval("=MATCH(2, A1:A5, 1)"), Value::Number(4.0));
+    assert_eq!(sheet.eval("=VLOOKUP(2.5, A1:B5, 2)"), Value::Number(40.0));
+    assert_eq!(sheet.eval("=VLOOKUP(2, A1:B5, 2)"), Value::Number(40.0));
+
+    // Descending approximate: insertion point for 2 is after the last 2.
+    sheet.set("C1", 3.0);
+    sheet.set("C2", 2.0);
+    sheet.set("C3", 2.0);
+    sheet.set("C4", 2.0);
+    sheet.set("C5", 1.0);
+    assert_eq!(sheet.eval("=MATCH(2, C1:C5, -1)"), Value::Number(4.0));
+}
+
+#[test]
 fn hlookup_exact_match() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);
