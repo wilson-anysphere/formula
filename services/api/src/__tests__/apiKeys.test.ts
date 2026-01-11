@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { newDb } from "pg-mem";
 import type { Pool } from "pg";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../app";
@@ -170,6 +171,81 @@ describe("API keys", () => {
       headers: { authorization: `Bearer ${rawKey}` }
     });
     expect(me.statusCode).toBe(401);
+  });
+
+  it("scopes API keys to their org for org-scoped routes", async () => {
+    const register = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "scoped-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "Scoped Org A"
+      }
+    });
+    expect(register.statusCode).toBe(200);
+    const cookie = extractCookie(register.headers["set-cookie"]);
+    const orgAId = (register.json() as any).organization.id as string;
+    const userId = (register.json() as any).user.id as string;
+
+    await app.inject({
+      method: "PATCH",
+      url: `/orgs/${orgAId}/settings`,
+      headers: { cookie },
+      payload: { allowedAuthMethods: ["password", "api_key"] }
+    });
+
+    const createKey = await app.inject({
+      method: "POST",
+      url: `/orgs/${orgAId}/api-keys`,
+      headers: { cookie },
+      payload: { name: "scoped" }
+    });
+    expect(createKey.statusCode).toBe(200);
+    const rawKey = (createKey.json() as any).key as string;
+
+    const orgBId = crypto.randomUUID();
+    await db.query("INSERT INTO organizations (id, name) VALUES ($1, $2)", [orgBId, "Scoped Org B"]);
+    await db.query("INSERT INTO org_settings (org_id) VALUES ($1)", [orgBId]);
+    await db.query("INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'owner')", [orgBId, userId]);
+
+    // Session auth can still access Org B.
+    const sessionOrgB = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgBId}`,
+      headers: { cookie }
+    });
+    expect(sessionOrgB.statusCode).toBe(200);
+
+    // API keys should be restricted to their org id, even if the user is a member of Org B.
+    const blockedOrgB = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgBId}`,
+      headers: { authorization: `Bearer ${rawKey}` }
+    });
+    expect(blockedOrgB.statusCode).toBe(404);
+    expect((blockedOrgB.json() as any).error).toBe("org_not_found");
+
+    const blockedSettings = await app.inject({
+      method: "PATCH",
+      url: `/orgs/${orgBId}/settings`,
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { allowExternalSharing: false }
+    });
+    expect(blockedSettings.statusCode).toBe(404);
+    expect((blockedSettings.json() as any).error).toBe("org_not_found");
+
+    // Listing orgs should be scoped to the API key org.
+    const listOrgs = await app.inject({
+      method: "GET",
+      url: "/orgs",
+      headers: { authorization: `Bearer ${rawKey}` }
+    });
+    expect(listOrgs.statusCode).toBe(200);
+    const listBody = listOrgs.json() as any;
+    expect(listBody.organizations).toHaveLength(1);
+    expect(listBody.organizations[0]).toMatchObject({ id: orgAId, name: "Scoped Org A" });
   });
 
   it("blocks API keys when org allowed_auth_methods excludes api_key", async () => {

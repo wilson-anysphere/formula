@@ -61,6 +61,10 @@ async function requireOrgAdminForOidcProviders(
   reply: FastifyReply,
   orgId: string
 ): Promise<{ role: OrgRole } | null> {
+  if (request.authOrgId && request.authOrgId !== orgId) {
+    reply.code(404).send({ error: "org_not_found" });
+    return null;
+  }
   const membership = await request.server.db.query(
     "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2",
     [orgId, request.user!.id]

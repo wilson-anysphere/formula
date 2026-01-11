@@ -132,6 +132,10 @@ async function requireOrgMember(
   reply: FastifyReply,
   orgId: string
 ): Promise<{ role: OrgRole } | null> {
+  if (request.authOrgId && request.authOrgId !== orgId) {
+    reply.code(404).send({ error: "org_not_found" });
+    return null;
+  }
   const membership = await request.server.db.query(
     "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2",
     [orgId, request.user!.id]
@@ -145,15 +149,18 @@ async function requireOrgMember(
 
 export function registerOrgRoutes(app: FastifyInstance): void {
   app.get("/orgs", { preHandler: requireAuth }, async (request) => {
+    const orgFilter = request.authOrgId ? "AND o.id = $2" : "";
+    const params = request.authOrgId ? [request.user!.id, request.authOrgId] : [request.user!.id];
     const result = await app.db.query(
       `
         SELECT o.id, o.name, om.role
         FROM organizations o
         JOIN org_members om ON om.org_id = o.id
         WHERE om.user_id = $1
+          ${orgFilter}
         ORDER BY o.created_at ASC
       `,
-      [request.user!.id]
+      params
     );
     return {
       organizations: result.rows.map((row) => ({
