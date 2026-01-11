@@ -125,13 +125,14 @@ export class SiemExportWorker {
       async (span) => {
         const now = new Date();
         try {
-          const tlsPolicy = await loadOrgTlsPolicy(this.options.db, org.orgId);
           const state = await this.stateStore.getOrCreate(org.orgId);
           if (state.disabledUntil && state.disabledUntil.getTime() > now.getTime()) {
             this.options.metrics.siemBatchesTotal.inc({ status: "disabled" });
             span.setStatus({ code: SpanStatusCode.OK });
             return null;
           }
+
+          const tlsPolicy = await loadOrgTlsPolicy(this.options.db, org.orgId);
 
           let cursor: AuditCursor = {
             lastCreatedAt: state.lastCreatedAt,
