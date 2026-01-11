@@ -18,6 +18,9 @@ export {
   OAuth2TokenError,
   InMemoryOAuthTokenStore,
   CredentialStoreOAuthTokenStore,
+  createCodeVerifier,
+  createCodeChallenge,
+  normalizeScopes,
 } from "./oauth2/index.js";
 
 export { parseM } from "./m/parser.js";
