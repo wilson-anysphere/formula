@@ -15,7 +15,24 @@ async function collect(dir, out) {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     // Skip node_modules and other generated output.
-    if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "coverage") continue;
+    if (
+      entry.name === ".git" ||
+      entry.name === "node_modules" ||
+      entry.name === "dist" ||
+      entry.name === "coverage" ||
+      entry.name === "target" ||
+      entry.name === "build" ||
+      entry.name === ".turbo" ||
+      entry.name === ".pnpm-store" ||
+      entry.name === ".cache" ||
+      entry.name === ".vite" ||
+      entry.name === "playwright-report" ||
+      entry.name === "test-results" ||
+      entry.name === "security-report" ||
+      entry.name.startsWith(".tmp")
+    ) {
+      continue;
+    }
 
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
