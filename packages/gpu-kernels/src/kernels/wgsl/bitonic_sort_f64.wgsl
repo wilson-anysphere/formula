@@ -27,6 +27,18 @@ fn cmp(a: Scalar, b: Scalar) -> i32 {
   if (b_nan) {
     return -1;
   }
+  // Match TypedArray sorting for signed zero: -0 compares less than +0.
+  if (a == 0.0 && b == 0.0) {
+    let a_neg_zero = (1.0 / a) < 0.0;
+    let b_neg_zero = (1.0 / b) < 0.0;
+    if (a_neg_zero && !b_neg_zero) {
+      return -1;
+    }
+    if (!a_neg_zero && b_neg_zero) {
+      return 1;
+    }
+    return 0;
+  }
   if (a < b) {
     return -1;
   }

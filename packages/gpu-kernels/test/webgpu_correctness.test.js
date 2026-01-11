@@ -130,6 +130,8 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
     for (let i = 0; i < n; i++) values[i] = (rng() - 0.5) * 1000;
     values[0] = Number.NaN;
     values[1] = Number.POSITIVE_INFINITY;
+    values[2] = 0;
+    values[3] = -0;
     const cpuSorted = await cpu.sort(values);
     const gpuSorted = await gpu.sort(values, { precision: "f32" });
     assert.deepEqual(Array.from(gpuSorted), Array.from(cpuSorted));
@@ -244,6 +246,8 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
       for (let i = 0; i < n; i++) values[i] = (rng() - 0.5) * 1000;
       values[0] = Number.NaN;
       values[1] = Number.POSITIVE_INFINITY;
+      values[2] = 0;
+      values[3] = -0;
       const cpuSorted = await cpu.sort(values);
       const gpuSorted = await gpu.sort(values, { precision: "f64", allowFp32FallbackForF64: false });
       assert.deepEqual(Array.from(gpuSorted), Array.from(cpuSorted));

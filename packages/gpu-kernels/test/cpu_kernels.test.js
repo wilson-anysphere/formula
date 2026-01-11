@@ -70,6 +70,13 @@ test("cpu: sort handles NaN and Infinity like TypedArray#sort", async () => {
   assert.deepEqual(Array.from(out), [Number.NEGATIVE_INFINITY, 1, 3, Number.POSITIVE_INFINITY, Number.NaN]);
 });
 
+test("cpu: sort preserves signed zero ordering like TypedArray#sort", async () => {
+  const cpu = new CpuBackend();
+  const out = await cpu.sort(new Float64Array([0, -0]));
+  assert.ok(Object.is(out[0], -0), `expected -0 first, got ${out[0]}`);
+  assert.ok(Object.is(out[1], 0) && !Object.is(out[1], -0), `expected +0 second, got ${out[1]}`);
+});
+
 test("cpu: histogram", async () => {
   const cpu = new CpuBackend();
   const values = new Float64Array([0, 0.49, 0.5, 0.99, 1.0, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]);
