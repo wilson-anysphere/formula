@@ -159,6 +159,7 @@ export class OpenAIClient {
           ? {
               promptTokens: json.usage.prompt_tokens,
               completionTokens: json.usage.completion_tokens,
+              totalTokens: json.usage.total_tokens,
             }
           : undefined,
         raw: json,

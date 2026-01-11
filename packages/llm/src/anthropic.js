@@ -197,6 +197,10 @@ export class AnthropicClient {
           ? {
               promptTokens: json.usage.input_tokens,
               completionTokens: json.usage.output_tokens,
+              totalTokens:
+                typeof json.usage.input_tokens === "number" && typeof json.usage.output_tokens === "number"
+                  ? json.usage.input_tokens + json.usage.output_tokens
+                  : undefined,
             }
           : undefined,
         raw: json,

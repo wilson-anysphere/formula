@@ -32,7 +32,7 @@
  *
  * @typedef {{
  *   message: Extract<LLMMessage, { role: "assistant" }>,
- *   usage?: { promptTokens?: number, completionTokens?: number },
+ *   usage?: { promptTokens?: number, completionTokens?: number, totalTokens?: number },
  *   raw?: any
  * }} ChatResponse
  *

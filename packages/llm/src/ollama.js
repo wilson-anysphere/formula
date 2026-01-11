@@ -155,6 +155,7 @@ export class OllamaChatClient {
             ? {
                 promptTokens: promptTokens ?? undefined,
                 completionTokens: completionTokens ?? undefined,
+                totalTokens: promptTokens != null && completionTokens != null ? promptTokens + completionTokens : undefined,
               }
             : undefined,
         raw: json,
