@@ -119,5 +119,46 @@ export class IndexedDBCacheStore {
       store.clear();
     });
   }
-}
 
+  /**
+   * Proactively delete expired entries.
+   *
+   * CacheManager deletes expired keys on access, but long-lived caches can benefit
+   * from an occasional sweep to free storage.
+   *
+   * @param {number} [nowMs]
+   */
+  async pruneExpired(nowMs = Date.now()) {
+    const db = await this.open();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, "readwrite");
+      tx.oncomplete = () => resolve(undefined);
+      tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+
+      const store = tx.objectStore(this.storeName);
+      const req = store.openCursor();
+      req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return;
+
+        const entry = cursor.value;
+        const expiresAtMs =
+          entry && typeof entry === "object" && "expiresAtMs" in entry
+            ? // @ts-ignore - runtime access
+              entry.expiresAtMs
+            : null;
+
+        if (typeof expiresAtMs === "number" && expiresAtMs <= nowMs) {
+          try {
+            cursor.delete();
+          } catch {
+            // ignore delete failures; continue iterating
+          }
+        }
+
+        cursor.continue();
+      };
+    });
+  }
+}

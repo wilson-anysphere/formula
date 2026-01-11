@@ -23,6 +23,7 @@
  * @property {(key: string, entry: CacheEntry) => Promise<void>} set
  * @property {(key: string) => Promise<void>} delete
  * @property {(() => Promise<void>) | undefined} [clear]
+ * @property {((nowMs?: number) => Promise<void>) | undefined} [pruneExpired]
  */
 
 /**
@@ -90,5 +91,19 @@ export class CacheManager {
 
   async clear() {
     if (this.store.clear) await this.store.clear();
+  }
+
+  /**
+   * Best-effort proactive pruning for stores that support it (e.g. IndexedDB).
+   *
+   * @param {number} [nowMs]
+   */
+  async pruneExpired(nowMs = this.now()) {
+    if (!this.store.pruneExpired) return;
+    try {
+      await this.store.pruneExpired(nowMs);
+    } catch {
+      // Cache pruning should never be fatal; callers may invoke this opportunistically.
+    }
   }
 }

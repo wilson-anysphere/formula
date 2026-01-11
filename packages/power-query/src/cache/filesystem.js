@@ -7,10 +7,148 @@ import { fnv1a64 } from "./key.js";
 const BINARY_MARKER_KEY = "__pq_cache_binary";
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown> & { [BINARY_MARKER_KEY]: string }}
+ */
+function isBinaryMarker(value) {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    // @ts-ignore - runtime indexing
+    typeof value[BINARY_MARKER_KEY] === "string"
+  );
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function containsBinaryMarker(value) {
+  if (isBinaryMarker(value)) return true;
+  if (Array.isArray(value)) return value.some((item) => containsBinaryMarker(item));
+  if (value && typeof value === "object") {
+    for (const v of Object.values(value)) {
+      if (containsBinaryMarker(v)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Replace all Uint8Array values in an object graph with marker objects that
+ * reference a sibling `.bin` file.
+ *
+ * @param {unknown} value
+ * @param {string} binFileName
+ * @returns {{ value: unknown, segments: Array<{ offset: number, length: number, bytes: Uint8Array }> }}
+ */
+function extractBinarySegments(value, binFileName) {
+  /** @type {Array<{ offset: number, length: number, bytes: Uint8Array }>} */
+  const segments = [];
+  let offset = 0;
+
+  /**
+   * @param {unknown} current
+   * @returns {unknown}
+   */
+  function visit(current) {
+    if (current instanceof Uint8Array) {
+      const segmentOffset = offset;
+      const length = current.byteLength;
+      offset += length;
+      segments.push({ offset: segmentOffset, length, bytes: current });
+      return { [BINARY_MARKER_KEY]: binFileName, offset: segmentOffset, length };
+    }
+
+    if (Array.isArray(current)) {
+      return current.map((item) => visit(item));
+    }
+
+    if (current && typeof current === "object") {
+      // Respect `toJSON()` for non-plain objects (e.g. Date, URL) so we don't
+      // accidentally serialize them as `{}` when extracting binary segments.
+      // (Buffers are handled above via the Uint8Array branch.)
+      // @ts-ignore - runtime inspection
+      if (typeof current.toJSON === "function" && current.constructor && current.constructor !== Object) {
+        // @ts-ignore - runtime
+        return visit(current.toJSON());
+      }
+
+      const out = {};
+      for (const [k, v] of Object.entries(current)) {
+        // @ts-ignore - runtime indexing
+        out[k] = visit(v);
+      }
+      return out;
+    }
+
+    return current;
+  }
+
+  return { value: visit(value), segments };
+}
+
+/**
+ * @param {unknown} value
+ * @param {Uint8Array} binBytes
+ * @param {string} binFileName
+ * @returns {unknown}
+ */
+function hydrateBinarySegments(value, binBytes, binFileName) {
+  /**
+   * @param {unknown} current
+   * @returns {unknown}
+   */
+  function visit(current) {
+    if (isBinaryMarker(current)) {
+      // @ts-ignore - runtime indexing
+      const markerFileName = current[BINARY_MARKER_KEY];
+      if (markerFileName !== binFileName) {
+        throw new Error("Invalid cache binary marker");
+      }
+
+      // Backwards compat: the original marker shape only included the filename
+      // and implied the entire `.bin` file.
+      const offset = typeof current.offset === "number" ? current.offset : 0;
+      const length = typeof current.length === "number" ? current.length : binBytes.byteLength;
+
+      if (
+        !Number.isFinite(offset) ||
+        !Number.isFinite(length) ||
+        offset < 0 ||
+        length < 0 ||
+        offset + length > binBytes.byteLength
+      ) {
+        throw new Error("Invalid cache binary marker range");
+      }
+
+      return new Uint8Array(binBytes.buffer, binBytes.byteOffset + offset, length);
+    }
+
+    if (Array.isArray(current)) {
+      return current.map((item) => visit(item));
+    }
+
+    if (current && typeof current === "object") {
+      for (const [k, v] of Object.entries(current)) {
+        // @ts-ignore - runtime indexing
+        current[k] = visit(v);
+      }
+      return current;
+    }
+
+    return current;
+  }
+
+  return visit(value);
+}
+
+/**
  * Very small filesystem cache store for Node environments.
  *
  * It stores one JSON file per key, plus an optional `.bin` blob when the cached
- * value includes Arrow IPC bytes.
+ * value includes binary payloads (`Uint8Array`), such as Arrow IPC bytes.
  *
  * Keys are hashed to filenames to avoid filesystem character issues.
  */
@@ -120,19 +258,11 @@ export class FileSystemCacheStore {
 
       const entry = parsed.entry ?? null;
       const value = entry?.value;
-      const bytesMarker = value?.version === 2 && value?.table?.kind === "arrow" ? value?.table?.bytes : null;
-      if (
-        bytesMarker &&
-        typeof bytesMarker === "object" &&
-        !Array.isArray(bytesMarker) &&
-        typeof bytesMarker[BINARY_MARKER_KEY] === "string"
-      ) {
-        const markerFileName = bytesMarker[BINARY_MARKER_KEY];
-        // Only allow loading from within the cache directory.
-        if (markerFileName !== binFileName) return null;
+
+      if (containsBinaryMarker(value)) {
         const bytes = await fs.readFile(binPath);
         const restored = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        entry.value = { ...value, table: { ...value.table, bytes: restored } };
+        entry.value = hydrateBinarySegments(value, restored, binFileName);
       }
 
       return entry;
@@ -150,26 +280,17 @@ export class FileSystemCacheStore {
     const { fs } = await this.deps();
     const { jsonPath, binPath, binFileName } = await this.pathsForKey(key);
 
-    const value = entry?.value;
-    const arrowBytes =
-      value?.version === 2 && value?.table?.kind === "arrow" && value?.table?.bytes instanceof Uint8Array
-        ? value.table.bytes
-        : null;
+    const extracted = extractBinarySegments(entry?.value, binFileName);
 
-    if (arrowBytes) {
-      await this.writeFileAtomic(binPath, arrowBytes);
-      const patchedValue = {
-        ...value,
-        table: {
-          ...value.table,
-          bytes: { [BINARY_MARKER_KEY]: binFileName },
-        },
-      };
-      await this.writeFileAtomic(
-        jsonPath,
-        JSON.stringify({ key, entry: { ...entry, value: patchedValue } }),
-        "utf8",
-      );
+    if (extracted.segments.length > 0) {
+      const total = extracted.segments.reduce((sum, seg) => sum + seg.length, 0);
+      const combined = new Uint8Array(total);
+      for (const seg of extracted.segments) {
+        combined.set(seg.bytes, seg.offset);
+      }
+
+      await this.writeFileAtomic(binPath, combined);
+      await this.writeFileAtomic(jsonPath, JSON.stringify({ key, entry: { ...entry, value: extracted.value } }), "utf8");
       return;
     }
 
