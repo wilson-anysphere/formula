@@ -94,6 +94,14 @@ export default async function main(ctx) {
 }
 `);
 
+    const xhrDenied = await runtime.run(`
+export default async function main(ctx) {
+  ctx.ui.log("XHRType", typeof XMLHttpRequest);
+  if (typeof XMLHttpRequest === "undefined") return;
+  new XMLHttpRequest();
+}
+`);
+
     return {
       mainRun,
       computed,
@@ -105,6 +113,7 @@ export default async function main(ctx) {
       allowlistWebSocketDenied,
       dynamicImportDenied,
       subworkerDenied,
+      xhrDenied,
     };
   };
 
@@ -148,6 +157,14 @@ export default async function main(ctx) {
     expect(result.subworkerDenied.error).toBeUndefined();
   } else {
     expect(result.subworkerDenied.error?.message).toContain("Workers are not permitted");
+  }
+
+  const xhrTypeEntry = result.xhrDenied.logs.find((entry) => entry.message.includes("XHRType"));
+  const xhrType = xhrTypeEntry?.message ?? "";
+  if (xhrType.includes("undefined")) {
+    expect(result.xhrDenied.error).toBeUndefined();
+  } else {
+    expect(result.xhrDenied.error?.message).toContain("Network access is not permitted");
   }
 });
 

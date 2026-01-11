@@ -22,6 +22,7 @@ const originalFetch = self.fetch?.bind(self);
 const OriginalWebSocket = self.WebSocket;
 const OriginalWorker = self.Worker;
 const OriginalSharedWorker = self.SharedWorker;
+const OriginalXMLHttpRequest = self.XMLHttpRequest;
 
 function postControlMessage(message) {
   if (!runToken) return;
@@ -97,6 +98,16 @@ function applyNetworkSandbox(permissions) {
     }
   };
 
+  const blockXmlHttpRequest = () => {
+    if (OriginalXMLHttpRequest) {
+      self.XMLHttpRequest = class BlockedXMLHttpRequest {
+        constructor() {
+          throw new Error("Network access is not permitted");
+        }
+      };
+    }
+  };
+
   if (mode === "none") {
     self.fetch = async () => {
       throw new Error("Network access is not permitted");
@@ -109,6 +120,7 @@ function applyNetworkSandbox(permissions) {
     };
 
     blockWorkers();
+    blockXmlHttpRequest();
     return;
   }
 
@@ -140,6 +152,7 @@ function applyNetworkSandbox(permissions) {
     };
 
     blockWorkers();
+    blockXmlHttpRequest();
     return;
   }
 
@@ -155,6 +168,9 @@ function applyNetworkSandbox(permissions) {
   }
   if (OriginalSharedWorker) {
     self.SharedWorker = OriginalSharedWorker;
+  }
+  if (OriginalXMLHttpRequest) {
+    self.XMLHttpRequest = OriginalXMLHttpRequest;
   }
 }
 
