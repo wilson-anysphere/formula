@@ -286,11 +286,7 @@ fn parse_workbook_metadata(
                     .get(&relationship_id)
                     .cloned()
                     .unwrap_or_else(|| "worksheets/sheet1.xml".to_string());
-                let path = if target.starts_with('/') {
-                    target.trim_start_matches('/').to_string()
-                } else {
-                    format!("xl/{target}")
-                };
+                let path = resolve_target(WORKBOOK_PART, &target);
                 sheets.push(ParsedSheet {
                     name,
                     sheet_id,
