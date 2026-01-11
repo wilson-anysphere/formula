@@ -84,7 +84,10 @@ export class SelectionRenderer {
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.restore();
 
-    const visibleRanges = this.computeVisibleRanges(selection.ranges, metrics);
+    const visibleRanges = this.computeVisibleRanges(selection.ranges, metrics, {
+      clipRect: options.clipRect,
+      borderWidth: style.borderWidth,
+    });
 
     this.lastDebug = {
       ranges: visibleRanges,
@@ -152,17 +155,25 @@ export class SelectionRenderer {
     ctx.restore();
   }
 
-  private computeVisibleRanges(ranges: Range[], metrics: GridMetrics): SelectionRangeRenderInfo[] {
+  private computeVisibleRanges(
+    ranges: Range[],
+    metrics: GridMetrics,
+    options: { clipRect?: Rect; borderWidth: number }
+  ): SelectionRangeRenderInfo[] {
     const out: SelectionRangeRenderInfo[] = [];
     for (const range of ranges) {
-      const info = this.rangeToVisibleRange(range, metrics);
+      const info = this.rangeToVisibleRange(range, metrics, options);
       if (!info) continue;
       out.push(info);
     }
     return out;
   }
 
-  private rangeToVisibleRange(range: Range, metrics: GridMetrics): SelectionRangeRenderInfo | null {
+  private rangeToVisibleRange(
+    range: Range,
+    metrics: GridMetrics,
+    options: { clipRect?: Rect; borderWidth: number }
+  ): SelectionRangeRenderInfo | null {
     const visibleStartRow = firstVisibleIndex(metrics.visibleRows, range.startRow, range.endRow);
     const visibleEndRow = lastVisibleIndex(metrics.visibleRows, range.startRow, range.endRow);
     const visibleStartCol = firstVisibleIndex(metrics.visibleCols, range.startCol, range.endCol);
@@ -181,12 +192,42 @@ export class SelectionRenderer {
     const height = end.y + end.height - start.y;
     if (width <= 0 || height <= 0) return null;
 
-    const edges = {
-      top: metrics.getCellRect({ row: range.startRow, col: visibleStartCol }) != null,
-      bottom: metrics.getCellRect({ row: range.endRow, col: visibleStartCol }) != null,
-      left: metrics.getCellRect({ row: visibleStartRow, col: range.startCol }) != null,
-      right: metrics.getCellRect({ row: visibleStartRow, col: range.endCol }) != null,
-    };
+    const edges = (() => {
+      // Historically we relied on `getCellRect` returning `null` for offscreen cells
+      // to decide whether a selection edge should be drawn. With virtual scrolling,
+      // `getCellRect` may return valid coordinates for offscreen cells, so we need
+      // to determine visibility against the viewport clip instead.
+      const clip = options.clipRect;
+      if (!clip) {
+        return {
+          top: visibleStartRow === range.startRow,
+          bottom: visibleEndRow === range.endRow,
+          left: visibleStartCol === range.startCol,
+          right: visibleEndCol === range.endCol,
+        };
+      }
+
+      const half = Math.max(0, options.borderWidth) / 2;
+      const clipRight = clip.x + clip.width;
+      const clipBottom = clip.y + clip.height;
+
+      const topCell = metrics.getCellRect({ row: range.startRow, col: visibleStartCol });
+      const bottomCell = metrics.getCellRect({ row: range.endRow, col: visibleStartCol });
+      const leftCell = metrics.getCellRect({ row: visibleStartRow, col: range.startCol });
+      const rightCell = metrics.getCellRect({ row: visibleStartRow, col: range.endCol });
+
+      const yTop = topCell ? topCell.y + 0.5 : null;
+      const yBottom = bottomCell ? bottomCell.y + bottomCell.height - 0.5 : null;
+      const xLeft = leftCell ? leftCell.x + 0.5 : null;
+      const xRight = rightCell ? rightCell.x + rightCell.width - 0.5 : null;
+
+      return {
+        top: yTop != null && yTop + half >= clip.y && yTop - half <= clipBottom,
+        bottom: yBottom != null && yBottom - half <= clipBottom && yBottom + half >= clip.y,
+        left: xLeft != null && xLeft + half >= clip.x && xLeft - half <= clipRight,
+        right: xRight != null && xRight - half <= clipRight && xRight + half >= clip.x,
+      };
+    })();
 
     return { range, rect: { x, y, width, height }, edges };
   }
