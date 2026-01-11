@@ -798,29 +798,43 @@ export class CanvasGridRenderer {
       { rect: main, shiftX: deltaX, shiftY: deltaY }
     ];
 
+    // Remote presence cursor badges can extend beyond their cursor cell (e.g. above + to the right).
+    // When we blit-scroll the selection layer we only redraw newly exposed stripes; without padding,
+    // badges for cursors that become visible in the new stripe can be clipped/truncated.
+    const selectionPadding =
+      this.remotePresences.length > 0 && this.selectionCtx ? this.getRemotePresenceDirtyPadding(this.selectionCtx) : 1;
+
     for (const { rect, shiftX, shiftY } of candidates) {
       if (rect.width <= 0 || rect.height <= 0) continue;
 
       if (shiftX > 0) {
-        this.markDirtyAll({ x: rect.x, y: rect.y, width: shiftX, height: rect.height });
+        const stripe = { x: rect.x, y: rect.y, width: shiftX, height: rect.height };
+        this.markDirtyBoth(stripe);
+        this.markDirtySelection(stripe, selectionPadding);
       } else if (shiftX < 0) {
-        this.markDirtyAll({
+        const stripe = {
           x: rect.x + rect.width + shiftX,
           y: rect.y,
           width: -shiftX,
           height: rect.height
-        });
+        };
+        this.markDirtyBoth(stripe);
+        this.markDirtySelection(stripe, selectionPadding);
       }
 
       if (shiftY > 0) {
-        this.markDirtyAll({ x: rect.x, y: rect.y, width: rect.width, height: shiftY });
+        const stripe = { x: rect.x, y: rect.y, width: rect.width, height: shiftY };
+        this.markDirtyBoth(stripe);
+        this.markDirtySelection(stripe, selectionPadding);
       } else if (shiftY < 0) {
-        this.markDirtyAll({
+        const stripe = {
           x: rect.x,
           y: rect.y + rect.height + shiftY,
           width: rect.width,
           height: -shiftY
-        });
+        };
+        this.markDirtyBoth(stripe);
+        this.markDirtySelection(stripe, selectionPadding);
       }
     }
   }
@@ -831,11 +845,45 @@ export class CanvasGridRenderer {
     this.dirty.content.markDirty(padded);
   }
 
-  private markDirtyAll(rect: Rect): void {
-    const padded: Rect = { x: rect.x - 1, y: rect.y - 1, width: rect.width + 2, height: rect.height + 2 };
-    this.dirty.background.markDirty(padded);
-    this.dirty.content.markDirty(padded);
+  private markDirtySelection(rect: Rect, padding: number): void {
+    const p = Number.isFinite(padding) ? Math.max(1, Math.floor(padding)) : 1;
+    const padded: Rect = { x: rect.x - p, y: rect.y - p, width: rect.width + p * 2, height: rect.height + p * 2 };
     this.dirty.selection.markDirty(padded);
+  }
+
+  private getRemotePresenceDirtyPadding(ctx: CanvasRenderingContext2D): number {
+    if (this.remotePresences.length === 0) return 1;
+
+    // Keep in sync with `renderRemotePresenceOverlays`.
+    const badgePaddingX = 6;
+    const badgePaddingY = 3;
+    const badgeOffsetX = 8;
+    const badgeOffsetY = -18;
+    const badgeTextHeight = 14;
+    const cursorStrokeWidth = 2;
+
+    const previousFont = ctx.font;
+    ctx.font = this.presenceFont;
+
+    let padding = cursorStrokeWidth + 4;
+    for (const presence of this.remotePresences) {
+      const name = presence.name ?? "Anonymous";
+      const metricsKey = `${this.presenceFont}::${name}`;
+      let textWidth = this.textWidthCache.get(metricsKey);
+      if (textWidth === undefined) {
+        textWidth = ctx.measureText(name).width;
+        this.textWidthCache.set(metricsKey, textWidth);
+      }
+
+      const badgeWidth = textWidth + badgePaddingX * 2;
+      const badgeHeight = badgeTextHeight + badgePaddingY * 2;
+      const padX = badgeOffsetX + badgeWidth;
+      const padY = Math.max(0, -badgeOffsetY) + badgeHeight;
+      padding = Math.max(padding, padX, padY);
+    }
+
+    ctx.font = previousFont;
+    return Math.ceil(padding);
   }
 
   private onProviderUpdate(update: CellProviderUpdate): void {
