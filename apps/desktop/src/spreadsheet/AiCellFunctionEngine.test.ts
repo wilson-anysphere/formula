@@ -437,4 +437,64 @@ describe("AiCellFunctionEngine", () => {
     expect(occurrences).toBeGreaterThan(0);
     expect(occurrences).toBeLessThan(200);
   });
+
+  it("truncates large cell values before serializing inputs into the prompt", async () => {
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      limits: { maxCellChars: 50 },
+    });
+
+    const long = `PREFIX_${"X".repeat(200)}_SUFFIX`;
+    const pending = evaluateFormula('=AI("summarize", A1)', (ref) => (ref === "A1" ? long : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("…[TRUNCATED]");
+    expect(userMessage).toContain("PREFIX_");
+    expect(userMessage).not.toContain("_SUFFIX");
+  });
+
+  it("truncates long prompts in audit entries", async () => {
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore,
+      sessionId: "audit-session",
+      limits: { maxAuditPreviewChars: 200 },
+    });
+
+    const longPrompt = "P".repeat(500);
+    const pending = evaluateFormula(`=AI("${longPrompt}", "hello")`, () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const entries = await auditStore.listEntries({ session_id: "audit-session" });
+    expect(entries).toHaveLength(1);
+    const input = entries[0]?.input as any;
+    expect(typeof input?.prompt).toBe("string");
+    expect(input.prompt).not.toBe(longPrompt);
+    expect(input.prompt.length).toBe(200);
+    expect(input.prompt).toContain("…[TRUNCATED]");
+    expect(input.prompt_hash).toMatch(/^[0-9a-f]{8}$/);
+  });
 });
