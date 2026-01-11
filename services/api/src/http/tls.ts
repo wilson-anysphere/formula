@@ -48,12 +48,14 @@ export function createPinnedCheckServerIdentity({ pins }: { pins: string[] }): C
     throw new TypeError("pins must be a non-empty array");
   }
 
-  const normalizedPins = pins.map((pin) => {
-    if (typeof pin !== "string" || pin.length === 0) {
-      throw new TypeError("pin must be a non-empty string");
-    }
-    return normalizeFingerprintHex(pin);
-  });
+  const normalizedPins = new Set(
+    pins.map((pin) => {
+      if (typeof pin !== "string" || pin.length === 0) {
+        throw new TypeError("pin must be a non-empty string");
+      }
+      return normalizeFingerprintHex(pin);
+    })
+  );
 
   return function checkServerIdentity(hostname, cert) {
     const defaultError = tls.checkServerIdentity(hostname, cert);
@@ -74,7 +76,7 @@ export function createPinnedCheckServerIdentity({ pins }: { pins: string[] }): C
       return err;
     }
 
-    if (!normalizedPins.includes(normalizeFingerprintHex(fingerprint))) {
+    if (!normalizedPins.has(normalizeFingerprintHex(fingerprint))) {
       const err = new Error("Certificate pinning failed: server certificate fingerprint mismatch");
       (err as { retriable?: boolean }).retriable = false;
       return err;
@@ -121,6 +123,12 @@ export function createTlsConnectOptions({
     }
 
     options.checkServerIdentity = createPinnedCheckServerIdentity({ pins });
+  } else {
+    options.checkServerIdentity = (hostname, cert) => {
+      const defaultError = tls.checkServerIdentity(hostname, cert);
+      if (defaultError) (defaultError as { retriable?: boolean }).retriable = false;
+      return defaultError;
+    };
   }
 
   return options;

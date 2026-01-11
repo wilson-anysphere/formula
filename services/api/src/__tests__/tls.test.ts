@@ -31,6 +31,20 @@ describe("TLS pinning helpers", () => {
     expect(options.minVersion).toBe("TLSv1.3");
   });
 
+  it("createTlsConnectOptions marks default TLS certificate validation errors non-retriable", () => {
+    const hostnameError = new Error("Hostname/IP does not match certificate");
+    const checkSpy = vi.spyOn(tls, "checkServerIdentity").mockReturnValue(hostnameError);
+    try {
+      const options = createTlsConnectOptions({ certificatePinningEnabled: false, certificatePins: [] });
+      expect(options.checkServerIdentity).toBeTypeOf("function");
+      const err = options.checkServerIdentity?.("example.com", { raw: Buffer.from("irrelevant") } as any);
+      expect(err).toBe(hostnameError);
+      expect((err as any).retriable).toBe(false);
+    } finally {
+      checkSpy.mockRestore();
+    }
+  });
+
   it("createTlsConnectOptions rejects empty pin set when pinning enabled", () => {
     expect(() => createTlsConnectOptions({ certificatePinningEnabled: true, certificatePins: [] })).toThrow(
       /certificatePins must be non-empty/i
