@@ -106,6 +106,23 @@ describe("secrets rotation (integration)", () => {
     }
   });
 
+  it("continues rotating when some secrets fail to decrypt", async () => {
+    const db = await createDb();
+    try {
+      const key = crypto.randomBytes(32);
+      const keyring: SecretStoreKeyring = { currentKeyId: "k1", keys: { k1: key } };
+
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", ["bad", "v2:missing:AAAA"]);
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", ["good", encryptV1(key, "ok")]);
+
+      const result = await runSecretsRotation(db, keyring);
+      expect(result).toEqual({ scanned: 2, rotated: 1, failed: 1 });
+      expect(await getSecret(db, keyring, "good")).toBe("ok");
+    } finally {
+      await db.end();
+    }
+  });
+
   it("lists and deletes secrets", async () => {
     const db = await createDb();
     try {
