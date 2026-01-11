@@ -193,6 +193,7 @@ fn patch_fmla_num<W: io::Write>(
     let rgce = payload
         .get(rgce_offset..rgce_end)
         .ok_or(Error::UnexpectedEof)?;
+    let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
     let cached = match &edit.new_value {
@@ -210,6 +211,7 @@ fn patch_fmla_num<W: io::Write>(
 
     let payload_len = 22u32
         .checked_add(new_rgce.len() as u32)
+        .and_then(|v| v.checked_add(extra.len() as u32))
         .ok_or(Error::UnexpectedEof)?;
 
     writer.write_record_header(biff12::FORMULA_FLOAT, payload_len)?;
@@ -219,6 +221,7 @@ fn patch_fmla_num<W: io::Write>(
     writer.write_u16(flags)?;
     writer.write_u32(new_rgce.len() as u32)?;
     writer.write_raw(new_rgce)?;
+    writer.write_raw(extra)?;
     Ok(())
 }
 

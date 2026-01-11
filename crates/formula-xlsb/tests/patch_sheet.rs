@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Cursor, Read};
 
 use formula_xlsb::{patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
+
+mod fixture_builder;
+use fixture_builder::XlsbFixtureBuilder;
 
 fn read_zip_part(path: &str, part_path: &str) -> Vec<u8> {
     let file = File::open(path).expect("open xlsb fixture");
@@ -219,4 +222,38 @@ fn patch_sheet_bin_can_update_formula_rgce_bytes() {
     let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*3"));
     assert_eq!(formula.rgce.as_slice(), new_rgce.as_slice());
+}
+
+#[test]
+fn patch_sheet_bin_preserves_formula_trailing_bytes() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("Arrayy");
+
+    // `PtgArray` placeholder token, followed by extra bytes (rgcb) describing the array constant.
+    let rgce = vec![0x20, 0, 0, 0, 0, 0, 0, 0];
+    let extra = vec![0xDE, 0xAD, 0xBE, 0xEF];
+    builder.set_cell_formula_num(0, 0, 1.0, rgce, extra);
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    // No-op patch (cached value unchanged): must reserialize byte-for-byte, including the extra
+    // bytes after `rgce`.
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(1.0),
+            new_formula: None,
+        }],
+    )
+    .expect("patch sheet bin");
+
+    assert_eq!(patched, sheet_bin);
 }
