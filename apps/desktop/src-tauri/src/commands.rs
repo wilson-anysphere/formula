@@ -2912,4 +2912,39 @@ export default async function main(ctx) {
         assert_eq!(c1.formula.as_deref(), Some("=A1+B1"));
         assert_eq!(c1.value.display(), "3");
     }
+
+    #[test]
+    fn typescript_migration_interpreter_respects_active_sheet_from_macro_context() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        let mut state = crate::state::AppState::new();
+        state.load_workbook(workbook);
+
+        // Simulate the user having Sheet2 selected when kicking off a migration validation.
+        state
+            .set_macro_ui_context("Sheet2", 0, 0, None)
+            .expect("set macro ui context");
+
+        let code = r#"
+export default async function main(ctx) {
+  const sheet = ctx.activeSheet;
+  sheet.range("A1").value = 99;
+}
+"#;
+
+        let result = run_typescript_migration_script(&mut state, code);
+        assert!(result.ok, "expected ok, got {:?}", result.error);
+
+        let sheet2_a1 = state.get_cell("Sheet2", 0, 0).expect("Sheet2!A1 exists");
+        assert_eq!(sheet2_a1.value.display(), "99");
+
+        let sheet1_a1 = state.get_cell("Sheet1", 0, 0).expect("Sheet1!A1 exists");
+        assert_eq!(
+            sheet1_a1.value.display(),
+            "",
+            "expected Sheet1!A1 to remain empty"
+        );
+    }
 }
