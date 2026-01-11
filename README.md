@@ -191,13 +191,13 @@ Manage KeyRing material (generate / rotate / validate):
 
 ```bash
 # Generate a new keyring (write to a secret file, or inject via env)
-pnpm -C services/sync-server keyring:generate > keyring.json
+pnpm -C services/sync-server -s keyring:generate > keyring.json
 
 # Validate and inspect a keyring
-pnpm -C services/sync-server keyring:validate -- --in keyring.json
+pnpm -C services/sync-server -s keyring:validate --in keyring.json
 
 # Rotate (adds a new key version; keeps old keys)
-pnpm -C services/sync-server keyring:rotate -- --in keyring.json --out keyring.json
+pnpm -C services/sync-server -s keyring:rotate --in keyring.json --out keyring.json
 ```
 
 Key rotation is operator-managed by replacing the KeyRing JSON (bumping `currentVersion` and adding a new key while keeping old key versions available for decryption).
