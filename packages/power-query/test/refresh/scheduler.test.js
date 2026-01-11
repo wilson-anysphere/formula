@@ -137,6 +137,29 @@ test("RefreshManager: cancellation aborts an in-flight refresh and emits progres
   manager.dispose();
 });
 
+test("RefreshManager: supports query ids like '__proto__' in persisted state", async () => {
+  const store = new InMemoryRefreshStateStore();
+  const engine = new ControlledEngine();
+  const manager = new RefreshManager({ engine, concurrency: 1, stateStore: store, now: () => 0 });
+
+  manager.registerQuery(makeQuery("__proto__", { type: "interval", intervalMs: 10 }));
+  await manager.ready;
+
+  const handle = manager.refresh("__proto__");
+  assert.equal(engine.calls.length, 1);
+  engine.calls[0].deferred.resolve(makeResult("__proto__"));
+  await handle.promise;
+  await Promise.resolve(); // allow persistence save
+
+  const state = await store.load();
+  assert.ok(Object.prototype.hasOwnProperty.call(state, "__proto__"));
+  assert.equal(state["__proto__"]?.policy?.type, "interval");
+  assert.equal(typeof state["__proto__"]?.lastRunAtMs, "number");
+  assert.equal(({}).polluted, undefined);
+
+  manager.dispose();
+});
+
 class FakeTimers {
   constructor() {
     this.now = 0;

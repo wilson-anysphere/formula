@@ -133,6 +133,31 @@ function abortError(message) {
 }
 
 /**
+ * Use null-prototype objects for internal refresh state maps so query ids like
+ * "__proto__" behave as ordinary keys (and cannot mutate prototypes).
+ *
+ * @returns {RefreshState}
+ */
+function createEmptyState() {
+  return Object.create(null);
+}
+
+/**
+ * @param {unknown} loaded
+ * @returns {RefreshState}
+ */
+function normalizeState(loaded) {
+  const out = createEmptyState();
+  if (!loaded || typeof loaded !== "object" || Array.isArray(loaded)) return out;
+  for (const [key, value] of Object.entries(/** @type {any} */ (loaded))) {
+    // Preserve the raw value; `RefreshManager` treats persistence as best-effort.
+    // @ts-ignore - runtime indexing
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
  * @typedef {{
  *   engine: QueryEngine;
  *   getContext?: () => QueryExecutionContext;
@@ -158,17 +183,17 @@ export class RefreshManager {
     this.stateStore = options.stateStore;
 
     /** @type {RefreshState} */
-    this.state = {};
+    this.state = createEmptyState();
     /** @type {Promise<void>} */
     this.stateReady = this.stateStore
       ? Promise.resolve()
           .then(() => this.stateStore.load())
           .then((loaded) => {
-            this.state = loaded ?? {};
+            this.state = normalizeState(loaded);
           })
           .catch(() => {
             // Best-effort: persistence should never break refresh.
-            this.state = {};
+            this.state = createEmptyState();
           })
       : Promise.resolve();
     // Public readiness hook for hosts/tests that want to await state restoration.
@@ -459,7 +484,13 @@ export class RefreshManager {
     }
 
     this.stateSaveInFlight = true;
-    const snapshot = typeof globalThis.structuredClone === "function" ? globalThis.structuredClone(this.state) : JSON.parse(JSON.stringify(this.state));
+    // Persist as a plain object (default prototype) so host stores don't need to
+    // handle null-prototype objects, while still keeping our internal state safe.
+    const snapshotBase = { ...this.state };
+    const snapshot =
+      typeof globalThis.structuredClone === "function"
+        ? globalThis.structuredClone(snapshotBase)
+        : JSON.parse(JSON.stringify(snapshotBase));
     let savePromise;
     try {
       savePromise = Promise.resolve(this.stateStore.save(snapshot));
