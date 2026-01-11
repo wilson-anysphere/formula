@@ -487,6 +487,23 @@ fn match_and_vlookup_approximate_treat_blanks_like_zero_or_empty_string() {
 }
 
 #[test]
+fn match_and_vlookup_approximate_handle_sorted_mixed_type_arrays() {
+    let mut sheet = TestSheet::new();
+    // Excel sorts numbers before text, so this is a valid ascending order for approximate match.
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 3.0);
+    sheet.set("A3", "A");
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 30.0);
+    sheet.set("B3", 40.0);
+
+    assert_eq!(sheet.eval("=MATCH(2, A1:A3, 1)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=MATCH(4, A1:A3, 1)"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=VLOOKUP(2, A1:B3, 2)"), Value::Number(10.0));
+    assert_eq!(sheet.eval("=VLOOKUP(4, A1:B3, 2)"), Value::Number(30.0));
+}
+
+#[test]
 fn hlookup_exact_match() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

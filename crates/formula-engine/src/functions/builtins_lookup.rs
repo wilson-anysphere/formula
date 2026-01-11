@@ -1502,6 +1502,29 @@ fn excel_ge(a: &Value, b: &Value) -> Option<bool> {
 }
 
 fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
+    fn ordering_to_i32(ord: std::cmp::Ordering) -> i32 {
+        match ord {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }
+    }
+
+    fn type_rank(v: &Value) -> Option<u8> {
+        match v {
+            Value::Number(_) => Some(0),
+            Value::Text(_) => Some(1),
+            Value::Bool(_) => Some(2),
+            Value::Blank => Some(3),
+            Value::Error(_) => Some(4),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => None,
+        }
+    }
+
     match (a, b) {
         // Blank compares like the other type (Excel semantics).
         (Value::Blank, Value::Number(y)) => match 0.0_f64.partial_cmp(y)? {
@@ -1534,24 +1557,21 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             std::cmp::Ordering::Equal => 0,
             std::cmp::Ordering::Greater => 1,
         }),
-        (Value::Number(x), Value::Number(y)) => match x.partial_cmp(y)? {
-            std::cmp::Ordering::Less => Some(-1),
-            std::cmp::Ordering::Equal => Some(0),
-            std::cmp::Ordering::Greater => Some(1),
-        },
-        (Value::Text(x), Value::Text(y)) => {
-            let ord = cmp_case_insensitive(x, y);
-            Some(match ord {
-                std::cmp::Ordering::Less => -1,
-                std::cmp::Ordering::Equal => 0,
-                std::cmp::Ordering::Greater => 1,
-            })
+        _ => {
+            let ra = type_rank(a)?;
+            let rb = type_rank(b)?;
+            if ra != rb {
+                return Some(ordering_to_i32(ra.cmp(&rb)));
+            }
+
+            match (a, b) {
+                (Value::Number(x), Value::Number(y)) => Some(ordering_to_i32(x.partial_cmp(y)?)),
+                (Value::Text(x), Value::Text(y)) => Some(ordering_to_i32(cmp_case_insensitive(x, y))),
+                (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
+                (Value::Blank, Value::Blank) => Some(0),
+                (Value::Error(x), Value::Error(y)) => Some(ordering_to_i32(x.as_code().cmp(y.as_code()))),
+                _ => None,
+            }
         }
-        (Value::Bool(x), Value::Bool(y)) => Some(match x.cmp(y) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        }),
-        _ => None,
     }
 }
