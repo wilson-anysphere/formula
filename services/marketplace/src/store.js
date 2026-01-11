@@ -567,8 +567,28 @@ class MarketplaceStore {
         existingPublisherStmt.free();
         const existingPem = existing.public_key_pem ? normalizePublicKeyPem(String(existing.public_key_pem)) : "";
         if (existingPem) {
+          let existingKeyId = null;
           try {
-            const existingKeyId = publisherKeyIdFromPublicKeyPem(existingPem);
+            existingKeyId = publisherKeyIdFromPublicKeyPem(existingPem);
+          } catch {
+            existingKeyId = null;
+          }
+
+          if (existingKeyId) {
+            // Guard against reusing the same key id across multiple publishers.
+            const existingKeyStmt = db.prepare(`SELECT publisher FROM publisher_keys WHERE id = ? LIMIT 1`);
+            existingKeyStmt.bind([existingKeyId]);
+            if (existingKeyStmt.step()) {
+              const row = existingKeyStmt.getAsObject();
+              const existingPublisher = String(row.publisher || "");
+              existingKeyStmt.free();
+              if (existingPublisher && existingPublisher !== publisher) {
+                throw new Error(`Signing key id already registered to a different publisher: ${existingKeyId}`);
+              }
+            } else {
+              existingKeyStmt.free();
+            }
+
             db.run(
               `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
                VALUES (?, ?, ?, ?, 0, NULL, 0)
@@ -586,8 +606,6 @@ class MarketplaceStore {
                  AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
               [existingKeyId, existingPem, publisher]
             );
-          } catch {
-            // Ignore invalid legacy keys; publishers.public_key_pem is still updated below.
           }
         }
       } else {
@@ -868,6 +886,19 @@ class MarketplaceStore {
         if (fallbackPem) {
           const keyId = publisherKeyIdFromPublicKeyPem(fallbackPem);
           await this.db.withTransaction((db) => {
+            const existingKeyStmt = db.prepare(`SELECT publisher FROM publisher_keys WHERE id = ? LIMIT 1`);
+            existingKeyStmt.bind([keyId]);
+            if (existingKeyStmt.step()) {
+              const row = existingKeyStmt.getAsObject();
+              const existingPublisher = String(row.publisher || "");
+              existingKeyStmt.free();
+              if (existingPublisher && existingPublisher !== publisher) {
+                throw new Error(`Signing key id already registered to a different publisher: ${keyId}`);
+              }
+            } else {
+              existingKeyStmt.free();
+            }
+
             db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE publisher = ?`, [publisher]);
             db.run(
               `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
