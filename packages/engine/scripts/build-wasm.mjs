@@ -69,7 +69,19 @@ rmSync(outDirAbs, { recursive: true, force: true });
 
 const result = spawnSync(
   wasmPackBin,
-  ["build", crateAbs, "--target", "web", "--out-dir", outDirAbs, "--out-name", outName],
+  [
+    "build",
+    crateAbs,
+    "--target",
+    "web",
+    "--out-dir",
+    outDirAbs,
+    "--out-name",
+    outName,
+    // Avoid generating a nested package.json in the output directory; consumers
+    // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
+    "--no-pack"
+  ],
   { cwd: repoRoot, stdio: "inherit" }
 );
 
