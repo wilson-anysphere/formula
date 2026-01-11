@@ -553,7 +553,8 @@ pub fn function_name_from_id(id: u16) -> Option<&'static str> {
 ///
 /// Lookup rules:
 /// - Case-insensitive (ASCII)
-/// - Accepts the `_xlfn.` prefix used in files for forward-compatible functions
+/// - Accepts the `_xlfn.` prefix used in files for forward-compatible functions, as well as
+///   the `_xlws.` / `_xludf.` namespaces that appear under `_xlfn.` in some workbook files.
 /// - Returns [`FTAB_USER_DEFINED`] (255) for unknown `_xlfn.` names, as well as
 ///   known future-function names not present in `FTAB`.
 pub fn function_id_from_name(name: &str) -> Option<u16> {
@@ -566,6 +567,13 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
         Some(stripped) => (true, stripped),
         None => (false, upper.as_str()),
     };
+
+    // Namespace-qualified functions (`_xlws.*`, `_xludf.*`) are encoded as future/UDF calls in
+    // BIFF (iftab=255). Excel commonly stores these as `_xlfn._xlws.*` / `_xlfn._xludf.*`, but
+    // accept the unwrapped form for round-trip safety.
+    if normalized.starts_with("_XLWS.") || normalized.starts_with("_XLUDF.") {
+        return Some(FTAB_USER_DEFINED);
+    }
 
     if let Some(id) = name_to_id().get(normalized).copied() {
         return Some(id);

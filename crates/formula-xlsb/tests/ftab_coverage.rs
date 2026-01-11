@@ -28,5 +28,22 @@ fn xlfn_prefix_is_ignored_for_lookup() {
         function_id_from_name("_xlfn.SOME_FUTURE_FUNCTION"),
         Some(FTAB_USER_DEFINED)
     );
-}
 
+    // Some workbook files use additional namespaces under `_xlfn.` for webservice/UDF calls.
+    assert_eq!(
+        function_id_from_name("_xlfn._xlws.WEBSERVICE"),
+        Some(FTAB_USER_DEFINED)
+    );
+    assert_eq!(
+        function_id_from_name("_xlws.WEBSERVICE"),
+        Some(FTAB_USER_DEFINED)
+    );
+    assert_eq!(
+        function_id_from_name("_xlfn._xludf.MYFUNC"),
+        Some(FTAB_USER_DEFINED)
+    );
+    assert_eq!(
+        function_id_from_name("_xludf.MYFUNC"),
+        Some(FTAB_USER_DEFINED)
+    );
+}
