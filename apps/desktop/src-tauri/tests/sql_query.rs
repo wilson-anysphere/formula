@@ -38,6 +38,23 @@ async fn unsupported_connection_kind_returns_clear_error() {
 }
 
 #[tokio::test]
+async fn sqlserver_connections_return_clear_error() {
+    let err = sql::sql_query(
+        json!({ "kind": "sql", "server": "localhost", "database": "db" }),
+        "SELECT 1".to_string(),
+        Vec::new(),
+        Some(json!({ "user": "sa", "password": "pw" })),
+    )
+    .await
+    .expect_err("expected sqlserver kind to error");
+
+    assert!(
+        err.to_string().contains("SQL Server connections are not supported"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
 async fn odbc_sqlite_in_memory_query_executes() {
     let result = sql::sql_query(
         json!({ "kind": "odbc", "connectionString": "Driver=SQLite3;Database=:memory:" }),

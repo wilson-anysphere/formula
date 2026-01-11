@@ -716,6 +716,9 @@ pub async fn sql_query(
                 ))
             }
         }
+        "sql" | "sqlserver" | "mssql" => Err(anyhow!(
+            "SQL Server connections are not supported yet (kind: 'sql'). Supported kinds: sqlite, postgres, odbc."
+        )),
         other => Err(anyhow!(
             "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres, odbc)"
         )),
@@ -871,6 +874,9 @@ pub async fn sql_get_schema(
                 ))
             }
         }
+        "sql" | "sqlserver" | "mssql" => Err(anyhow!(
+            "SQL Server connections are not supported yet (kind: 'sql'). Supported kinds: sqlite, postgres, odbc."
+        )),
         other => Err(anyhow!(
             "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres, odbc)"
         )),
