@@ -3379,6 +3379,19 @@ impl BytecodeColumnCache {
             }
         }
 
+        fn apply_value(seg: &mut BytecodeColumnSegment, value: &Value, row: i32) {
+            match value {
+                Value::Number(n) => seg.values[(row - seg.row_start) as usize] = *n,
+                Value::Blank => {}
+                Value::Error(_) | Value::Array(_) | Value::Spill { .. } => {
+                    seg.blocked_rows_strict.push(row);
+                    seg.blocked_rows_ignore_nonnumeric.push(row);
+                }
+                Value::Bool(_) | Value::Text(_) => seg.blocked_rows_strict.push(row),
+            }
+        }
+
+        let has_provider = snapshot.external_value_provider.is_some();
         let mut by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::with_capacity(sheet_count);
         for sheet_id in 0..sheet_count {
             let mut cols: HashMap<i32, BytecodeColumn> = HashMap::new();
@@ -3409,54 +3422,86 @@ impl BytecodeColumnCache {
                     debug_assert!(row_start >= 0);
                     debug_assert!(row_end >= row_start);
                     let len = (row_end - row_start + 1) as usize;
-                    let mut values: Vec<f64> = vec![f64::NAN; len];
-                    let mut blocked_rows_strict: Vec<i32> = Vec::new();
-                    let mut blocked_rows_ignore_nonnumeric: Vec<i32> = Vec::new();
-
-                    let mut apply_value = |value: &Value, row: i32| match value {
-                        Value::Number(n) => values[(row - row_start) as usize] = *n,
-                        Value::Blank => {}
-                        Value::Error(_) | Value::Array(_) | Value::Spill { .. } => {
-                            blocked_rows_strict.push(row);
-                            blocked_rows_ignore_nonnumeric.push(row);
-                        }
-                        Value::Bool(_) | Value::Text(_) => blocked_rows_strict.push(row),
+                    let mut segment = BytecodeColumnSegment {
+                        row_start,
+                        values: vec![f64::NAN; len],
+                        blocked_rows_strict: Vec::new(),
+                        blocked_rows_ignore_nonnumeric: Vec::new(),
                     };
 
-                    for row in row_start..=row_end {
-                        let addr = CellAddr {
-                            row: row as u32,
-                            col: (*col) as u32,
-                        };
-                        if let Some(v) = snapshot.values.get(&CellKey { sheet: sheet_id, addr }) {
-                            apply_value(v, row);
-                            continue;
-                        }
+                    // When there is no external value provider, treat missing cells as blank and
+                    // avoid scanning the entire row window just to do HashMap lookups. We'll fill
+                    // from `snapshot.values` in a second pass after all segments are allocated.
+                    if has_provider {
+                        for row in row_start..=row_end {
+                            let addr = CellAddr {
+                                row: row as u32,
+                                col: (*col) as u32,
+                            };
+                            if let Some(v) = snapshot.values.get(&CellKey { sheet: sheet_id, addr }) {
+                                apply_value(&mut segment, v, row);
+                                continue;
+                            }
 
-                        if let (Some(provider), Some(sheet_name)) = (provider, sheet_name) {
-                            if let Some(v) = provider.get(sheet_name, addr) {
-                                apply_value(&v, row);
+                            if let (Some(provider), Some(sheet_name)) = (provider, sheet_name) {
+                                if let Some(v) = provider.get(sheet_name, addr) {
+                                    apply_value(&mut segment, &v, row);
+                                }
                             }
                         }
                     }
 
-                    blocked_rows_strict.sort_unstable();
-                    blocked_rows_strict.dedup();
+                    segment.blocked_rows_strict.sort_unstable();
+                    segment.blocked_rows_strict.dedup();
+                    segment
+                        .blocked_rows_ignore_nonnumeric
+                        .sort_unstable();
+                    segment
+                        .blocked_rows_ignore_nonnumeric
+                        .dedup();
 
-                    blocked_rows_ignore_nonnumeric.sort_unstable();
-                    blocked_rows_ignore_nonnumeric.dedup();
-
-                    col_segments.push(BytecodeColumnSegment {
-                        row_start,
-                        values,
-                        blocked_rows_strict,
-                        blocked_rows_ignore_nonnumeric,
-                    });
+                    col_segments.push(segment);
                 }
 
                 cols.insert(*col, BytecodeColumn { segments: col_segments });
             }
             by_sheet.push(cols);
+        }
+
+        if !has_provider {
+            for (key, value) in &snapshot.values {
+                if matches!(value, Value::Blank) {
+                    continue;
+                }
+                let Some(sheet_cols) = by_sheet.get_mut(key.sheet) else {
+                    continue;
+                };
+                let col = key.addr.col as i32;
+                let Some(column) = sheet_cols.get_mut(&col) else {
+                    continue;
+                };
+                let row = key.addr.row as i32;
+                let idx = column.segments.partition_point(|seg| seg.row_end() < row);
+                if idx >= column.segments.len() {
+                    continue;
+                }
+                let seg = &mut column.segments[idx];
+                if row < seg.row_start || row > seg.row_end() {
+                    continue;
+                }
+                apply_value(seg, value, row);
+            }
+
+            for sheet_cols in &mut by_sheet {
+                for col in sheet_cols.values_mut() {
+                    for seg in &mut col.segments {
+                        seg.blocked_rows_strict.sort_unstable();
+                        seg.blocked_rows_strict.dedup();
+                        seg.blocked_rows_ignore_nonnumeric.sort_unstable();
+                        seg.blocked_rows_ignore_nonnumeric.dedup();
+                    }
+                }
+            }
         }
 
         Self { by_sheet }
@@ -4161,6 +4206,42 @@ mod tests {
         assert_eq!(col.segments[0].values.len(), 10);
         assert_eq!(col.segments[1].row_start, 899_999);
         assert_eq!(col.segments[1].values.len(), 11);
+    }
+
+    #[test]
+    fn bytecode_column_cache_populates_segment_values() {
+        let mut engine = Engine::new();
+        engine.set_cell_value("Sheet1", "A5", 42.0).unwrap();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(A1:A10)")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: parse_a1("B1").unwrap(),
+        };
+        let compiled = engine
+            .workbook
+            .get_cell(key)
+            .and_then(|c| c.compiled.clone())
+            .expect("compiled formula stored");
+
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            engine.external_value_provider.clone(),
+        );
+        let column_cache =
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+
+        let col = column_cache.by_sheet[sheet_id]
+            .get(&0)
+            .expect("column A is cached");
+        assert_eq!(col.segments.len(), 1);
+        let seg = &col.segments[0];
+        assert_eq!(seg.row_start, 0);
+        assert_eq!(seg.values[4], 42.0);
     }
 
     #[test]
