@@ -2144,15 +2144,62 @@ fn merge_named_ranges_into_defined_names(
         sheet_ids.insert(canonical_sheet_name_key(&sheet.name), sheet.id);
     }
 
+    let mut sheet_sort_keys: HashMap<u32, String> = HashMap::new();
+    for sheet in sheets {
+        sheet_sort_keys.insert(sheet.id, canonical_sheet_name_key(&sheet.name));
+    }
+
     let mut stmt = conn.prepare(
         r#"
-        SELECT name, scope, reference
+        SELECT rowid, name, scope, reference
         FROM named_ranges
         WHERE workbook_id = ?1
-        ORDER BY scope COLLATE NOCASE, name COLLATE NOCASE
+        ORDER BY rowid DESC
         "#,
     )?;
     let mut rows = stmt.query(params![workbook_id.to_string()])?;
+
+    struct LegacyNamedRangeRow {
+        name: String,
+        scope: DefinedNameScope,
+        reference: String,
+    }
+
+    // Legacy databases may contain duplicate rows that differ only by case in the scope or name
+    // fields (especially for non-ASCII sheet names). SQLite's `COLLATE NOCASE` is ASCII-only, so
+    // the relative ordering of those duplicates is not necessarily insertion-ordered.
+    //
+    // Prefer the newest row (highest `rowid`) for each `(scope, name)` pair and then merge the
+    // surviving rows into the workbook in a deterministic order (scope/name).
+    let mut winners: BTreeMap<(u8, String, String), LegacyNamedRangeRow> = BTreeMap::new();
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        let scope_raw: String = row.get(2)?;
+        let reference: String = row.get(3)?;
+
+        let (scope, scope_rank, scope_sort_key) = if scope_raw.eq_ignore_ascii_case("workbook") {
+            (DefinedNameScope::Workbook, 0u8, String::new())
+        } else if let Some(sheet_id) = sheet_ids.get(&canonical_sheet_name_key(&scope_raw)).copied()
+        {
+            let sort_key = sheet_sort_keys
+                .get(&sheet_id)
+                .cloned()
+                .unwrap_or_else(String::new);
+            (DefinedNameScope::Sheet(sheet_id), 1u8, sort_key)
+        } else {
+            // Unknown scope (likely stale sheet name) - skip rather than generating broken entries.
+            continue;
+        };
+
+        let name_key = name.to_ascii_lowercase();
+        winners
+            .entry((scope_rank, scope_sort_key, name_key))
+            .or_insert(LegacyNamedRangeRow {
+                name,
+                scope,
+                reference,
+            });
+    }
 
     let mut next_id = defined_names
         .iter()
@@ -2161,26 +2208,12 @@ fn merge_named_ranges_into_defined_names(
         .unwrap_or(0)
         .wrapping_add(1);
 
-    while let Some(row) = rows.next()? {
-        let name: String = row.get(0)?;
-        let scope_raw: String = row.get(1)?;
-        let reference: String = row.get(2)?;
-
-        let scope = if scope_raw.eq_ignore_ascii_case("workbook") {
-            DefinedNameScope::Workbook
-        } else if let Some(sheet_id) = sheet_ids.get(&canonical_sheet_name_key(&scope_raw)).copied()
-        {
-            DefinedNameScope::Sheet(sheet_id)
-        } else {
-            // Unknown scope (likely stale sheet name) - skip rather than generating broken entries.
-            continue;
-        };
-
-        let refers_to = normalize_refers_to(&reference);
+    for row in winners.values() {
+        let refers_to = normalize_refers_to(&row.reference);
 
         if let Some(existing) = defined_names
             .iter_mut()
-            .find(|n| n.scope == scope && n.name.eq_ignore_ascii_case(&name))
+            .find(|n| n.scope == row.scope && n.name.eq_ignore_ascii_case(&row.name))
         {
             existing.refers_to = refers_to;
             continue;
@@ -2188,8 +2221,8 @@ fn merge_named_ranges_into_defined_names(
 
         defined_names.push(DefinedName {
             id: next_id,
-            name,
-            scope,
+            name: row.name.clone(),
+            scope: row.scope,
             refers_to,
             comment: None,
             hidden: false,
