@@ -27,39 +27,40 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
   // downstream sheet lookups remain deterministic.
   const shouldNormalize = (() => {
     const seen = new Set<string>();
-    let hasSheetWithId = false;
     for (const entry of sheets.toArray()) {
       const maybe = entry as any;
       const id = coerceString(maybe?.get?.("id") ?? maybe?.id);
-      if (!id) continue;
-      hasSheetWithId = true;
+      if (!id) return true;
       if (seen.has(id)) return true;
       seen.add(id);
     }
-    return !hasSheetWithId;
+    return sheets.length === 0;
   })();
 
   if (shouldNormalize) {
     doc.transact(() => {
       const seen = new Set<string>();
-      const duplicates: number[] = [];
+      const deleteIndices: number[] = [];
 
       for (let i = 0; i < sheets.length; i++) {
         const entry = sheets.get(i) as any;
         const id = coerceString(entry?.get?.("id") ?? entry?.id);
-        if (!id) continue;
+        if (!id) {
+          deleteIndices.push(i);
+          continue;
+        }
         if (seen.has(id)) {
-          duplicates.push(i);
+          deleteIndices.push(i);
           continue;
         }
         seen.add(id);
       }
 
-      for (let i = duplicates.length - 1; i >= 0; i--) {
-        sheets.delete(duplicates[i], 1);
+      for (let i = deleteIndices.length - 1; i >= 0; i--) {
+        sheets.delete(deleteIndices[i], 1);
       }
 
-      if (seen.size === 0) {
+      if (sheets.length === 0) {
         const sheet = new Y.Map<unknown>();
         sheet.set("id", defaultSheetId);
         sheet.set("name", defaultSheetName);
@@ -146,6 +147,11 @@ export class SheetManager {
     this.transact(() => {
       const idx = this.indexOf(id);
       if (idx < 0) throw new Error(`Sheet not found: ${id}`);
+      // Workbooks must always have at least one sheet. Match common spreadsheet
+      // semantics by preventing callers from deleting the last remaining sheet.
+      if (this.countSheetEntriesWithIds() <= 1) {
+        throw new Error("Cannot delete the last remaining sheet");
+      }
       this.sheets.delete(idx, 1);
     });
   }
@@ -174,6 +180,15 @@ export class SheetManager {
       if (entryId === id) return i;
     }
     return -1;
+  }
+
+  private countSheetEntriesWithIds(): number {
+    let count = 0;
+    for (const entry of this.sheets.toArray()) {
+      const id = coerceString(entry?.get("id"));
+      if (id) count += 1;
+    }
+    return count;
   }
 }
 

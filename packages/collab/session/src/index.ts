@@ -333,7 +333,14 @@ export class CollabSession {
     this.cellValueConflictMonitor = null;
 
     if (schemaAutoInit) {
+      const provider = this.provider;
       const ensureSchema = () => {
+        // Avoid mutating the workbook schema while a sync provider is still in
+        // the middle of initial hydration. In particular, sheets can be created
+        // incrementally (e.g. map inserted before its `id` field is applied),
+        // and eagerly inserting a default sheet during that window can create
+        // spurious extra sheets.
+        if (provider && typeof provider.on === "function" && !provider.synced) return;
         if (this.ensuringSchema) return;
         this.ensuringSchema = true;
         try {
@@ -352,7 +359,6 @@ export class CollabSession {
       this.sheetsSchemaObserver = () => ensureSchema();
       this.sheets.observe(this.sheetsSchemaObserver);
 
-      const provider = this.provider;
       if (provider && !provider.synced && typeof provider.on === "function") {
         const handler = (isSynced: boolean) => {
           if (!isSynced) return;
