@@ -442,6 +442,224 @@ fn pivot_columnar_group_by(
     }))
 }
 
+fn pivot_planned_row_group_by(
+    model: &DataModel,
+    base_table: &str,
+    group_by: &[GroupByColumn],
+    measures: &[PivotMeasure],
+    filter: &FilterContext,
+) -> DaxResult<Option<PivotResult>> {
+    let engine = DaxEngine::new();
+
+    let table_ref = model
+        .table(base_table)
+        .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+
+    let mut agg_specs: Vec<AggregationSpec> = Vec::new();
+    let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
+    let mut plans: Vec<PlannedExpr> = Vec::with_capacity(measures.len());
+    for measure in measures {
+        let Some(plan) = plan_pivot_expr(
+            model,
+            table_ref,
+            base_table,
+            &measure.parsed,
+            0,
+            &mut agg_specs,
+            &mut agg_map,
+        )?
+        else {
+            return Ok(None);
+        };
+        plans.push(plan);
+    }
+
+    #[derive(Clone)]
+    enum AggState {
+        Sum { sum: f64, count: usize },
+        Avg { sum: f64, count: usize },
+        Min { best: Option<f64> },
+        Max { best: Option<f64> },
+        CountRows { count: usize },
+        DistinctCount { set: HashSet<Value> },
+    }
+
+    impl AggState {
+        fn new(spec: &AggregationSpec) -> Self {
+            match spec.kind {
+                AggregationKind::Sum => AggState::Sum { sum: 0.0, count: 0 },
+                AggregationKind::Average => AggState::Avg { sum: 0.0, count: 0 },
+                AggregationKind::Min => AggState::Min { best: None },
+                AggregationKind::Max => AggState::Max { best: None },
+                AggregationKind::CountRows => AggState::CountRows { count: 0 },
+                AggregationKind::DistinctCount => AggState::DistinctCount {
+                    set: HashSet::new(),
+                },
+            }
+        }
+
+        fn update(&mut self, spec: &AggregationSpec, table: &crate::model::Table, row: usize) {
+            match (self, spec.kind) {
+                (AggState::CountRows { count }, AggregationKind::CountRows) => {
+                    *count += 1;
+                }
+                (AggState::Sum { sum, count }, AggregationKind::Sum) => {
+                    let Some(idx) = spec.column_idx else {
+                        return;
+                    };
+                    if let Some(Value::Number(n)) = table.value_by_idx(row, idx) {
+                        *sum += n.0;
+                        *count += 1;
+                    }
+                }
+                (AggState::Avg { sum, count }, AggregationKind::Average) => {
+                    let Some(idx) = spec.column_idx else {
+                        return;
+                    };
+                    if let Some(Value::Number(n)) = table.value_by_idx(row, idx) {
+                        *sum += n.0;
+                        *count += 1;
+                    }
+                }
+                (AggState::Min { best }, AggregationKind::Min) => {
+                    let Some(idx) = spec.column_idx else {
+                        return;
+                    };
+                    if let Some(Value::Number(n)) = table.value_by_idx(row, idx) {
+                        *best = Some(best.map_or(n.0, |current| current.min(n.0)));
+                    }
+                }
+                (AggState::Max { best }, AggregationKind::Max) => {
+                    let Some(idx) = spec.column_idx else {
+                        return;
+                    };
+                    if let Some(Value::Number(n)) = table.value_by_idx(row, idx) {
+                        *best = Some(best.map_or(n.0, |current| current.max(n.0)));
+                    }
+                }
+                (AggState::DistinctCount { set }, AggregationKind::DistinctCount) => {
+                    let Some(idx) = spec.column_idx else {
+                        return;
+                    };
+                    let value = table.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                    set.insert(value);
+                }
+                _ => {}
+            }
+        }
+
+        fn finalize(self) -> Value {
+            match self {
+                AggState::Sum { sum, count } => {
+                    if count == 0 {
+                        Value::Blank
+                    } else {
+                        Value::from(sum)
+                    }
+                }
+                AggState::Avg { sum, count } => {
+                    if count == 0 {
+                        Value::Blank
+                    } else {
+                        Value::from(sum / count as f64)
+                    }
+                }
+                AggState::Min { best } => best.map(Value::from).unwrap_or(Value::Blank),
+                AggState::Max { best } => best.map(Value::from).unwrap_or(Value::Blank),
+                AggState::CountRows { count } => Value::from(count as i64),
+                AggState::DistinctCount { set } => Value::from(set.len() as i64),
+            }
+        }
+    }
+
+    let state_template: Vec<AggState> = agg_specs.iter().map(AggState::new).collect();
+
+    let base_rows = (!filter.is_empty())
+        .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
+        .transpose()?;
+
+    let group_exprs: Vec<Expr> = group_by
+        .iter()
+        .map(|col| {
+            if col.table == base_table {
+                Expr::ColumnRef {
+                    table: col.table.clone(),
+                    column: col.column.clone(),
+                }
+            } else {
+                Expr::Call {
+                    name: "RELATED".to_string(),
+                    args: vec![Expr::ColumnRef {
+                        table: col.table.clone(),
+                        column: col.column.clone(),
+                    }],
+                }
+            }
+        })
+        .collect();
+
+    let mut groups: HashMap<Vec<Value>, Vec<AggState>> = HashMap::new();
+    let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
+
+    let mut process_row = |row: usize| -> DaxResult<()> {
+        let mut row_ctx = RowContext::default();
+        row_ctx.push(base_table, row);
+
+        key_buf.clear();
+        for expr in &group_exprs {
+            key_buf.push(engine.evaluate_expr(model, expr, filter, &row_ctx)?);
+        }
+
+        if let Some(states) = groups.get_mut(key_buf.as_slice()) {
+            for (state, spec) in states.iter_mut().zip(&agg_specs) {
+                state.update(spec, table_ref, row);
+            }
+            return Ok(());
+        }
+
+        let mut states = state_template.clone();
+        for (state, spec) in states.iter_mut().zip(&agg_specs) {
+            state.update(spec, table_ref, row);
+        }
+        groups.insert(key_buf.clone(), states);
+        Ok(())
+    };
+
+    if let Some(rows) = base_rows {
+        for row in rows {
+            process_row(row)?;
+        }
+    } else {
+        for row in 0..table_ref.row_count() {
+            process_row(row)?;
+        }
+    }
+
+    let key_len = group_by.len();
+    let mut rows_out: Vec<Vec<Value>> = Vec::with_capacity(groups.len());
+    for (key, states) in groups {
+        let agg_values: Vec<Value> = states.into_iter().map(AggState::finalize).collect();
+        let mut row = key;
+        for plan in &plans {
+            row.push(eval_planned(plan, &agg_values));
+        }
+        rows_out.push(row);
+    }
+
+    rows_out.sort_by(|a, b| cmp_key(&a[..key_len], &b[..key_len]));
+
+    let mut columns: Vec<String> = group_by
+        .iter()
+        .map(|c| format!("{}[{}]", c.table, c.column))
+        .collect();
+    columns.extend(measures.iter().map(|m| m.name.clone()));
+
+    Ok(Some(PivotResult {
+        columns,
+        rows: rows_out,
+    }))
+}
+
 fn pivot_row_scan(
     model: &DataModel,
     base_table: &str,
@@ -549,6 +767,10 @@ pub fn pivot(
     filter: &FilterContext,
 ) -> DaxResult<PivotResult> {
     if let Some(result) = pivot_columnar_group_by(model, base_table, group_by, measures, filter)? {
+        return Ok(result);
+    }
+
+    if let Some(result) = pivot_planned_row_group_by(model, base_table, group_by, measures, filter)? {
         return Ok(result);
     }
 
