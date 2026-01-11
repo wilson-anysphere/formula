@@ -102,6 +102,9 @@ test("marketplace publish → discover → install → verify signature → run 
     });
     assert.equal(publishV1.id, extensionId);
     assert.equal(publishV1.version, "1.0.0");
+    await assert.doesNotReject(() =>
+      fs.stat(path.join(dataDir, "packages", extensionId, "1.0.0.fextpkg"))
+    );
 
     const marketplaceClient = new MarketplaceClient({ baseUrl });
     const search = await marketplaceClient.search({ q: "sample" });
@@ -140,6 +143,9 @@ test("marketplace publish → discover → install → verify signature → run 
       privateKeyPemOrPath: privateKeyPath,
     });
     assert.equal(publishV11.version, "1.1.0");
+    await assert.doesNotReject(() =>
+      fs.stat(path.join(dataDir, "packages", extensionId, "1.1.0.fextpkg"))
+    );
 
     const updates = await manager.checkForUpdates();
     assert.deepEqual(updates, [
