@@ -599,6 +599,47 @@ fn index_and_match() {
 }
 
 #[test]
+fn index_returns_references_and_spills_rows_or_columns_when_zero() {
+    let mut engine = Engine::new();
+
+    // 3x3 array in A1:C3.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 200.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 300.0).unwrap();
+
+    // row_num = 0: return the entire column.
+    engine
+        .set_cell_formula("Sheet1", "E1", "=INDEX(A1:C3, 0, 2)")
+        .unwrap();
+    // col_num = 0: return the entire row.
+    engine
+        .set_cell_formula("Sheet1", "E5", "=INDEX(A1:C3, 2, 0)")
+        .unwrap();
+    // INDEX returns references (so OFFSET can consume them).
+    engine
+        .set_cell_formula("Sheet1", "H1", "=OFFSET(INDEX(A1:C3, 1, 2), 1, 0)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(200.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E4"), Value::Blank);
+
+    assert_eq!(engine.get_cell_value("Sheet1", "E5"), Value::Number(10.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F5"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G5"), Value::Number(30.0));
+
+    assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Number(20.0));
+}
+
+#[test]
 fn choose_selects_index_supports_arrays_and_range_unions() {
     let mut sheet = TestSheet::new();
 
