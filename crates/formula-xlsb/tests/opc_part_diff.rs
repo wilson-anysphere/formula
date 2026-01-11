@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
-use formula_xlsb::{CellValue, XlsbWorkbook};
+use formula_xlsb::{CellValue, OpenOptions, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -109,6 +109,33 @@ fn save_as_is_lossless_when_styles_and_calc_chain_parts_exist() {
     std::fs::write(&input_path, variant_bytes).expect("write variant fixture");
 
     let wb = XlsbWorkbook::open(&input_path).expect("open variant xlsb");
+    wb.save_as(&out_path).expect("save_as");
+
+    let report = xlsx_diff::diff_workbooks(&input_path, &out_path).expect("diff workbooks");
+    assert!(
+        report.is_empty(),
+        "expected no OPC part diffs, got:\n{}",
+        format_report(&report)
+    );
+}
+
+#[test]
+fn save_as_is_lossless_with_minimal_open_options() {
+    let base_path = fixture_path();
+    let base_bytes = std::fs::read(&base_path).expect("read base fixture");
+    let variant_bytes = build_fixture_with_calc_chain_and_styles(&base_bytes);
+
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("with_calc_chain.xlsb");
+    let out_path = tmpdir.path().join("roundtrip.xlsb");
+    std::fs::write(&input_path, variant_bytes).expect("write variant fixture");
+
+    let options = OpenOptions {
+        preserve_unknown_parts: false,
+        preserve_parsed_parts: false,
+        preserve_worksheets: false,
+    };
+    let wb = XlsbWorkbook::open_with_options(&input_path, options).expect("open variant xlsb");
     wb.save_as(&out_path).expect("save_as");
 
     let report = xlsx_diff::diff_workbooks(&input_path, &out_path).expect("diff workbooks");
