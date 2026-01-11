@@ -81,31 +81,57 @@ export class YjsBranchStore {
   async ensureDocument(docId, actor, initialState) {
     const existingRoot = this.#meta.get("rootCommitId");
     if (typeof existingRoot === "string" && existingRoot.length > 0) {
-      // Backwards-compatible migration: older docs may have been created before
-      // we started persisting the global checked-out branch name.
-      const existingBranch = this.#meta.get("currentBranchName");
-      if (typeof existingBranch !== "string" || existingBranch.length === 0) {
-        this.#ydoc.transact(() => {
-          const current = this.#meta.get("currentBranchName");
-          if (typeof current === "string" && current.length > 0) return;
-          this.#meta.set("currentBranchName", "main");
-        });
+      const rootCommitMap = getYMap(this.#commits.get(existingRoot));
+      if (!rootCommitMap) throw new Error(`Root commit not found: ${existingRoot}`);
+
+      const rootDocId = rootCommitMap.get("docId");
+      if (typeof rootDocId === "string" && rootDocId.length > 0 && rootDocId !== docId) {
+        throw new Error(
+          `YjsBranchStore docId mismatch: requested ${docId}, but ydoc history is for ${rootDocId}`
+        );
       }
 
       // Migration: older docs may not have stored commit snapshots.
-      const rootCommitMap = getYMap(this.#commits.get(existingRoot));
-      if (rootCommitMap && rootCommitMap.get("snapshot") === undefined) {
-        const patch = rootCommitMap.get("patch");
-        if (patch) {
-          const snapshot = this._applyPatch(emptyDocumentState(), patch);
-          this.#ydoc.transact(() => {
-            const commit = getYMap(this.#commits.get(existingRoot));
-            if (!commit) return;
-            if (commit.get("snapshot") !== undefined) return;
-            commit.set("snapshot", structuredClone(snapshot));
-          });
+      const patch = rootCommitMap.get("patch");
+      const needsSnapshot = rootCommitMap.get("snapshot") === undefined && patch;
+      const snapshot = needsSnapshot ? this._applyPatch(emptyDocumentState(), patch) : null;
+
+      this.#ydoc.transact(() => {
+        // Backwards-compatible migration: ensure main branch exists.
+        let mainBranch = getYMap(this.#branches.get("main"));
+        if (!mainBranch) {
+          const createdBy =
+            typeof rootCommitMap.get("createdBy") === "string" ? rootCommitMap.get("createdBy") : actor.userId;
+          const createdAt = Number(rootCommitMap.get("createdAt") ?? Date.now());
+          const main = new Y.Map();
+          main.set("id", randomUUID());
+          main.set("docId", docId);
+          main.set("name", "main");
+          main.set("createdBy", createdBy);
+          main.set("createdAt", createdAt);
+          main.set("description", null);
+          main.set("headCommitId", existingRoot);
+          this.#branches.set("main", main);
+          mainBranch = main;
+        } else if (String(mainBranch.get("docId") ?? "") !== docId) {
+          throw new Error(
+            `YjsBranchStore docId mismatch: requested ${docId}, but branch 'main' is for ${String(mainBranch.get("docId") ?? "")}`
+          );
         }
-      }
+
+        // Backwards-compatible migration: ensure current branch name exists + is valid.
+        let current = this.#meta.get("currentBranchName");
+        if (typeof current !== "string" || current.length === 0) current = "main";
+        if (!getYMap(this.#branches.get(current))) current = "main";
+        this.#meta.set("currentBranchName", current);
+
+        if (snapshot) {
+          const commit = getYMap(this.#commits.get(existingRoot));
+          if (commit && commit.get("snapshot") === undefined) {
+            commit.set("snapshot", structuredClone(snapshot));
+          }
+        }
+      });
 
       return;
     }
@@ -149,9 +175,16 @@ export class YjsBranchStore {
     });
   }
 
-  async getCurrentBranchName(_docId) {
-    const name = this.#meta.get("currentBranchName");
-    return typeof name === "string" && name.length > 0 ? name : "main";
+  async getCurrentBranchName(docId) {
+    const raw = this.#meta.get("currentBranchName");
+    const name = typeof raw === "string" && raw.length > 0 ? raw : "main";
+    const branch = getYMap(this.#branches.get(name));
+    if (branch && String(branch.get("docId") ?? "") === docId) return name;
+
+    const main = getYMap(this.#branches.get("main"));
+    if (main && String(main.get("docId") ?? "") === docId) return "main";
+
+    return "main";
   }
 
   /**
