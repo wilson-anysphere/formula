@@ -32,6 +32,8 @@ If you already have something running on these ports, you can override the publi
 API_PORT=3001 SYNC_WS_PORT=1235 POSTGRES_PORT=5433 docker-compose up --build
 ```
 
+The examples below also read `SYNC_WS_PORT` (default `1234`) so they keep working if you override ports.
+
 ## Token configuration (API ↔ sync-server)
 
 The API issues short-lived JWT sync tokens via `POST /docs/:docId/sync-token`.
@@ -137,12 +139,15 @@ const token = process.env.TOKEN;
 const docId = process.env.DOC_ID;
 if (!token || !docId) throw new Error("Missing TOKEN or DOC_ID env var");
 
+const wsPort = process.env.SYNC_WS_PORT ?? "1234";
+const wsUrl = `ws://localhost:${wsPort}`;
+
 // Prefer Node's built-in WebSocket (Node 20+). Fall back to the `ws` package if needed.
 const WebSocketPolyfill = globalThis.WebSocket ?? (await import("ws")).default;
 
 const ydoc = new Y.Doc();
 
-const provider = new WebsocketProvider("ws://localhost:1234", docId, ydoc, {
+const provider = new WebsocketProvider(wsUrl, docId, ydoc, {
   WebSocketPolyfill,
   disableBc: true,
   params: { token }
@@ -174,11 +179,13 @@ const token = process.env.TOKEN
 const docId = process.env.DOC_ID
 if (!token || !docId) throw new Error('Missing TOKEN or DOC_ID env var')
 
+const wsPort = process.env.SYNC_WS_PORT ?? '1234'
+
 if (typeof WebSocket !== 'function') {
   throw new Error('WebSocket is not available (need Node 20+)')
 }
 
-const ws = new WebSocket(`ws://localhost:1234/${docId}?token=${encodeURIComponent(token)}`)
+const ws = new WebSocket(`ws://localhost:${wsPort}/${docId}?token=${encodeURIComponent(token)}`)
 ws.addEventListener('open', () => {
   console.log('connected')
   ws.close()
