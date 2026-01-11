@@ -521,36 +521,16 @@ export async function getAggregateClassificationForRange(
 ): Promise<Classification> {
   const range = normalizeRange({ start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } });
 
-  let result: Classification = { ...DEFAULT_CLASSIFICATION };
-
-  const applyRows = (rows: Array<{ classification: unknown }>) => {
-    for (const row of rows) {
-      result = maxClassification(result, normalizeClassification(row.classification));
-    }
-  };
-
-  const docRes = await db.query(
+  const res = await db.query(
     `
       SELECT classification
       FROM document_classifications
       WHERE document_id = $1 AND scope = 'document'
-    `,
-    [docId]
-  );
-  applyRows(docRes.rows as any);
-
-  const sheetRes = await db.query(
-    `
+      UNION ALL
       SELECT classification
       FROM document_classifications
       WHERE document_id = $1 AND scope = 'sheet' AND sheet_id = $2
-    `,
-    [docId, sheetId]
-  );
-  applyRows(sheetRes.rows as any);
-
-  const colRes = await db.query(
-    `
+      UNION ALL
       SELECT classification
       FROM document_classifications
       WHERE
@@ -559,41 +539,32 @@ export async function getAggregateClassificationForRange(
         AND sheet_id = $2
         AND table_id IS NULL
         AND column_index BETWEEN $3 AND $4
-    `,
-    [docId, sheetId, range.start.col, range.end.col]
-  );
-  applyRows(colRes.rows as any);
-
-  const rangeRes = await db.query(
-    `
+      UNION ALL
       SELECT classification
       FROM document_classifications
       WHERE
         document_id = $1
         AND scope = 'range'
         AND sheet_id = $2
-        AND start_row <= $3 AND end_row >= $4
-        AND start_col <= $5 AND end_col >= $6
-    `,
-    [docId, sheetId, range.end.row, range.start.row, range.end.col, range.start.col]
-  );
-  applyRows(rangeRes.rows as any);
-
-  const cellRes = await db.query(
-    `
+        AND start_row <= $5 AND end_row >= $6
+        AND start_col <= $4 AND end_col >= $3
+      UNION ALL
       SELECT classification
       FROM document_classifications
       WHERE
         document_id = $1
         AND scope = 'cell'
         AND sheet_id = $2
-        AND row BETWEEN $3 AND $4
-        AND col BETWEEN $5 AND $6
+        AND row BETWEEN $6 AND $5
+        AND col BETWEEN $3 AND $4
     `,
-    [docId, sheetId, range.start.row, range.end.row, range.start.col, range.end.col]
+    [docId, sheetId, range.start.col, range.end.col, range.end.row, range.start.row]
   );
-  applyRows(cellRes.rows as any);
 
+  let result: Classification = { ...DEFAULT_CLASSIFICATION };
+  for (const row of res.rows as Array<{ classification: unknown }>) {
+    result = maxClassification(result, normalizeClassification(row.classification));
+  }
   return result;
 }
 
