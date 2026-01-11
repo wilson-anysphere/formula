@@ -587,8 +587,15 @@ function nullSafeEqualsSql(dialect, leftExpr, rightExpr) {
  */
 function columnsCompatible(base, candidate) {
   if (base.length !== candidate.length) return false;
-  const set = new Set(base);
-  return candidate.every((c) => set.has(c));
+  const baseSet = new Set(base);
+  if (baseSet.size !== base.length) return false;
+  const candidateSet = new Set(candidate);
+  if (candidateSet.size !== candidate.length) return false;
+  if (baseSet.size !== candidateSet.size) return false;
+  for (const name of baseSet) {
+    if (!candidateSet.has(name)) return false;
+  }
+  return true;
 }
 
 /**
