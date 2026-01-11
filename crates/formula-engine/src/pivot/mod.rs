@@ -844,84 +844,150 @@ impl PivotEngine {
 
         // Subtotal accumulators per row-field level (excluding leaf level).
         let subtotal_levels = cfg.row_fields.len().saturating_sub(1);
-        let mut group_accs: Vec<Option<GroupAccumulator>> = vec![None; subtotal_levels];
-        let mut current_group_prefix: Vec<Option<PivotKeyPart>> = vec![None; subtotal_levels];
         let mut grand_acc: Option<GroupAccumulator> = if cfg.grand_totals.rows {
             Some(GroupAccumulator::new())
         } else {
             None
         };
 
-        let mut prev_row_key: Option<PivotKey> = None;
-        for row_key in &row_keys {
-            // Close groups if needed before emitting leaf row.
-            if cfg.subtotals != SubtotalPosition::None && subtotal_levels > 0 {
-                let common_prefix = prev_row_key
-                    .as_ref()
-                    .map(|prev| common_prefix_len(&prev.0, &row_key.0))
-                    .unwrap_or(0);
-                Self::close_groups_bottom(
-                    cfg,
-                    &col_keys,
-                    common_prefix,
-                    &mut group_accs,
-                    &mut current_group_prefix,
-                    &mut data,
-                    &mut row_kinds,
-                );
+        match cfg.subtotals {
+            SubtotalPosition::Top if subtotal_levels > 0 => {
+                // For top subtotals we need the totals up front, so we precompute them per prefix.
+                let group_totals =
+                    Self::precompute_group_totals(&cube, &row_keys, &col_keys, cfg, subtotal_levels);
 
-                // Open new groups for changed prefixes.
-                for level in common_prefix..subtotal_levels {
-                    current_group_prefix[level] = row_key.0.get(level).cloned();
-                    group_accs[level] = Some(GroupAccumulator::new());
+                let mut prev_row_key: Option<PivotKey> = None;
+                for row_key in &row_keys {
+                    let common_prefix = prev_row_key
+                        .as_ref()
+                        .map(|prev| common_prefix_len(&prev.0, &row_key.0))
+                        .unwrap_or(0);
+
+                    // Open new groups for changed prefixes and emit their subtotal rows.
+                    for level in common_prefix..subtotal_levels {
+                        let prefix_key = PivotKey(row_key.0[..=level].to_vec());
+                        if let Some(totals) = group_totals[level].get(&prefix_key) {
+                            data.push(Self::render_subtotal_row(
+                                level,
+                                &row_key.0,
+                                totals,
+                                &col_keys,
+                                cfg,
+                            ));
+                            row_kinds.push(PivotRowKind::Subtotal);
+                        }
+                    }
+
+                    let row_map = cube.get(row_key);
+                    data.push(Self::render_row(
+                        row_key,
+                        row_map,
+                        &col_keys,
+                        cfg,
+                        /*label*/ None,
+                    ));
+                    row_kinds.push(PivotRowKind::Leaf);
+
+                    if let Some(acc) = grand_acc.as_mut() {
+                        acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+                    }
+
+                    prev_row_key = Some(row_key.clone());
                 }
             }
+            SubtotalPosition::Bottom if subtotal_levels > 0 => {
+                let mut group_accs: Vec<Option<GroupAccumulator>> = vec![None; subtotal_levels];
 
-            let row_map = cube.get(row_key);
-            let row_cells = Self::render_row(row_key, row_map, &col_keys, cfg, /*label*/ None);
-            data.push(row_cells.clone());
-            row_kinds.push(PivotRowKind::Leaf);
+                let mut prev_row_key: Option<PivotKey> = None;
+                for row_key in &row_keys {
+                    let common_prefix = prev_row_key
+                        .as_ref()
+                        .map(|prev| common_prefix_len(&prev.0, &row_key.0))
+                        .unwrap_or(0);
 
-            // Update subtotal accumulators & grand accumulator.
-            if subtotal_levels > 0 {
-                for level in 0..subtotal_levels {
-                    if let Some(acc) = group_accs[level].as_mut() {
+                    // Close groups if needed before emitting leaf row.
+                    if let Some(prev) = prev_row_key.as_ref() {
+                        Self::close_groups_bottom(
+                            cfg,
+                            &col_keys,
+                            common_prefix,
+                            &mut group_accs,
+                            prev,
+                            &mut data,
+                            &mut row_kinds,
+                        );
+                    }
+
+                    // Open new groups for changed prefixes.
+                    for level in common_prefix..subtotal_levels {
+                        group_accs[level] = Some(GroupAccumulator::new());
+                    }
+
+                    let row_map = cube.get(row_key);
+                    data.push(Self::render_row(
+                        row_key,
+                        row_map,
+                        &col_keys,
+                        cfg,
+                        /*label*/ None,
+                    ));
+                    row_kinds.push(PivotRowKind::Leaf);
+
+                    // Update subtotal accumulators & grand accumulator.
+                    for level in 0..subtotal_levels {
+                        if let Some(acc) = group_accs[level].as_mut() {
+                            acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+                        }
+                    }
+                    if let Some(acc) = grand_acc.as_mut() {
+                        acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+                    }
+
+                    prev_row_key = Some(row_key.clone());
+                }
+
+                // Close remaining groups.
+                if let Some(prev) = prev_row_key.as_ref() {
+                    Self::close_groups_bottom(
+                        cfg,
+                        &col_keys,
+                        0,
+                        &mut group_accs,
+                        prev,
+                        &mut data,
+                        &mut row_kinds,
+                    );
+                }
+            }
+            _ => {
+                // No subtotals (or not enough row fields).
+                for row_key in &row_keys {
+                    let row_map = cube.get(row_key);
+                    data.push(Self::render_row(
+                        row_key,
+                        row_map,
+                        &col_keys,
+                        cfg,
+                        /*label*/ None,
+                    ));
+                    row_kinds.push(PivotRowKind::Leaf);
+                    if let Some(acc) = grand_acc.as_mut() {
                         acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
                     }
                 }
             }
-            if let Some(acc) = grand_acc.as_mut() {
-                acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
-            }
-
-            prev_row_key = Some(row_key.clone());
-        }
-
-        // Close remaining groups.
-        if cfg.subtotals != SubtotalPosition::None && subtotal_levels > 0 {
-            Self::close_groups_bottom(
-                cfg,
-                &col_keys,
-                0,
-                &mut group_accs,
-                &mut current_group_prefix,
-                &mut data,
-                &mut row_kinds,
-            );
         }
 
         // Grand total row.
         if let Some(grand) = grand_acc {
-            let label = PivotValue::Text("Grand Total".to_string());
-            let row_key = PivotKey(vec![label.to_key_part()]);
-            let rendered = Self::render_totals_row(
-                &row_key,
+            data.push(Self::render_totals_row(
+                PivotValue::Text("Grand Total".to_string()),
+                /*label_column*/ 0,
+                /*prefix_parts*/ &[],
                 &grand,
                 &col_keys,
                 cfg,
-                Some(PivotValue::Text("Grand Total".to_string())),
-            );
-            data.push(rendered);
+            ));
             row_kinds.push(PivotRowKind::GrandTotal);
         }
 
@@ -1055,33 +1121,37 @@ impl PivotEngine {
     }
 
     fn render_totals_row(
-        row_key: &PivotKey,
+        label: PivotValue,
+        label_column: usize,
+        prefix_parts: &[PivotKeyPart],
         totals: &GroupAccumulator,
         col_keys: &[PivotKey],
         cfg: &PivotConfig,
-        label: Option<PivotValue>,
     ) -> Vec<PivotValue> {
         let mut row = Vec::new();
 
         match cfg.layout {
             Layout::Compact => {
-                row.push(label.unwrap_or_else(|| PivotValue::Text("Total".to_string())));
+                row.push(label);
             }
             Layout::Tabular => {
-                // Put label in first column, blanks for the rest.
-                if let Some(l) = label {
-                    row.push(l);
+                if cfg.row_fields.is_empty() {
+                    // Preserve previous behavior: still emit a label cell even if there are no row fields.
+                    row.push(label);
                 } else {
-                    row.push(PivotValue::Text(
-                        row_key
-                            .0
-                            .get(0)
-                            .map(|p| p.display_string())
-                            .unwrap_or_default(),
-                    ));
-                }
-                for _ in 1..cfg.row_fields.len() {
-                    row.push(PivotValue::Blank);
+                    for idx in 0..cfg.row_fields.len() {
+                        if idx < label_column {
+                            let prefix = prefix_parts
+                                .get(idx)
+                                .map(|p| p.display_string())
+                                .unwrap_or_default();
+                            row.push(PivotValue::Text(prefix));
+                        } else if idx == label_column {
+                            row.push(label.clone());
+                        } else {
+                            row.push(PivotValue::Blank);
+                        }
+                    }
                 }
             }
         }
@@ -1112,34 +1182,65 @@ impl PivotEngine {
         row
     }
 
+    fn render_subtotal_row(
+        level: usize,
+        row_key_parts: &[PivotKeyPart],
+        totals: &GroupAccumulator,
+        col_keys: &[PivotKey],
+        cfg: &PivotConfig,
+    ) -> Vec<PivotValue> {
+        let base = row_key_parts.get(level).map(|p| p.display_string()).unwrap_or_default();
+        let label = if base.is_empty() {
+            PivotValue::Text("Total".to_string())
+        } else {
+            PivotValue::Text(format!("{base} Total"))
+        };
+
+        Self::render_totals_row(label, level, row_key_parts, totals, col_keys, cfg)
+    }
+
+    fn precompute_group_totals(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_keys: &[PivotKey],
+        cfg: &PivotConfig,
+        subtotal_levels: usize,
+    ) -> Vec<HashMap<PivotKey, GroupAccumulator>> {
+        let mut out: Vec<HashMap<PivotKey, GroupAccumulator>> = (0..subtotal_levels).map(|_| HashMap::new()).collect();
+
+        for row_key in row_keys {
+            let row_map = cube.get(row_key);
+            for level in 0..subtotal_levels {
+                let prefix_key = PivotKey(row_key.0[..=level].to_vec());
+                let entry = out[level].entry(prefix_key).or_insert_with(GroupAccumulator::new);
+                entry.merge_row(row_map, col_keys, cfg.value_fields.len());
+            }
+        }
+
+        out
+    }
+
     fn close_groups_bottom(
         cfg: &PivotConfig,
         col_keys: &[PivotKey],
         keep_prefix_len: usize,
         group_accs: &mut [Option<GroupAccumulator>],
-        current_group_prefix: &mut [Option<PivotKeyPart>],
+        prev_row_key: &PivotKey,
         out: &mut Vec<Vec<PivotValue>>,
         row_kinds: &mut Vec<PivotRowKind>,
     ) {
         // Close from deepest to keep_prefix_len.
         for level in (keep_prefix_len..group_accs.len()).rev() {
             if let Some(acc) = group_accs[level].take() {
-                // Only show subtotals for levels that correspond to a row field.
-                let label = current_group_prefix[level]
-                    .as_ref()
-                    .map(|p| format!("{} Total", p.display_string()))
-                    .unwrap_or_else(|| "Total".to_string());
-
-                out.push(Self::render_totals_row(
-                    &PivotKey(vec![PivotKeyPart::Text(label.clone())]),
+                out.push(Self::render_subtotal_row(
+                    level,
+                    &prev_row_key.0,
                     &acc,
                     col_keys,
                     cfg,
-                    Some(PivotValue::Text(label)),
                 ));
                 row_kinds.push(PivotRowKind::Subtotal);
             }
-            current_group_prefix[level] = None;
         }
     }
 
@@ -2162,6 +2263,116 @@ mod tests {
                 ],
                 vec!["East".into(), PivotValue::Blank, 20.into()],
                 vec!["(blank)".into(), 10.into(), PivotValue::Blank],
+            ]
+        );
+    }
+
+    #[test]
+    fn produces_top_subtotals_for_multiple_row_fields() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 100.into()]),
+            pv_row(&["East".into(), "B".into(), 150.into()]),
+            pv_row(&["West".into(), "A".into(), 200.into()]),
+            pv_row(&["West".into(), "B".into(), 250.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region"), PivotField::new("Product")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::Top,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Product".into(), "Sum of Sales".into()],
+                vec!["East Total".into(), PivotValue::Blank, 250.into()],
+                vec!["East".into(), "A".into(), 100.into()],
+                vec!["East".into(), "B".into(), 150.into()],
+                vec!["West Total".into(), PivotValue::Blank, 450.into()],
+                vec!["West".into(), "A".into(), 200.into()],
+                vec!["West".into(), "B".into(), 250.into()],
+                vec!["Grand Total".into(), PivotValue::Blank, 700.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn places_nested_subtotal_labels_in_correct_row_field_column() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Month".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), "1".into(), 100.into()]),
+            pv_row(&["East".into(), "A".into(), "2".into(), 150.into()]),
+            pv_row(&["East".into(), "B".into(), "1".into(), 200.into()]),
+            pv_row(&["West".into(), "A".into(), "1".into(), 250.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![
+                PivotField::new("Region"),
+                PivotField::new("Product"),
+                PivotField::new("Month"),
+            ],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::Bottom,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "Product".into(),
+                    "Month".into(),
+                    "Sum of Sales".into()
+                ],
+                vec!["East".into(), "A".into(), "1".into(), 100.into()],
+                vec!["East".into(), "A".into(), "2".into(), 150.into()],
+                vec!["East".into(), "A Total".into(), PivotValue::Blank, 250.into()],
+                vec!["East".into(), "B".into(), "1".into(), 200.into()],
+                vec!["East".into(), "B Total".into(), PivotValue::Blank, 200.into()],
+                vec!["East Total".into(), PivotValue::Blank, PivotValue::Blank, 450.into()],
+                vec!["West".into(), "A".into(), "1".into(), 250.into()],
+                vec!["West".into(), "A Total".into(), PivotValue::Blank, 250.into()],
+                vec!["West Total".into(), PivotValue::Blank, PivotValue::Blank, 250.into()],
+                vec!["Grand Total".into(), PivotValue::Blank, PivotValue::Blank, 700.into()],
             ]
         );
     }
