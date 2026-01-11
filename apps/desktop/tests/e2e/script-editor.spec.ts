@@ -24,7 +24,9 @@ await ctx.activeSheet.getRange("C1").setValue(99);
 
       try {
         await expect
-          .poll(async () => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1")))
+          .poll(async () =>
+            page.evaluate(() => (window as any).__formulaApp?.getCellValueA1?.("C1") ?? "")
+          )
           .toBe("99");
         break;
       } catch (err) {
