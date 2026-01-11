@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { arrowTableFromColumns } from "../../../data-io/src/index.js";
+import { arrowTableFromColumns, arrowTableToParquet } from "../../../data-io/src/index.js";
 
 import { CacheManager } from "../../src/cache/cache.js";
 import { EncryptedFileSystemCacheStore } from "../../src/cache/encryptedFilesystem.js";
@@ -18,6 +18,22 @@ import { isEncryptedFileBytes } from "../../../security/crypto/encryptedFile.js"
 import { InMemoryKeychainProvider } from "../../../security/crypto/keychain/inMemoryKeychain.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+let arrowAvailable = true;
+try {
+  arrowTableFromColumns({ __probe: [1] });
+} catch {
+  arrowAvailable = false;
+}
+
+let parquetAvailable = arrowAvailable;
+if (parquetAvailable) {
+  try {
+    await arrowTableToParquet(arrowTableFromColumns({ __probe: new Int32Array([1]) }));
+  } catch {
+    parquetAvailable = false;
+  }
+}
 
 test("EncryptedFileSystemCacheStore: encrypts at rest and supports disabling encryption", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-"));
@@ -55,7 +71,10 @@ test("EncryptedFileSystemCacheStore: encrypts at rest and supports disabling enc
   }
 });
 
-test("EncryptedFileSystemCacheStore: stores Arrow IPC payloads in an encrypted .bin blob", async () => {
+test(
+  "EncryptedFileSystemCacheStore: stores Arrow IPC payloads in an encrypted .bin blob",
+  { skip: !arrowAvailable },
+  async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-arrow-"));
   try {
     const keychainProvider = new InMemoryKeychainProvider();
@@ -120,9 +139,13 @@ test("EncryptedFileSystemCacheStore: stores Arrow IPC payloads in an encrypted .
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
-});
+  },
+);
 
-test("EncryptedFileSystemCacheStore: enableEncryption migrates Arrow IPC .bin blobs", async () => {
+test(
+  "EncryptedFileSystemCacheStore: enableEncryption migrates Arrow IPC .bin blobs",
+  { skip: !arrowAvailable },
+  async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-arrow-migrate-"));
   try {
     const keychainProvider = new InMemoryKeychainProvider();
@@ -173,9 +196,13 @@ test("EncryptedFileSystemCacheStore: enableEncryption migrates Arrow IPC .bin bl
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
-});
+  },
+);
 
-test("QueryEngine: caches Arrow-backed Parquet results using EncryptedFileSystemCacheStore", async () => {
+test(
+  "QueryEngine: caches Arrow-backed Parquet results using EncryptedFileSystemCacheStore",
+  { skip: !parquetAvailable },
+  async () => {
   const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-engine-"));
   try {
     const keychainProvider = new InMemoryKeychainProvider();
@@ -223,4 +250,5 @@ test("QueryEngine: caches Arrow-backed Parquet results using EncryptedFileSystem
   } finally {
     await fs.rm(cacheDir, { recursive: true, force: true });
   }
-});
+  },
+);

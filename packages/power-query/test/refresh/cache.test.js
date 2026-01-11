@@ -23,16 +23,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let arrowAvailable = true;
 try {
-  await import("apache-arrow");
+  // Validate Arrow is actually usable via the data-io helpers (pnpm workspaces
+  // don't necessarily hoist `apache-arrow` to the repo root).
+  arrowTableFromColumns({ __probe: [1] });
 } catch {
   arrowAvailable = false;
 }
 
 let parquetAvailable = arrowAvailable;
-try {
-  await import("parquet-wasm/esm");
-} catch {
-  parquetAvailable = false;
+if (parquetAvailable) {
+  try {
+    await arrowTableToParquet(arrowTableFromColumns({ __probe: new Int32Array([1]) }));
+  } catch {
+    parquetAvailable = false;
+  }
 }
 
 let indexedDbAvailable = true;
@@ -955,6 +959,57 @@ test("QueryEngine: invalidates file cache entries when mtime changes (within TTL
   const third = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(third.meta.cache?.hit, false);
   assert.equal(readCount, 2);
+});
+
+test("QueryEngine: invalidates Parquet Arrow cache entries when mtime changes (within TTL)", { skip: !parquetAvailable }, async () => {
+  let now = 0;
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => now });
+
+  const inputTable = arrowTableFromColumns({
+    id: new Int32Array([1, 2, 3]),
+    name: ["Alice", "Bob", "Carla"],
+  });
+  const parquetBytes = await arrowTableToParquet(inputTable);
+
+  let readCount = 0;
+  let mtimeMs = 1;
+
+  const engine = new QueryEngine({
+    cache,
+    defaultCacheTtlMs: 10_000,
+    fileAdapter: {
+      readBinary: async () => {
+        readCount += 1;
+        return parquetBytes;
+      },
+      stat: async () => ({ mtimeMs }),
+    },
+  });
+
+  const query = {
+    id: "q_parquet_mtime",
+    name: "Parquet mtime",
+    source: { type: "parquet", path: "/tmp/mtime.parquet" },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(readCount, 1);
+  assert.ok(first.table instanceof ArrowTableAdapter);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(readCount, 1);
+  assert.ok(second.table instanceof ArrowTableAdapter);
+
+  mtimeMs = 2;
+  const third = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(third.meta.cache?.hit, false);
+  assert.equal(readCount, 2, "mtime change should invalidate Parquet cache entries");
+  assert.ok(third.table instanceof ArrowTableAdapter);
 });
 
 test("QueryEngine: invalidates HTTP cache entries when ETag/Last-Modified changes (within TTL)", async () => {

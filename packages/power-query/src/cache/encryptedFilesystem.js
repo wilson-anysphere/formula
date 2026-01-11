@@ -364,7 +364,7 @@ export class EncryptedFileSystemCacheStore {
         : null;
 
     if (arrowBytes) {
-      const binPlaintext = Buffer.from(arrowBytes);
+      const binPlaintext = Buffer.from(arrowBytes.buffer, arrowBytes.byteOffset, arrowBytes.byteLength);
       const binOut = await this._encryptFileBytes(binPlaintext);
       await this._atomicWrite(binPath, binOut);
 
