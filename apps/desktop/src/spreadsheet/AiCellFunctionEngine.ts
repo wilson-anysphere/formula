@@ -1122,7 +1122,9 @@ function truncateText(text: string, maxChars: number): string {
   const s = String(text);
   if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
   if (s.length <= maxChars) return s;
-  return `${s.slice(0, Math.max(0, maxChars - 1))}…`;
+  const marker = "…[TRUNCATED]";
+  if (maxChars <= marker.length) return marker.slice(0, Math.max(0, maxChars));
+  return `${s.slice(0, Math.max(0, maxChars - marker.length))}${marker}`;
 }
 
 function clampInt(value: number, opts: { min: number; max: number }): number {
