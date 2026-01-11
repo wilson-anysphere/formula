@@ -7,7 +7,11 @@ export { CanvasGrid } from "./react/CanvasGrid";
 export type { GridPresence, GridPresenceCursor, GridPresenceRange } from "./presence/types";
 
 export type { GridPerfStats } from "./rendering/CanvasGridRenderer";
+export type { GridTheme } from "./theme/GridTheme";
+export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme";
+export { GRID_THEME_CSS_VAR_NAMES, readGridThemeFromCssVars } from "./theme/resolveThemeFromCssVars";
 
+export { CanvasGridRenderer } from "./rendering/CanvasGridRenderer";
 export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker";
 export { LruCache } from "./utils/LruCache";
 

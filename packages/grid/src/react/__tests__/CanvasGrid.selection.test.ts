@@ -130,7 +130,9 @@ describe("CanvasGrid selection API", () => {
     expect(onSelectionChange).toHaveBeenCalledWith({ row: 0, col: 0 });
     expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 0 });
 
-    apiRef.current?.clearSelection();
+    await act(async () => {
+      apiRef.current?.clearSelection();
+    });
     expect(onSelectionChange).toHaveBeenCalledTimes(2);
     expect(onSelectionChange).toHaveBeenLastCalledWith(null);
     expect(apiRef.current?.getSelection()).toBeNull();

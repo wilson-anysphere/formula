@@ -1,7 +1,10 @@
-import React, { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
+import React, { useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CellProvider, CellRange } from "../model/CellProvider";
 import type { GridPresence } from "../presence/types";
-import { CanvasGridRenderer, type GridPerfStats } from "../rendering/CanvasGridRenderer";
+import { CanvasGridRenderer, formatCellDisplayText, type GridPerfStats } from "../rendering/CanvasGridRenderer";
+import type { GridTheme } from "../theme/GridTheme";
+import { resolveGridTheme } from "../theme/GridTheme";
+import { readGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 
 export interface GridApi {
@@ -35,6 +38,7 @@ export interface CanvasGridProps {
   colCount: number;
   frozenRows?: number;
   frozenCols?: number;
+  theme?: Partial<GridTheme>;
   defaultRowHeight?: number;
   defaultColWidth?: number;
   /**
@@ -60,6 +64,71 @@ export interface CanvasGridProps {
   onRangeSelectionChange?: (range: CellRange) => void;
   onRangeSelectionEnd?: (range: CellRange) => void;
   style?: React.CSSProperties;
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
+}
+
+function toColumnName(col0: number): string {
+  let value = col0 + 1;
+  let name = "";
+  while (value > 0) {
+    const rem = (value - 1) % 26;
+    name = String.fromCharCode(65 + rem) + name;
+    value = Math.floor((value - 1) / 26);
+  }
+  return name;
+}
+
+function toA1Address(row0: number, col0: number): string {
+  return `${toColumnName(col0)}${row0 + 1}`;
+}
+
+function describeCell(
+  selection: { row: number; col: number } | null,
+  range: CellRange | null,
+  provider: CellProvider,
+  frozenRows: number,
+  frozenCols: number
+): string {
+  if (!selection) return "No cell selected.";
+
+  const row0 = selection.row - frozenRows;
+  const col0 = selection.col - frozenCols;
+  const address =
+    row0 >= 0 && col0 >= 0
+      ? toA1Address(row0, col0)
+      : `row ${selection.row + 1}, column ${selection.col + 1}`;
+
+  const cell = provider.getCell(selection.row, selection.col);
+  const valueText = formatCellDisplayText(cell?.value ?? null);
+  const valueDescription = valueText.trim() === "" ? "blank" : valueText;
+
+  let selectionDescription = "none";
+  if (range) {
+    const startRow0 = range.startRow - frozenRows;
+    const startCol0 = range.startCol - frozenCols;
+    const endRow0 = range.endRow - frozenRows - 1;
+    const endCol0 = range.endCol - frozenCols - 1;
+    if (startRow0 >= 0 && startCol0 >= 0 && endRow0 >= 0 && endCol0 >= 0) {
+      const start = toA1Address(startRow0, startCol0);
+      const end = toA1Address(endRow0, endCol0);
+      selectionDescription = start === end ? start : `${start}:${end}`;
+    } else {
+      selectionDescription = `row ${range.startRow + 1}, column ${range.startCol + 1}`;
+    }
+  }
+
+  return `Active cell ${address}, value ${valueDescription}. Selection ${selectionDescription}.`;
+}
+
+function partialThemeEqual(a: Partial<GridTheme>, b: Partial<GridTheme>): boolean {
+  const aKeys = Object.keys(a) as Array<keyof GridTheme>;
+  const bKeys = Object.keys(b) as Array<keyof GridTheme>;
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
 }
 
 export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
@@ -92,11 +161,30 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
   const frozenRows = props.frozenRows ?? 0;
   const frozenCols = props.frozenCols ?? 0;
+  const frozenRowsRef = useRef(frozenRows);
+  const frozenColsRef = useRef(frozenCols);
+  frozenRowsRef.current = frozenRows;
+  frozenColsRef.current = frozenCols;
+
+  const providerRef = useRef(props.provider);
+  providerRef.current = props.provider;
   const prefetchOverscanRows = props.prefetchOverscanRows ?? 10;
   const prefetchOverscanCols = props.prefetchOverscanCols ?? 5;
   const interactionMode = props.interactionMode ?? "default";
   const interactionModeRef = useRef<GridInteractionMode>(interactionMode);
   interactionModeRef.current = interactionMode;
+
+  const statusId = useId();
+  const [cssTheme, setCssTheme] = useState<Partial<GridTheme>>({});
+  const resolvedTheme = useMemo(() => resolveGridTheme(cssTheme, props.theme), [cssTheme, props.theme]);
+  const [a11yStatusText, setA11yStatusText] = useState<string>(() =>
+    describeCell(null, null, providerRef.current, frozenRowsRef.current, frozenColsRef.current)
+  );
+
+  const announceSelection = (selection: { row: number; col: number } | null, range: CellRange | null) => {
+    const text = describeCell(selection, range, providerRef.current, frozenRowsRef.current, frozenColsRef.current);
+    setA11yStatusText((prev) => (prev === text ? prev : text));
+  };
 
   const rendererFactory = useMemo(
     () =>
@@ -191,6 +279,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         renderer.setSelection({ row, col });
 
         if (!prevSelection || prevSelection.row !== row || prevSelection.col !== col) {
+          announceSelection({ row, col }, { startRow: row, endRow: row + 1, startCol: col, endCol: col + 1 });
           onSelectionChangeRef.current?.({ row, col });
         }
 
@@ -202,6 +291,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           prevRange.startCol !== nextRange.startCol ||
           prevRange.endCol !== nextRange.endCol
         ) {
+          announceSelection({ row, col }, nextRange);
           onSelectionRangeChangeRef.current?.(nextRange);
         }
       },
@@ -214,6 +304,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         renderer.setSelectionRange(range);
         const nextSelection = renderer.getSelection();
         const nextRange = renderer.getSelectionRange();
+
+        announceSelection(nextSelection, nextRange);
 
         if (
           (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
@@ -238,6 +330,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const prevRange = renderer?.getSelectionRange() ?? null;
         renderer?.setSelectionRange(null);
         renderer?.setRangeSelection(null);
+        announceSelection(null, null);
         if (prevSelection) onSelectionChangeRef.current?.(null);
         if (prevRange) onSelectionRangeChangeRef.current?.(null);
       },
@@ -258,6 +351,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const selectionCanvas = selectionCanvasRef.current;
     if (!container || !gridCanvas || !contentCanvas || !selectionCanvas) return;
 
+    const nextCssTheme = readGridThemeFromCssVars(getComputedStyle(container));
+    setCssTheme((prev) => (partialThemeEqual(prev, nextCssTheme) ? prev : nextCssTheme));
+
     const renderer = rendererFactory();
     rendererRef.current = renderer;
 
@@ -276,12 +372,66 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const ro = new ResizeObserver(resize);
     ro.observe(container);
 
-    return () => {
-      ro.disconnect();
-      renderer.destroy();
-      rendererRef.current = null;
-    };
+      return () => {
+        ro.disconnect();
+        renderer.destroy();
+        rendererRef.current = null;
+      };
   }, [rendererFactory, frozenRows, frozenCols]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const refreshTheme = () => {
+      const next = readGridThemeFromCssVars(getComputedStyle(container));
+      setCssTheme((prev) => (partialThemeEqual(prev, next) ? prev : next));
+    };
+
+    const observers: MutationObserver[] = [];
+    if (typeof MutationObserver !== "undefined") {
+      const observer = new MutationObserver(() => refreshTheme());
+      observer.observe(container, { attributes: true, attributeFilter: ["style", "class"] });
+      observers.push(observer);
+
+      const root = container.ownerDocument?.documentElement;
+      if (root && root !== container) {
+        const rootObserver = new MutationObserver(() => refreshTheme());
+        rootObserver.observe(root, { attributes: true, attributeFilter: ["style", "class"] });
+        observers.push(rootObserver);
+      }
+    }
+
+    const canMatchMedia = typeof window !== "undefined" && typeof window.matchMedia === "function";
+    const mqlDark = canMatchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    const mqlContrast = canMatchMedia ? window.matchMedia("(prefers-contrast: more)") : null;
+    const onMediaChange = () => refreshTheme();
+
+    if (mqlDark) {
+      if ("addEventListener" in mqlDark) mqlDark.addEventListener("change", onMediaChange);
+      else mqlDark.addListener(onMediaChange);
+    }
+    if (mqlContrast) {
+      if ("addEventListener" in mqlContrast) mqlContrast.addEventListener("change", onMediaChange);
+      else mqlContrast.addListener(onMediaChange);
+    }
+
+    return () => {
+      for (const observer of observers) observer.disconnect();
+      if (mqlDark) {
+        if ("removeEventListener" in mqlDark) mqlDark.removeEventListener("change", onMediaChange);
+        else mqlDark.removeListener(onMediaChange);
+      }
+      if (mqlContrast) {
+        if ("removeEventListener" in mqlContrast) mqlContrast.removeEventListener("change", onMediaChange);
+        else mqlContrast.removeListener(onMediaChange);
+      }
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    rendererRef.current?.setTheme(resolvedTheme);
+  }, [resolvedTheme]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -320,6 +470,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       if (!renderer) return;
 
       event.preventDefault();
+      containerRef.current?.focus({ preventScroll: true });
       const picked = getPickedCell(event);
       if (!picked) return;
 
@@ -342,33 +493,35 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       }
 
       transientRangeRef.current = null;
-      renderer.setRangeSelection(null);
+        renderer.setRangeSelection(null);
 
-      const prevSelection = renderer.getSelection();
-      const prevRange = renderer.getSelectionRange();
+        const prevSelection = renderer.getSelection();
+        const prevRange = renderer.getSelectionRange();
 
-      renderer.setSelection(picked);
+        renderer.setSelection(picked);
 
-      if (!prevSelection || prevSelection.row !== picked.row || prevSelection.col !== picked.col) {
-        onSelectionChangeRef.current?.(picked);
-      }
+        if (!prevSelection || prevSelection.row !== picked.row || prevSelection.col !== picked.col) {
+          announceSelection(picked, { startRow: picked.row, endRow: picked.row + 1, startCol: picked.col, endCol: picked.col + 1 });
+          onSelectionChangeRef.current?.(picked);
+        }
 
-      const nextRange: CellRange = {
-        startRow: picked.row,
-        endRow: picked.row + 1,
+        const nextRange: CellRange = {
+          startRow: picked.row,
+          endRow: picked.row + 1,
         startCol: picked.col,
         endCol: picked.col + 1
       };
-      if (
-        !prevRange ||
-        prevRange.startRow !== nextRange.startRow ||
-        prevRange.endRow !== nextRange.endRow ||
-        prevRange.startCol !== nextRange.startCol ||
-        prevRange.endCol !== nextRange.endCol
-      ) {
-        onSelectionRangeChangeRef.current?.(nextRange);
-      }
-    };
+        if (
+          !prevRange ||
+          prevRange.startRow !== nextRange.startRow ||
+          prevRange.endRow !== nextRange.endRow ||
+          prevRange.startCol !== nextRange.startCol ||
+          prevRange.endCol !== nextRange.endCol
+        ) {
+          announceSelection(picked, nextRange);
+          onSelectionRangeChangeRef.current?.(nextRange);
+        }
+      };
 
     const onPointerMove = (event: PointerEvent) => {
       const renderer = rendererRef.current;
@@ -421,6 +574,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       }
 
       renderer.setSelectionRange(range);
+      announceSelection(renderer.getSelection(), renderer.getSelectionRange());
       onSelectionRangeChangeRef.current?.(range);
     };
 
@@ -572,10 +726,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       width: "100%",
       height: "100%",
       touchAction: "none",
-      background: "#ffffff",
+      background: resolvedTheme.gridBg,
       ...props.style
     }),
-    [props.style]
+    [props.style, resolvedTheme.gridBg]
   );
 
   const canvasStyle: React.CSSProperties = {
@@ -587,22 +741,55 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     display: "block"
   };
 
+  const ariaLabel = props.ariaLabelledBy ? undefined : (props.ariaLabel ?? "Spreadsheet grid");
+
   return (
-    <div ref={containerRef} style={containerStyle} data-testid="canvas-grid">
+    <div
+      ref={containerRef}
+      style={containerStyle}
+      data-testid="canvas-grid"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      aria-labelledby={props.ariaLabelledBy}
+      aria-describedby={statusId}
+    >
+      <div
+        id={statusId}
+        data-testid="canvas-grid-a11y-status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: "hidden",
+          clip: "rect(0, 0, 0, 0)",
+          whiteSpace: "nowrap",
+          border: 0
+        }}
+      >
+        {a11yStatusText}
+      </div>
       <canvas
         ref={gridCanvasRef}
         style={{ ...canvasStyle, pointerEvents: "none" }}
         data-testid="canvas-grid-background"
+        aria-hidden="true"
       />
       <canvas
         ref={contentCanvasRef}
         style={{ ...canvasStyle, pointerEvents: "none" }}
         data-testid="canvas-grid-content"
+        aria-hidden="true"
       />
       <canvas
         ref={selectionCanvasRef}
         style={{ ...canvasStyle, pointerEvents: "auto" }}
         data-testid="canvas-grid-selection"
+        aria-hidden="true"
       />
 
       <div
@@ -613,7 +800,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           top: 2,
           bottom: 16,
           width: 10,
-          background: "rgba(0,0,0,0.04)",
+          background: resolvedTheme.scrollbarTrack,
           borderRadius: 6
         }}
       >
@@ -625,7 +812,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
             left: 1,
             right: 1,
             height: 40,
-            background: "rgba(0,0,0,0.25)",
+            background: resolvedTheme.scrollbarThumb,
             borderRadius: 6,
             cursor: "pointer"
           }}
@@ -640,7 +827,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           right: 16,
           bottom: 2,
           height: 10,
-          background: "rgba(0,0,0,0.04)",
+          background: resolvedTheme.scrollbarTrack,
           borderRadius: 6
         }}
       >
@@ -652,7 +839,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
             bottom: 1,
             left: 0,
             width: 40,
-            background: "rgba(0,0,0,0.25)",
+            background: resolvedTheme.scrollbarThumb,
             borderRadius: 6,
             cursor: "pointer"
           }}

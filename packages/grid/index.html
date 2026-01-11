@@ -12,6 +12,65 @@
         width: 100%;
         margin: 0;
       }
+
+      :root {
+        --formula-grid-bg: #ffffff;
+        --formula-grid-line: #e6e6e6;
+        --formula-grid-header-bg: #f8fafc;
+        --formula-grid-header-text: #0f172a;
+        --formula-grid-cell-text: #111111;
+        --formula-grid-error-text: #cc0000;
+        --formula-grid-selection-fill: rgba(14, 101, 235, 0.12);
+        --formula-grid-selection-border: #0e65eb;
+        --formula-grid-selection-handle: #0e65eb;
+        --formula-grid-scrollbar-track: rgba(0, 0, 0, 0.04);
+        --formula-grid-scrollbar-thumb: rgba(0, 0, 0, 0.25);
+        --formula-grid-freeze-line: #c0c0c0;
+        --formula-grid-comment-indicator: #f59e0b;
+        --formula-grid-comment-indicator-resolved: #9ca3af;
+        --formula-grid-remote-presence-default: #4c8bf5;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --formula-grid-bg: #0b1220;
+          --formula-grid-line: rgba(255, 255, 255, 0.12);
+          --formula-grid-header-bg: #0f172a;
+          --formula-grid-header-text: #e2e8f0;
+          --formula-grid-cell-text: #e2e8f0;
+          --formula-grid-error-text: #f87171;
+          --formula-grid-selection-fill: rgba(96, 165, 250, 0.18);
+          --formula-grid-selection-border: #60a5fa;
+          --formula-grid-selection-handle: #60a5fa;
+          --formula-grid-scrollbar-track: rgba(255, 255, 255, 0.08);
+          --formula-grid-scrollbar-thumb: rgba(255, 255, 255, 0.3);
+          --formula-grid-freeze-line: rgba(255, 255, 255, 0.35);
+          --formula-grid-comment-indicator: #fbbf24;
+          --formula-grid-comment-indicator-resolved: #6b7280;
+          --formula-grid-remote-presence-default: #60a5fa;
+        }
+      }
+
+      @media (prefers-contrast: more) {
+        :root {
+          --formula-grid-selection-fill: transparent;
+          --formula-grid-selection-border: #000000;
+          --formula-grid-selection-handle: #000000;
+          --formula-grid-line: #000000;
+          --formula-grid-scrollbar-thumb: #000000;
+          --formula-grid-freeze-line: #000000;
+        }
+      }
+
+      @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+        :root {
+          --formula-grid-selection-border: #ffffff;
+          --formula-grid-selection-handle: #ffffff;
+          --formula-grid-line: rgba(255, 255, 255, 0.8);
+          --formula-grid-scrollbar-thumb: #ffffff;
+          --formula-grid-freeze-line: #ffffff;
+        }
+      }
     </style>
   </head>
   <body>
@@ -19,4 +78,3 @@
     <script type="module" src="/dev/main.tsx"></script>
   </body>
 </html>
-

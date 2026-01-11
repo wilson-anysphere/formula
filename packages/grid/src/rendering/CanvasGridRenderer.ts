@@ -3,6 +3,8 @@ import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker";
 import { setupHiDpiCanvas } from "./HiDpiCanvas";
 import { LruCache } from "../utils/LruCache";
 import type { GridPresence } from "../presence/types";
+import type { GridTheme } from "../theme/GridTheme";
+import { DEFAULT_GRID_THEME, gridThemesEqual, resolveGridTheme } from "../theme/GridTheme";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 import { VirtualScrollManager } from "../virtualization/VirtualScrollManager";
 import {
@@ -97,8 +99,6 @@ function pickTextColor(backgroundColor: string): string {
   return luma > 0.6 ? "#000000" : "#ffffff";
 }
 
-const DEFAULT_ERROR_TEXT_COLOR = "#cc0000";
-
 export function formatCellDisplayText(value: CellData["value"]): string {
   if (value === null) return "";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
@@ -106,9 +106,17 @@ export function formatCellDisplayText(value: CellData["value"]): string {
 }
 
 export function resolveCellTextColor(value: CellData["value"], explicitColor: string | undefined): string {
+  return resolveCellTextColorWithTheme(value, explicitColor, undefined);
+}
+
+export function resolveCellTextColorWithTheme(
+  value: CellData["value"],
+  explicitColor: string | undefined,
+  theme: Pick<GridTheme, "cellText" | "errorText"> | undefined
+): string {
   if (explicitColor !== undefined) return explicitColor;
-  if (typeof value === "string" && value.startsWith("#")) return DEFAULT_ERROR_TEXT_COLOR;
-  return "#111111";
+  if (typeof value === "string" && value.startsWith("#")) return theme?.errorText ?? DEFAULT_GRID_THEME.errorText;
+  return theme?.cellText ?? DEFAULT_GRID_THEME.cellText;
 }
 
 export class CanvasGridRenderer {
@@ -164,6 +172,7 @@ export class CanvasGridRenderer {
   private textLayoutEngine?: TextLayoutEngine;
 
   private readonly presenceFont = "12px system-ui, sans-serif";
+  private theme: GridTheme;
 
   private readonly perfStats: GridPerfStats = {
     enabled: false,
@@ -182,10 +191,12 @@ export class CanvasGridRenderer {
     defaultColWidth?: number;
     prefetchOverscanRows?: number;
     prefetchOverscanCols?: number;
+    theme?: Partial<GridTheme>;
   }) {
     this.provider = options.provider;
     this.prefetchOverscanRows = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanRows);
     this.prefetchOverscanCols = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanCols);
+    this.theme = resolveGridTheme(options.theme);
     this.scroll = new VirtualScrollManager({
       rowCount: options.rowCount,
       colCount: options.colCount,
@@ -207,6 +218,17 @@ export class CanvasGridRenderer {
 
   setPerfStatsEnabled(enabled: boolean): void {
     this.perfStats.enabled = enabled;
+  }
+
+  setTheme(theme: Partial<GridTheme> | null | undefined): void {
+    const next = resolveGridTheme(theme);
+    if (gridThemesEqual(this.theme, next)) return;
+    this.theme = next;
+    this.markAllDirtyForThemeChange();
+  }
+
+  getTheme(): GridTheme {
+    return this.theme;
   }
 
   attach(canvases: {
@@ -738,7 +760,7 @@ export class CanvasGridRenderer {
       if (shiftX === 0 && shiftY === 0) continue;
 
       if (layer === "background") {
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = this.theme.gridBg;
         ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
       } else {
         ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
@@ -987,7 +1009,7 @@ export class CanvasGridRenderer {
       ctx.clip();
 
       if (layer === "background") {
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = this.theme.gridBg;
         ctx.fillRect(region.x, region.y, region.width, region.height);
       } else {
         ctx.clearRect(region.x, region.y, region.width, region.height);
@@ -1540,7 +1562,7 @@ export class CanvasGridRenderer {
       ctx.fill();
     }
 
-    ctx.strokeStyle = "#e6e6e6";
+    ctx.strokeStyle = this.theme.gridLine;
     ctx.lineWidth = 1;
 
     ctx.beginPath();
@@ -1618,7 +1640,7 @@ export class CanvasGridRenderer {
             currentFont = font;
           }
 
-          const fillStyle = resolveCellTextColor(cell.value, style?.color);
+          const fillStyle = resolveCellTextColorWithTheme(cell.value, style?.color, this.theme);
           if (fillStyle !== currentFillStyle) {
             ctx.fillStyle = fillStyle;
             currentFillStyle = fillStyle;
@@ -1749,7 +1771,7 @@ export class CanvasGridRenderer {
             ctx.lineTo(x + colWidth - size, y);
             ctx.lineTo(x + colWidth, y + size);
             ctx.closePath();
-            ctx.fillStyle = resolved ? "#9ca3af" : "#f59e0b";
+            ctx.fillStyle = resolved ? this.theme.commentIndicatorResolved : this.theme.commentIndicator;
             ctx.fill();
             ctx.restore();
           }
@@ -1773,14 +1795,14 @@ export class CanvasGridRenderer {
     if (transientRange) {
       const rects = this.rangeToViewportRects(transientRange, viewport);
 
-      ctx.fillStyle = "rgba(14, 101, 235, 0.12)";
+      ctx.fillStyle = this.theme.selectionFill;
       for (const rect of rects) {
         const clipped = intersectRect(rect, intersection);
         if (!clipped) continue;
         ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
       }
 
-      ctx.strokeStyle = "#0e65eb";
+      ctx.strokeStyle = this.theme.selectionBorder;
       ctx.lineWidth = 2;
       for (const rect of rects) {
         if (!intersectRect(rect, intersection)) continue;
@@ -1795,14 +1817,14 @@ export class CanvasGridRenderer {
     const rects = this.rangeToViewportRects(range, viewport);
     if (rects.length === 0) return;
 
-    ctx.fillStyle = "rgba(14, 101, 235, 0.12)";
+    ctx.fillStyle = this.theme.selectionFill;
     for (const rect of rects) {
       const clipped = intersectRect(rect, intersection);
       if (!clipped) continue;
       ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
     }
 
-    ctx.strokeStyle = "#0e65eb";
+    ctx.strokeStyle = this.theme.selectionBorder;
     ctx.lineWidth = 2;
     for (const rect of rects) {
       if (!intersectRect(rect, intersection)) continue;
@@ -1826,7 +1848,7 @@ export class CanvasGridRenderer {
     const handleClipped = intersectRect(handleRect, intersection);
     if (!handleClipped) return;
 
-    ctx.fillStyle = "#0e65eb";
+    ctx.fillStyle = this.theme.selectionHandle;
     ctx.fillRect(handleClipped.x, handleClipped.y, handleClipped.width, handleClipped.height);
   }
 
@@ -1850,7 +1872,7 @@ export class CanvasGridRenderer {
     const badgeTextHeight = 14;
 
     for (const presence of this.remotePresences) {
-      const color = presence.color ?? "#4c8bf5";
+      const color = presence.color ?? this.theme.remotePresenceDefault;
 
       if (presence.selections.length > 0) {
         ctx.fillStyle = color;
@@ -1932,7 +1954,7 @@ export class CanvasGridRenderer {
   private drawFreezeLines(ctx: CanvasRenderingContext2D, viewport: GridViewportState): void {
     if (viewport.frozenCols === 0 && viewport.frozenRows === 0) return;
 
-    ctx.strokeStyle = "#c0c0c0";
+    ctx.strokeStyle = this.theme.freezeLine;
     ctx.lineWidth = 2;
     ctx.beginPath();
 
@@ -2040,6 +2062,16 @@ export class CanvasGridRenderer {
       this.dirty.selection.markDirty(padRect(rect, padding));
     }
 
+    this.requestRender();
+  }
+
+  private markAllDirtyForThemeChange(): void {
+    const viewport = this.scroll.getViewportState();
+    const full = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+    this.dirty.background.markDirty(full);
+    this.dirty.content.markDirty(full);
+    this.dirty.selection.markDirty(full);
+    this.forceFullRedraw = true;
     this.requestRender();
   }
 
