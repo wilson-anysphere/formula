@@ -178,6 +178,55 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("ignores applyState deltas when firing Worksheet_Change", async () => {
+    const calls: Array<{ cmd: string; args?: any }> = [];
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_worksheet_change") return { ok: true, output: [], updates: [] };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    await flushAsync(); // let Workbook_Open settle
+    calls.length = 0;
+
+    const snapshot = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 1,
+        sheets: [{ id: "Sheet1", cells: [{ row: 0, col: 0, value: "X", formula: null, format: null }] }],
+      }),
+    );
+    doc.applyState(snapshot);
+
+    await flushAsync();
+
+    const changeCalls = calls.filter((c) => c.cmd === "fire_worksheet_change");
+    expect(changeCalls).toHaveLength(0);
+
+    wiring.dispose();
+  });
+
   it("does not re-trigger Worksheet_Change when applying macro updates", async () => {
     const calls: Array<{ cmd: string; args?: any }> = [];
 

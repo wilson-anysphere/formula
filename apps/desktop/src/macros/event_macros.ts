@@ -496,12 +496,13 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     lastSelectionKeyFired = key;
   }
 
-  const stopDocListening = args.app.getDocument().on("change", ({ deltas }) => {
+  const stopDocListening = args.app.getDocument().on("change", ({ deltas, source }) => {
     if (disposed) return;
     if (!securityReady) return;
     if (!Array.isArray(deltas) || deltas.length === 0) return;
     if (eventsDisabled) return;
     if (applyingMacroUpdates) return;
+    if (source === "applyState") return;
 
     // Only run Worksheet_Change when macros are already trusted.
     if (!eventsAllowed) return;
