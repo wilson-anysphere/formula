@@ -283,6 +283,35 @@ test("RefreshOrchestrator: shared dependency executes once when not explicitly t
   assert.deepEqual(new Set(Object.keys(results)), new Set(["B", "C"]));
 });
 
+test("RefreshOrchestrator: fan-out dependencies schedule dependents concurrently", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+  orchestrator.registerQuery(makeQuery("C", { type: "query", queryId: "A" }));
+
+  const handle = orchestrator.refreshAll(["B", "C"]);
+
+  assert.equal(engine.calls.length, 1);
+  assert.equal(engine.calls[0].queryId, "A");
+
+  engine.calls[0].deferred.resolve(makeResult("A"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(engine.calls.length, 3);
+  assert.deepEqual(
+    new Set(engine.calls.slice(1).map((c) => c.queryId)),
+    new Set(["B", "C"]),
+    "both dependents should start once the shared dependency completes",
+  );
+
+  engine.calls[1].deferred.resolve(makeResult(engine.calls[1].queryId));
+  engine.calls[2].deferred.resolve(makeResult(engine.calls[2].queryId));
+
+  const results = await handle.promise;
+  assert.deepEqual(new Set(Object.keys(results)), new Set(["B", "C"]));
+});
+
 test("RefreshOrchestrator: refreshAll() with no queryIds refreshes all registered queries", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
