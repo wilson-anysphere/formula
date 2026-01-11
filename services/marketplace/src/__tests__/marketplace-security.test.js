@@ -256,6 +256,53 @@ test("malicious packages are flagged and cannot be downloaded", async (t) => {
   }
 });
 
+test("scan allowlist can permit otherwise-failing packages", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-scan-allowlist-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const publisher = "temp-pub";
+  const name = "allowlisted-ext";
+
+  const { dir } = await createTempExtensionDir({
+    publisher,
+    name,
+    version: "1.0.0",
+    jsSource: 'const cp = require("child_process");\nmodule.exports = { activate() { return cp; } };\n',
+  });
+
+  try {
+    const keys = generateEd25519KeyPair();
+    const store = new MarketplaceStore({ dataDir, scanAllowlist: ["JS.CHILD_PROCESS"] });
+    await store.init();
+    await store.registerPublisher({
+      publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+    const published = await store.publishExtension({ publisher, packageBytes: pkgBytes, signatureBase64: null });
+
+    const scan = await store.getPackageScan(published.id, published.version);
+    assert.ok(scan, "scan record should exist");
+    assert.equal(scan.status, "passed");
+    assert.ok(!scan.findings?.findings?.some((f) => f.id === "js.child_process"));
+
+    const downloaded = await store.getPackage(published.id, published.version);
+    assert.ok(downloaded);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("publisher key rotation preserves ability to verify old versions", async (t) => {
   try {
     requireFromHere.resolve("sql.js");
