@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Attachment, ChatMessage } from "./types.js";
 import type { LLMClient, LLMMessage, ToolCall, ToolExecutor } from "../../../../../packages/llm/src/types.js";
@@ -34,6 +34,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
   // Provider-facing history is stored separately from UI messages. UI tool
   // entries created in `onToolCall` / `onToolResult` are for display only and
   // don't carry the `toolCallId` required by the LLM protocol.
@@ -51,6 +52,12 @@ export function AIChatPanel(props: AIChatPanelProps) {
       "You are an AI assistant inside a spreadsheet app. Prefer using tools to read data before making claims.",
     [props.systemPrompt],
   );
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages]);
 
   function safeStringify(value: unknown): string {
     if (typeof value === "string") return value;
@@ -174,7 +181,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
       <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>
         {t("chat.title")}
       </div>
-      <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflow: "auto", padding: 12 }}>
         {messages.map((m) => (
           <div key={m.id} style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 12, opacity: 0.7 }}>
