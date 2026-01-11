@@ -118,23 +118,18 @@ export function scanEncryptedRecords(data, opts, offset = FILE_HEADER_BYTES) {
     const tagOffset = ivOffset + AES_GCM_IV_BYTES;
     const ciphertextOffset = tagOffset + AES_GCM_TAG_BYTES;
 
-    try {
-      const plaintext = opts.keyRing.decryptBytes(
-        {
-          keyVersion,
-          algorithm: AES_256_GCM_ALGORITHM,
-          iv: record.subarray(ivOffset, ivOffset + AES_GCM_IV_BYTES),
-          tag: record.subarray(tagOffset, tagOffset + AES_GCM_TAG_BYTES),
-          ciphertext: record.subarray(ciphertextOffset),
-        },
-        { aadContext: opts.aadContext }
-      );
-      updates.push(new Uint8Array(plaintext));
-      lastGoodOffset = offset;
-    } catch {
-      // Decryption failed; treat as a corrupt tail record.
-      break;
-    }
+    const plaintext = opts.keyRing.decryptBytes(
+      {
+        keyVersion,
+        algorithm: AES_256_GCM_ALGORITHM,
+        iv: record.subarray(ivOffset, ivOffset + AES_GCM_IV_BYTES),
+        tag: record.subarray(tagOffset, tagOffset + AES_GCM_TAG_BYTES),
+        ciphertext: record.subarray(ciphertextOffset),
+      },
+      { aadContext: opts.aadContext }
+    );
+    updates.push(new Uint8Array(plaintext));
+    lastGoodOffset = offset;
   }
 
   return { updates, lastGoodOffset };
