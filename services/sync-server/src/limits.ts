@@ -1,5 +1,6 @@
 export class TokenBucketRateLimiter {
   private buckets = new Map<string, { tokens: number; lastRefillMs: number }>();
+  private lastSweepMs = 0;
 
   constructor(
     private readonly capacity: number,
@@ -7,6 +8,25 @@ export class TokenBucketRateLimiter {
   ) {}
 
   consume(key: string, nowMs: number = Date.now()): boolean {
+    // Opportunistically sweep stale entries so a large number of one-off keys
+    // (e.g. connection attempts from many unique IPs) doesn't grow this map
+    // without bound.
+    const sweepIntervalMs = Math.max(this.refillMs, 30_000);
+    const maxEntriesBeforeSweep = 10_000;
+    if (
+      this.buckets.size > 0 &&
+      (this.buckets.size > maxEntriesBeforeSweep ||
+        nowMs - this.lastSweepMs > sweepIntervalMs)
+    ) {
+      const staleAfterMs = Math.max(this.refillMs, 1);
+      for (const [bucketKey, bucket] of this.buckets) {
+        if (nowMs - bucket.lastRefillMs > staleAfterMs) {
+          this.buckets.delete(bucketKey);
+        }
+      }
+      this.lastSweepMs = nowMs;
+    }
+
     const existing = this.buckets.get(key);
     if (!existing) {
       this.buckets.set(key, { tokens: this.capacity - 1, lastRefillMs: nowMs });
