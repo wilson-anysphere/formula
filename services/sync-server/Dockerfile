@@ -2,9 +2,9 @@ FROM node:20-slim AS build
 
 WORKDIR /app
 
-COPY services/sync-server/package.json ./package.json
-COPY services/sync-server/tsconfig.json ./tsconfig.json
-COPY services/sync-server/src ./src
+COPY package.json ./package.json
+COPY tsconfig.json ./tsconfig.json
+COPY src ./src
 
 RUN npm install
 RUN npm run build
@@ -23,4 +23,3 @@ COPY --from=build /app/dist ./dist
 
 EXPOSE 1234
 CMD ["node", "dist/index.js"]
-
