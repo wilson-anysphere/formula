@@ -65,6 +65,21 @@ function isLegacyCellsOnlyState(value) {
 }
 
 /**
+ * Backwards-compatible detection for malformed/partial schemaVersion=1 payloads
+ * that only include `cells` but not a valid `sheets` ordering/metadata.
+ *
+ * Treat these like legacy cell-only commits so callers can't accidentally wipe
+ * sheet ordering/names by omitting them.
+ *
+ * @param {any} value
+ */
+function isSchemaV1CellsOnlyState(value) {
+  if (!isRecord(value) || value.schemaVersion !== 1) return false;
+  const sheets = value.sheets;
+  return !isRecord(sheets) || !Array.isArray(sheets.order) || !isRecord(sheets.metaById);
+}
+
+/**
  * Backwards-compatible detection for older schemaVersion=1 clients that existed
  * before BranchService started tracking some workbook-level maps (metadata,
  * namedRanges, comments).
@@ -264,7 +279,7 @@ export class BranchService {
     );
 
     let effectiveNextState = nextState;
-    if (isLegacyCellsOnlyState(nextState)) {
+    if (isLegacyCellsOnlyState(nextState) || isSchemaV1CellsOnlyState(nextState)) {
       const legacy = normalizeDocumentState(nextState);
 
       // Legacy commits only provide per-sheet cell maps. Treat them as an overlay

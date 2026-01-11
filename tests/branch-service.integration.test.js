@@ -287,3 +287,39 @@ test("schemaVersion=1 commits missing comments preserve existing comments", asyn
   assert.equal(state.cells.Sheet1.A1.value, 2);
   assert.equal(state.comments.c1?.content, "hello");
 });
+
+test("schemaVersion=1 commits missing sheets preserve existing sheet metadata", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-no-sheets", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "First" } },
+    },
+    cells: { Sheet1: { A1: { value: 1 } } },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  });
+
+  // Simulate a malformed/partial schemaVersion=1 payload that includes cells but
+  // omits the sheets ordering/metadata.
+  await service.commit(actor, {
+    // @ts-expect-error - intentionally missing `sheets`.
+    nextState: {
+      schemaVersion: 1,
+      cells: { Sheet1: { A1: { value: 2 } } },
+      metadata: {},
+      namedRanges: {},
+      comments: {},
+    },
+  });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.cells.Sheet1.A1.value, 2);
+  assert.equal(state.sheets.metaById.Sheet1?.name, "First");
+  assert.deepEqual(state.sheets.order, ["Sheet1"]);
+});
