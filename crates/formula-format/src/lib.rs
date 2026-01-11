@@ -5,6 +5,12 @@
 //! - A higher-level Excel/OOXML number format engine that understands common
 //!   format codes (`#,##0.00`, `m/d/yyyy`, `0%`, `0.00E+00`, and multi-section
 //!   formats like `positive;negative;zero;text`).
+//!
+//! For spreadsheet importers, the crate also exposes helpers for resolving Excel's
+//! built-in number format IDs (`numFmtId` / `ifmt`) to format codes:
+//! - [`builtin_format_code`] (canonical en-US mapping for ids 0–49)
+//! - [`builtin_format_code_with_locale`] (best-effort locale-aware variants)
+//! - [`locale_for_lcid`] (map LCIDs in format code tokens like `[$€-407]` to [`Locale`])
 
 pub mod locale;
 
