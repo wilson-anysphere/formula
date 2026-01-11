@@ -25,6 +25,11 @@ const LOG_REDACTIONS = [
   "req.body.access_token",
   "req.body.refresh_token",
   "req.body.id_token",
+  // SIEM configuration secrets (nested).
+  "req.body.auth.token",
+  "req.body.auth.username",
+  "req.body.auth.password",
+  "req.body.auth.value",
   "password",
   "token",
   "apiKey",

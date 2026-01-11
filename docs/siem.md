@@ -80,17 +80,22 @@ SIEM delivery is configured per organization and persisted in Postgres (`org_sie
 Endpoints:
 
 - `PUT /orgs/:orgId/siem` – upsert SIEM configuration for an org and set `enabled` (defaults to `true` on first create).
-- `GET /orgs/:orgId/siem` – fetch sanitized config (auth secrets are masked as `"***"`).
+- `GET /orgs/:orgId/siem` – fetch sanitized config, plus `secretConfigured` (auth secrets are never returned).
 - `DELETE /orgs/:orgId/siem` – remove SIEM configuration (disables exports).
 
 Request/response shape:
 
-- `GET` returns `{ enabled, config }`.
+- `GET` returns `{ enabled, config, secretConfigured }`. If no config exists yet, it returns `{ enabled: false, config: null, secretConfigured: false }`.
 - `PUT` accepts either `{ enabled, config }` (preferred) or the `config` object itself (backwards compatible).
-- When updating an existing config, you can keep previously stored secret values by sending `"***"` for secret fields (the same masked value returned by `GET`).
+- When updating an existing config, you can keep previously stored secret values by **omitting secret fields**. (Backwards compatible: `"***"` is also accepted.)
 - Setting `enabled: false` disables exports and deletes any stored secrets; re-enabling requires supplying secret values again.
 
-Auth secrets are stored encrypted in the database-backed secret store (`secrets` table; configured via `SECRET_STORE_KEYS_JSON` or legacy `SECRET_STORE_KEY`) and referenced from `org_siem_configs.config` via `{ "secretRef": "siem:<orgId>:..." }` entries (never plaintext).
+Auth secrets are stored encrypted in the database-backed secret store (`secrets` table; configured via `SECRET_STORE_KEYS_JSON` or legacy `SECRET_STORE_KEY`) and referenced internally from `org_siem_configs.config` via `{ "secretRef": "siem:<orgId>:..." }` entries (never plaintext). Secret names use stable keys such as:
+
+- `siem:<orgId>:bearer_token`
+- `siem:<orgId>:basic_username`
+- `siem:<orgId>:basic_password`
+- `siem:<orgId>:header_value`
 
 Example payload:
 

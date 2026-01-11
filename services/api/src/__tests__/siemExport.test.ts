@@ -576,7 +576,7 @@ describe("SIEM export worker", () => {
         currentKeyId: "legacy",
         keys: { legacy: deriveSecretStoreKey(encryptionSecret) }
       };
-      const secretName = `siem:${orgId}:headerValue:authorization`;
+      const secretName = `siem:${orgId}:header_value`;
       await putSecret(db, keyring, secretName, "Splunk supersecret-token");
 
       const storedConfig: SiemEndpointConfig = {

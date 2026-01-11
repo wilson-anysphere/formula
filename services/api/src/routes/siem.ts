@@ -10,7 +10,13 @@ import {
   DataResidencyViolationError
 } from "../policies/dataResidency";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
-import { deleteSecret, putSecret, type SecretStoreKeyring } from "../secrets/secretStore";
+import {
+  deleteSecret,
+  listSecrets,
+  putSecret,
+  secretExists,
+  type SecretStoreKeyring
+} from "../secrets/secretStore";
 import type { MaybeEncryptedSecret, SiemAuthConfig, SiemEndpointConfig } from "../siem/types";
 import { requireAuth } from "./auth";
 
@@ -54,47 +60,58 @@ function collectSecretRefsFromConfig(config: SiemEndpointConfig | null): string[
   return refs;
 }
 
-function maskSecrets(config: SiemEndpointConfig): SiemEndpointConfig {
-  if (!config.auth) return config;
+function sanitizeConfigForResponse(config: SiemEndpointConfig): Record<string, unknown> {
   const auth = config.auth;
-
-  if (auth.type === "none") return config;
+  if (!auth || auth.type === "none") return config;
 
   if (auth.type === "bearer") {
-    return { ...config, auth: { type: "bearer", token: SECRET_MASK } };
+    return { ...config, auth: { type: "bearer" } };
   }
 
   if (auth.type === "basic") {
-    return {
-      ...config,
-      auth: {
-        type: "basic",
-        username: SECRET_MASK,
-        password: SECRET_MASK
-      }
-    };
+    return { ...config, auth: { type: "basic" } };
   }
 
   if (auth.type === "header") {
-    return {
-      ...config,
-      auth: {
-        type: "header",
-        name: auth.name,
-        value: SECRET_MASK
-      }
-    };
+    return { ...config, auth: { type: "header", name: auth.name } };
   }
 
   return config;
 }
 
-function siemSecretName(orgId: string, kind: "bearerToken" | "basicUsername" | "basicPassword"): string {
-  return `siem:${orgId}:${kind}`;
+async function secretConfigured(db: FastifyInstance["db"], config: SiemEndpointConfig): Promise<boolean> {
+  const auth = config.auth;
+  if (!auth || auth.type === "none") return true;
+
+  const resolve = async (value: MaybeEncryptedSecret | undefined): Promise<boolean> => {
+    if (!value) return false;
+    if (typeof value === "string") return value.length > 0;
+    if ("secretRef" in value && typeof value.secretRef === "string") return secretExists(db, value.secretRef);
+    if ("encrypted" in value && typeof value.encrypted === "string") return value.encrypted.length > 0;
+    if ("ciphertext" in value && typeof value.ciphertext === "string") return value.ciphertext.length > 0;
+    return false;
+  };
+
+  if (auth.type === "bearer") {
+    return resolve(auth.token);
+  }
+
+  if (auth.type === "basic") {
+    return (await resolve(auth.username)) && (await resolve(auth.password));
+  }
+
+  if (auth.type === "header") {
+    return resolve(auth.value);
+  }
+
+  return false;
 }
 
-function siemHeaderSecretName(orgId: string, headerName: string): string {
-  return `siem:${orgId}:headerValue:${headerName.trim().toLowerCase()}`;
+function siemSecretName(
+  orgId: string,
+  kind: "bearer_token" | "basic_username" | "basic_password" | "header_value"
+): string {
+  return `siem:${orgId}:${kind}`;
 }
 
 function normalizeHeaderName(value: string): string {
@@ -158,9 +175,9 @@ async function requireOrgAdmin(
 
 const SiemAuthSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("none") }),
-  z.object({ type: z.literal("bearer"), token: z.string().min(1) }),
-  z.object({ type: z.literal("basic"), username: z.string().min(1), password: z.string().min(1) }),
-  z.object({ type: z.literal("header"), name: z.string().min(1), value: z.string().min(1) })
+  z.object({ type: z.literal("bearer"), token: z.string().min(1).optional() }),
+  z.object({ type: z.literal("basic"), username: z.string().min(1).optional(), password: z.string().min(1).optional() }),
+  z.object({ type: z.literal("header"), name: z.string().min(1), value: z.string().min(1).optional() })
 ]);
 
 type IncomingSiemAuthConfig = z.infer<typeof SiemAuthSchema>;
@@ -219,15 +236,15 @@ async function storeAuth(options: {
   existingAuth: SiemAuthConfig | undefined;
 }): Promise<SiemAuthConfig | undefined> {
   const { db, keyring, orgId, enabled, auth, existingAuth } = options;
-  if (!auth) return undefined;
+  if (!auth) return existingAuth;
 
   if (auth.type === "none") return auth;
 
   if (auth.type === "bearer") {
-    const secretName = siemSecretName(orgId, "bearerToken");
+    const secretName = siemSecretName(orgId, "bearer_token");
     const token = auth.token;
 
-    if (token === SECRET_MASK) {
+    if (!token || token === SECRET_MASK) {
       if (
         existingAuth?.type === "bearer" &&
         typeof existingAuth.token === "object" &&
@@ -248,15 +265,15 @@ async function storeAuth(options: {
   }
 
   if (auth.type === "basic") {
-    const usernameName = siemSecretName(orgId, "basicUsername");
-    const passwordName = siemSecretName(orgId, "basicPassword");
+    const usernameName = siemSecretName(orgId, "basic_username");
+    const passwordName = siemSecretName(orgId, "basic_password");
     const username = auth.username;
     const password = auth.password;
 
     let usernameRef: MaybeEncryptedSecret;
     let passwordRef: MaybeEncryptedSecret;
 
-    if (username === SECRET_MASK) {
+    if (!username || username === SECRET_MASK) {
       if (
         existingAuth?.type === "basic" &&
         typeof existingAuth.username === "object" &&
@@ -275,7 +292,7 @@ async function storeAuth(options: {
       usernameRef = { secretRef: usernameName };
     }
 
-    if (password === SECRET_MASK) {
+    if (!password || password === SECRET_MASK) {
       if (
         existingAuth?.type === "basic" &&
         typeof existingAuth.password === "object" &&
@@ -299,13 +316,12 @@ async function storeAuth(options: {
 
   if (auth.type === "header") {
     const headerName = validateHeaderName(auth.name, "auth.name");
-    const secretName = siemHeaderSecretName(orgId, headerName);
+    const secretName = siemSecretName(orgId, "header_value");
 
-    if (auth.value === SECRET_MASK) {
+    if (!auth.value || auth.value === SECRET_MASK) {
       const existing = existingAuth;
       if (
         existing?.type === "header" &&
-        existing.name.trim().toLowerCase() === headerName.trim().toLowerCase() &&
         typeof existing.value === "object" &&
         existing.value != null &&
         "secretRef" in existing.value &&
@@ -332,23 +348,29 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     "/orgs/:orgId/siem",
     { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
     async (request, reply) => {
-    const orgId = (request.params as { orgId: string }).orgId;
-    const member = await requireOrgAdmin(request, reply, orgId);
-    if (!member) return;
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
-      return reply.code(403).send({ error: "mfa_required" });
-    }
+      const orgId = (request.params as { orgId: string }).orgId;
+      const member = await requireOrgAdmin(request, reply, orgId);
+      if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
-    const res = await app.db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
-    if (res.rowCount !== 1) return reply.code(404).send({ error: "siem_config_not_found" });
+      const res = await app.db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
+      if (res.rowCount !== 1) {
+        return reply.send({ enabled: false, config: null, secretConfigured: false });
+      }
 
-    const row = res.rows[0] as { enabled: boolean; config: unknown };
-    const config = parseJsonValue(row.config) as SiemEndpointConfig | null;
-    if (!config || typeof config.endpointUrl !== "string") {
-      return reply.code(500).send({ error: "siem_config_invalid" });
-    }
+      const row = res.rows[0] as { enabled: boolean; config: unknown };
+      const config = parseJsonValue(row.config) as SiemEndpointConfig | null;
+      if (!config || typeof config.endpointUrl !== "string") {
+        return reply.code(500).send({ error: "siem_config_invalid" });
+      }
 
-    return reply.send({ enabled: Boolean(row.enabled), config: maskSecrets(config) });
+      return reply.send({
+        enabled: Boolean(row.enabled),
+        config: sanitizeConfigForResponse(config),
+        secretConfigured: await secretConfigured(app.db, config)
+      });
     }
   );
 
@@ -356,50 +378,50 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     "/orgs/:orgId/siem",
     { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
     async (request, reply) => {
-    const orgId = (request.params as { orgId: string }).orgId;
-    const member = await requireOrgAdmin(request, reply, orgId);
-    if (!member) return;
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
-      return reply.code(403).send({ error: "mfa_required" });
-    }
+      const orgId = (request.params as { orgId: string }).orgId;
+      const member = await requireOrgAdmin(request, reply, orgId);
+      if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
-    const parsedBody = PutBody.safeParse(request.body);
-    if (!parsedBody.success) return reply.code(400).send({ error: "invalid_request" });
+      const parsedBody = PutBody.safeParse(request.body);
+      if (!parsedBody.success) return reply.code(400).send({ error: "invalid_request" });
 
-    const body = parsedBody.data as IncomingPutBody;
-    const incomingConfig = "config" in body ? body.config : body;
-    const requestedEnabled = "config" in body ? body.enabled : undefined;
+      const body = parsedBody.data as IncomingPutBody;
+      const incomingConfig = "config" in body ? body.config : body;
+      const requestedEnabled = "config" in body ? body.enabled : undefined;
 
-    const existingRes = await app.db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
-    const existingRow =
-      existingRes.rowCount === 1 ? (existingRes.rows[0] as { enabled: boolean; config: unknown }) : null;
-    const existingConfig = existingRow ? (parseJsonValue(existingRow.config) as SiemEndpointConfig | null) : null;
-    const prevEnabled = existingRow?.enabled ?? null;
+      const existingRes = await app.db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
+      const existingRow =
+        existingRes.rowCount === 1 ? (existingRes.rows[0] as { enabled: boolean; config: unknown }) : null;
+      const existingConfig = existingRow ? (parseJsonValue(existingRow.config) as SiemEndpointConfig | null) : null;
+      const prevEnabled = existingRow?.enabled ?? null;
 
-    const enabled = requestedEnabled ?? prevEnabled ?? true;
+      const enabled = requestedEnabled ?? prevEnabled ?? true;
 
-    const settingsRes = await app.db.query<{
-      certificate_pinning_enabled: boolean;
-      data_residency_region: string;
-      data_residency_allowed_regions: unknown;
-      allow_cross_region_processing: boolean;
-    }>(
-      `
-        SELECT
-          certificate_pinning_enabled,
-          data_residency_region,
-          data_residency_allowed_regions,
-          allow_cross_region_processing
-        FROM org_settings
-        WHERE org_id = $1
-      `,
-      [orgId]
-    );
-    const settingsRow = settingsRes.rowCount === 1 ? (settingsRes.rows[0] as any) : null;
-    const certificatePinningEnabled = settingsRow ? Boolean(settingsRow.certificate_pinning_enabled) : false;
-    const dataResidencyRegion = settingsRow ? String(settingsRow.data_residency_region ?? "us") : "us";
-    const dataResidencyAllowedRegions = settingsRow ? settingsRow.data_residency_allowed_regions : null;
-    const allowCrossRegionProcessing = settingsRow ? Boolean(settingsRow.allow_cross_region_processing) : true;
+      const settingsRes = await app.db.query<{
+        certificate_pinning_enabled: boolean;
+        data_residency_region: string;
+        data_residency_allowed_regions: unknown;
+        allow_cross_region_processing: boolean;
+      }>(
+        `
+          SELECT
+            certificate_pinning_enabled,
+            data_residency_region,
+            data_residency_allowed_regions,
+            allow_cross_region_processing
+          FROM org_settings
+          WHERE org_id = $1
+        `,
+        [orgId]
+      );
+      const settingsRow = settingsRes.rowCount === 1 ? (settingsRes.rows[0] as any) : null;
+      const certificatePinningEnabled = settingsRow ? Boolean(settingsRow.certificate_pinning_enabled) : false;
+      const dataResidencyRegion = settingsRow ? String(settingsRow.data_residency_region ?? "us") : "us";
+      const dataResidencyAllowedRegions = settingsRow ? settingsRow.data_residency_allowed_regions : null;
+      const allowCrossRegionProcessing = settingsRow ? Boolean(settingsRow.allow_cross_region_processing) : true;
 
     let effectiveDataRegion: string;
     try {
@@ -498,22 +520,35 @@ export function registerSiemRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "invalid_request" });
     }
 
-    const isEnabling = Boolean(enabled) && !Boolean(prevEnabled);
-    if (isEnabling) {
-      const incomingAuth = incomingConfig.auth;
-      if (incomingAuth?.type === "bearer" && incomingAuth.token === SECRET_MASK) {
-        return reply.code(400).send({ error: "invalid_request" });
+      const isEnabling = Boolean(enabled) && !Boolean(prevEnabled);
+      if (isEnabling) {
+        const incomingAuth = incomingConfig.auth;
+        if (!incomingAuth) {
+          // Enabling after SIEM was previously disabled requires re-supplying
+          // secrets (they are deleted when disabled). If an existing auth mode
+          // needs secrets, reject and force the client to include them.
+          const existingAuth = existingConfig?.auth;
+          if (existingAuth && existingAuth.type !== "none") {
+            return reply.code(400).send({ error: "invalid_request" });
+          }
+        } else {
+          if (incomingAuth.type === "bearer" && (!incomingAuth.token || incomingAuth.token === SECRET_MASK)) {
+            return reply.code(400).send({ error: "invalid_request" });
+          }
+          if (
+            incomingAuth.type === "basic" &&
+            (!incomingAuth.username ||
+              !incomingAuth.password ||
+              incomingAuth.username === SECRET_MASK ||
+              incomingAuth.password === SECRET_MASK)
+          ) {
+            return reply.code(400).send({ error: "invalid_request" });
+          }
+          if (incomingAuth.type === "header" && (!incomingAuth.value || incomingAuth.value === SECRET_MASK)) {
+            return reply.code(400).send({ error: "invalid_request" });
+          }
+        }
       }
-      if (
-        incomingAuth?.type === "basic" &&
-        (incomingAuth.username === SECRET_MASK || incomingAuth.password === SECRET_MASK)
-      ) {
-        return reply.code(400).send({ error: "invalid_request" });
-      }
-      if (incomingAuth?.type === "header" && incomingAuth.value === SECRET_MASK) {
-        return reply.code(400).send({ error: "invalid_request" });
-      }
-    }
 
     let storedAuth: SiemAuthConfig | undefined;
     try {
@@ -537,25 +572,25 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     const oldRefs = new Set(collectSecretRefsFromConfig(existingConfig));
     const newRefs = new Set(collectSecretRefsFromConfig(storedConfig));
 
-    await app.db.query(
-      `
-        INSERT INTO org_siem_configs (org_id, enabled, config)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (org_id)
-        DO UPDATE SET enabled = EXCLUDED.enabled, config = EXCLUDED.config, updated_at = now()
-      `,
-      [orgId, enabled, JSON.stringify(storedConfig)]
-    );
+      await app.db.query(
+        `
+          INSERT INTO org_siem_configs (org_id, enabled, config, created_by, updated_by)
+          VALUES ($1, $2, $3, $4, $4)
+          ON CONFLICT (org_id)
+          DO UPDATE SET enabled = EXCLUDED.enabled, config = EXCLUDED.config, updated_by = EXCLUDED.updated_by, updated_at = now()
+        `,
+        [orgId, enabled, JSON.stringify(storedConfig), request.user!.id]
+      );
 
-    if (!enabled) {
-      // Disabling SIEM should remove secrets from the store.
-      for (const name of oldRefs) await deleteSecret(app.db, name);
-      for (const name of newRefs) await deleteSecret(app.db, name);
-    } else {
-      for (const name of oldRefs) {
-        if (!newRefs.has(name)) await deleteSecret(app.db, name);
+      if (!enabled) {
+        // Disabling SIEM should remove secrets from the store.
+        const names = await listSecrets(app.db, `siem:${orgId}:`);
+        for (const name of names) await deleteSecret(app.db, name);
+      } else {
+        for (const name of oldRefs) {
+          if (!newRefs.has(name)) await deleteSecret(app.db, name);
+        }
       }
-    }
 
     const isAdd = Boolean(enabled) && !Boolean(prevEnabled);
     const isRemove = !Boolean(enabled) && Boolean(prevEnabled);
@@ -590,7 +625,11 @@ export function registerSiemRoutes(app: FastifyInstance): void {
       })
     );
 
-    return reply.send({ enabled, config: maskSecrets(storedConfig) });
+      return reply.send({
+        enabled,
+        config: sanitizeConfigForResponse(storedConfig),
+        secretConfigured: await secretConfigured(app.db, storedConfig)
+      });
     }
   );
 
@@ -598,43 +637,43 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     "/orgs/:orgId/siem",
     { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
     async (request, reply) => {
-    const orgId = (request.params as { orgId: string }).orgId;
-    const member = await requireOrgAdmin(request, reply, orgId);
-    if (!member) return;
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
-      return reply.code(403).send({ error: "mfa_required" });
-    }
+      const orgId = (request.params as { orgId: string }).orgId;
+      const member = await requireOrgAdmin(request, reply, orgId);
+      if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
-    const existingRes = await app.db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
-    if (existingRes.rowCount !== 1) return reply.code(404).send({ error: "siem_config_not_found" });
+      const existingRes = await app.db.query("SELECT 1 FROM org_siem_configs WHERE org_id = $1", [orgId]);
+      const existed = existingRes.rowCount === 1;
 
-    const existingRow = existingRes.rows[0] as { enabled: boolean; config: unknown };
-    const existingConfig = parseJsonValue(existingRow.config) as SiemEndpointConfig | null;
-    const oldRefs = new Set(collectSecretRefsFromConfig(existingConfig));
+      await app.db.query("DELETE FROM org_siem_configs WHERE org_id = $1", [orgId]);
 
-    await app.db.query("DELETE FROM org_siem_configs WHERE org_id = $1", [orgId]);
-    for (const name of oldRefs) await deleteSecret(app.db, name);
+      const names = await listSecrets(app.db, `siem:${orgId}:`);
+      for (const name of names) await deleteSecret(app.db, name);
 
-    await writeAuditEvent(
-      app.db,
-      createAuditEvent({
-        eventType: "admin.integration_removed",
-        actor: { type: "user", id: request.user!.id },
-        context: {
-          orgId,
-          userId: request.user!.id,
-          userEmail: request.user!.email,
-          sessionId: request.session?.id ?? null,
-          ipAddress: getClientIp(request),
-          userAgent: getUserAgent(request)
-        },
-        resource: { type: "integration", id: "siem", name: "siem" },
-        success: true,
-        details: { integration: "siem" }
-      })
-    );
+      if (existed) {
+        await writeAuditEvent(
+          app.db,
+          createAuditEvent({
+            eventType: "admin.integration_removed",
+            actor: { type: "user", id: request.user!.id },
+            context: {
+              orgId,
+              userId: request.user!.id,
+              userEmail: request.user!.email,
+              sessionId: request.session?.id ?? null,
+              ipAddress: getClientIp(request),
+              userAgent: getUserAgent(request)
+            },
+            resource: { type: "integration", id: "siem", name: "siem" },
+            success: true,
+            details: { integration: "siem" }
+          })
+        );
+      }
 
-    return reply.code(204).send();
+      return reply.code(204).send();
     }
   );
 }

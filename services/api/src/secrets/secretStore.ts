@@ -149,6 +149,10 @@ export async function getSecret(
   return decryptSecretValue(keyring, name, row.encrypted_value);
 }
 
+export async function secretExists(db: Queryable, name: string): Promise<boolean> {
+  const result = await db.query("SELECT 1 FROM secrets WHERE name = $1", [name]);
+  return (result.rowCount ?? 0) > 0;
+}
 export async function deleteSecret(db: Queryable, name: string): Promise<void> {
   await db.query("DELETE FROM secrets WHERE name = $1", [name]);
 }

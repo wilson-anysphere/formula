@@ -96,6 +96,10 @@ describe("SIEM config routes", () => {
       }
     });
     expect(putRes.statusCode).toBe(200);
+    const putBody = putRes.json() as any;
+    expect(putBody.enabled).toBe(true);
+    expect(putBody.secretConfigured).toBe(true);
+    expect(putBody.config.auth).toEqual({ type: "header", name: "Authorization" });
 
     const stored = await db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
     expect(stored.rowCount).toBe(1);
@@ -104,7 +108,7 @@ describe("SIEM config routes", () => {
     const rawConfig = JSON.stringify(stored.rows[0]!.config);
     expect(rawConfig).not.toContain(token);
 
-    const secretName = `siem:${orgId}:headerValue:authorization`;
+    const secretName = `siem:${orgId}:header_value`;
     const secretRow = await db.query("SELECT encrypted_value FROM secrets WHERE name = $1", [secretName]);
     expect(secretRow.rowCount).toBe(1);
     const encrypted = secretRow.rows[0]!.encrypted_value as string;
@@ -119,7 +123,8 @@ describe("SIEM config routes", () => {
     expect(getRes.statusCode).toBe(200);
     const getBody = getRes.json() as any;
     expect(getBody.enabled).toBe(true);
-    expect(getBody.config.auth).toEqual({ type: "header", name: "Authorization", value: "***" });
+    expect(getBody.secretConfigured).toBe(true);
+    expect(getBody.config.auth).toEqual({ type: "header", name: "Authorization" });
 
     const delRes = await app.inject({
       method: "DELETE",
@@ -132,5 +137,13 @@ describe("SIEM config routes", () => {
     expect(remainingConfig.rowCount).toBe(0);
     const remainingSecrets = await db.query("SELECT 1 FROM secrets WHERE name = $1", [secretName]);
     expect(remainingSecrets.rowCount).toBe(0);
+
+    const afterDelete = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgId}/siem`,
+      headers: { cookie }
+    });
+    expect(afterDelete.statusCode).toBe(200);
+    expect(afterDelete.json()).toEqual({ enabled: false, config: null, secretConfigured: false });
   });
 });

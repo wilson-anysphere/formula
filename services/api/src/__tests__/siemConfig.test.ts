@@ -68,7 +68,7 @@ describe("SIEM config", () => {
     await db.end();
   });
 
-  it("upserts a SIEM config, masks secrets on read, and deletes cleanly", async () => {
+  it("upserts a SIEM config, sanitizes secrets on read, and deletes cleanly", async () => {
     const register = await app.inject({
       method: "POST",
       url: "/auth/register",
@@ -97,13 +97,14 @@ describe("SIEM config", () => {
     expect(put.statusCode).toBe(200);
     const putBody = put.json() as any;
     expect(putBody.config.endpointUrl).toBe("https://example.invalid/ingest");
-    expect(putBody.config.auth.token).toBe("***");
+    expect(putBody.secretConfigured).toBe(true);
+    expect(putBody.config.auth).toEqual({ type: "bearer" });
 
     const stored = await db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
     expect(stored.rowCount).toBe(1);
     expect(stored.rows[0]!.enabled).toBe(true);
     const storedConfig = parsePgJson(stored.rows[0]!.config);
-    const secretName = `siem:${orgId}:bearerToken`;
+    const secretName = `siem:${orgId}:bearer_token`;
     expect(storedConfig.auth.token).toEqual({ secretRef: secretName });
 
     const secretRow = await db.query("SELECT encrypted_value FROM secrets WHERE name = $1", [secretName]);
@@ -117,7 +118,8 @@ describe("SIEM config", () => {
     });
     expect(get.statusCode).toBe(200);
     const getBody = get.json() as any;
-    expect(getBody.config.auth.token).toBe("***");
+    expect(getBody.secretConfigured).toBe(true);
+    expect(getBody.config.auth).toEqual({ type: "bearer" });
 
     const del = await app.inject({
       method: "DELETE",
@@ -131,7 +133,8 @@ describe("SIEM config", () => {
       url: `/orgs/${orgId}/siem`,
       headers: { cookie }
     });
-    expect(afterDelete.statusCode).toBe(404);
+    expect(afterDelete.statusCode).toBe(200);
+    expect(afterDelete.json()).toEqual({ enabled: false, config: null, secretConfigured: false });
 
     const audit = await db.query(
       "SELECT event_type FROM audit_log WHERE org_id = $1 AND event_type LIKE 'admin.integration_%'",
