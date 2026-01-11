@@ -1797,6 +1797,9 @@ impl Engine {
         if !bytecode_expr_is_eligible(&expr) {
             return None;
         }
+        if !bytecode_expr_within_grid_limits(&expr, origin) {
+            return None;
+        }
         Some(self.bytecode_cache.get_or_compile(&expr))
     }
 
@@ -3230,6 +3233,7 @@ pub trait ExternalValueProvider: Send + Sync {
 
 const EXCEL_MAX_ROWS_I32: i32 = 1_048_576;
 const EXCEL_MAX_COLS_I32: i32 = 16_384;
+const BYTECODE_MAX_RANGE_CELLS: i64 = 5_000_000;
 
 fn engine_error_to_bytecode(err: ErrorKind) -> bytecode::ErrorKind {
     match err {
@@ -3308,11 +3312,22 @@ fn slice_mode_for_program(program: &bytecode::Program) -> ColumnSliceMode {
 }
 
 #[derive(Debug, Clone)]
-struct BytecodeColumn {
+struct BytecodeColumnSegment {
     row_start: i32,
     values: Vec<f64>,
     blocked_rows_strict: Vec<i32>,
     blocked_rows_ignore_nonnumeric: Vec<i32>,
+}
+
+impl BytecodeColumnSegment {
+    fn row_end(&self) -> i32 {
+        self.row_start + self.values.len() as i32 - 1
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BytecodeColumn {
+    segments: Vec<BytecodeColumnSegment>,
 }
 
 #[derive(Debug)]
@@ -3326,10 +3341,10 @@ impl BytecodeColumnCache {
         snapshot: &Snapshot,
         tasks: &[(CellKey, CompiledFormula)],
     ) -> Self {
-        // Track the minimum and maximum row index needed for each column. This avoids allocating
-        // and scanning from row 0 when formulas reference small windows far down the sheet
-        // (e.g. `A900000:A900010`).
-        let mut row_bounds_by_col: Vec<HashMap<i32, (i32, i32)>> = vec![HashMap::new(); sheet_count];
+        // Collect row windows for each referenced column so the cache can build compact
+        // columnar buffers. This avoids allocating/scanning from row 0 (e.g. `A900000:A900010`),
+        // and also avoids spanning huge gaps when formulas reference multiple disjoint windows.
+        let mut row_ranges_by_col: Vec<HashMap<i32, Vec<(i32, i32)>>> = vec![HashMap::new(); sheet_count];
 
         for (key, compiled) in tasks {
             let CompiledFormula::Bytecode(bc) = compiled else {
@@ -3356,11 +3371,10 @@ impl BytecodeColumnCache {
                     continue;
                 }
                 for col in resolved.col_start..=resolved.col_end {
-                    let entry = row_bounds_by_col[key.sheet]
+                    row_ranges_by_col[key.sheet]
                         .entry(col)
-                        .or_insert((resolved.row_start, resolved.row_end));
-                    entry.0 = entry.0.min(resolved.row_start);
-                    entry.1 = entry.1.max(resolved.row_end);
+                        .or_default()
+                        .push((resolved.row_start, resolved.row_end));
                 }
             }
         }
@@ -3368,62 +3382,79 @@ impl BytecodeColumnCache {
         let mut by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::with_capacity(sheet_count);
         for sheet_id in 0..sheet_count {
             let mut cols: HashMap<i32, BytecodeColumn> = HashMap::new();
-            for (col, (min_row, max_row)) in row_bounds_by_col[sheet_id].iter() {
-                debug_assert!(*min_row >= 0);
-                debug_assert!(*max_row >= 0);
-                debug_assert!(*max_row >= *min_row);
-                let row_start = *min_row;
-                let row_end = *max_row;
-                let len = (row_end - row_start + 1) as usize;
-                let mut values: Vec<f64> = vec![f64::NAN; len];
-                let mut blocked_rows_strict: Vec<i32> = Vec::new();
-                let mut blocked_rows_ignore_nonnumeric: Vec<i32> = Vec::new();
+            for (col, ranges) in row_ranges_by_col[sheet_id].iter() {
+                let mut merged = ranges.clone();
+                merged.sort_unstable();
+
+                let mut segments: Vec<(i32, i32)> = Vec::new();
+                let mut cur_start = merged[0].0;
+                let mut cur_end = merged[0].1;
+                for &(row_start, row_end) in &merged[1..] {
+                    if row_start <= cur_end.saturating_add(1) {
+                        cur_end = cur_end.max(row_end);
+                    } else {
+                        segments.push((cur_start, cur_end));
+                        cur_start = row_start;
+                        cur_end = row_end;
+                    }
+                }
+                segments.push((cur_start, cur_end));
+
+                let mut col_segments: Vec<BytecodeColumnSegment> = Vec::with_capacity(segments.len());
 
                 let sheet_name = snapshot.sheet_names_by_id.get(sheet_id).map(String::as_str);
                 let provider = snapshot.external_value_provider.as_ref();
 
-                let mut apply_value = |value: &Value, row: i32| match value {
-                    Value::Number(n) => values[(row - row_start) as usize] = *n,
-                    Value::Blank => {}
-                    Value::Error(_) | Value::Array(_) | Value::Spill { .. } => {
-                        blocked_rows_strict.push(row);
-                        blocked_rows_ignore_nonnumeric.push(row);
-                    }
-                    Value::Bool(_) | Value::Text(_) => blocked_rows_strict.push(row),
-                };
+                for (row_start, row_end) in segments {
+                    debug_assert!(row_start >= 0);
+                    debug_assert!(row_end >= row_start);
+                    let len = (row_end - row_start + 1) as usize;
+                    let mut values: Vec<f64> = vec![f64::NAN; len];
+                    let mut blocked_rows_strict: Vec<i32> = Vec::new();
+                    let mut blocked_rows_ignore_nonnumeric: Vec<i32> = Vec::new();
 
-                for row in row_start..=row_end {
-                    let addr = CellAddr {
-                        row: row as u32,
-                        col: (*col) as u32,
+                    let mut apply_value = |value: &Value, row: i32| match value {
+                        Value::Number(n) => values[(row - row_start) as usize] = *n,
+                        Value::Blank => {}
+                        Value::Error(_) | Value::Array(_) | Value::Spill { .. } => {
+                            blocked_rows_strict.push(row);
+                            blocked_rows_ignore_nonnumeric.push(row);
+                        }
+                        Value::Bool(_) | Value::Text(_) => blocked_rows_strict.push(row),
                     };
-                    if let Some(v) = snapshot.values.get(&CellKey { sheet: sheet_id, addr }) {
-                        apply_value(v, row);
-                        continue;
-                    }
 
-                    if let (Some(provider), Some(sheet_name)) = (provider, sheet_name) {
-                        if let Some(v) = provider.get(sheet_name, addr) {
-                            apply_value(&v, row);
+                    for row in row_start..=row_end {
+                        let addr = CellAddr {
+                            row: row as u32,
+                            col: (*col) as u32,
+                        };
+                        if let Some(v) = snapshot.values.get(&CellKey { sheet: sheet_id, addr }) {
+                            apply_value(v, row);
+                            continue;
+                        }
+
+                        if let (Some(provider), Some(sheet_name)) = (provider, sheet_name) {
+                            if let Some(v) = provider.get(sheet_name, addr) {
+                                apply_value(&v, row);
+                            }
                         }
                     }
-                }
 
-                blocked_rows_strict.sort_unstable();
-                blocked_rows_strict.dedup();
+                    blocked_rows_strict.sort_unstable();
+                    blocked_rows_strict.dedup();
 
-                blocked_rows_ignore_nonnumeric.sort_unstable();
-                blocked_rows_ignore_nonnumeric.dedup();
+                    blocked_rows_ignore_nonnumeric.sort_unstable();
+                    blocked_rows_ignore_nonnumeric.dedup();
 
-                cols.insert(
-                    *col,
-                    BytecodeColumn {
+                    col_segments.push(BytecodeColumnSegment {
                         row_start,
                         values,
                         blocked_rows_strict,
                         blocked_rows_ignore_nonnumeric,
-                    },
-                );
+                    });
+                }
+
+                cols.insert(*col, BytecodeColumn { segments: col_segments });
             }
             by_sheet.push(cols);
         }
@@ -3489,22 +3520,28 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             return None;
         }
         let data = self.cols.get(&col)?;
+        let idx = data
+            .segments
+            .partition_point(|seg| seg.row_end() < row_start);
+        let seg = data.segments.get(idx)?;
+        if row_start < seg.row_start || row_end > seg.row_end() {
+            return None;
+        }
+
         let blocked_rows = match self.slice_mode {
-            ColumnSliceMode::StrictNumeric => &data.blocked_rows_strict,
-            ColumnSliceMode::IgnoreNonNumeric => &data.blocked_rows_ignore_nonnumeric,
+            ColumnSliceMode::StrictNumeric => &seg.blocked_rows_strict,
+            ColumnSliceMode::IgnoreNonNumeric => &seg.blocked_rows_ignore_nonnumeric,
         };
         if has_blocked_row(blocked_rows, row_start, row_end) {
             return None;
         }
-        if row_start < data.row_start {
+
+        let start = (row_start - seg.row_start) as usize;
+        let end = (row_end - seg.row_start) as usize;
+        if end >= seg.values.len() {
             return None;
         }
-        let start = (row_start - data.row_start) as usize;
-        let end = (row_end - data.row_start) as usize;
-        if end >= data.values.len() {
-            return None;
-        }
-        Some(&data.values[start..=end])
+        Some(&seg.values[start..=end])
     }
 
     fn bounds(&self) -> (i32, i32) {
@@ -3514,6 +3551,38 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
 
 fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
     bytecode_expr_is_eligible_inner(expr, false, false)
+}
+
+fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::CellCoord) -> bool {
+    match expr {
+        bytecode::Expr::Literal(_) => true,
+        bytecode::Expr::CellRef(r) => {
+            let coord = r.resolve(origin);
+            coord.row >= 0
+                && coord.col >= 0
+                && coord.row < EXCEL_MAX_ROWS_I32
+                && coord.col < EXCEL_MAX_COLS_I32
+        }
+        bytecode::Expr::RangeRef(r) => {
+            let resolved = r.resolve(origin);
+            if resolved.row_start < 0
+                || resolved.col_start < 0
+                || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                || resolved.col_end >= EXCEL_MAX_COLS_I32
+            {
+                return false;
+            }
+            let cells = (resolved.rows() as i64) * (resolved.cols() as i64);
+            cells <= BYTECODE_MAX_RANGE_CELLS
+        }
+        bytecode::Expr::Unary { expr, .. } => bytecode_expr_within_grid_limits(expr, origin),
+        bytecode::Expr::Binary { left, right, .. } => {
+            bytecode_expr_within_grid_limits(left, origin) && bytecode_expr_within_grid_limits(right, origin)
+        }
+        bytecode::Expr::FuncCall { args, .. } => args
+            .iter()
+            .all(|arg| bytecode_expr_within_grid_limits(arg, origin)),
+    }
 }
 
 fn bytecode_expr_is_eligible_inner(
@@ -4052,8 +4121,46 @@ mod tests {
         let col = column_cache.by_sheet[sheet_id]
             .get(&0)
             .expect("column A is cached");
-        assert_eq!(col.row_start, 899_999);
-        assert_eq!(col.values.len(), 11);
+        assert_eq!(col.segments.len(), 1);
+        let seg = &col.segments[0];
+        assert_eq!(seg.row_start, 899_999);
+        assert_eq!(seg.values.len(), 11);
+    }
+
+    #[test]
+    fn bytecode_column_cache_builds_disjoint_segments() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(A1:A10)+SUM(A900000:A900010)")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: parse_a1("B1").unwrap(),
+        };
+        let compiled = engine
+            .workbook
+            .get_cell(key)
+            .and_then(|c| c.compiled.clone())
+            .expect("compiled formula stored");
+
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            engine.external_value_provider.clone(),
+        );
+        let column_cache =
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+
+        let col = column_cache.by_sheet[sheet_id]
+            .get(&0)
+            .expect("column A is cached");
+        assert_eq!(col.segments.len(), 2);
+        assert_eq!(col.segments[0].row_start, 0);
+        assert_eq!(col.segments[0].values.len(), 10);
+        assert_eq!(col.segments[1].row_start, 899_999);
+        assert_eq!(col.segments[1].values.len(), 11);
     }
 
     #[test]
@@ -4090,6 +4197,18 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_compiler_skips_huge_ranges() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(A1:XFD1048576)")
+            .unwrap();
+
+        // Full-sheet ranges would require enormous columnar buffers; skip bytecode compilation
+        // so evaluation uses the AST engine's sparse range handling instead.
+        assert_eq!(engine.bytecode_program_count(), 0);
+    }
+
+    #[test]
     fn engine_bytecode_grid_column_slice_rejects_out_of_bounds_columns() {
         let mut engine = Engine::new();
         engine.ensure_sheet("Sheet1");
@@ -4104,10 +4223,12 @@ mod tests {
         cols.insert(
             EXCEL_MAX_COLS_I32,
             BytecodeColumn {
-                row_start: 0,
-                values: vec![1.0],
-                blocked_rows_strict: Vec::new(),
-                blocked_rows_ignore_nonnumeric: Vec::new(),
+                segments: vec![BytecodeColumnSegment {
+                    row_start: 0,
+                    values: vec![1.0],
+                    blocked_rows_strict: Vec::new(),
+                    blocked_rows_ignore_nonnumeric: Vec::new(),
+                }],
             },
         );
 

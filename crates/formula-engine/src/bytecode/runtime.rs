@@ -375,7 +375,10 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         match arg {
             Value::Number(_) => count += 1,
             Value::Array(a) => count += simd::count_ignore_nan_f64(&a.values),
-            Value::Range(r) => count += count_range(grid, r.resolve(base)),
+            Value::Range(r) => match count_range(grid, r.resolve(base)) {
+                Ok(c) => count += c,
+                Err(e) => return Value::Error(e),
+            },
             Value::Bool(_) | Value::Empty | Value::Error(_) | Value::Text(_) => {}
         }
     }
@@ -395,7 +398,10 @@ fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     };
     let count = match range {
-        RangeArg::Range(r) => count_if_range(grid, r.resolve(base), criteria),
+        RangeArg::Range(r) => match count_if_range(grid, r.resolve(base), criteria) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        },
         RangeArg::Array(a) => simd::count_if_f64(a.as_slice(), criteria),
     };
     Value::Number(count as f64)
@@ -459,7 +465,21 @@ fn parse_criteria_str(s: &str) -> Option<NumericCriteria> {
     Some(NumericCriteria::new(op, rhs))
 }
 
+#[inline]
+fn range_in_bounds(grid: &dyn Grid, range: ResolvedRange) -> bool {
+    grid.in_bounds(CellCoord {
+        row: range.row_start,
+        col: range.col_start,
+    }) && grid.in_bounds(CellCoord {
+        row: range.row_end,
+        col: range.col_end,
+    })
+}
+
 fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
     let mut sum = 0.0;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -483,6 +503,9 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
 }
 
 fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize), ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
     let mut sum = 0.0;
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
@@ -511,7 +534,10 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
     Ok((sum, count))
 }
 
-fn count_range(grid: &dyn Grid, range: ResolvedRange) -> usize {
+fn count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -524,10 +550,13 @@ fn count_range(grid: &dyn Grid, range: ResolvedRange) -> usize {
             }
         }
     }
-    count
+    Ok(count)
 }
 
 fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
         let col_min = if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -555,6 +584,9 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
 }
 
 fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
         let col_max = if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -581,7 +613,14 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     Ok(out)
 }
 
-fn count_if_range(grid: &dyn Grid, range: ResolvedRange, criteria: NumericCriteria) -> usize {
+fn count_if_range(
+    grid: &dyn Grid,
+    range: ResolvedRange,
+    criteria: NumericCriteria,
+) -> Result<usize, ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -596,7 +635,7 @@ fn count_if_range(grid: &dyn Grid, range: ResolvedRange, criteria: NumericCriter
             }
         }
     }
-    count
+    Ok(count)
 }
 
 fn coerce_sumproduct_number(v: Value) -> Result<f64, ErrorKind> {
@@ -611,6 +650,9 @@ fn coerce_sumproduct_number(v: Value) -> Result<f64, ErrorKind> {
 }
 
 fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Result<f64, ErrorKind> {
+    if !range_in_bounds(grid, a) || !range_in_bounds(grid, b) {
+        return Err(ErrorKind::Ref);
+    }
     if a.rows() != b.rows() || a.cols() != b.cols() {
         return Err(ErrorKind::Value);
     }
@@ -642,4 +684,33 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
         }
     }
     Ok(sum)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytecode::ColumnarGrid;
+
+    #[test]
+    fn range_aggregates_return_ref_for_out_of_bounds_ranges() {
+        let grid = ColumnarGrid::new(10, 10);
+
+        let range = ResolvedRange {
+            row_start: 0,
+            row_end: 20,
+            col_start: 0,
+            col_end: 0,
+        };
+
+        assert_eq!(sum_range(&grid, range), Err(ErrorKind::Ref));
+        assert_eq!(sum_count_range(&grid, range), Err(ErrorKind::Ref));
+        assert_eq!(count_range(&grid, range), Err(ErrorKind::Ref));
+
+        let criteria = NumericCriteria::new(CmpOp::Gt, 0.0);
+        assert_eq!(count_if_range(&grid, range, criteria), Err(ErrorKind::Ref));
+        assert_eq!(min_range(&grid, range), Err(ErrorKind::Ref));
+        assert_eq!(max_range(&grid, range), Err(ErrorKind::Ref));
+
+        assert_eq!(sumproduct_range(&grid, range, range), Err(ErrorKind::Ref));
+    }
 }
