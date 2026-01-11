@@ -247,18 +247,34 @@ impl Workbook {
     }
 
     pub fn recalculate(&mut self, sheet: Option<&str>) -> Result<Vec<CellChange>, WorkbookError> {
-        let sheet_name = sheet.unwrap_or(DEFAULT_SHEET);
+        match sheet {
+            Some(sheet_name) => self.recalculate_sheet(sheet_name),
+            None => {
+                let mut sheet_names: Vec<String> = self.sheets.keys().cloned().collect();
+                sheet_names.sort();
+
+                let mut changes = Vec::new();
+                for sheet_name in sheet_names {
+                    changes.extend(self.recalculate_sheet(&sheet_name)?);
+                }
+                Ok(changes)
+            }
+        }
+    }
+
+    fn recalculate_sheet(&mut self, sheet_name: &str) -> Result<Vec<CellChange>, WorkbookError> {
         let sheet = self
             .sheets
             .get(sheet_name)
             .ok_or_else(|| WorkbookError::MissingSheet(sheet_name.to_string()))?
             .clone();
 
-        let formula_coords: Vec<CellCoord> = sheet
+        let mut formula_coords: Vec<CellCoord> = sheet
             .cells
             .iter()
             .filter_map(|(coord, cell)| is_formula_input(&cell.input).then_some(*coord))
             .collect();
+        formula_coords.sort_by_key(|coord| (coord.row, coord.col));
 
         let mut ctx = EvalContext::default();
         let mut changes = Vec::new();
@@ -1541,6 +1557,23 @@ mod tests {
 
         wb.recalculate(None).unwrap();
         assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_REF));
+    }
+
+    #[test]
+    fn recalculate_without_sheet_updates_all_sheets() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!(1), Some("Sheet2")).unwrap();
+        wb.set_cell("A2", json!("=A1*2"), Some("Sheet2")).unwrap();
+
+        let changes = wb.recalculate(None).unwrap();
+
+        assert!(changes.contains(&CellChange {
+            sheet: "Sheet2".to_string(),
+            address: "A2".to_string(),
+            value: json!(2.0)
+        }));
+
+        assert_eq!(wb.get_cell("A2", Some("Sheet2")).unwrap().value, json!(2.0));
     }
 
     #[test]
