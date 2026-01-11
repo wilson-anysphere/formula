@@ -522,6 +522,16 @@ async function cleanupLegacyPowerQueryCache(dbName: string): Promise<void> {
   }
 }
 
+let legacyPowerQueryCacheCleanupPromise: Promise<void> | null = null;
+function scheduleLegacyPowerQueryCacheCleanup(dbName: string): void {
+  if (legacyPowerQueryCacheCleanupPromise) return;
+
+  legacyPowerQueryCacheCleanupPromise = cleanupLegacyPowerQueryCache(dbName).catch(() => {
+    // Allow retry after failures (best-effort).
+    legacyPowerQueryCacheCleanupPromise = null;
+  });
+}
+
 function createDefaultCacheManager(): CacheManager {
   // Keep Power Query caches bounded so long-lived desktop sessions don't accumulate
   // unbounded IndexedDB storage.
@@ -539,7 +549,7 @@ function createDefaultCacheManager(): CacheManager {
   const legacyDbName = "formula-power-query-cache";
   const dbName = "formula-power-query-cache-encrypted-v1";
 
-  cleanupLegacyPowerQueryCache(legacyDbName).catch(() => {});
+  scheduleLegacyPowerQueryCacheCleanup(legacyDbName);
 
   const underlyingStore = new IndexedDBCacheStore({ dbName });
   const store = hasTauriInvoke()
