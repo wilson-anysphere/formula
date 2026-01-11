@@ -45,6 +45,7 @@ COPY packages/security/crypto ./packages/security/crypto
 # Note: we copy its package.json so Node treats permissions/index.js as ESM.
 COPY packages/collab/permissions/package.json ./packages/collab/permissions/package.json
 COPY packages/collab/permissions/index.js ./packages/collab/permissions/index.js
+COPY packages/collab/permissions/index.d.ts ./packages/collab/permissions/index.d.ts
 
 WORKDIR /app/services/sync-server
 
@@ -79,6 +80,7 @@ COPY --from=build /app/packages/security/crypto /app/packages/security/crypto
 
 COPY --from=build /app/packages/collab/permissions/package.json /app/packages/collab/permissions/package.json
 COPY --from=build /app/packages/collab/permissions/index.js /app/packages/collab/permissions/index.js
+COPY --from=build /app/packages/collab/permissions/index.d.ts /app/packages/collab/permissions/index.d.ts
 
 # Default `SYNC_SERVER_DATA_DIR` resolves under this workdir.
 RUN mkdir -p /app/services/sync-server/.sync-server-data \
