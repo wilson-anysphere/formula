@@ -8,7 +8,7 @@ use crate::types::{
     canonical_json, CellData, CellSnapshot, CellValue, ImportModelWorkbookOptions, NamedRange,
     SheetMeta, SheetVisibility, Style as StorageStyle, WorkbookMeta,
 };
-use formula_model::{validate_sheet_name, ErrorValue, SheetNameError};
+use formula_model::{validate_sheet_name, DefinedName, DefinedNameScope, ErrorValue, SheetNameError};
 use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value as JsonValue};
@@ -456,6 +456,39 @@ impl Storage {
             }
         }
 
+        // Populate the legacy `named_ranges` table for compatibility with existing APIs.
+        //
+        // The canonical representation of defined names is stored in `workbooks.defined_names`,
+        // but callers that still use `Storage::{get_named_range, upsert_named_range}` expect
+        // `named_ranges` to reflect the workbook state.
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT INTO named_ranges (workbook_id, name, scope, reference)
+                VALUES (?1, ?2, ?3, ?4)
+                "#,
+            )?;
+            let workbook_id = workbook_meta.id.to_string();
+            for name in &workbook.defined_names {
+                let scope = match name.scope {
+                    DefinedNameScope::Workbook => "workbook".to_string(),
+                    DefinedNameScope::Sheet(sheet_id) => {
+                        let Some(sheet) = workbook.sheets.iter().find(|s| s.id == sheet_id) else {
+                            continue;
+                        };
+                        sheet.name.clone()
+                    }
+                };
+
+                stmt.execute(params![
+                    &workbook_id,
+                    &name.name,
+                    &scope,
+                    &name.refers_to
+                ])?;
+            }
+        }
+
         // Insert worksheets in the order they appear in the model workbook.
         let mut seen_names: Vec<String> = Vec::with_capacity(workbook.sheets.len());
         let mut model_sheet_to_storage: HashMap<u32, Uuid> = HashMap::new();
@@ -841,6 +874,12 @@ impl Storage {
         }
 
         model_workbook.sheets = worksheets;
+        merge_named_ranges_into_defined_names(
+            &conn,
+            workbook_id,
+            &model_workbook.sheets,
+            &mut model_workbook.defined_names,
+        )?;
         model_workbook.recompute_runtime_state();
         Ok(model_workbook)
     }
@@ -1049,6 +1088,12 @@ impl Storage {
             }
         }
 
+        // Update any sheet-scoped named ranges that use the sheet name as their scope identifier.
+        tx.execute(
+            "UPDATE named_ranges SET scope = ?1 WHERE workbook_id = ?2 AND scope = ?3 COLLATE NOCASE",
+            params![name, meta.workbook_id.to_string(), meta.name],
+        )?;
+
         tx.execute(
             "UPDATE sheets SET name = ?1 WHERE id = ?2",
             params![name, sheet_id.to_string()],
@@ -1147,6 +1192,11 @@ impl Storage {
 
         let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
 
+        // Remove sheet-scoped named ranges that use the sheet name as their scope identifier.
+        tx.execute(
+            "DELETE FROM named_ranges WHERE workbook_id = ?1 AND scope = ?2 COLLATE NOCASE",
+            params![meta.workbook_id.to_string(), meta.name],
+        )?;
         tx.execute(
             "DELETE FROM sheet_drawings WHERE sheet_id = ?1",
             params![sheet_id.to_string()],
@@ -1949,6 +1999,83 @@ fn worksheet_metadata_json(sheet: &formula_model::Worksheet) -> Result<Option<Js
     );
 
     Ok(Some(JsonValue::Object(map)))
+}
+
+fn normalize_refers_to(value: &str) -> String {
+    let trimmed = value.trim();
+    trimmed.strip_prefix('=').unwrap_or(trimmed).to_string()
+}
+
+fn canonical_sheet_name_key(name: &str) -> String {
+    name.nfkc().flat_map(|c| c.to_uppercase()).collect()
+}
+
+fn merge_named_ranges_into_defined_names(
+    conn: &Connection,
+    workbook_id: Uuid,
+    sheets: &[formula_model::Worksheet],
+    defined_names: &mut Vec<DefinedName>,
+) -> Result<()> {
+    let mut sheet_ids: HashMap<String, u32> = HashMap::new();
+    for sheet in sheets {
+        sheet_ids.insert(canonical_sheet_name_key(&sheet.name), sheet.id);
+    }
+
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT name, scope, reference
+        FROM named_ranges
+        WHERE workbook_id = ?1
+        ORDER BY scope COLLATE NOCASE, name COLLATE NOCASE
+        "#,
+    )?;
+    let mut rows = stmt.query(params![workbook_id.to_string()])?;
+
+    let mut next_id = defined_names
+        .iter()
+        .map(|n| n.id)
+        .max()
+        .unwrap_or(0)
+        .wrapping_add(1);
+
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(0)?;
+        let scope_raw: String = row.get(1)?;
+        let reference: String = row.get(2)?;
+
+        let scope = if scope_raw.eq_ignore_ascii_case("workbook") {
+            DefinedNameScope::Workbook
+        } else if let Some(sheet_id) = sheet_ids.get(&canonical_sheet_name_key(&scope_raw)).copied()
+        {
+            DefinedNameScope::Sheet(sheet_id)
+        } else {
+            // Unknown scope (likely stale sheet name) - skip rather than generating broken entries.
+            continue;
+        };
+
+        let refers_to = normalize_refers_to(&reference);
+
+        if let Some(existing) = defined_names
+            .iter_mut()
+            .find(|n| n.scope == scope && n.name.eq_ignore_ascii_case(&name))
+        {
+            existing.refers_to = refers_to;
+            continue;
+        }
+
+        defined_names.push(DefinedName {
+            id: next_id,
+            name,
+            scope,
+            refers_to,
+            comment: None,
+            hidden: false,
+            xlsx_local_sheet_id: None,
+        });
+        next_id = next_id.wrapping_add(1);
+    }
+
+    Ok(())
 }
 
 fn get_or_insert_style_component_tx(

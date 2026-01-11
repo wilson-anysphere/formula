@@ -275,6 +275,18 @@ fn model_workbook_import_export_round_trips() {
         .import_model_workbook(&workbook, ImportModelWorkbookOptions::new("ModelBook"))
         .expect("import workbook");
 
+    // Imported defined names should also be visible through the legacy named-ranges API.
+    let global = storage
+        .get_named_range(meta.id, "MyGlobalName", "workbook")
+        .expect("get named range")
+        .expect("global name exists");
+    assert_eq!(global.reference, "Data!$A$1");
+    let local = storage
+        .get_named_range(meta.id, "MyLocalName", "Äbc")
+        .expect("get named range")
+        .expect("local name exists");
+    assert_eq!(local.reference, "Data!$A$2");
+
     // Ensure legacy tab-color API overrides the richer tab_color_json persisted during import.
     let sheet_a_storage_id = storage
         .list_sheets(meta.id)
