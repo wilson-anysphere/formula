@@ -3,6 +3,9 @@
 import { beforeEach, expect, test } from "vitest";
 
 import { LocalStorageBinaryStorage } from "../src/store/binaryStorage.js";
+import { ensureTestLocalStorage } from "./testLocalStorage.js";
+
+ensureTestLocalStorage();
 
 function getTestLocalStorage(): Storage {
   // Vitest's jsdom environment exposes the actual JSDOM instance on `globalThis.jsdom`.

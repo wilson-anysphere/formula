@@ -302,7 +302,7 @@ sock = socket.create_connection(("127.0.0.1", ${address.port}), timeout=2)
           api: workbook,
           permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
         }),
-      ).rejects.toThrow(/Network access to '127\.0\.0\.1' is not permitted/);
+      ).rejects.toThrow(/Network access to ['"]?127\.0\.0\.1(?::\d+)?['"]? is not permitted/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

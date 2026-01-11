@@ -4,6 +4,9 @@ import { beforeEach, expect, test } from "vitest";
 
 import { LocalStorageBinaryStorage } from "../src/store/binaryStorage.js";
 import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
+import { ensureTestLocalStorage } from "./testLocalStorage.js";
+
+ensureTestLocalStorage();
 
 function getTestLocalStorage(): Storage {
   const jsdomStorage = (globalThis as any)?.jsdom?.window?.localStorage as Storage | undefined;
