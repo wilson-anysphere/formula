@@ -26,7 +26,7 @@ export interface CellStyle {
 export interface CellData {
   row: number;
   col: number;
-  value: string | number | null;
+  value: string | number | boolean | null;
   style?: CellStyle;
   /**
    * Optional comment metadata used for rendering a cell comment indicator.

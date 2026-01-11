@@ -1,4 +1,4 @@
-import type { CellProvider, CellProviderUpdate, CellRange } from "../model/CellProvider";
+import type { CellData, CellProvider, CellProviderUpdate, CellRange } from "../model/CellProvider";
 import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker";
 import { setupHiDpiCanvas } from "./HiDpiCanvas";
 import { LruCache } from "../utils/LruCache";
@@ -65,6 +65,20 @@ function pickTextColor(backgroundColor: string): string {
   if (!rgb) return "#ffffff";
   const luma = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
   return luma > 0.6 ? "#000000" : "#ffffff";
+}
+
+const DEFAULT_ERROR_TEXT_COLOR = "#cc0000";
+
+export function formatCellDisplayText(value: CellData["value"]): string {
+  if (value === null) return "";
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  return String(value);
+}
+
+function resolveCellTextColor(value: CellData["value"], explicitColor: string | undefined): string {
+  if (explicitColor !== undefined) return explicitColor;
+  if (typeof value === "string" && value.startsWith("#")) return DEFAULT_ERROR_TEXT_COLOR;
+  return "#111111";
 }
 
 export class CanvasGridRenderer {
@@ -971,13 +985,13 @@ export class CanvasGridRenderer {
             currentFont = font;
           }
 
-          const fillStyle = style?.color ?? "#111111";
+          const fillStyle = resolveCellTextColor(cell.value, style?.color);
           if (fillStyle !== currentFillStyle) {
             ctx.fillStyle = fillStyle;
             currentFillStyle = fillStyle;
           }
 
-          const formattedKey = `${cell.value}`;
+          const formattedKey = formatCellDisplayText(cell.value);
           let text = this.formattedCache.get(formattedKey);
           if (text === undefined) {
             text = formattedKey;
