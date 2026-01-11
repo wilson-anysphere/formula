@@ -5,7 +5,7 @@ use formula_model::{
 #[test]
 fn default_print_settings_exist_for_sheet() {
     let mut wb = Workbook::new();
-    let sheet_id = wb.add_sheet("Sheet1");
+    let sheet_id = wb.add_sheet("Sheet1").unwrap();
 
     let settings = wb.sheet_print_settings(sheet_id);
     assert_eq!(settings.sheet_name, "Sheet1");
@@ -18,8 +18,8 @@ fn default_print_settings_exist_for_sheet() {
 #[test]
 fn setting_and_clearing_print_area_is_deterministic() {
     let mut wb = Workbook::new();
-    let sheet1 = wb.add_sheet("Sheet1");
-    let sheet2 = wb.add_sheet("Sheet2");
+    let sheet1 = wb.add_sheet("Sheet1").unwrap();
+    let sheet2 = wb.add_sheet("Sheet2").unwrap();
 
     let area1 = vec![Range::new(CellRef::new(0, 0), CellRef::new(1, 1))];
     let area2 = vec![Range::new(CellRef::new(2, 2), CellRef::new(3, 3))];
@@ -43,7 +43,7 @@ fn setting_and_clearing_print_area_is_deterministic() {
 #[test]
 fn print_settings_roundtrip_through_serde() {
     let mut wb = Workbook::new();
-    let sheet_id = wb.add_sheet("Sheet1");
+    let sheet_id = wb.add_sheet("Sheet1").unwrap();
 
     let print_area = vec![Range::from_a1("B2:C3").unwrap()];
     assert!(wb.set_sheet_print_area(sheet_id, Some(print_area)));
