@@ -52,7 +52,12 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
       const seen = new Set<string>();
       const deleteIndices: number[] = [];
 
-      for (let i = 0; i < sheets.length; i++) {
+      // When duplicates exist, prefer keeping the *last* occurrence. This is
+      // important when a client locally initializes a default Sheet1 while a
+      // sync provider is still asynchronously hydrating persisted state: the
+      // later (remote/persisted) entry typically reflects the canonical order
+      // and any subsequent reordering ops.
+      for (let i = sheets.length - 1; i >= 0; i--) {
         const entry = sheets.get(i) as any;
         const id = coerceString(entry?.get?.("id") ?? entry?.id);
         if (!id) continue;
@@ -63,8 +68,8 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
         seen.add(id);
       }
 
-      for (let i = deleteIndices.length - 1; i >= 0; i--) {
-        sheets.delete(deleteIndices[i], 1);
+      for (const index of deleteIndices) {
+        sheets.delete(index, 1);
       }
 
       if (createDefaultSheet && sheets.length === 0) {

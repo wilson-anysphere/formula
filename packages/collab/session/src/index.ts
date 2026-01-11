@@ -348,6 +348,8 @@ export class CollabSession {
       throw new Error("CollabSession cannot be constructed with both `connection` and `provider` options");
     }
 
+    let onOfflineLoaded: (() => void) | null = null;
+
     const offlineEnabled = options.offline != null;
     const offlineAutoLoad = options.offline?.autoLoad ?? true;
     const offlineAutoConnectAfterLoad =
@@ -381,8 +383,12 @@ export class CollabSession {
       const state = {
         isLoaded: false,
         whenLoaded: async () => {
-          await handle.whenLoaded();
-          state.isLoaded = true;
+          try {
+            await handle.whenLoaded();
+          } finally {
+            state.isLoaded = true;
+            onOfflineLoaded?.();
+          }
         },
         destroy: () => handle.destroy(),
         clear: () => handle.clear(),
@@ -441,9 +447,15 @@ export class CollabSession {
         providerSynced = Boolean(provider.synced);
       }
 
-      // When offline persistence is enabled, schema initialization must wait for
-      // offline state to load to avoid creating default sheets that race with
-      // persisted document state.
+      // When offline persistence is enabled and configured to auto-load (or
+      // auto-connect after loading), schema initialization must wait for offline
+      // state to load to avoid creating default sheets that race with persisted
+      // document state.
+      //
+      // Note: we *do not* trigger offline hydration here. When `offline.autoLoad`
+      // is false, callers must call `session.offline.whenLoaded()` themselves.
+      // We still wait for that load to complete before creating the default
+      // sheet, otherwise we'd race with persisted state.
       const shouldWaitForOffline = this.offline != null;
       let offlineReady = !shouldWaitForOffline;
 
@@ -489,15 +501,16 @@ export class CollabSession {
       };
 
       if (shouldWaitForOffline) {
-        void this.offline!
-          .whenLoaded()
-          .catch(() => {
-            // Schema init should still run even if offline persistence fails to load.
-          })
-          .then(() => {
-            offlineReady = true;
-            ensureSchema();
-          });
+        const markOfflineReady = () => {
+          if (offlineReady) return;
+          offlineReady = true;
+          onOfflineLoaded = null;
+          ensureSchema();
+        };
+
+        onOfflineLoaded = markOfflineReady;
+        // Handle the case where offline finished loading before we registered the callback.
+        if (this.offline!.isLoaded) markOfflineReady();
       }
 
       // Keep the sheets array well-formed over time (e.g. remove duplicate ids).

@@ -8,6 +8,8 @@ import {
 } from "../encryption/src/index.node.js";
 import { maskCellValue as defaultMaskCellValue } from "../permissions/index.js";
 
+const MASKED_CELL_VALUE = "###";
+
 function stableStringify(value) {
   if (value === undefined) return "undefined";
   if (value == null || typeof value !== "object") return JSON.stringify(value);

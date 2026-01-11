@@ -248,6 +248,11 @@ export class FilePersistence {
       })
       .then(task);
     this.queues.set(docName, next);
+    void next.finally(() => {
+      if (this.queues.get(docName) === next) {
+        this.queues.delete(docName);
+      }
+    });
     return next;
   }
 
@@ -406,11 +411,9 @@ export class FilePersistence {
     }
     this.compactTimers.clear();
 
-    while (true) {
-      const snapshot = Array.from(this.queues.entries());
-      await Promise.allSettled(snapshot.map(([, pending]) => pending));
-      const hasNewer = snapshot.some(([docName, pending]) => this.queues.get(docName) !== pending);
-      if (!hasNewer) return;
+    while (this.queues.size > 0) {
+      const pending = Array.from(this.queues.values());
+      await Promise.allSettled(pending);
     }
   }
 
