@@ -3656,10 +3656,9 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_id(&self, name: &str) -> Option<usize> {
-        let needle = name.trim();
         self.sheet_names_by_id
             .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(needle))
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {

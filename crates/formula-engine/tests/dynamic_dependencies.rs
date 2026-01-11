@@ -216,3 +216,16 @@ fn indirect_dependency_switching_updates_graph_edges() {
         }]
     );
 }
+
+#[test]
+fn indirect_resolves_sheet_names_with_trailing_spaces() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1 ", "A1", 42.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=INDIRECT(\"'Sheet1 '!A1\")")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(42.0));
+}
