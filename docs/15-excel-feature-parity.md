@@ -281,12 +281,12 @@ This document tracks every Excel feature and our implementation status. Features
 | F.TEST | ⬜ | |
 | FISHER | ⬜ | |
 | FISHERINV | ⬜ | |
-| FORECAST | ⬜ | |
+| FORECAST | ✅ | |
 | FORECAST.ETS | ⬜ | |
 | FORECAST.ETS.CONFINT | ⬜ | |
 | FORECAST.ETS.SEASONALITY | ⬜ | |
 | FORECAST.ETS.STAT | ⬜ | |
-| FORECAST.LINEAR | ⬜ | |
+| FORECAST.LINEAR | ✅ | |
 | FREQUENCY | ⬜ | Array function |
 | GAMMA | ⬜ | |
 | GAMMA.DIST | ⬜ | |

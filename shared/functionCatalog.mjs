@@ -627,6 +627,30 @@ export default {
       ]
     },
     {
+      "name": "FORECAST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "FORECAST.LINEAR",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "FV",
       "min_args": 3,
       "max_args": 5,

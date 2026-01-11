@@ -129,6 +129,14 @@ fn rsq_slope_and_intercept_match_simple_regression() {
 }
 
 #[test]
+fn forecast_linear_matches_identity_relationship() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=FORECAST(4,{1,2,3},{1,2,3})"), 4.0);
+    assert_number(&sheet.eval("=FORECAST.LINEAR(4,{1,2,3},{1,2,3})"), 4.0);
+    assert_number(&sheet.eval("=_xlfn.FORECAST.LINEAR(4,{1,2,3},{1,2,3})"), 4.0);
+}
+
+#[test]
 fn var_s_ignores_text_and_logicals_in_references() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

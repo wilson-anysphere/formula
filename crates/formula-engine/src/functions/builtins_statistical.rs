@@ -1234,6 +1234,70 @@ fn intercept_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "FORECAST",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Any, ValueType::Any],
+        implementation: forecast_linear_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "FORECAST.LINEAR",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Any, ValueType::Any],
+        implementation: forecast_linear_fn,
+    }
+}
+
+fn forecast_linear_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    // Excel signature: FORECAST(x, known_y's, known_x's)
+    let x = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    // `collect_numeric_pairs` returns (xs, ys), so swap known_x / known_y.
+    let (xs, ys) = match collect_numeric_pairs(ctx, &args[2], &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let slope = match crate::functions::statistical::slope(&xs, &ys) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let n = xs.len() as f64;
+    if n == 0.0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    let mean_x = xs.iter().sum::<f64>() / n;
+    let mean_y = ys.iter().sum::<f64>() / n;
+    if !mean_x.is_finite() || !mean_y.is_finite() {
+        return Value::Error(ErrorKind::Num);
+    }
+    let intercept = mean_y - slope * mean_x;
+    let out = intercept + slope * x;
+    if out.is_finite() {
+        Value::Number(out)
+    } else {
+        Value::Error(ErrorKind::Num)
+    }
+}
+
 fn correl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let (xs, ys) = match collect_numeric_pairs(ctx, &args[0], &args[1]) {
         Ok(v) => v,
