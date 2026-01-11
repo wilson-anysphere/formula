@@ -37,13 +37,21 @@
  * }} ChatResponse
  *
  * @typedef {{
+ *   // Streamed text delta. Consumers should append `delta` to reconstruct the
+ *   // assistant text for the current model call.
  *   type: "text",
  *   delta: string
  * } | {
+ *   // Tool call start. Some providers only provide a final tool call id late
+ *   // in the stream; clients may synthesize ids (e.g. `toolcall-0`) so tool
+ *   // results can still be attached as `role: "tool"` messages.
  *   type: "tool_call_start",
  *   id: string,
  *   name: string
  * } | {
+ *   // Incremental tool call arguments. Providers are inconsistent: some stream
+ *   // true deltas, others repeat the full argument string. Client
+ *   // implementations should normalize to emitting only incremental suffixes.
  *   type: "tool_call_delta",
  *   id: string,
  *   delta: string
