@@ -204,7 +204,7 @@ fn recalculate_orders_changes_by_row_col_within_sheet() {
 }
 
 #[wasm_bindgen_test]
-fn recalculate_filters_changes_by_sheet_argument_case_insensitive() {
+fn recalculate_does_not_filter_changes_by_sheet_argument() {
     let mut wb = WasmWorkbook::new();
 
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
@@ -220,7 +220,7 @@ fn recalculate_filters_changes_by_sheet_argument_case_insensitive() {
     wb.recalculate(None).unwrap();
 
     // Dirty both sheets, then request a sheet-scoped recalc. The returned changes should still
-    // be filtered to the requested sheet name (case-insensitive).
+    // include all sheets so the JS cache remains coherent across sheet switches.
     wb.set_cell("A1".to_string(), JsValue::from_f64(2.0), None)
         .unwrap();
     wb.set_cell("A1".to_string(), JsValue::from_f64(11.0), Some("Sheet2".to_string()))
@@ -228,18 +228,21 @@ fn recalculate_filters_changes_by_sheet_argument_case_insensitive() {
 
     let changes_js = wb.recalculate(Some("sHeEt1".to_string())).unwrap();
     let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
-    assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].sheet, DEFAULT_SHEET);
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0].sheet, "Sheet1");
     assert_eq!(changes[0].address, "A2");
     assert_json_number(&changes[0].value, 4.0);
+    assert_eq!(changes[1].sheet, "Sheet2");
+    assert_eq!(changes[1].address, "A2");
+    assert_json_number(&changes[1].value, 22.0);
 }
 
 #[wasm_bindgen_test]
-fn recalculate_errors_on_missing_sheet_argument() {
+fn recalculate_ignores_unknown_sheet_argument() {
     let mut wb = WasmWorkbook::new();
-    let err = wb.recalculate(Some("MissingSheet".to_string())).unwrap_err();
-    let msg = err.as_string().unwrap_or_default();
-    assert!(msg.contains("missing sheet"), "unexpected error: {msg}");
+    let changes_js = wb.recalculate(Some("MissingSheet".to_string())).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert!(changes.is_empty());
 }
 
 #[wasm_bindgen_test]
