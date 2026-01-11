@@ -221,7 +221,49 @@ fn cache_parts_by_id(package: &XlsxPackage) -> Result<HashMap<u32, CacheParts>, 
         );
     }
 
+    // Fallback for malformed workbooks: if `workbook.xml` omits `<pivotCaches>` (or the workbook
+    // `.rels` is incomplete), attempt to resolve cache parts using the common `...DefinitionN.xml`
+    // / `...RecordsN.xml` naming convention where `N` matches `cacheId`.
+    for part_name in package
+        .part_names()
+        .filter(|name| name.starts_with("xl/pivotCache/") && name.ends_with(".xml"))
+    {
+        let Some(cache_id) = cache_id_from_pivot_cache_definition_part(part_name) else {
+            continue;
+        };
+        caches.entry(cache_id).or_insert_with(|| CacheParts {
+            definition_part: Some(part_name.to_string()),
+            records_part: package
+                .part(&format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml"))
+                .map(|_| format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml")),
+        });
+    }
+
+    for (cache_id, parts) in caches.iter_mut() {
+        if parts.definition_part.is_none() {
+            let guess = format!("xl/pivotCache/pivotCacheDefinition{cache_id}.xml");
+            if package.part(&guess).is_some() {
+                parts.definition_part = Some(guess);
+            }
+        }
+
+        if parts.records_part.is_none() {
+            let guess = format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml");
+            if package.part(&guess).is_some() {
+                parts.records_part = Some(guess);
+            }
+        }
+    }
+
     Ok(caches)
+}
+
+fn cache_id_from_pivot_cache_definition_part(part_name: &str) -> Option<u32> {
+    let file = part_name.rsplit('/').next()?;
+    let digits = file
+        .strip_prefix("pivotCacheDefinition")?
+        .strip_suffix(".xml")?;
+    digits.parse::<u32>().ok()
 }
 
 fn cache_records_part(

@@ -49,6 +49,32 @@ fn includes_pivot_table_even_without_cache_id() {
     assert_eq!(table.cache_records_part, None);
 }
 
+#[test]
+fn resolves_cache_parts_by_filename_when_workbook_omits_pivot_caches() {
+    // This fixture is intentionally missing `workbook.xml` pivotCaches and any relevant `.rels`
+    // entries, but still contains `pivotCacheDefinition1.xml` + `pivotCacheRecords1.xml`. We
+    // should still resolve the cache parts by the common `...Definition{cacheId}.xml` pattern.
+    let fixture = include_bytes!("fixtures/pivot-fixture.xlsx");
+    let pkg = XlsxPackage::from_bytes(fixture).expect("read fixture");
+
+    let graph = pkg.pivot_graph().expect("resolve pivot graph");
+    assert_eq!(graph.pivot_tables.len(), 1);
+
+    let table = &graph.pivot_tables[0];
+    assert_eq!(table.pivot_table_part, "xl/pivotTables/pivotTable1.xml");
+    assert_eq!(table.sheet_part, None);
+    assert_eq!(table.sheet_name, None);
+    assert_eq!(table.cache_id, Some(1));
+    assert_eq!(
+        table.cache_definition_part.as_deref(),
+        Some("xl/pivotCache/pivotCacheDefinition1.xml")
+    );
+    assert_eq!(
+        table.cache_records_part.as_deref(),
+        Some("xl/pivotCache/pivotCacheRecords1.xml")
+    );
+}
+
 fn build_synthetic_pivot_package() -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
