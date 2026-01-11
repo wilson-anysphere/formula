@@ -14,6 +14,8 @@ import type { DesktopPowerQueryEvent } from "./refresh.ts";
 // events as an opaque payload and primarily use their `type` + `job` fields.
 type RefreshGraphEvent = any;
 
+export type DesktopPowerQueryRefreshReason = "manual" | "interval" | "on-open" | "cron";
+
 export type DesktopPowerQueryRefreshAllOptions = {
   engine: QueryEngine;
   document: DocumentController;
@@ -178,7 +180,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
     this.orchestrator.unregisterQuery(queryId);
   }
 
-  refreshAll(queryIds?: string[], reason: any = "manual"): DesktopPowerQueryRefreshAllHandle {
+  refreshAll(queryIds?: string[], reason: DesktopPowerQueryRefreshReason = "manual"): DesktopPowerQueryRefreshAllHandle {
     const handle = this.orchestrator.refreshAll(queryIds, reason);
     const sessionId = handle.sessionId;
 
