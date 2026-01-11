@@ -1,0 +1,23 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "database",
+    "connection": {
+      "kind": "odbc",
+      "connectionString": "Driver={PostgreSQL Unicode};Server=db.example.com;Port=5432;Database=analytics;Uid=alice;"
+    },
+    "query": "select * from sales",
+    "dialect": "postgres"
+  },
+  "steps": [
+    {
+      "id": "s1_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["Region"]
+      }
+    }
+  ]
+}

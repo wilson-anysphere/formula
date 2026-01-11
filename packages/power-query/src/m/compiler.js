@@ -372,8 +372,17 @@ function compileSourceFunctionCall(ctx, name, expr) {
       if (!connExpr || !queryExpr) ctx.error(expr, "Odbc.Query requires (connectionString, query)");
       const connectionString = expectText(ctx, connExpr);
       const query = expectText(ctx, queryExpr);
+      let dialect = undefined;
+      try {
+        const match = connectionString.match(/\bdriver\s*=\s*\{?([^;}]*)\}?/i);
+        const driver = match?.[1] ? String(match[1]).toLowerCase() : "";
+        if (driver.includes("postgres")) dialect = "postgres";
+        else if (driver.includes("sqlite")) dialect = "sqlite";
+      } catch {
+        // ignore
+      }
       /** @type {QuerySource} */
-      const source = { type: "database", connection: { kind: "odbc", connectionString }, query };
+      const source = { type: "database", connection: { kind: "odbc", connectionString }, query, ...(dialect ? { dialect } : {}) };
       return { source, steps: [], schema: null };
     }
     case "PostgreSQL.Database": {
