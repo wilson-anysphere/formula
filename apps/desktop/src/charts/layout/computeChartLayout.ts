@@ -143,6 +143,7 @@ export function computeChartLayout(
     let y = legendRect.y + LEGEND_PADDING_PX;
     for (let i = 0; i < entriesText.length; i += 1) {
       const label = entriesText[i];
+      const color = theme.palette[i % theme.palette.length] ?? theme.palette[0] ?? "currentColor";
       const markerRect: Rect = {
         x: legendRect.x + LEGEND_PADDING_PX,
         y: round(y + (legendLineHeight - LEGEND_MARKER_SIZE_PX) / 2),
@@ -159,7 +160,7 @@ export function computeChartLayout(
         height: round(legendLineHeight),
       };
 
-      entries.push({ seriesIndex: i, label, markerRect, labelRect });
+      entries.push({ seriesIndex: i, label, color, markerRect, labelRect });
       y += legendLineHeight + LEGEND_ENTRY_GAP_PX;
     }
 

@@ -27,6 +27,13 @@ export interface ChartTheme {
     axis: FontSpec;
     legend: FontSpec;
   };
+  /**
+   * Resolved series palette (index = series order).
+   *
+   * v1 layout does not depend on colors, but we carry it through so renderers
+   * can use the same resolved palette for legend markers / series styling.
+   */
+  palette: string[];
 }
 
 export type ChartKind = "bar" | "line" | "pie" | "scatter" | "unknown";
@@ -123,6 +130,7 @@ export interface TextBlockLayout {
 export interface LegendEntryLayout {
   seriesIndex: number;
   label: string;
+  color: string;
   markerRect: Rect;
   labelRect: Rect;
 }
