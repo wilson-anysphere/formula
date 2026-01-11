@@ -3,6 +3,7 @@ use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
 
+pub mod charts;
 mod preserve;
 
 pub use preserve::{PreservedDrawingParts, SheetDrawingRelationship};
@@ -19,8 +20,8 @@ pub fn extract_chart_refs(
 ) -> Result<Vec<DrawingChartRef>, ChartExtractionError> {
     let xml = std::str::from_utf8(drawing_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
-    let doc =
-        Document::parse(xml).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc = Document::parse(xml)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
 
     let mut out = Vec::new();
     for anchor in doc.descendants().filter(|n| n.is_element()) {

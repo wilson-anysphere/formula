@@ -1,0 +1,186 @@
+use formula_model::drawings::{Anchor, AnchorPoint, CellOffset, EmuSize};
+use formula_model::CellRef;
+use roxmltree::Document;
+
+use crate::workbook::ChartExtractionError;
+
+const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpcPart {
+    pub path: String,
+    pub rels_path: Option<String>,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChartParts {
+    pub chart: OpcPart,
+    pub chart_ex: Option<OpcPart>,
+    pub style: Option<OpcPart>,
+    pub colors: Option<OpcPart>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChartObject {
+    pub sheet_name: Option<String>,
+    pub sheet_part: Option<String>,
+    pub drawing_part: String,
+    pub anchor: Anchor,
+    /// Raw XML for the `<xdr:graphicFrame>` subtree inside the drawing part.
+    pub drawing_frame_xml: String,
+    pub parts: ChartParts,
+    pub diagnostics: Vec<ChartDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChartDiagnostic {
+    pub severity: ChartDiagnosticSeverity,
+    pub message: String,
+    pub part: Option<String>,
+    pub xpath: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartDiagnosticSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DrawingChartObjectRef {
+    pub rel_id: String,
+    pub anchor: Anchor,
+    pub drawing_frame_xml: String,
+}
+
+pub(crate) fn extract_chart_object_refs(
+    drawing_xml: &[u8],
+    part_name: &str,
+) -> Result<Vec<DrawingChartObjectRef>, ChartExtractionError> {
+    let xml = std::str::from_utf8(drawing_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
+    let doc = Document::parse(xml)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+
+    let mut out = Vec::new();
+    for anchor in doc.descendants().filter(|n| n.is_element()) {
+        let anchor_kind = anchor.tag_name().name();
+        if anchor_kind != "twoCellAnchor"
+            && anchor_kind != "absoluteAnchor"
+            && anchor_kind != "oneCellAnchor"
+        {
+            continue;
+        }
+
+        let Some(anchor_model) = parse_anchor(&anchor) else {
+            continue;
+        };
+
+        for frame in anchor
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
+        {
+            let Some(chart) = frame
+                .descendants()
+                .find(|n| n.is_element() && n.tag_name().name() == "chart")
+            else {
+                continue;
+            };
+            let Some(rel_id) = chart
+                .attribute((REL_NS, "id"))
+                .or_else(|| chart.attribute("r:id"))
+                .or_else(|| chart.attribute("id"))
+            else {
+                continue;
+            };
+
+            let frame_xml = slice_node_xml(&frame, xml).unwrap_or_default();
+            out.push(DrawingChartObjectRef {
+                rel_id: rel_id.to_string(),
+                anchor: anchor_model,
+                drawing_frame_xml: frame_xml,
+            });
+        }
+    }
+
+    Ok(out)
+}
+
+fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
+    match anchor.tag_name().name() {
+        "absoluteAnchor" => {
+            let pos = anchor
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "pos")?;
+            let ext = anchor
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
+
+            Some(Anchor::Absolute {
+                pos: CellOffset::new(
+                    pos.attribute("x")?.parse().ok()?,
+                    pos.attribute("y")?.parse().ok()?,
+                ),
+                ext: EmuSize::new(
+                    ext.attribute("cx")?.parse().ok()?,
+                    ext.attribute("cy")?.parse().ok()?,
+                ),
+            })
+        }
+        "oneCellAnchor" => {
+            let from = anchor
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "from")?;
+            let ext = anchor
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
+
+            Some(Anchor::OneCell {
+                from: parse_anchor_point(&from)?,
+                ext: EmuSize::new(
+                    ext.attribute("cx")?.parse().ok()?,
+                    ext.attribute("cy")?.parse().ok()?,
+                ),
+            })
+        }
+        "twoCellAnchor" => {
+            let from = anchor
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "from")?;
+            let to = anchor
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "to")?;
+
+            Some(Anchor::TwoCell {
+                from: parse_anchor_point(&from)?,
+                to: parse_anchor_point(&to)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_anchor_point(node: &roxmltree::Node<'_, '_>) -> Option<AnchorPoint> {
+    let col: u32 = descendant_text(*node, "col")?.trim().parse().ok()?;
+    let row: u32 = descendant_text(*node, "row")?.trim().parse().ok()?;
+    let col_off: i64 = descendant_text(*node, "colOff")?.trim().parse().ok()?;
+    let row_off: i64 = descendant_text(*node, "rowOff")?.trim().parse().ok()?;
+
+    Some(AnchorPoint::new(
+        CellRef::new(row, col),
+        CellOffset::new(col_off, row_off),
+    ))
+}
+
+fn descendant_text<'a>(node: roxmltree::Node<'a, 'a>, tag: &str) -> Option<&'a str> {
+    node.children()
+        .find(|n| n.is_element() && n.tag_name().name() == tag)
+        .and_then(|n| n.text())
+}
+
+fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
+    let range = node.range();
+    doc.get(range).map(|s| s.to_string())
+}

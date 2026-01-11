@@ -4,6 +4,10 @@ use formula_model::charts::{Chart, ChartType};
 use roxmltree::Document;
 
 use crate::charts::parse_chart;
+use crate::drawingml::charts::{
+    extract_chart_object_refs, ChartDiagnostic, ChartDiagnosticSeverity, ChartObject, ChartParts,
+    OpcPart,
+};
 use crate::drawingml::extract_chart_refs;
 use crate::package::XlsxPackage;
 use crate::path::{rels_for_part, resolve_target};
@@ -98,6 +102,198 @@ impl XlsxPackage {
         Ok(charts)
     }
 
+    pub fn extract_chart_objects(&self) -> Result<Vec<ChartObject>, ChartExtractionError> {
+        let drawing_to_sheet = self.drawing_to_sheet_map().unwrap_or_default();
+        let mut chart_objects = Vec::new();
+
+        for drawing_part in self
+            .part_names()
+            .filter(|name| name.starts_with("xl/drawings/drawing") && name.ends_with(".xml"))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        {
+            let sheet_info = drawing_to_sheet.get(&drawing_part);
+            let sheet_name = sheet_info.map(|info| info.name.clone());
+            let sheet_part = sheet_info.and_then(|info| info.part.clone());
+
+            let drawing_xml = match self.part(&drawing_part) {
+                Some(bytes) => bytes,
+                None => continue,
+            };
+
+            let drawing_chart_refs = extract_chart_object_refs(drawing_xml, &drawing_part)?;
+            if drawing_chart_refs.is_empty() {
+                continue;
+            }
+
+            let drawing_rels_part = rels_for_part(&drawing_part);
+            let drawing_rel_map = match self.part(&drawing_rels_part) {
+                Some(xml) => parse_relationships(xml, &drawing_rels_part)?
+                    .into_iter()
+                    .map(|r| (r.id.clone(), r))
+                    .collect::<HashMap<_, _>>(),
+                None => HashMap::new(),
+            };
+
+            for drawing_ref in drawing_chart_refs {
+                let mut diagnostics = Vec::new();
+
+                let chart_part_path = match drawing_rel_map.get(&drawing_ref.rel_id) {
+                    Some(rel) => resolve_target(&drawing_part, &rel.target),
+                    None => {
+                        diagnostics.push(ChartDiagnostic {
+                            severity: ChartDiagnosticSeverity::Error,
+                            message: format!(
+                                "missing drawing relationship for chart reference {}",
+                                drawing_ref.rel_id
+                            ),
+                            part: Some(drawing_rels_part.clone()),
+                            xpath: None,
+                        });
+                        String::new()
+                    }
+                };
+
+                let chart_bytes = if chart_part_path.is_empty() {
+                    Vec::new()
+                } else {
+                    match self.part(&chart_part_path) {
+                        Some(bytes) => bytes.to_vec(),
+                        None => {
+                            diagnostics.push(ChartDiagnostic {
+                                severity: ChartDiagnosticSeverity::Error,
+                                message: format!("missing chart part: {chart_part_path}"),
+                                part: Some(chart_part_path.clone()),
+                                xpath: None,
+                            });
+                            Vec::new()
+                        }
+                    }
+                };
+
+                let chart_rels_path = if chart_part_path.is_empty() {
+                    None
+                } else {
+                    let rels = rels_for_part(&chart_part_path);
+                    self.part(&rels).map(|_| rels)
+                };
+
+                let mut chart_ex_part = None;
+                let mut style_part = None;
+                let mut colors_part = None;
+
+                if let Some(chart_rels_path) = chart_rels_path.as_deref() {
+                    if let Some(chart_rels_xml) = self.part(chart_rels_path) {
+                        let rels = parse_relationships(chart_rels_xml, chart_rels_path)?;
+                        for rel in rels {
+                            let target_path = resolve_target(&chart_part_path, &rel.target);
+                            let rel_type = rel.type_.to_ascii_lowercase();
+                            let rel_target = rel.target.to_ascii_lowercase();
+
+                            if chart_ex_part.is_none()
+                                && (rel_type.contains("chartex") || rel_target.contains("chartex"))
+                            {
+                                chart_ex_part = Some(target_path);
+                                continue;
+                            }
+
+                            if style_part.is_none()
+                                && is_chart_style_relationship(&rel_type, &rel_target)
+                            {
+                                style_part = Some(target_path);
+                                continue;
+                            }
+
+                            if colors_part.is_none()
+                                && is_chart_colors_relationship(&rel_type, &rel_target)
+                            {
+                                colors_part = Some(target_path);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                let chart = OpcPart {
+                    path: chart_part_path.clone(),
+                    rels_path: chart_rels_path.clone(),
+                    bytes: chart_bytes,
+                };
+
+                let chart_ex = chart_ex_part.and_then(|path| match self.part(&path) {
+                    Some(bytes) => {
+                        let rels_path = rels_for_part(&path);
+                        Some(OpcPart {
+                            path,
+                            rels_path: self.part(&rels_path).map(|_| rels_path),
+                            bytes: bytes.to_vec(),
+                        })
+                    }
+                    None => {
+                        diagnostics.push(ChartDiagnostic {
+                            severity: ChartDiagnosticSeverity::Warning,
+                            message: format!("missing chartEx part: {path}"),
+                            part: Some(path),
+                            xpath: None,
+                        });
+                        None
+                    }
+                });
+
+                let style = style_part.and_then(|path| match self.part(&path) {
+                    Some(bytes) => Some(OpcPart {
+                        path,
+                        rels_path: None,
+                        bytes: bytes.to_vec(),
+                    }),
+                    None => {
+                        diagnostics.push(ChartDiagnostic {
+                            severity: ChartDiagnosticSeverity::Warning,
+                            message: format!("missing chart style part: {path}"),
+                            part: Some(path),
+                            xpath: None,
+                        });
+                        None
+                    }
+                });
+
+                let colors = colors_part.and_then(|path| match self.part(&path) {
+                    Some(bytes) => Some(OpcPart {
+                        path,
+                        rels_path: None,
+                        bytes: bytes.to_vec(),
+                    }),
+                    None => {
+                        diagnostics.push(ChartDiagnostic {
+                            severity: ChartDiagnosticSeverity::Warning,
+                            message: format!("missing chart colors part: {path}"),
+                            part: Some(path),
+                            xpath: None,
+                        });
+                        None
+                    }
+                });
+
+                chart_objects.push(ChartObject {
+                    sheet_name: sheet_name.clone(),
+                    sheet_part: sheet_part.clone(),
+                    drawing_part: drawing_part.clone(),
+                    anchor: drawing_ref.anchor,
+                    drawing_frame_xml: drawing_ref.drawing_frame_xml,
+                    parts: ChartParts {
+                        chart,
+                        chart_ex,
+                        style,
+                        colors,
+                    },
+                    diagnostics,
+                });
+            }
+        }
+
+        Ok(chart_objects)
+    }
+
     fn drawing_to_sheet_map(&self) -> Result<HashMap<String, SheetInfo>, ChartExtractionError> {
         const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
         let workbook_part = "xl/workbook.xml";
@@ -177,7 +373,8 @@ impl XlsxPackage {
                 None => continue,
             };
             let sheet_rels = parse_relationships(sheet_rels_xml, &sheet_rels_part)?;
-            let rel_map: HashMap<_, _> = sheet_rels.into_iter().map(|r| (r.id.clone(), r)).collect();
+            let rel_map: HashMap<_, _> =
+                sheet_rels.into_iter().map(|r| (r.id.clone(), r)).collect();
 
             for drawing_rid in drawing_rids {
                 let drawing_target = match rel_map.get(&drawing_rid) {
@@ -203,4 +400,21 @@ impl XlsxPackage {
 struct SheetInfo {
     name: String,
     part: Option<String>,
+}
+
+fn is_chart_style_relationship(rel_type: &str, rel_target: &str) -> bool {
+    if rel_type.contains("chartstyle") {
+        return true;
+    }
+    // Fallback to filename heuristic for producers that omit the relationship type.
+    rel_target.ends_with(".xml")
+        && rel_target.contains("style")
+        && !rel_target.ends_with("styles.xml")
+}
+
+fn is_chart_colors_relationship(rel_type: &str, rel_target: &str) -> bool {
+    if rel_type.contains("chartcolorstyle") {
+        return true;
+    }
+    rel_target.ends_with(".xml") && rel_target.contains("colors")
 }
