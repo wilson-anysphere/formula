@@ -1,4 +1,5 @@
 import http from "node:http";
+import { promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
@@ -266,6 +267,8 @@ export function createSyncServer(
         "SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring is only supported with SYNC_SERVER_PERSISTENCE_BACKEND=file."
       );
     }
+
+    await fs.mkdir(config.dataDir, { recursive: true });
 
     const isLockError = (err: unknown) => {
       const msg =

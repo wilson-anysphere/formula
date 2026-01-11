@@ -18,6 +18,9 @@
     "y-websocket": "^2.1.0",
     "yjs": "^13.6.23"
   },
+  "optionalDependencies": {
+    "y-leveldb": "^0.1.0"
+  },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.0",

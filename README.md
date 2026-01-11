@@ -190,6 +190,22 @@ The service lives in:
 
 - `services/sync-server/`
 
+#### Docker
+
+Build from the repo root:
+
+```bash
+docker build -f services/sync-server/Dockerfile -t formula-sync-server .
+```
+
+Run (auth is required in production):
+
+```bash
+docker run --rm -p 1234:1234 \
+  -e SYNC_SERVER_AUTH_TOKEN=dev-token \
+  formula-sync-server
+```
+
 ## License
 
 Licensed under the Apache License 2.0. See [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).
