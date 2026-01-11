@@ -17,6 +17,7 @@ use crate::calc_settings::{CalcSettings, CalculationMode};
 use crate::date::ExcelDateSystem;
 use crate::iterative;
 use formula_model::{CellId, CellRef, Range, Table};
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -1143,7 +1144,14 @@ impl Engine {
     }
 
     pub fn recalculate(&mut self) {
-        self.recalculate_with_mode(RecalcMode::MultiThreaded);
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
+            self.recalculate_with_mode(RecalcMode::MultiThreaded);
+        }
+        #[cfg(any(target_arch = "wasm32", not(feature = "parallel")))]
+        {
+            self.recalculate_with_mode(RecalcMode::SingleThreaded);
+        }
     }
 
     pub fn recalculate_single_threaded(&mut self) {
@@ -1151,7 +1159,14 @@ impl Engine {
     }
 
     pub fn recalculate_multi_threaded(&mut self) {
-        self.recalculate_with_mode(RecalcMode::MultiThreaded);
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
+            self.recalculate_with_mode(RecalcMode::MultiThreaded);
+        }
+        #[cfg(any(target_arch = "wasm32", not(feature = "parallel")))]
+        {
+            self.recalculate_with_mode(RecalcMode::SingleThreaded);
+        }
     }
 
     fn recalculate_with_mode(&mut self, mode: RecalcMode) {
@@ -1268,52 +1283,7 @@ impl Engine {
             let mut results: Vec<(CellKey, Value)> =
                 Vec::with_capacity(parallel_tasks.len() + serial_tasks.len());
 
-            if mode == RecalcMode::MultiThreaded {
-                results.extend(
-                    parallel_tasks
-                        .par_iter()
-                        .map_init(
-                            || bytecode::Vm::with_capacity(32),
-                            |vm, (k, compiled)| {
-                                let ctx = crate::eval::EvalContext {
-                                    current_sheet: k.sheet,
-                                    current_cell: k.addr,
-                                };
-                                match compiled {
-                                    CompiledFormula::Ast(expr) => {
-                                        let evaluator = crate::eval::Evaluator::new_with_date_system(
-                                            &snapshot,
-                                            ctx,
-                                            recalc_ctx,
-                                            date_system,
-                                        );
-                                        (*k, evaluator.eval_formula(expr))
-                                    }
-                                    CompiledFormula::Bytecode(bc) => {
-                                        let cols = column_cache
-                                            .by_sheet
-                                            .get(k.sheet)
-                                            .unwrap_or(&empty_cols);
-                                        let slice_mode = slice_mode_for_program(&bc.program);
-                                        let grid = EngineBytecodeGrid {
-                                            snapshot: &snapshot,
-                                            sheet: k.sheet,
-                                            cols,
-                                            slice_mode,
-                                        };
-                                        let base = bytecode::CellCoord {
-                                            row: k.addr.row as i32,
-                                            col: k.addr.col as i32,
-                                        };
-                                        let v = vm.eval(&bc.program, &grid, base);
-                                        (*k, bytecode_value_to_engine(v))
-                                    }
-                                }
-                            },
-                        )
-                        .collect::<Vec<_>>(),
-                );
-            } else {
+            let mut eval_parallel_tasks_serial = |results: &mut Vec<(CellKey, Value)>| {
                 let mut vm = bytecode::Vm::with_capacity(32);
                 for (k, compiled) in &parallel_tasks {
                     let ctx = crate::eval::EvalContext {
@@ -1349,6 +1319,63 @@ impl Engine {
                     };
                     results.push((*k, value));
                 }
+            };
+
+            if mode == RecalcMode::MultiThreaded {
+                #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+                {
+                    results.extend(
+                        parallel_tasks
+                            .par_iter()
+                            .map_init(
+                                || bytecode::Vm::with_capacity(32),
+                                |vm, (k, compiled)| {
+                                    let ctx = crate::eval::EvalContext {
+                                        current_sheet: k.sheet,
+                                        current_cell: k.addr,
+                                    };
+                                    match compiled {
+                                        CompiledFormula::Ast(expr) => {
+                                            let evaluator = crate::eval::Evaluator::new_with_date_system(
+                                                &snapshot,
+                                                ctx,
+                                                recalc_ctx,
+                                                date_system,
+                                            );
+                                            (*k, evaluator.eval_formula(expr))
+                                        }
+                                        CompiledFormula::Bytecode(bc) => {
+                                            let cols = column_cache
+                                                .by_sheet
+                                                .get(k.sheet)
+                                                .unwrap_or(&empty_cols);
+                                            let slice_mode = slice_mode_for_program(&bc.program);
+                                            let grid = EngineBytecodeGrid {
+                                                snapshot: &snapshot,
+                                                sheet: k.sheet,
+                                                cols,
+                                                slice_mode,
+                                            };
+                                            let base = bytecode::CellCoord {
+                                                row: k.addr.row as i32,
+                                                col: k.addr.col as i32,
+                                            };
+                                            let v = vm.eval(&bc.program, &grid, base);
+                                            (*k, bytecode_value_to_engine(v))
+                                        }
+                                    }
+                                },
+                            )
+                            .collect::<Vec<_>>(),
+                    );
+                }
+
+                #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+                {
+                    eval_parallel_tasks_serial(&mut results);
+                }
+            } else {
+                eval_parallel_tasks_serial(&mut results);
             }
 
             // Non-thread-safe tasks are always serialized.

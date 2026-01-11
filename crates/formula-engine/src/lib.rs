@@ -36,6 +36,9 @@ mod engine;
 mod perf;
 pub mod structured_refs;
 
+#[cfg(target_arch = "wasm32")]
+mod wasm_smoke;
+
 mod ast;
 pub mod parser;
 

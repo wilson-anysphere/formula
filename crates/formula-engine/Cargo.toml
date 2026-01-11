@@ -4,12 +4,19 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+# Enable parallel evaluation + concurrent caches on native builds.
+#
+# WASM builds (`wasm32-unknown-unknown`) are single-threaded, so the implementation
+# automatically falls back to sequential code paths even if this feature is enabled.
+default = ["parallel"]
+parallel = ["dep:rayon", "dep:dashmap"]
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 formula-model = { path = "../formula-model" }
 rstar = "0.12"
 inventory = "0.3"
-rayon = "1.10"
 serde = { version = "1.0", features = ["derive"] }
 formula-format = { path = "../formula-format" }
 serde_json = "1.0"
@@ -17,9 +24,12 @@ thiserror = "2.0"
 
 # Bytecode cache + SIMD kernels for bulk range evaluation.
 ahash = "0.8"
-dashmap = "5"
 smallvec = "1"
 wide = "0.7"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1.10", optional = true }
+dashmap = { version = "5", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

@@ -3,6 +3,7 @@ use super::grid::{Grid, GridMut};
 use super::{BytecodeCache, Program, Vm};
 use super::value::{CellCoord, Value};
 use ahash::{AHashMap, AHashSet};
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 use std::sync::Arc;
 
@@ -124,13 +125,24 @@ impl RecalcEngine {
             results.resize(level.len(), Value::Empty);
             {
                 let g: &dyn Grid = &*grid;
-                results
-                    .par_iter_mut()
-                    .zip(level.par_iter())
-                    .for_each_init(|| Vm::with_capacity(32), |vm, (out, &idx)| {
+                #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+                {
+                    results
+                        .par_iter_mut()
+                        .zip(level.par_iter())
+                        .for_each_init(|| Vm::with_capacity(32), |vm, (out, &idx)| {
+                            let node = &graph.nodes[idx];
+                            *out = vm.eval(&node.program, g, node.coord);
+                        });
+                }
+                #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+                {
+                    let mut vm = Vm::with_capacity(32);
+                    for (out, &idx) in results.iter_mut().zip(level.iter()) {
                         let node = &graph.nodes[idx];
                         *out = vm.eval(&node.program, g, node.coord);
-                    });
+                    }
+                }
             }
 
             for (i, &idx) in level.iter().enumerate() {
