@@ -541,19 +541,29 @@ function addColumn(table, name, formula) {
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {string} oldName
  * @param {string} newName
- * @returns {DataTable}
+ * @returns {ITable}
  */
 function renameColumn(table, oldName, newName) {
-  if (table.columnIndex.has(newName) && newName !== oldName) {
+  const idx = table.getColumnIndex(oldName);
+  if (newName !== oldName && table.columns.some((col, i) => i !== idx && col.name === newName)) {
     throw new Error(`Column '${newName}' already exists`);
   }
 
-  const idx = table.getColumnIndex(oldName);
   const columns = table.columns.map((col, i) => (i === idx ? { ...col, name: newName } : col));
-  return new DataTable(columns, table.rows);
+
+  if (table instanceof ArrowTableAdapter) {
+    return new ArrowTableAdapter(table.table, columns);
+  }
+
+  if (table instanceof DataTable) {
+    return new DataTable(columns, table.rows);
+  }
+
+  const materialized = ensureDataTable(table);
+  return new DataTable(columns, materialized.rows);
 }
 
 /**
@@ -855,7 +865,7 @@ export function applyOperation(table, operation) {
     case "addColumn":
       return addColumn(ensureDataTable(table), operation.name, operation.formula);
     case "renameColumn":
-      return renameColumn(ensureDataTable(table), operation.oldName, operation.newName);
+      return renameColumn(table, operation.oldName, operation.newName);
     case "changeType":
       return changeType(table, operation.column, operation.newType);
     case "take":

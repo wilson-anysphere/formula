@@ -40,12 +40,16 @@ export class InMemorySheet {
 export function writeTableToSheet(table, sheet, options = {}) {
   const startRow = options.startRow ?? 1;
   const startCol = options.startCol ?? 1;
-  const grid = table.toGrid({ includeHeader: true });
 
-  for (let r = 0; r < grid.length; r++) {
-    const row = grid[r];
-    for (let c = 0; c < row.length; c++) {
-      sheet.setCell(startRow + r, startCol + c, row[c]);
+  // Header row.
+  for (let col = 0; col < table.columnCount; col++) {
+    sheet.setCell(startRow, startCol + col, table.columns[col]?.name ?? null);
+  }
+
+  // Data rows.
+  for (let row = 0; row < table.rowCount; row++) {
+    for (let col = 0; col < table.columnCount; col++) {
+      sheet.setCell(startRow + 1 + row, startCol + col, table.getCell(row, col));
     }
   }
 }

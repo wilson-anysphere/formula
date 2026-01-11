@@ -76,3 +76,34 @@ test("executeQueryStreaming streams Arrow results using arrowTableToGridBatches"
   const expected = (await engine.executeQuery(query, { tables: { t: arrowTable } }, {})).toGrid();
   assert.deepEqual(streamed, expected);
 });
+
+test("executeQueryStreaming uses adapter column names for Arrow headers (renameColumn)", async () => {
+  const engine = new QueryEngine();
+  const arrowTable = new ArrowTableAdapter(
+    arrowTableFromColumns({
+      Region: ["East", "West"],
+      Sales: [100, 200],
+    }),
+  );
+
+  const query = {
+    id: "q_stream_arrow_rename",
+    name: "Stream Arrow Rename",
+    source: { type: "table", table: "t" },
+    steps: [{ id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "Sales", newName: "Amount" } }],
+  };
+
+  const grid = [];
+  await engine.executeQueryStreaming(query, { tables: { t: arrowTable } }, {
+    batchSize: 2,
+    onBatch: (batch) => {
+      for (let i = 0; i < batch.values.length; i++) {
+        grid[batch.rowOffset + i] = batch.values[i];
+      }
+    },
+  });
+
+  assert.deepEqual(grid[0], ["Region", "Amount"]);
+  assert.deepEqual(grid[1], ["East", 100]);
+  assert.deepEqual(grid[2], ["West", 200]);
+});

@@ -1057,7 +1057,17 @@ export class QueryEngine {
  */
 async function* tableToGridBatches(table, options) {
   if (table instanceof ArrowTableAdapter) {
-    yield* arrowTableToGridBatches(table.table, options);
+    const batchSize = options.batchSize;
+    const includeHeader = options.includeHeader;
+    const baseOffset = includeHeader ? 1 : 0;
+
+    if (includeHeader) {
+      yield { rowOffset: 0, values: [table.columns.map((c) => c.name)] };
+    }
+
+    for await (const batch of arrowTableToGridBatches(table.table, { batchSize, includeHeader: false })) {
+      yield { rowOffset: baseOffset + batch.rowOffset, values: batch.values };
+    }
     return;
   }
 

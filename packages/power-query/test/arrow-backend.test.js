@@ -48,6 +48,7 @@ test("Arrow backend: core steps match DataTable results", () => {
   const operations = [
     { type: "selectColumns", columns: ["Product", "Sales"] },
     { type: "removeColumns", columns: ["Product"] },
+    { type: "renameColumn", oldName: "Product", newName: "Item" },
     { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } },
     { type: "sortRows", sortBy: [{ column: "Sales", direction: "descending" }] },
     { type: "groupBy", groupColumns: ["Region"], aggregations: [{ column: "Sales", op: "sum", as: "Total Sales" }] },
