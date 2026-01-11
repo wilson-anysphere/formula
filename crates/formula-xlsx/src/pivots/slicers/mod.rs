@@ -1,5 +1,7 @@
+use crate::openxml::{
+    local_name, parse_relationships, resolve_relationship_target, resolve_target,
+};
 use crate::package::{XlsxError, XlsxPackage};
-use crate::openxml::{local_name, parse_relationships, resolve_relationship_target, resolve_target};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,6 +13,8 @@ pub struct SlicerDefinition {
     pub name: Option<String>,
     pub uid: Option<String>,
     pub cache_part: Option<String>,
+    pub cache_name: Option<String>,
+    pub source_name: Option<String>,
     pub connected_pivot_tables: Vec<String>,
     pub placed_on_drawings: Vec<String>,
 }
@@ -21,6 +25,10 @@ pub struct TimelineDefinition {
     pub name: Option<String>,
     pub uid: Option<String>,
     pub cache_part: Option<String>,
+    pub cache_name: Option<String>,
+    pub source_name: Option<String>,
+    pub base_field: Option<u32>,
+    pub level: Option<u32>,
     pub connected_pivot_tables: Vec<String>,
     pub placed_on_drawings: Vec<String>,
 }
@@ -96,11 +104,17 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             None => None,
         };
 
-        let connected_pivot_tables = if let Some(cache_part) = cache_part.as_deref() {
-            resolve_slicer_cache_pivot_tables(package, cache_part)?
-        } else {
-            Vec::new()
-        };
+        let (cache_name, source_name, connected_pivot_tables) =
+            if let Some(cache_part) = cache_part.as_deref() {
+                let resolved = resolve_slicer_cache_definition(package, cache_part)?;
+                (
+                    resolved.cache_name,
+                    resolved.source_name,
+                    resolved.connected_pivot_tables,
+                )
+            } else {
+                (None, None, Vec::new())
+            };
 
         let placed_on_drawings = slicer_to_drawings
             .get(&part_name)
@@ -112,6 +126,8 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             name: parsed.name,
             uid: parsed.uid,
             cache_part,
+            cache_name,
+            source_name,
             connected_pivot_tables,
             placed_on_drawings,
         });
@@ -129,11 +145,19 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             None => None,
         };
 
-        let connected_pivot_tables = if let Some(cache_part) = cache_part.as_deref() {
-            resolve_timeline_cache_pivot_tables(package, cache_part)?
-        } else {
-            Vec::new()
-        };
+        let (cache_name, source_name, base_field, level, connected_pivot_tables) =
+            if let Some(cache_part) = cache_part.as_deref() {
+                let resolved = resolve_timeline_cache_definition(package, cache_part)?;
+                (
+                    resolved.cache_name,
+                    resolved.source_name,
+                    resolved.base_field,
+                    resolved.level,
+                    resolved.connected_pivot_tables,
+                )
+            } else {
+                (None, None, None, None, Vec::new())
+            };
 
         let placed_on_drawings = timeline_to_drawings
             .get(&part_name)
@@ -145,6 +169,10 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             name: parsed.name,
             uid: parsed.uid,
             cache_part,
+            cache_name,
+            source_name,
+            base_field,
+            level,
             connected_pivot_tables,
             placed_on_drawings,
         });
@@ -153,40 +181,72 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
     Ok(PivotSlicerParts { slicers, timelines })
 }
 
-fn resolve_slicer_cache_pivot_tables(
-    package: &XlsxPackage,
-    cache_part: &str,
-) -> Result<Vec<String>, XlsxError> {
-    let cache_bytes = package
-        .part(cache_part)
-        .ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
-    let pivot_rids = parse_slicer_cache_xml(cache_bytes)?;
-
-    let mut pivot_tables = BTreeSet::new();
-    for rid in pivot_rids {
-        if let Some(target) = resolve_relationship_target(package, cache_part, &rid)? {
-            pivot_tables.insert(target);
-        }
-    }
-    Ok(pivot_tables.into_iter().collect())
+#[derive(Debug)]
+struct ResolvedSlicerCacheDefinition {
+    cache_name: Option<String>,
+    source_name: Option<String>,
+    connected_pivot_tables: Vec<String>,
 }
 
-fn resolve_timeline_cache_pivot_tables(
+fn resolve_slicer_cache_definition(
     package: &XlsxPackage,
     cache_part: &str,
-) -> Result<Vec<String>, XlsxError> {
+) -> Result<ResolvedSlicerCacheDefinition, XlsxError> {
     let cache_bytes = package
         .part(cache_part)
         .ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
-    let pivot_rids = parse_timeline_cache_xml(cache_bytes)?;
+    let parsed = parse_slicer_cache_xml(cache_bytes)?;
+    let connected_pivot_tables =
+        resolve_relationship_targets(package, cache_part, parsed.pivot_table_rids)?;
 
-    let mut pivot_tables = BTreeSet::new();
-    for rid in pivot_rids {
-        if let Some(target) = resolve_relationship_target(package, cache_part, &rid)? {
-            pivot_tables.insert(target);
+    Ok(ResolvedSlicerCacheDefinition {
+        cache_name: parsed.cache_name,
+        source_name: parsed.source_name,
+        connected_pivot_tables,
+    })
+}
+
+#[derive(Debug)]
+struct ResolvedTimelineCacheDefinition {
+    cache_name: Option<String>,
+    source_name: Option<String>,
+    base_field: Option<u32>,
+    level: Option<u32>,
+    connected_pivot_tables: Vec<String>,
+}
+
+fn resolve_timeline_cache_definition(
+    package: &XlsxPackage,
+    cache_part: &str,
+) -> Result<ResolvedTimelineCacheDefinition, XlsxError> {
+    let cache_bytes = package
+        .part(cache_part)
+        .ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
+    let parsed = parse_timeline_cache_xml(cache_bytes)?;
+    let connected_pivot_tables =
+        resolve_relationship_targets(package, cache_part, parsed.pivot_table_rids)?;
+
+    Ok(ResolvedTimelineCacheDefinition {
+        cache_name: parsed.cache_name,
+        source_name: parsed.source_name,
+        base_field: parsed.base_field,
+        level: parsed.level,
+        connected_pivot_tables,
+    })
+}
+
+fn resolve_relationship_targets(
+    package: &XlsxPackage,
+    base_part: &str,
+    relationship_ids: Vec<String>,
+) -> Result<Vec<String>, XlsxError> {
+    let mut targets = BTreeSet::new();
+    for rid in relationship_ids {
+        if let Some(target) = resolve_relationship_target(package, base_part, &rid)? {
+            targets.insert(target);
         }
     }
-    Ok(pivot_tables.into_iter().collect())
+    Ok(targets.into_iter().collect())
 }
 
 fn drawing_part_name_from_rels(rels_name: &str) -> String {
@@ -245,20 +305,45 @@ fn parse_slicer_xml(xml: &[u8]) -> Result<ParsedSlicerXml, XlsxError> {
         buf.clear();
     }
 
-    Ok(ParsedSlicerXml { name, uid, cache_rid })
+    Ok(ParsedSlicerXml {
+        name,
+        uid,
+        cache_rid,
+    })
 }
 
-fn parse_slicer_cache_xml(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
+#[derive(Debug)]
+struct ParsedSlicerCacheXml {
+    cache_name: Option<String>,
+    source_name: Option<String>,
+    pivot_table_rids: Vec<String>,
+}
+
+fn parse_slicer_cache_xml(xml: &[u8]) -> Result<ParsedSlicerCacheXml, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
 
+    let mut cache_name = None;
+    let mut source_name = None;
     let mut pivot_table_rids = Vec::new();
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(start) | Event::Empty(start) => {
-                if local_name(start.name().as_ref()).eq_ignore_ascii_case(b"slicerCachePivotTable")
-                {
+                let element_name = start.name();
+                let tag = local_name(element_name.as_ref());
+                if tag.eq_ignore_ascii_case(b"slicerCache") {
+                    for attr in start.attributes() {
+                        let attr = attr?;
+                        let key = local_name(attr.key.as_ref());
+                        let value = attr.unescape_value()?.into_owned();
+                        if key.eq_ignore_ascii_case(b"name") {
+                            cache_name = Some(value);
+                        } else if key.eq_ignore_ascii_case(b"sourceName") {
+                            source_name = Some(value);
+                        }
+                    }
+                } else if tag.eq_ignore_ascii_case(b"slicerCachePivotTable") {
                     for attr in start.attributes() {
                         let attr = attr?;
                         if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
@@ -273,7 +358,11 @@ fn parse_slicer_cache_xml(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
         buf.clear();
     }
 
-    Ok(pivot_table_rids)
+    Ok(ParsedSlicerCacheXml {
+        cache_name,
+        source_name,
+        pivot_table_rids,
+    })
 }
 
 #[derive(Debug)]
@@ -323,19 +412,54 @@ fn parse_timeline_xml(xml: &[u8]) -> Result<ParsedTimelineXml, XlsxError> {
         buf.clear();
     }
 
-    Ok(ParsedTimelineXml { name, uid, cache_rid })
+    Ok(ParsedTimelineXml {
+        name,
+        uid,
+        cache_rid,
+    })
 }
 
-fn parse_timeline_cache_xml(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
+#[derive(Debug)]
+struct ParsedTimelineCacheXml {
+    cache_name: Option<String>,
+    source_name: Option<String>,
+    base_field: Option<u32>,
+    level: Option<u32>,
+    pivot_table_rids: Vec<String>,
+}
+
+fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
+
+    let mut cache_name = None;
+    let mut source_name = None;
+    let mut base_field = None;
+    let mut level = None;
     let mut pivot_table_rids = Vec::new();
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(start) | Event::Empty(start) => {
-                if local_name(start.name().as_ref()).eq_ignore_ascii_case(b"pivotTable") {
+                let element_name = start.name();
+                let tag = local_name(element_name.as_ref());
+                if tag.eq_ignore_ascii_case(b"timelineCacheDefinition") {
+                    for attr in start.attributes() {
+                        let attr = attr?;
+                        let key = local_name(attr.key.as_ref());
+                        let value = attr.unescape_value()?.into_owned();
+                        if key.eq_ignore_ascii_case(b"name") {
+                            cache_name = Some(value);
+                        } else if key.eq_ignore_ascii_case(b"sourceName") {
+                            source_name = Some(value);
+                        } else if key.eq_ignore_ascii_case(b"baseField") {
+                            base_field = value.parse::<u32>().ok();
+                        } else if key.eq_ignore_ascii_case(b"level") {
+                            level = value.parse::<u32>().ok();
+                        }
+                    }
+                } else if tag.eq_ignore_ascii_case(b"pivotTable") {
                     for attr in start.attributes() {
                         let attr = attr?;
                         if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
@@ -350,5 +474,11 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
         buf.clear();
     }
 
-    Ok(pivot_table_rids)
+    Ok(ParsedTimelineCacheXml {
+        cache_name,
+        source_name,
+        base_field,
+        level,
+        pivot_table_rids,
+    })
 }

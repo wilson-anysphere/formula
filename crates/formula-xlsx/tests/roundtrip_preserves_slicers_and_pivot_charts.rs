@@ -19,6 +19,8 @@ fn roundtrip_preserves_slicers_timelines_and_pivot_charts() -> Result<(), Box<dy
         slicer.cache_part.as_deref(),
         Some("xl/slicerCaches/slicerCache1.xml")
     );
+    assert_eq!(slicer.cache_name.as_deref(), Some("RegionSlicerCache"));
+    assert_eq!(slicer.source_name.as_deref(), Some("PivotTable1"));
     assert_eq!(
         slicer.connected_pivot_tables,
         vec!["xl/pivotTables/pivotTable1.xml".to_string()]
