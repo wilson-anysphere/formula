@@ -155,6 +155,28 @@ pub fn xmatch_with_modes(
     Ok(i32::try_from(pos).unwrap_or(i32::MAX))
 }
 
+/// Like [`xmatch_with_modes`], but allows providing the lookup array via a random-access accessor.
+///
+/// This is used to avoid materializing large reference ranges into a `Vec<Value>` when the caller
+/// can compute element values on-demand (e.g. via worksheet cell lookup).
+pub fn xmatch_with_modes_accessor(
+    lookup_value: &Value,
+    len: usize,
+    mut value_at: impl FnMut(usize) -> Value,
+    match_mode: MatchMode,
+    search_mode: SearchMode,
+) -> Result<i32, ErrorKind> {
+    let pos = match search_mode {
+        SearchMode::FirstToLast => xmatch_linear_accessor(lookup_value, len, &mut value_at, match_mode, false)?,
+        SearchMode::LastToFirst => xmatch_linear_accessor(lookup_value, len, &mut value_at, match_mode, true)?,
+        SearchMode::BinaryAscending => xmatch_binary_accessor(lookup_value, len, &mut value_at, match_mode, false)?,
+        SearchMode::BinaryDescending => xmatch_binary_accessor(lookup_value, len, &mut value_at, match_mode, true)?,
+    };
+
+    let pos = pos.checked_add(1).unwrap_or(usize::MAX);
+    Ok(i32::try_from(pos).unwrap_or(i32::MAX))
+}
+
 fn xmatch_linear(
     lookup_value: &Value,
     lookup_array: &[Value],
@@ -254,6 +276,107 @@ fn xmatch_linear(
     }
 }
 
+fn xmatch_linear_accessor(
+    lookup_value: &Value,
+    len: usize,
+    value_at: &mut impl FnMut(usize) -> Value,
+    match_mode: MatchMode,
+    reverse: bool,
+) -> Result<usize, ErrorKind> {
+    let iter: Box<dyn Iterator<Item = usize>> = if reverse {
+        Box::new((0..len).rev())
+    } else {
+        Box::new(0..len)
+    };
+
+    match match_mode {
+        MatchMode::Exact => {
+            for idx in iter {
+                let candidate = value_at(idx);
+                if values_equal_for_lookup(lookup_value, &candidate) {
+                    return Ok(idx);
+                }
+            }
+            Err(ErrorKind::NA)
+        }
+        MatchMode::Wildcard => {
+            let pattern = match lookup_value.coerce_to_string() {
+                Ok(s) => s,
+                Err(e) => return Err(e),
+            };
+            for idx in iter {
+                let candidate = value_at(idx);
+                let text = match &candidate {
+                    Value::Error(_) => continue,
+                    Value::Text(s) => Cow::Borrowed(s.as_str()),
+                    other => match other.coerce_to_string() {
+                        Ok(s) => Cow::Owned(s),
+                        Err(_) => continue,
+                    },
+                };
+                if wildcard_match(&pattern, text.as_ref()) {
+                    return Ok(idx);
+                }
+            }
+            Err(ErrorKind::NA)
+        }
+        MatchMode::ExactOrNextSmaller => {
+            let mut best: Option<(usize, Value)> = None;
+            for idx in iter {
+                let candidate = value_at(idx);
+                let ord = lookup_cmp(&candidate, lookup_value);
+                if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, &candidate) {
+                    return Ok(idx);
+                }
+                if ord == Ordering::Less {
+                    best = match best {
+                        None => Some((idx, candidate)),
+                        Some((best_idx, best_val)) => match lookup_cmp(&candidate, &best_val) {
+                            Ordering::Greater => Some((idx, candidate)),
+                            Ordering::Equal => {
+                                if idx > best_idx {
+                                    Some((idx, candidate))
+                                } else {
+                                    Some((best_idx, best_val))
+                                }
+                            }
+                            Ordering::Less => Some((best_idx, best_val)),
+                        },
+                    };
+                }
+            }
+            best.map(|(idx, _)| idx).ok_or(ErrorKind::NA)
+        }
+        MatchMode::ExactOrNextLarger => {
+            let mut best: Option<(usize, Value)> = None;
+            for idx in iter {
+                let candidate = value_at(idx);
+                let ord = lookup_cmp(&candidate, lookup_value);
+                if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, &candidate) {
+                    return Ok(idx);
+                }
+                if ord == Ordering::Greater {
+                    best = match best {
+                        None => Some((idx, candidate)),
+                        Some((best_idx, best_val)) => match lookup_cmp(&candidate, &best_val) {
+                            Ordering::Less => Some((idx, candidate)),
+                            Ordering::Equal => {
+                                if idx < best_idx {
+                                    Some((idx, candidate))
+                                } else {
+                                    Some((best_idx, best_val))
+                                }
+                            }
+                            Ordering::Greater => Some((best_idx, best_val)),
+                        },
+                    };
+                }
+            }
+            best.map(|(idx, _)| idx).ok_or(ErrorKind::NA)
+        }
+    }
+}
+
 fn xmatch_binary(
     lookup_value: &Value,
     lookup_array: &[Value],
@@ -308,6 +431,116 @@ fn xmatch_binary(
                 return Ok(lb);
             }
             let ub = upper_bound_by(lookup_array, lookup_value, cmp);
+            if ub == 0 {
+                return Err(ErrorKind::NA);
+            }
+            Ok(ub - 1)
+        }
+        MatchMode::Wildcard => Err(ErrorKind::Value),
+    }
+}
+
+fn lower_bound_by_accessor(
+    len: usize,
+    needle: &Value,
+    cmp: impl Fn(&Value, &Value) -> Ordering,
+    value_at: &mut impl FnMut(usize) -> Value,
+) -> usize {
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let mid_val = value_at(mid);
+        match cmp(&mid_val, needle) {
+            Ordering::Less => lo = mid + 1,
+            Ordering::Equal | Ordering::Greater => hi = mid,
+        }
+    }
+    lo
+}
+
+fn upper_bound_by_accessor(
+    len: usize,
+    needle: &Value,
+    cmp: impl Fn(&Value, &Value) -> Ordering,
+    value_at: &mut impl FnMut(usize) -> Value,
+) -> usize {
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let mid_val = value_at(mid);
+        match cmp(&mid_val, needle) {
+            Ordering::Greater => hi = mid,
+            Ordering::Less | Ordering::Equal => lo = mid + 1,
+        }
+    }
+    lo
+}
+
+fn xmatch_binary_accessor(
+    lookup_value: &Value,
+    len: usize,
+    value_at: &mut impl FnMut(usize) -> Value,
+    match_mode: MatchMode,
+    descending: bool,
+) -> Result<usize, ErrorKind> {
+    if len == 0 {
+        return Err(ErrorKind::NA);
+    }
+
+    if matches!(match_mode, MatchMode::Wildcard) {
+        return Err(ErrorKind::Value);
+    }
+
+    let cmp = if descending {
+        |a: &Value, b: &Value| lookup_cmp(b, a)
+    } else {
+        lookup_cmp
+    };
+
+    let effective_mode = if descending {
+        match match_mode {
+            MatchMode::Exact => MatchMode::Exact,
+            MatchMode::ExactOrNextSmaller => MatchMode::ExactOrNextLarger,
+            MatchMode::ExactOrNextLarger => MatchMode::ExactOrNextSmaller,
+            MatchMode::Wildcard => MatchMode::Wildcard,
+        }
+    } else {
+        match_mode
+    };
+
+    let lb = lower_bound_by_accessor(len, lookup_value, cmp, value_at);
+
+    match effective_mode {
+        MatchMode::Exact => {
+            if lb < len {
+                let candidate = value_at(lb);
+                if values_equal_for_lookup(lookup_value, &candidate) {
+                    return Ok(lb);
+                }
+            }
+            Err(ErrorKind::NA)
+        }
+        MatchMode::ExactOrNextLarger => {
+            if lb < len {
+                let candidate = value_at(lb);
+                if values_equal_for_lookup(lookup_value, &candidate) {
+                    return Ok(lb);
+                }
+                return Ok(lb);
+            }
+            Err(ErrorKind::NA)
+        }
+        MatchMode::ExactOrNextSmaller => {
+            if lb < len {
+                let candidate = value_at(lb);
+                if values_equal_for_lookup(lookup_value, &candidate) {
+                    return Ok(lb);
+                }
+            }
+
+            let ub = upper_bound_by_accessor(len, lookup_value, cmp, value_at);
             if ub == 0 {
                 return Err(ErrorKind::NA);
             }

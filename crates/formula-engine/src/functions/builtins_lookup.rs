@@ -330,19 +330,6 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let lookup_values = match ctx.eval_arg(&args[1]) {
-        ArgValue::Reference(r) => flatten_1d_values(ctx, r.normalized()),
-        ArgValue::Scalar(Value::Array(arr)) => {
-            if arr.rows == 1 || arr.cols == 1 {
-                Some(arr.values)
-            } else {
-                None
-            }
-        }
-        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
-        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
-    };
-
     let match_mode = match args.get(2) {
         Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::MatchMode::Exact,
         Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64() {
@@ -366,14 +353,55 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => lookup::SearchMode::FirstToLast,
     };
 
-    let lookup_values = match lookup_values {
-        Some(values) => values,
-        None => return Value::Error(ErrorKind::Value),
-    };
+    match ctx.eval_arg(&args[1]) {
+        ArgValue::Reference(r) => {
+            let r = r.normalized();
+            let (shape, len) = match reference_1d_shape_len(r) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Value),
+            };
+            let sheet_id = r.sheet_id;
+            let start = r.start;
 
-    match lookup::xmatch_with_modes(&lookup_value, &lookup_values, match_mode, search_mode) {
-        Ok(pos) => Value::Number(pos as f64),
-        Err(e) => Value::Error(e),
+            let pos = lookup::xmatch_with_modes_accessor(
+                &lookup_value,
+                len,
+                |idx| match shape {
+                    XlookupVectorShape::Vertical => ctx.get_cell_value(
+                        sheet_id,
+                        crate::eval::CellAddr {
+                            row: start.row + idx as u32,
+                            col: start.col,
+                        },
+                    ),
+                    XlookupVectorShape::Horizontal => ctx.get_cell_value(
+                        sheet_id,
+                        crate::eval::CellAddr {
+                            row: start.row,
+                            col: start.col + idx as u32,
+                        },
+                    ),
+                },
+                match_mode,
+                search_mode,
+            );
+
+            match pos {
+                Ok(p) => Value::Number(p as f64),
+                Err(e) => Value::Error(e),
+            }
+        }
+        ArgValue::Scalar(Value::Array(arr)) => {
+            if arr.rows != 1 && arr.cols != 1 {
+                return Value::Error(ErrorKind::Value);
+            }
+            match lookup::xmatch_with_modes(&lookup_value, &arr.values, match_mode, search_mode) {
+                Ok(pos) => Value::Number(pos as f64),
+                Err(e) => Value::Error(e),
+            }
+        }
+        ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
+        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
     }
 }
 
@@ -435,13 +463,92 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => lookup::SearchMode::FirstToLast,
     };
 
-    let (lookup_shape, lookup_values) = match ctx.eval_arg(&args[1]) {
-        ArgValue::Reference(r) => match flatten_1d_values_with_shape(ctx, r.normalized()) {
-            Some(v) => v,
-            None => return Value::Error(ErrorKind::Value),
+    enum XlookupLookupArray {
+        Values {
+            shape: XlookupVectorShape,
+            values: Vec<Value>,
         },
+        Reference {
+            shape: XlookupVectorShape,
+            reference: Reference,
+            len: usize,
+        },
+    }
+
+    impl XlookupLookupArray {
+        fn shape(&self) -> XlookupVectorShape {
+            match self {
+                XlookupLookupArray::Values { shape, .. } | XlookupLookupArray::Reference { shape, .. } => *shape,
+            }
+        }
+
+        fn len(&self) -> usize {
+            match self {
+                XlookupLookupArray::Values { values, .. } => values.len(),
+                XlookupLookupArray::Reference { len, .. } => *len,
+            }
+        }
+
+        fn xmatch(
+            &self,
+            ctx: &dyn FunctionContext,
+            lookup_value: &Value,
+            match_mode: lookup::MatchMode,
+            search_mode: lookup::SearchMode,
+        ) -> Result<i32, ErrorKind> {
+            match self {
+                XlookupLookupArray::Values { values, .. } => {
+                    lookup::xmatch_with_modes(lookup_value, values, match_mode, search_mode)
+                }
+                XlookupLookupArray::Reference {
+                    shape,
+                    reference,
+                    len,
+                } => {
+                    let sheet_id = reference.sheet_id;
+                    let start = reference.start;
+                    lookup::xmatch_with_modes_accessor(
+                        lookup_value,
+                        *len,
+                        |idx| match shape {
+                            XlookupVectorShape::Vertical => ctx.get_cell_value(
+                                sheet_id,
+                                crate::eval::CellAddr {
+                                    row: start.row + idx as u32,
+                                    col: start.col,
+                                },
+                            ),
+                            XlookupVectorShape::Horizontal => ctx.get_cell_value(
+                                sheet_id,
+                                crate::eval::CellAddr {
+                                    row: start.row,
+                                    col: start.col + idx as u32,
+                                },
+                            ),
+                        },
+                        match_mode,
+                        search_mode,
+                    )
+                }
+            }
+        }
+    }
+
+    let lookup_array = match ctx.eval_arg(&args[1]) {
+        ArgValue::Reference(r) => {
+            let r = r.normalized();
+            let (shape, len) = match reference_1d_shape_len(r) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Value),
+            };
+            XlookupLookupArray::Reference {
+                shape,
+                reference: r,
+                len,
+            }
+        }
         ArgValue::Scalar(Value::Array(arr)) => match array_1d_with_shape(arr) {
-            Ok(v) => v,
+            Ok((shape, values)) => XlookupLookupArray::Values { shape, values },
             Err(e) => return Value::Error(e),
         },
         ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
@@ -489,7 +596,8 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
 
-    let lookup_len = lookup_values.len();
+    let lookup_shape = lookup_array.shape();
+    let lookup_len = lookup_array.len();
     if lookup_len == 0 {
         return match if_not_found {
             Some(v) => v,
@@ -513,7 +621,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    let match_pos = match lookup::xmatch_with_modes(&lookup_value, &lookup_values, match_mode, search_mode) {
+    let match_pos = match lookup_array.xmatch(ctx, &lookup_value, match_mode, search_mode) {
         Ok(pos) => pos,
         Err(ErrorKind::NA) => {
             return match if_not_found {
@@ -991,54 +1099,25 @@ fn flatten_1d(r: Reference) -> Option<Vec<crate::eval::CellAddr>> {
     }
 }
 
-fn flatten_1d_values(ctx: &dyn FunctionContext, r: Reference) -> Option<Vec<Value>> {
-    let sheet_id = r.sheet_id;
-    let addrs = flatten_1d(r)?;
-    Some(
-        addrs
-            .into_iter()
-            .map(|addr| ctx.get_cell_value(sheet_id, addr))
-            .collect(),
-    )
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XlookupVectorShape {
     Horizontal,
     Vertical,
 }
 
-fn flatten_1d_with_shape(r: Reference) -> Option<(XlookupVectorShape, Vec<crate::eval::CellAddr>)> {
+fn reference_1d_shape_len(r: Reference) -> Option<(XlookupVectorShape, usize)> {
     if r.start.row == r.end.row && r.start.col == r.end.col {
-        return Some((XlookupVectorShape::Vertical, vec![r.start]));
+        return Some((XlookupVectorShape::Vertical, 1));
     }
     if r.start.row == r.end.row {
-        let cols = r.start.col..=r.end.col;
-        return Some((
-            XlookupVectorShape::Horizontal,
-            cols.map(|col| crate::eval::CellAddr { row: r.start.row, col }).collect(),
-        ));
+        let len = (r.end.col - r.start.col + 1) as usize;
+        return Some((XlookupVectorShape::Horizontal, len));
     }
     if r.start.col == r.end.col {
-        let rows = r.start.row..=r.end.row;
-        return Some((
-            XlookupVectorShape::Vertical,
-            rows.map(|row| crate::eval::CellAddr { row, col: r.start.col }).collect(),
-        ));
+        let len = (r.end.row - r.start.row + 1) as usize;
+        return Some((XlookupVectorShape::Vertical, len));
     }
     None
-}
-
-fn flatten_1d_values_with_shape(ctx: &dyn FunctionContext, r: Reference) -> Option<(XlookupVectorShape, Vec<Value>)> {
-    let sheet_id = r.sheet_id;
-    let (shape, addrs) = flatten_1d_with_shape(r)?;
-    Some((
-        shape,
-        addrs
-            .into_iter()
-            .map(|addr| ctx.get_cell_value(sheet_id, addr))
-            .collect(),
-    ))
 }
 
 fn array_1d_with_shape(arr: Array) -> Result<(XlookupVectorShape, Vec<Value>), ErrorKind> {
