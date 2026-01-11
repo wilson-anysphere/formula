@@ -82,6 +82,25 @@ test("RefreshOrchestrator: DAG ordering (B depends on A)", async () => {
   await handle.promise;
 });
 
+test("RefreshOrchestrator: supports query ids like '__proto__' without prototype pollution", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1 });
+  orchestrator.registerQuery(makeQuery("__proto__", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+
+  const handle = orchestrator.refreshAll(["__proto__"]);
+  assert.equal(engine.calls.length, 1);
+  assert.equal(engine.calls[0].queryId, "__proto__");
+
+  engine.calls[0].deferred.resolve(makeResult("__proto__"));
+  const results = await handle.promise;
+
+  assert.equal(Object.getPrototypeOf(results), Object.prototype);
+  assert.equal(Object.prototype.hasOwnProperty.call(results, "__proto__"), true);
+  assert.equal(results["__proto__"].meta.queryId, "__proto__");
+  // Ensure we did not mutate the global object prototype.
+  assert.equal(({}).polluted, undefined);
+});
+
 test("RefreshOrchestrator: refresh(queryId) refreshes dependencies and returns the target result", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
