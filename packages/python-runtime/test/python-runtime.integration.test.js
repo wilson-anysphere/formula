@@ -251,6 +251,90 @@ s.sendmsg([b"hi"], [], 0, ("127.0.0.1", 9))
   );
 });
 
+test("native allowlist sandbox cannot be bypassed via base socket connect", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Failed to bind local test server");
+  }
+
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import socket
+
+Base = socket.socket.__mro__[1]
+s = socket.socket()
+s.settimeout(2)
+Base.connect(s, ("127.0.0.1", ${address.port}))
+`;
+
+  try {
+    await assert.rejects(
+      () =>
+        runtime.execute(script, {
+          api: workbook,
+          permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
+        }),
+      /Network access to '127.0.0.1' is not permitted/,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("native allowlist sandbox cannot be bypassed via original connect globals", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Failed to bind local test server");
+  }
+
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import socket
+
+orig = socket.socket.connect.__globals__.get("_ORIGINAL_SOCKET_CONNECT")
+s = socket.socket()
+s.settimeout(2)
+orig(s, ("127.0.0.1", ${address.port}))
+`;
+
+  try {
+    await assert.rejects(
+      () =>
+        runtime.execute(script, {
+          api: workbook,
+          permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
+        }),
+      /Network access to '127.0.0.1' is not permitted/,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("native allowlist sandbox ignores monkeypatched getaddrinfo in create_connection", async () => {
   let hits1271 = 0;
   let hits1272 = 0;

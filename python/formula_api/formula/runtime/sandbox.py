@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import io
 import os
+import sys
 import sysconfig
 from typing import Any, Dict
 
@@ -29,6 +30,11 @@ _ORIGINAL_SOCKET_GLOBAL_DEFAULT_TIMEOUT = None
 _ORIGINAL_SOCKET_SOCKET_CLASS = None
 _ORIGINAL__SOCKET_SOCKET = None
 _ORIGINAL__SOCKET_SOCKETTYPE = None
+
+_AUDIT_HOOK_INSTALLED = False
+_AUDIT_NETWORK_MODE = "full"
+_AUDIT_NETWORK_ALLOWLIST_EXACT: set[str] = set()
+_AUDIT_NETWORK_ALLOWLIST_WILDCARDS: tuple[str, ...] = ()
 
 try:  # pragma: no cover - environment dependent
     _IMPORT_ALLOWLIST_ROOTS = tuple(
@@ -273,6 +279,83 @@ def _hostname_in_allowlist(hostname: str, exact: set[str], wildcard_suffixes: tu
     return False
 
 
+def _apply_network_audit_policy(network: str, permissions: Dict[str, Any]) -> None:
+    """Best-effort network enforcement via Python audit hooks (native only)."""
+
+    global _AUDIT_HOOK_INSTALLED
+    global _AUDIT_NETWORK_MODE
+    global _AUDIT_NETWORK_ALLOWLIST_EXACT
+    global _AUDIT_NETWORK_ALLOWLIST_WILDCARDS
+
+    _AUDIT_NETWORK_MODE = network
+
+    raw_allowlist = permissions.get("networkAllowlist", permissions.get("network_allowlist", []))
+    if network == "allowlist":
+        exact, wildcard_suffixes = _parse_network_allowlist(raw_allowlist)
+        _AUDIT_NETWORK_ALLOWLIST_EXACT = exact
+        _AUDIT_NETWORK_ALLOWLIST_WILDCARDS = wildcard_suffixes
+    else:
+        _AUDIT_NETWORK_ALLOWLIST_EXACT = set()
+        _AUDIT_NETWORK_ALLOWLIST_WILDCARDS = ()
+
+    if _AUDIT_HOOK_INSTALLED or not hasattr(sys, "addaudithook"):
+        return
+
+    def audit_hook(event: str, args: Any) -> None:
+        mode = _AUDIT_NETWORK_MODE
+        if mode == "full":
+            return
+        if not isinstance(event, str) or not event.startswith("socket."):
+            return
+
+        if mode == "none":
+            raise PermissionError("Network access is not permitted")
+
+        if mode != "allowlist":
+            return
+
+        hostname: str | None = None
+        if event in {"socket.connect", "socket.sendto", "socket.sendmsg", "socket.getnameinfo"}:
+            if isinstance(args, tuple) and len(args) >= 2:
+                hostname = _extract_hostname(args[1])
+            elif event == "socket.getnameinfo" and isinstance(args, tuple) and args:
+                hostname = _extract_hostname(args[0])
+        elif event == "socket.getaddrinfo":
+            if isinstance(args, tuple) and args:
+                host = args[0]
+                if isinstance(host, bytes):
+                    try:
+                        host = host.decode("utf-8", errors="ignore")
+                    except Exception:
+                        host = None
+                if isinstance(host, str):
+                    hostname = _normalize_hostname(host)
+        elif event in {"socket.gethostbyname", "socket.gethostbyaddr"}:
+            if isinstance(args, tuple) and args:
+                host = args[0]
+                if isinstance(host, bytes):
+                    try:
+                        host = host.decode("utf-8", errors="ignore")
+                    except Exception:
+                        host = None
+                if isinstance(host, str):
+                    hostname = _normalize_hostname(host)
+        else:
+            return
+
+        if hostname is None or not _hostname_in_allowlist(
+            hostname, _AUDIT_NETWORK_ALLOWLIST_EXACT, _AUDIT_NETWORK_ALLOWLIST_WILDCARDS
+        ):
+            raise PermissionError(f"Network access to {hostname!r} is not permitted")
+
+    try:
+        sys.addaudithook(audit_hook)
+        _AUDIT_HOOK_INSTALLED = True
+    except Exception:
+        # Best-effort: audit hooks are not available on all platforms/runtimes.
+        pass
+
+
 def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> None:
     """Patch socket connection APIs for network allowlist enforcement."""
 
@@ -446,7 +529,7 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
                     sock_obj.settimeout(timeout)
                 if source_address:
                     sock_obj.bind(source_address)
-                _ORIGINAL_SOCKET_CONNECT(sock_obj, sa)  # type: ignore[misc]
+                _ORIGINAL_SOCKET_CONNECT(sock_obj, (host, port))  # type: ignore[misc]
                 return sock_obj
             except BaseException as err:
                 errors.append(err)
@@ -558,6 +641,8 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
 
     filesystem = _filesystem_permission(permissions)
     network = _network_permission(permissions)
+
+    _apply_network_audit_policy(network, permissions)
 
     # Process execution is a common escape hatch for both filesystem and network
     # restrictions (e.g. spawning `curl` or using shell redirection). Only allow
