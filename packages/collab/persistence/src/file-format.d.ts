@@ -5,6 +5,10 @@ export const FILE_HEADER_BYTES: number;
 export const FILE_FLAG_ENCRYPTED: number;
 
 export function encodeLegacyRecord(update: Uint8Array): Buffer;
+export function scanLegacyRecords(
+  data: Buffer,
+  offset?: number
+): { updates: Uint8Array[]; lastGoodOffset: number };
 export function decodeLegacyRecords(data: Buffer, offset?: number): Uint8Array[];
 
 export function hasFileHeader(data: Buffer): boolean;
@@ -15,6 +19,11 @@ export function encodeEncryptedRecord(
   update: Uint8Array,
   opts: { keyRing: KeyRing; aadContext: unknown }
 ): Buffer;
+export function scanEncryptedRecords(
+  data: Buffer,
+  opts: { keyRing: KeyRing; aadContext: unknown },
+  offset?: number
+): { updates: Uint8Array[]; lastGoodOffset: number };
 export function decodeEncryptedRecords(
   data: Buffer,
   opts: { keyRing: KeyRing; aadContext: unknown },
@@ -22,4 +31,3 @@ export function decodeEncryptedRecords(
 ): Uint8Array[];
 
 export function atomicWriteFile(filePath: string, contents: Buffer): Promise<void>;
-

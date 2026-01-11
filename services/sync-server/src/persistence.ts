@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, promises as fs } from "node:fs";
+import { mkdirSync, readFileSync, truncateSync, promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { Logger } from "pino";
@@ -10,13 +10,13 @@ import {
   FILE_FLAG_ENCRYPTED,
   FILE_HEADER_BYTES,
   atomicWriteFile,
-  decodeEncryptedRecords,
-  decodeLegacyRecords,
   encodeEncryptedRecord,
   encodeFileHeader,
   encodeLegacyRecord,
   hasFileHeader,
   parseFileHeader,
+  scanEncryptedRecords,
+  scanLegacyRecords,
 } from "../../../packages/collab/persistence/src/file-format.js";
 import { Y } from "./yjs.js";
 
@@ -68,8 +68,8 @@ export async function migrateLegacyPlaintextFilesToEncryptedFormat(opts: {
 
     const aadContext = persistenceAadContextForDocHash(docHash);
     const legacyUpdates = hasFileHeader(data)
-      ? decodeLegacyRecords(data, FILE_HEADER_BYTES)
-      : decodeLegacyRecords(data);
+      ? scanLegacyRecords(data, FILE_HEADER_BYTES).updates
+      : scanLegacyRecords(data).updates;
 
     const header = encodeFileHeader(FILE_FLAG_ENCRYPTED);
     const records = legacyUpdates.map((update) =>
@@ -227,10 +227,15 @@ export class FilePersistence {
         }
       }
 
-      for (const update of hasFileHeader(data)
-        ? decodeLegacyRecords(data, FILE_HEADER_BYTES)
-        : decodeLegacyRecords(data)) {
+      const legacyScan = hasFileHeader(data)
+        ? scanLegacyRecords(data, FILE_HEADER_BYTES)
+        : scanLegacyRecords(data);
+      for (const update of legacyScan.updates) {
         Y.applyUpdate(doc, update, persistenceOrigin);
+      }
+      if (legacyScan.lastGoodOffset < data.length) {
+        truncateSync(filePath, legacyScan.lastGoodOffset);
+        this.logger.warn({ docName }, "persistence_truncated_corrupt_tail");
       }
       this.logger.info({ docName }, "persistence_loaded");
       return;
@@ -270,11 +275,13 @@ export class FilePersistence {
         }
 
         const { keyRing } = this.encryption;
-        for (const update of decodeEncryptedRecords(data, {
-          keyRing,
-          aadContext,
-        })) {
+        const { updates, lastGoodOffset } = scanEncryptedRecords(data, { keyRing, aadContext });
+        for (const update of updates) {
           Y.applyUpdate(doc, update, persistenceOrigin);
+        }
+        if (lastGoodOffset < data.length) {
+          await fs.truncate(filePath, lastGoodOffset);
+          this.logger.warn({ docName }, "persistence_truncated_corrupt_tail");
         }
         this.logger.info({ docName }, "persistence_loaded");
         return;
@@ -282,7 +289,7 @@ export class FilePersistence {
 
       // Legacy plaintext file (no header). If encryption is enabled, upgrade it
       // in-place (atomically) before applying updates.
-      const legacyUpdates = decodeLegacyRecords(data);
+      const legacyUpdates = scanLegacyRecords(data).updates;
       if (this.encryption.mode === "keyring") {
         const { keyRing } = this.encryption;
         const header = encodeFileHeader(FILE_FLAG_ENCRYPTED);

@@ -10,13 +10,13 @@ import type { CollabPersistence, CollabPersistenceBinding } from "./index.js";
 import {
   FILE_FLAG_ENCRYPTED,
   atomicWriteFile,
-  decodeEncryptedRecords,
-  decodeLegacyRecords,
   encodeEncryptedRecord,
   encodeFileHeader,
   encodeLegacyRecord,
   hasFileHeader,
   parseFileHeader,
+  scanEncryptedRecords,
+  scanLegacyRecords,
 } from "./file-format.js";
 
 type PendingQueue = Promise<void>;
@@ -155,7 +155,11 @@ export class FileCollabPersistence implements CollabPersistence {
         }
 
         const { keyRing } = this.encryption;
-        for (const update of decodeEncryptedRecords(data, { keyRing, aadContext })) {
+        const { updates, lastGoodOffset } = scanEncryptedRecords(data, { keyRing, aadContext });
+        if (lastGoodOffset < data.length) {
+          await fs.truncate(filePath, lastGoodOffset);
+        }
+        for (const update of updates) {
           Y.applyUpdate(doc, update, persistenceOrigin);
         }
         return;
@@ -163,7 +167,7 @@ export class FileCollabPersistence implements CollabPersistence {
 
       // Legacy plaintext file (no header). If encryption is enabled, upgrade it
       // in-place (atomically) before applying updates.
-      const legacyUpdates = decodeLegacyRecords(data);
+      const { updates: legacyUpdates, lastGoodOffset } = scanLegacyRecords(data);
       if (this.encryption.mode === "keyring") {
         const { keyRing } = this.encryption;
         const header = encodeFileHeader(FILE_FLAG_ENCRYPTED);
@@ -174,6 +178,9 @@ export class FileCollabPersistence implements CollabPersistence {
           })
         );
         await atomicWriteFile(filePath, Buffer.concat([header, ...records]));
+      } else if (lastGoodOffset < data.length) {
+        // Trim partial/corrupt tail records so future appends remain replayable.
+        await fs.truncate(filePath, lastGoodOffset);
       }
 
       for (const update of legacyUpdates) {

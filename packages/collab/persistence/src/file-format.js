@@ -23,16 +23,22 @@ export function encodeLegacyRecord(update) {
   return Buffer.concat([header, Buffer.from(update)]);
 }
 
-export function decodeLegacyRecords(data, offset = 0) {
-  const out = [];
+export function scanLegacyRecords(data, offset = 0) {
+  const updates = [];
+  let lastGoodOffset = offset;
   while (offset + 4 <= data.length) {
     const len = data.readUInt32BE(offset);
     offset += 4;
     if (offset + len > data.length) break;
-    out.push(new Uint8Array(data.subarray(offset, offset + len)));
+    updates.push(new Uint8Array(data.subarray(offset, offset + len)));
     offset += len;
+    lastGoodOffset = offset;
   }
-  return out;
+  return { updates, lastGoodOffset };
+}
+
+export function decodeLegacyRecords(data, offset = 0) {
+  return scanLegacyRecords(data, offset).updates;
 }
 
 export function hasFileHeader(data) {
@@ -92,19 +98,17 @@ export function encodeEncryptedRecord(update, opts) {
   return Buffer.concat([lenPrefix, recordBytes]);
 }
 
-export function decodeEncryptedRecords(data, opts, offset = FILE_HEADER_BYTES) {
-  const out = [];
+export function scanEncryptedRecords(data, opts, offset = FILE_HEADER_BYTES) {
+  const updates = [];
+  let lastGoodOffset = offset;
 
   while (offset + 4 <= data.length) {
     const recordLen = data.readUInt32BE(offset);
     offset += 4;
     if (offset + recordLen > data.length) break;
 
-    if (recordLen < ENCRYPTED_RECORD_HEADER_BYTES) {
-      throw new Error(
-        `Invalid encrypted record length: ${recordLen} (< ${ENCRYPTED_RECORD_HEADER_BYTES})`
-      );
-    }
+    // Corrupt tail record; stop at the previous good boundary.
+    if (recordLen < ENCRYPTED_RECORD_HEADER_BYTES) break;
 
     const record = data.subarray(offset, offset + recordLen);
     offset += recordLen;
@@ -114,20 +118,30 @@ export function decodeEncryptedRecords(data, opts, offset = FILE_HEADER_BYTES) {
     const tagOffset = ivOffset + AES_GCM_IV_BYTES;
     const ciphertextOffset = tagOffset + AES_GCM_TAG_BYTES;
 
-    const plaintext = opts.keyRing.decryptBytes(
-      {
-        keyVersion,
-        algorithm: AES_256_GCM_ALGORITHM,
-        iv: record.subarray(ivOffset, ivOffset + AES_GCM_IV_BYTES),
-        tag: record.subarray(tagOffset, tagOffset + AES_GCM_TAG_BYTES),
-        ciphertext: record.subarray(ciphertextOffset),
-      },
-      { aadContext: opts.aadContext }
-    );
-    out.push(new Uint8Array(plaintext));
+    try {
+      const plaintext = opts.keyRing.decryptBytes(
+        {
+          keyVersion,
+          algorithm: AES_256_GCM_ALGORITHM,
+          iv: record.subarray(ivOffset, ivOffset + AES_GCM_IV_BYTES),
+          tag: record.subarray(tagOffset, tagOffset + AES_GCM_TAG_BYTES),
+          ciphertext: record.subarray(ciphertextOffset),
+        },
+        { aadContext: opts.aadContext }
+      );
+      updates.push(new Uint8Array(plaintext));
+      lastGoodOffset = offset;
+    } catch {
+      // Decryption failed; treat as a corrupt tail record.
+      break;
+    }
   }
 
-  return out;
+  return { updates, lastGoodOffset };
+}
+
+export function decodeEncryptedRecords(data, opts, offset = FILE_HEADER_BYTES) {
+  return scanEncryptedRecords(data, opts, offset).updates;
 }
 
 export async function atomicWriteFile(filePath, contents) {
@@ -145,4 +159,3 @@ export async function atomicWriteFile(filePath, contents) {
     throw err;
   }
 }
-
