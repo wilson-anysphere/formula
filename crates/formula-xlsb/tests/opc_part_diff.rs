@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use formula_xlsb::{CellValue, OpenOptions, XlsbWorkbook};
 use pretty_assertions::assert_eq;
+use quick_xml::events::Event;
+use quick_xml::Reader as XmlReader;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 fn fixture_path() -> PathBuf {
@@ -17,6 +19,17 @@ fn insert_before_closing_tag(mut xml: String, closing_tag: &str, insert: &str) -
         .unwrap_or_else(|| panic!("missing closing tag {closing_tag}"));
     xml.insert_str(idx, insert);
     xml
+}
+
+fn max_rid_suffix(xml: &str) -> u32 {
+    let mut max = 0u32;
+    for chunk in xml.split("Id=\"rId").skip(1) {
+        let digits: String = chunk.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<u32>() {
+            max = max.max(n);
+        }
+    }
+    max
 }
 
 fn build_fixture_with_calc_chain_and_styles(base_bytes: &[u8]) -> Vec<u8> {
@@ -56,10 +69,15 @@ fn build_fixture_with_calc_chain_and_styles(base_bytes: &[u8]) -> Vec<u8> {
 
     let workbook_rels =
         String::from_utf8(parts["xl/_rels/workbook.bin.rels"].clone()).expect("utf8 workbook rels");
+    let max_rid = max_rid_suffix(&workbook_rels);
+    let styles_rid = format!("rId{}", max_rid + 1);
+    let calc_chain_rid = format!("rId{}", max_rid + 2);
     let workbook_rels = insert_before_closing_tag(
         workbook_rels,
         "</Relationships>",
-        "  <Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.bin\"/>\n  <Relationship Id=\"rId4\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain\" Target=\"calcChain.bin\"/>\n",
+        &format!(
+            "  <Relationship Id=\"{styles_rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.bin\"/>\n  <Relationship Id=\"{calc_chain_rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain\" Target=\"calcChain.bin\"/>\n"
+        ),
     );
     parts.insert("xl/_rels/workbook.bin.rels".to_string(), workbook_rels.into_bytes());
 
@@ -81,6 +99,52 @@ fn zip_has_part(path: &Path, part: &str) -> bool {
     let zip = ZipArchive::new(file).expect("read zip");
     let has = zip.file_names().any(|name| name == part);
     has
+}
+
+fn zip_read_to_string(path: &Path, part: &str) -> String {
+    let file = File::open(path).expect("open zip");
+    let mut zip = ZipArchive::new(file).expect("read zip");
+    let mut entry = zip.by_name(part).expect("part exists");
+    let mut bytes = Vec::new();
+    entry.read_to_end(&mut bytes).expect("read part bytes");
+    String::from_utf8(bytes).expect("utf8")
+}
+
+fn calc_chain_relationship_id(workbook_rels_xml: &str) -> Option<String> {
+    let mut reader = XmlReader::from_str(workbook_rels_xml);
+    reader.trim_text(true);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.name().as_ref().ends_with(b"Relationship") =>
+            {
+                let mut id = None;
+                let mut target = None;
+                for attr in e.attributes().flatten() {
+                    match attr.key.as_ref() {
+                        b"Id" => {
+                            id = Some(attr.decode_and_unescape_value(&reader).ok()?.into_owned())
+                        }
+                        b"Target" => {
+                            target = Some(attr.decode_and_unescape_value(&reader).ok()?.into_owned())
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let Some(target) = target {
+                    if target.replace('\\', "/").ends_with("calcChain.bin") {
+                        return id;
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    None
 }
 
 fn format_report(report: &xlsx_diff::DiffReport) -> String {
@@ -271,6 +335,9 @@ fn patch_writer_allows_only_expected_calc_chain_side_effects() {
     std::fs::write(&input_path, variant_bytes).expect("write variant fixture");
 
     let wb = XlsbWorkbook::open(&input_path).expect("open variant xlsb");
+    let workbook_rels_xml = zip_read_to_string(&input_path, "xl/_rels/workbook.bin.rels");
+    let calc_chain_rid = calc_chain_relationship_id(&workbook_rels_xml)
+        .expect("calcChain relationship id present in injected fixture");
     wb.save_with_edits(&out_path, 0, 0, 1, 123.0)
         .expect("save_with_edits");
 
@@ -333,7 +400,7 @@ fn patch_writer_allows_only_expected_calc_chain_side_effects() {
         .iter()
         .filter(|d| d.part == "xl/_rels/workbook.bin.rels")
     {
-        let mentions_calc_chain = diff.path.contains("rId4")
+        let mentions_calc_chain = diff.path.contains(&calc_chain_rid)
             || diff.path.contains("calcChain")
             || diff
                 .expected
