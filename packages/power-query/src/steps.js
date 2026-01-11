@@ -1,6 +1,6 @@
 import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable, inferColumnType, makeUniqueColumnNames } from "./table.js";
-import { compilePredicate } from "./predicate.js";
+import { compilePredicate, compileRowPredicate } from "./predicate.js";
 import { valueKey } from "./valueKey.js";
 import { bindExprColumns, collectExprColumnRefs, evaluateExpr, parseFormula } from "./expr/index.js";
 
@@ -630,12 +630,41 @@ export function compileRowFormula(table, formula) {
 }
 
 /**
+ * Compile an `addColumn` formula into a row function for streaming execution.
+ *
+ * This variant binds column references against a plain column list (rather than
+ * requiring a `DataTable` instance).
+ *
+ * @param {Array<{ name: string }>} columns
+ * @param {string} formula
+ * @returns {(values: unknown[]) => unknown}
+ */
+export function compileRowFormulaForColumns(columns, formula) {
+  /** @type {Map<string, number>} */
+  const index = new Map();
+  for (let i = 0; i < columns.length; i++) {
+    const name = columns[i]?.name;
+    if (typeof name === "string") index.set(name, i);
+  }
+
+  const expr = parseFormula(formula);
+  const bound = bindExprColumns(expr, (name) => {
+    const idx = index.get(name);
+    if (idx == null) {
+      throw new Error(`Unknown column '${name}'. Available: ${columns.map((c) => c.name).join(", ")}`);
+    }
+    return idx;
+  });
+  return (values) => evaluateExpr(bound, values);
+}
+
+/**
  * Compile a `transformColumns` formula into a value function.
  *
  * @param {string} formula
  * @returns {(value: unknown) => unknown}
  */
-function compileValueFormula(formula) {
+export function compileValueFormula(formula) {
   const expr = parseFormula(formula);
   const refs = collectExprColumnRefs(expr);
   if (refs.size > 0) {
@@ -974,6 +1003,223 @@ function take(table, count) {
     throw new Error(`Invalid take count '${count}'`);
   }
   return table.head(count);
+}
+
+/**
+ * Operation types that can be executed incrementally (per batch) without
+ * materializing the full table in memory.
+ *
+ * Note: this list intentionally excludes order-sensitive or stateful operations
+ * like `sortRows` / `groupBy` / `pivot` / `merge` / `append`.
+ */
+export const STREAMABLE_OPERATION_TYPES = new Set([
+  "selectColumns",
+  "removeColumns",
+  "filterRows",
+  "addColumn",
+  "renameColumn",
+  "changeType",
+  "transformColumns",
+  "take",
+]);
+
+/**
+ * @param {QueryOperation} operation
+ */
+export function isStreamableOperation(operation) {
+  return STREAMABLE_OPERATION_TYPES.has(operation.type);
+}
+
+/**
+ * Compile a list of streamable operations into a batch transformer.
+ *
+ * This is used by `QueryEngine.executeQueryStreaming(..., { materialize: false })`
+ * to keep memory bounded while applying common transformations.
+ *
+ * @param {QueryOperation[]} operations
+ * @param {import("./table.js").Column[]} inputColumns
+ * @returns {{
+ *   columns: import("./table.js").Column[];
+ *   transformBatch: (rows: unknown[][]) => { rows: unknown[][]; done: boolean };
+ * }}
+ */
+export function compileStreamingPipeline(operations, inputColumns) {
+  const normalizeCell = normalizeMissing;
+
+  /** @type {import("./table.js").Column[]} */
+  let columns = inputColumns.map((c) => ({ name: c.name, type: c.type ?? "any" }));
+
+  /**
+   * @param {import("./table.js").Column[]} cols
+   */
+  const buildIndex = (cols) => new Map(cols.map((c, idx) => [c.name, idx]));
+
+  /** @type {Map<string, number>} */
+  let columnIndex = buildIndex(columns);
+
+  /**
+   * @param {string} name
+   */
+  const getColumnIndex = (name) => {
+    const idx = columnIndex.get(name);
+    if (idx == null) {
+      throw new Error(`Unknown column '${name}'. Available: ${columns.map((c) => c.name).join(", ")}`);
+    }
+    return idx;
+  };
+
+  /**
+   * @typedef {(rows: unknown[][]) => { rows: unknown[][]; done: boolean }} BatchTransform
+   */
+
+  /** @type {BatchTransform[]} */
+  const transforms = [];
+
+  for (const op of operations) {
+    switch (op.type) {
+      case "selectColumns": {
+        const indices = op.columns.map((name) => getColumnIndex(name));
+        const outColumns = indices.map((idx) => columns[idx]);
+        columns = outColumns;
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => ({
+          rows: rows.map((row) => indices.map((idx) => normalizeCell(row?.[idx]))),
+          done: false,
+        }));
+        break;
+      }
+      case "removeColumns": {
+        const remove = new Set(op.columns.map((name) => getColumnIndex(name)));
+        const keepIndices = columns
+          .map((_c, idx) => idx)
+          .filter((idx) => !remove.has(idx));
+
+        const outColumns = keepIndices.map((idx) => columns[idx]);
+        columns = outColumns;
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => ({
+          rows: rows.map((row) => keepIndices.map((idx) => normalizeCell(row?.[idx]))),
+          done: false,
+        }));
+        break;
+      }
+      case "filterRows": {
+        const predicate = compileRowPredicate(columns, op.predicate);
+        transforms.push((rows) => ({ rows: rows.filter((row) => predicate(row)), done: false }));
+        break;
+      }
+      case "addColumn": {
+        if (columnIndex.has(op.name)) {
+          throw new Error(`Column '${op.name}' already exists`);
+        }
+        const compute = compileRowFormulaForColumns(columns, op.formula);
+        columns = [...columns, { name: op.name, type: "any" }];
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => ({
+          rows: rows.map((row) => {
+            const computed = normalizeCell(compute(row));
+            return [...row, computed];
+          }),
+          done: false,
+        }));
+        break;
+      }
+      case "renameColumn": {
+        const idx = getColumnIndex(op.oldName);
+        if (op.newName !== op.oldName && columns.some((col, i) => i !== idx && col.name === op.newName)) {
+          throw new Error(`Column '${op.newName}' already exists`);
+        }
+        columns = columns.map((col, i) => (i === idx ? { ...col, name: op.newName } : col));
+        columnIndex = buildIndex(columns);
+        transforms.push((rows) => ({ rows, done: false }));
+        break;
+      }
+      case "changeType": {
+        const idx = getColumnIndex(op.column);
+        columns = columns.map((col, i) => (i === idx ? { ...col, type: op.newType } : col));
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => ({
+          rows: rows.map((row) => {
+            const next = row.slice();
+            next[idx] = coerceType(op.newType, row?.[idx]);
+            return next;
+          }),
+          done: false,
+        }));
+        break;
+      }
+      case "transformColumns": {
+        const compiled = op.transforms.map((t) => ({
+          idx: getColumnIndex(t.column),
+          newType: t.newType ?? null,
+          fn: compileValueFormula(t.formula),
+        }));
+
+        columns = columns.map((col, idx) => {
+          const t = compiled.find((x) => x.idx === idx);
+          if (!t) return col;
+          return { ...col, type: t.newType ?? "any" };
+        });
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => {
+          const out = rows.map((row) => row.slice());
+          for (const t of compiled) {
+            for (const row of out) {
+              const next = t.fn(row[t.idx]);
+              row[t.idx] = t.newType ? coerceType(t.newType, next) : normalizeCell(next);
+            }
+          }
+          return { rows: out, done: false };
+        });
+        break;
+      }
+      case "take": {
+        if (!Number.isFinite(op.count) || op.count < 0) {
+          throw new Error(`Invalid take count '${op.count}'`);
+        }
+        let seen = 0;
+        const limit = op.count;
+        transforms.push((rows) => {
+          const remaining = limit - seen;
+          if (remaining <= 0) return { rows: [], done: true };
+          const slice = rows.slice(0, remaining);
+          seen += slice.length;
+          return { rows: slice, done: seen >= limit };
+        });
+        break;
+      }
+      default: {
+        /** @type {never} */
+        const exhausted = op;
+        throw new Error(`Unsupported operation '${exhausted.type}'`);
+      }
+    }
+  }
+
+  let done = false;
+  /**
+   * @param {unknown[][]} rows
+   */
+  const transformBatch = (rows) => {
+    if (done) return { rows: [], done: true };
+    /** @type {unknown[][]} */
+    let current = rows;
+    for (const fn of transforms) {
+      if (done) break;
+      const result = fn(current);
+      current = result.rows;
+      if (result.done) done = true;
+      if (current.length === 0 && done) break;
+    }
+    return { rows: current, done };
+  };
+
+  return { columns, transformBatch };
 }
 
 /**

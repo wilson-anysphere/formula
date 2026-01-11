@@ -74,6 +74,137 @@ export function parseCsv(text, options = {}) {
 }
 
 /**
+ * Incrementally parse CSV rows from an async iterable of text chunks.
+ *
+ * This is used by streaming query execution to avoid materializing a full CSV
+ * file into a single string before parsing.
+ *
+ * @param {AsyncIterable<string>} chunks
+ * @param {{ delimiter?: string }} [options]
+ * @returns {AsyncGenerator<string[]>}
+ */
+export async function* parseCsvStream(chunks, options = {}) {
+  const delimiter = options.delimiter ?? ",";
+
+  /** @type {string[]} */
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+  let pendingQuote = false;
+
+  /**
+   * @param {boolean} isFinal
+   * @returns {string[] | null}
+   */
+  const flushRow = (isFinal) => {
+    row.push(field);
+    field = "";
+    const out = row;
+    // Ignore empty trailing row when the file ends with a newline.
+    if (out.length === 1 && out[0] === "" && isFinal) return null;
+    row = [];
+    return out;
+  };
+
+  for await (const chunk of chunks) {
+    const text = chunk ?? "";
+    let i = 0;
+
+    if (pendingQuote) {
+      pendingQuote = false;
+      if (text[0] === '"') {
+        // Escaped quote spanning a chunk boundary.
+        field += '"';
+        i = 1;
+      } else {
+        // Closing quote at the end of the previous chunk.
+        inQuotes = false;
+      }
+    }
+
+    for (; i < text.length; i++) {
+      const char = text[i];
+
+      if (inQuotes) {
+        if (char === '"') {
+          const next = text[i + 1];
+          if (next === '"') {
+            field += '"';
+            i += 1;
+          } else if (i === text.length - 1) {
+            // Need lookahead into the next chunk to disambiguate closing quote
+            // vs escaped quote.
+            pendingQuote = true;
+          } else {
+            inQuotes = false;
+          }
+          continue;
+        }
+        field += char;
+        continue;
+      }
+
+      if (char === '"') {
+        inQuotes = true;
+        continue;
+      }
+
+      if (char === delimiter) {
+        row.push(field);
+        field = "";
+        continue;
+      }
+
+      if (char === "\r") {
+        // Ignore CR; LF will handle row endings.
+        continue;
+      }
+
+      if (char === "\n") {
+        const next = flushRow(false);
+        if (next) yield next;
+        continue;
+      }
+
+      field += char;
+    }
+  }
+
+  if (pendingQuote) {
+    // End-of-stream lookahead: treat trailing `"` as closing quote.
+    pendingQuote = false;
+    inQuotes = false;
+  }
+
+  // Flush the final row when the file does not end with a newline.
+  if (!inQuotes && (field !== "" || row.length > 0)) {
+    const next = flushRow(true);
+    if (next) yield next;
+  }
+}
+
+/**
+ * Parse CSV into row batches from an async iterable of text chunks.
+ *
+ * @param {AsyncIterable<string>} chunks
+ * @param {{ delimiter?: string; batchSize?: number }} [options]
+ * @returns {AsyncGenerator<string[][]>}
+ */
+export async function* parseCsvStreamBatches(chunks, options = {}) {
+  const batchSize = options.batchSize ?? 1024;
+  /** @type {string[][]} */
+  let batch = [];
+  for await (const row of parseCsvStream(chunks, { delimiter: options.delimiter })) {
+    batch.push(row);
+    if (batch.length >= batchSize) {
+      yield batch;
+      batch = [];
+    }
+  }
+  if (batch.length > 0) yield batch;
+}
+
+/**
  * Convert a CSV cell to a primitive.
  * @param {string} value
  * @returns {unknown}
@@ -169,6 +300,10 @@ function tableFromJson(json) {
 /**
  * @typedef {{
  *   readText?: (path: string) => Promise<string>;
+ *   readTextStream?: (path: string, options?: { signal?: AbortSignal }) => AsyncIterable<string>;
+ *   readBinary?: (path: string) => Promise<Uint8Array>;
+ *   readBinaryStream?: (path: string, options?: { signal?: AbortSignal }) => AsyncIterable<Uint8Array>;
+ *   openFile?: (path: string, options?: { signal?: AbortSignal }) => Promise<Blob>;
  *   readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable>;
  *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
  * }} FileConnectorOptions
@@ -182,6 +317,10 @@ export class FileConnector {
     this.id = "file";
     this.permissionKind = "file:read";
     this.readText = options.readText ?? null;
+    this.readTextStream = options.readTextStream ?? null;
+    this.readBinary = options.readBinary ?? null;
+    this.readBinaryStream = options.readBinaryStream ?? null;
+    this.openFile = options.openFile ?? null;
     this.readParquetTable = options.readParquetTable ?? null;
     this.stat = options.stat ?? null;
   }
@@ -248,10 +387,7 @@ export class FileConnector {
     }
 
     if (request.format === "csv") {
-      if (!this.readText) {
-        throw new Error("CSV source requires a FileConnector readText adapter");
-      }
-      const text = await this.readText(request.path);
+      const text = await this.readTextFromAdapters(request.path, { signal });
       if (signal?.aborted) {
         const err = new Error("Aborted");
         err.name = "AbortError";
@@ -274,10 +410,7 @@ export class FileConnector {
     }
 
     if (request.format === "json") {
-      if (!this.readText) {
-        throw new Error("JSON source requires a FileConnector readText adapter");
-      }
-      const text = await this.readText(request.path);
+      const text = await this.readTextFromAdapters(request.path, { signal });
       if (signal?.aborted) {
         const err = new Error("Aborted");
         err.name = "AbortError";
@@ -318,5 +451,36 @@ export class FileConnector {
     /** @type {never} */
     const exhausted = request;
     throw new Error(`Unsupported file request '${String(exhausted)}'`);
+  }
+
+  /**
+   * Materialize a full text file into a string.
+   *
+   * Prefer `readText`, but fall back to concatenating `readTextStream` when only the streaming
+   * adapter is available.
+   *
+   * @private
+   * @param {string} path
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  async readTextFromAdapters(path, options = {}) {
+    const signal = options.signal;
+    if (this.readText) {
+      return this.readText(path);
+    }
+    if (!this.readTextStream) {
+      throw new Error("File source requires a FileConnector readText or readTextStream adapter");
+    }
+    /** @type {string[]} */
+    const chunks = [];
+    for await (const chunk of this.readTextStream(path, { signal })) {
+      if (signal?.aborted) {
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      }
+      chunks.push(chunk ?? "");
+    }
+    return chunks.join("");
   }
 }

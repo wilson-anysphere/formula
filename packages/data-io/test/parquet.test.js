@@ -12,6 +12,7 @@ import {
   arrowTableToIPC,
   arrowTableToParquet,
   parquetFileToArrowTable,
+  parquetFileToGridBatches,
   parquetToArrowTable,
 } from '../src/index.js';
 
@@ -102,6 +103,28 @@ test('Parquet import from Blob streams and can emit grid batches', { skip: !parq
   });
 
   assert.equal(table.numRows, 3);
+  assert.deepEqual(grid[0], ['id', 'name', 'active', 'score']);
+  assert.deepEqual(grid[1], [1, 'Alice', true, 1.5]);
+  assert.deepEqual(grid[3], [3, 'Carla', true, 3.75]);
+});
+
+test('parquetFileToGridBatches streams grid batches without materializing an Arrow table', { skip: !parquetAvailable }, async () => {
+  const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
+  const parquetBytes = new Uint8Array(await readFile(parquetPath));
+
+  const blob = new Blob([parquetBytes]);
+  const grid = [];
+
+  for await (const batch of parquetFileToGridBatches(blob, {
+    batchSize: 2,
+    gridBatchSize: 2,
+    includeHeader: true,
+  })) {
+    for (let i = 0; i < batch.values.length; i++) {
+      grid[batch.rowOffset + i] = batch.values[i];
+    }
+  }
+
   assert.deepEqual(grid[0], ['id', 'name', 'active', 'score']);
   assert.deepEqual(grid[1], [1, 'Alice', true, 1.5]);
   assert.deepEqual(grid[3], [3, 'Carla', true, 3.75]);

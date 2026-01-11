@@ -228,6 +228,7 @@ export async function applyQueryToDocument(
     await options.engine.executeQueryStreaming(query, options.context ?? {}, {
       batchSize,
       includeHeader: destination.includeHeader,
+      materialize: false,
       signal: options.signal,
       onProgress: async (evt) => {
         await options.onProgress?.({ type: "engine", queryId: query.id, event: evt });

@@ -1,11 +1,11 @@
-import { applyOperation } from "./steps.js";
+import { applyOperation, compileStreamingPipeline, isStreamableOperation } from "./steps.js";
 import { ArrowTableAdapter } from "./arrowTable.js";
-import { DataTable } from "./table.js";
+import { DataTable, makeUniqueColumnNames } from "./table.js";
 
 import { hashValue } from "./cache/key.js";
 import { valueKey } from "./valueKey.js";
 import { deserializeAnyTable, deserializeTable, serializeAnyTable } from "./cache/serialize.js";
-import { FileConnector } from "./connectors/file.js";
+import { FileConnector, parseCsvCell, parseCsvStream } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { ODataConnector } from "./connectors/odata.js";
 import { SqlConnector } from "./connectors/sql.js";
@@ -93,6 +93,12 @@ async function loadDataIoModule() {
  *   stepIndex: number;
  *   stepId: string;
  *   operation: QueryOperation["type"];
+ * } | {
+ *   type: "stream:batch";
+ *   queryId: string;
+ *   rowOffset: number;
+ *   rowCount: number;
+ *   totalRowsEmitted: number;
  * } | {
  *   type: "privacy:firewall";
  *   queryId: string;
@@ -182,12 +188,15 @@ async function loadDataIoModule() {
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `SqlConnector`.
  * @property {{ fetchTable: (url: string, options: { method: string; headers?: Record<string, string> }) => Promise<ITable> } | undefined} [apiAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `HttpConnector`.
- * @property {{
- *   readText?: (path: string) => Promise<string>;
- *   readBinary?: (path: string) => Promise<Uint8Array>;
- *   readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable>;
- *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
- * } | undefined} [fileAdapter]
+  * @property {{
+  *   readText?: (path: string) => Promise<string>;
+  *   readTextStream?: (path: string, options?: { signal?: AbortSignal }) => AsyncIterable<string>;
+  *   readBinary?: (path: string) => Promise<Uint8Array>;
+  *   readBinaryStream?: (path: string, options?: { signal?: AbortSignal }) => AsyncIterable<Uint8Array>;
+  *   openFile?: (path: string, options?: { signal?: AbortSignal }) => Promise<Blob>;
+  *   readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable>;
+  *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
+  * } | undefined} [fileAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `FileConnector`.
  * @property {Partial<{ file: FileConnector; http: HttpConnector; odata: ODataConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
  * @property {import("./cache/cache.js").CacheManager | undefined} [cache]
@@ -388,6 +397,10 @@ export class QueryEngine {
       options.connectors?.file ??
       new FileConnector({
         readText: options.fileAdapter?.readText,
+        readTextStream: options.fileAdapter?.readTextStream,
+        readBinary: options.fileAdapter?.readBinary,
+        readBinaryStream: options.fileAdapter?.readBinaryStream,
+        openFile: options.fileAdapter?.openFile,
         readParquetTable: options.fileAdapter?.readParquetTable,
         stat: options.fileAdapter?.stat,
       });
@@ -1038,7 +1051,7 @@ export class QueryEngine {
       }
     } else {
       let source = query.source;
-      if (source.type === "parquet" && this.fileAdapter?.readBinary) {
+      if (source.type === "parquet" && (this.fileAdapter?.readBinary || this.fileAdapter?.openFile)) {
         const projection = computeParquetProjectionColumns(steps);
         const rowLimit = computeParquetRowLimit(steps, options.limit);
         const nextOptions = projection || rowLimit != null ? { ...(source.options ?? {}) } : null;
@@ -1828,8 +1841,34 @@ export class QueryEngine {
         }
       }
 
-      // Prefer the Arrow-backed Parquet path when the host can provide raw bytes.
-      // This avoids materializing row arrays and lets downstream steps stay columnar.
+      // Prefer Arrow-backed Parquet when possible.
+      //
+      // 1) `openFile`: avoids reading the entire parquet file into a single `Uint8Array` before
+      //    decoding (parquet-wasm can stream from the file/blob handle).
+      // 2) `readBinary`: legacy path, still columnar but requires a full file read.
+      //
+      // Both avoid materializing row arrays and let downstream steps stay columnar.
+      if (source.type === "parquet" && this.fileAdapter?.openFile) {
+        const handle = await this.fileAdapter.openFile(source.path, { signal: options.signal });
+        throwIfAborted(options.signal);
+        const { parquetFileToArrowTable } = await loadDataIoModule();
+        const arrowTable = await parquetFileToArrowTable(handle, source.options);
+        const table = new ArrowTableAdapter(arrowTable);
+        this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
+        const meta = {
+          refreshedAt: new Date(state.now()),
+          sourceTimestamp: sourceState.sourceTimestamp,
+          etag: sourceState.etag,
+          sourceKey,
+          schema: { columns: table.columns, inferred: true },
+          rowCount: table.rowCount,
+          rowCountEstimate: table.rowCount,
+          provenance: { kind: "file", path: source.path, format: "parquet" },
+        };
+        options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+        return { table, meta, sources: [meta] };
+      }
+
       if (source.type === "parquet" && this.fileAdapter?.readBinary) {
         const bytes = await this.fileAdapter.readBinary(source.path);
         throwIfAborted(options.signal);
@@ -2432,23 +2471,451 @@ export class QueryEngine {
    * @param {ExecuteOptions & {
    *   batchSize?: number;
    *   includeHeader?: boolean;
+   *   materialize?: boolean;
    *   onBatch: (batch: { rowOffset: number; values: unknown[][] }) => Promise<void> | void;
    * }} options
+   *   When `options.materialize === false`, the engine will avoid retaining a fully materialized
+   *   output table and will instead stream output batches through `onBatch`.
+   *
+   *   When omitted or `true`, this method preserves the original behavior and returns the fully
+   *   materialized `ITable` for backwards compatibility.
+   * @returns {Promise<ITable | { schema: SchemaInfo; rowCount: number; columnCount: number }>}
    */
   async executeQueryStreaming(query, context = {}, options) {
     const batchSize = options.batchSize ?? 1024;
     const includeHeader = options.includeHeader ?? true;
     const onBatch = options.onBatch;
+    const materialize = options.materialize ?? true;
 
-    const { batchSize: _batchSize, includeHeader: _includeHeader, onBatch: _onBatch, ...executeOptions } = options;
+    const {
+      batchSize: _batchSize,
+      includeHeader: _includeHeader,
+      onBatch: _onBatch,
+      materialize: _materialize,
+      ...executeOptions
+    } = options;
+
+    if (materialize === false) {
+      return this.executeQueryStreamingNonMaterializing(query, context, {
+        ...executeOptions,
+        batchSize,
+        includeHeader,
+        onBatch,
+      });
+    }
+
     const table = await this.executeQuery(query, context, executeOptions);
 
+    let totalRowsEmitted = 0;
     for await (const batch of tableToGridBatches(table, { batchSize, includeHeader })) {
+      throwIfAborted(executeOptions.signal);
+      totalRowsEmitted = Math.max(totalRowsEmitted, batch.rowOffset + batch.values.length);
+      executeOptions.onProgress?.({
+        type: "stream:batch",
+        queryId: query.id,
+        rowOffset: batch.rowOffset,
+        rowCount: batch.values.length,
+        totalRowsEmitted,
+      });
       await onBatch(batch);
     }
 
     return table;
   }
+
+  /**
+   * Streaming query execution that does not retain a fully materialized output table.
+   *
+   * The streaming pipeline supports a subset of operations that can be applied incrementally
+   * without needing to inspect the full dataset (e.g. `selectColumns`, `filterRows`, `take`).
+   *
+   * Queries that include non-streamable operations fall back to the existing materializing
+   * execution strategy.
+   *
+   * @private
+   * @param {Query} query
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions & {
+   *   batchSize: number;
+   *   includeHeader: boolean;
+   *   onBatch: (batch: { rowOffset: number; values: unknown[][] }) => Promise<void> | void;
+   * }} options
+   * @returns {Promise<{ schema: SchemaInfo; rowCount: number; columnCount: number }>}
+   */
+  async executeQueryStreamingNonMaterializing(query, context, options) {
+    const batchSize = options.batchSize ?? 1024;
+    const includeHeader = options.includeHeader ?? true;
+    const onBatch = options.onBatch;
+
+    const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
+    const steps = query.steps.slice(0, maxStepIndex + 1);
+
+    const canStreamSteps = steps.every((step) => isStreamableOperation(step.operation));
+
+    const fileConnector = this.connectors.get("file");
+    const canStreamSource =
+      query.source.type === "range" ||
+      query.source.type === "table" ||
+      (query.source.type === "csv" && Boolean(fileConnector?.readTextStream || fileConnector?.readText)) ||
+      (query.source.type === "parquet" && Boolean(fileConnector?.openFile));
+
+    if (!canStreamSteps || !canStreamSource) {
+      // Fall back to the existing execution strategy when we can't safely stream.
+      const { batchSize: _batchSize, includeHeader: _includeHeader, onBatch: _onBatch, ...executeOptions } = options;
+      const table = await this.executeQuery(query, context, executeOptions);
+
+      let totalRowsEmitted = 0;
+      for await (const batch of tableToGridBatches(table, { batchSize, includeHeader })) {
+        throwIfAborted(executeOptions.signal);
+        totalRowsEmitted = Math.max(totalRowsEmitted, batch.rowOffset + batch.values.length);
+        executeOptions.onProgress?.({
+          type: "stream:batch",
+          queryId: query.id,
+          rowOffset: batch.rowOffset,
+          rowCount: batch.values.length,
+          totalRowsEmitted,
+        });
+        await onBatch(batch);
+      }
+
+      return {
+        schema: { columns: table.columns, inferred: true },
+        rowCount: table.rowCount,
+        columnCount: table.columnCount,
+      };
+    }
+
+    throwIfAborted(options.signal);
+
+    /** @type {QueryOperation[]} */
+    const operations = steps.map((step) => step.operation);
+    if (options.limit != null) {
+      operations.push({ type: "take", count: options.limit });
+    }
+
+    const state = { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
+    const callStack = new Set([query.id]);
+
+    options.onProgress?.({ type: "source:start", queryId: query.id, sourceType: query.source.type });
+    const source = await this.loadSourceBatchesForStreaming(query.source, context, callStack, options, state);
+
+    const pipeline = compileStreamingPipeline(operations, source.columns);
+    const outputColumns = pipeline.columns;
+
+    let totalRowsEmitted = 0;
+    if (includeHeader) {
+      totalRowsEmitted = 1;
+      options.onProgress?.({
+        type: "stream:batch",
+        queryId: query.id,
+        rowOffset: 0,
+        rowCount: 1,
+        totalRowsEmitted,
+      });
+      await onBatch({ rowOffset: 0, values: [outputColumns.map((c) => c.name)] });
+    }
+
+    /** @type {unknown[][]} */
+    let buffer = [];
+    let bufferOffset = 0;
+    let nextRowOffset = includeHeader ? 1 : 0;
+    let outputRowCount = 0;
+
+    /**
+     * @param {unknown[][]} rows
+     */
+    const enqueue = (rows) => {
+      if (rows.length === 0) return;
+      if (bufferOffset === 0 && buffer.length === 0) {
+        buffer = rows;
+        bufferOffset = 0;
+      } else {
+        buffer = buffer.slice(bufferOffset).concat(rows);
+        bufferOffset = 0;
+      }
+    };
+
+    /**
+     * @param {number} count
+     */
+    const dequeue = (count) => {
+      const slice = buffer.slice(bufferOffset, bufferOffset + count);
+      bufferOffset += count;
+      if (bufferOffset >= buffer.length) {
+        buffer = [];
+        bufferOffset = 0;
+      }
+      return slice;
+    };
+
+    /**
+     * @param {boolean} flushAll
+     */
+    const emitAvailable = async (flushAll) => {
+      while (buffer.length - bufferOffset >= batchSize || (flushAll && buffer.length - bufferOffset > 0)) {
+        const available = buffer.length - bufferOffset;
+        const size = flushAll ? Math.min(available, batchSize) : batchSize;
+        const chunk = dequeue(size);
+        if (chunk.length === 0) break;
+        throwIfAborted(options.signal);
+        totalRowsEmitted = Math.max(totalRowsEmitted, nextRowOffset + chunk.length);
+        options.onProgress?.({
+          type: "stream:batch",
+          queryId: query.id,
+          rowOffset: nextRowOffset,
+          rowCount: chunk.length,
+          totalRowsEmitted,
+        });
+        await onBatch({ rowOffset: nextRowOffset, values: chunk });
+        nextRowOffset += chunk.length;
+        outputRowCount += chunk.length;
+      }
+    };
+
+    try {
+      for await (const batchRows of source.batches) {
+        throwIfAborted(options.signal);
+        const result = pipeline.transformBatch(batchRows);
+        enqueue(result.rows);
+        await emitAvailable(result.done);
+        if (result.done) break;
+      }
+
+      await emitAvailable(true);
+    } finally {
+      options.onProgress?.({ type: "source:complete", queryId: query.id, sourceType: query.source.type });
+    }
+
+    return {
+      schema: { columns: outputColumns, inferred: true },
+      rowCount: outputRowCount,
+      columnCount: outputColumns.length,
+    };
+  }
+
+  /**
+   * Load a query source as an async iterable of row batches for streaming execution.
+   *
+   * @private
+   * @param {QuerySource} source
+   * @param {QueryExecutionContext} context
+   * @param {Set<string>} callStack
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @returns {Promise<{ columns: import("./table.js").Column[]; batches: AsyncIterable<unknown[][]> }>}
+   */
+  async loadSourceBatchesForStreaming(source, context, callStack, options, state) {
+    throwIfAborted(options.signal);
+
+    const batchSize = options.batchSize ?? 1024;
+
+    if (source.type === "range") {
+      const hasHeaders = source.range.hasHeaders ?? true;
+      const values = Array.isArray(source.range.values) ? source.range.values : [];
+      const headerRow = hasHeaders ? values[0] ?? [] : null;
+      const colCount = hasHeaders && Array.isArray(headerRow) ? headerRow.length : Math.max(...values.map((r) => (Array.isArray(r) ? r.length : 0)), 0);
+
+      const rawNames = hasHeaders ? (Array.isArray(headerRow) ? headerRow : []) : Array.from({ length: colCount }, (_v, i) => `Column${i + 1}`);
+      const names = makeUniqueColumnNames(rawNames);
+      const columns = names.map((name) => ({ name, type: "any" }));
+
+      const startRow = hasHeaders ? 1 : 0;
+      async function* batches() {
+        for (let rowStart = startRow; rowStart < values.length; rowStart += batchSize) {
+          const end = Math.min(values.length, rowStart + batchSize);
+          /** @type {unknown[][]} */
+          const out = [];
+          for (let i = rowStart; i < end; i++) {
+            const row = Array.isArray(values[i]) ? values[i] : [];
+            const next = new Array(columns.length);
+            for (let c = 0; c < columns.length; c++) {
+              const value = row[c];
+              next[c] = value === undefined ? null : value;
+            }
+            out.push(next);
+          }
+          yield out;
+        }
+      }
+
+      return { columns, batches: batches() };
+    }
+
+    if (source.type === "table") {
+      const table = context.tables?.[source.table];
+      if (!table) {
+        throw new Error(`Unknown table '${source.table}'`);
+      }
+      const columns = table.columns.map((c) => ({ name: c.name, type: c.type ?? "any" }));
+
+      async function* batches() {
+        /** @type {unknown[][]} */
+        let batch = [];
+        for (const row of table.iterRows()) {
+          batch.push(row);
+          if (batch.length >= batchSize) {
+            yield batch;
+            batch = [];
+          }
+        }
+        if (batch.length > 0) yield batch;
+      }
+
+      return { columns, batches: batches() };
+    }
+
+    if (source.type === "csv") {
+      const connector = this.connectors.get("file");
+      if (!connector) throw new Error("CSV source requires a FileConnector");
+      const request = { format: "csv", path: source.path, csv: { delimiter: source.options?.delimiter, hasHeaders: source.options?.hasHeaders } };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      await this.getCredentials("file", request, state);
+
+      /** @type {AsyncIterable<string>} */
+      const chunks = connector.readTextStream
+        ? connector.readTextStream(source.path, { signal: options.signal })
+        : connector.readText
+          ? (async function* () {
+              yield await connector.readText(source.path);
+            })()
+          : null;
+
+      if (!chunks) {
+        throw new Error("CSV source requires a FileConnector readText or readTextStream adapter");
+      }
+
+      const hasHeaders = source.options?.hasHeaders ?? true;
+      const delimiter = source.options?.delimiter;
+
+      const rowIterator = parseCsvStream(chunks, { delimiter })[Symbol.asyncIterator]();
+      let firstRow = await rowIterator.next();
+
+      /** @type {import("./table.js").Column[]} */
+      let columns = [];
+      /** @type {unknown[] | null} */
+      let firstDataRow = null;
+
+      if (!firstRow.done) {
+        if (hasHeaders) {
+          const rawNames = firstRow.value.map(parseCsvCell);
+          const names = makeUniqueColumnNames(rawNames);
+          columns = names.map((name) => ({ name, type: "any" }));
+        } else {
+          const width = firstRow.value.length;
+          columns = Array.from({ length: width }, (_v, i) => ({ name: `Column${i + 1}`, type: "any" }));
+          firstDataRow = normalizeCsvRow(firstRow.value, columns.length);
+        }
+      }
+
+      async function* batches() {
+        try {
+          /** @type {unknown[][]} */
+          let batch = [];
+          if (firstDataRow) batch.push(firstDataRow);
+          while (true) {
+            const next = await rowIterator.next();
+            if (next.done) break;
+            batch.push(normalizeCsvRow(next.value, columns.length));
+            if (batch.length >= batchSize) {
+              yield batch;
+              batch = [];
+            }
+          }
+          if (batch.length > 0) yield batch;
+        } finally {
+          if (typeof rowIterator.return === "function") {
+            try {
+              await rowIterator.return();
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+
+      return { columns, batches: batches() };
+    }
+
+    if (source.type === "parquet") {
+      const connector = this.connectors.get("file");
+      if (!connector) throw new Error("Parquet source requires a FileConnector");
+      if (!connector.openFile) {
+        throw new Error("Parquet streaming requires a FileConnector openFile adapter");
+      }
+      const request = { format: "parquet", path: source.path };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      await this.getCredentials("file", request, state);
+
+      const handle = await connector.openFile(source.path, { signal: options.signal });
+      throwIfAborted(options.signal);
+
+      const { parquetFileToGridBatches } = await loadDataIoModule();
+      const iterator = parquetFileToGridBatches(handle, {
+        ...(source.options ?? {}),
+        gridBatchSize: batchSize,
+        includeHeader: true,
+      })[Symbol.asyncIterator]();
+
+      const first = await iterator.next();
+      const header = !first.done && Array.isArray(first.value?.values) ? first.value.values[0] ?? [] : [];
+      const columns = header.map((name) => ({ name: String(name ?? ""), type: "any" }));
+
+      async function* batches() {
+        try {
+          while (true) {
+            const next = await iterator.next();
+            if (next.done) break;
+            const values = next.value?.values;
+            if (Array.isArray(values) && values.length > 0) {
+              yield values;
+            }
+          }
+        } finally {
+          if (typeof iterator.return === "function") {
+            try {
+              await iterator.return();
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+
+      return { columns, batches: batches() };
+    }
+
+    /** @type {never} */
+    const exhausted = source;
+    throw new Error(`Streaming execution does not support source type '${exhausted.type}'`);
+  }
+}
+
+/**
+ * Normalize a parsed CSV row into a fixed-width row array.
+ *
+ * Mirrors `DataTable.fromGrid` + `FileConnector` parsing semantics:
+ * - missing values become `null`
+ * - extra values are truncated
+ * - cell text is parsed via `parseCsvCell`
+ *
+ * @param {string[]} row
+ * @param {number} width
+ * @returns {unknown[]}
+ */
+function normalizeCsvRow(row, width) {
+  const out = new Array(width);
+  for (let i = 0; i < width; i++) {
+    const raw = i < row.length ? row[i] : undefined;
+    if (raw === undefined) {
+      out[i] = null;
+      continue;
+    }
+    const parsed = parseCsvCell(raw);
+    out[i] = parsed === undefined ? null : parsed;
+  }
+  return out;
 }
 
 /**

@@ -57,31 +57,78 @@ function isEqual(a, b) {
  * @returns {(rowIndex: number) => boolean}
  */
 export function compilePredicate(table, predicate) {
-  const getCell = table.getCell.bind(table);
+  return compilePredicateImpl(
+    (rowIndex, colIndex) => table.getCell(rowIndex, colIndex),
+    (name) => table.getColumnIndex(name),
+    predicate,
+  );
+}
+
+/**
+ * Compile a filter predicate into a row predicate that operates on row arrays.
+ *
+ * This is used by streaming query execution to apply `filterRows` without
+ * materializing the full table.
+ *
+ * @param {Array<{ name: string }>} columns
+ * @param {FilterPredicate} predicate
+ * @returns {(row: unknown[]) => boolean}
+ */
+export function compileRowPredicate(columns, predicate) {
+  /** @type {Map<string, number>} */
+  const index = new Map();
+  for (let i = 0; i < columns.length; i++) {
+    const name = columns[i]?.name;
+    if (typeof name === "string") index.set(name, i);
+  }
 
   /**
+   * @param {string} name
+   */
+  const getColumnIndex = (name) => {
+    const idx = index.get(name);
+    if (idx == null) {
+      throw new Error(`Unknown column '${name}'. Available: ${columns.map((c) => c.name).join(", ")}`);
+    }
+    return idx;
+  };
+
+  return compilePredicateImpl((row, colIndex) => row?.[colIndex] ?? null, getColumnIndex, predicate);
+}
+
+/**
+ * Shared predicate compiler that can target either `ITable` row indices or row arrays.
+ *
+ * @template RowCtx
+ * @param {(row: RowCtx, colIndex: number) => unknown} getCell
+ * @param {(name: string) => number} getColumnIndex
+ * @param {FilterPredicate} predicate
+ * @returns {(row: RowCtx) => boolean}
+ */
+function compilePredicateImpl(getCell, getColumnIndex, predicate) {
+  /**
    * @param {FilterPredicate} node
-   * @returns {(rowIndex: number) => boolean}
+   * @returns {(row: any) => boolean}
    */
   function compileNode(node) {
     switch (node.type) {
       case "and": {
         const parts = node.predicates.map((p) => compileNode(p));
-        return (rowIndex) => parts.every((fn) => fn(rowIndex));
+        return (row) => parts.every((fn) => fn(row));
       }
       case "or": {
         const parts = node.predicates.map((p) => compileNode(p));
-        return (rowIndex) => parts.some((fn) => fn(rowIndex));
+        return (row) => parts.some((fn) => fn(row));
       }
       case "not": {
         const inner = compileNode(node.predicate);
-        return (rowIndex) => !inner(rowIndex);
+        return (row) => !inner(row);
       }
       case "comparison": {
-        const idx = table.getColumnIndex(node.column);
+        const idx = getColumnIndex(node.column);
         const caseSensitive = node.caseSensitive ?? false;
-        return (rowIndex) => {
-          const value = getCell(rowIndex, idx);
+        return (row) => {
+          const value = getCell(row, idx);
 
           switch (node.operator) {
             case "isNull":

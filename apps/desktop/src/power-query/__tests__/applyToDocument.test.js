@@ -10,6 +10,35 @@ import { MockEngine } from "../../document/engine.js";
 import { applyQueryToDocument } from "../applyToDocument.ts";
 import { dateToExcelSerial } from "../../shared/valueParsing.js";
 
+test("applyQueryToDocument requests non-materializing streaming execution", async () => {
+  const engine = {
+    executeQueryStreaming: async (_query, _context, opts) => {
+      assert.equal(opts.materialize, false);
+      await opts.onBatch({ rowOffset: 0, values: [["A", "B"]] });
+      await opts.onBatch({ rowOffset: 1, values: [[1, 2], [3, 4]] });
+      return { schema: { columns: [{ name: "A", type: "any" }, { name: "B", type: "any" }], inferred: true }, rowCount: 2, columnCount: 2 };
+    },
+  };
+
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const query = {
+    id: "q_stream_stub",
+    name: "Stream stub",
+    source: { type: "range", range: { values: [["A", "B"]], hasHeaders: true } },
+    steps: [],
+  };
+
+  const destination = { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true };
+
+  const result = await applyQueryToDocument(doc, query, destination, { engine, batchSize: 5 });
+
+  assert.deepEqual(result, { rows: 3, cols: 2 });
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, "A");
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, 1);
+  assert.equal(doc.getCell("Sheet1", { row: 2, col: 1 }).value, 4);
+});
+
 test("applyQueryToDocument writes query output into the destination range (file CSV source)", async () => {
   const engine = new QueryEngine({
     fileAdapter: {
