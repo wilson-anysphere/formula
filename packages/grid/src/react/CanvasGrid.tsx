@@ -520,11 +520,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const ro = new ResizeObserver(resize);
     ro.observe(container);
 
-      return () => {
-        ro.disconnect();
-        renderer.destroy();
-        rendererRef.current = null;
-      };
+    return () => {
+      ro.disconnect();
+      renderer.destroy();
+      rendererRef.current = null;
+    };
   }, [rendererFactory, frozenRows, frozenCols]);
 
   useEffect(() => {
