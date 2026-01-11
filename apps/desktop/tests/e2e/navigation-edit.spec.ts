@@ -81,6 +81,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     expect(a1Value).toBe("Hello");
 
     // Start editing A2 but cancel.
+    const a2Before = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2"));
     await page.keyboard.press("F2");
     await expect(editor).toBeVisible();
     await editor.fill("ShouldNotCommit");
@@ -90,8 +91,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     expect(recalcAfterCancel).toBe(recalcAfterCommit);
 
     const a2Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2"));
-    // A2 is part of the seeded demo chart data; cancel should restore the original value.
-    expect(a2Value).toBe("A");
+    expect(a2Value).toBe(a2Before);
     await expect(page.getByTestId("active-cell")).toHaveText("A2");
 
     // Delete clears cell contents.

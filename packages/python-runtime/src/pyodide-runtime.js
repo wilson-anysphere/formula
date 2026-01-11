@@ -41,6 +41,7 @@ export class PyodideRuntime {
     this.permissions = options.permissions ?? defaultPermissions();
     this.api = options.api;
     this.formulaFiles = options.formulaFiles ?? bundledFormulaFiles;
+    this.onOutput = options.onOutput ?? null;
     this.worker = null;
     this._onRpcMessage = null;
   }
@@ -78,6 +79,7 @@ export class PyodideRuntime {
     this.indexURL = options.indexURL ?? this.indexURL;
     this.rpcTimeoutMs = options.rpcTimeoutMs ?? this.rpcTimeoutMs;
     this.rpcBufferBytes = options.rpcBufferBytes ?? this.rpcBufferBytes;
+    this.onOutput = options.onOutput ?? this.onOutput;
 
     if (!this.formulaFiles) {
       throw new Error("PyodideRuntime.initialize requires { formulaFiles } to install the in-repo formula API");
@@ -93,7 +95,24 @@ export class PyodideRuntime {
 
     this._onRpcMessage = (event) => {
       const msg = event.data;
-      if (!msg || msg.type !== "rpc") return;
+      if (!msg || typeof msg.type !== "string") return;
+
+      if (msg.type === "output") {
+        if (typeof this.onOutput === "function") {
+          try {
+            this.onOutput({
+              requestId: typeof msg.requestId === "string" ? msg.requestId : null,
+              stream: msg.stream === "stderr" ? "stderr" : "stdout",
+              text: typeof msg.text === "string" ? msg.text : String(msg.text ?? ""),
+            });
+          } catch {
+            // ignore output handler errors
+          }
+        }
+        return;
+      }
+
+      if (msg.type !== "rpc") return;
 
       if (typeof SharedArrayBuffer === "undefined") {
         return;
@@ -162,13 +181,13 @@ export class PyodideRuntime {
    * Spreadsheet operations are expected to be bridged by injecting a JS module
    * (e.g. `formula_bridge`) into Pyodide.
    */
-  async execute(code, { timeoutMs, maxMemoryBytes, permissions } = {}) {
+  async execute(code, { timeoutMs, maxMemoryBytes, permissions, requestId } = {}) {
     if (!this.worker) {
       throw new Error("PyodideRuntime not initialized; call initialize() first");
     }
 
     const effectiveTimeout = timeoutMs ?? this.timeoutMs;
-    const requestId = globalThis.crypto?.randomUUID?.() ?? String(Date.now());
+    const effectiveRequestId = requestId ?? globalThis.crypto?.randomUUID?.() ?? String(Date.now());
     const effectiveMaxMemory = maxMemoryBytes ?? this.maxMemoryBytes;
     const effectivePermissions = permissions ?? this.permissions;
 
@@ -186,7 +205,7 @@ export class PyodideRuntime {
 
       const onMessage = (event) => {
         const msg = event.data;
-        if (msg?.type !== "result" || msg?.requestId !== requestId) return;
+        if (msg?.type !== "result" || msg?.requestId !== effectiveRequestId) return;
         worker.removeEventListener("message", onMessage);
         worker.removeEventListener("error", onError);
         if (timer) clearTimeout(timer);
@@ -221,7 +240,7 @@ export class PyodideRuntime {
       worker.addEventListener("error", onError, { once: true });
       worker.postMessage({
         type: "execute",
-        requestId,
+        requestId: effectiveRequestId,
         code,
         indexURL: this.indexURL,
         timeoutMs: effectiveTimeout,

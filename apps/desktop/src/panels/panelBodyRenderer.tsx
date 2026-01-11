@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { PanelIds } from "./panelRegistry.js";
 import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
 import { createAIAuditPanel } from "./ai-audit/index.js";
+import { mountPythonPanel } from "./python/index.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 
 export interface PanelBodyRendererOptions {
@@ -86,6 +87,21 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           createChart={options.createChart}
         />,
       );
+      return;
+    }
+
+    if (panelId === PanelIds.PYTHON) {
+      makeBodyFillAvailableHeight(body);
+      renderDomPanel(panelId, body, (container) => {
+        const dispose = mountPythonPanel({
+          // `DocumentControllerBridge` expects the desktop `DocumentController` shape.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          documentController: options.getDocumentController() as any,
+          container,
+          getActiveSheetId: options.getActiveSheetId,
+        });
+        return { container, dispose };
+      });
       return;
     }
 

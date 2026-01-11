@@ -1,1 +1,1 @@
-export { PythonPanel } from "./PythonPanel";
+export { mountPythonPanel } from "./PythonPanel";

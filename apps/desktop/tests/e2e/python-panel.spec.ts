@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("python panel", () => {
-  test("runs a script that writes to the workbook", async ({ page }) => {
+  test("runs a script that prints output and updates the workbook", async ({ page }) => {
     test.setTimeout(120_000);
 
     const script = `import formula
@@ -9,6 +9,7 @@ test.describe("python panel", () => {
 sheet = formula.active_sheet
 sheet["A1"] = 777
 sheet["A2"] = "=A1*2"
+print("Hello from Python")
 `;
 
     // Vite may trigger a one-time full reload after dependency optimization (e.g. when Pyodide
@@ -33,6 +34,8 @@ sheet["A2"] = "=A1*2"
         await editor.fill(script);
 
         await panel.getByTestId("python-panel-run").click();
+
+        await expect(panel.getByTestId("python-panel-output")).toContainText("Hello from Python", { timeout: 120_000 });
 
         await expect
           .poll(async () => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1")))

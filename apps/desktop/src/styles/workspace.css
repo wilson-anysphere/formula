@@ -124,4 +124,7 @@
 .dock-panel__body {
   padding: 10px;
   color: var(--text-secondary);
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
