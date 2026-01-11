@@ -40,6 +40,10 @@ export type ChartAnchor =
     };
 
 export type ChartDef = {
+  /**
+   * Sheet the chart is anchored on (i.e. where it should be rendered).
+   */
+  sheetId: string;
   chartType: { kind: ChartType; name?: string };
   title?: string;
   series: ChartSeriesDef[];
@@ -123,13 +127,13 @@ export class ChartStore {
       throw new Error(`Invalid data_range: ${spec.data_range}`);
     }
 
-    const sheetId = parsed.sheetName ?? this.options.defaultSheet;
+    const dataSheetId = parsed.sheetName ?? this.options.defaultSheet;
     const rowCount = parsed.endRow - parsed.startRow + 1;
     const colCount = parsed.endCol - parsed.startCol + 1;
 
     const headerRow: unknown[] = [];
     for (let c = parsed.startCol; c <= parsed.endCol; c += 1) {
-      headerRow.push(this.options.getCellValue(sheetId, parsed.startRow, c));
+      headerRow.push(this.options.getCellValue(dataSheetId, parsed.startRow, c));
     }
 
     const hasHeader = rowCount > 1 && isMostlyStrings(headerRow);
@@ -145,29 +149,40 @@ export class ChartStore {
 
       series.push({
         ...(seriesName ? { name: seriesName } : {}),
-        xValues: formatAbsRange(sheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol),
-        yValues: formatAbsRange(sheetId, dataStartRow, parsed.startCol + 1, parsed.endRow, parsed.startCol + 1)
+        xValues: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol),
+        yValues: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol + 1, parsed.endRow, parsed.startCol + 1)
       });
     } else {
       if (colCount >= 2) {
         series.push({
           ...(seriesName ? { name: seriesName } : {}),
-          categories: formatAbsRange(sheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol),
-          values: formatAbsRange(sheetId, dataStartRow, parsed.startCol + 1, parsed.endRow, parsed.startCol + 1)
+          categories: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol),
+          values: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol + 1, parsed.endRow, parsed.startCol + 1)
         });
       } else {
         series.push({
           ...(seriesName ? { name: seriesName } : {}),
-          values: formatAbsRange(sheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol)
+          values: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol)
         });
       }
     }
 
-    const anchor = this.resolveAnchor(spec, parsed);
+    const positionParsed =
+      spec.position && String(spec.position).trim() !== ""
+        ? (() => {
+            const parsedPosition = parseA1Range(spec.position);
+            if (!parsedPosition) throw new Error(`Invalid position: ${spec.position}`);
+            return parsedPosition;
+          })()
+        : null;
+
+    const sheetId = positionParsed?.sheetName ?? dataSheetId;
+    const anchor = this.resolveAnchor(parsed, positionParsed);
     const id = `chart_${this.nextId++}`;
 
     const chart: ChartRecord = {
       id,
+      sheetId,
       chartType: { kind: spec.chart_type },
       ...(spec.title ? { title: spec.title } : {}),
       series,
@@ -191,21 +206,19 @@ export class ChartStore {
     return cloned;
   }
 
-  private resolveAnchor(spec: CreateChartSpec, dataRange: NonNullable<ReturnType<typeof parseA1Range>>): ChartAnchor {
-    if (spec.position && String(spec.position).trim() !== "") {
-      const parsed = parseA1Range(spec.position);
-      if (!parsed) {
-        throw new Error(`Invalid position: ${spec.position}`);
-      }
-
-      const fromCol = parsed.startCol;
-      const fromRow = parsed.startRow;
+  private resolveAnchor(
+    dataRange: NonNullable<ReturnType<typeof parseA1Range>>,
+    position: NonNullable<ReturnType<typeof parseA1Range>> | null
+  ): ChartAnchor {
+    if (position) {
+      const fromCol = position.startCol;
+      const fromRow = position.startRow;
 
       // If a rectangular range is provided, use it as the chart bounds.
-      const rangeCols = parsed.endCol - parsed.startCol + 1;
-      const rangeRows = parsed.endRow - parsed.startRow + 1;
-      const toCol = rangeCols > 1 ? parsed.endCol + 1 : fromCol + DEFAULT_ANCHOR_WIDTH_COLS;
-      const toRow = rangeRows > 1 ? parsed.endRow + 1 : fromRow + DEFAULT_ANCHOR_HEIGHT_ROWS;
+      const rangeCols = position.endCol - position.startCol + 1;
+      const rangeRows = position.endRow - position.startRow + 1;
+      const toCol = rangeCols > 1 ? position.endCol + 1 : fromCol + DEFAULT_ANCHOR_WIDTH_COLS;
+      const toRow = rangeRows > 1 ? position.endRow + 1 : fromRow + DEFAULT_ANCHOR_HEIGHT_ROWS;
 
       return {
         kind: "twoCell",

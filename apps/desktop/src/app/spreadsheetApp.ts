@@ -856,7 +856,7 @@ export class SpreadsheetApp {
 
   private renderCharts(): void {
     this.chartLayer.replaceChildren();
-    const charts = this.chartStore.listCharts();
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
     if (charts.length === 0) return;
 
     const provider = {

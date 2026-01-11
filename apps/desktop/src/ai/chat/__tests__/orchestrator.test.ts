@@ -296,6 +296,7 @@ describe("ai chat orchestrator", () => {
 
     const charts = chartStore.listCharts();
     expect(charts).toHaveLength(1);
+    expect(charts[0]?.sheetId).toBe("Sheet1");
     expect(charts[0]?.title).toBe("Sales");
     expect(charts[0]?.series[0]).toMatchObject({
       name: "Value",
