@@ -1487,29 +1487,55 @@ fn snapshot_from_row(
     formula: Option<String>,
     style_id: Option<i64>,
 ) -> rusqlite::Result<CellSnapshot> {
-    let value = if let Some(raw_json) = value_json.as_deref().filter(|s| !s.trim().is_empty()) {
-        serde_json::from_str::<CellValue>(raw_json).map_err(|err| {
+    let value_type_str = value_type.as_deref();
+    let raw_json = value_json.as_deref().filter(|s| !s.trim().is_empty());
+    let parse_json = |raw: &str| {
+        serde_json::from_str::<CellValue>(raw).map_err(|err| {
             rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err))
-        })?
-    } else {
-        match value_type.as_deref() {
-            Some("number") => CellValue::Number(value_number.unwrap_or(0.0)),
-            Some("string") => CellValue::String(value_string.unwrap_or_default()),
-            Some("boolean") => CellValue::Boolean(value_number.unwrap_or(0.0) != 0.0),
-            Some("error") => {
-                let legacy = value_string.unwrap_or_default();
-                let parsed = legacy.parse::<ErrorValue>().unwrap_or(ErrorValue::Unknown);
+        })
+    };
+
+    // Prefer the scalar columns when they are available, even if `value_json` is present.
+    // This keeps `cells.value_json` as the canonical stored representation (we always write it),
+    // while allowing reads to avoid JSON parsing on hot paths.
+    let value = match value_type_str {
+        Some("number") => match value_number {
+            Some(n) => CellValue::Number(n),
+            None => raw_json.map(parse_json).transpose()?.unwrap_or(CellValue::Number(0.0)),
+        },
+        Some("string") => match value_string {
+            Some(s) => CellValue::String(s),
+            None => raw_json
+                .map(parse_json)
+                .transpose()?
+                .unwrap_or_else(|| CellValue::String(String::new())),
+        },
+        Some("boolean") => match value_number {
+            Some(n) => CellValue::Boolean(n != 0.0),
+            None => raw_json
+                .map(parse_json)
+                .transpose()?
+                .unwrap_or(CellValue::Boolean(false)),
+        },
+        Some("error") => match value_string {
+            Some(s) => {
+                let parsed = s.parse::<ErrorValue>().unwrap_or(ErrorValue::Unknown);
                 CellValue::Error(parsed)
             }
-            // Legacy sentinel used by older schema versions when a cell contains a formula but no cached value.
-            Some("formula") => CellValue::Empty,
+            None => raw_json
+                .map(parse_json)
+                .transpose()?
+                .unwrap_or(CellValue::Error(ErrorValue::Unknown)),
+        },
+        // Legacy sentinel used by older schema versions when a cell contains a formula but no cached value.
+        Some("formula") => CellValue::Empty,
+        // Unknown/NULL types fall back to canonical JSON when present.
+        _ => raw_json.map(parse_json).transpose()?.unwrap_or_else(|| match value_type_str {
             // `NULL` value_type means a style-only blank cell.
             None => CellValue::Empty,
-            Some(other) => {
-                // Unknown value types are treated as strings to preserve data.
-                CellValue::String(other.to_string())
-            }
-        }
+            // Unknown value types are treated as strings to preserve data.
+            Some(other) => CellValue::String(other.to_string()),
+        }),
     };
 
     Ok(CellSnapshot {
