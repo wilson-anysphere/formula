@@ -158,8 +158,43 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "COUNT",
+    description: "Counts the number of cells that contain numbers.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "COUNTA",
+    description: "Counts the number of non-empty cells.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "COUNTBLANK",
+    description: "Counts the number of blank cells within a range.",
+    args: [
+      { name: "range", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "AVERAGE",
     description: "Returns the average (arithmetic mean) of the arguments.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "MAX",
+    description: "Returns the largest value in a set of values.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "MIN",
+    description: "Returns the smallest value in a set of values.",
     args: [
       { name: "number1", type: "range", repeating: true },
     ],

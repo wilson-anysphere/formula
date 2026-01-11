@@ -309,7 +309,8 @@ export class FormulaBarView {
           return p.text;
         })
         .join("");
-      this.#hintEl.textContent = `${sig} — ${hint.signature.summary}`;
+      const summary = hint.signature.summary?.trim?.() ?? "";
+      this.#hintEl.textContent = summary ? `${sig} — ${summary}` : sig;
     }
 
     const explanation = this.model.errorExplanation();

@@ -124,4 +124,23 @@ describe("FormulaBarView tab completion (integration)", () => {
     completion.destroy();
     host.remove();
   });
+
+  it("does not render a dangling summary separator when the signature has no summary", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=ABS(";
+    view.textarea.setSelectionRange(5, 5);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const hint = host.querySelector<HTMLElement>('[data-testid="formula-hint"]');
+    expect(hint?.textContent).toContain("ABS(");
+    expect(hint?.textContent).not.toContain("—");
+
+    host.remove();
+  });
 });
