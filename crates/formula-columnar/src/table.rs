@@ -655,9 +655,13 @@ impl MutableColumnarTable {
         }
     }
 
-    pub fn append_rows(&mut self, rows: &[Vec<Value>]) {
+    pub fn append_rows<I, R>(&mut self, rows: I)
+    where
+        I: IntoIterator<Item = R>,
+        R: AsRef<[Value]>,
+    {
         for row in rows {
-            self.append_row(row);
+            self.append_row(row.as_ref());
         }
     }
 
