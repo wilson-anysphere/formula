@@ -60,3 +60,36 @@ fn roundtrip_union_inside_function_arg_is_parenthesized() {
     // as multiple arguments.
     roundtrip("=SUM((A1,B1)+C1)", opts, ser);
 }
+
+#[test]
+fn serializes_sheet_names_that_require_quoting() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+
+    // Excel requires quoting sheet names that look like cell references.
+    let ast = parse_formula("='A1'!B2", opts.clone()).unwrap();
+    assert_eq!(ast.to_string(ser.clone()).unwrap(), "='A1'!B2");
+
+    let ast = parse_formula("='R1C1'!A1", opts.clone()).unwrap();
+    assert_eq!(ast.to_string(ser.clone()).unwrap(), "='R1C1'!A1");
+
+    // Reserved boolean keywords must be quoted to avoid parsing as literals.
+    let ast = parse_formula("='TRUE'!A1", opts.clone()).unwrap();
+    assert_eq!(ast.to_string(ser.clone()).unwrap(), "='TRUE'!A1");
+
+    // Sheet names starting with digits must be quoted to avoid parsing as row references / numbers.
+    let ast = parse_formula("='2019'!A1", opts.clone()).unwrap();
+    assert_eq!(ast.to_string(ser.clone()).unwrap(), "='2019'!A1");
+
+    // Non-ASCII sheet names must be quoted to remain parseable by the canonical lexer.
+    let ast = parse_formula("='Résumé'!A1", opts).unwrap();
+    assert_eq!(ast.to_string(ser).unwrap(), "='Résumé'!A1");
+}
+
+#[test]
+fn serializes_external_workbook_prefixes_as_single_quoted_sheet_refs() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    let ast = parse_formula("=[Book.xlsx]Sheet1!A1+1", opts).unwrap();
+    assert_eq!(ast.to_string(ser).unwrap(), "='[Book.xlsx]Sheet1'!A1+1");
+}

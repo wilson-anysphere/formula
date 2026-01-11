@@ -786,7 +786,11 @@ impl ArrayLiteral {
 }
 
 fn fmt_sheet_name(out: &mut String, sheet: &str) {
-    let needs_quotes = sheet.chars().any(|c| matches!(c, ' ' | '!' | '\'')) || sheet.is_empty();
+    // Be conservative: quoting is always accepted by Excel, but the unquoted form is only valid
+    // for a subset of ASCII identifier-like sheet names. This avoids producing formulas that the
+    // canonical lexer cannot re-parse (e.g. non-ASCII names) and matches Excel's requirement to
+    // quote sheet names that look like cell references (e.g. `A1` or `R1C1`).
+    let needs_quotes = needs_sheet_quotes(sheet);
     if needs_quotes {
         out.push('\'');
         for ch in sheet.chars() {
@@ -801,6 +805,103 @@ fn fmt_sheet_name(out: &mut String, sheet: &str) {
     } else {
         out.push_str(sheet);
     }
+}
+
+fn needs_sheet_quotes(sheet: &str) -> bool {
+    if sheet.is_empty() {
+        return true;
+    }
+
+    if is_reserved_unquoted_sheet_name(sheet) {
+        return true;
+    }
+
+    if looks_like_a1_cell_reference(sheet) || looks_like_r1c1_cell_reference(sheet) {
+        return true;
+    }
+
+    let mut chars = sheet.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+    if first.is_ascii_digit() {
+        return true;
+    }
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return true;
+    }
+    if !chars.all(|ch| ch == '_' || ch == '.' || ch.is_ascii_alphanumeric()) {
+        return true;
+    }
+
+    false
+}
+
+fn is_reserved_unquoted_sheet_name(sheet: &str) -> bool {
+    sheet.eq_ignore_ascii_case("TRUE") || sheet.eq_ignore_ascii_case("FALSE")
+}
+
+fn looks_like_a1_cell_reference(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+        i += 1;
+        if i > 3 {
+            return false;
+        }
+    }
+
+    if i == 0 || i >= bytes.len() {
+        return false;
+    }
+
+    let digit_start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    if digit_start == i || i != bytes.len() {
+        return false;
+    }
+
+    // Reject impossible columns (beyond XFD). This mirrors the cheap check in
+    // `formula-model` to avoid quoting names like `SHEET1` where the letters segment
+    // is longer than 3 and already returned false above.
+    let col = name[..digit_start]
+        .chars()
+        .fold(0u32, |acc, c| acc * 26 + (c.to_ascii_uppercase() as u32 - 'A' as u32 + 1));
+    col <= 16_384
+}
+
+fn looks_like_r1c1_cell_reference(name: &str) -> bool {
+    if name.eq_ignore_ascii_case("r") || name.eq_ignore_ascii_case("c") {
+        return true;
+    }
+
+    let bytes = name.as_bytes();
+    if bytes.first().copied().map(|b| b.to_ascii_uppercase()) != Some(b'R') {
+        return false;
+    }
+
+    let mut i = 1;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    if i >= bytes.len() || bytes[i].to_ascii_uppercase() != b'C' {
+        return false;
+    }
+
+    i += 1;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    i == bytes.len()
 }
 
 fn fmt_ref_prefix(out: &mut String, workbook: &Option<String>, sheet: &Option<String>) {
