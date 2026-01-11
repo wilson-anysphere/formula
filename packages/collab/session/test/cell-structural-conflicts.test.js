@@ -79,6 +79,48 @@ function cutPaste(session, fromKey, toKey) {
     session.cells.delete(fromKey);
   }, session.origin);
 }
+
+/**
+ * Cut/paste a single cell in a single transaction, overriding the moved cell's
+ * format. The source cell is updated to match the format before deleting so the
+ * structural monitor still infers a move (delete at X + add at Y with identical
+ * fingerprint).
+ *
+ * @param {import("../src/index.ts").CollabSession} session
+ * @param {string} fromKey
+ * @param {string} toKey
+ * @param {any} format
+ */
+function cutPasteWithFormat(session, fromKey, toKey, format) {
+  session.doc.transact(() => {
+    const from = session.cells.get(fromKey);
+    const fromMap = isYMap(from) ? from : null;
+    const value = fromMap?.get("value") ?? null;
+    const formula = fromMap?.get("formula") ?? null;
+    const enc = fromMap?.get("enc") ?? null;
+
+    if (fromMap) {
+      fromMap.delete("style");
+      if (format != null) {
+        fromMap.set("format", format);
+      } else {
+        fromMap.delete("format");
+      }
+    }
+
+    const next = new Y.Map();
+    if (enc) {
+      next.set("enc", enc);
+    } else {
+      next.set("value", value);
+      if (formula) next.set("formula", formula);
+    }
+    if (format != null) next.set("format", format);
+
+    session.cells.set(toKey, next);
+    session.cells.delete(fromKey);
+  }, session.origin);
+}
  
 test("CellStructuralConflictMonitor detects concurrent move-destination conflicts and converges after resolution", async () => {
   const docA = new Y.Doc();
@@ -698,6 +740,75 @@ test("CellStructuralConflictMonitor surfaces content conflicts when two users mo
   assert.equal(await sessionB.getCell("Sheet1:0:0"), null);
   assert.equal((await sessionA.getCell("Sheet1:0:1"))?.value ?? null, expected);
   assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value ?? null, expected);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CellStructuralConflictMonitor surfaces format conflicts when two users move the same cell to the same destination with different formats", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+  /** @type {Array<any>} */
+  const conflictsB = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    cellConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    cellConflicts: {
+      localUserId: "user-b",
+      onConflict: (c) => conflictsB.push(c),
+    },
+  });
+
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  disconnect();
+
+  cutPasteWithFormat(sessionA, "Sheet1:0:0", "Sheet1:0:1", { a: 1 });
+  cutPasteWithFormat(sessionB, "Sheet1:0:0", "Sheet1:0:1", { a: 2 });
+
+  disconnect = connectDocs(docA, docB);
+
+  const allConflicts = [...conflictsA, ...conflictsB];
+  assert.ok(allConflicts.length >= 1, "expected at least one conflict to be detected");
+
+  const conflictSide = conflictsA.length > 0 ? sessionA : sessionB;
+  const conflict = conflictsA.length > 0 ? conflictsA[0] : conflictsB[0];
+
+  assert.equal(conflict.type, "cell");
+  assert.equal(conflict.reason, "format");
+  assert.equal(conflict.cellKey, "Sheet1:0:1");
+
+  const expectedValue = conflict.local?.after?.value ?? null;
+  const expectedFormat = conflict.local?.after?.format ?? null;
+
+  assert.ok(conflictSide.cellConflictMonitor?.resolveConflict(conflict.id, { choice: "ours" }));
+
+  assert.equal(await sessionA.getCell("Sheet1:0:0"), null);
+  assert.equal(await sessionB.getCell("Sheet1:0:0"), null);
+  assert.equal((await sessionA.getCell("Sheet1:0:1"))?.value ?? null, expectedValue);
+  assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value ?? null, expectedValue);
+
+  const yCellA = sessionA.cells.get("Sheet1:0:1");
+  const yCellB = sessionB.cells.get("Sheet1:0:1");
+  assert.ok(isYMap(yCellA));
+  assert.ok(isYMap(yCellB));
+  assert.deepEqual(yCellA.get("format") ?? null, expectedFormat);
+  assert.deepEqual(yCellB.get("format") ?? null, expectedFormat);
 
   sessionA.destroy();
   sessionB.destroy();
