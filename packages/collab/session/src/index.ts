@@ -62,19 +62,126 @@ function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
   // historical schemas (Map or Array) we peek at the underlying state before
   // choosing a constructor.
   const existing = doc.share.get("comments");
-  if (!existing) return doc.getMap("comments");
-  const existingMap = getYMap(existing);
-  if (existingMap) return existingMap;
-  const existingArray = getYArray(existing);
-  if (existingArray) return existingArray;
-  const placeholder = existing as any;
-  const hasStart = placeholder?._start != null; // sequence item => likely array
-  const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-  const kind = hasStart && mapSize === 0 ? "array" : "map";
-  return kind === "array" ? doc.getArray("comments") : doc.getMap("comments");
+
+  let root: Y.AbstractType<any>;
+  if (!existing) {
+    root = doc.getMap("comments");
+  } else {
+    const existingMap = getYMap(existing);
+    if (existingMap) {
+      root = existingMap;
+    } else {
+      const existingArray = getYArray(existing);
+      if (existingArray) {
+        root = existingArray;
+      } else {
+        const placeholder = existing as any;
+        const hasStart = placeholder?._start != null; // sequence item => likely array
+        const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+        const kind = hasStart && mapSize === 0 ? "array" : "map";
+        root = kind === "array" ? doc.getArray("comments") : doc.getMap("comments");
+      }
+    }
+  }
+
+  // If updates were applied using a different Yjs module instance (e.g. y-websocket
+  // applying updates via CommonJS `require("yjs")` while the app uses ESM imports),
+  // the `comments` root can contain nested Y.Maps/Y.Arrays whose constructors do
+  // not match this module instance.
+  //
+  // Yjs UndoManager relies on constructor checks, so undo may fail to revert
+  // comment edits unless we normalize those nested types up front.
+  normalizeCommentsForUndoScope(doc, root);
+
+  return root;
 }
 
 export type DocumentRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
+
+function normalizeCommentsForUndoScope(doc: Y.Doc, root: Y.AbstractType<any>): void {
+  if (!(root instanceof Y.Map)) return;
+
+  /** @type {Array<[string, any]>} */
+  const foreignComments: Array<[string, any]> = [];
+  root.forEach((value, key) => {
+    const yComment = getYMap(value);
+    if (!yComment) return;
+    // Foreign Yjs instances fail `instanceof` checks, but we still want to
+    // normalize them to local constructors before UndoManager is created.
+    if (yComment instanceof Y.Map) return;
+    foreignComments.push([String(key), yComment]);
+  });
+
+  if (foreignComments.length === 0) return;
+
+  doc.transact(() => {
+    for (const [key, yComment] of foreignComments) {
+      root.set(key, cloneForeignCommentToLocal(yComment));
+    }
+  });
+}
+
+function cloneForeignCommentToLocal(comment: any): Y.Map<unknown> {
+  const out = new Y.Map<unknown>();
+
+  if (comment && typeof comment.forEach === "function") {
+    comment.forEach((value: any, key: string) => {
+      if (key === "replies") return;
+      out.set(key, normalizeForeignScalar(value));
+    });
+  }
+
+  const replies = comment?.get?.("replies");
+  out.set("replies", cloneForeignRepliesToLocal(replies));
+  return out;
+}
+
+function cloneForeignRepliesToLocal(replies: any): Y.Array<Y.Map<unknown>> {
+  const out = new Y.Array<Y.Map<unknown>>();
+  const yReplies = getYArray(replies);
+  if (!yReplies) return out;
+
+  const items = typeof yReplies.toArray === "function" ? yReplies.toArray() : [];
+  for (const item of items) {
+    const yReply = getYMap(item);
+    if (!yReply) continue;
+
+    const reply = new Y.Map<unknown>();
+    yReply.forEach((value: any, key: string) => {
+      reply.set(key, normalizeForeignScalar(value));
+    });
+    out.push([reply]);
+  }
+
+  return out;
+}
+
+function normalizeForeignScalar(value: any): any {
+  if (value == null) return value;
+
+  const yMap = getYMap(value);
+  if (yMap && !(yMap instanceof Y.Map)) {
+    /** @type {Record<string, any>} */
+    const obj = {};
+    yMap.forEach((v: any, k: string) => {
+      obj[String(k)] = normalizeForeignScalar(v);
+    });
+    return obj;
+  }
+
+  const yArray = getYArray(value);
+  if (yArray && !(yArray instanceof Y.Array)) {
+    const arr = typeof yArray.toArray === "function" ? yArray.toArray() : [];
+    return arr.map((v: any) => normalizeForeignScalar(v));
+  }
+
+  if (value instanceof Y.Text) return value.toString();
+  if (value && typeof value === "object" && value.constructor?.name === "YText" && typeof value.toString === "function") {
+    return value.toString();
+  }
+
+  return value;
+}
 
 export interface CellAddress {
   sheetId: string;
