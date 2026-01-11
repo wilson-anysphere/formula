@@ -82,6 +82,26 @@ test("RefreshOrchestrator: DAG ordering (B depends on A)", async () => {
   await handle.promise;
 });
 
+test("RefreshOrchestrator: refresh(queryId) refreshes dependencies and returns the target result", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+
+  const handle = orchestrator.refresh("B");
+  assert.equal(engine.calls.length, 1);
+  assert.equal(engine.calls[0].queryId, "A");
+  engine.calls[0].deferred.resolve(makeResult("A"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(engine.calls.length, 2);
+  assert.equal(engine.calls[1].queryId, "B");
+  engine.calls[1].deferred.resolve(makeResult("B"));
+
+  const result = await handle.promise;
+  assert.equal(result.meta.queryId, "B");
+});
+
 test("RefreshOrchestrator: merge dependency ordering (B merge depends on A)", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });

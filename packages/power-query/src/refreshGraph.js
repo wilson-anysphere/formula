@@ -263,6 +263,25 @@ export class RefreshOrchestrator {
   }
 
   /**
+   * Refresh a single query (and its dependencies) with the same dependency-aware semantics as
+   * `refreshAll([queryId])`, but with a single-query promise return type.
+   *
+   * This is useful for hosts that want "refresh this query" UX while still ensuring upstream
+   * dependencies are refreshed exactly once and share the same credential/permission session.
+   *
+   * @param {string} queryId
+   * @param {RefreshReason} [reason]
+   * @returns {{ id: string; sessionId: string; queryId: string; promise: Promise<QueryExecutionResult>; cancel: () => void }}
+   */
+  refresh(queryId, reason = "manual") {
+    const handle = this.refreshAll([queryId], reason);
+    const promise = handle.promise.then((results) => results[queryId]);
+    // Mirror `refreshAll` fire-and-forget behavior for callers that don't await the returned promise.
+    promise.catch(() => {});
+    return { id: handle.sessionId, sessionId: handle.sessionId, queryId, promise, cancel: handle.cancel };
+  }
+
+  /**
    * Trigger all registered queries whose refreshPolicy is `{ type: "on-open" }`.
    *
    * This is a dependency-aware equivalent to `RefreshManager.triggerOnOpen`, and is useful for
