@@ -2,6 +2,7 @@ import { parseA1Range, type RangeAddress } from "./a1.js";
 import { tokenizeFormula } from "../formula-bar/highlight/tokenizeFormula.js";
 
 export type SpreadsheetValue = number | string | boolean | null;
+export const PROVENANCE_REF_SEPARATOR = "\u001f";
 export type ProvenanceCellValue = { __cellRef: string; value: SpreadsheetValue };
 export type CellValue = SpreadsheetValue | SpreadsheetValue[] | ProvenanceCellValue | ProvenanceCellValue[];
 
@@ -37,7 +38,7 @@ function unwrapProvenance(value: CellValue): CellValue {
 
 function splitProvenanceRefs(refs: string): string[] {
   return String(refs)
-    .split(";")
+    .split(PROVENANCE_REF_SEPARATOR)
     .map((ref) => ref.trim())
     .filter(Boolean);
 }
@@ -58,7 +59,7 @@ function provenanceRefs(value: CellValue): string[] {
 function wrapWithProvenance(value: SpreadsheetValue, refs: string[]): CellValue {
   const uniq = [...new Set(refs.map((r) => r.trim()).filter(Boolean))];
   if (uniq.length === 0) return value;
-  return { __cellRef: uniq.join(";"), value };
+  return { __cellRef: uniq.join(PROVENANCE_REF_SEPARATOR), value };
 }
 
 function toNumber(value: CellValue): number | null {

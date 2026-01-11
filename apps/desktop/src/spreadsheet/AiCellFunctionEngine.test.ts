@@ -287,6 +287,43 @@ describe("AiCellFunctionEngine", () => {
     expect(llmClient.chat).not.toHaveBeenCalled();
   });
 
+  it("resolves DLP classifications for quoted sheet names containing semicolons", () => {
+    const llmClient = { chat: vi.fn() };
+
+    const policy = createDefaultOrgPolicy();
+    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
+      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
+      redactDisallowed: false,
+    };
+
+    const documentId = "unit-test-doc";
+    const storage = createMemoryStorage();
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      documentId,
+      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "A;B", row: 0, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+    );
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      dlp: {
+        policy,
+        documentId,
+        classificationStore,
+        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
+      },
+    });
+
+    const value = evaluateFormula('=AI("summarize", \'A;B\'!A1)', (ref) => (ref === "A;B!A1" ? "top secret" : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
+    expect(value).toBe(AI_CELL_DLP_ERROR);
+    expect(llmClient.chat).not.toHaveBeenCalled();
+  });
+
   it("DLP redacts inputs before sending to the LLM", async () => {
     const llmClient = {
       chat: vi.fn(async () => ({

@@ -10,7 +10,7 @@ import { createDefaultOrgPolicy } from "../../../../packages/security/dlp/src/po
 import { DLP_DECISION, evaluatePolicy } from "../../../../packages/security/dlp/src/policyEngine.js";
 import { effectiveCellClassification, effectiveRangeClassification, a1ToCell } from "../../../../packages/security/dlp/src/selectors.js";
 
-import type { AiFunctionEvaluator, CellValue, ProvenanceCellValue, SpreadsheetValue } from "./evaluateFormula.js";
+import { PROVENANCE_REF_SEPARATOR, type AiFunctionEvaluator, type CellValue, type ProvenanceCellValue, type SpreadsheetValue } from "./evaluateFormula.js";
 import { getDesktopAIAuditStore } from "../ai/audit/auditStore.js";
 
 import { loadDesktopLLMConfig } from "../ai/llm/settings.js";
@@ -426,7 +426,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     if (!cleaned) return valueClassification;
 
     const refs = cleaned
-      .split(";")
+      .split(PROVENANCE_REF_SEPARATOR)
       .map((part) => part.trim())
       .filter(Boolean);
 
