@@ -666,35 +666,14 @@ impl MutableColumnarTable {
     }
 
     pub fn update_cell(&mut self, row: usize, col: usize, value: Value) -> bool {
-        if row >= self.rows {
+        let Some(recompute) = self.update_cell_core(row, col, value) else {
             return false;
-        }
-        let column_type = match self.columns.get(col) {
-            Some(column) => column.column_type(),
-            None => return false,
         };
 
-        let coerced = coerce_value_for_type(column_type, value);
-        let base = self.get_cell_base(row, col);
-        let old = self.get_cell(row, col);
-
-        if old == coerced {
-            return true;
-        }
-
-        if coerced == base {
-            if let Some(map) = self.overlays.get_mut(col) {
-                map.remove(&row);
-            }
-        } else if let Some(map) = self.overlays.get_mut(col) {
-            map.insert(row, coerced.clone());
-        }
-
-        self.maybe_clear_cache_for_dict_growth(col, &coerced);
-        let recompute = self.columns[col].apply_update(&old, &coerced);
         if recompute {
             self.recompute_min_max(col);
         }
+
         true
     }
 
@@ -724,14 +703,52 @@ impl MutableColumnarTable {
             return 0;
         }
 
+        let mut needs_recompute: Vec<bool> = vec![false; self.columns.len()];
         for r in 0..rows {
             for c in 0..cols {
                 let idx = r * cols + c;
-                let _ = self.update_cell(row_start + r, col_start + c, values[idx].clone());
+                if let Some(recompute) = self.update_cell_core(
+                    row_start + r,
+                    col_start + c,
+                    values[idx].clone(),
+                ) {
+                    needs_recompute[col_start + c] |= recompute;
+                }
+            }
+        }
+
+        for col in col_start..col_end {
+            if needs_recompute[col] {
+                self.recompute_min_max(col);
             }
         }
 
         expected
+    }
+
+    fn update_cell_core(&mut self, row: usize, col: usize, value: Value) -> Option<bool> {
+        if row >= self.rows {
+            return None;
+        }
+        let column_type = self.columns.get(col)?.column_type();
+
+        let coerced = coerce_value_for_type(column_type, value);
+        let base = self.get_cell_base(row, col);
+        let old = self.get_cell(row, col);
+
+        if old == coerced {
+            return Some(false);
+        }
+
+        if coerced == base {
+            self.overlays.get_mut(col)?.remove(&row);
+        } else {
+            self.overlays.get_mut(col)?.insert(row, coerced.clone());
+        }
+
+        self.maybe_clear_cache_for_dict_growth(col, &coerced);
+        let recompute = self.columns[col].apply_update(&old, &coerced);
+        Some(recompute)
     }
 
     /// Delete rows in `[row_start, row_end)` (0-based, half-open).
