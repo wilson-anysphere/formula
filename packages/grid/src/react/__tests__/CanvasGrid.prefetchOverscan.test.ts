@@ -236,6 +236,116 @@ describe("CanvasGrid prefetch overscan", () => {
     restoreActEnvironment(previousActEnvironment);
   });
 
+  it("prefetches frozen quadrants separately (without relying on overscan)", async () => {
+    const previousActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const prefetch = vi.fn<(range: CellRange) => void>();
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe(_target: Element): void {}
+        unobserve(_target: Element): void {}
+        disconnect(): void {}
+      }
+    );
+
+    vi.stubGlobal("requestAnimationFrame", vi.fn((_cb: FrameRequestCallback) => 0));
+
+    const viewportWidth = 150;
+    const viewportHeight = 200;
+
+    const overscanRows = 1;
+    const overscanCols = 1;
+
+    const rowHeight = 10;
+    const colWidth = 10;
+
+    const rowCount = 100;
+    const colCount = 100;
+
+    const frozenRows = 12;
+    const frozenCols = 8;
+
+    const boundingRect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(
+        () =>
+          ({
+            width: viewportWidth,
+            height: viewportHeight,
+            top: 0,
+            left: 0,
+            right: viewportWidth,
+            bottom: viewportHeight,
+            x: 0,
+            y: 0,
+            toJSON: () => ({})
+          }) as DOMRect
+      );
+
+    const ctxStub: Partial<CanvasRenderingContext2D> = {
+      setTransform: vi.fn(),
+      measureText: (text: string) =>
+        ({
+          width: text.length * 6,
+          actualBoundingBoxAscent: 8,
+          actualBoundingBoxDescent: 2
+        }) as TextMetrics
+    };
+
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .mockImplementation(() => ctxStub as any);
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(CanvasGrid, {
+          provider: {
+            getCell: () => null,
+            prefetch
+          },
+          rowCount,
+          colCount,
+          frozenRows,
+          frozenCols,
+          defaultRowHeight: rowHeight,
+          defaultColWidth: colWidth,
+          prefetchOverscanRows: overscanRows,
+          prefetchOverscanCols: overscanCols
+        })
+      );
+    });
+
+    expect(prefetch).toHaveBeenCalledTimes(4);
+    expect(prefetch.mock.calls.map((call) => call[0])).toEqual([
+      // Frozen (top-left) quadrant.
+      { startRow: 0, endRow: frozenRows, startCol: 0, endCol: frozenCols },
+      // Frozen rows + scrollable columns (top-right) quadrant.
+      { startRow: 0, endRow: frozenRows, startCol: frozenCols, endCol: 16 },
+      // Scrollable rows + frozen columns (bottom-left) quadrant.
+      { startRow: frozenRows, endRow: 21, startCol: 0, endCol: frozenCols },
+      // Main (scrollable) quadrant.
+      { startRow: frozenRows, endRow: 21, startCol: frozenCols, endCol: 16 }
+    ]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+
+    boundingRect.mockRestore();
+    getContext.mockRestore();
+    vi.unstubAllGlobals();
+    restoreActEnvironment(previousActEnvironment);
+  });
+
   it("dedupes prefetch calls when the prefetched range does not change", async () => {
     const previousActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;

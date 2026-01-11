@@ -93,7 +93,7 @@ export class CanvasGridRenderer {
 
   private readonly prefetchOverscanRows: number;
   private readonly prefetchOverscanCols: number;
-  private lastPrefetchRange: CellRange | null = null;
+  private lastPrefetchRanges: CellRange[] | null = null;
 
   private gridCanvas?: HTMLCanvasElement;
   private gridCtx?: CanvasRenderingContext2D;
@@ -451,19 +451,81 @@ export class CanvasGridRenderer {
     const rowCount = this.getRowCount();
     const colCount = this.getColCount();
 
-    const nextRange: CellRange = {
-      startRow: Math.max(0, viewport.main.rows.start - this.prefetchOverscanRows),
-      endRow: Math.min(rowCount, viewport.main.rows.end + this.prefetchOverscanRows),
-      startCol: Math.max(0, viewport.main.cols.start - this.prefetchOverscanCols),
-      endCol: Math.min(colCount, viewport.main.cols.end + this.prefetchOverscanCols)
+    const frozenHeight = Math.min(viewport.height, viewport.frozenHeight);
+    const frozenWidth = Math.min(viewport.width, viewport.frozenWidth);
+
+    const frozenRowsRange =
+      viewport.frozenRows === 0 || frozenHeight === 0
+        ? { start: 0, end: 0 }
+        : this.scroll.rows.visibleRange(0, frozenHeight, { min: 0, maxExclusive: viewport.frozenRows });
+    const frozenColsRange =
+      viewport.frozenCols === 0 || frozenWidth === 0
+        ? { start: 0, end: 0 }
+        : this.scroll.cols.visibleRange(0, frozenWidth, { min: 0, maxExclusive: viewport.frozenCols });
+
+    const mainRows = viewport.main.rows;
+    const mainCols = viewport.main.cols;
+
+    const nextRanges: CellRange[] = [];
+    const pushRange = (range: CellRange) => {
+      if (range.endRow <= range.startRow) return;
+      if (range.endCol <= range.startCol) return;
+      nextRanges.push(range);
     };
 
-    if (!options?.force && this.lastPrefetchRange && CanvasGridRenderer.rangesEqual(this.lastPrefetchRange, nextRange)) {
+    // Frozen (top-left) quadrant.
+    pushRange({
+      startRow: frozenRowsRange.start,
+      endRow: frozenRowsRange.end,
+      startCol: frozenColsRange.start,
+      endCol: frozenColsRange.end
+    });
+
+    // Frozen rows + scrollable columns (top-right) quadrant.
+    pushRange({
+      startRow: frozenRowsRange.start,
+      endRow: frozenRowsRange.end,
+      startCol: Math.max(viewport.frozenCols, mainCols.start - this.prefetchOverscanCols),
+      endCol: Math.min(colCount, mainCols.end + this.prefetchOverscanCols)
+    });
+
+    // Scrollable rows + frozen columns (bottom-left) quadrant.
+    pushRange({
+      startRow: Math.max(viewport.frozenRows, mainRows.start - this.prefetchOverscanRows),
+      endRow: Math.min(rowCount, mainRows.end + this.prefetchOverscanRows),
+      startCol: frozenColsRange.start,
+      endCol: frozenColsRange.end
+    });
+
+    // Scrollable (main) quadrant.
+    pushRange({
+      startRow: Math.max(viewport.frozenRows, mainRows.start - this.prefetchOverscanRows),
+      endRow: Math.min(rowCount, mainRows.end + this.prefetchOverscanRows),
+      startCol: Math.max(viewport.frozenCols, mainCols.start - this.prefetchOverscanCols),
+      endCol: Math.min(colCount, mainCols.end + this.prefetchOverscanCols)
+    });
+
+    if (!options?.force && this.lastPrefetchRanges && CanvasGridRenderer.rangesListEqual(this.lastPrefetchRanges, nextRanges)) {
       return;
     }
 
-    this.lastPrefetchRange = nextRange;
-    this.provider.prefetch(nextRange);
+    const prevRanges = this.lastPrefetchRanges;
+    this.lastPrefetchRanges = nextRanges;
+
+    if (!options?.force && prevRanges && prevRanges.length === nextRanges.length) {
+      for (let i = 0; i < nextRanges.length; i++) {
+        const next = nextRanges[i];
+        const prev = prevRanges[i];
+        if (!prev || !CanvasGridRenderer.rangesEqual(prev, next)) {
+          this.provider.prefetch(next);
+        }
+      }
+      return;
+    }
+
+    for (const range of nextRanges) {
+      this.provider.prefetch(range);
+    }
   }
 
   private static sanitizeOverscan(value: number | undefined): number {
@@ -478,6 +540,14 @@ export class CanvasGridRenderer {
       a.startCol === b.startCol &&
       a.endCol === b.endCol
     );
+  }
+
+  private static rangesListEqual(a: CellRange[], b: CellRange[]): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!CanvasGridRenderer.rangesEqual(a[i], b[i])) return false;
+    }
+    return true;
   }
 
   private alignScrollToDevicePixels(pos: { x: number; y: number }): { x: number; y: number } {
@@ -871,8 +941,6 @@ export class CanvasGridRenderer {
       );
 
       if (endRow <= startRow || endCol <= startCol) continue;
-
-      this.provider.prefetch?.({ startRow, endRow, startCol, endCol });
 
       if (layer === "selection") {
         this.renderSelectionQuadrant(intersection, viewport);
