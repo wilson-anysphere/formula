@@ -61,14 +61,23 @@ pub mod arrow;
 #[cfg(feature = "arrow")]
 pub mod parquet;
 
+// Persistence / storage layers sometimes need access to the encoded representation.
+// We keep the implementation details in private modules, but re-export the relevant
+// types so other workspace crates (e.g. `formula-storage`) can persist them without
+// re-encoding to row-wise formats.
+pub use crate::bitmap::BitVec;
 pub use crate::cache::{CacheStats, PageCacheConfig};
+pub use crate::encoding::{
+    BoolChunk, DictionaryEncodedChunk, EncodedChunk, FloatChunk, RleEncodedU32, RleEncodedU64,
+    U32SequenceEncoding, U64SequenceEncoding, ValueEncodedChunk,
+};
 pub use crate::query::{
     group_by, group_by_rows, hash_join, AggOp, AggSpec, GroupByEngine, GroupByResult, JoinResult,
     QueryError,
 };
 pub use crate::stats::ColumnStats;
 pub use crate::table::{
-    ColumnSchema, ColumnarRange, ColumnarTable, ColumnarTableBuilder, MutableColumnarTable,
-    TableOptions, TableScan,
+    ColumnSchema, ColumnarRange, ColumnarTable, ColumnarTableBuilder, EncodedColumn,
+    MutableColumnarTable, TableOptions, TableScan,
 };
 pub use crate::types::{ColumnType, Value};

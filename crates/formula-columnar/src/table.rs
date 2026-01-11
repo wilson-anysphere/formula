@@ -32,6 +32,19 @@ pub struct ColumnSchema {
     pub column_type: ColumnType,
 }
 
+/// A fully-encoded column suitable for persistence.
+///
+/// This mirrors the internal column representation used by [`ColumnarTable`], but is exposed
+/// as a public struct so other crates can construct a [`ColumnarTable`] without re-encoding
+/// row-wise data.
+#[derive(Clone, Debug)]
+pub struct EncodedColumn {
+    pub schema: ColumnSchema,
+    pub chunks: Vec<EncodedChunk>,
+    pub stats: ColumnStats,
+    pub dictionary: Option<Arc<Vec<Arc<str>>>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Column {
     schema: ColumnSchema,
@@ -174,6 +187,10 @@ impl ColumnarTable {
         &self.schema
     }
 
+    pub fn options(&self) -> TableOptions {
+        self.options
+    }
+
     pub fn row_count(&self) -> usize {
         self.rows
     }
@@ -185,6 +202,44 @@ impl ColumnarTable {
     /// Return the dictionary backing a string column (if the column is dictionary encoded).
     pub fn dictionary(&self, col: usize) -> Option<Arc<Vec<Arc<str>>>> {
         self.columns.get(col)?.dictionary.clone()
+    }
+
+    pub fn stats(&self, col: usize) -> Option<&ColumnStats> {
+        self.columns.get(col).map(|c| &c.stats)
+    }
+
+    /// Return the encoded chunks for a column, without decoding them.
+    pub fn encoded_chunks(&self, col: usize) -> Option<&[EncodedChunk]> {
+        Some(self.columns.get(col)?.chunks.as_slice())
+    }
+
+    /// Construct a [`ColumnarTable`] directly from encoded columns/chunks.
+    ///
+    /// This is intended for persistence layers that store the encoded chunks on disk.
+    pub fn from_encoded(
+        schema: Vec<ColumnSchema>,
+        columns: Vec<EncodedColumn>,
+        rows: usize,
+        options: TableOptions,
+    ) -> Self {
+        let mut out_cols: Vec<Column> = Vec::with_capacity(columns.len());
+        for col in columns {
+            out_cols.push(Column {
+                schema: col.schema,
+                chunks: col.chunks,
+                stats: col.stats,
+                dictionary: col.dictionary,
+                distinct: None,
+            });
+        }
+
+        Self {
+            schema,
+            columns: out_cols,
+            rows,
+            options,
+            cache: Arc::new(Mutex::new(LruCache::new(options.cache.max_entries))),
+        }
     }
 
     pub fn get_cell(&self, row: usize, col: usize) -> Value {
@@ -316,10 +371,6 @@ impl ColumnarTable {
 
     pub(crate) fn page_size_rows(&self) -> usize {
         self.options.page_size_rows
-    }
-
-    pub(crate) fn encoded_chunks(&self, col: usize) -> Option<&[EncodedChunk]> {
-        Some(self.columns.get(col)?.chunks.as_slice())
     }
 
     /// Group rows by one or more key columns and compute aggregations.

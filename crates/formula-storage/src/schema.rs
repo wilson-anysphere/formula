@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, Transaction};
 
-const LATEST_SCHEMA_VERSION: i64 = 5;
+const LATEST_SCHEMA_VERSION: i64 = 6;
 
 pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     // Ensure foreign keys are enforced (disabled by default in SQLite).
@@ -29,6 +29,7 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
             3 => migrate_to_v3(&tx)?,
             4 => migrate_to_v4(&tx)?,
             5 => migrate_to_v5(&tx)?,
+            6 => migrate_to_v6(&tx)?,
             _ => unreachable!("unknown schema migration target: {next}"),
         }
         tx.execute(
@@ -242,6 +243,99 @@ fn migrate_to_v5(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_sheet_drawings_sheet ON sheet_drawings(sheet_id);
         "#,
     )?;
+    Ok(())
+}
+
+fn migrate_to_v6(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    // Persist Power Pivot / Data Model state (tables, encoded columnar chunks, relationships, measures).
+    tx.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS data_model_tables (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workbook_id TEXT NOT NULL REFERENCES workbooks(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          schema_json TEXT NOT NULL,
+          row_count INTEGER NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          metadata JSON,
+          UNIQUE(workbook_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_data_model_tables_workbook ON data_model_tables(workbook_id);
+
+        CREATE TABLE IF NOT EXISTS data_model_columns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          table_id INTEGER NOT NULL REFERENCES data_model_tables(id) ON DELETE CASCADE,
+          ordinal INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          column_type TEXT NOT NULL,
+          encoding_json TEXT NOT NULL,
+          stats_json TEXT,
+          dictionary BLOB,
+          UNIQUE(table_id, ordinal),
+          UNIQUE(table_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_data_model_columns_table ON data_model_columns(table_id);
+
+        CREATE TABLE IF NOT EXISTS data_model_chunks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          column_id INTEGER NOT NULL REFERENCES data_model_columns(id) ON DELETE CASCADE,
+          chunk_index INTEGER NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('int','float','bool','dict')),
+          data BLOB NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          metadata JSON,
+          UNIQUE(column_id, chunk_index)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_data_model_chunks_column ON data_model_chunks(column_id);
+
+        CREATE TABLE IF NOT EXISTS data_model_relationships (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workbook_id TEXT NOT NULL REFERENCES workbooks(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          from_table TEXT NOT NULL,
+          from_column TEXT NOT NULL,
+          to_table TEXT NOT NULL,
+          to_column TEXT NOT NULL,
+          cardinality TEXT NOT NULL,
+          cross_filter_direction TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          referential_integrity INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_data_model_relationships_workbook ON data_model_relationships(workbook_id);
+        CREATE INDEX IF NOT EXISTS idx_data_model_relationships_from ON data_model_relationships(workbook_id, from_table);
+        CREATE INDEX IF NOT EXISTS idx_data_model_relationships_to ON data_model_relationships(workbook_id, to_table);
+
+        CREATE TABLE IF NOT EXISTS data_model_measures (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workbook_id TEXT NOT NULL REFERENCES workbooks(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          expression TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          metadata JSON,
+          UNIQUE(workbook_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_data_model_measures_workbook ON data_model_measures(workbook_id);
+
+        CREATE TABLE IF NOT EXISTS data_model_calculated_columns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workbook_id TEXT NOT NULL REFERENCES workbooks(id) ON DELETE CASCADE,
+          table_name TEXT NOT NULL,
+          name TEXT NOT NULL,
+          expression TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          metadata JSON,
+          UNIQUE(workbook_id, table_name, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_data_model_calculated_columns_workbook ON data_model_calculated_columns(workbook_id);
+        "#,
+    )?;
+
     Ok(())
 }
 

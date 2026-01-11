@@ -1724,6 +1724,8 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
+ "formula-columnar",
+ "formula-dax",
  "formula-model",
  "lru",
  "rand 0.8.5",

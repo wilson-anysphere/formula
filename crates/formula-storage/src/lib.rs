@@ -13,6 +13,7 @@
 
 mod autosave;
 mod cache;
+pub mod data_model;
 pub mod encryption;
 mod schema;
 pub mod storage;

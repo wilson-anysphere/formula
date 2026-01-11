@@ -12,6 +12,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 lru = "0.12"
 formula-model = { path = "../formula-model" }
+formula-dax = { path = "../formula-dax" }
+formula-columnar = { path = "../formula-columnar" }
 unicode-normalization = "0.1"
 aes-gcm = "0.10"
 base64 = "0.22"

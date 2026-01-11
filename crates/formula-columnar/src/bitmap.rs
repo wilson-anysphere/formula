@@ -91,6 +91,41 @@ impl BitVec {
     pub fn as_words(&self) -> &[u64] {
         &self.words
     }
+
+    /// Reconstruct a [`BitVec`] from a raw word buffer and a bit length.
+    ///
+    /// This is primarily used by persistence layers that store the `u64` words
+    /// directly (e.g. SQLite blobs) and want to avoid per-bit rebuilds.
+    pub fn from_words(words: Vec<u64>, len: usize) -> Self {
+        if len == 0 {
+            return Self {
+                words,
+                len: 0,
+                ones: 0,
+            };
+        }
+
+        let full_words = len / 64;
+        let rem_bits = len % 64;
+        let mut ones: usize = 0;
+
+        for w in words.iter().take(full_words) {
+            ones = ones.saturating_add(w.count_ones() as usize);
+        }
+
+        if rem_bits > 0 {
+            if let Some(last) = words.get(full_words) {
+                let mask = if rem_bits == 64 {
+                    u64::MAX
+                } else {
+                    (1u64 << rem_bits) - 1
+                };
+                ones = ones.saturating_add((last & mask).count_ones() as usize);
+            }
+        }
+
+        Self { words, len, ones }
+    }
 }
 
 impl Default for BitVec {

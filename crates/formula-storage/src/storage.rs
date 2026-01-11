@@ -1,3 +1,4 @@
+use crate::data_model;
 use crate::schema;
 use crate::encryption::{
     decrypt_sqlite_bytes, encrypt_sqlite_bytes, is_encrypted_container, load_or_create_keyring,
@@ -43,6 +44,8 @@ pub enum StorageError {
     InvalidSheetName(SheetNameError),
     #[error("sheet name already exists: {0}")]
     DuplicateSheetName(String),
+    #[error("dax error: {0}")]
+    Dax(#[from] formula_dax::DaxError),
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -251,6 +254,51 @@ impl Storage {
             .map_err(crate::encryption::EncryptionError::from)?;
         self.persist()?;
         Ok(Some(keyring.current_version))
+    }
+
+    pub fn save_data_model(&self, workbook_id: Uuid, model: &formula_dax::DataModel) -> Result<()> {
+        // Ensure workbook exists.
+        self.get_workbook(workbook_id)?;
+
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+        data_model::save_data_model_tx(&tx, workbook_id, model)?;
+        touch_workbook_modified_at_by_workbook_id(&tx, workbook_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn load_data_model(&self, workbook_id: Uuid) -> Result<formula_dax::DataModel> {
+        // Ensure workbook exists.
+        self.get_workbook(workbook_id)?;
+
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        data_model::load_data_model(&conn, workbook_id)
+    }
+
+    pub fn load_data_model_schema(&self, workbook_id: Uuid) -> Result<data_model::DataModelSchema> {
+        // Ensure workbook exists.
+        self.get_workbook(workbook_id)?;
+
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        data_model::load_data_model_schema(&conn, workbook_id)
+    }
+
+    pub fn stream_data_model_column_chunks<F>(
+        &self,
+        workbook_id: Uuid,
+        table_name: &str,
+        column_name: &str,
+        f: F,
+    ) -> Result<()>
+    where
+        F: FnMut(data_model::DataModelChunk) -> Result<()>,
+    {
+        // Ensure workbook exists.
+        self.get_workbook(workbook_id)?;
+
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        data_model::stream_column_chunks(&conn, workbook_id, table_name, column_name, f)
     }
 
     pub fn create_workbook(
@@ -946,8 +994,10 @@ impl Storage {
 
         // Enforce Excel-style uniqueness (Unicode-aware, case-insensitive) within the workbook.
         {
-            let mut stmt = tx.prepare("SELECT name FROM sheets WHERE workbook_id = ?1 AND id != ?2")?;
-            let mut rows = stmt.query(params![meta.workbook_id.to_string(), sheet_id.to_string()])?;
+            let mut stmt =
+                tx.prepare("SELECT name FROM sheets WHERE workbook_id = ?1 AND id != ?2")?;
+            let mut rows =
+                stmt.query(params![meta.workbook_id.to_string(), sheet_id.to_string()])?;
             while let Some(row) = rows.next()? {
                 let existing: String = row.get(0)?;
                 if sheet_name_eq_case_insensitive(&existing, name) {

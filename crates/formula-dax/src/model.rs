@@ -3,6 +3,7 @@ use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::parser::Expr;
 use crate::value::Value;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cardinality {
@@ -17,7 +18,7 @@ pub enum CrossFilterDirection {
     Both,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Relationship {
     pub name: String,
     pub from_table: String,
@@ -70,6 +71,15 @@ impl Table {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// If this table is backed by a [`formula_columnar::ColumnarTable`], return the underlying
+    /// storage.
+    pub fn columnar_table(&self) -> Option<&Arc<formula_columnar::ColumnarTable>> {
+        match &self.storage {
+            TableStorage::Columnar(backend) => Some(&backend.table),
+            _ => None,
+        }
     }
 
     pub fn columns(&self) -> &[String] {
@@ -261,6 +271,22 @@ impl DataModel {
 
     pub fn table(&self, name: &str) -> Option<&Table> {
         self.tables.get(name)
+    }
+
+    pub fn tables(&self) -> impl Iterator<Item = &Table> {
+        self.tables.values()
+    }
+
+    pub fn relationships_definitions(&self) -> impl Iterator<Item = &Relationship> {
+        self.relationships.iter().map(|r| &r.rel)
+    }
+
+    pub fn measures_definitions(&self) -> impl Iterator<Item = &Measure> {
+        self.measures.values()
+    }
+
+    pub fn calculated_columns(&self) -> &[CalculatedColumn] {
+        &self.calculated_columns
     }
 
     pub fn add_table(&mut self, table: Table) -> DaxResult<()> {
@@ -610,6 +636,53 @@ impl DataModel {
         table_mut.add_column(name, values)?;
 
         self.calculated_columns.push(calc);
+        Ok(())
+    }
+
+    /// Register a calculated column definition for a table that already contains the computed
+    /// values.
+    ///
+    /// This is useful when loading persisted models: Power Pivot stores calculated column values
+    /// physically in the table, so re-evaluating them on load is both expensive and can fail if
+    /// the backend is immutable (e.g. [`Table::from_columnar`]).
+    pub fn add_calculated_column_definition(
+        &mut self,
+        table: impl Into<String>,
+        name: impl Into<String>,
+        expression: impl Into<String>,
+    ) -> DaxResult<()> {
+        let table = table.into();
+        let name = name.into();
+        if self
+            .calculated_columns
+            .iter()
+            .any(|c| c.table == table && c.name == name)
+        {
+            return Err(DaxError::DuplicateColumn {
+                table,
+                column: name,
+            });
+        }
+
+        let table_ref = self
+            .tables
+            .get(&table)
+            .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+        if table_ref.column_idx(&name).is_none() {
+            return Err(DaxError::UnknownColumn {
+                table,
+                column: name,
+            });
+        }
+
+        let expression = expression.into();
+        let parsed = crate::parser::parse(&expression)?;
+        self.calculated_columns.push(CalculatedColumn {
+            table,
+            name,
+            expression,
+            parsed,
+        });
         Ok(())
     }
 
