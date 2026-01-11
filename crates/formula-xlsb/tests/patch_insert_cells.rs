@@ -162,6 +162,7 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
             col: 3,
             new_value: CellValue::Number(99.0),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -223,6 +224,7 @@ fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
             col: 10,
             new_value: CellValue::Number(42.0),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -277,6 +279,7 @@ fn patch_sheet_bin_can_expand_dimension_when_brtwsdim_is_after_sheetdata() {
             col: 3,
             new_value: CellValue::Number(99.0),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -307,6 +310,7 @@ fn patch_sheet_bin_does_not_materialize_missing_blank_cells() {
             col: 3,
             new_value: CellValue::Blank,
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )

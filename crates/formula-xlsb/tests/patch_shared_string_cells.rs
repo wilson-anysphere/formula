@@ -141,6 +141,7 @@ fn patching_shared_string_cell_keeps_it_as_string_record() {
             col: 0,
             new_value: CellValue::Text("World".to_string()),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -188,6 +189,7 @@ fn patching_shared_string_cell_appends_to_shared_strings_bin() {
             col: 0,
             new_value: CellValue::Text("New".to_string()),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -244,6 +246,7 @@ fn inserting_new_text_cell_uses_shared_string_record_and_updates_shared_strings_
             col: 1,
             new_value: CellValue::Text("New".to_string()),
             new_formula: None,
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )

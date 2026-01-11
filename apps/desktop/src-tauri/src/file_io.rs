@@ -1232,6 +1232,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                         col: col_u32,
                         new_value,
                         new_formula: None,
+                        new_rgcb: None,
                         shared_string_index: None,
                     },
                 };

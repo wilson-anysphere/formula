@@ -28,6 +28,7 @@ fn save_with_cell_edits_streaming_matches_in_memory_patch_path() {
         col: 1,
         new_value: CellValue::Number(123.0),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     }];
 
@@ -65,6 +66,7 @@ fn save_with_cell_edits_streaming_can_insert_missing_cells() {
         col: 3,
         new_value: CellValue::Number(123.0),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     }];
 
@@ -96,6 +98,7 @@ fn save_with_cell_edits_streaming_is_lossless_for_noop_edit() {
         col: 1,
         new_value: CellValue::Number(42.5),
         new_formula: None,
+        new_rgcb: None,
         shared_string_index: None,
     }];
 
