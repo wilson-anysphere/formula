@@ -12,7 +12,7 @@
 
 use chrono::NaiveDate;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub use formula_model::pivots::ShowAsType;
 use serde::{Deserialize, Serialize};
@@ -100,10 +100,22 @@ pub enum PivotValue {
 }
 
 impl PivotValue {
+    fn canonical_number_bits(n: f64) -> u64 {
+        if n == 0.0 {
+            // Treat -0.0 and 0.0 as the same pivot item (Excel displays them identically).
+            return 0.0_f64.to_bits();
+        }
+        if n.is_nan() {
+            // Canonicalize all NaNs to a single representation so we don't emit multiple "NaN" rows.
+            return f64::NAN.to_bits();
+        }
+        n.to_bits()
+    }
+
     fn to_key_part(&self) -> PivotKeyPart {
         match self {
             PivotValue::Blank => PivotKeyPart::Blank,
-            PivotValue::Number(n) => PivotKeyPart::Number(n.to_bits()),
+            PivotValue::Number(n) => PivotKeyPart::Number(Self::canonical_number_bits(*n)),
             PivotValue::Date(d) => PivotKeyPart::Date(*d),
             PivotValue::Text(s) => PivotKeyPart::Text(s.clone()),
             PivotValue::Bool(b) => PivotKeyPart::Bool(*b),
@@ -186,6 +198,16 @@ pub enum PivotKeyPart {
 }
 
 impl PivotKeyPart {
+    fn kind_rank(&self) -> u8 {
+        match self {
+            PivotKeyPart::Number(_) => 0,
+            PivotKeyPart::Date(_) => 1,
+            PivotKeyPart::Text(_) => 2,
+            PivotKeyPart::Bool(_) => 3,
+            PivotKeyPart::Blank => 4,
+        }
+    }
+
     fn display_string(&self) -> String {
         match self {
             PivotKeyPart::Blank => "(blank)".to_string(),
@@ -197,12 +219,59 @@ impl PivotKeyPart {
     }
 }
 
+impl PartialOrd for PivotKeyPart {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PivotKeyPart {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let rank_cmp = self.kind_rank().cmp(&other.kind_rank());
+        if rank_cmp != Ordering::Equal {
+            // Excel uses a fixed cross-type ordering (numbers/dates, then text, then booleans,
+            // blanks last) regardless of ascending/descending selection. Pivots currently always
+            // sort ascending within that global type ordering.
+            return rank_cmp;
+        }
+
+        match (self, other) {
+            (PivotKeyPart::Blank, PivotKeyPart::Blank) => Ordering::Equal,
+            (PivotKeyPart::Number(a), PivotKeyPart::Number(b)) => {
+                let a = f64::from_bits(*a);
+                let b = f64::from_bits(*b);
+                a.total_cmp(&b)
+            }
+            (PivotKeyPart::Date(a), PivotKeyPart::Date(b)) => a.cmp(b),
+            (PivotKeyPart::Text(a), PivotKeyPart::Text(b)) => {
+                let a_fold = a.to_ascii_lowercase();
+                let b_fold = b.to_ascii_lowercase();
+                a_fold.cmp(&b_fold).then_with(|| a.cmp(b))
+            }
+            (PivotKeyPart::Bool(a), PivotKeyPart::Bool(b)) => a.cmp(b),
+            _ => Ordering::Equal,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PivotKey(pub Vec<PivotKeyPart>);
 
 impl PivotKey {
     fn display_strings(&self) -> Vec<String> {
         self.0.iter().map(|p| p.display_string()).collect()
+    }
+}
+
+impl PartialOrd for PivotKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PivotKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
     }
 }
 
@@ -268,39 +337,25 @@ impl PivotCache {
 
         let records = range[1..].to_vec();
 
-        let mut unique_values: HashMap<String, BTreeSet<String>> = HashMap::new();
-        let mut unique_raw: HashMap<String, HashMap<String, PivotValue>> = HashMap::new();
+        let mut unique_values: HashMap<String, BTreeMap<PivotKeyPart, PivotValue>> = HashMap::new();
 
         for row in &records {
             for field in &fields {
-                if let Some(value) = row.get(field.index) {
-                    let key = value.display_string();
-                    unique_values
-                        .entry(field.name.clone())
-                        .or_default()
-                        .insert(key.clone());
-                    unique_raw
-                        .entry(field.name.clone())
-                        .or_default()
-                        .entry(key)
-                        .or_insert_with(|| value.clone());
-                }
+                let value = row.get(field.index).cloned().unwrap_or(PivotValue::Blank);
+                unique_values
+                    .entry(field.name.clone())
+                    .or_default()
+                    .entry(value.to_key_part())
+                    .or_insert(value);
             }
         }
 
         let mut unique_values_final = HashMap::new();
         for field in &fields {
-            let mut values = Vec::new();
-            if let Some(sorted) = unique_values.get(&field.name) {
-                let raw_map = unique_raw.get(&field.name);
-                for k in sorted {
-                    if let Some(raw) = raw_map.and_then(|m| m.get(k)) {
-                        values.push(raw.clone());
-                    } else {
-                        values.push(PivotValue::Text(k.clone()));
-                    }
-                }
-            }
+            let values = unique_values
+                .get(&field.name)
+                .map(|map| map.values().cloned().collect())
+                .unwrap_or_default();
             unique_values_final.insert(field.name.clone(), values);
         }
 
@@ -1690,35 +1745,8 @@ impl KeySortSpec {
     }
 }
 
-fn key_part_rank(part: &PivotKeyPart) -> u8 {
-    match part {
-        PivotKeyPart::Number(_) => 0,
-        PivotKeyPart::Date(_) => 1,
-        PivotKeyPart::Text(_) => 2,
-        PivotKeyPart::Bool(_) => 3,
-        PivotKeyPart::Blank => 4,
-    }
-}
-
 fn compare_key_parts_ascending(left: &PivotKeyPart, right: &PivotKeyPart) -> Ordering {
-    use PivotKeyPart::*;
-
-    match (left, right) {
-        (Blank, Blank) => Ordering::Equal,
-        (Blank, _) => Ordering::Greater,
-        (_, Blank) => Ordering::Less,
-
-        (Number(a_bits), Number(b_bits)) => {
-            let a = f64::from_bits(*a_bits);
-            let b = f64::from_bits(*b_bits);
-            a.total_cmp(&b)
-        }
-        (Date(a), Date(b)) => a.cmp(b),
-        (Text(a), Text(b)) => a.cmp(b),
-        (Bool(a), Bool(b)) => a.cmp(b),
-
-        _ => key_part_rank(left).cmp(&key_part_rank(right)),
-    }
+    left.cmp(right)
 }
 
 fn compare_key_parts_for_field(left: &PivotKeyPart, right: &PivotKeyPart, spec: &KeySortSpec) -> Ordering {
@@ -1758,7 +1786,10 @@ fn compare_pivot_keys(left: &PivotKey, right: &PivotKey, specs: &[KeySortSpec]) 
             return ord;
         }
     }
-    Ordering::Equal
+    // If all configured fields compare equal, fall back to the full typed key ordering to keep
+    // output deterministic even when display strings collide (HashSet iteration order is not
+    // stable across runs).
+    left.cmp(right)
 }
 
 fn common_prefix_len(a: &[PivotKeyPart], b: &[PivotKeyPart]) -> usize {
@@ -2420,6 +2451,48 @@ mod tests {
     }
 
     #[test]
+    fn sorts_numeric_row_keys_by_numeric_value() {
+        let data = vec![
+            pv_row(&["Num".into(), "Sales".into()]),
+            pv_row(&[2.into(), 1.into()]),
+            pv_row(&[10.into(), 1.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Num")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Num".into(), "Sum of Sales".into()],
+                vec!["2".into(), 1.into()],
+                vec!["10".into(), 1.into()],
+            ]
+        );
+    }
+
+    #[test]
     fn show_as_percent_of_row_total() {
         let data = vec![
             pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
@@ -2642,5 +2715,59 @@ mod tests {
                 vec!["C".into(), 2.into()],
             ]
         );
+    }
+
+    #[test]
+    fn unique_values_are_type_aware_and_collision_free() {
+        let data = vec![pv_row(&["Key".into()]), pv_row(&[1.into()]), pv_row(&["1".into()])];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let values = cache.unique_values.get("Key").unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(matches!(values[0], PivotValue::Number(n) if n == 1.0));
+        assert!(matches!(&values[1], PivotValue::Text(s) if s == "1"));
+    }
+
+    #[test]
+    fn pivot_order_is_deterministic_when_display_strings_collide() {
+        let data = vec![
+            pv_row(&["Key".into(), "Amount".into()]),
+            pv_row(&[PivotValue::Number(1.0), 10.into()]),
+            pv_row(&[PivotValue::Text("1".to_string()), 20.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Key")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Amount".to_string(),
+                name: "Sum of Amount".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let expected = vec![
+            vec!["Key".into(), "Sum of Amount".into()],
+            vec!["1".into(), 10.into()],
+            vec!["1".into(), 20.into()],
+        ];
+
+        for _ in 0..32 {
+            let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+            assert_eq!(result.data, expected);
+        }
     }
 }
