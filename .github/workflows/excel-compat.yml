@@ -87,7 +87,8 @@ jobs:
             # Default filter for push/PR: restrict to currently implemented
             # core operators + a few baseline functions.
             if ([string]::IsNullOrWhiteSpace($include)) {
-              $include = "add,sub,mul,div,cmp,SUM,IF,IFERROR,ISERROR,error"
+              # Include a small amount of dynamic array spill coverage as well.
+              $include = "add,sub,mul,div,cmp,SUM,IF,IFERROR,ISERROR,error,range,TRANSPOSE,SEQUENCE"
             }
           }
 
