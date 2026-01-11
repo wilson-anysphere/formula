@@ -18,6 +18,13 @@ fn parses_quoted_sheet_range_prefix() {
 }
 
 #[test]
+fn roundtrip_preserves_single_quoted_sheet_range_when_required() {
+    let ast = parse_formula("=SUM('Sheet 1:Sheet 3'!A1)", ParseOptions::default()).unwrap();
+    let roundtrip = ast.to_string(SerializeOptions::default()).unwrap();
+    assert_eq!(roundtrip, "=SUM('Sheet 1:Sheet 3'!A1)");
+}
+
+#[test]
 fn evaluates_sum_over_sheet_range_cell_ref() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
@@ -63,6 +70,38 @@ fn evaluates_sum_over_sheet_range_area_ref() {
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(66.0));
+}
+
+#[test]
+fn evaluates_sum_over_sheet_range_column_range() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet2", "B1", 100.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A:A)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+}
+
+#[test]
+fn evaluates_sum_over_sheet_range_row_range() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "C1", 3.0).unwrap();
+    engine.set_cell_value("Sheet3", "A2", 100.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!1:1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
 }
 
 #[test]

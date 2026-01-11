@@ -827,6 +827,38 @@ fn fmt_sheet_name(out: &mut String, sheet: &str, reference_style: ReferenceStyle
     }
 }
 
+fn fmt_sheet_name_escaped(out: &mut String, sheet: &str) {
+    for ch in sheet.chars() {
+        if ch == '\'' {
+            out.push('\'');
+            out.push('\'');
+        } else {
+            out.push(ch);
+        }
+    }
+}
+
+fn fmt_sheet_range_name(
+    out: &mut String,
+    start: &str,
+    end: &str,
+    reference_style: ReferenceStyle,
+) {
+    let needs_quotes = sheet_name_needs_quotes(start, reference_style)
+        || sheet_name_needs_quotes(end, reference_style);
+    if needs_quotes {
+        out.push('\'');
+        fmt_sheet_name_escaped(out, start);
+        out.push(':');
+        fmt_sheet_name_escaped(out, end);
+        out.push('\'');
+    } else {
+        out.push_str(start);
+        out.push(':');
+        out.push_str(end);
+    }
+}
+
 fn fmt_ref_prefix(
     out: &mut String,
     workbook: &Option<String>,
@@ -857,9 +889,7 @@ fn fmt_ref_prefix(
                 out.push('!');
             }
             SheetRef::SheetRange { start, end } => {
-                fmt_sheet_name(out, start, reference_style);
-                out.push(':');
-                fmt_sheet_name(out, end, reference_style);
+                fmt_sheet_range_name(out, start, end, reference_style);
                 out.push('!');
             }
         },
