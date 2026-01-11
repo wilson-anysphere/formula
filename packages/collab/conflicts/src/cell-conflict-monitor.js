@@ -100,12 +100,13 @@ export class CellConflictMonitor {
     if (!conflict) return false;
 
     const normalizedChosen = chosenValue ?? null;
-    // The remote value is already applied in the doc at conflict time, so
-    // choosing it is a no-op (and importantly should not clear unrelated state
-    // like a concurrently-written formula).
-    if (!valuesDeeplyEqual(normalizedChosen, conflict.remoteValue)) {
-      this.setLocalValue(conflict.cellKey, normalizedChosen);
-    }
+    const cell = /** @type {any} */ (this.cells.get(conflict.cellKey));
+    const currentValue = cell?.get?.("value") ?? null;
+    // Only apply a write if the chosen value differs from the current doc
+    // state. This keeps choosing an already-applied value as a no-op while
+    // still allowing resolution to re-apply if the cell changed since the
+    // conflict was detected.
+    if (!valuesDeeplyEqual(normalizedChosen, currentValue)) this.setLocalValue(conflict.cellKey, normalizedChosen);
     this._conflicts.delete(conflictId);
     return true;
   }

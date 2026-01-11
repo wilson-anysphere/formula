@@ -231,13 +231,13 @@ export class FormulaConflictMonitor {
     const conflict = this._conflicts.get(conflictId);
     if (!conflict) return false;
 
+    const cell = /** @type {any} */ (this.cells.get(conflict.cellKey));
+    const currentFormula = (cell?.get?.("formula") ?? "").toString();
+    const currentValue = cell?.get?.("value") ?? null;
+
     if (conflict.kind === "content") {
       const choice = /** @type {any} */ (chosen);
       if (!choice || typeof choice !== "object") return false;
-
-      const cell = /** @type {any} */ (this.cells.get(conflict.cellKey));
-      const currentFormula = (cell?.get?.("formula") ?? "").toString();
-      const currentValue = cell?.get?.("value") ?? null;
 
       if (choice.type === "formula") {
         const chosenFormula = String(choice.formula ?? "");
@@ -257,19 +257,19 @@ export class FormulaConflictMonitor {
     }
 
     if (conflict.kind === "value") {
-      // The remote value is already applied in the doc at conflict time, so
-      // choosing it is a no-op (and importantly should not clear unrelated state
-      // like a concurrently-written formula).
-      if (!valuesDeeplyEqual(chosen, conflict.remoteValue)) {
-        this.setLocalValue(conflict.cellKey, chosen);
-      }
+      const normalizedChosen = chosen ?? null;
+      // Only apply a write if the chosen value differs from the current doc
+      // state. This keeps choosing an already-applied value as a no-op while
+      // still allowing resolution to re-apply if the cell changed since the
+      // conflict was detected.
+      if (!valuesDeeplyEqual(normalizedChosen, currentValue)) this.setLocalValue(conflict.cellKey, normalizedChosen);
     } else {
       const chosenFormula = String(chosen ?? "");
-      // The remote formula is already applied in the doc at conflict time, so
-      // choosing it is a no-op.
-      if (!formulasRoughlyEqual(chosenFormula, conflict.remoteFormula)) {
-        this.setLocalFormula(conflict.cellKey, chosenFormula);
-      }
+      // Apply the chosen formula if it differs from the current doc state, or if
+      // the cell still holds a stale literal value alongside the formula.
+      const formulaAlready = formulasRoughlyEqual(chosenFormula, currentFormula);
+      const valueAlreadyCleared = currentValue === null;
+      if (!(formulaAlready && valueAlreadyCleared)) this.setLocalFormula(conflict.cellKey, chosenFormula);
     }
     this._conflicts.delete(conflictId);
     return true;
