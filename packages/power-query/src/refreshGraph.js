@@ -276,6 +276,37 @@ export class RefreshOrchestrator {
     const targetIds = queryIds ? Array.from(new Set(queryIds)) : Array.from(this.registrations.keys());
     const targetSet = new Set(targetIds);
 
+    /**
+     * @param {Error} error
+     * @param {string} queryId
+     * @returns {RefreshAllHandle}
+     */
+    const errorHandle = (error, queryId) => {
+      const job = {
+        id: `${sessionId}:graph`,
+        queryId,
+        reason,
+        queuedAt: new Date(),
+      };
+      this.emitter.emit(
+        "event",
+        /** @type {RefreshGraphEvent} */ ({
+          type: "error",
+          sessionId,
+          phase: targetSet.has(queryId) ? "target" : "dependency",
+          job,
+          error,
+        }),
+      );
+
+      return {
+        sessionId,
+        queryIds: targetIds,
+        promise: Promise.reject(error),
+        cancel: () => {},
+      };
+    };
+
     /** @type {Map<string, string[]>} */
     const depsById = new Map();
     for (const [id, query] of this.registrations) depsById.set(id, computeQueryDependencies(query));
@@ -290,13 +321,13 @@ export class RefreshOrchestrator {
 
       const query = this.registrations.get(id);
       if (!query) {
-        throw new Error(`Unknown query '${id}'`);
+        return errorHandle(new Error(`Unknown query '${id}'`), id);
       }
       closure.add(id);
 
       for (const dep of depsById.get(id) ?? []) {
         if (!this.registrations.has(dep)) {
-          throw new Error(`Unknown query '${dep}' (dependency of '${id}')`);
+          return errorHandle(new Error(`Unknown query '${dep}' (dependency of '${id}')`), id);
         }
         stack.push(dep);
       }
@@ -313,30 +344,8 @@ export class RefreshOrchestrator {
 
     const cycle = findCycle(graph);
     if (cycle) {
-      const error = new Error(`Query dependency cycle detected: ${cycle.join(" -> ")}`);
-      const job = {
-        id: `${sessionId}:graph`,
-        queryId: cycle[0] ?? "<unknown>",
-        reason,
-        queuedAt: new Date(),
-      };
-      this.emitter.emit(
-        "event",
-        /** @type {RefreshGraphEvent} */ ({
-          type: "error",
-          sessionId,
-          phase: targetSet.has(job.queryId) ? "target" : "dependency",
-          job,
-          error,
-        }),
-      );
-
-      return {
-        sessionId,
-        queryIds: targetIds,
-        promise: Promise.reject(error),
-        cancel: () => {},
-      };
+      const root = cycle[0] ?? "<unknown>";
+      return errorHandle(new Error(`Query dependency cycle detected: ${cycle.join(" -> ")}`), root);
     }
 
     /** @type {Record<string, QueryExecutionResult>} */

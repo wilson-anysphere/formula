@@ -195,6 +195,42 @@ test("RefreshOrchestrator: cycle detection emits a clear error", async () => {
   assert.match(String(errEvt.error?.message ?? ""), /A -> B -> A/);
 });
 
+test("RefreshOrchestrator: unknown target query emits error event and rejects", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+
+  /** @type {any[]} */
+  const events = [];
+  orchestrator.onEvent((evt) => events.push(evt));
+
+  const handle = orchestrator.refreshAll(["Missing"]);
+  await assert.rejects(handle.promise, /Unknown query 'Missing'/);
+  assert.equal(engine.calls.length, 0);
+
+  const errEvt = events.find((e) => e.type === "error");
+  assert.ok(errEvt, "orchestrator should emit an error event");
+  assert.equal(errEvt.job.queryId, "Missing");
+});
+
+test("RefreshOrchestrator: missing dependency emits error event and rejects", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "Missing" }));
+
+  /** @type {any[]} */
+  const events = [];
+  orchestrator.onEvent((evt) => events.push(evt));
+
+  const handle = orchestrator.refreshAll(["B"]);
+  await assert.rejects(handle.promise, /Unknown query 'Missing' \(dependency of 'B'\)/);
+  assert.equal(engine.calls.length, 0);
+
+  const errEvt = events.find((e) => e.type === "error");
+  assert.ok(errEvt, "orchestrator should emit an error event");
+  assert.equal(errEvt.job.queryId, "B", "error should be associated with the query that references the missing dependency");
+});
+
 test("RefreshOrchestrator: cancellation stops remaining queued jobs", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1 });
