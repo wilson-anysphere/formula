@@ -330,3 +330,28 @@ fn exponentiation_operator_matches_excel_precedence_and_associativity() {
     assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(4.0));
     assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(512.0));
 }
+
+#[test]
+fn array_functions_are_recognized_but_spill_without_dynarrays() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=TRANSPOSE(A1:C1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", "=_xlfn.SEQUENCE(2,2,1,1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D1"),
+        Value::Error(ErrorKind::Spill)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D2"),
+        Value::Error(ErrorKind::Spill)
+    );
+}

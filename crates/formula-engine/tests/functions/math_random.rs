@@ -52,3 +52,23 @@ fn randbetween_worksheet_function_respects_bounds() {
         }
     }
 }
+
+#[test]
+fn random_functions_accept_xlfn_prefix() {
+    let mut sheet = TestSheet::new();
+    match sheet.eval("=_xlfn.RAND()") {
+        Value::Number(n) => {
+            assert!(n >= 0.0);
+            assert!(n < 1.0);
+        }
+        other => panic!("expected numeric result, got {other:?}"),
+    }
+
+    match sheet.eval("=_xlfn.RANDBETWEEN(1,3)") {
+        Value::Number(n) => {
+            assert_eq!(n.fract(), 0.0);
+            assert!((1.0..=3.0).contains(&n));
+        }
+        other => panic!("expected numeric result, got {other:?}"),
+    }
+}

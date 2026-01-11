@@ -154,3 +154,12 @@ fn substitute_worksheet_function_replaces_all_or_nth_instance() {
         Value::Error(ErrorKind::Value)
     );
 }
+
+#[test]
+fn substitute_accepts_xlfn_prefix() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=_xlfn.SUBSTITUTE(\"foo bar foo\",\"foo\",\"x\")"),
+        Value::Text("x bar x".to_string())
+    );
+}
