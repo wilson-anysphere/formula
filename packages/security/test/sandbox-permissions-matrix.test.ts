@@ -227,6 +227,28 @@ describe("Sandbox permissions matrix", () => {
 
     await expect(
       runScript({
+        scriptId: "py.net.udp.denied",
+        language: "python",
+        code: `import socket\nsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\nsock.sendto(b"hi", ("127.0.0.1", 9))\n`,
+        permissionManager,
+        auditLogger,
+        timeoutMs: 2_000
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "network" } });
+
+    await expect(
+      runScript({
+        scriptId: "py.net.bind.denied",
+        language: "python",
+        code: `import socket\nsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\nsock.bind(("127.0.0.1", 0))\n`,
+        permissionManager,
+        auditLogger,
+        timeoutMs: 2_000
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "network" } });
+
+    await expect(
+      runScript({
         scriptId: "py.net.denied",
         language: "python",
         code: `import urllib.request\nurllib.request.urlopen(${JSON.stringify(serverUrl)}).read()\n`,

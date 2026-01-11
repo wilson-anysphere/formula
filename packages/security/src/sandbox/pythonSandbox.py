@@ -536,33 +536,55 @@ def _main():
     original_create_connection = _socket.create_connection
     original_connect = _socket.socket.connect
     original_connect_ex = getattr(_socket.socket, "connect_ex", None)
+    original_bind = _socket.socket.bind
+    original_sendto = _socket.socket.sendto
+    original_sendmsg = getattr(_socket.socket, "sendmsg", None)
 
-    def _ensure_network_allowed(address):
+    def _ensure_network_allowed(address, protocol: str = "tcp", method: str = "CONNECT"):
         if not isinstance(address, tuple) or len(address) < 2:
-            ensure({"kind": "network", "url": f"tcp://{address}"})
+            ensure({"kind": "network", "url": f"{protocol}://{address}"})
             return
-        host = str(address[0])
+        host = str(address[0] or "0.0.0.0")
         port = int(address[1])
-        url = f"tcp://{host}:{port}"
+        url = f"{protocol}://{host}:{port}"
         ensure({"kind": "network", "url": url})
-        audit("security.network.request", True, {"url": url, "method": "CONNECT"})
+        audit("security.network.request", True, {"url": url, "method": method})
 
     def guarded_create_connection(address, *args, **kwargs):
-        _ensure_network_allowed(address)
+        _ensure_network_allowed(address, protocol="tcp", method="CONNECT")
         return original_create_connection(address, *args, **kwargs)
 
     def guarded_connect(self, address):
-        _ensure_network_allowed(address)
+        _ensure_network_allowed(address, protocol="tcp", method="CONNECT")
         return original_connect(self, address)
 
     def guarded_connect_ex(self, address):
-        _ensure_network_allowed(address)
+        _ensure_network_allowed(address, protocol="tcp", method="CONNECT")
         return original_connect_ex(self, address)  # type: ignore[misc]
+
+    def guarded_bind(self, address):
+        protocol = "udp" if (self.type & _socket.SOCK_DGRAM) else "tcp"
+        _ensure_network_allowed(address, protocol=protocol, method="BIND")
+        return original_bind(self, address)
+
+    def guarded_sendto(self, data, address):
+        _ensure_network_allowed(address, protocol="udp", method="SENDTO")
+        return original_sendto(self, data, address)
+
+    def guarded_sendmsg(self, *args):
+        # sendmsg(buffers[, ancdata[, flags[, address]]])
+        if len(args) >= 4:
+            _ensure_network_allowed(args[3], protocol="udp", method="SENDMSG")
+        return original_sendmsg(self, *args)  # type: ignore[misc]
 
     _socket.create_connection = guarded_create_connection
     _socket.socket.connect = guarded_connect
     if original_connect_ex is not None:
         _socket.socket.connect_ex = guarded_connect_ex  # type: ignore[assignment]
+    _socket.socket.bind = guarded_bind
+    _socket.socket.sendto = guarded_sendto
+    if original_sendmsg is not None:
+        _socket.socket.sendmsg = guarded_sendmsg  # type: ignore[assignment]
 
     user_stdout = LimitedStringIO(max_output_bytes)
     user_stderr = LimitedStringIO(max_output_bytes)
