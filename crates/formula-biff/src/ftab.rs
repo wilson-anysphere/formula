@@ -23,6 +23,16 @@ use std::sync::OnceLock;
 /// BIFF `iftab` value used for user-defined / add-in / future functions.
 pub const FTAB_USER_DEFINED: u16 = 255;
 
+#[cfg(feature = "encode")]
+fn is_formula_engine_function(name: &str) -> bool {
+    formula_engine::functions::lookup_function(name).is_some()
+}
+
+#[cfg(not(feature = "encode"))]
+fn is_formula_engine_function(_name: &str) -> bool {
+    false
+}
+
 /// Function name table indexed by BIFF `iftab`. Empty strings denote reserved ids.
 ///
 /// NOTE: The table currently matches the BIFF12 function table as published in the
@@ -561,7 +571,7 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
         return Some(id);
     }
 
-    if had_xlfn_prefix || FUTURE_UDF_FUNCTIONS.contains(&normalized) {
+    if had_xlfn_prefix || FUTURE_UDF_FUNCTIONS.contains(&normalized) || is_formula_engine_function(normalized) {
         return Some(FTAB_USER_DEFINED);
     }
 
