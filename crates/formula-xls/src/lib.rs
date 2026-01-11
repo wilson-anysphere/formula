@@ -423,6 +423,16 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 let Some(style_id) = style_id else {
                     continue;
                 };
+
+                // If the anchor cell has its own (resolvable) XF entry, prefer it over any
+                // conflicting XF indices from other cells within the merged region.
+                if anchor != cell_ref {
+                    if let Some(&anchor_xf_idx) = sheet_cell_xfs.get(&anchor) {
+                        if let Some(Some(_)) = xf_style_ids.get(anchor_xf_idx as usize).copied() {
+                            continue;
+                        }
+                    }
+                }
                 sheet.set_style_id(anchor, style_id);
             }
 
