@@ -8,7 +8,10 @@ const WORKSHEET: u32 = 0x0181;
 const SHEETDATA: u32 = 0x0191;
 const SHEETDATA_END: u32 = 0x0192;
 const ROW: u32 = 0x0000;
+const FORMULA_STRING: u32 = 0x0008;
 const FORMULA_FLOAT: u32 = 0x0009;
+const FORMULA_BOOL: u32 = 0x000A;
+const FORMULA_BOOLERR: u32 = 0x000B;
 
 fn push_record(stream: &mut Vec<u8>, id: u32, data: &[u8]) {
     biff12_varint::write_record_id(stream, id).expect("write record id");
@@ -35,6 +38,80 @@ fn synthetic_sheet_brt_fmla_num(flags: u16, cached: f64, extra: &[u8]) -> Vec<u8
     rec.extend_from_slice(extra);
 
     push_record(&mut sheet, FORMULA_FLOAT, &rec);
+    push_record(&mut sheet, SHEETDATA_END, &[]);
+    sheet
+}
+
+fn push_utf16_chars(out: &mut Vec<u8>, s: &str) {
+    for unit in s.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+}
+
+fn synthetic_sheet_brt_fmla_bool(flags: u16, cached: bool, extra: &[u8]) -> Vec<u8> {
+    let mut sheet = Vec::new();
+
+    push_record(&mut sheet, WORKSHEET, &[]);
+    push_record(&mut sheet, SHEETDATA, &[]);
+    push_record(&mut sheet, ROW, &0u32.to_le_bytes());
+
+    // BrtFmlaBool (FORMULA_BOOL) record payload:
+    //   [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
+    let mut rec = Vec::new();
+    rec.extend_from_slice(&0u32.to_le_bytes()); // col
+    rec.extend_from_slice(&0u32.to_le_bytes()); // style
+    rec.push(u8::from(cached));
+    rec.extend_from_slice(&flags.to_le_bytes());
+    rec.extend_from_slice(&0u32.to_le_bytes()); // cce = 0, rgce empty
+    rec.extend_from_slice(extra);
+
+    push_record(&mut sheet, FORMULA_BOOL, &rec);
+    push_record(&mut sheet, SHEETDATA_END, &[]);
+    sheet
+}
+
+fn synthetic_sheet_brt_fmla_error(flags: u16, cached: u8, extra: &[u8]) -> Vec<u8> {
+    let mut sheet = Vec::new();
+
+    push_record(&mut sheet, WORKSHEET, &[]);
+    push_record(&mut sheet, SHEETDATA, &[]);
+    push_record(&mut sheet, ROW, &0u32.to_le_bytes());
+
+    // BrtFmlaError (FORMULA_BOOLERR) record payload:
+    //   [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
+    let mut rec = Vec::new();
+    rec.extend_from_slice(&0u32.to_le_bytes()); // col
+    rec.extend_from_slice(&0u32.to_le_bytes()); // style
+    rec.push(cached);
+    rec.extend_from_slice(&flags.to_le_bytes());
+    rec.extend_from_slice(&0u32.to_le_bytes()); // cce = 0, rgce empty
+    rec.extend_from_slice(extra);
+
+    push_record(&mut sheet, FORMULA_BOOLERR, &rec);
+    push_record(&mut sheet, SHEETDATA_END, &[]);
+    sheet
+}
+
+fn synthetic_sheet_brt_fmla_string(flags: u16, cached: &str, extra: &[u8]) -> Vec<u8> {
+    let mut sheet = Vec::new();
+
+    push_record(&mut sheet, WORKSHEET, &[]);
+    push_record(&mut sheet, SHEETDATA, &[]);
+    push_record(&mut sheet, ROW, &0u32.to_le_bytes());
+
+    // BrtFmlaString (FORMULA_STRING) record payload:
+    //   [col: u32][style: u32][cch: u32][flags: u16][utf16 chars...][cce: u32][rgce bytes...][extra...]
+    let mut rec = Vec::new();
+    rec.extend_from_slice(&0u32.to_le_bytes()); // col
+    rec.extend_from_slice(&0u32.to_le_bytes()); // style
+    let cch = cached.encode_utf16().count() as u32;
+    rec.extend_from_slice(&cch.to_le_bytes());
+    rec.extend_from_slice(&flags.to_le_bytes());
+    push_utf16_chars(&mut rec, cached);
+    rec.extend_from_slice(&0u32.to_le_bytes()); // cce = 0, rgce empty
+    rec.extend_from_slice(extra);
+
+    push_record(&mut sheet, FORMULA_STRING, &rec);
     push_record(&mut sheet, SHEETDATA_END, &[]);
     sheet
 }
@@ -120,6 +197,143 @@ fn patcher_updates_cached_value_without_changing_flags() {
     assert_eq!(sheet.cells.len(), 1);
     let cell = &sheet.cells[0];
     assert_eq!(cell.value, CellValue::Number(99.5));
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
+    assert_eq!(formula.extra, extra.to_vec());
+}
+
+#[test]
+fn parses_and_preserves_brt_fmla_bool_flags() {
+    let flags = 0x1234;
+    let extra = [0xDE, 0xAD, 0xBE, 0xEF];
+    let sheet_bin = synthetic_sheet_brt_fmla_bool(flags, true, &extra);
+
+    let tmp = write_fixture_like_xlsb(&sheet_bin);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.row, 0);
+    assert_eq!(cell.col, 0);
+    assert_eq!(cell.value, CellValue::Bool(true));
+
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
+    assert_eq!(formula.extra, extra.to_vec());
+}
+
+#[test]
+fn patcher_updates_cached_bool_without_changing_flags() {
+    let flags = 0x2222;
+    let extra = [0xAA, 0xBB];
+    let sheet_bin = synthetic_sheet_brt_fmla_bool(flags, true, &extra);
+
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Bool(false),
+        new_formula: None,
+    };
+    let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+
+    let tmp = write_fixture_like_xlsb(&patched_sheet);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.value, CellValue::Bool(false));
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
+    assert_eq!(formula.extra, extra.to_vec());
+}
+
+#[test]
+fn parses_and_preserves_brt_fmla_error_flags() {
+    let flags = 0x1234;
+    let extra = [0xDE, 0xAD];
+    let sheet_bin = synthetic_sheet_brt_fmla_error(flags, 0x07, &extra);
+
+    let tmp = write_fixture_like_xlsb(&sheet_bin);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.value, CellValue::Error(0x07));
+
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
+    assert_eq!(formula.extra, extra.to_vec());
+}
+
+#[test]
+fn patcher_updates_cached_error_without_changing_flags() {
+    let flags = 0x2222;
+    let extra = [0xAA];
+    let sheet_bin = synthetic_sheet_brt_fmla_error(flags, 0x07, &extra);
+
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Error(0x2A),
+        new_formula: None,
+    };
+    let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+
+    let tmp = write_fixture_like_xlsb(&patched_sheet);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.value, CellValue::Error(0x2A));
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
+    assert_eq!(formula.extra, extra.to_vec());
+}
+
+#[test]
+fn parses_and_preserves_brt_fmla_string_flags() {
+    let flags = 0x1234;
+    let extra = [0x10, 0x20, 0x30];
+    let sheet_bin = synthetic_sheet_brt_fmla_string(flags, "Hello", &extra);
+
+    let tmp = write_fixture_like_xlsb(&sheet_bin);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.value, CellValue::Text("Hello".to_string()));
+
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
+    assert_eq!(formula.extra, extra.to_vec());
+}
+
+#[test]
+fn patcher_updates_cached_string_without_changing_flags() {
+    let flags = 0x2222;
+    let extra = [0xAA, 0xBB, 0xCC];
+    let sheet_bin = synthetic_sheet_brt_fmla_string(flags, "Hello", &extra);
+
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text("World".to_string()),
+        new_formula: None,
+    };
+    let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+
+    let tmp = write_fixture_like_xlsb(&patched_sheet);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.value, CellValue::Text("World".to_string()));
     let formula = cell.formula.as_ref().expect("formula expected");
     assert_eq!(formula.flags, flags);
     assert_eq!(formula.extra, extra.to_vec());
