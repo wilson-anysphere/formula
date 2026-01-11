@@ -91,7 +91,7 @@ fn formula_and_style_keep_empty_cells_in_sparse_store() {
 
     // Formula-only cell is stored.
     sheet
-        .set_formula_a1("A1", Some("=1+1".to_string()))
+        .set_formula_a1("A1", Some("1+1".to_string()))
         .unwrap();
     assert_eq!(sheet.cell_count(), 1);
     assert_eq!(sheet.formula(CellRef::new(0, 0)), Some("1+1"));

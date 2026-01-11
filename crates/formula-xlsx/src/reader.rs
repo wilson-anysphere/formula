@@ -253,10 +253,7 @@ fn parse_sheet(
                             }
                         }
                     };
-                    let formula = current_formula.take().and_then(|f| {
-                        let normalized = normalize_formula_text(&f);
-                        (!normalized.is_empty()).then_some(normalized)
-                    });
+                    let formula = current_formula.take().and_then(|f| normalize_formula_text(&f));
                     sheet.set_cell(
                         cell_ref,
                         Cell {

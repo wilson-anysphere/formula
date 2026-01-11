@@ -247,10 +247,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         continue;
                     };
 
-                    let normalized = normalize_formula_text(formula);
-                    if normalized.is_empty() {
+                    let Some(normalized) = normalize_formula_text(formula) else {
                         continue;
-                    }
+                    };
 
                     let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                     sheet.set_formula(anchor, Some(normalized));

@@ -158,19 +158,7 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
 }
 
 fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Workbook, xlsb::Error> {
-    use formula_model::{CellRef, CellValue, ErrorValue, Workbook as ModelWorkbook};
-
-    fn normalize_formula(formula: &str) -> Option<String> {
-        let trimmed = formula.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        if trimmed.starts_with('=') {
-            Some(trimmed.to_owned())
-        } else {
-            Some(format!("={trimmed}"))
-        }
-    }
+    use formula_model::{normalize_formula_text, CellRef, CellValue, ErrorValue, Workbook as ModelWorkbook};
 
     let mut out = ModelWorkbook::new();
 
@@ -196,7 +184,7 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
             }
 
             if let Some(formula) = cell.formula.and_then(|f| f.text) {
-                if let Some(normalized) = normalize_formula(&formula) {
+                if let Some(normalized) = normalize_formula_text(&formula) {
                     sheet.set_formula(cell_ref, Some(normalized));
                 }
             }
@@ -204,4 +192,31 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::xlsb_to_model_workbook;
+    use formula_model::CellRef;
+    use std::path::Path;
+
+    #[test]
+    fn xlsb_to_model_strips_leading_equals_from_formulas() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+
+        let wb = crate::xlsb::XlsbWorkbook::open(fixture_path).expect("open xlsb fixture");
+        let model = xlsb_to_model_workbook(&wb).expect("convert to model");
+        let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+
+        let cell = CellRef::from_a1("C1").expect("valid ref");
+        let formula = sheet.formula(cell).expect("expected formula in C1");
+        assert!(
+            !formula.starts_with('='),
+            "formula should be stored without leading '=' (got {formula:?})"
+        );
+        assert_eq!(formula, "B1*2");
+    }
 }

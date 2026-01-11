@@ -782,10 +782,7 @@ impl Worksheet {
     /// Setting a formula to `None` clears the formula and removes the cell from the sparse store
     /// if it becomes "truly empty".
     pub fn set_formula(&mut self, cell_ref: CellRef, formula: Option<String>) {
-        let formula = formula.and_then(|formula| {
-            let normalized = crate::normalize_formula_text(&formula);
-            (!normalized.is_empty()).then_some(normalized)
-        });
+        let formula = formula.and_then(|formula| crate::normalize_formula_text(&formula));
 
         let key = CellKey::from(cell_ref);
 
@@ -857,10 +854,7 @@ impl Worksheet {
     /// If the cell becomes "truly empty", it is removed from storage.
     pub fn set_cell(&mut self, cell_ref: CellRef, mut cell: Cell) {
         if let Some(formula) = cell.formula.take() {
-            let normalized = crate::normalize_formula_text(&formula);
-            if !normalized.is_empty() {
-                cell.formula = Some(normalized);
-            }
+            cell.formula = crate::normalize_formula_text(&formula);
         }
 
         let anchor = self.merged_regions.resolve_cell(cell_ref);

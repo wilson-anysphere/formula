@@ -207,10 +207,7 @@ where
     D: Deserializer<'de>,
 {
     let raw = Option::<String>::deserialize(deserializer)?;
-    Ok(raw.and_then(|s| {
-        let normalized = crate::normalize_formula_text(&s);
-        (!normalized.is_empty()).then_some(normalized)
-    }))
+    Ok(raw.and_then(|s| crate::normalize_formula_text(&s)))
 }
 
 #[cfg(test)]

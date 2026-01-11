@@ -269,8 +269,7 @@ fn cell_xml(
     }
 
     if let Some(formula) = &cell.formula {
-        let formula = normalize_formula_text(formula);
-        if !formula.is_empty() {
+        if let Some(formula) = normalize_formula_text(formula) {
             value_xml.push_str(&format!(r#"<f>{}</f>"#, escape_xml(&formula)));
         }
     }

@@ -407,8 +407,7 @@ fn parse_worksheet_into_model(
 
                     let formula_in_model = current_formula.as_ref().and_then(|f| {
                         let stripped = crate::formula_text::strip_xlfn_prefixes(&f.file_text);
-                        let normalized = normalize_formula_text(&stripped);
-                        (!normalized.is_empty()).then_some(normalized)
+                        normalize_formula_text(&stripped)
                     });
 
                     let mut cell = Cell::default();
