@@ -83,6 +83,15 @@ if (!globalThis.navigator || typeof globalThis.navigator !== "object") {
 if (typeof globalThis.navigator.sendBeacon !== "function") {
   globalThis.navigator.sendBeacon = () => true;
 }
+if (typeof globalThis.Worker !== "function") {
+  globalThis.Worker = function Worker() {};
+}
+if (typeof globalThis.SharedWorker !== "function") {
+  globalThis.SharedWorker = function SharedWorker() {};
+}
+if (typeof globalThis.importScripts !== "function") {
+  globalThis.importScripts = function importScripts() {};
+}
 
 const listeners = new Map();
 globalThis.addEventListener = (type, listener) => {
@@ -317,6 +326,42 @@ test("extension-worker: AsyncFunction constructor throws when disableEval is ena
   }
 });
 
+test("extension-worker: GeneratorFunction constructor throws when disableEval is enabled", async () => {
+  const dir = await createTempDir("formula-ext-worker-generator-function-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  const GeneratorFunction = Object.getPrototypeOf(function*(){}).constructor;\n  GeneratorFunction("return 1");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /GeneratorFunction is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: AsyncGeneratorFunction constructor throws when disableEval is enabled", async () => {
+  const dir = await createTempDir("formula-ext-worker-async-generator-function-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  const AsyncGeneratorFunction = Object.getPrototypeOf(async function*(){}).constructor;\n  AsyncGeneratorFunction("return 1");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /AsyncGeneratorFunction is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("extension-worker: setTimeout(string) throws when disableEval is enabled", async () => {
   const dir = await createTempDir("formula-ext-worker-timeout-string-");
   try {
@@ -347,6 +392,78 @@ test("extension-worker: setInterval(string) throws when disableEval is enabled",
     await assert.rejects(
       () => activateExtensionWorker({ mainUrl, extensionPath }),
       /setInterval with a string callback is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: XMLHttpRequest is blocked when present", async () => {
+  const dir = await createTempDir("formula-ext-worker-xhr-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  new XMLHttpRequest();\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /XMLHttpRequest is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: Worker is blocked when present", async () => {
+  const dir = await createTempDir("formula-ext-worker-worker-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  new Worker("data:text/javascript,export default 1", { type: "module" });\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /Worker is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: SharedWorker is blocked when present", async () => {
+  const dir = await createTempDir("formula-ext-worker-sharedworker-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  new SharedWorker("data:text/javascript,export default 1", { type: "module" });\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /SharedWorker is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: importScripts is blocked when present", async () => {
+  const dir = await createTempDir("formula-ext-worker-importscripts-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  importScripts("https://example.invalid/");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /importScripts is not allowed in extensions/i
     );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
