@@ -77,7 +77,29 @@ async function copyToPublic() {
   }
 }
 
-// Validate `wasm-pack` is installed early with a good error message.
+// Ensure the crate path exists (helps when running from unexpected working dirs).
+if (!existsSync(path.join(crateDir, "Cargo.toml"))) {
+  fatal(
+    `[formula] Expected WASM crate at ${path.relative(repoRoot, crateDir)} (relative to repo root), but it was not found.`
+  );
+}
+
+const outputExists = existsSync(wrapper) && existsSync(wasm);
+if (outputExists) {
+  const outputStamp = Math.min((await stat(wrapper)).mtimeMs, (await stat(wasm)).mtimeMs);
+  const sourceStamp = Math.max(
+    await latestMtime(crateDir),
+    await latestMtime(coreDir),
+    await latestMtime(path.join(repoRoot, "Cargo.lock"))
+  );
+
+  if (outputStamp >= sourceStamp) {
+    await copyToPublic();
+    process.exit(0);
+  }
+}
+
+// Validate `wasm-pack` is installed (only required when we need to rebuild).
 {
   const check = spawnSync(wasmPackBin, ["--version"], { encoding: "utf8" });
   if (check.error) {
@@ -108,28 +130,6 @@ async function copyToPublic() {
         .filter(Boolean)
         .join("\n")
     );
-  }
-}
-
-// Ensure the crate path exists (helps when running from unexpected working dirs).
-if (!existsSync(path.join(crateDir, "Cargo.toml"))) {
-  fatal(
-    `[formula] Expected WASM crate at ${path.relative(repoRoot, crateDir)} (relative to repo root), but it was not found.`
-  );
-}
-
-const outputExists = existsSync(wrapper) && existsSync(wasm);
-if (outputExists) {
-  const outputStamp = Math.min((await stat(wrapper)).mtimeMs, (await stat(wasm)).mtimeMs);
-  const sourceStamp = Math.max(
-    await latestMtime(crateDir),
-    await latestMtime(coreDir),
-    await latestMtime(path.join(repoRoot, "Cargo.lock"))
-  );
-
-  if (outputStamp >= sourceStamp) {
-    await copyToPublic();
-    process.exit(0);
   }
 }
 
