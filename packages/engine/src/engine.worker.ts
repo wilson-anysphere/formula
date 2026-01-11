@@ -32,8 +32,14 @@ let wasmBinaryUrl: string | null = null;
 let workbook: WasmWorkbookInstance | null = null;
 
 let cancelledRequests = new Set<number>();
-const cancelledRequestQueue: number[] = [];
-const MAX_CANCELLED_REQUEST_IDS = 4096;
+const pendingRequestIds = new Set<number>();
+
+// Cancels can arrive for request IDs that will never be sent (e.g. abort signal
+// already fired before the request message is posted). Track those separately
+// in a bounded structure so they don't leak forever.
+const preCancelledRequestIds = new Set<number>();
+const preCancelledRequestQueue: number[] = [];
+const MAX_PRE_CANCELLED_REQUEST_IDS = 4096;
 
 // Cancellation messages can arrive after the worker has already responded (e.g.
 // main thread aborts while a response is in-flight). Track a bounded set of
@@ -44,6 +50,10 @@ const completedRequestQueue: number[] = [];
 const MAX_COMPLETED_REQUEST_IDS = 1024;
 
 function markRequestCompleted(id: number): void {
+  pendingRequestIds.delete(id);
+  cancelledRequests.delete(id);
+  preCancelledRequestIds.delete(id);
+
   completedRequestIds.add(id);
   completedRequestQueue.push(id);
   if (completedRequestQueue.length > MAX_COMPLETED_REQUEST_IDS) {
@@ -58,16 +68,22 @@ function trackCancellation(id: number): void {
   if (completedRequestIds.has(id)) {
     return;
   }
-  if (cancelledRequests.has(id)) {
+
+  if (pendingRequestIds.has(id)) {
+    cancelledRequests.add(id);
     return;
   }
 
-  cancelledRequests.add(id);
-  cancelledRequestQueue.push(id);
-  if (cancelledRequestQueue.length > MAX_CANCELLED_REQUEST_IDS) {
-    const oldest = cancelledRequestQueue.shift();
+  if (preCancelledRequestIds.has(id)) {
+    return;
+  }
+
+  preCancelledRequestIds.add(id);
+  preCancelledRequestQueue.push(id);
+  if (preCancelledRequestQueue.length > MAX_PRE_CANCELLED_REQUEST_IDS) {
+    const oldest = preCancelledRequestQueue.shift();
     if (oldest != null) {
-      cancelledRequests.delete(oldest);
+      preCancelledRequestIds.delete(oldest);
     }
   }
 }
@@ -266,12 +282,24 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
 }
 
 function isWorkerInboundMessage(data: unknown): data is WorkerInboundMessage {
-  return (
-    !!data &&
-    typeof data === "object" &&
-    "type" in data &&
-    ((data as any).type === "request" || (data as any).type === "cancel")
-  );
+  if (!data || typeof data !== "object" || !("type" in data)) {
+    return false;
+  }
+
+  const type = (data as any).type;
+  if (type !== "request" && type !== "cancel") {
+    return false;
+  }
+
+  if (typeof (data as any).id !== "number") {
+    return false;
+  }
+
+  if (type === "request") {
+    return typeof (data as any).method === "string";
+  }
+
+  return true;
 }
 
 let requestQueue: Promise<void> = Promise.resolve();
@@ -298,6 +326,12 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
       // Handle cancels immediately so in-flight requests can observe cancellation.
       trackCancellation(inbound.id);
       return;
+    }
+
+    pendingRequestIds.add(inbound.id);
+    if (preCancelledRequestIds.has(inbound.id)) {
+      preCancelledRequestIds.delete(inbound.id);
+      cancelledRequests.add(inbound.id);
     }
 
     // Serialize request processing to avoid interleaving workbook mutations.
