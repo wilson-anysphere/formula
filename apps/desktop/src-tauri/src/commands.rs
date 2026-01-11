@@ -404,7 +404,7 @@ pub struct FileStat {
     pub size_bytes: u64,
 }
 
-/// Stat a local file and return its modification time in milliseconds since the Unix epoch.
+/// Stat a local file and return its modification time and size.
 ///
 /// This is used by Power Query's cache validation logic to decide whether cached results can be
 /// reused when reading local sources (CSV/JSON/Parquet).

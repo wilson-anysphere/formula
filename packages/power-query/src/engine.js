@@ -2808,7 +2808,7 @@ export class QueryEngine {
           : null;
 
       if (!chunks) {
-        throw new Error("CSV source requires a FileConnector readText or readTextStream adapter");
+        throw new Error("CSV source requires a FileConnector readText, readTextStream, or readBinaryStream adapter");
       }
 
       const hasHeaders = source.options?.hasHeaders ?? true;
