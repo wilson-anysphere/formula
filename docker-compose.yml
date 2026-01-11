@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: formula
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -25,7 +25,7 @@ services:
       # Set to "0" to disable background retention sweeps.
       RETENTION_SWEEP_INTERVAL_MS: "3600000"
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     depends_on:
       - db
 
@@ -46,7 +46,7 @@ services:
       # built-in file persistence backend for local docker-compose.
       SYNC_SERVER_PERSISTENCE_BACKEND: file
     ports:
-      - "1234:1234"
+      - "${SYNC_WS_PORT:-1234}:1234"
     volumes:
       - sync_server_data:/data
     depends_on:

@@ -24,6 +24,14 @@ Services:
 
 The API automatically runs SQL migrations on startup.
 
+### Port overrides
+
+If you already have something running on these ports, you can override the published ports:
+
+```bash
+API_PORT=3001 SYNC_WS_PORT=1235 POSTGRES_PORT=5433 docker-compose up --build
+```
+
 ## Token configuration (API ↔ sync-server)
 
 The API issues short-lived JWT sync tokens via `POST /docs/:docId/sync-token`.
