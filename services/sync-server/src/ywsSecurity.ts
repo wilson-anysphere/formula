@@ -145,39 +145,70 @@ type CellAddress = { sheetId: string; row: number; col: number };
 function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddress | null {
   if (typeof key !== "string" || key.length === 0) return null;
 
-  const isValidIndex = (value: number): boolean =>
-    Number.isSafeInteger(value) && value >= 0;
+  const isValidIndex = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
 
-  const parts = key.split(":");
-  if (parts.length === 3) {
-    const sheetId = parts[0] || defaultSheetId;
-    const row = Number(parts[1]);
-    const col = Number(parts[2]);
-    if (!isValidIndex(row) || !isValidIndex(col)) return null;
-    return { sheetId, row, col };
-  }
+  const parseIndex = (value: string): number | null => {
+    if (value.length === 0) return null;
 
-  // Some internal modules use `${sheetId}:${row},${col}`.
-  if (parts.length === 2) {
-    const sheetId = parts[0] || defaultSheetId;
-    const m = parts[1]?.match(/^(\d+),(\d+)$/);
-    if (m) {
-      const row = Number(m[1]);
-      const col = Number(m[2]);
-      if (!isValidIndex(row) || !isValidIndex(col)) return null;
-      return { sheetId, row, col };
+    // Short-circuit extremely large values to avoid `Number("9".repeat(400))` -> Infinity
+    // surprises and to keep parsing work bounded for hostile keys.
+    let firstNonZero = 0;
+    while (firstNonZero < value.length && value.charCodeAt(firstNonZero) === 48) {
+      firstNonZero += 1;
+    }
+    const significantDigits = value.length - firstNonZero;
+    if (significantDigits > 16) return null;
+
+    // Only allow ASCII digits. This keeps behavior deterministic and avoids
+    // accepting locales/unicode digits.
+    for (let i = 0; i < value.length; i += 1) {
+      const code = value.charCodeAt(i);
+      if (code < 48 || code > 57) return null;
+    }
+
+    const parsed = Number(value);
+    return isValidIndex(parsed) ? parsed : null;
+  };
+
+  // Format: `r{row}c{col}` (defaults sheetId)
+  if (key.charCodeAt(0) === 114 /* r */) {
+    const cIndex = key.indexOf("c", 1);
+    if (cIndex > 1 && cIndex < key.length - 1) {
+      const row = parseIndex(key.slice(1, cIndex));
+      const col = parseIndex(key.slice(cIndex + 1));
+      if (row !== null && col !== null) {
+        return { sheetId: defaultSheetId, row, col };
+      }
     }
   }
 
-  const m = key.match(/^r(\d+)c(\d+)$/);
-  if (m) {
-    const row = Number(m[1]);
-    const col = Number(m[2]);
-    if (!isValidIndex(row) || !isValidIndex(col)) return null;
-    return { sheetId: defaultSheetId, row, col };
+  const firstColon = key.indexOf(":");
+  if (firstColon < 0) return null;
+
+  const sheetId = (firstColon === 0 ? "" : key.slice(0, firstColon)) || defaultSheetId;
+  const secondColon = key.indexOf(":", firstColon + 1);
+
+  // Format: `${sheetId}:${row},${col}` (legacy internal encoding)
+  if (secondColon < 0) {
+    const rest = key.slice(firstColon + 1);
+    const comma = rest.indexOf(",");
+    if (comma <= 0 || comma >= rest.length - 1) return null;
+    // Reject `row,col,extra` (bound parsing work / keep format strict).
+    if (rest.indexOf(",", comma + 1) !== -1) return null;
+    const row = parseIndex(rest.slice(0, comma));
+    const col = parseIndex(rest.slice(comma + 1));
+    if (row === null || col === null) return null;
+    return { sheetId, row, col };
   }
 
-  return null;
+  // Reject keys with more than two `:` separators.
+  if (key.indexOf(":", secondColon + 1) !== -1) return null;
+
+  // Format: `${sheetId}:${row}:${col}` (canonical)
+  const row = parseIndex(key.slice(firstColon + 1, secondColon));
+  const col = parseIndex(key.slice(secondColon + 1));
+  if (row === null || col === null) return null;
+  return { sheetId, row, col };
 }
 
 function decodeAwarenessUpdate(
