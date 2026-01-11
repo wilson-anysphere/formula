@@ -275,3 +275,25 @@ test("RefreshOrchestrator: cancellation rejects even when dependents were never 
   await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
   assert.deepEqual(new Set(cancelled), new Set(["A", "B", "C"]));
 });
+
+test("RefreshOrchestrator: dependency error rejects and cancels unscheduled dependents", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+  orchestrator.registerQuery(makeQuery("C", { type: "query", queryId: "B" }));
+
+  /** @type {string[]} */
+  const cancelled = [];
+  orchestrator.onEvent((evt) => {
+    if (evt.type === "cancelled") cancelled.push(evt.job.queryId);
+  });
+
+  const handle = orchestrator.refreshAll(["C"]);
+  assert.equal(engine.calls.length, 1);
+  assert.equal(engine.calls[0].queryId, "A");
+
+  engine.calls[0].deferred.reject(new Error("Boom"));
+  await assert.rejects(handle.promise, /Boom/);
+  assert.deepEqual(new Set(cancelled), new Set(["B", "C"]));
+});
