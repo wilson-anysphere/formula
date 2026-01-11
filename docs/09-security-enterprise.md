@@ -306,6 +306,14 @@ class CellPermissionManager {
     documentId: string,
     requestedRange: Range
   ): Promise<CellData[][]> {
+    // NOTE: In the real-time collaboration (Yjs) system, the sync server broadcasts
+    // CRDT updates and cannot filter cell-level payloads per connection. That means
+    // returning `{ value: "###" }` here is only *UI masking* and does not provide
+    // confidentiality by itself.
+    //
+    // For truly confidential protected ranges, cell contents must be end-to-end
+    // encrypted client-side before entering the CRDT (stored under the Yjs `enc`
+    // field with per-range keys).
     const restrictions = await this.getRestrictions(documentId);
     const userGroups = await this.getUserGroups(userId);
     
