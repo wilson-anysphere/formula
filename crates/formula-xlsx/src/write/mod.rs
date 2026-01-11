@@ -30,6 +30,8 @@ const REL_TYPE_STYLES: &str =
 const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
+const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
 mod dimension;
 mod sheetdata_patch;
 
@@ -89,6 +91,36 @@ fn sheet_part_number(path: &str) -> Option<u32> {
 
 fn next_sheet_part_number<'a>(paths: impl Iterator<Item = &'a str>) -> u32 {
     paths.filter_map(sheet_part_number).max().unwrap_or(0) + 1
+}
+
+fn local_name(name: &[u8]) -> &[u8] {
+    match name.iter().rposition(|b| *b == b':') {
+        Some(idx) => &name[idx + 1..],
+        None => name,
+    }
+}
+
+fn element_prefix(name: &[u8]) -> Option<&[u8]> {
+    name.iter().rposition(|b| *b == b':').map(|idx| &name[..idx])
+}
+
+fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
+    match prefix {
+        Some(prefix) => format!("{prefix}:{local}"),
+        None => local.to_string(),
+    }
+}
+
+fn worksheet_has_default_spreadsheetml_ns(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<bool, WriteError> {
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"xmlns" && attr.value.as_ref() == SPREADSHEETML_NS.as_bytes() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn plan_sheet_structure(
@@ -1943,39 +1975,60 @@ fn patch_worksheet_dimension(
     let mut inserted_dimension = false;
     let mut saw_sheet_pr = false;
     let mut in_sheet_pr = false;
+    let mut worksheet_prefix: Option<String> = None;
+    let mut worksheet_has_default_ns = false;
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.name().as_ref() == b"sheetPr" => {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"worksheet" => {
+                if worksheet_prefix.is_none() {
+                    worksheet_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    worksheet_has_default_ns = worksheet_has_default_spreadsheetml_ns(&e)?;
+                }
+                writer.write_event(Event::Start(e.into_owned()))?;
+            }
+            Event::Start(e) if local_name(e.name().as_ref()) == b"sheetPr" => {
                 saw_sheet_pr = true;
                 in_sheet_pr = true;
                 writer.write_event(Event::Start(e.into_owned()))?;
             }
-            Event::Empty(e) if e.name().as_ref() == b"sheetPr" => {
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetPr" => {
                 saw_sheet_pr = true;
-                writer.write_event(Event::Empty(e.into_owned()))?;
                 if insert_dimension && !inserted_dimension {
-                    insert_dimension_element(&mut writer, dimension_ref);
+                    let prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    let tag = prefixed_tag(prefix.as_deref(), "dimension");
+                    writer.write_event(Event::Empty(e.into_owned()))?;
+                    insert_dimension_element(&mut writer, tag.as_str(), dimension_ref);
                     inserted_dimension = true;
+                } else {
+                    writer.write_event(Event::Empty(e.into_owned()))?;
                 }
             }
-            Event::End(e) if e.name().as_ref() == b"sheetPr" => {
+            Event::End(e) if local_name(e.name().as_ref()) == b"sheetPr" => {
                 in_sheet_pr = false;
+                let prefix = element_prefix(e.name().as_ref())
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
                 writer.write_event(Event::End(e.into_owned()))?;
                 if insert_dimension && !inserted_dimension {
-                    insert_dimension_element(&mut writer, dimension_ref);
+                    let tag = prefixed_tag(prefix.as_deref(), "dimension");
+                    insert_dimension_element(&mut writer, tag.as_str(), dimension_ref);
                     inserted_dimension = true;
                 }
             }
 
-            Event::Start(e) if e.name().as_ref() == b"dimension" => {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"dimension" => {
                 if dimension_matches(&e, dimension_range)? {
                     writer.write_event(Event::Start(e.into_owned()))?;
                 } else {
                     write_dimension_element(&mut writer, &e, dimension_ref, false)?;
                 }
             }
-            Event::Empty(e) if e.name().as_ref() == b"dimension" => {
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"dimension" => {
                 if dimension_matches(&e, dimension_range)? {
                     writer.write_event(Event::Empty(e.into_owned()))?;
                 } else {
@@ -1983,16 +2036,24 @@ fn patch_worksheet_dimension(
                 }
             }
 
-            Event::Start(e) if e.name().as_ref() == b"sheetData" => {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 if insert_dimension && !inserted_dimension && !saw_sheet_pr && !in_sheet_pr {
-                    insert_dimension_element(&mut writer, dimension_ref);
+                    let prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    let tag = prefixed_tag(prefix.as_deref(), "dimension");
+                    insert_dimension_element(&mut writer, tag.as_str(), dimension_ref);
                     inserted_dimension = true;
                 }
                 writer.write_event(Event::Start(e.into_owned()))?;
             }
-            Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 if insert_dimension && !inserted_dimension && !saw_sheet_pr && !in_sheet_pr {
-                    insert_dimension_element(&mut writer, dimension_ref);
+                    let prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    let tag = prefixed_tag(prefix.as_deref(), "dimension");
+                    insert_dimension_element(&mut writer, tag.as_str(), dimension_ref);
                     inserted_dimension = true;
                 }
                 writer.write_event(Event::Empty(e.into_owned()))?;
@@ -2006,17 +2067,27 @@ fn patch_worksheet_dimension(
                             && !inserted_dimension
                             && !saw_sheet_pr
                             && !in_sheet_pr
-                            && e.name().as_ref() != b"worksheet" =>
+                            && local_name(e.name().as_ref()) != b"worksheet" =>
                     {
-                        insert_dimension_element(&mut writer, dimension_ref);
+                        let prefix = element_prefix(e.name().as_ref())
+                            .and_then(|p| std::str::from_utf8(p).ok())
+                            .map(|s| s.to_string());
+                        let tag = prefixed_tag(prefix.as_deref(), "dimension");
+                        insert_dimension_element(&mut writer, tag.as_str(), dimension_ref);
                         inserted_dimension = true;
                     }
                     Event::End(e)
                         if insert_dimension
                             && !inserted_dimension
-                            && e.name().as_ref() == b"worksheet" =>
+                            && local_name(e.name().as_ref()) == b"worksheet" =>
                     {
-                        insert_dimension_element(&mut writer, dimension_ref);
+                        let prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        let tag = prefixed_tag(prefix, "dimension");
+                        insert_dimension_element(&mut writer, tag.as_str(), dimension_ref);
                         inserted_dimension = true;
                     }
                     _ => {}
@@ -2088,18 +2159,18 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteErr
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"dimension" => {
+            Event::Start(e) | Event::Empty(e) if local_name(e.name().as_ref()) == b"dimension" => {
                 // If the worksheet already has a <dimension> element, we don't need to scan the
                 // potentially-large <sheetData> section just to decide whether to insert one.
                 return Ok((true, None));
             }
-            Event::Start(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = true,
-            Event::End(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = false,
-            Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => in_sheet_data = true,
+            Event::End(e) if local_name(e.name().as_ref()) == b"sheetData" => in_sheet_data = false,
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 in_sheet_data = false;
                 drop(e);
             }
-            Event::Start(e) | Event::Empty(e) if in_sheet_data && e.name().as_ref() == b"c" => {
+            Event::Start(e) | Event::Empty(e) if in_sheet_data && local_name(e.name().as_ref()) == b"c" => {
                 for attr in e.attributes() {
                     let attr = attr?;
                     if attr.key.as_ref() != b"r" {
@@ -2133,8 +2204,14 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteErr
     Ok((false, used_range))
 }
 
-fn insert_dimension_element(writer: &mut Writer<Vec<u8>>, dimension_ref: &str) {
-    writer.get_mut().extend_from_slice(b"<dimension ref=\"");
+fn insert_dimension_element(
+    writer: &mut Writer<Vec<u8>>,
+    dimension_tag: &str,
+    dimension_ref: &str,
+) {
+    writer.get_mut().push(b'<');
+    writer.get_mut().extend_from_slice(dimension_tag.as_bytes());
+    writer.get_mut().extend_from_slice(b" ref=\"");
     writer
         .get_mut()
         .extend_from_slice(escape_attr(dimension_ref).as_bytes());
@@ -2165,7 +2242,8 @@ fn write_dimension_element(
     dimension_ref: &str,
     is_empty: bool,
 ) -> Result<(), WriteError> {
-    writer.get_mut().extend_from_slice(b"<dimension");
+    writer.get_mut().push(b'<');
+    writer.get_mut().extend_from_slice(e.name().as_ref());
     let mut wrote_ref = false;
     for attr in e.attributes() {
         let attr = attr?;

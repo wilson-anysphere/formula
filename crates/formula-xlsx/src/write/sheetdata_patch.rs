@@ -10,6 +10,29 @@ use crate::SheetMeta;
 
 use super::{CellValueKind, SharedStringKey, WriteError, XlsxDocument};
 
+#[derive(Debug, Clone)]
+struct SheetMlTags {
+    row: String,
+    c: String,
+    f: String,
+    v: String,
+    is_: String,
+    t: String,
+}
+
+impl SheetMlTags {
+    fn new(prefix: Option<&str>) -> Self {
+        Self {
+            row: super::prefixed_tag(prefix, "row"),
+            c: super::prefixed_tag(prefix, "c"),
+            f: super::prefixed_tag(prefix, "f"),
+            v: super::prefixed_tag(prefix, "v"),
+            is_: super::prefixed_tag(prefix, "is"),
+            t: super::prefixed_tag(prefix, "t"),
+        }
+    }
+}
+
 pub(super) fn patch_worksheet_xml(
     doc: &XlsxDocument,
     sheet_meta: &SheetMeta,
@@ -34,10 +57,27 @@ pub(super) fn patch_worksheet_xml(
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut writer = Writer::new(Vec::with_capacity(original.len()));
+    let mut worksheet_prefix: Option<String> = None;
+    let mut worksheet_has_default_ns = false;
+    let mut saw_sheet_data = false;
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.name().as_ref() == b"sheetData" => {
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"worksheet" => {
+                if worksheet_prefix.is_none() {
+                    worksheet_prefix = super::element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    worksheet_has_default_ns = super::worksheet_has_default_spreadsheetml_ns(&e)?;
+                }
+                writer.write_event(Event::Start(e.into_owned()))?;
+            }
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"sheetData" => {
+                saw_sheet_data = true;
+                let sheet_prefix = super::element_prefix(e.name().as_ref())
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
+                let tags = SheetMlTags::new(sheet_prefix.as_deref());
                 writer.write_event(Event::Start(e.into_owned()))?;
                 patch_sheet_data_contents(
                     doc,
@@ -49,16 +89,23 @@ pub(super) fn patch_worksheet_xml(
                     cell_meta_sheet_ids,
                     &mut desired_cells,
                     &mut desired_idx,
+                    &tags,
                     &mut reader,
                     &mut writer,
                     &mut buf,
                 )?;
             }
-            Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
+            Event::Empty(e) if super::local_name(e.name().as_ref()) == b"sheetData" => {
+                saw_sheet_data = true;
                 if desired_idx >= desired_cells.len() {
                     writer.write_event(Event::Empty(e.into_owned()))?;
                 } else {
                     // Expand <sheetData/> to insert new rows/cells.
+                    let sheet_data_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let sheet_prefix = super::element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    let tags = SheetMlTags::new(sheet_prefix.as_deref());
                     writer.write_event(Event::Start(e.into_owned()))?;
                     write_remaining_rows(
                         doc,
@@ -70,10 +117,38 @@ pub(super) fn patch_worksheet_xml(
                         cell_meta_sheet_ids,
                         &mut desired_cells,
                         &mut desired_idx,
+                        &tags,
                         &mut writer,
                     )?;
-                    writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_data_tag.as_str())))?;
                 }
+            }
+            Event::End(e) if super::local_name(e.name().as_ref()) == b"worksheet" => {
+                if !saw_sheet_data && desired_idx < desired_cells.len() {
+                    let prefix = if worksheet_has_default_ns {
+                        None
+                    } else {
+                        worksheet_prefix.as_deref()
+                    };
+                    let sheet_data_tag = super::prefixed_tag(prefix, "sheetData");
+                    let tags = SheetMlTags::new(prefix);
+                    writer.write_event(Event::Start(BytesStart::new(sheet_data_tag.as_str())))?;
+                    write_remaining_rows(
+                        doc,
+                        sheet_meta,
+                        sheet,
+                        shared_lookup,
+                        style_to_xf,
+                        &shared_formulas,
+                        cell_meta_sheet_ids,
+                        &mut desired_cells,
+                        &mut desired_idx,
+                        &tags,
+                        &mut writer,
+                    )?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_data_tag.as_str())))?;
+                }
+                writer.write_event(Event::End(e.into_owned()))?;
             }
             Event::Eof => break,
             ev => writer.write_event(ev.into_owned())?,
@@ -94,13 +169,14 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
+    tags: &SheetMlTags,
     reader: &mut Reader<R>,
     writer: &mut Writer<W>,
     buf: &mut Vec<u8>,
 ) -> Result<(), WriteError> {
     loop {
         match reader.read_event_into(buf)? {
-            Event::Start(e) if e.name().as_ref() == b"row" => {
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"row" => {
                 let row_num = row_num_from_attrs(&e)?;
                 let has_extra_attrs = row_has_extra_attrs(&e)?;
                 let keep_due_to_row_props = sheet
@@ -116,6 +192,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                 )?;
@@ -131,6 +208,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     reader,
                     &mut row_writer,
                     buf,
@@ -141,7 +219,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     writer.get_mut().write_all(&row_bytes)?;
                 }
             }
-            Event::Empty(e) if e.name().as_ref() == b"row" => {
+            Event::Empty(e) if super::local_name(e.name().as_ref()) == b"row" => {
                 let row_num = row_num_from_attrs(&e)?;
                 let has_extra_attrs = row_has_extra_attrs(&e)?;
                 let keep_due_to_row_props = sheet
@@ -157,6 +235,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                 )?;
@@ -171,6 +250,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     }
                 } else {
                     // Row existed but was empty; expand and insert any desired cells.
+                    let row_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                     let mut row_writer = Writer::new(Vec::new());
                     row_writer.write_event(Event::Start(e.into_owned()))?;
                     write_remaining_cells_in_row(
@@ -182,14 +262,15 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                         cell_meta_sheet_ids,
                         desired_cells,
                         desired_idx,
+                        tags,
                         &mut row_writer,
                         row_num,
                     )?;
-                    row_writer.write_event(Event::End(BytesEnd::new("row")))?;
+                    row_writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
                     writer.get_mut().write_all(&row_writer.into_inner())?;
                 }
             }
-            Event::End(e) if e.name().as_ref() == b"sheetData" => {
+            Event::End(e) if super::local_name(e.name().as_ref()) == b"sheetData" => {
                 write_remaining_rows(
                     doc,
                     sheet_meta,
@@ -200,6 +281,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                 )?;
                 writer.write_event(Event::End(e.into_owned()))?;
@@ -223,6 +305,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
+    tags: &SheetMlTags,
     reader: &mut Reader<R>,
     writer: &mut Writer<W>,
     buf: &mut Vec<u8>,
@@ -232,7 +315,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
     let mut wrote_other = false;
     loop {
         match reader.read_event_into(buf)? {
-            Event::Start(e) if e.name().as_ref() == b"c" => {
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"c" => {
                 let cell_events = collect_full_element(Event::Start(e.into_owned()), reader, buf)?;
                 let (cell_ref, col_1_based) = match cell_ref_from_cell_events(&cell_events)? {
                     Some(v) => v,
@@ -253,6 +336,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                     col_1_based,
@@ -267,6 +351,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                     col_1_based,
@@ -277,7 +362,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     wrote_cell |= wrote;
                 })?;
             }
-            Event::Empty(e) if e.name().as_ref() == b"c" => {
+            Event::Empty(e) if super::local_name(e.name().as_ref()) == b"c" => {
                 let cell_events = vec![Event::Empty(e.into_owned())];
                 let (cell_ref, col_1_based) = match cell_ref_from_cell_events(&cell_events)? {
                     Some(v) => v,
@@ -297,6 +382,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                     col_1_based,
@@ -311,6 +397,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                     col_1_based,
@@ -321,7 +408,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     wrote_cell |= wrote;
                 })?;
             }
-            Event::End(e) if e.name().as_ref() == b"row" => {
+            Event::End(e) if super::local_name(e.name().as_ref()) == b"row" => {
                 // Append any new cells at the end of the row.
                 let idx_before = *desired_idx;
                 write_remaining_cells_in_row(
@@ -333,6 +420,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                 )?;
@@ -343,7 +431,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
             }
             // Non-cell element inside the row (eg extLst). Ensure any new cells are emitted
             // before it so we keep cells grouped at the start of the row.
-            Event::Start(e) if e.name().as_ref() != b"c" => {
+            Event::Start(e) if super::local_name(e.name().as_ref()) != b"c" => {
                 wrote_other = true;
                 let idx_before = *desired_idx;
                 write_remaining_cells_in_row(
@@ -355,13 +443,14 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                 )?;
                 wrote_cell |= *desired_idx > idx_before;
                 writer.write_event(Event::Start(e.into_owned()))?;
             }
-            Event::Empty(e) if e.name().as_ref() != b"c" => {
+            Event::Empty(e) if super::local_name(e.name().as_ref()) != b"c" => {
                 wrote_other = true;
                 let idx_before = *desired_idx;
                 write_remaining_cells_in_row(
@@ -373,6 +462,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
+                    tags,
                     writer,
                     row_num,
                 )?;
@@ -414,6 +504,7 @@ fn patch_or_copy_cell<W: Write>(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
+    tags: &SheetMlTags,
     writer: &mut Writer<W>,
     row_num: u32,
     col_1_based: u32,
@@ -465,6 +556,7 @@ fn patch_or_copy_cell<W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    tags,
                     writer,
                     cell_ref,
                     desired_cell,
@@ -505,6 +597,7 @@ fn write_missing_rows_before<W: Write>(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
+    tags: &SheetMlTags,
     writer: &mut Writer<W>,
     row_num: u32,
 ) -> Result<(), WriteError> {
@@ -522,6 +615,7 @@ fn write_missing_rows_before<W: Write>(
             cell_meta_sheet_ids,
             desired_cells,
             desired_idx,
+            tags,
             writer,
             next_row,
         )?;
@@ -539,6 +633,7 @@ fn write_remaining_rows<W: Write>(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
+    tags: &SheetMlTags,
     writer: &mut Writer<W>,
 ) -> Result<(), WriteError> {
     while let Some(next_row) = peek_row(desired_cells, *desired_idx) {
@@ -552,6 +647,7 @@ fn write_remaining_rows<W: Write>(
             cell_meta_sheet_ids,
             desired_cells,
             desired_idx,
+            tags,
             writer,
             next_row,
         )?;
@@ -569,10 +665,11 @@ fn write_new_row<W: Write>(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
+    tags: &SheetMlTags,
     writer: &mut Writer<W>,
     row_num: u32,
 ) -> Result<(), WriteError> {
-    let mut row_start = BytesStart::new("row");
+    let mut row_start = BytesStart::new(tags.row.as_str());
     let row_str = row_num.to_string();
     row_start.push_attribute(("r", row_str.as_str()));
     let height_str = sheet
@@ -598,10 +695,11 @@ fn write_new_row<W: Write>(
         cell_meta_sheet_ids,
         desired_cells,
         desired_idx,
+        tags,
         writer,
         row_num,
     )?;
-    writer.write_event(Event::End(BytesEnd::new("row")))?;
+    writer.write_event(Event::End(BytesEnd::new(tags.row.as_str())))?;
     Ok(())
 }
 
@@ -614,6 +712,7 @@ fn write_missing_cells_before_col<W: Write>(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
+    tags: &SheetMlTags,
     writer: &mut Writer<W>,
     row_num: u32,
     col_limit_1_based: u32,
@@ -633,6 +732,7 @@ fn write_missing_cells_before_col<W: Write>(
             style_to_xf,
             shared_formulas,
             cell_meta_sheet_ids,
+            tags,
             writer,
             cell_ref,
             cell,
@@ -653,6 +753,7 @@ fn write_remaining_cells_in_row<W: Write>(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
+    tags: &SheetMlTags,
     writer: &mut Writer<W>,
     row_num: u32,
 ) -> Result<(), WriteError> {
@@ -667,6 +768,7 @@ fn write_remaining_cells_in_row<W: Write>(
             style_to_xf,
             shared_formulas,
             cell_meta_sheet_ids,
+            tags,
             writer,
             cell_ref,
             cell,
@@ -685,6 +787,7 @@ fn write_updated_cell<W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    tags: &SheetMlTags,
     writer: &mut Writer<W>,
     cell_ref: CellRef,
     cell: &formula_model::Cell,
@@ -696,6 +799,30 @@ fn write_updated_cell<W: Write>(
         Event::Empty(e) => Some(e),
         _ => None,
     });
+    let cell_tag = original_start
+        .map(|start| String::from_utf8_lossy(start.name().as_ref()).into_owned())
+        .unwrap_or_else(|| tags.c.clone());
+
+    let tags_prefix = super::element_prefix(tags.c.as_bytes()).and_then(|p| std::str::from_utf8(p).ok());
+    let cell_prefix =
+        super::element_prefix(cell_tag.as_bytes()).and_then(|p| std::str::from_utf8(p).ok());
+    let cell_tags = (cell_prefix != tags_prefix).then(|| SheetMlTags::new(cell_prefix));
+    let f_tag = cell_tags
+        .as_ref()
+        .map(|t| t.f.as_str())
+        .unwrap_or(tags.f.as_str());
+    let v_tag = cell_tags
+        .as_ref()
+        .map(|t| t.v.as_str())
+        .unwrap_or(tags.v.as_str());
+    let is_tag = cell_tags
+        .as_ref()
+        .map(|t| t.is_.as_str())
+        .unwrap_or(tags.is_.as_str());
+    let t_tag = cell_tags
+        .as_ref()
+        .map(|t| t.t.as_str())
+        .unwrap_or(tags.t.as_str());
 
     let mut preserved_attrs: Vec<(String, String)> = Vec::new();
     if let Some(start) = original_start {
@@ -759,7 +886,7 @@ fn write_updated_cell<W: Write>(
         .flatten()
         .map(|xf_index| xf_index.to_string());
 
-    let mut c_start = BytesStart::new("c");
+    let mut c_start = BytesStart::new(cell_tag.as_str());
     c_start.push_attribute(("r", a1.as_str()));
     if let Some(style_xf_str) = &style_xf_str {
         c_start.push_attribute(("s", style_xf_str.as_str()));
@@ -787,7 +914,7 @@ fn write_updated_cell<W: Write>(
     writer.write_event(Event::Start(c_start))?;
 
     if let Some(formula_meta) = formula_meta {
-        let mut f_start = BytesStart::new("f");
+        let mut f_start = BytesStart::new(f_tag);
         let si_str = formula_meta.shared_index.map(|si| si.to_string());
         if let Some(t) = &formula_meta.t {
             f_start.push_attribute(("t", t.as_str()));
@@ -812,73 +939,73 @@ fn write_updated_cell<W: Write>(
         } else {
             writer.write_event(Event::Start(f_start))?;
             writer.write_event(Event::Text(BytesText::new(&file_text)))?;
-            writer.write_event(Event::End(BytesEnd::new("f")))?;
+            writer.write_event(Event::End(BytesEnd::new(f_tag)))?;
         }
     }
 
     match &cell.value {
         CellValue::Empty => {}
         CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
-            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
             let v = super::raw_or_other(meta, s);
             writer.write_event(Event::Text(BytesText::new(&v)))?;
-            writer.write_event(Event::End(BytesEnd::new("v")))?;
+            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
         }
         CellValue::Number(n) => {
-            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
             let v = super::raw_or_number(meta, *n);
             writer.write_event(Event::Text(BytesText::new(&v)))?;
-            writer.write_event(Event::End(BytesEnd::new("v")))?;
+            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
         }
         CellValue::Boolean(b) => {
-            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
             let v = super::raw_or_bool(meta, *b);
             writer.write_event(Event::Text(BytesText::new(v)))?;
-            writer.write_event(Event::End(BytesEnd::new("v")))?;
+            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
         }
         CellValue::Error(err) => {
-            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
             let v = super::raw_or_error(meta, *err);
             writer.write_event(Event::Text(BytesText::new(&v)))?;
-            writer.write_event(Event::End(BytesEnd::new("v")))?;
+            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
         }
         value @ CellValue::String(s) => match &value_kind {
             CellValueKind::SharedString { .. } => {
                 let idx = super::shared_string_index(doc, meta, value, shared_lookup);
-                writer.write_event(Event::Start(BytesStart::new("v")))?;
+                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
                 writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
-                writer.write_event(Event::End(BytesEnd::new("v")))?;
+                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
             }
             CellValueKind::InlineString => {
-                writer.write_event(Event::Start(BytesStart::new("is")))?;
-                let mut t_start = BytesStart::new("t");
+                writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+                let mut t_start = BytesStart::new(t_tag);
                 if super::needs_space_preserve(s) {
                     t_start.push_attribute(("xml:space", "preserve"));
                 }
                 writer.write_event(Event::Start(t_start))?;
                 writer.write_event(Event::Text(BytesText::new(s)))?;
-                writer.write_event(Event::End(BytesEnd::new("t")))?;
-                writer.write_event(Event::End(BytesEnd::new("is")))?;
+                writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
             }
             CellValueKind::Str => {
-                writer.write_event(Event::Start(BytesStart::new("v")))?;
+                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
                 let v = super::raw_or_str(meta, s);
                 writer.write_event(Event::Text(BytesText::new(&v)))?;
-                writer.write_event(Event::End(BytesEnd::new("v")))?;
+                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
             }
             _ => {
                 let idx = super::shared_string_index(doc, meta, value, shared_lookup);
-                writer.write_event(Event::Start(BytesStart::new("v")))?;
+                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
                 writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
-                writer.write_event(Event::End(BytesEnd::new("v")))?;
+                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
             }
         },
         value @ CellValue::RichText(rich) => {
             let idx = super::shared_string_index(doc, meta, value, shared_lookup);
             if idx != 0 || !rich.text.is_empty() {
-                writer.write_event(Event::Start(BytesStart::new("v")))?;
+                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
                 writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
-                writer.write_event(Event::End(BytesEnd::new("v")))?;
+                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
             }
         }
         _ => {
@@ -890,7 +1017,7 @@ fn write_updated_cell<W: Write>(
         writer.write_event(ev)?;
     }
 
-    writer.write_event(Event::End(BytesEnd::new("c")))?;
+    writer.write_event(Event::End(BytesEnd::new(cell_tag.as_str())))?;
     Ok(())
 }
 
@@ -1081,20 +1208,20 @@ fn parse_cell_semantics(
 
     for ev in events {
         match ev {
-            Event::Start(e) => match e.name().as_ref() {
+            Event::Start(e) => match super::local_name(e.name().as_ref()) {
                 b"v" => in_v = true,
                 b"f" => in_f = true,
                 b"t" if cell_type.as_deref() == Some("inlineStr") => in_inline_t = true,
                 _ => {}
             },
-            Event::End(e) => match e.name().as_ref() {
+            Event::End(e) => match super::local_name(e.name().as_ref()) {
                 b"v" => in_v = false,
                 b"f" => in_f = false,
                 b"t" if cell_type.as_deref() == Some("inlineStr") => in_inline_t = false,
                 _ => {}
             },
             Event::Empty(e) => {
-                if e.name().as_ref() == b"f" {
+                if super::local_name(e.name().as_ref()) == b"f" {
                     // Shared formulas may be represented as <f .../> with no text.
                     f_text.get_or_insert_with(String::new);
                 }
@@ -1212,10 +1339,13 @@ fn extract_preserved_cell_children(events: &[Event<'static>]) -> Vec<Event<'stat
         }
 
         match ev {
-            Event::Start(e) if matches!(e.name().as_ref(), b"f" | b"v" | b"is") => {
+            Event::Start(e)
+                if matches!(super::local_name(e.name().as_ref()), b"f" | b"v" | b"is") =>
+            {
                 skipping = 1;
             }
-            Event::Empty(e) if matches!(e.name().as_ref(), b"f" | b"v" | b"is") => {}
+            Event::Empty(e)
+                if matches!(super::local_name(e.name().as_ref()), b"f" | b"v" | b"is") => {}
             other => preserved.push(other.clone()),
         }
     }
