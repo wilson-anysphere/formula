@@ -192,9 +192,11 @@ function isModuleScript(tsSource) {
     return false;
   }
 
-  // Best-effort fallback. We intentionally keep this strict because without the
-  // TypeScript compiler we only support the simplest module scripts.
-  return /^\s*export\s+default\b/m.test(tsSource);
+  // Best-effort fallback. When `typescript` isn't available we only support the
+  // simplest module scripts (an `export default` function with no imports), but
+  // we still want to classify `import`/`export` usage as module code so we can
+  // emit a clear "imports are not supported" error instead of a syntax error.
+  return /^\s*(import|export)\b/m.test(tsSource);
 }
 
 function findDynamicImportSpecifier(tsSource) {
@@ -232,8 +234,15 @@ function compileTypeScriptModule(tsSource) {
     //
     // This keeps recorded macros runnable in minimal environments where the
     // `typescript` dependency is unavailable.
-    if (/\bimport\s+/.test(tsSource) || /\bexport\s+(?!default\b)/.test(tsSource)) {
-      throw new Error("TypeScript compiler is required to run module scripts with imports/exports");
+    const importMatch =
+      /^\s*import\s+[^"']*["']([^"']+)["']/m.exec(tsSource) ??
+      /^\s*import\s*\(\s*["']([^"']+)["']\s*\)/m.exec(tsSource);
+    if (importMatch) {
+      throw new Error(`Imports are not supported in scripts (attempted to import ${importMatch[1]})`);
+    }
+
+    if (/\bexport\s+(?!default\b)/.test(tsSource)) {
+      throw new Error("Only `export default` is supported in module scripts when the TypeScript compiler is unavailable");
     }
 
     return tsSource.replace(/\bexport\s+default\s+/, "exports.default = ");

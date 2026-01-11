@@ -14,7 +14,7 @@ test("macro recorder normalizes DocumentController formulas to include '=' prefi
   recorder.start();
 
   workbook.setSelection("Sheet1", "A1");
-  // DocumentController accepts formula bodies without a leading "=" and canonicalizes them.
+  // DocumentController accepts formula expressions without a leading "=" and canonicalizes them.
   controller.setCellFormula("Sheet1", "A1", "A1+B1");
 
   const actions = recorder.stop();

@@ -56,13 +56,6 @@ function isFormulaString(input) {
   return trimmed.startsWith("=") && trimmed.length > 1;
 }
 
-function stripLeadingEquals(formulaText) {
-  if (typeof formulaText !== "string") return formulaText;
-  const trimmed = formulaText.trimStart();
-  if (!trimmed.startsWith("=")) return formulaText;
-  return trimmed.slice(1);
-}
-
 function denseRectForDeltas(deltas) {
   if (!deltas || deltas.length === 0) return null;
 
@@ -598,16 +591,7 @@ class DocumentControllerRangeAdapter {
       );
     }
 
-    const normalized = values.map((row) =>
-      row.map((cell) => {
-        if (typeof cell !== "string") return cell;
-        if (cell.startsWith("'")) return cell;
-        if (!isFormulaString(cell)) return cell;
-        return { formula: stripLeadingEquals(cell) };
-      }),
-    );
-
-    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, normalized, {
+    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, values, {
       label: "Script: set values",
     });
     this.sheet.workbook._notifyMutate();
@@ -638,7 +622,7 @@ class DocumentControllerRangeAdapter {
         return;
       }
       if (isFormulaString(value)) {
-        this.sheet.workbook.documentController.setCellFormula(this.sheet.name, coord, stripLeadingEquals(value), {
+        this.sheet.workbook.documentController.setCellFormula(this.sheet.name, coord, value, {
           label: "Script: set value",
         });
         this.sheet.workbook._notifyMutate();
