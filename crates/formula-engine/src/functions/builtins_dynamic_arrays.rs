@@ -391,9 +391,7 @@ fn sort_key(value: &Value) -> SortKeyValue {
         | Value::ReferenceUnion(_)
         | Value::Array(_)
         | Value::Lambda(_)
-        | Value::Spill { .. } => {
-            SortKeyValue::Error(ErrorKind::Value)
-        }
+        | Value::Spill { .. } => SortKeyValue::Error(ErrorKind::Value),
     }
 }
 
@@ -501,9 +499,7 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         | Value::ReferenceUnion(_)
         | Value::Array(_)
         | Value::Lambda(_)
-        | Value::Spill { .. } => {
-            UniqueKeyCell::Error(ErrorKind::Value)
-        }
+        | Value::Spill { .. } => UniqueKeyCell::Error(ErrorKind::Value),
     }
 }
 
@@ -626,7 +622,8 @@ fn take_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let default_rows = i64::try_from(array.rows).unwrap_or(i64::MAX);
+    let rows = match eval_optional_i64(ctx, args.get(1), default_rows) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };

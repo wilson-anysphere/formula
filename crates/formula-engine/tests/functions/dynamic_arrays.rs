@@ -612,6 +612,18 @@ fn take_and_drop_slice_arrays() {
         .unwrap();
     engine.recalculate_single_threaded();
 
+    // Column-only TAKE: omit rows (blank) to take all rows and select columns.
+    engine
+        .set_cell_formula("Sheet1", "C5", "=TAKE(A1:C3,,2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "C5"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D5"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C6"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D6"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C7"), Value::Number(7.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D7"), Value::Number(8.0));
+
     engine
         .set_cell_formula("Sheet1", "E1", "=TAKE(A1:C3,2,-2)")
         .unwrap();
