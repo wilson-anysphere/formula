@@ -564,7 +564,10 @@ export class SpreadsheetApp {
     this.root.addEventListener("pointermove", (e) => this.onPointerMove(e), { signal: this.domAbort.signal });
     this.root.addEventListener("pointerup", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
     this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
-    this.root.addEventListener("pointerleave", () => this.hideCommentTooltip(), { signal: this.domAbort.signal });
+    this.root.addEventListener("pointerleave", () => {
+      this.hideCommentTooltip();
+      this.root.style.cursor = "";
+    }, { signal: this.domAbort.signal });
     this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
     this.root.addEventListener("wheel", (e) => this.onWheel(e), { passive: false, signal: this.domAbort.signal });
 
@@ -2661,6 +2664,7 @@ export class SpreadsheetApp {
           target.closest(".outline-toggle")
         ) {
           this.hideCommentTooltip();
+          this.root.style.cursor = "";
           return;
         }
       }
@@ -2718,6 +2722,22 @@ export class SpreadsheetApp {
       return;
     }
 
+    const fillHandle = this.selectionRenderer.getFillHandleRect(this.selection, {
+      getCellRect: (cell) => this.getCellRect(cell),
+      visibleRows: this.visibleRows,
+      visibleCols: this.visibleCols,
+    });
+    const overFillHandle =
+      fillHandle &&
+      x >= fillHandle.x &&
+      x <= fillHandle.x + fillHandle.width &&
+      y >= fillHandle.y &&
+      y <= fillHandle.y + fillHandle.height;
+    const nextCursor = overFillHandle ? "crosshair" : "";
+    if (this.root.style.cursor !== nextCursor) {
+      this.root.style.cursor = nextCursor;
+    }
+
     if (this.commentsPanelVisible) {
       // Don't show tooltips while the panel is open; it obscures the grid anyway.
       this.hideCommentTooltip();
@@ -2726,11 +2746,13 @@ export class SpreadsheetApp {
 
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
       this.hideCommentTooltip();
+      this.root.style.cursor = "";
       return;
     }
 
     if (x < this.rowHeaderWidth || y < this.colHeaderHeight) {
       this.hideCommentTooltip();
+      this.root.style.cursor = "";
       return;
     }
 
