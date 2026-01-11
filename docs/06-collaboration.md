@@ -854,6 +854,11 @@ class DiffRenderer {
 > (e.g. `getCommentsRoot` / `migrateCommentsArrayToMap` in `@formula/collab-comments`; the
 > migration renames the legacy array root to `comments_legacy*` and creates the canonical map
 > under `comments`).
+>
+> Undo note: if you're using `@formula/collab-session` with collaborative undo enabled
+> (`@formula/collab-undo`), ensure comment mutations run inside
+> `session.transactLocal(...)` (or use `createCommentManagerForSession(session)`), otherwise
+> they won't be captured by the UndoManager's tracked origins.
 
 ```typescript
 interface Comment {

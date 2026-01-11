@@ -41,6 +41,16 @@ export function createCollabUndoService(opts) {
 
   const localOrigins = new Set([origin, undoManager]);
 
+  // Yjs UndoManager will skip stack items that it can't apply (e.g. a Y.Map key
+  // was overwritten by a remote collaborator) and continue undoing older items.
+  //
+  // Formula's collaborative undo semantics are stricter: a single undo action
+  // should never skip past an un-undoable local change and revert earlier edits
+  // (which can indirectly undo other users' work, e.g. undoing a sheet insert
+  // after a remote rename overwrote our local rename).
+  //
+  // To match that behavior, we constrain each `undo()` / `redo()` call to at most
+  // one stack item by temporarily isolating the top entry.
   const undoOnce = () => {
     if (!undoManager.canUndo()) return;
     const saved = undoManager.undoStack;

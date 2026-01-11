@@ -466,6 +466,14 @@ export class CollabSession {
           this.ensuringSchema = false;
         }
 
+        // If a remote-origin transaction temporarily leaves the sheets array
+        // empty (e.g. during a merge where duplicate Sheet1 entries are pruned),
+        // avoid creating a default sheet synchronously. In tests we forward Yjs
+        // updates synchronously, and mutating the doc during applyUpdate can
+        // cause recursive update ping-pong and stack overflows.
+        //
+        // Instead, schedule a microtask to re-run schema init once the merge
+        // settles. Local transactions still create a default sheet immediately.
         if (transaction && !this.localOrigins.has(transaction.origin) && this.sheets.length === 0 && !ensureDefaultSheetScheduled) {
           ensureDefaultSheetScheduled = true;
           queueMicrotask(() => {
