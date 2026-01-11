@@ -231,6 +231,10 @@ export class CanvasGridRenderer {
     this.requestRender();
   }
 
+  getSelection(): Selection | null {
+    return this.selection ? { ...this.selection } : null;
+  }
+
   setRemotePresences(presences: GridPresence[] | null): void {
     if (presences === this.remotePresences) return;
     this.remotePresences = presences ?? [];

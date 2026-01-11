@@ -11,6 +11,7 @@ export interface GridApi {
   setFrozen(frozenRows: number, frozenCols: number): void;
   setSelection(row: number, col: number): void;
   clearSelection(): void;
+  getSelection(): { row: number; col: number } | null;
   setRemotePresences(presences: GridPresence[] | null): void;
   renderImmediately(): void;
 }
@@ -25,6 +26,7 @@ export interface CanvasGridProps {
   defaultColWidth?: number;
   remotePresences?: GridPresence[] | null;
   apiRef?: React.Ref<GridApi>;
+  onSelectionChange?: (cell: { row: number; col: number } | null) => void;
   style?: React.CSSProperties;
 }
 
@@ -40,6 +42,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const hThumbRef = useRef<HTMLDivElement | null>(null);
 
   const rendererRef = useRef<CanvasGridRenderer | null>(null);
+  const onSelectionChangeRef = useRef(props.onSelectionChange);
+  onSelectionChangeRef.current = props.onSelectionChange;
 
   const frozenRows = props.frozenRows ?? 0;
   const frozenCols = props.frozenCols ?? 0;
@@ -119,7 +123,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         syncScrollbars();
       },
       setSelection: (row, col) => rendererRef.current?.setSelection({ row, col }),
-      clearSelection: () => rendererRef.current?.setSelection(null),
+      clearSelection: () => {
+        const renderer = rendererRef.current;
+        const prevSelection = renderer?.getSelection() ?? null;
+        renderer?.setSelection(null);
+        if (prevSelection) onSelectionChangeRef.current?.(null);
+      },
+      getSelection: () => rendererRef.current?.getSelection() ?? null,
       setRemotePresences: (presences) => rendererRef.current?.setRemotePresences(presences),
       renderImmediately: () => rendererRef.current?.renderImmediately()
     }),
@@ -187,7 +197,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
       const picked = rendererRef.current.pickCellAt(x, y);
-      if (picked) rendererRef.current.setSelection(picked);
+      if (!picked) return;
+      const prevSelection = rendererRef.current.getSelection();
+      rendererRef.current.setSelection(picked);
+      if (!prevSelection || prevSelection.row !== picked.row || prevSelection.col !== picked.col) {
+        onSelectionChangeRef.current?.(picked);
+      }
     };
 
     selectionCanvas.addEventListener("pointerdown", onPointerDown);
