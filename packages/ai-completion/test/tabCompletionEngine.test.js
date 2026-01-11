@@ -262,6 +262,72 @@ test("TabCompletionEngine caches suggestions by context key", async () => {
   assert.equal(callCount, 1, "Expected local model to be called once due to caching");
 });
 
+test("TabCompletionEngine cache busts when schemaProvider cache key changes", async () => {
+  let callCount = 0;
+  let schemaKey = "v1";
+
+  const localModel = {
+    async complete() {
+      callCount++;
+      return "+1";
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    localModel,
+    localModelTimeoutMs: 200,
+    schemaProvider: {
+      getCacheKey: () => schemaKey,
+    },
+  });
+
+  const ctx = {
+    currentInput: "=1+",
+    cursorPosition: 3,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  };
+
+  await engine.getSuggestions(ctx);
+  schemaKey = "v2";
+  await engine.getSuggestions(ctx);
+
+  assert.equal(callCount, 2, "Expected local model to be called again when schema key changes");
+});
+
+test("TabCompletionEngine cache busts when surroundingCells cache key changes", async () => {
+  let callCount = 0;
+  let cellsKey = "cells:v1";
+
+  const localModel = {
+    async complete() {
+      callCount++;
+      return "+1";
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    localModel,
+    localModelTimeoutMs: 200,
+  });
+
+  const ctx = {
+    currentInput: "=1+",
+    cursorPosition: 3,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: {
+      ...createMockCellContext({}),
+      getCacheKey: () => cellsKey,
+    },
+  };
+
+  await engine.getSuggestions(ctx);
+  cellsKey = "cells:v2";
+  await engine.getSuggestions(ctx);
+
+  assert.equal(callCount, 2, "Expected local model to be called again when surrounding key changes");
+});
+
 test("Named ranges are suggested in range arguments (=SUM(Sal → SalesData)", async () => {
   const engine = new TabCompletionEngine({
     schemaProvider: {
