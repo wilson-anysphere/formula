@@ -12,6 +12,8 @@ import {
 export { createAuditEvent };
 export type { AuditEvent };
 
+type AuditDbClient = Pick<Pool, "query">;
+
 function currentTraceId(): string | undefined {
   const span = trace.getSpan(context.active());
   const spanContext = span?.spanContext();
@@ -39,8 +41,8 @@ function enrichCorrelation(event: AuditEvent): AuditEvent {
   return enriched;
 }
 
-export async function writeAuditEvent(pool: Pool, event: AuditEvent): Promise<void> {
+export async function writeAuditEvent(db: AuditDbClient, event: AuditEvent): Promise<void> {
   const enriched = enrichCorrelation(event);
   const { text, values } = buildPostgresAuditLogInsert(enriched);
-  await pool.query(text, values);
+  await db.query(text, values);
 }
