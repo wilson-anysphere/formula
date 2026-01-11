@@ -162,6 +162,32 @@ test("NodeFsOfflineAuditQueue reclaims enqueue lock from a crashed writer", asyn
   await queue.enqueue(makeEvent({ secret: "lock1" }));
 });
 
+test("NodeFsOfflineAuditQueue reclaims flush lock from a crashed flusher", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-flush-lock-"));
+  const queue = new NodeFsOfflineAuditQueue({ dirPath: dir, flushBatchSize: 10 });
+
+  const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+  const pid = child.pid;
+  await new Promise((resolve, reject) => {
+    child.on("exit", resolve);
+    child.on("error", reject);
+  });
+
+  await writeFile(path.join(dir, "queue.flush.lock"), JSON.stringify({ pid, createdAt: Date.now() }), "utf8");
+  await queue.enqueue(makeEvent({ secret: "flush1" }));
+
+  const sent = [];
+  const exporter = {
+    async sendBatch(batch) {
+      sent.push(...batch.map((evt) => evt.id));
+    },
+  };
+
+  const result = await queue.flushToExporter(exporter);
+  assert.equal(result.sent, 1);
+  assert.equal(sent.length, 1);
+});
+
 test("NodeFsOfflineAuditQueue does not lose events when flushing an open segment with a partial tail record", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-open-segment-"));
   const queue = new NodeFsOfflineAuditQueue({
