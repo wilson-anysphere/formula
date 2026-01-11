@@ -12,7 +12,9 @@ use crate::Locale;
 /// Excel's built-in table is locale-dependent. In practice, this most visibly
 /// affects:
 /// - currency/accounting formats (currency symbol + sometimes placement)
+///   - ids **5–8** (Currency) and **42/44** (Accounting w/ currency)
 /// - short date formats (month/day ordering differs by locale)
+///   - ids **14/22** and reserved locale ids **27–31**
 ///
 /// [`builtin_format_code`] returns the canonical *en-US* variants.
 /// [`builtin_format_code_with_locale`] can be used when the caller knows the

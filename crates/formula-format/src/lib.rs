@@ -11,6 +11,10 @@
 //! - [`builtin_format_code`] (canonical en-US mapping for ids 0–49)
 //! - [`builtin_format_code_with_locale`] (best-effort locale-aware variants)
 //! - [`locale_for_lcid`] (map LCIDs in format code tokens like `[$€-407]` to [`Locale`])
+//!
+//! Some importers also preserve unknown built-ins as placeholder strings like
+//! `__builtin_numFmtId:14`. The formatter treats these placeholders as references
+//! to the built-in table.
 
 pub mod locale;
 
