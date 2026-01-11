@@ -32,6 +32,7 @@ export class EncryptedFileSystemCacheStore {
   /**
    * @param {{
    *   directory: string;
+   *   now?: () => number;
    *   encryption: {
    *     enabled: boolean;
    *     keychainProvider: {
@@ -49,6 +50,7 @@ export class EncryptedFileSystemCacheStore {
     this.directory = options.directory;
     this.encryption = options.encryption ?? null;
     this._encryptionEnabled = Boolean(options.encryption?.enabled);
+    this.now = options.now ?? (() => Date.now());
 
     this._binaryMarkerKey = "__pq_cache_binary";
 
@@ -61,6 +63,23 @@ export class EncryptedFileSystemCacheStore {
     this._keyRingLoadPromise = null;
     /** @type {Promise<KeyRing> | null} */
     this._keyRingEnsurePromise = null;
+  }
+
+  /**
+   * Best-effort touch to update file mtimes as an approximation of last-access time.
+   * Used for LRU eviction without needing to rewrite/decrypt cache payloads.
+   *
+   * @param {string} filePath
+   * @param {number} nowMs
+   */
+  async _touchFile(filePath, nowMs) {
+    const { fs } = await this.deps();
+    try {
+      const date = new Date(nowMs);
+      await fs.utimes(filePath, date, date);
+    } catch {
+      // ignore
+    }
   }
 
   _aadContext() {
@@ -341,11 +360,29 @@ export class EncryptedFileSystemCacheStore {
    */
   async get(key) {
     await this.ensureDir();
-    const { jsonPath } = await this.pathsForKey(key);
+    const { jsonPath, binPath } = await this.pathsForKey(key);
     const parsed = await this._readAndParseFile(jsonPath);
     if (!parsed || parsed.key !== key) return null;
+
+    const value = parsed.entry?.value;
+    const bytesMarker = value?.version === 2 && value?.table?.kind === "arrow" ? value?.table?.bytes : null;
+    const hasBin =
+      bytesMarker &&
+      typeof bytesMarker === "object" &&
+      !Array.isArray(bytesMarker) &&
+      // @ts-ignore - runtime access
+      typeof bytesMarker[this._binaryMarkerKey] === "string";
+
     const hydrated = await this._hydrateBinary(key, parsed.entry);
-    return hydrated ?? null;
+    if (!hydrated) return null;
+
+    const nowMs = this.now();
+    await this._touchFile(jsonPath, nowMs);
+    if (hasBin) {
+      await this._touchFile(binPath, nowMs);
+    }
+
+    return hydrated;
   }
 
   /**
@@ -379,6 +416,10 @@ export class EncryptedFileSystemCacheStore {
       const jsonPlaintext = Buffer.from(JSON.stringify({ key, entry: { ...entry, value: patchedValue } }), "utf8");
       const jsonOut = await this._encryptFileBytes(jsonPlaintext);
       await this._atomicWrite(jsonPath, jsonOut);
+
+      const nowMs = this.now();
+      await this._touchFile(binPath, nowMs);
+      await this._touchFile(jsonPath, nowMs);
       return;
     }
 
@@ -387,6 +428,8 @@ export class EncryptedFileSystemCacheStore {
     const jsonPlaintext = Buffer.from(JSON.stringify({ key, entry }), "utf8");
     const jsonOut = await this._encryptFileBytes(jsonPlaintext);
     await this._atomicWrite(jsonPath, jsonOut);
+
+    await this._touchFile(jsonPath, this.now());
   }
 
   /**
@@ -505,6 +548,95 @@ export class EncryptedFileSystemCacheStore {
       } catch {
         // ignore
       }
+    }
+  }
+
+  /**
+   * Prune expired entries and enforce optional entry/byte quotas using LRU eviction.
+   *
+   * This store approximates LRU using the entry file's mtime (updated on `get()` and
+   * `set()`).
+   *
+   * @param {{ nowMs: number, maxEntries?: number, maxBytes?: number }} options
+   */
+  async prune(options) {
+    const maxEntries = options.maxEntries;
+    const maxBytes = options.maxBytes;
+
+    if (maxEntries == null && maxBytes == null) {
+      await this.pruneExpired(options.nowMs);
+      return;
+    }
+
+    await this.ensureDir();
+    const { fs, path } = await this.deps();
+
+    /** @type {import("node:fs").Dirent[]} */
+    let entries = [];
+    try {
+      entries = await fs.readdir(this.directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    /** @type {Array<{ base: string, jsonPath: string, binPath: string, lastAccessMs: number, sizeBytes: number }>} */
+    const records = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+
+      // Ignore temp files (pruneExpired handles stale cleanup).
+      if (entry.name.includes(".tmp-") || entry.name.endsWith(".tmp")) continue;
+
+      if (!entry.name.endsWith(".json")) continue;
+      const baseName = entry.name.slice(0, -".json".length);
+      const jsonPath = path.join(this.directory, entry.name);
+      const binPath = path.join(this.directory, `${baseName}.bin`);
+
+      let jsonStat;
+      try {
+        jsonStat = await fs.stat(jsonPath);
+      } catch {
+        continue;
+      }
+
+      let binSize = 0;
+      try {
+        const binStat = await fs.stat(binPath);
+        binSize = binStat.size;
+      } catch {
+        binSize = 0;
+      }
+
+      records.push({
+        base: baseName,
+        jsonPath,
+        binPath,
+        lastAccessMs: Number.isFinite(jsonStat.mtimeMs) ? jsonStat.mtimeMs : 0,
+        sizeBytes: jsonStat.size + binSize,
+      });
+    }
+
+    let totalEntries = records.length;
+    let totalBytes = 0;
+    for (const rec of records) totalBytes += rec.sizeBytes;
+
+    records.sort((a, b) => {
+      if (a.lastAccessMs !== b.lastAccessMs) return a.lastAccessMs - b.lastAccessMs;
+      return a.base.localeCompare(b.base);
+    });
+
+    let idx = 0;
+    while (
+      (maxEntries != null && totalEntries > maxEntries) ||
+      (maxBytes != null && totalBytes > maxBytes)
+    ) {
+      const victim = records[idx++];
+      if (!victim) break;
+      await fs.rm(victim.jsonPath, { force: true }).catch(() => {});
+      await fs.rm(victim.binPath, { force: true }).catch(() => {});
+      totalEntries -= 1;
+      totalBytes -= victim.sizeBytes;
     }
   }
 
