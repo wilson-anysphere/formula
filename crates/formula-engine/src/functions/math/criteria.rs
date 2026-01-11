@@ -192,8 +192,9 @@ fn matches_text_criteria(op: CriteriaOp, pattern: &TextCriteria, value: &Value) 
 
 fn parse_criteria_string(raw: &str, system: ExcelDateSystem) -> Result<Criteria, ErrorKind> {
     let (op, rhs_str) = split_op(raw);
-    let rhs_str = rhs_str.trim();
+    let rhs_trimmed = rhs_str.trim();
 
+    // Blank criteria are driven by the explicit RHS, not by whitespace.
     if rhs_str.is_empty() {
         return match op {
             CriteriaOp::Eq | CriteriaOp::Ne => Ok(Criteria {
@@ -204,31 +205,33 @@ fn parse_criteria_string(raw: &str, system: ExcelDateSystem) -> Result<Criteria,
         };
     }
 
-    if let Some(err) = parse_error_kind(rhs_str) {
+    if let Some(err) = parse_error_kind(rhs_trimmed) {
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Error(err),
         });
     }
 
-    if rhs_str.eq_ignore_ascii_case("TRUE") {
+    if rhs_trimmed.eq_ignore_ascii_case("TRUE") {
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Bool(true),
         });
     }
-    if rhs_str.eq_ignore_ascii_case("FALSE") {
+    if rhs_trimmed.eq_ignore_ascii_case("FALSE") {
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Bool(false),
         });
     }
 
-    if let Ok(num) = parse_number(rhs_str, NumberLocale::en_us()) {
-        return Ok(Criteria {
-            op,
-            rhs: CriteriaRhs::Number(num),
-        });
+    if !rhs_trimmed.is_empty() {
+        if let Ok(num) = parse_number(rhs_str, NumberLocale::en_us()) {
+            return Ok(Criteria {
+                op,
+                rhs: CriteriaRhs::Number(num),
+            });
+        }
     }
 
     if let Some(serial) = parse_date_time_criteria(rhs_str, system) {
@@ -245,7 +248,7 @@ fn parse_criteria_string(raw: &str, system: ExcelDateSystem) -> Result<Criteria,
 }
 
 fn split_op(raw: &str) -> (CriteriaOp, &str) {
-    let raw = raw.trim_start();
+    let raw = raw;
     for (prefix, op) in [
         ("<>", CriteriaOp::Ne),
         ("<=", CriteriaOp::Lte),
