@@ -190,6 +190,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const docId = (request.params as { docId: string }).docId;
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const doc = await app.db.query("SELECT id, org_id, title FROM documents WHERE id = $1", [docId]);
     return { document: doc.rows[0], role: membership.role };
