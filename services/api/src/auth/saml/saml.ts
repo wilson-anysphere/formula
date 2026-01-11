@@ -878,11 +878,7 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
     decodedXml = decodeSamlXml(parsed.data.SAMLResponse);
     preflightSamlResponseXml(decodedXml);
   } catch (err) {
-    let validation = mapSamlValidationError(err);
-    if (validation.code === "invalid_saml_response") {
-      const timestamp = classifyTimestampValidation(decodedXml);
-      if (timestamp) validation = timestamp;
-    }
+    const validation = mapSamlValidationError(err);
     request.server.metrics.authFailuresTotal.inc({ reason: validation.code });
     await writeSamlFailureAudit({
       request,
