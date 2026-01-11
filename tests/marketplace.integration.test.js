@@ -1094,6 +1094,93 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
   }
 });
 
+test("extension metadata ETag changes when publisher public key changes", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-etag-key-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const keyA = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPemA = keyA.publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPemA = keyA.privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const keyB = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPemB = keyB.publicKey.export({ type: "spki", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPemA);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regA = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem: publicKeyPemA,
+        verified: true,
+      }),
+    });
+    assert.equal(regA.status, 200);
+
+    await publishExtension({
+      extensionDir: extSource,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const extUrl = `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}`;
+    const first = await fetch(extUrl);
+    assert.equal(first.status, 200);
+    const etagA = first.headers.get("etag");
+    assert.ok(etagA);
+    const bodyA = await first.json();
+    assert.equal(bodyA.publisherPublicKeyPem, publicKeyPemA);
+
+    const regB = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem: publicKeyPemB,
+        verified: true,
+      }),
+    });
+    assert.equal(regB.status, 200);
+
+    const second = await fetch(extUrl, { headers: { "If-None-Match": etagA } });
+    assert.equal(second.status, 200);
+    const etagB = second.headers.get("etag");
+    assert.ok(etagB && etagB !== etagA);
+    const bodyB = await second.json();
+    assert.equal(bodyB.publisherPublicKeyPem, publicKeyPemB);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("desktop client uses on-disk cache + If-None-Match for package downloads", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-client-cache-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");

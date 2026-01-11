@@ -314,7 +314,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           statusCode = 404;
           return sendJson(res, 404, { error: "Not found" });
         }
-        const etag = `"${sha256Hex(`${ext.id}|${ext.updatedAt || ""}`)}"`;
+        const etag = `"${sha256Hex(`${ext.id}|${ext.updatedAt || ""}|${ext.publisherPublicKeyPem || ""}`)}"`;
         if (etagMatches(req.headers["if-none-match"], etag)) {
           statusCode = 304;
           res.writeHead(304, { ETag: etag, "Cache-Control": CACHE_CONTROL_REVALIDATE });
