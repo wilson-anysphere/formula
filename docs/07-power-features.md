@@ -453,6 +453,42 @@ class QueryFoldingEngine {
 }
 ```
 
+### Privacy Levels + Formula Firewall
+
+Excel/Power Query has a privacy model ("Public" / "Organizational" / "Private") enforced by the **formula firewall**. The goal is to prevent *implicit* data leakage when queries combine sources, especially when query folding/pushdown would send data from one privacy domain into another external system.
+
+In Formula, the Power Query engine supports the same concept:
+
+- **Stable source identities (`sourceId`)** are derived per source:
+  - file: normalized path
+  - web: origin (`scheme://host:port`)
+  - database: `sql:<connectionId>` (from `source.connectionId` / `SqlConnector.getConnectionIdentity`)
+  - workbook: `workbook:range`, `workbook:table:<name>`
+- Hosts can classify sources by supplying privacy levels in the execution context:
+  ```js
+  const context = {
+    privacy: {
+      levelsBySourceId: {
+        "sql:db-prod": "organizational",
+        "https://api.example.com:443": "public",
+        "workbook:table:Sales": "private",
+      },
+    },
+  };
+  ```
+- The engine can be configured with a privacy enforcement mode:
+  ```js
+  const engine = new QueryEngine({
+    privacyMode: "ignore" | "warn" | "enforce", // default: "ignore"
+  });
+  ```
+
+Behavior summary:
+- **Folding restrictions (safe by default)**: when `privacyMode !== "ignore"`, folding of `merge`/`append` across different privacy levels is prevented (downgrades to hybrid/local) and a structured diagnostic is emitted.
+- **Local combination firewall**: in `"enforce"` mode, obvious high→low combinations (e.g. Private/Unknown + Public) are blocked with a `Formula.Firewall` error; in `"warn"` mode they run but emit a warning diagnostic.
+
+Diagnostics are surfaced via the engine `onProgress` callback as `type: "privacy:firewall"` events with the involved source ids + levels.
+
 ### Query Editor UI
 
 ```typescript
