@@ -58,6 +58,30 @@ function renderVerification(entry: AIAuditEntry): HTMLElement | null {
     Array.isArray(verification.warnings) && verification.warnings.length > 0 ? ` • ${verification.warnings.join(" ")}` : "";
   const text = `Verification: ${status} (confidence ${confidencePct}%)${warnings}`;
 
+  const claims = Array.isArray((verification as any).claims) ? ((verification as any).claims as any[]) : [];
+  const detailsNode =
+    claims.length > 0
+      ? (() => {
+          const verifiedCount = claims.filter((c) => c?.verified === true).length;
+          const summary = `Claims: ${verifiedCount}/${claims.length} verified`;
+          return el(
+            "details",
+            { "data-testid": "ai-audit-verification-claims", style: "margin-top: 6px;" },
+            [
+              el("summary", { style: "cursor: pointer;" }, [summary]),
+              el(
+                "pre",
+                { style: "white-space: pre-wrap; font-size: 11px; opacity: 0.9; margin: 6px 0 0 0;" },
+                [JSON.stringify(claims, null, 2)],
+              ),
+            ],
+          );
+        })()
+      : null;
+
+  const children: Array<Node | string> = [text];
+  if (detailsNode) children.push(detailsNode);
+
   if (verification.verified) {
     return el(
       "div",
@@ -65,7 +89,7 @@ function renderVerification(entry: AIAuditEntry): HTMLElement | null {
         "data-testid": "ai-audit-verification",
         style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;",
       },
-      [text],
+      children,
     );
   }
 
@@ -76,7 +100,7 @@ function renderVerification(entry: AIAuditEntry): HTMLElement | null {
       style:
         "font-size: 12px; margin-bottom: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--warning-bg);",
     },
-    [text],
+    children,
   );
 }
 

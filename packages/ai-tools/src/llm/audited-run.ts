@@ -5,7 +5,7 @@ import { runChatWithTools } from "../../../llm/src/toolCalling.js";
 import { serializeToolResultForModel } from "../../../llm/src/toolResultSerialization.js";
 
 import type { LLMToolCall } from "./integration.js";
-import { classifyQueryNeedsTools, verifyToolUsage, type VerificationResult } from "./verification.js";
+import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage, type VerificationResult } from "./verification.js";
 
 export interface AuditedRunOptions {
   audit_store: AIAuditStore;
@@ -63,6 +63,21 @@ export interface AuditedRunParams {
    * Optional attachment context used by the verifier (range/table/chart/formula references).
    */
   attachments?: unknown[] | null;
+  /**
+   * When enabled, run a post-response verification pass that extracts numeric
+   * spreadsheet claims from the assistant message and validates them via
+   * read-only spreadsheet tools (e.g. compute_statistics, read_range).
+   */
+  verify_claims?: boolean;
+  /**
+   * Optional tool executor used *only* for claim verification (to avoid side
+   * effects like UI tool-result capture). Defaults to `tool_executor`.
+   */
+  verification_tool_executor?: { tools?: any[]; execute: (call: any) => Promise<any> };
+  /**
+   * Limit the number of extracted claims verified per response (safety/perf).
+   */
+  verification_max_claims?: number;
 }
 
 /**
@@ -152,10 +167,38 @@ export async function runChatWithToolsAuditedVerified(
       result = await runOnce(strictMessages);
     }
 
-    const verification = verifyToolUsage({
+    const baseVerification = verifyToolUsage({
       needsTools,
       toolCalls: recorder.entry.tool_calls.map((call) => ({ name: call.name, ok: call.ok }))
     });
+
+    let verification = baseVerification;
+
+    if (params.verify_claims) {
+      const claimSummary = await verifyAssistantClaims({
+        assistantText: result.final,
+        userText,
+        attachments: params.attachments,
+        toolCalls: recorder.entry.tool_calls.map((call) => ({ name: call.name, parameters: call.parameters })),
+        toolExecutor: (params.verification_tool_executor ?? params.tool_executor) as any,
+        maxClaims: params.verification_max_claims
+      });
+
+      if (claimSummary) {
+        const warnings = [...claimSummary.warnings];
+        if (needsTools && !baseVerification.used_tools) {
+          warnings.unshift("Model did not use tools for a data question.");
+        }
+        verification = {
+          needs_tools: baseVerification.needs_tools,
+          used_tools: baseVerification.used_tools,
+          verified: claimSummary.verified,
+          confidence: claimSummary.confidence,
+          warnings,
+          claims: claimSummary.claims
+        };
+      }
+    }
 
     recorder.setVerification(verification);
 

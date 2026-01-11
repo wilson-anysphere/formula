@@ -204,7 +204,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
       });
 
       llmHistory.current = stripSystemPrompt(result.messages);
-      return { messages: result.messages, final: result.finalText };
+      return { messages: result.messages, final: result.finalText, verification: result.verification as any };
     };
   }, [orchestrator]);
 

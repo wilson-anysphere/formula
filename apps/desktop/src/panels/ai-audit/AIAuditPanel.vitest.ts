@@ -29,7 +29,8 @@ describe("AIAuditPanel", () => {
         used_tools: true,
         verified: true,
         confidence: 0.9,
-        warnings: []
+        warnings: [],
+        claims: [{ claim: "mean(A1:A2) = 1.5", verified: true, expected: 1.5, actual: 1.5, toolEvidence: { tool: "compute_statistics" } }]
       },
       token_usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
       latency_ms: 10,
@@ -96,6 +97,7 @@ describe("AIAuditPanel", () => {
     // Verification details should be surfaced.
     expect(container.querySelectorAll('[data-testid="ai-audit-verification"]')).toHaveLength(2);
     expect(container.textContent).toContain("Verification:");
+    expect(container.querySelectorAll('[data-testid="ai-audit-verification-claims"]')).toHaveLength(1);
 
     // Switching the workbook filter should update the results.
     const workbookInput = container.querySelector<HTMLInputElement>('[data-testid="ai-audit-filter-workbook"]');

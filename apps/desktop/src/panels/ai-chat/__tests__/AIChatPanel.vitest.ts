@@ -206,4 +206,57 @@ describe("AIChatPanel tool-calling history", () => {
       root.unmount();
     });
   });
+
+  it("shows a warning banner when verification is low confidence", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return {
+        messages: [],
+        final: "Answer.",
+        verification: { needs_tools: true, used_tools: true, verified: true, confidence: 0.5, warnings: [] }
+      };
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage
+        })
+      );
+    });
+
+    const input = container.querySelector("input");
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send");
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    const inputEl = input as HTMLInputElement;
+    const buttonEl = sendButton as HTMLButtonElement;
+
+    await act(async () => {
+      setNativeInputValue(inputEl, "Hi");
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      buttonEl.click();
+      await waitFor(() => sendMessage.mock.calls.length === 1);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("Unverified answer.") ?? false);
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

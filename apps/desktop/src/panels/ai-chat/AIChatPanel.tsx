@@ -3,8 +3,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, ChatMessage } from "./types.js";
 import type { LLMClient, LLMMessage, ToolCall, ToolExecutor } from "../../../../../packages/llm/src/types.js";
 import { runChatWithTools } from "../../../../../packages/llm/src/toolCalling.js";
-import { classifyQueryNeedsTools, verifyToolUsage } from "../../../../../packages/ai-tools/src/llm/verification.js";
+import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage } from "../../../../../packages/ai-tools/src/llm/verification.js";
 import { t, tWithVars } from "../../i18n/index.js";
+
+const CONFIDENCE_WARNING_THRESHOLD = 0.7;
 
 function safeStringify(value: unknown, opts: { pretty?: boolean } = {}): string {
   if (typeof value === "string") return value;
@@ -29,7 +31,9 @@ export interface AIChatPanelSendMessageArgs {
   onToolResult?: (call: ToolCall, result: unknown) => void;
 }
 
-export type AIChatPanelSendMessage = (args: AIChatPanelSendMessageArgs) => Promise<{ messages: LLMMessage[]; final: string }>;
+export type AIChatPanelSendMessage = (
+  args: AIChatPanelSendMessageArgs,
+) => Promise<{ messages: LLMMessage[]; final: string; verification?: ChatMessage["verification"] }>;
 
 export type AIChatPanelProps =
   | {
@@ -177,7 +181,34 @@ export function AIChatPanel(props: AIChatPanelProps) {
       });
       setLlmHistory(result.messages);
 
-      const verification = verifyToolUsage({ needsTools, toolCalls: executedToolCalls });
+      const baseVerification = verifyToolUsage({ needsTools, toolCalls: executedToolCalls });
+      let verification = result.verification ?? baseVerification;
+
+      // In legacy/demo mode (no external orchestrator), we can optionally run a
+      // post-response verification pass to check numeric claims against
+      // spreadsheet computations.
+      if (!result.verification && !props.sendMessage) {
+        const claims = await verifyAssistantClaims({
+          assistantText: result.final,
+          userText: text,
+          attachments,
+          toolCalls: [],
+          toolExecutor: props.toolExecutor as any
+        });
+
+        if (claims) {
+          const warnings = [...claims.warnings];
+          if (needsTools && !baseVerification.used_tools) warnings.unshift("Model did not use tools for a data question.");
+          verification = {
+            needs_tools: baseVerification.needs_tools,
+            used_tools: baseVerification.used_tools,
+            verified: claims.verified,
+            confidence: claims.confidence,
+            warnings,
+            claims: claims.claims
+          };
+        }
+      }
 
       setMessages((prev) => {
         const next = prev.slice();
@@ -245,7 +276,9 @@ export function AIChatPanel(props: AIChatPanelProps) {
               {m.pending ? t("chat.meta.thinking") : ""}
               {m.requiresApproval ? t("chat.meta.requiresApproval") : ""}
             </div>
-            {m.role === "assistant" && m.verification && !m.verification.verified ? (
+            {m.role === "assistant" &&
+            m.verification &&
+            (!m.verification.verified || (m.verification.confidence ?? 0) < CONFIDENCE_WARNING_THRESHOLD) ? (
               <div
                 style={{
                   marginTop: 6,

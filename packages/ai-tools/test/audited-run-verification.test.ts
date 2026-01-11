@@ -27,6 +27,7 @@ describe("runChatWithToolsAuditedVerified", () => {
       client,
       tool_executor: toolExecutor as any,
       messages: [{ role: "user", content: "What is the average of A1:A3?" }],
+      verify_claims: true,
       audit: {
         audit_store: auditStore,
         session_id: "session-verification-1",
@@ -81,6 +82,7 @@ describe("runChatWithToolsAuditedVerified", () => {
       client,
       tool_executor: toolExecutor as any,
       messages: [{ role: "user", content: "What is the average of Sheet1!A1:A3?" }],
+      verify_claims: true,
       audit: {
         audit_store: auditStore,
         session_id: "session-verification-2",
@@ -98,6 +100,65 @@ describe("runChatWithToolsAuditedVerified", () => {
     const entries = await auditStore.listEntries({ session_id: "session-verification-2" });
     expect(entries[0]!.tool_calls.some((c) => c.name === "read_range" && c.ok === true)).toBe(true);
     expect(entries[0]!.verification).toEqual(result.verification);
+  });
+
+  it("flags incorrect numeric claims with computed actuals + tool evidence", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: 2 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: 3 });
+
+    const toolExecutor = new SpreadsheetLLMToolExecutor(workbook);
+
+    let callCount = 0;
+    const client = {
+      async chat() {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:A3" } }]
+            },
+            usage: { promptTokens: 10, completionTokens: 5 }
+          };
+        }
+
+        return {
+          message: { role: "assistant", content: "Average is 10." },
+          usage: { promptTokens: 2, completionTokens: 3 }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+
+    const result = await runChatWithToolsAuditedVerified({
+      client,
+      tool_executor: toolExecutor as any,
+      messages: [{ role: "user", content: "What is the average of Sheet1!A1:A3?" }],
+      verify_claims: true,
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-verification-4",
+        mode: "chat",
+        input: { prompt: "What is the average of Sheet1!A1:A3?" },
+        model: "unit-test-model"
+      }
+    });
+
+    expect(result.verification.verified).toBe(false);
+    expect(result.verification.claims).toHaveLength(1);
+    expect(result.verification.claims?.[0]).toMatchObject({
+      verified: false,
+      expected: 10,
+      actual: 2
+    });
+
+    const evidence = (result.verification.claims?.[0] as any)?.toolEvidence;
+    expect(evidence?.call?.name).toBe("compute_statistics");
+    expect(evidence?.result?.data?.statistics?.mean).toBe(2);
   });
 
   it("retries once with a strict system message when strict_tool_verification is enabled", async () => {
@@ -148,6 +209,7 @@ describe("runChatWithToolsAuditedVerified", () => {
       tool_executor: toolExecutor as any,
       messages: [{ role: "user", content: "What is the average of A1:A3?" }],
       strict_tool_verification: true,
+      verify_claims: true,
       audit: {
         audit_store: auditStore,
         session_id: "session-verification-3",
@@ -161,4 +223,3 @@ describe("runChatWithToolsAuditedVerified", () => {
     expect(result.verification.verified).toBe(true);
   });
 });
-

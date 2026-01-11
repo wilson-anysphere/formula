@@ -12,6 +12,13 @@ export interface ChatVerification {
   verified: boolean;
   confidence: number;
   warnings: string[];
+  claims?: Array<{
+    claim: string;
+    verified: boolean;
+    expected?: number | string | null;
+    actual?: number | string | null;
+    toolEvidence?: unknown;
+  }>;
 }
 
 export interface ChatMessage {

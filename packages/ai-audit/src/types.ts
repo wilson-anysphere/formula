@@ -41,6 +41,20 @@ export interface AIVerificationResult {
   verified: boolean;
   confidence: number;
   warnings: string[];
+  /**
+   * Optional claim-level verification details.
+   *
+   * When present, each entry represents a deterministic check comparing the
+   * assistant's numeric statement (`expected`) against a spreadsheet computation
+   * (`actual`) along with tool evidence used to derive it.
+   */
+  claims?: Array<{
+    claim: string;
+    verified: boolean;
+    expected?: number | string | null;
+    actual?: number | string | null;
+    toolEvidence?: unknown;
+  }>;
 }
 
 export interface AIAuditEntry {

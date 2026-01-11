@@ -1,3 +1,5 @@
+import { extractVerifiableClaims } from "./claim-extraction.js";
+
 export interface VerificationResult {
   /**
    * Heuristic signal that the user's query likely needs spreadsheet tools to
@@ -11,9 +13,12 @@ export interface VerificationResult {
   /**
    * Whether the run is considered verified.
    *
-   * A run is considered verified when:
-   * - tools were not needed, OR
-   * - at least one tool call succeeded (`ok: true`).
+   * For tool-usage-only verification (see `verifyToolUsage`), a run is verified
+   * when tools were not needed or at least one tool call succeeded.
+   *
+   * When post-response claim verification runs (see `verifyAssistantClaims`),
+   * this reflects whether all extracted numeric claims were validated against
+   * spreadsheet computations.
    */
   verified: boolean;
   /**
@@ -25,6 +30,20 @@ export interface VerificationResult {
    */
   confidence: number;
   warnings: string[];
+  /**
+   * Optional claim-level verification details.
+   *
+   * When present, each entry represents a deterministic check comparing a
+   * numeric assistant claim (`expected`) against a spreadsheet computation
+   * (`actual`) plus tool evidence.
+   */
+  claims?: Array<{
+    claim: string;
+    verified: boolean;
+    expected?: number | string | null;
+    actual?: number | string | null;
+    toolEvidence?: unknown;
+  }>;
 }
 
 export interface VerifyToolUsageParams {
@@ -40,6 +59,24 @@ export interface ClassifyQueryNeedsToolsParams {
   userText: string;
   attachments?: unknown[] | null;
 }
+
+export interface VerifyAssistantClaimsParams {
+  assistantText: string;
+  userText?: string;
+  attachments?: unknown[] | null;
+  toolCalls?: Array<{ name: string; parameters?: unknown }>;
+  toolExecutor: { tools?: Array<{ name: string }>; execute: (call: any) => Promise<any> };
+  maxClaims?: number;
+}
+
+export interface ClaimVerificationSummary {
+  claims: NonNullable<VerificationResult["claims"]>;
+  verified: boolean;
+  confidence: number;
+  warnings: string[];
+}
+
+export { extractVerifiableClaims, type ExtractedSpreadsheetClaim, type SpreadsheetClaimMeasure } from "./claim-extraction.js";
 
 const A1_REFERENCE_RE = /\b[A-Z]{1,3}\d+\b/i;
 
@@ -132,8 +169,204 @@ export function verifyToolUsage(params: VerifyToolUsageParams): VerificationResu
   };
 }
 
+/**
+ * Post-response claim verification: extract numeric spreadsheet claims from the
+ * assistant response and deterministically verify them via spreadsheet tools.
+ *
+ * Returns `null` when no verifiable claims are found.
+ */
+export async function verifyAssistantClaims(params: VerifyAssistantClaimsParams): Promise<ClaimVerificationSummary | null> {
+  const extracted = extractVerifiableClaims({
+    assistantText: params.assistantText,
+    userText: params.userText,
+    attachments: params.attachments,
+    toolCalls: params.toolCalls
+  });
+
+  if (extracted.length === 0) return null;
+
+  const maxClaims = params.maxClaims ?? 8;
+  const claimsToVerify = extracted.slice(0, Math.max(0, maxClaims));
+
+  const hasTool = (name: string) => Array.isArray(params.toolExecutor.tools) && params.toolExecutor.tools.some((t) => t?.name === name);
+
+  const verifiedClaims: NonNullable<VerificationResult["claims"]> = [];
+
+  for (const claim of claimsToVerify) {
+    if (claim.kind === "range_stat") {
+      verifiedClaims.push(await verifyRangeStatClaim(claim, { toolExecutor: params.toolExecutor, hasTool }));
+      continue;
+    }
+    verifiedClaims.push(await verifyCellValueClaim(claim, { toolExecutor: params.toolExecutor, hasTool }));
+  }
+
+  const verifiedCount = verifiedClaims.filter((c) => c.verified).length;
+  const confidence = verifiedClaims.length ? verifiedCount / verifiedClaims.length : 0;
+  const verified = verifiedClaims.length > 0 && verifiedCount === verifiedClaims.length;
+
+  const warnings: string[] = [];
+  if (!verified) warnings.push("One or more numeric claims did not match spreadsheet results.");
+
+  return {
+    claims: verifiedClaims,
+    verified,
+    confidence,
+    warnings
+  };
+}
+
 function isVerifiedToolName(name: string): boolean {
   if (!name) return false;
   if (VERIFIED_TOOL_NAMES.has(name)) return true;
   return VERIFIED_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+async function verifyRangeStatClaim(
+  claim: import("./claim-extraction.js").ExtractedSpreadsheetClaim,
+  ctx: { toolExecutor: VerifyAssistantClaimsParams["toolExecutor"]; hasTool: (name: string) => boolean }
+): Promise<NonNullable<VerificationResult["claims"]>[number]> {
+  if (claim.kind !== "range_stat") {
+    return { claim: claim.source, verified: false, expected: null, actual: null };
+  }
+
+  const reference = claim.reference;
+  const claimLabel = formatRangeStatClaimLabel(claim.measure, reference, claim.expected);
+
+  if (!reference) {
+    return {
+      claim: claimLabel,
+      verified: false,
+      expected: claim.expected,
+      actual: null,
+      toolEvidence: { error: "missing_reference" }
+    };
+  }
+
+  if (!ctx.hasTool("compute_statistics")) {
+    return {
+      claim: claimLabel,
+      verified: false,
+      expected: claim.expected,
+      actual: null,
+      toolEvidence: { error: "missing_tool", tool: "compute_statistics" }
+    };
+  }
+
+  const toolCall = {
+    name: "compute_statistics",
+    arguments: {
+      range: reference,
+      measures: [claim.measure]
+    }
+  };
+
+  try {
+    const result = await ctx.toolExecutor.execute(toolCall);
+    const sanitized = sanitizeVerificationToolResult(result);
+    const actual = extractStatisticValue(result, claim.measure);
+    const verified = numbersApproximatelyEqual(actual, claim.expected);
+    return {
+      claim: claimLabel,
+      verified,
+      expected: claim.expected,
+      actual: actual ?? null,
+      toolEvidence: { call: toolCall, result: sanitized }
+    };
+  } catch (error) {
+    return {
+      claim: claimLabel,
+      verified: false,
+      expected: claim.expected,
+      actual: null,
+      toolEvidence: { call: toolCall, error: error instanceof Error ? error.message : String(error) }
+    };
+  }
+}
+
+async function verifyCellValueClaim(
+  claim: import("./claim-extraction.js").ExtractedSpreadsheetClaim,
+  ctx: { toolExecutor: VerifyAssistantClaimsParams["toolExecutor"]; hasTool: (name: string) => boolean }
+): Promise<NonNullable<VerificationResult["claims"]>[number]> {
+  if (claim.kind !== "cell_value") {
+    return { claim: claim.source, verified: false, expected: null, actual: null };
+  }
+
+  const reference = claim.reference;
+  const claimLabel = `value(${reference}) = ${claim.expected}`;
+
+  if (!ctx.hasTool("read_range")) {
+    return {
+      claim: claimLabel,
+      verified: false,
+      expected: claim.expected,
+      actual: null,
+      toolEvidence: { error: "missing_tool", tool: "read_range" }
+    };
+  }
+
+  const toolCall = {
+    name: "read_range",
+    arguments: { range: reference, include_formulas: false }
+  };
+
+  try {
+    const result = await ctx.toolExecutor.execute(toolCall);
+    const sanitized = sanitizeVerificationToolResult(result);
+    const actual = extractSingleCellValue(result);
+    const actualNumber = typeof actual === "number" ? actual : typeof actual === "string" ? Number(actual) : null;
+    const verified = numbersApproximatelyEqual(actualNumber, claim.expected);
+    return {
+      claim: claimLabel,
+      verified,
+      expected: claim.expected,
+      actual: actualNumber ?? null,
+      toolEvidence: { call: toolCall, result: sanitized }
+    };
+  } catch (error) {
+    return {
+      claim: claimLabel,
+      verified: false,
+      expected: claim.expected,
+      actual: null,
+      toolEvidence: { call: toolCall, error: error instanceof Error ? error.message : String(error) }
+    };
+  }
+}
+
+function formatRangeStatClaimLabel(
+  measure: import("./claim-extraction.js").SpreadsheetClaimMeasure,
+  reference: string | undefined,
+  expected: number
+): string {
+  const ref = reference ? `(${reference})` : "";
+  return `${measure}${ref} = ${expected}`;
+}
+
+function sanitizeVerificationToolResult(result: unknown): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const { timing, ...rest } = result as any;
+  return rest;
+}
+
+function extractStatisticValue(result: any, measure: import("./claim-extraction.js").SpreadsheetClaimMeasure): number | null {
+  const stats = result?.data?.statistics;
+  if (!stats || typeof stats !== "object") return null;
+  const value = (stats as any)[measure];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function extractSingleCellValue(result: any): unknown {
+  const values = result?.data?.values;
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const firstRow = values[0];
+  if (!Array.isArray(firstRow) || firstRow.length === 0) return null;
+  return firstRow[0];
+}
+
+function numbersApproximatelyEqual(actual: number | null, expected: number): boolean {
+  if (actual == null) return false;
+  if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false;
+  const diff = Math.abs(actual - expected);
+  const scale = Math.max(1, Math.abs(actual), Math.abs(expected));
+  return diff <= 1e-6 * scale;
 }

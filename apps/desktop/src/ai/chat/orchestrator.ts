@@ -17,7 +17,7 @@ import type {
   SpreadsheetLLMToolExecutorOptions
 } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import { SpreadsheetLLMToolExecutor, createPreviewApprovalHandler } from "../../../../../packages/ai-tools/src/llm/integration.js";
-import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
+import { runChatWithToolsAuditedVerified } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 
@@ -59,6 +59,7 @@ export interface SendAiChatMessageResult {
   finalText: string;
   messages: LLMMessage[];
   toolResults: ToolExecutionResult[];
+  verification?: unknown;
   context: {
     workbookId: string;
     promptContext: string;
@@ -268,7 +269,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
     const capturingAuditStore = new CapturingAuditStore(auditStore);
     try {
-      const result = await runChatWithToolsAudited({
+      const result = await runChatWithToolsAuditedVerified({
         client: {
           chat: async (request: any) => {
             const requestToolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
@@ -304,6 +305,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         require_approval: requireApproval as any,
         on_tool_call: params.onToolCall as any,
         on_tool_result: params.onToolResult as any,
+        verify_claims: true,
+        verification_tool_executor: toolExecutor as any,
         audit: {
           audit_store: capturingAuditStore,
           session_id: sessionId,
@@ -324,6 +327,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         finalText: result.final,
         messages: stripLeadingSystemMessages(result.messages as LLMMessage[]),
         toolResults,
+        verification: result.verification,
         context: {
           workbookId: options.workbookId,
           promptContext: workbookContext.promptContext ?? "",
