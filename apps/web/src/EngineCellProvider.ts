@@ -113,10 +113,16 @@ export class EngineCellProvider implements CellProvider {
           const gridCol = startCol + c;
           const key = cacheKey(gridRow, gridCol);
 
-          const previous = this.cache.get(key);
+          // Treat missing cache entries as blank (`null`) to avoid filling the cache
+          // with sparse empty cells as the user scrolls around a large sheet.
+          const previous = this.cache.get(key) ?? null;
           if (previous === value) continue;
 
-          this.cache.set(key, value);
+          if (value === null) {
+            this.cache.delete(key);
+          } else {
+            this.cache.set(key, value);
+          }
 
           gridStartRow = Math.min(gridStartRow, gridRow);
           gridStartCol = Math.min(gridStartCol, gridCol);
@@ -142,4 +148,3 @@ export class EngineCellProvider implements CellProvider {
     });
   }
 }
-
