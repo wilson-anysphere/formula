@@ -47,6 +47,18 @@ pub struct MemoryManagerStats {
     pub cell_changes_flushed: u64,
 }
 
+/// Current cache state plus cumulative counters.
+///
+/// This is intended for observability (e.g. telemetry, debug overlays).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MemoryManagerMetrics {
+    pub stats: MemoryManagerStats,
+    pub cached_pages: usize,
+    pub dirty_pages: usize,
+    pub estimated_bytes: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlushOutcome {
     /// Number of `CellChange`s applied to the live SQLite database.
@@ -191,11 +203,29 @@ impl MemoryManager {
             .len()
     }
 
+    pub fn dirty_page_count(&self) -> usize {
+        self.inner
+            .lock()
+            .expect("memory manager mutex poisoned")
+            .dirty_pages
+            .len()
+    }
+
     pub fn stats_snapshot(&self) -> MemoryManagerStats {
         self.inner
             .lock()
             .expect("memory manager mutex poisoned")
             .stats
+    }
+
+    pub fn metrics_snapshot(&self) -> MemoryManagerMetrics {
+        let inner = self.inner.lock().expect("memory manager mutex poisoned");
+        MemoryManagerMetrics {
+            stats: inner.stats,
+            cached_pages: inner.pages.len(),
+            dirty_pages: inner.dirty_pages.len(),
+            estimated_bytes: inner.bytes,
+        }
     }
 
     pub fn get_sheet(&self, sheet_id: Uuid) -> StorageResult<SheetMeta> {

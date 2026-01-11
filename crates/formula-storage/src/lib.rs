@@ -24,7 +24,10 @@ pub mod storage;
 mod types;
 
 pub use autosave::{AutoSaveConfig, AutoSaveManager};
-pub use cache::{FlushOutcome, MemoryManager, MemoryManagerConfig, MemoryManagerStats, ViewportData};
+pub use cache::{
+    FlushOutcome, MemoryManager, MemoryManagerConfig, MemoryManagerMetrics, MemoryManagerStats,
+    ViewportData,
+};
 pub use encryption::{EncryptionError, InMemoryKeyProvider, KeyProvider, KeyProviderError, KeyRing};
 pub use storage::{Storage, StorageError};
 pub use types::{
