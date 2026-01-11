@@ -3660,6 +3660,11 @@ fn walk_expr_flags(
                 walk_expr_flags(a, current_cell, workbook, names, volatile, thread_safe, visiting_names);
             }
         }
+        Expr::ArrayLiteral { values, .. } => {
+            for el in values.iter() {
+                walk_expr_flags(el, current_cell, workbook, names, volatile, thread_safe, visiting_names);
+            }
+        }
         Expr::ImplicitIntersection(inner) | Expr::SpillRange(inner) => {
             walk_expr_flags(inner, current_cell, workbook, names, volatile, thread_safe, visiting_names)
         }
@@ -3832,6 +3837,11 @@ fn walk_calc_expr(
         Expr::FunctionCall { args, .. } => {
             for a in args {
                 walk_calc_expr(a, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
+            }
+        }
+        Expr::ArrayLiteral { values, .. } => {
+            for el in values.iter() {
+                walk_calc_expr(el, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
             }
         }
         Expr::ImplicitIntersection(inner) => {

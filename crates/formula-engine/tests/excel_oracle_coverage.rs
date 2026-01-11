@@ -54,6 +54,11 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
             collect_unknown_function_calls(left, unknown);
             collect_unknown_function_calls(right, unknown);
         }
+        eval::Expr::ArrayLiteral { values, .. } => {
+            for el in values.iter() {
+                collect_unknown_function_calls(el, unknown);
+            }
+        }
         eval::Expr::ImplicitIntersection(inner) => collect_unknown_function_calls(inner, unknown),
         eval::Expr::SpillRange(inner) => collect_unknown_function_calls(inner, unknown),
         eval::Expr::Number(_)

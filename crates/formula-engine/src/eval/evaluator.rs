@@ -156,6 +156,22 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             Expr::Bool(b) => EvalValue::Scalar(Value::Bool(*b)),
             Expr::Blank => EvalValue::Scalar(Value::Blank),
             Expr::Error(e) => EvalValue::Scalar(Value::Error(*e)),
+            Expr::ArrayLiteral { rows, cols, values } => {
+                let mut out = Vec::with_capacity(rows.saturating_mul(*cols));
+                for el in values.iter() {
+                    let v = match self.eval_value(el) {
+                        EvalValue::Scalar(v) => v,
+                        EvalValue::Reference(ranges) => self.apply_implicit_intersection(&ranges),
+                    };
+
+                    let v = match v {
+                        Value::Array(_) | Value::Spill { .. } => Value::Error(ErrorKind::Value),
+                        other => other,
+                    };
+                    out.push(v);
+                }
+                EvalValue::Scalar(Value::Array(Array::new(*rows, *cols, out)))
+            }
             Expr::CellRef(r) => match self.resolve_sheet_id(&r.sheet) {
                 Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
                     EvalValue::Reference(vec![ResolvedRange {

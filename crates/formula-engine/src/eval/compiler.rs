@@ -106,7 +106,7 @@ fn compile_expr_inner(
                 _ => Expr::Error(ErrorKind::Name),
             }
         }
-        crate::Expr::Array(_) => Expr::Error(ErrorKind::Value),
+        crate::Expr::Array(arr) => compile_array_literal(arr, current_sheet, current_cell, resolve_sheet),
         crate::Expr::FunctionCall(call) => {
             let name = call.name.name_upper.clone();
             let original_name = call.name.original.clone();
@@ -162,6 +162,37 @@ fn compile_expr_inner(
             ))),
         },
         crate::Expr::Binary(b) => compile_binary(b, current_sheet, current_cell, resolve_sheet),
+    }
+}
+
+fn compile_array_literal(
+    arr: &crate::ArrayLiteral,
+    current_sheet: usize,
+    current_cell: CellAddr,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> CompiledExpr {
+    let rows = arr.rows.len();
+    let cols = arr.rows.first().map(|r| r.len()).unwrap_or(0);
+
+    if rows == 0 || cols == 0 {
+        return Expr::Error(ErrorKind::Value);
+    }
+
+    if arr.rows.iter().any(|r| r.len() != cols) {
+        return Expr::Error(ErrorKind::Value);
+    }
+
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    for row in &arr.rows {
+        for el in row {
+            values.push(compile_expr_inner(el, current_sheet, current_cell, resolve_sheet));
+        }
+    }
+
+    Expr::ArrayLiteral {
+        rows,
+        cols,
+        values: values.into(),
     }
 }
 

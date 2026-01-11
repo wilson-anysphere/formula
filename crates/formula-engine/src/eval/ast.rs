@@ -1,5 +1,6 @@
 use crate::eval::address::CellAddr;
 use crate::value::ErrorKind;
+use std::sync::Arc;
 
 pub type ParsedExpr = Expr<String>;
 pub type CompiledExpr = Expr<usize>;
@@ -78,6 +79,15 @@ pub enum Expr<S> {
     Bool(bool),
     Blank,
     Error(ErrorKind),
+    /// Array literal constant written as `{...}`.
+    ///
+    /// The values are stored in row-major order and each element is a compiled sub-expression
+    /// evaluated at runtime.
+    ArrayLiteral {
+        rows: usize,
+        cols: usize,
+        values: Arc<[Expr<S>]>,
+    },
     NameRef(NameRef<S>),
     CellRef(CellRef<S>),
     RangeRef(RangeRef<S>),
@@ -122,6 +132,11 @@ impl<S: Clone> Expr<S> {
             Expr::Bool(b) => Expr::Bool(*b),
             Expr::Blank => Expr::Blank,
             Expr::Error(e) => Expr::Error(*e),
+            Expr::ArrayLiteral { rows, cols, values } => Expr::ArrayLiteral {
+                rows: *rows,
+                cols: *cols,
+                values: values.iter().map(|v| v.map_sheets(f)).collect::<Vec<_>>().into(),
+            },
             Expr::NameRef(r) => Expr::NameRef(NameRef {
                 sheet: f(&r.sheet),
                 name: r.name.clone(),
