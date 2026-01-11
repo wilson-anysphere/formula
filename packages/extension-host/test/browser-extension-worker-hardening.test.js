@@ -256,6 +256,60 @@ test("extension-worker: rejects static absolute URL imports", async () => {
   }
 });
 
+test("extension-worker: rejects static data: URL imports", async () => {
+  const dir = await createTempDir("formula-ext-worker-data-import-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `import "data:text/javascript,export default 1";\nexport async function activate() {}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /URL\/protocol imports are not allowed/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: rejects bare module specifiers", async () => {
+  const dir = await createTempDir("formula-ext-worker-bare-import-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `import "lodash";\nexport async function activate() {}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /Disallowed import specifier 'lodash'.*only relative imports/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: rejects absolute-path imports", async () => {
+  const dir = await createTempDir("formula-ext-worker-absolute-path-import-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `import "/evil.mjs";\nexport async function activate() {}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /absolute imports are not allowed/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("extension-worker: allows relative import graphs", async () => {
   const dir = await createTempDir("formula-ext-worker-relative-import-");
   try {
