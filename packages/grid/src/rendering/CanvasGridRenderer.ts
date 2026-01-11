@@ -1154,7 +1154,7 @@ export class CanvasGridRenderer {
       contentCtx.rect(intersection.x, intersection.y, intersection.width, intersection.height);
       contentCtx.clip();
 
-      this.renderGridQuadrant(quadrant, startRow, endRow, startCol, endCol);
+      this.renderGridQuadrant(quadrant, startRow, endRow, startCol, endCol, viewport.frozenRows, viewport.frozenCols);
 
       contentCtx.restore();
       gridCtx.restore();
@@ -1171,11 +1171,14 @@ export class CanvasGridRenderer {
     startRow: number,
     endRow: number,
     startCol: number,
-    endCol: number
+    endCol: number,
+    frozenRows: number,
+    frozenCols: number
   ): void {
     if (!this.gridCtx || !this.contentCtx) return;
     const gridCtx = this.gridCtx;
     const contentCtx = this.contentCtx;
+    const headerTextTheme = { cellText: this.theme.headerText, errorText: this.theme.errorText };
 
     // Content layer state.
     const layoutEngine = this.textLayoutEngine;
@@ -1223,8 +1226,10 @@ export class CanvasGridRenderer {
         const cell = this.provider.getCell(row, col);
         const style = cell?.style;
 
+        const isHeader = row < frozenRows || col < frozenCols;
+
         // Background fill (grid layer).
-        const fill = style?.fill;
+        const fill = style?.fill ?? (isHeader ? this.theme.headerBg : undefined);
         const fillToDraw = fill && fill !== this.theme.gridBg ? fill : null;
         if (fillToDraw) {
           if (fillToDraw !== fillRunColor) {
@@ -1255,7 +1260,7 @@ export class CanvasGridRenderer {
             contentCtx.font = toCanvasFontString(fontSpec);
           }
 
-          const fillStyle = resolveCellTextColorWithTheme(cell.value, style?.color, this.theme);
+          const fillStyle = resolveCellTextColorWithTheme(cell.value, style?.color, isHeader ? headerTextTheme : this.theme);
           if (fillStyle !== currentTextFill) {
             contentCtx.fillStyle = fillStyle;
             currentTextFill = fillStyle;
