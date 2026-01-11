@@ -59,11 +59,21 @@ fn parse_bracketed(input: &str, start: usize) -> Option<(&str, usize)> {
                 i += 1;
             }
             b']' => {
-                // Excel escapes ']' inside structured references as ']]'. At the outermost depth,
-                // treat a double ']]' as a literal ']' rather than the end of the bracketed segment.
-                if depth == 1 && bytes.get(i + 1) == Some(&b']') {
-                    i += 2;
-                    continue;
+                // Excel escapes `]` inside structured references as `]]`.
+                //
+                // `]]` is ambiguous when nested brackets are involved because it can also represent
+                // the end of an inner bracket group immediately followed by the end of the outer
+                // structured-ref bracket (e.g. `Table1[[Col]]`).
+                //
+                // Disambiguate by treating `]]` as an escaped literal only when there is at least
+                // one more `]` later in the bracketed segment. Otherwise, interpret it as a close
+                // bracket (potentially followed by another close for an outer level).
+                if bytes.get(i + 1) == Some(&b']') {
+                    let has_closer = bytes.get(i + 2..).is_some_and(|rest| rest.contains(&b']'));
+                    if has_closer {
+                        i += 2;
+                        continue;
+                    }
                 }
                 depth -= 1;
                 if depth == 0 {
@@ -349,6 +359,14 @@ mod tests {
         let (sref, _) = parse_structured_ref("Table1[[#Headers],[Qty]]", 0).unwrap();
         assert_eq!(sref.item, Some(StructuredRefItem::Headers));
         assert_eq!(sref.columns, StructuredColumns::Single("Qty".into()));
+    }
+
+    #[test]
+    fn parses_nested_column_name_with_escaped_bracket() {
+        let (sref, _) = parse_structured_ref("Table1[[#Headers],[A]]B]]", 0).unwrap();
+        assert_eq!(sref.table_name.as_deref(), Some("Table1"));
+        assert_eq!(sref.item, Some(StructuredRefItem::Headers));
+        assert_eq!(sref.columns, StructuredColumns::Single("A]B".into()));
     }
 
     #[test]
