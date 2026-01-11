@@ -84,3 +84,19 @@ The grid is canvas-rendered, but includes baseline accessibility scaffolding:
   - active cell value
   - active selection range
 - Keyboard navigation is supported via arrow keys when the grid container is focused.
+
+## Autofill (fill handle)
+
+When `interactionMode="default"`, the selection overlay draws a small **fill handle** at the bottom-right of the active selection range (Excel-like).
+
+Dragging the fill handle:
+
+- Extends the active selection range in the drag direction.
+- Renders a dashed preview overlay while dragging.
+- Fires callbacks so consumers can apply an autofill algorithm to their underlying data model:
+  - `onFillHandleChange?: ({ source, target }) => void`
+  - `onFillHandleCommit?: ({ source, target }) => void | Promise<void`
+
+`target` is the full extended range **including** `source`.
+
+Note: `@formula/grid` only handles interaction + rendering. Consumers are responsible for actually writing filled values/formulas into their backing store.
