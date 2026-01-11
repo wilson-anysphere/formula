@@ -580,10 +580,7 @@ impl Workbook {
 
 fn normalize_refers_to(refers_to: String) -> String {
     let trimmed = refers_to.trim();
-    trimmed
-        .strip_prefix('=')
-        .unwrap_or(trimmed)
-        .to_string()
+    trimmed.strip_prefix('=').unwrap_or(trimmed).to_string()
 }
 
 impl<'de> Deserialize<'de> for Workbook {

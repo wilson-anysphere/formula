@@ -1,7 +1,7 @@
 use formula_model::{
-    CellKey, CellRef, CellValue, ErrorValue, Range, Table, TableColumn, Workbook, Worksheet,
-    EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS, SCHEMA_VERSION,
+    CellKey, CellRef, CellValue, DataValidation, DataValidationAssignment, DataValidationKind,
+    ErrorValue, Hyperlink, HyperlinkTarget, Range, Table, TableColumn, Workbook, Worksheet,
+    EXCEL_MAX_COLS, EXCEL_MAX_ROWS, SCHEMA_VERSION,
 };
 
 #[test]
@@ -90,9 +90,7 @@ fn formula_and_style_keep_empty_cells_in_sparse_store() {
     let mut sheet = Worksheet::new(1, "Sheet1");
 
     // Formula-only cell is stored.
-    sheet
-        .set_formula_a1("A1", Some("1+1".to_string()))
-        .unwrap();
+    sheet.set_formula_a1("A1", Some("1+1".to_string())).unwrap();
     assert_eq!(sheet.cell_count(), 1);
     assert_eq!(sheet.formula(CellRef::new(0, 0)), Some("1+1"));
 
@@ -275,6 +273,71 @@ fn table_column_index_is_case_insensitive() {
     assert_eq!(table.column_index("col"), Some(0));
     assert_eq!(table.column_index("COL"), Some(0));
     assert_eq!(table.column_index("oThEr"), Some(1));
+}
+
+#[test]
+fn rename_sheet_rewrites_non_cell_formulas_and_hyperlinks() {
+    let mut workbook = Workbook::new();
+    let renamed_id = workbook.add_sheet("Sheet1").unwrap();
+    let other_id = workbook.add_sheet("Other").unwrap();
+
+    let other = workbook.sheet_mut(other_id).unwrap();
+    other.tables.push(Table {
+        id: 1,
+        name: "Table1".into(),
+        display_name: "Table1".into(),
+        range: Range::from_a1("A1:B2").unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![TableColumn {
+            id: 1,
+            name: "Col".into(),
+            formula: Some("Sheet1!A1".into()),
+            totals_formula: Some("Sheet1!B1".into()),
+        }],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
+    });
+    other.data_validations.push(DataValidationAssignment {
+        id: 1,
+        ranges: vec![Range::from_a1("A1").unwrap()],
+        validation: DataValidation {
+            kind: DataValidationKind::List,
+            operator: None,
+            formula1: "Sheet1!A1:A3".into(),
+            formula2: None,
+            allow_blank: false,
+            show_input_message: false,
+            show_error_message: false,
+            show_drop_down: false,
+            input_message: None,
+            error_alert: None,
+        },
+    });
+    other.hyperlinks.push(Hyperlink::for_cell(
+        CellRef::new(0, 0),
+        HyperlinkTarget::Internal {
+            sheet: "Sheet1".into(),
+            cell: CellRef::new(0, 0),
+        },
+    ));
+
+    workbook.rename_sheet(renamed_id, "Data").unwrap();
+
+    let other = workbook.sheet(other_id).unwrap();
+    let col = &other.tables[0].columns[0];
+    assert_eq!(col.formula.as_deref(), Some("Data!A1"));
+    assert_eq!(col.totals_formula.as_deref(), Some("Data!B1"));
+    assert_eq!(other.data_validations[0].validation.formula1, "Data!A1:A3");
+    match &other.hyperlinks[0].target {
+        HyperlinkTarget::Internal { sheet, cell } => {
+            assert_eq!(sheet, "Data");
+            assert_eq!(*cell, CellRef::new(0, 0));
+        }
+        _ => panic!("expected internal hyperlink"),
+    }
 }
 
 #[test]
