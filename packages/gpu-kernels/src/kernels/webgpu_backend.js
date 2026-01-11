@@ -113,43 +113,28 @@ export class WebGpuBackend {
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
       if (!adapter) return null;
 
-      const supportsF64 = adapter.features?.has?.("shader-f64") ?? false;
-      /** @type {GPUFeatureName[]} */
-      const requiredFeatures = supportsF64 ? ["shader-f64"] : [];
+      let supportsF64 = adapter.features?.has?.("shader-f64") ?? false;
 
       /** @type {GPUDevice} */
-      const device = await adapter.requestDevice({ requiredFeatures });
+      let device;
+      try {
+        device = supportsF64 ? await adapter.requestDevice({ requiredFeatures: ["shader-f64"] }) : await adapter.requestDevice();
+      } catch {
+        // Fall back to an f32-only device if requesting shader-f64 fails for any
+        // reason (browser quirks, partial implementations, etc).
+        device = await adapter.requestDevice();
+        supportsF64 = false;
+      }
+      supportsF64 = supportsF64 && (device.features?.has?.("shader-f64") ?? false);
 
-      const [
-        reduceSumSrc,
-        reduceMinSrc,
-        reduceMaxSrc,
-        reduceSumproductSrc,
-        mmultSrc,
-        histogramSrc,
-        bitonicSortSrc,
-        reduceSumF64Src,
-        reduceMinF64Src,
-        reduceMaxF64Src,
-        reduceSumproductF64Src,
-        mmultF64Src,
-        histogramF64Src,
-        bitonicSortF64Src
-      ] = await Promise.all([
+      const [reduceSumSrc, reduceMinSrc, reduceMaxSrc, reduceSumproductSrc, mmultSrc, histogramSrc, bitonicSortSrc] = await Promise.all([
         loadTextResource(new URL("./wgsl/reduce_sum.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_min.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_max.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_sumproduct.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/mmult.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/histogram.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/bitonic_sort.wgsl", import.meta.url)),
-        supportsF64 ? loadTextResource(new URL("./wgsl/reduce_sum_f64.wgsl", import.meta.url)) : null,
-        supportsF64 ? loadTextResource(new URL("./wgsl/reduce_min_f64.wgsl", import.meta.url)) : null,
-        supportsF64 ? loadTextResource(new URL("./wgsl/reduce_max_f64.wgsl", import.meta.url)) : null,
-        supportsF64 ? loadTextResource(new URL("./wgsl/reduce_sumproduct_f64.wgsl", import.meta.url)) : null,
-        supportsF64 ? loadTextResource(new URL("./wgsl/mmult_f64.wgsl", import.meta.url)) : null,
-        supportsF64 ? loadTextResource(new URL("./wgsl/histogram_f64.wgsl", import.meta.url)) : null,
-        supportsF64 ? loadTextResource(new URL("./wgsl/bitonic_sort_f64.wgsl", import.meta.url)) : null
+        loadTextResource(new URL("./wgsl/bitonic_sort.wgsl", import.meta.url))
       ]);
 
       const reduceSum_f32 = device.createComputePipeline({
@@ -221,56 +206,98 @@ export class WebGpuBackend {
 
       if (supportsF64) {
         // Create f64 variants. These only compile on devices that expose the
-        // `shader-f64` feature.
-        pipelines.reduceSum_f64 = device.createComputePipeline({
-          layout: "auto",
-          compute: {
-            module: device.createShaderModule({ code: reduceSumF64Src ?? "" }),
-            entryPoint: "main"
-          }
-        });
-        pipelines.reduceMin_f64 = device.createComputePipeline({
-          layout: "auto",
-          compute: {
-            module: device.createShaderModule({ code: reduceMinF64Src ?? "" }),
-            entryPoint: "main"
-          }
-        });
-        pipelines.reduceMax_f64 = device.createComputePipeline({
-          layout: "auto",
-          compute: {
-            module: device.createShaderModule({ code: reduceMaxF64Src ?? "" }),
-            entryPoint: "main"
-          }
-        });
-        pipelines.reduceSumproduct_f64 = device.createComputePipeline({
-          layout: "auto",
-          compute: {
-            module: device.createShaderModule({ code: reduceSumproductF64Src ?? "" }),
-            entryPoint: "main"
-          }
-        });
-        pipelines.mmult_f64 = device.createComputePipeline({
-          layout: "auto",
-          compute: {
-            module: device.createShaderModule({ code: mmultF64Src ?? "" }),
-            entryPoint: "main"
-          }
-        });
-        pipelines.histogram_f64 = device.createComputePipeline({
-          layout: "auto",
-          compute: {
-            module: device.createShaderModule({ code: histogramF64Src ?? "" }),
-            entryPoint: "main"
-          }
-        });
-        pipelines.bitonicSort_f64 = device.createComputePipeline({
-          layout: "auto",
-          compute: {
-            module: device.createShaderModule({ code: bitonicSortF64Src ?? "" }),
-            entryPoint: "main"
-          }
-        });
+        // `shader-f64` feature. Keep the backend usable even if an individual
+        // f64 shader/pipeline fails to compile by falling back to f32 for that
+        // kernel.
+        let reduceSumF64Src;
+        let reduceMinF64Src;
+        let reduceMaxF64Src;
+        let reduceSumproductF64Src;
+        let mmultF64Src;
+        let histogramF64Src;
+        let bitonicSortF64Src;
+        try {
+          [reduceSumF64Src, reduceMinF64Src, reduceMaxF64Src, reduceSumproductF64Src, mmultF64Src, histogramF64Src, bitonicSortF64Src] =
+            await Promise.all([
+              loadTextResource(new URL("./wgsl/reduce_sum_f64.wgsl", import.meta.url)),
+              loadTextResource(new URL("./wgsl/reduce_min_f64.wgsl", import.meta.url)),
+              loadTextResource(new URL("./wgsl/reduce_max_f64.wgsl", import.meta.url)),
+              loadTextResource(new URL("./wgsl/reduce_sumproduct_f64.wgsl", import.meta.url)),
+              loadTextResource(new URL("./wgsl/mmult_f64.wgsl", import.meta.url)),
+              loadTextResource(new URL("./wgsl/histogram_f64.wgsl", import.meta.url)),
+              loadTextResource(new URL("./wgsl/bitonic_sort_f64.wgsl", import.meta.url))
+            ]);
+        } catch {
+          // If fetching f64 WGSL fails, treat f64 as unavailable while keeping
+          // f32 pipelines usable.
+          supportsF64 = false;
+        }
+
+        if (supportsF64) {
+          try {
+            pipelines.reduceSum_f64 = device.createComputePipeline({
+              layout: "auto",
+              compute: {
+                module: device.createShaderModule({ code: reduceSumF64Src }),
+                entryPoint: "main"
+              }
+            });
+          } catch {}
+          try {
+            pipelines.reduceMin_f64 = device.createComputePipeline({
+              layout: "auto",
+              compute: {
+                module: device.createShaderModule({ code: reduceMinF64Src }),
+                entryPoint: "main"
+              }
+            });
+          } catch {}
+          try {
+            pipelines.reduceMax_f64 = device.createComputePipeline({
+              layout: "auto",
+              compute: {
+                module: device.createShaderModule({ code: reduceMaxF64Src }),
+                entryPoint: "main"
+              }
+            });
+          } catch {}
+          try {
+            pipelines.reduceSumproduct_f64 = device.createComputePipeline({
+              layout: "auto",
+              compute: {
+                module: device.createShaderModule({ code: reduceSumproductF64Src }),
+                entryPoint: "main"
+              }
+            });
+          } catch {}
+          try {
+            pipelines.mmult_f64 = device.createComputePipeline({
+              layout: "auto",
+              compute: {
+                module: device.createShaderModule({ code: mmultF64Src }),
+                entryPoint: "main"
+              }
+            });
+          } catch {}
+          try {
+            pipelines.histogram_f64 = device.createComputePipeline({
+              layout: "auto",
+              compute: {
+                module: device.createShaderModule({ code: histogramF64Src }),
+                entryPoint: "main"
+              }
+            });
+          } catch {}
+          try {
+            pipelines.bitonicSort_f64 = device.createComputePipeline({
+              layout: "auto",
+              compute: {
+                module: device.createShaderModule({ code: bitonicSortF64Src }),
+                entryPoint: "main"
+              }
+            });
+          } catch {}
+        }
       }
 
       return new WebGpuBackend(device, adapter, {
