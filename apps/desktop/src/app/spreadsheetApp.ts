@@ -3041,17 +3041,33 @@ export class SpreadsheetApp {
   private onPointerDown(e: PointerEvent): void {
     if (this.editor.isOpen()) return;
 
-    // Right/middle clicks should not mutate selection. This keeps the current selection stable
-    // for context menus (and matches typical spreadsheet behavior where the context menu applies
-    // to the existing selection).
-    if (e.pointerType === "mouse" && e.button !== 0) {
-      this.focus();
-      return;
-    }
-
     const rect = this.root.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // Right/middle clicks should not start drag selection, but we still want right-click to
+    // apply to the cell under the cursor when the click happens outside the current selection.
+    // (Excel keeps selection when right-clicking inside it, but moves selection when right-clicking
+    // outside.)
+    if (e.pointerType === "mouse" && e.button !== 0) {
+      if (x >= this.rowHeaderWidth && y >= this.colHeaderHeight) {
+        const cell = this.cellFromPoint(x, y);
+        const inSelection = this.selection.ranges.some(
+          (range) =>
+            cell.row >= range.startRow &&
+            cell.row <= range.endRow &&
+            cell.col >= range.startCol &&
+            cell.col <= range.endCol
+        );
+        if (!inSelection) {
+          this.selection = setActiveCell(this.selection, cell, this.limits);
+          this.renderSelection();
+          this.updateStatus();
+        }
+      }
+      this.focus();
+      return;
+    }
 
     const primary = e.ctrlKey || e.metaKey;
 

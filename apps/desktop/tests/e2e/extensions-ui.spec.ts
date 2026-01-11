@@ -160,7 +160,8 @@ test.describe("Extensions UI integration", () => {
     await page.getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
 
-    await page.locator("#grid").click({ button: "right" });
+    // Right-click inside the selection so the selection remains intact and `hasSelection` stays true.
+    await page.locator("#grid").click({ button: "right", position: { x: 100, y: 40 } });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 
