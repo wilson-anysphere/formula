@@ -129,6 +129,32 @@ describe("charts scene graph", () => {
     expect(svg).toContain('clip-rule="evenodd"');
   });
 
+  it("supports stroke cap/join attributes in SVG", () => {
+    const scene: Scene = {
+      nodes: [
+        {
+          kind: "line",
+          x1: 0,
+          y1: 0,
+          x2: 10,
+          y2: 0,
+          stroke: {
+            paint: { color: "#000000" },
+            width: 2,
+            lineCap: "round",
+            lineJoin: "bevel",
+            miterLimit: 2,
+          },
+        },
+      ],
+    };
+
+    const svg = renderSceneToSvg(scene, { width: 10, height: 10 });
+    expect(svg).toContain('stroke-linecap="round"');
+    expect(svg).toContain('stroke-linejoin="bevel"');
+    expect(svg).toContain('stroke-miterlimit="2"');
+  });
+
   it("supports rounded rects + clip-shape transforms on Canvas", () => {
     const scene: Scene = {
       nodes: [

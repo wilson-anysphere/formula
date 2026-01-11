@@ -9,10 +9,17 @@ export interface Paint {
   opacity?: number;
 }
 
+export type LineCap = "butt" | "round" | "square";
+
+export type LineJoin = "miter" | "round" | "bevel";
+
 export interface Stroke {
   paint: Paint;
   width: number;
   dash?: number[];
+  lineCap?: LineCap;
+  lineJoin?: LineJoin;
+  miterLimit?: number;
 }
 
 export interface FontSpec {

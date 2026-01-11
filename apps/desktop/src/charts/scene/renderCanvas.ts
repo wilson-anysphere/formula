@@ -18,6 +18,9 @@ function applyStroke(ctx: CanvasRenderingContext2D, stroke: Stroke | undefined):
   if (!rgba || rgba.a <= 0) return false;
   ctx.strokeStyle = rgbaToCss(rgba);
   ctx.lineWidth = stroke.width;
+  if (stroke.lineCap) ctx.lineCap = stroke.lineCap;
+  if (stroke.lineJoin) ctx.lineJoin = stroke.lineJoin;
+  if (stroke.miterLimit != null) ctx.miterLimit = stroke.miterLimit;
   ctx.setLineDash(stroke.dash ?? []);
   return true;
 }
