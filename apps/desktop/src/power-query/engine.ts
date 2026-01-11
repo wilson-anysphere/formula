@@ -1,7 +1,9 @@
 import { CacheManager } from "../../../../packages/power-query/src/cache/cache.js";
 import { hashValue } from "../../../../packages/power-query/src/cache/key.js";
+import { EncryptedCacheStore } from "../../../../packages/power-query/src/cache/encryptedStore.js";
 import { IndexedDBCacheStore } from "../../../../packages/power-query/src/cache/indexeddb.js";
 import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/memory.js";
+import { createWebCryptoCacheProvider } from "../../../../packages/power-query/src/cache/webCryptoProvider.js";
 import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
 import { DataTable } from "../../../../packages/power-query/src/table.js";
@@ -169,6 +171,10 @@ function getTauriInvoke(): TauriInvoke {
     throw new Error("Tauri invoke API not available");
   }
   return invoke;
+}
+
+function hasTauriInvoke(): boolean {
+  return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
 }
 
 function getTauriFs(): any {
@@ -398,12 +404,84 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
   };
 }
 
+function deleteIndexedDbDatabase(dbName: string): Promise<void> {
+  if (typeof indexedDB === "undefined") return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(dbName);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error ?? new Error(`IndexedDB deleteDatabase failed for ${dbName}`));
+    // If the delete is blocked (e.g. another open handle), treat it as best-effort.
+    req.onblocked = () => resolve();
+  });
+}
+
+type CacheCryptoProvider = import("../../../../packages/power-query/src/cache/encryptedStore.js").CacheCryptoProvider;
+
+let desktopCacheCryptoProviderPromise: Promise<CacheCryptoProvider> | null = null;
+function createDesktopCacheCryptoProvider(): CacheCryptoProvider {
+  let cachedKeyVersion = 1;
+  const ensureProvider = async () => {
+    if (!desktopCacheCryptoProviderPromise) {
+      desktopCacheCryptoProviderPromise = (async () => {
+        const invoke = getTauriInvoke();
+        const payload = (await invoke("power_query_cache_key_get_or_create")) as any;
+        const keyVersion = typeof payload?.keyVersion === "number" ? payload.keyVersion : null;
+        const keyBase64 = typeof payload?.keyBase64 === "string" ? payload.keyBase64 : null;
+        if (!keyVersion || keyVersion < 1 || !keyBase64) {
+          throw new Error("Unexpected Power Query cache key payload returned from Tauri");
+        }
+        const keyBytes = normalizeBinaryPayload(keyBase64);
+        const provider = await createWebCryptoCacheProvider({ keyVersion, keyBytes });
+        cachedKeyVersion = provider.keyVersion;
+        return provider;
+      })();
+    }
+    return desktopCacheCryptoProviderPromise;
+  };
+
+  return {
+    get keyVersion() {
+      return cachedKeyVersion;
+    },
+    async encryptBytes(plaintext, aad) {
+      const provider = await ensureProvider();
+      return provider.encryptBytes(plaintext, aad);
+    },
+    async decryptBytes(payload, aad) {
+      const provider = await ensureProvider();
+      return provider.decryptBytes(payload, aad);
+    },
+  };
+}
+
 function createDefaultCacheManager(): CacheManager {
   // Keep Power Query caches bounded so long-lived desktop sessions don't accumulate
   // unbounded IndexedDB storage.
   const limits = { maxEntries: 256, maxBytes: 256 * 1024 * 1024 };
-  const store =
-    typeof indexedDB !== "undefined" ? new IndexedDBCacheStore({ dbName: "formula-power-query-cache" }) : new MemoryCacheStore();
+  const storeIdbAvailable = typeof indexedDB !== "undefined";
+
+  if (!storeIdbAvailable) {
+    const cache = new CacheManager({ store: new MemoryCacheStore(), limits });
+    cache.prune().catch(() => {});
+    return cache;
+  }
+
+  // Encrypt cache entries at rest in the desktop app. We use a dedicated dbName so we
+  // can safely delete legacy plaintext caches created by older versions.
+  const legacyDbName = "formula-power-query-cache";
+  const dbName = "formula-power-query-cache-encrypted-v1";
+
+  deleteIndexedDbDatabase(legacyDbName).catch(() => {});
+
+  const underlyingStore = new IndexedDBCacheStore({ dbName });
+  const store = hasTauriInvoke()
+    ? new EncryptedCacheStore({
+        store: underlyingStore,
+        crypto: createDesktopCacheCryptoProvider(),
+        storeId: dbName,
+      })
+    : underlyingStore;
+
   const cache = new CacheManager({ store, limits });
   // Best-effort: prune on startup to enforce quotas even if the cache directory/db
   // was created by an older version without eviction.

@@ -4,6 +4,8 @@ use serde_json::Value as JsonValue;
 
 use crate::macro_trust::MacroTrustDecision;
 #[cfg(feature = "desktop")]
+use crate::storage::power_query_cache_key::{PowerQueryCacheKey, PowerQueryCacheKeyStore};
+#[cfg(feature = "desktop")]
 use crate::storage::power_query_credentials::{
     PowerQueryCredentialEntry, PowerQueryCredentialListEntry, PowerQueryCredentialStore,
 };
@@ -476,6 +478,22 @@ pub async fn read_binary_file_range(
         buf.truncate(read);
 
         Ok::<_, String>(STANDARD.encode(buf))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Power Query: retrieve (or create) the AES-256-GCM key used to encrypt cached
+/// query results at rest.
+///
+/// The key material is stored in the OS keychain so cached results remain
+/// decryptable across app restarts.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn power_query_cache_key_get_or_create() -> Result<PowerQueryCacheKey, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = PowerQueryCacheKeyStore::open_default();
+        store.get_or_create().map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
