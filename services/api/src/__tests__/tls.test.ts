@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import {
   closeCachedOrgTlsAgentsForTests,
   createPinnedCheckServerIdentity,
+  createTlsConnectOptions,
   normalizeFingerprintHex,
   sha256FingerprintHexFromCertRaw,
   fetchWithOrgTls
@@ -23,6 +24,35 @@ describe("TLS pinning helpers", () => {
   it("normalizes SHA-256 fingerprints (colon-separated vs hex)", () => {
     expect(normalizeFingerprintHex("AA:bb:CC")).toBe("aabbcc");
     expect(normalizeFingerprintHex("aabbcc")).toBe("aabbcc");
+  });
+
+  it("createTlsConnectOptions enforces TLSv1.3 minimum", () => {
+    const options = createTlsConnectOptions({ certificatePinningEnabled: false, certificatePins: [] });
+    expect(options.minVersion).toBe("TLSv1.3");
+  });
+
+  it("createTlsConnectOptions rejects empty pin set when pinning enabled", () => {
+    expect(() => createTlsConnectOptions({ certificatePinningEnabled: true, certificatePins: [] })).toThrow(
+      /certificatePins must be non-empty/i
+    );
+
+    try {
+      createTlsConnectOptions({ certificatePinningEnabled: true, certificatePins: [] });
+    } catch (err: any) {
+      expect(err.retriable).toBe(false);
+    }
+  });
+
+  it("createTlsConnectOptions rejects invalid pins when pinning enabled", () => {
+    expect(() =>
+      createTlsConnectOptions({ certificatePinningEnabled: true, certificatePins: ["not-a-fingerprint"] })
+    ).toThrow(/certificatePins must be SHA-256/i);
+
+    try {
+      createTlsConnectOptions({ certificatePinningEnabled: true, certificatePins: ["not-a-fingerprint"] });
+    } catch (err: any) {
+      expect(err.retriable).toBe(false);
+    }
   });
 
   it("rejects pin mismatches", () => {
