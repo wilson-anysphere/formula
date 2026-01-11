@@ -3,6 +3,7 @@ import { IndexedDBCacheStore } from "../../../../packages/power-query/src/cache/
 import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/memory.js";
 import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
+import type { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
 
 import { enforceExternalConnector } from "../dlp/enforceExternalConnector.js";
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
@@ -38,6 +39,12 @@ export type DesktopQueryEngineOptions = {
    * Overrides for HTTP requests. Defaults to the global `fetch`.
    */
   fetch?: typeof fetch;
+  /**
+   * Optional OAuth2 manager. When supplied, HTTP connectors can transparently
+   * add bearer tokens for requests that specify `auth: { type: "oauth2", ... }`
+   * (or when credential hooks return `{ oauth2: ... }`).
+   */
+  oauth2Manager?: OAuth2Manager;
   /**
    * Cache manager override. If omitted, Formula uses IndexedDB in browser contexts
    * (and an in-memory cache as a fallback for non-browser environments).
@@ -148,7 +155,10 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
   const cache = options.cache ?? createDefaultCacheManager();
   const fileAdapter = options.fileAdapter ?? createDefaultFileAdapter();
 
-  const http = options.fetch ? new HttpConnector({ fetch: options.fetch }) : undefined;
+  const http =
+    options.fetch || options.oauth2Manager
+      ? new HttpConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
+      : undefined;
 
   return new QueryEngine({
     cache,

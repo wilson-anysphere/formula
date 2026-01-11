@@ -48,3 +48,43 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
   }
 });
 
+test("createDesktopQueryEngine wires oauth2Manager into HttpConnector", async () => {
+  /** @type {any[]} */
+  const oauthCalls = [];
+  const oauth2Manager = {
+    getAccessToken: async (opts) => {
+      oauthCalls.push(opts);
+      return { accessToken: "token", expiresAtMs: null, refreshToken: null };
+    },
+  };
+
+  /** @type {typeof fetch} */
+  const fetchFn = async (_url, init) => {
+    const auth = /** @type {any} */ (init?.headers)?.Authorization;
+    assert.equal(auth, "Bearer token");
+    return new Response(JSON.stringify([{ id: 1 }]), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  const engine = createDesktopQueryEngine({
+    fetch: fetchFn,
+    oauth2Manager,
+    fileAdapter: { readText: async () => "", readBinary: async () => new Uint8Array() },
+  });
+
+  const query = {
+    id: "q_api",
+    name: "API",
+    source: {
+      type: "api",
+      url: "https://api.example/data",
+      method: "GET",
+      auth: { type: "oauth2", providerId: "example" },
+    },
+    steps: [],
+  };
+
+  const table = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(table.toGrid(), [["id"], [1]]);
+  assert.equal(oauthCalls.length, 1);
+  assert.equal(oauthCalls[0].providerId, "example");
+});
