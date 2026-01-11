@@ -1689,6 +1689,52 @@ impl AppState {
         self.macro_host.list_macros(workbook)
     }
 
+    pub fn macro_runtime_context(&self) -> MacroRuntimeContext {
+        self.macro_host.runtime_context()
+    }
+
+    pub fn set_macro_runtime_context(&mut self, ctx: MacroRuntimeContext) -> Result<(), MacroHostError> {
+        let workbook = self
+            .workbook
+            .as_ref()
+            .ok_or(MacroHostError::NoWorkbookLoaded)?;
+
+        if ctx.active_sheet >= workbook.sheets.len() {
+            return Err(MacroHostError::Runtime(format!(
+                "sheet index out of range: {}",
+                ctx.active_sheet
+            )));
+        }
+
+        if ctx.active_cell.0 == 0 || ctx.active_cell.1 == 0 {
+            return Err(MacroHostError::Runtime("ActiveCell is 1-based".to_string()));
+        }
+
+        if let Some(sel) = ctx.selection {
+            if sel.sheet >= workbook.sheets.len() {
+                return Err(MacroHostError::Runtime(format!(
+                    "selection sheet index out of range: {}",
+                    sel.sheet
+                )));
+            }
+            if sel.start_row == 0 || sel.start_col == 0 || sel.end_row == 0 || sel.end_col == 0 {
+                return Err(MacroHostError::Runtime("Selection is 1-based".to_string()));
+            }
+            if sel.start_row > sel.end_row || sel.start_col > sel.end_col {
+                return Err(MacroHostError::Runtime(format!(
+                    "invalid selection range: start ({},{}) end ({},{})",
+                    sel.start_row, sel.start_col, sel.end_row, sel.end_col
+                )));
+            }
+        }
+
+        // Ensure the macro host has already synchronized with the workbook so the context
+        // is not reset the first time the VBA project hash is computed.
+        self.macro_host.sync_with_workbook(workbook);
+        self.macro_host.set_runtime_context(ctx);
+        Ok(())
+    }
+
     pub fn set_macro_ui_context(
         &mut self,
         sheet_id: &str,

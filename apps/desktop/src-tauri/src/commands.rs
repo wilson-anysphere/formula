@@ -1995,11 +1995,15 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
     use std::collections::HashMap;
 
     let active_sheet_id = match state.get_workbook() {
-        Ok(workbook) => workbook
-            .sheets
-            .first()
-            .map(|s| s.id.clone())
-            .unwrap_or_else(|| "Sheet1".to_string()),
+        Ok(workbook) => {
+            let active_index = state.macro_runtime_context().active_sheet;
+            workbook
+                .sheets
+                .get(active_index)
+                .or_else(|| workbook.sheets.first())
+                .map(|s| s.id.clone())
+                .unwrap_or_else(|| "Sheet1".to_string())
+        }
         Err(err) => {
             return TypeScriptRunResult {
                 ok: false,
@@ -2196,7 +2200,7 @@ pub async fn validate_vba_migration(
         use crate::macros::MacroExecutionOptions;
         use std::collections::BTreeSet;
 
-        let (vba_blocked_result, workbook) = {
+        let (vba_blocked_result, workbook, macro_ctx) = {
             let mut state = shared.lock().unwrap();
             let trust_store = trust_shared.lock().unwrap();
 
@@ -2207,15 +2211,22 @@ pub async fn validate_vba_migration(
             };
 
             let vba_blocked_result = blocked.map(macro_blocked_result);
+            let macro_ctx = state.macro_runtime_context();
             let workbook = state.get_workbook_mut().map_err(app_error)?.clone();
-            (vba_blocked_result, workbook)
+            (vba_blocked_result, workbook, macro_ctx)
         };
 
         let mut vba_state = AppState::new();
         vba_state.load_workbook(workbook.clone());
+        vba_state
+            .set_macro_runtime_context(macro_ctx)
+            .map_err(|e| e.to_string())?;
 
         let mut script_state = AppState::new();
         script_state.load_workbook(workbook);
+        script_state
+            .set_macro_runtime_context(macro_ctx)
+            .map_err(|e| e.to_string())?;
 
         let vba = if let Some(blocked_result) = vba_blocked_result {
             blocked_result
@@ -2241,6 +2252,44 @@ pub async fn validate_vba_migration(
 
         match target {
             MigrationTarget::Python => {
+                let python_context = {
+                    let workbook = script_state
+                        .get_workbook()
+                        .map_err(|e| e.to_string())?;
+                    let fallback_sheet_id = workbook
+                        .sheets
+                        .first()
+                        .map(|s| s.id.clone())
+                        .ok_or_else(|| "workbook contains no sheets".to_string())?;
+                    let active_sheet_id = workbook
+                        .sheets
+                        .get(macro_ctx.active_sheet)
+                        .map(|s| s.id.clone())
+                        .unwrap_or_else(|| fallback_sheet_id.clone());
+
+                    let selection = macro_ctx.selection.unwrap_or(formula_vba_runtime::VbaRangeRef {
+                        sheet: macro_ctx.active_sheet,
+                        start_row: macro_ctx.active_cell.0,
+                        start_col: macro_ctx.active_cell.1,
+                        end_row: macro_ctx.active_cell.0,
+                        end_col: macro_ctx.active_cell.1,
+                    });
+                    let selection_sheet_id = workbook
+                        .sheets
+                        .get(selection.sheet)
+                        .map(|s| s.id.clone())
+                        .unwrap_or_else(|| active_sheet_id.clone());
+                    PythonRunContext {
+                        active_sheet_id: Some(active_sheet_id.clone()),
+                        selection: Some(PythonSelection {
+                            sheet_id: selection_sheet_id,
+                            start_row: selection.start_row.saturating_sub(1) as usize,
+                            start_col: selection.start_col.saturating_sub(1) as usize,
+                            end_row: selection.end_row.saturating_sub(1) as usize,
+                            end_col: selection.end_col.saturating_sub(1) as usize,
+                        }),
+                    }
+                };
                 python = Some(
                     crate::python::run_python_script(
                         &mut script_state,
@@ -2248,7 +2297,7 @@ pub async fn validate_vba_migration(
                         None,
                         None,
                         None,
-                        None,
+                        Some(python_context),
                     )
                     .map_err(|e| e.to_string())?,
                 );
