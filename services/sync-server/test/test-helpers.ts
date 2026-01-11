@@ -97,6 +97,7 @@ export async function startSyncServer(opts: {
     ".."
   );
   const entry = path.join(serviceDir, "src", "index.ts");
+  const nodeWithTsx = path.join(serviceDir, "scripts", "node-with-tsx.mjs");
 
   let child: ChildProcessWithoutNullStreams | null = null;
   let stdout = "";
@@ -127,7 +128,7 @@ export async function startSyncServer(opts: {
           SYNC_SERVER_JWT_ISSUER: opts.auth.issuer ?? "",
         };
 
-  child = spawn(process.execPath, ["--import", "tsx", entry], {
+  child = spawn(process.execPath, [nodeWithTsx, entry], {
     cwd: serviceDir,
     env: {
       ...process.env,
@@ -169,4 +170,3 @@ export async function startSyncServer(opts: {
     stop: killChild,
   };
 }
-

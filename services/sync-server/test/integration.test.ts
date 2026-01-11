@@ -912,6 +912,7 @@ test("refuses to start a second server using the same data directory", async (t)
     ".."
   );
   const entry = path.join(serviceDir, "src", "index.ts");
+  const nodeWithTsx = path.join(serviceDir, "scripts", "node-with-tsx.mjs");
 
   const server1 = await startSyncServer({
     port: port1,
@@ -927,7 +928,7 @@ test("refuses to start a second server using the same data directory", async (t)
 
   let stdout2 = "";
   let stderr2 = "";
-  const server2 = spawn(process.execPath, ["--import", "tsx", entry], {
+  const server2 = spawn(process.execPath, [nodeWithTsx, entry], {
     cwd: serviceDir,
     env: {
       ...process.env,
@@ -992,10 +993,11 @@ test("does not treat lock from another host as stale", async (t) => {
     ".."
   );
   const entry = path.join(serviceDir, "src", "index.ts");
+  const nodeWithTsx = path.join(serviceDir, "scripts", "node-with-tsx.mjs");
 
   let stdout = "";
   let stderr = "";
-  const child = spawn(process.execPath, ["--import", "tsx", entry], {
+  const child = spawn(process.execPath, [nodeWithTsx, entry], {
     cwd: serviceDir,
     env: {
       ...process.env,
