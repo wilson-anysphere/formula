@@ -376,6 +376,8 @@ mod tests {
         assert_eq!(format_sheet_reference(None, "Sheet1", None), "Sheet1");
         assert_eq!(format_sheet_reference(None, "My Sheet", None), "'My Sheet'");
         assert_eq!(format_sheet_reference(None, "O'Brien", None), "'O''Brien'");
+        assert_eq!(format_sheet_reference(None, "Résumé", None), "'Résumé'");
+        assert_eq!(format_sheet_reference(None, "数据", None), "'数据'");
         assert_eq!(
             format_sheet_reference(None, "Sheet1", Some("Sheet3")),
             "Sheet1:Sheet3"
@@ -487,6 +489,14 @@ mod tests {
         assert_eq!(
             rewrite_sheet_names_in_formula("='📊'!A1", "📊", "Data"),
             "=Data!A1"
+        );
+    }
+
+    #[test]
+    fn rewrite_quotes_unicode_sheet_names_in_output() {
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=Sheet1!A1", "Sheet1", "数据"),
+            "='数据'!A1"
         );
     }
 

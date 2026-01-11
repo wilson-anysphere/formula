@@ -209,6 +209,13 @@ fn workbook_sheet_by_name_is_case_insensitive() {
 }
 
 #[test]
+fn workbook_sheet_by_name_is_unicode_case_insensitive() {
+    let mut workbook = Workbook::new();
+    workbook.add_sheet("Äbc");
+    assert!(workbook.sheet_by_name("äbc").is_some());
+}
+
+#[test]
 fn workbook_find_table_is_case_insensitive() {
     let mut workbook = Workbook::new();
     let sheet_id = workbook.add_sheet("Sheet1");
