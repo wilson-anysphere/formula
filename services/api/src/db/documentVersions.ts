@@ -97,8 +97,9 @@ export async function createDocumentVersion(
   pool: Pool,
   keyring: Keyring,
   params: CreateDocumentVersionParams
-): Promise<{ id: string }> {
+): Promise<{ id: string; createdAt: Date }> {
   const versionId = crypto.randomUUID();
+  let createdAt: Date | null = null;
 
   await withTransaction(pool, async (client) => {
     const docRes = await client.query("SELECT org_id FROM documents WHERE id = $1 LIMIT 1", [params.documentId]);
@@ -110,13 +111,15 @@ export async function createDocumentVersion(
     const settings = await loadOrgEncryptionSettings(client, orgId);
 
     if (!settings.cloudEncryptionAtRest) {
-      await client.query(
+      const inserted = await client.query(
         `
           INSERT INTO document_versions (id, document_id, created_by, description, data)
           VALUES ($1, $2, $3, $4, $5)
+          RETURNING created_at
         `,
         [versionId, params.documentId, params.createdBy ?? null, params.description ?? null, params.data]
       );
+      createdAt = (inserted.rows[0] as any).created_at as Date;
       return;
     }
 
@@ -136,7 +139,7 @@ export async function createDocumentVersion(
       aadContext: aad
     });
 
-    await client.query(
+    const inserted = await client.query(
       `
         INSERT INTO document_versions (
           id,
@@ -159,6 +162,7 @@ export async function createDocumentVersion(
           NULL,
           $5,$6,$7,$8,$9,$10,$11,$12,$13
         )
+        RETURNING created_at
       `,
       [
         versionId,
@@ -176,16 +180,24 @@ export async function createDocumentVersion(
         JSON.stringify(envelope.aad)
       ]
     );
+    createdAt = (inserted.rows[0] as any).created_at as Date;
   });
 
-  return { id: versionId };
+  if (!createdAt) {
+    throw new Error("failed_to_create_document_version");
+  }
+
+  return { id: versionId, createdAt };
 }
 
 export async function getDocumentVersionData(
   pool: Pool,
   keyring: Keyring,
-  versionId: string
+  versionId: string,
+  { documentId: expectedDocumentId }: { documentId?: string } = {}
 ): Promise<Buffer | null> {
+  const whereDoc = expectedDocumentId ? "AND v.document_id = $2" : "";
+  const params = expectedDocumentId ? [versionId, expectedDocumentId] : [versionId];
   const res = await pool.query(
     `
       SELECT
@@ -205,9 +217,10 @@ export async function getDocumentVersionData(
       FROM document_versions v
       JOIN documents d ON d.id = v.document_id
       WHERE v.id = $1
+      ${whereDoc}
       LIMIT 1
     `,
-    [versionId]
+    params
   );
 
   if (res.rowCount !== 1) return null;

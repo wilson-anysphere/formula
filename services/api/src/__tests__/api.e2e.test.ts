@@ -456,6 +456,10 @@ describe("API e2e: auth + RBAC + sync token", () => {
     const ownerId = ownerBody.user.id as string;
     const orgId = ownerBody.organization.id as string;
 
+    // Ensure encryption-at-rest is enabled for this org so the test verifies we
+    // are not storing document version blobs in plaintext.
+    await db.query("UPDATE org_settings SET cloud_encryption_at_rest = true WHERE org_id = $1", [orgId]);
+
     const viewerRes = await app.inject({
       method: "POST",
       url: "/auth/register",
@@ -508,6 +512,14 @@ describe("API e2e: auth + RBAC + sync token", () => {
     expect(created.version.description).toBe("v1");
     expect(created.version.sizeBytes).toBe(bytes.length);
     const versionId = created.version.id as string;
+
+    const rawStored = await db.query(
+      "SELECT data, data_ciphertext, data_encrypted_dek FROM document_versions WHERE id = $1",
+      [versionId]
+    );
+    expect(rawStored.rows[0].data).toBeNull();
+    expect(rawStored.rows[0].data_ciphertext).toBeTypeOf("string");
+    expect(rawStored.rows[0].data_encrypted_dek).toBeTypeOf("string");
 
     const listAsViewer = await app.inject({
       method: "GET",

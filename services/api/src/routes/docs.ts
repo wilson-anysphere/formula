@@ -3,7 +3,9 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { isMfaEnforcedForOrg } from "../auth/mfa";
+import { createKeyring } from "../crypto/keyring";
 import { normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
+import { createDocumentVersion, getDocumentVersionData } from "../db/documentVersions";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { canDocument, type DocumentRole } from "../rbac/roles";
 import { signSyncToken } from "../sync/token";
@@ -100,6 +102,7 @@ async function requireOrgMembership(request: FastifyRequest, orgId: string): Pro
 }
 
 export function registerDocRoutes(app: FastifyInstance): void {
+  const keyring = createKeyring(app.config);
   const CreateDocBody = z.object({
     orgId: z.string().uuid(),
     title: z.string().min(1)
@@ -222,17 +225,14 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const data = decodeBase64Strict(parsed.data.dataBase64);
     if (!data) return reply.code(400).send({ error: "invalid_request" });
 
-    const versionId = crypto.randomUUID();
-    const inserted = await app.db.query(
-      `
-        INSERT INTO document_versions (id, document_id, created_by, description, data)
-        VALUES ($1,$2,$3,$4,$5)
-        RETURNING created_at
-      `,
-      [versionId, docId, request.user!.id, parsed.data.description ?? null, data]
-    );
+    const created = await createDocumentVersion(app.db, keyring, {
+      documentId: docId,
+      createdBy: request.user!.id,
+      description: parsed.data.description ?? null,
+      data
+    });
 
-    const createdAt = (inserted.rows[0] as any).created_at as Date;
+    const createdAt = created.createdAt;
     const sizeBytes = data.length;
 
     await writeAuditEvent(
@@ -246,17 +246,17 @@ export function registerDocRoutes(app: FastifyInstance): void {
           userEmail: request.user!.email,
           sessionId: request.session?.id,
           ipAddress: getClientIp(request),
-          userAgent: getUserAgent(request)
-        },
-        resource: { type: "document", id: docId },
-        success: true,
-        details: { versionId, description: parsed.data.description ?? null, sizeBytes }
-      })
-    );
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "document", id: docId },
+          success: true,
+          details: { versionId: created.id, description: parsed.data.description ?? null, sizeBytes }
+        })
+      );
 
     return reply.send({
       version: {
-        id: versionId,
+        id: created.id,
         createdAt,
         description: parsed.data.description ?? null,
         sizeBytes
@@ -280,14 +280,25 @@ export function registerDocRoutes(app: FastifyInstance): void {
       [docId]
     );
 
+    const enriched = await Promise.all(
+      versions.rows.map(async (row: any) => {
+        const plaintextBytes = row.data
+          ? Buffer.from(row.data as any)
+          : await getDocumentVersionData(app.db, keyring, String(row.id), { documentId: docId });
+        const sizeBytes = plaintextBytes ? plaintextBytes.length : 0;
+
+        return {
+          id: row.id as string,
+          createdAt: row.created_at as Date,
+          createdBy: row.created_by as string | null,
+          description: row.description as string | null,
+          sizeBytes
+        };
+      })
+    );
+
     return reply.send({
-      versions: versions.rows.map((row: any) => ({
-        id: row.id as string,
-        createdAt: row.created_at as Date,
-        createdBy: row.created_by as string | null,
-        description: row.description as string | null,
-        sizeBytes: row.data ? Buffer.from(row.data as any).length : 0
-      }))
+      versions: enriched
     });
   });
 
@@ -310,7 +321,8 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (res.rowCount !== 1) return reply.code(404).send({ error: "version_not_found" });
 
     const row = res.rows[0] as any;
-    const bytes = row.data ? Buffer.from(row.data as any) : Buffer.alloc(0);
+    const bytes =
+      row.data ? Buffer.from(row.data as any) : (await getDocumentVersionData(app.db, keyring, versionId, { documentId: docId })) ?? Buffer.alloc(0);
     return reply.send({
       version: {
         id: row.id as string,

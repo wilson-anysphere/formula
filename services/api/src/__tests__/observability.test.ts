@@ -30,6 +30,8 @@ describe("observability: request-id, log correlation, db spans", () => {
       cookieSecure: false,
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
+      localKmsMasterKey: "test-local-kms-master-key",
+      awsKmsEnabled: false,
       retentionSweepIntervalMs: null
     };
 
