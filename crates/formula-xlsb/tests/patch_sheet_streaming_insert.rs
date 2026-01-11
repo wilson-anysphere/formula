@@ -572,3 +572,75 @@ fn patch_sheet_bin_streaming_inserts_missing_rows_between_existing_rows() {
     );
     assert_eq!(read_dimension_bounds(&patched_stream), Some((0, 5, 0, 0)));
 }
+
+#[test]
+fn patch_sheet_bin_streaming_insert_formula_with_rgcb_matches_in_memory() {
+    const FORMULA_FLOAT: u32 = 0x0009;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let rgce = vec![0x20, 0, 0, 0, 0, 0, 0, 0]; // PtgArray placeholder
+    let rgcb = vec![0xDE, 0xAD, 0xBE, 0xEF];
+    let edits = [CellEdit {
+        row: 4,
+        col: 2,
+        new_value: CellValue::Number(6.0),
+        new_formula: Some(rgce.clone()),
+        new_rgcb: Some(rgcb.clone()),
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) = find_cell_record(&patched_stream, 4, 2).expect("find inserted cell");
+    assert_eq!(id, FORMULA_FLOAT, "expected BrtFmlaNum/FORMULA_FLOAT record id");
+
+    let cce = u32::from_le_bytes(payload[18..22].try_into().unwrap()) as usize;
+    assert_eq!(payload[22..22 + cce], rgce);
+    assert_eq!(payload[22 + cce..], rgcb);
+}
+
+#[test]
+fn patch_sheet_bin_streaming_can_patch_formula_rgcb_bytes() {
+    const FORMULA_FLOAT: u32 = 0x0009;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("PatchRgcb");
+    let rgce = vec![0x20, 0, 0, 0, 0, 0, 0, 0]; // PtgArray placeholder
+    let rgcb = vec![0xAA, 0xBB, 0xCC];
+    builder.set_cell_formula_num(0, 0, 6.0, rgce.clone(), rgcb);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let new_rgcb = vec![0x11, 0x22, 0x33, 0x44];
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(6.0),
+        new_formula: None,
+        new_rgcb: Some(new_rgcb.clone()),
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) = find_cell_record(&patched_stream, 0, 0).expect("find patched cell");
+    assert_eq!(id, FORMULA_FLOAT, "expected BrtFmlaNum/FORMULA_FLOAT record id");
+
+    let cce = u32::from_le_bytes(payload[18..22].try_into().unwrap()) as usize;
+    assert_eq!(payload[22..22 + cce], rgce);
+    assert_eq!(payload[22 + cce..], new_rgcb);
+}
