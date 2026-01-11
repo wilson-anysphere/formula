@@ -1,93 +1,82 @@
-# SCIM 2.0 Provisioning (Enterprise)
+# SCIM 2.0 Provisioning (Users)
 
-Formula supports a minimal SCIM 2.0 subset for automated user provisioning into an organization.
+Formula supports a minimal subset of **SCIM 2.0** user provisioning for enterprise IdPs (Okta, Azure AD) via an **org-scoped bearer token**.
 
-## Authentication (SCIM token)
+Only the **Users** resource is implemented (enough for basic provisioning/deprovisioning).
 
-SCIM endpoints **only** accept a SCIM bearer token (sessions / API keys are not valid).
+## Token management (org admin)
 
-### Create / rotate token (org admin)
+SCIM tokens are managed by org admins (owner/admin) via the cloud API:
 
-`POST /orgs/:orgId/scim/token`
+- `POST /orgs/:orgId/scim/tokens` → create a token (returned once)
+- `GET /orgs/:orgId/scim/tokens` → list token metadata (no raw token)
+- `DELETE /orgs/:orgId/scim/tokens/:tokenId` → revoke a token
 
-- Requires an org admin (owner/admin) session.
-- Returns the **plaintext token once**; it is never persisted server-side.
-- Calling this endpoint again rotates the token (old token becomes invalid).
+Tokens are stored **hashed** in the database (salted SHA-256); the raw token is only returned at creation time.
+
+Example:
+
+```bash
+curl -X POST "https://api.example.com/orgs/$ORG_ID/scim/tokens" \
+  -H "Cookie: formula_session=..." \
+  -H "Content-Type: application/json" \
+  -d '{"name":"okta"}'
+```
 
 Response:
 
 ```json
-{ "token": "scim_<orgId>.<secret>" }
+{ "id": "…", "name": "okta", "token": "scim_<uuid>.<secret>" }
 ```
 
-### Revoke token (org admin)
+## SCIM authentication
 
-`DELETE /orgs/:orgId/scim/token`
+All SCIM endpoints require a SCIM bearer token:
 
-Revokes the current token immediately.
+```http
+Authorization: Bearer scim_<uuid>.<secret>
+```
+
+Requests and responses use `Content-Type: application/scim+json`.
 
 ## SCIM base URL
 
-All SCIM routes live under:
+All SCIM routes are mounted under:
 
 `/scim/v2`
 
-Use the token as:
-
-`Authorization: Bearer scim_<orgId>.<secret>`
-
 ## Supported endpoints
 
-### List users
+### Users
 
-`GET /scim/v2/Users`
+- `GET /scim/v2/Users`
+  - Supports `startIndex` (1-based), `count`
+  - Minimal filter support: `filter=userName eq "user@example.com"`
+- `GET /scim/v2/Users/:id`
+- `POST /scim/v2/Users`
+  - Creates the user if missing (by `userName` email)
+  - Adds org membership
+- `PATCH /scim/v2/Users/:id`
+  - Supports `active` plus basic name/email updates
+  - `active=false` deprovisions by removing org membership
+  - `active=true` re-adds org membership
+- `DELETE /scim/v2/Users/:id`
+  - Removes org membership (does not delete the user record)
 
-Supports:
-
-- `startIndex` (1-based)
-- `count`
-- `filter` subset: `userName eq "user@example.com"`
-
-Only users that are **active members** of the org are returned.
-
-### Create user (idempotent by email)
-
-`POST /scim/v2/Users`
-
-- Creates a new `users` row if the email does not exist.
-- Ensures `org_members` exists when `active !== false`.
-
-### Get user
-
-`GET /scim/v2/Users/:id`
-
-Returns the user only if they are an active member of the org.
-
-### Patch user
-
-`PATCH /scim/v2/Users/:id`
-
-Supported updates:
-
-- `active` (boolean)
-  - `active=false` removes org membership (`org_members` row deleted)
-  - `active=true` adds org membership (`org_members` row inserted)
-- `displayName` (string) updates `users.name`
+All operations are **org-scoped** by the SCIM token; cross-org access is denied.
 
 ## Data mapping
 
 - SCIM `id` → `users.id` (UUID)
-- SCIM `userName` + primary email → `users.email`
-- SCIM `displayName` → `users.name`
+- SCIM `userName` → `users.email`
+- SCIM `name.formatted` (or `givenName` + `familyName`) → `users.name`
 - SCIM `active` → org membership (presence of `org_members` row)
 
 ## Audit logging
 
-Provisioning actions are recorded in `audit_log`:
+- `org.scim_token.created` / `org.scim_token.revoked`
+- `scim.user.created`
+- `scim.user.deactivated` / `scim.user.reactivated`
+- `scim.user.removed_from_org`
 
-- `org.scim.token_created` / `org.scim.token_revoked`
-- `admin.user_created`
-- `admin.user_deactivated` / `admin.user_reactivated`
-
-All provisioning events include `details.source = "scim"`.
-
+All SCIM provisioning events include `details.source = "scim"`.

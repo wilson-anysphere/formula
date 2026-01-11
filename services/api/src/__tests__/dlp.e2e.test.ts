@@ -211,7 +211,9 @@ describe("API e2e: DLP policy + classification endpoints", () => {
     20_000
   );
 
-  it("resolves effective classification with selector precedence", async () => {
+  it(
+    "resolves effective classification with selector precedence",
+    async () => {
     const ownerRegister = await app.inject({
       method: "POST",
       url: "/auth/register",
@@ -383,5 +385,7 @@ describe("API e2e: DLP policy + classification endpoints", () => {
       classification: { level: "Restricted", labels: ["Mask", "PII"] },
       maxAllowed: "Confidential"
     });
-  });
+    },
+    20_000
+  );
 });

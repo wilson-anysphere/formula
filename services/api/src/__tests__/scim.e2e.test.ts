@@ -79,12 +79,14 @@ describe("SCIM provisioning", () => {
 
     const createToken = await app.inject({
       method: "POST",
-      url: `/orgs/${orgId}/scim/token`,
-      headers: { cookie }
+      url: `/orgs/${orgId}/scim/tokens`,
+      headers: { cookie },
+      payload: { name: "okta" }
     });
     expect(createToken.statusCode).toBe(200);
+    const tokenId = (createToken.json() as any).id as string;
     const token = (createToken.json() as any).token as string;
-    expect(token).toMatch(new RegExp(`^scim_${orgId}\\.`));
+    expect(token).toMatch(/^scim_[0-9a-f-]{36}\./i);
 
     const createAlice = await app.inject({
       method: "POST",
@@ -195,12 +197,12 @@ describe("SCIM provisioning", () => {
       [orgId]
     );
     const eventTypes = auditRes.rows.map((row) => row.event_type as string);
-    expect(eventTypes).toContain("org.scim.token_created");
-    expect(eventTypes).toContain("admin.user_created");
-    expect(eventTypes).toContain("admin.user_deactivated");
-    expect(eventTypes).toContain("admin.user_reactivated");
+    expect(eventTypes).toContain("org.scim_token.created");
+    expect(eventTypes).toContain("scim.user.created");
+    expect(eventTypes).toContain("scim.user.deactivated");
+    expect(eventTypes).toContain("scim.user.reactivated");
 
-    const scimEvents = auditRes.rows.filter((row) => String(row.event_type).startsWith("admin.user_"));
+    const scimEvents = auditRes.rows.filter((row) => String(row.event_type).startsWith("scim.user."));
     for (const row of scimEvents) {
       const details = row.details as any;
       const parsed = typeof details === "string" ? JSON.parse(details) : details;
@@ -209,7 +211,7 @@ describe("SCIM provisioning", () => {
 
     const revokeToken = await app.inject({
       method: "DELETE",
-      url: `/orgs/${orgId}/scim/token`,
+      url: `/orgs/${orgId}/scim/tokens/${tokenId}`,
       headers: { cookie }
     });
     expect(revokeToken.statusCode).toBe(200);
@@ -223,8 +225,9 @@ describe("SCIM provisioning", () => {
 
     const rotateToken = await app.inject({
       method: "POST",
-      url: `/orgs/${orgId}/scim/token`,
-      headers: { cookie }
+      url: `/orgs/${orgId}/scim/tokens`,
+      headers: { cookie },
+      payload: { name: "rotated" }
     });
     expect(rotateToken.statusCode).toBe(200);
     const newToken = (rotateToken.json() as any).token as string;
