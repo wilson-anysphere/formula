@@ -28,6 +28,12 @@ jobs:
           python-version: "3.11"
       - name: Run compatibility gate (engine vs pinned Excel dataset)
         run: python tools/excel-oracle/compat_gate.py
+      - name: Publish compatibility summary
+        if: always()
+        run: |
+          if [ -f tests/compatibility/excel-oracle/reports/summary.md ]; then
+            cat tests/compatibility/excel-oracle/reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   web:
     name: Web build

@@ -14,6 +14,7 @@ and exits non-zero if the mismatch rate exceeds the configured threshold.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -74,6 +75,11 @@ def main() -> int:
         "--report",
         default="tests/compatibility/excel-oracle/reports/mismatch-report.json",
         help="Where to write mismatch report JSON (default: %(default)s)",
+    )
+    p.add_argument(
+        "--report-md",
+        default="tests/compatibility/excel-oracle/reports/summary.md",
+        help="Where to write a human-readable markdown summary (default: %(default)s)",
     )
     p.add_argument(
         "--max-cases",
@@ -159,6 +165,74 @@ def main() -> int:
         compare_cmd += ["--exclude-tag", t]
 
     proc = subprocess.run(compare_cmd)
+
+    # Produce a markdown summary alongside the JSON report for easy viewing in CI.
+    try:
+        report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+        summary = report_payload.get("summary", {}) if isinstance(report_payload, dict) else {}
+        md_path = Path(args.report_md)
+
+        lines: list[str] = []
+        lines.append("# Excel oracle compatibility report")
+        lines.append("")
+        lines.append(f"* Total cases: {summary.get('totalCases')}")
+        lines.append(f"* Mismatches: {summary.get('mismatches')}")
+        lines.append(f"* Mismatch rate: {summary.get('mismatchRate')}")
+        lines.append(f"* Max mismatch rate: {summary.get('maxMismatchRate')}")
+        lines.append("")
+
+        tag_summary = summary.get("tagSummary")
+        if isinstance(tag_summary, list) and tag_summary:
+            lines.append("## Tag summary")
+            lines.append("")
+            lines.append("| Tag | Passes | Mismatches | Total | Mismatch rate |")
+            lines.append("| --- | ---: | ---: | ---: | ---: |")
+            for row in tag_summary[:50]:
+                if not isinstance(row, dict):
+                    continue
+                tag = row.get("tag")
+                passes = row.get("passes")
+                mismatches = row.get("mismatches")
+                total = row.get("total")
+                rate = row.get("mismatchRate")
+                lines.append(f"| {tag} | {passes} | {mismatches} | {total} | {rate:.4%} |")
+            lines.append("")
+
+        top_missing = summary.get("topMissingFunctions")
+        if isinstance(top_missing, list) and top_missing:
+            lines.append("## Top missing functions")
+            lines.append("")
+            for row in top_missing[:20]:
+                if isinstance(row, dict) and "name" in row and "count" in row:
+                    lines.append(f"* `{row['name']}`: {row['count']}")
+            lines.append("")
+
+        top_errors = summary.get("topActualErrorKinds")
+        if isinstance(top_errors, list) and top_errors:
+            lines.append("## Top actual error kinds (in mismatches)")
+            lines.append("")
+            for row in top_errors[:20]:
+                if isinstance(row, dict) and "code" in row and "count" in row:
+                    lines.append(f"* `{row['code']}`: {row['count']}")
+            lines.append("")
+
+        mismatches = report_payload.get("mismatches") if isinstance(report_payload, dict) else None
+        if isinstance(mismatches, list) and mismatches:
+            lines.append("## Sample mismatches")
+            lines.append("")
+            for m in mismatches[:10]:
+                if not isinstance(m, dict):
+                    continue
+                lines.append(f"* `{m.get('caseId')}` `{m.get('reason')}` `{m.get('formula')}`")
+            lines.append("")
+
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    except Exception:
+        # Don't fail the gate if the summary couldn't be generated (the compare step already
+        # enforces correctness via exit code + JSON report).
+        pass
+
     return proc.returncode
 
 

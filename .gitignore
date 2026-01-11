@@ -101,3 +101,9 @@ apps/desktop/.formula/
 # Compatibility corpus local/private data
 tools/corpus/private/
 tools/corpus/out/
+
+# Excel oracle compatibility artifacts (generated locally/CI)
+tests/compatibility/excel-oracle/datasets/excel-oracle.json
+tests/compatibility/excel-oracle/datasets/engine-results.json
+tests/compatibility/excel-oracle/reports/*
+!tests/compatibility/excel-oracle/reports/.gitkeep
