@@ -248,6 +248,7 @@ export class SpreadsheetApp {
 
   private outline = new Outline();
   private outlineLayer: HTMLDivElement;
+  private readonly outlineButtons = new Map<string, HTMLButtonElement>();
 
   private dpr = 1;
   private width = 0;
@@ -1988,9 +1989,13 @@ export class SpreadsheetApp {
   }
 
   private renderOutlineControls(): void {
-    this.outlineLayer.replaceChildren();
-    if (!this.outline.pr.showOutlineSymbols) return;
+    if (!this.outline.pr.showOutlineSymbols) {
+      for (const button of this.outlineButtons.values()) button.remove();
+      this.outlineButtons.clear();
+      return;
+    }
 
+    const keep = new Set<string>();
     const size = 14;
     const padding = 4;
     const originX = this.rowHeaderWidth;
@@ -2004,29 +2009,34 @@ export class SpreadsheetApp {
       const details = groupDetailRange(this.outline.rows, summaryIndex, entry.level, this.outline.pr.summaryBelow);
       if (!details) continue;
 
-      const button = document.createElement("button");
-      button.className = "outline-toggle";
-      button.type = "button";
+      const key = `row:${summaryIndex}`;
+      keep.add(key);
+      let button = this.outlineButtons.get(key);
+      if (!button) {
+        button = document.createElement("button");
+        button.className = "outline-toggle";
+        button.type = "button";
+        button.setAttribute("data-testid", `outline-toggle-row-${summaryIndex}`);
+        button.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.outline.toggleRowGroup(summaryIndex);
+          this.onOutlineUpdated();
+        });
+        button.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+        });
+        this.outlineButtons.set(key, button);
+        this.outlineLayer.appendChild(button);
+      }
+
       button.textContent = entry.collapsed ? "+" : "-";
-      button.setAttribute("data-testid", `outline-toggle-row-${summaryIndex}`);
       button.style.left = `${padding}px`;
       const visualIndex = this.visibleRowStart + visualRow;
       const rowTop = originY + visualIndex * this.cellHeight - this.scrollY;
       button.style.top = `${rowTop + (this.cellHeight - size) / 2}px`;
       button.style.width = `${size}px`;
       button.style.height = `${size}px`;
-
-      button.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.outline.toggleRowGroup(summaryIndex);
-        this.onOutlineUpdated();
-      });
-      button.addEventListener("pointerdown", (e) => {
-        e.stopPropagation();
-      });
-
-      this.outlineLayer.appendChild(button);
     }
 
     // Column group toggles live in the column header.
@@ -2037,29 +2047,40 @@ export class SpreadsheetApp {
       const details = groupDetailRange(this.outline.cols, summaryIndex, entry.level, this.outline.pr.summaryRight);
       if (!details) continue;
 
-      const button = document.createElement("button");
-      button.className = "outline-toggle";
-      button.type = "button";
+      const key = `col:${summaryIndex}`;
+      keep.add(key);
+      let button = this.outlineButtons.get(key);
+      if (!button) {
+        button = document.createElement("button");
+        button.className = "outline-toggle";
+        button.type = "button";
+        button.setAttribute("data-testid", `outline-toggle-col-${summaryIndex}`);
+        button.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.outline.toggleColGroup(summaryIndex);
+          this.onOutlineUpdated();
+        });
+        button.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+        });
+        this.outlineButtons.set(key, button);
+        this.outlineLayer.appendChild(button);
+      }
+
       button.textContent = entry.collapsed ? "+" : "-";
-      button.setAttribute("data-testid", `outline-toggle-col-${summaryIndex}`);
       const visualIndex = this.visibleColStart + visualCol;
       const colLeft = originX + visualIndex * this.cellWidth - this.scrollX;
       button.style.left = `${colLeft + (this.cellWidth - size) / 2}px`;
       button.style.top = `${padding}px`;
       button.style.width = `${size}px`;
       button.style.height = `${size}px`;
+    }
 
-      button.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.outline.toggleColGroup(summaryIndex);
-        this.onOutlineUpdated();
-      });
-      button.addEventListener("pointerdown", (e) => {
-        e.stopPropagation();
-      });
-
-      this.outlineLayer.appendChild(button);
+    for (const [key, button] of this.outlineButtons) {
+      if (keep.has(key)) continue;
+      button.remove();
+      this.outlineButtons.delete(key);
     }
   }
 
