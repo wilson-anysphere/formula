@@ -25,7 +25,13 @@
  *   user?: string | null;
  * }} SqlCredentialScope
  *
- * @typedef {HttpCredentialScope | FileCredentialScope | SqlCredentialScope} CredentialScope
+ * @typedef {{
+ *   type: "oauth2";
+ *   providerId: string;
+ *   scopesHash: string;
+ * }} OAuth2CredentialScope
+ *
+ * @typedef {HttpCredentialScope | FileCredentialScope | SqlCredentialScope | OAuth2CredentialScope} CredentialScope
  */
 
 /**
@@ -66,3 +72,10 @@ export function sqlScope({ server, database = null, user = null }) {
   return out;
 }
 
+/**
+ * @param {{ providerId: string; scopesHash: string }} args
+ * @returns {OAuth2CredentialScope}
+ */
+export function oauth2Scope({ providerId, scopesHash }) {
+  return { type: "oauth2", providerId, scopesHash };
+}
