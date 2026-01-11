@@ -14,8 +14,16 @@ use thiserror::Error;
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
+use crate::path::resolve_target;
 use crate::styles::StylesPart;
 use crate::{CellValueKind, DateSystem, SheetMeta, XlsxDocument};
+
+const WORKBOOK_PART: &str = "xl/workbook.xml";
+const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
+const REL_TYPE_STYLES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+const REL_TYPE_SHARED_STRINGS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 #[derive(Debug, Error)]
 pub enum WriteError {
@@ -193,15 +201,29 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         parts = generate_minimal_package(&sheet_plan.sheets)?;
     }
 
-    let (shared_strings_xml, shared_string_lookup) = build_shared_strings_xml(doc, &sheet_plan.sheets)?;
-    if is_new || !shared_string_lookup.is_empty() || parts.contains_key("xl/sharedStrings.xml") {
-        parts.insert("xl/sharedStrings.xml".to_string(), shared_strings_xml);
+    let (mut styles_part_name, mut shared_strings_part_name) = (
+        "xl/styles.xml".to_string(),
+        "xl/sharedStrings.xml".to_string(),
+    );
+    if let Some(rels) = parts.get(WORKBOOK_RELS_PART).map(|b| b.as_slice()) {
+        if let Some(target) = relationship_target_by_type(rels, REL_TYPE_STYLES)? {
+            styles_part_name = resolve_target(WORKBOOK_PART, &target);
+        }
+        if let Some(target) = relationship_target_by_type(rels, REL_TYPE_SHARED_STRINGS)? {
+            shared_strings_part_name = resolve_target(WORKBOOK_PART, &target);
+        }
+    }
+
+    let (shared_strings_xml, shared_string_lookup) =
+        build_shared_strings_xml(doc, &sheet_plan.sheets)?;
+    if is_new || !shared_string_lookup.is_empty() || parts.contains_key(&shared_strings_part_name) {
+        parts.insert(shared_strings_part_name.clone(), shared_strings_xml);
     }
 
     // Parse/update styles.xml (cellXfs) so cell `s` attributes refer to real xf indices.
     let mut style_table = doc.workbook.styles.clone();
     let mut styles_part = StylesPart::parse_or_default(
-        parts.get("xl/styles.xml").map(|b| b.as_slice()),
+        parts.get(&styles_part_name).map(|b| b.as_slice()),
         &mut style_table,
     )?;
     let style_ids = doc
@@ -211,33 +233,33 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
         .filter(|style_id| *style_id != 0);
     let style_to_xf = styles_part.xf_indices_for_style_ids(style_ids, &style_table)?;
-    parts.insert("xl/styles.xml".to_string(), styles_part.to_xml_bytes());
+    parts.insert(styles_part_name.clone(), styles_part.to_xml_bytes());
 
     // Ensure core relationship/content types metadata exists when we synthesize new
     // parts for existing packages. For existing relationships we preserve IDs by
     // only adding missing entries with a new `rIdN`.
-    if parts.contains_key("xl/sharedStrings.xml") {
+    if parts.contains_key(&shared_strings_part_name) {
         ensure_content_types_override(
             &mut parts,
-            "/xl/sharedStrings.xml",
+            &format!("/{shared_strings_part_name}"),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
         )?;
         ensure_workbook_rels_has_relationship(
             &mut parts,
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings",
-            "sharedStrings.xml",
+            REL_TYPE_SHARED_STRINGS,
+            &relationship_target_from_workbook(&shared_strings_part_name),
         )?;
     }
-    if parts.contains_key("xl/styles.xml") {
+    if parts.contains_key(&styles_part_name) {
         ensure_content_types_override(
             &mut parts,
-            "/xl/styles.xml",
+            &format!("/{styles_part_name}"),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
         )?;
         ensure_workbook_rels_has_relationship(
             &mut parts,
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
-            "styles.xml",
+            REL_TYPE_STYLES,
+            &relationship_target_from_workbook(&styles_part_name),
         )?;
     }
 
@@ -1277,7 +1299,7 @@ fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> String {
     xml.push_str(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
 
     for sheet_meta in sheets {
-        let target = rels_target_from_part_path(&sheet_meta.path);
+        let target = relationship_target_from_workbook(&sheet_meta.path);
         xml.push_str(r#"<Relationship Id=""#);
         xml.push_str(&escape_attr(&sheet_meta.relationship_id));
         xml.push_str(r#"" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target=""#);
@@ -1288,19 +1310,48 @@ fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> String {
     let next = next_relationship_id(
         sheets.iter().map(|s| s.relationship_id.as_str()),
     );
-    xml.push_str(&format!(r#"<Relationship Id="rId{next}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#));
+    xml.push_str(&format!(
+        r#"<Relationship Id="rId{next}" Type="{REL_TYPE_STYLES}" Target="styles.xml"/>"#
+    ));
     let next2 = next + 1;
-    xml.push_str(&format!(r#"<Relationship Id="rId{next2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>"#));
+    xml.push_str(&format!(
+        r#"<Relationship Id="rId{next2}" Type="{REL_TYPE_SHARED_STRINGS}" Target="sharedStrings.xml"/>"#
+    ));
     xml.push_str("</Relationships>");
     xml
 }
 
-fn rels_target_from_part_path(path: &str) -> String {
-    // workbook.xml.rels is rooted at `xl/`, so worksheet targets are relative.
-    path.strip_prefix("xl/")
-        .or_else(|| path.strip_prefix("/xl/"))
-        .unwrap_or(path)
-        .to_string()
+fn relationship_target_from_workbook(part_name: &str) -> String {
+    let base_dir = WORKBOOK_PART
+        .rsplit_once('/')
+        .map(|(dir, _)| dir)
+        .unwrap_or("");
+    relative_target(base_dir, part_name)
+}
+
+fn relative_target(base_dir: &str, part_name: &str) -> String {
+    let base_parts: Vec<&str> = base_dir.split('/').filter(|p| !p.is_empty()).collect();
+    let target_parts: Vec<&str> = part_name.split('/').filter(|p| !p.is_empty()).collect();
+
+    let mut common = 0usize;
+    while common < base_parts.len()
+        && common < target_parts.len()
+        && base_parts[common] == target_parts[common]
+    {
+        common += 1;
+    }
+
+    let mut out: Vec<&str> = Vec::new();
+    for _ in common..base_parts.len() {
+        out.push("..");
+    }
+    out.extend_from_slice(&target_parts[common..]);
+
+    if out.is_empty() {
+        ".".to_string()
+    } else {
+        out.join("/")
+    }
 }
 
 fn minimal_content_types_xml(sheets: &[SheetMeta]) -> String {
@@ -1346,12 +1397,41 @@ fn ensure_content_types_override(
     Ok(())
 }
 
+fn relationship_target_by_type(rels_xml: &[u8], rel_type: &str) -> Result<Option<String>, WriteError> {
+    let mut reader = Reader::from_reader(rels_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
+                let mut type_ = None;
+                let mut target = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"Type" => type_ = Some(attr.unescape_value()?.into_owned()),
+                        b"Target" => target = Some(attr.unescape_value()?.into_owned()),
+                        _ => {}
+                    }
+                }
+                if type_.as_deref() == Some(rel_type) {
+                    return Ok(target);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(None)
+}
+
 fn ensure_workbook_rels_has_relationship(
     parts: &mut BTreeMap<String, Vec<u8>>,
     rel_type: &str,
     target: &str,
 ) -> Result<(), WriteError> {
-    let rels_name = "xl/_rels/workbook.xml.rels";
+    let rels_name = WORKBOOK_RELS_PART;
     let Some(existing) = parts.get(rels_name).cloned() else {
         return Ok(());
     };
@@ -1425,7 +1505,7 @@ fn patch_workbook_rels_for_sheet_edits(
             }
             Event::End(ref e) if e.name().as_ref() == b"Relationships" => {
                 for sheet in added {
-                    let target = rels_target_from_part_path(&sheet.path);
+                    let target = relationship_target_from_workbook(&sheet.path);
                     let mut rel = quick_xml::events::BytesStart::new("Relationship");
                     rel.push_attribute(("Id", sheet.relationship_id.as_str()));
                     rel.push_attribute(("Type", WORKSHEET_REL_TYPE));

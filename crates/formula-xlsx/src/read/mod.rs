@@ -11,9 +11,17 @@ use quick_xml::Reader;
 use thiserror::Error;
 use zip::ZipArchive;
 
+use crate::path::resolve_target;
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::styles::StylesPart;
 use crate::{CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta};
+
+const WORKBOOK_PART: &str = "xl/workbook.xml";
+const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
+const REL_TYPE_STYLES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+const REL_TYPE_SHARED_STRINGS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 #[derive(Debug, Error)]
 pub enum ReadError {
@@ -60,24 +68,37 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         parts.insert(name, buf);
     }
 
-    let shared_strings = if let Some(bytes) = parts.get("xl/sharedStrings.xml") {
+    let workbook_xml = parts
+        .get(WORKBOOK_PART)
+        .ok_or(ReadError::MissingPart(WORKBOOK_PART))?;
+    let workbook_rels = parts
+        .get(WORKBOOK_RELS_PART)
+        .ok_or(ReadError::MissingPart(WORKBOOK_RELS_PART))?;
+
+    let rels_info = parse_relationships(workbook_rels)?;
+    let (date_system, calc_pr, sheets) = parse_workbook_metadata(workbook_xml, &rels_info.id_to_target)?;
+
+    let mut workbook = Workbook::new();
+    let styles_part_name = rels_info
+        .styles_target
+        .as_deref()
+        .map(|target| resolve_target(WORKBOOK_PART, target))
+        .unwrap_or_else(|| "xl/styles.xml".to_string());
+    let styles_part = StylesPart::parse_or_default(
+        parts.get(&styles_part_name).map(|b| b.as_slice()),
+        &mut workbook.styles,
+    )?;
+
+    let shared_strings_part_name = rels_info
+        .shared_strings_target
+        .as_deref()
+        .map(|target| resolve_target(WORKBOOK_PART, target))
+        .unwrap_or_else(|| "xl/sharedStrings.xml".to_string());
+    let shared_strings = if let Some(bytes) = parts.get(&shared_strings_part_name) {
         parse_shared_strings(bytes)?
     } else {
         Vec::new()
     };
-
-    let workbook_xml = parts
-        .get("xl/workbook.xml")
-        .ok_or(ReadError::MissingPart("xl/workbook.xml"))?;
-    let workbook_rels = parts
-        .get("xl/_rels/workbook.xml.rels")
-        .ok_or(ReadError::MissingPart("xl/_rels/workbook.xml.rels"))?;
-
-    let rels_map = parse_relationships(workbook_rels)?;
-    let (date_system, calc_pr, sheets) = parse_workbook_metadata(workbook_xml, &rels_map)?;
-
-    let mut workbook = Workbook::new();
-    let styles_part = StylesPart::parse_or_default(parts.get("xl/styles.xml").map(|b| b.as_slice()), &mut workbook.styles)?;
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
 
@@ -129,26 +150,41 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     })
 }
 
-fn parse_relationships(bytes: &[u8]) -> Result<BTreeMap<String, String>, ReadError> {
+fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
     let mut reader = Reader::from_reader(bytes);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
-    let mut map = BTreeMap::new();
+    let mut id_to_target = BTreeMap::new();
+    let mut styles_target = None;
+    let mut shared_strings_target = None;
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
                 let mut id = None;
+                let mut type_ = None;
                 let mut target = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
                         b"Id" => id = Some(attr.unescape_value()?.into_owned()),
+                        b"Type" => type_ = Some(attr.unescape_value()?.into_owned()),
                         b"Target" => target = Some(attr.unescape_value()?.into_owned()),
                         _ => {}
                     }
                 }
                 if let (Some(id), Some(target)) = (id, target) {
-                    map.insert(id, target);
+                    if let Some(type_) = &type_ {
+                        match type_.as_str() {
+                            REL_TYPE_STYLES => {
+                                styles_target.get_or_insert_with(|| target.clone());
+                            }
+                            REL_TYPE_SHARED_STRINGS => {
+                                shared_strings_target.get_or_insert_with(|| target.clone());
+                            }
+                            _ => {}
+                        }
+                    }
+                    id_to_target.insert(id, target);
                 }
             }
             Event::Eof => break,
@@ -156,7 +192,18 @@ fn parse_relationships(bytes: &[u8]) -> Result<BTreeMap<String, String>, ReadErr
         }
         buf.clear();
     }
-    Ok(map)
+    Ok(RelationshipsInfo {
+        id_to_target,
+        styles_target,
+        shared_strings_target,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct RelationshipsInfo {
+    id_to_target: BTreeMap<String, String>,
+    styles_target: Option<String>,
+    shared_strings_target: Option<String>,
 }
 
 fn parse_shared_strings(bytes: &[u8]) -> Result<Vec<RichText>, ReadError> {
