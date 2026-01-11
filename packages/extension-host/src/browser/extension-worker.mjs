@@ -931,29 +931,50 @@ function assertAllowedStaticImport(specifier, parentUrl) {
   );
 }
 
-async function fetchModuleSource(url) {
+async function fetchModuleSource(url, rootUrl) {
   if (!nativeFetch) {
     throw new Error("Strict import validation requires fetch support in this runtime");
   }
   const response = await nativeFetch(url);
+  const effectiveUrl =
+    typeof response?.url === "string" && response.url.trim().length > 0 ? response.url : String(url);
+  if (
+    rootUrl &&
+    effectiveUrl &&
+    !effectiveUrl.startsWith(rootUrl) &&
+    (response?.redirected === true || effectiveUrl !== String(url))
+  ) {
+    throw new Error(
+      `Extension module redirected outside the extension base URL: '${url}' resolved to '${effectiveUrl}'`
+    );
+  }
   if (!response.ok) {
     throw new Error(`Failed to fetch extension module: ${url} (${response.status})`);
   }
   const buffer = await response.arrayBuffer();
   const size = buffer.byteLength;
-  return { source: new TextDecoder().decode(buffer), size };
+  return { source: new TextDecoder().decode(buffer), size, url: effectiveUrl };
 }
 
 async function validateModuleGraph(entryUrl, extensionRootUrl, limits = IMPORT_PREFLIGHT_LIMITS) {
   const root = extensionRootUrl ? new URL("./", extensionRootUrl).href : null;
+  const entry = String(entryUrl ?? "");
+  if (root && entry && !entry.startsWith(root)) {
+    throw new Error(
+      `Extension entrypoint must resolve inside the extension base URL: '${entry}' is outside '${root}'`
+    );
+  }
   /** @type {string[]} */
-  const queue = [String(entryUrl)];
+  const queue = [entry];
   const visited = new Set();
   let totalBytes = 0;
 
   while (queue.length > 0) {
-    const url = queue.shift();
-    if (!url) continue;
+    const requestedUrl = queue.shift();
+    if (!requestedUrl) continue;
+    if (visited.has(requestedUrl)) continue;
+
+    const { source, size, url } = await fetchModuleSource(requestedUrl, root);
     if (visited.has(url)) continue;
     if (visited.size >= limits.maxModules) {
       throw new Error(
@@ -962,7 +983,6 @@ async function validateModuleGraph(entryUrl, extensionRootUrl, limits = IMPORT_P
     }
 
     visited.add(url);
-    const { source, size } = await fetchModuleSource(url);
 
     if (size > limits.maxModuleBytes) {
       throw new Error(

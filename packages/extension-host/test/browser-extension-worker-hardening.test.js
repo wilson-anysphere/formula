@@ -259,6 +259,26 @@ test("extension-worker: eval() throws when disableEval is enabled", async () => 
   }
 });
 
+test("extension-worker: rejects entrypoints outside extensionPath base URL", async () => {
+  const rootDir = await createTempDir("formula-ext-worker-root-");
+  const outsideDir = await createTempDir("formula-ext-worker-outside-");
+  try {
+    await writeFiles(outsideDir, {
+      "main.mjs": `export async function activate() {}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(outsideDir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${rootDir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /entrypoint must resolve inside the extension base URL/i
+    );
+  } finally {
+    await fs.rm(rootDir, { recursive: true, force: true });
+    await fs.rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
 test("extension-worker: sample extension activates under strict sandbox defaults", async () => {
   const distDir = path.resolve(__dirname, "../../../extensions/sample-hello/dist");
   const mainUrl = pathToFileURL(path.join(distDir, "extension.mjs")).href;
