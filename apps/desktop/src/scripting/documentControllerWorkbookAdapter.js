@@ -37,7 +37,14 @@ function hasOwn(obj, key) {
 
 function cellInputFromState(state) {
   if (state.formula != null) return state.formula;
-  return state.value ?? null;
+  const value = state.value ?? null;
+  // This scripting surface treats strings that start with "=" as formulas on write. To allow
+  // round-tripping literal strings that start with "=", we re-add the leading apostrophe when
+  // reading from the DocumentController (which strips it during input normalization).
+  if (typeof value === "string" && value.startsWith("=")) {
+    return `'${value}`;
+  }
+  return value;
 }
 
 function isFormulaString(input) {
