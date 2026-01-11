@@ -3,9 +3,13 @@ mod criteria;
 mod random;
 mod rounding;
 
-pub use aggregates::{aggregate, subtotal, sumif, sumifs, sumproduct};
+pub use aggregates::{
+    aggregate, averageif, averageifs, countifs, subtotal, sumif, sumifs, sumproduct,
+};
 pub use random::{rand, randbetween};
-pub use rounding::{ceiling, ceiling_math, ceiling_precise, floor, floor_math, floor_precise, iso_ceiling};
+pub use rounding::{
+    ceiling, ceiling_math, ceiling_precise, floor, floor_math, floor_precise, iso_ceiling,
+};
 
 use crate::error::{ExcelError, ExcelResult};
 
@@ -93,3 +97,26 @@ pub fn exp(number: f64) -> ExcelResult<f64> {
     }
 }
 
+/// LOG10(number)
+pub fn log10(number: f64) -> ExcelResult<f64> {
+    log(number, None)
+}
+
+/// SQRT(number)
+pub fn sqrt(number: f64) -> ExcelResult<f64> {
+    if number < 0.0 || !number.is_finite() {
+        return Err(ExcelError::Num);
+    }
+    let out = number.sqrt();
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ExcelError::Num)
+    }
+}
+
+/// PI()
+#[must_use]
+pub fn pi() -> f64 {
+    std::f64::consts::PI
+}

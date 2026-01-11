@@ -22,6 +22,7 @@ mod builtins_lambda;
 mod builtins_logical;
 mod builtins_lookup;
 mod builtins_math;
+mod builtins_math_extended;
 mod builtins_text;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

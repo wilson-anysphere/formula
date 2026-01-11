@@ -2,7 +2,11 @@ use crate::functions::math::criteria::Criteria;
 use crate::{ErrorKind, Value};
 
 /// SUMIF(range, criteria, [sum_range])
-pub fn sumif(criteria_range: &[Value], criteria: &Value, sum_range: Option<&[Value]>) -> Result<f64, ErrorKind> {
+pub fn sumif(
+    criteria_range: &[Value],
+    criteria: &Value,
+    sum_range: Option<&[Value]>,
+) -> Result<f64, ErrorKind> {
     let sum_range = sum_range.unwrap_or(criteria_range);
     if criteria_range.len() != sum_range.len() {
         return Err(ErrorKind::Value);
@@ -23,7 +27,10 @@ pub fn sumif(criteria_range: &[Value], criteria: &Value, sum_range: Option<&[Val
 }
 
 /// SUMIFS(sum_range, criteria_range1, criteria1, ...)
-pub fn sumifs(sum_range: &[Value], criteria_pairs: &[(&[Value], &Value)]) -> Result<f64, ErrorKind> {
+pub fn sumifs(
+    sum_range: &[Value],
+    criteria_pairs: &[(&[Value], &Value)],
+) -> Result<f64, ErrorKind> {
     for (range, _) in criteria_pairs {
         if range.len() != sum_range.len() {
             return Err(ErrorKind::Value);
@@ -51,6 +58,111 @@ pub fn sumifs(sum_range: &[Value], criteria_pairs: &[(&[Value], &Value)]) -> Res
     }
 
     Ok(sum)
+}
+
+/// COUNTIFS(criteria_range1, criteria1, ...)
+pub fn countifs(criteria_pairs: &[(&[Value], &Value)]) -> Result<f64, ErrorKind> {
+    if criteria_pairs.is_empty() {
+        return Ok(0.0);
+    }
+
+    let len = criteria_pairs[0].0.len();
+    for (range, _) in criteria_pairs {
+        if range.len() != len {
+            return Err(ErrorKind::Value);
+        }
+    }
+
+    let compiled = criteria_pairs
+        .iter()
+        .map(|(_, crit)| Criteria::parse(*crit))
+        .collect::<Result<Vec<_>, ErrorKind>>()?;
+
+    let mut count = 0u64;
+    'row: for idx in 0..len {
+        for ((range, _), crit) in criteria_pairs.iter().zip(compiled.iter()) {
+            if !crit.matches(&range[idx]) {
+                continue 'row;
+            }
+        }
+        count += 1;
+    }
+
+    Ok(count as f64)
+}
+
+/// AVERAGEIF(range, criteria, [average_range])
+pub fn averageif(
+    criteria_range: &[Value],
+    criteria: &Value,
+    average_range: Option<&[Value]>,
+) -> Result<f64, ErrorKind> {
+    let average_range = average_range.unwrap_or(criteria_range);
+    if criteria_range.len() != average_range.len() {
+        return Err(ErrorKind::Value);
+    }
+
+    let criteria = Criteria::parse(criteria)?;
+    let mut sum = 0.0;
+    let mut count = 0u64;
+    for (crit_val, avg_val) in criteria_range.iter().zip(average_range.iter()) {
+        if criteria.matches(crit_val) {
+            match avg_val {
+                Value::Number(n) => {
+                    sum += n;
+                    count += 1;
+                }
+                Value::Error(e) => return Err(*e),
+                _ => {}
+            }
+        }
+    }
+
+    if count == 0 {
+        return Err(ErrorKind::Div0);
+    }
+    Ok(sum / count as f64)
+}
+
+/// AVERAGEIFS(average_range, criteria_range1, criteria1, ...)
+pub fn averageifs(
+    average_range: &[Value],
+    criteria_pairs: &[(&[Value], &Value)],
+) -> Result<f64, ErrorKind> {
+    for (range, _) in criteria_pairs {
+        if range.len() != average_range.len() {
+            return Err(ErrorKind::Value);
+        }
+    }
+
+    let compiled = criteria_pairs
+        .iter()
+        .map(|(_, crit)| Criteria::parse(*crit))
+        .collect::<Result<Vec<_>, ErrorKind>>()?;
+
+    let mut sum = 0.0;
+    let mut count = 0u64;
+    'row: for idx in 0..average_range.len() {
+        for ((range, _), crit) in criteria_pairs.iter().zip(compiled.iter()) {
+            if !crit.matches(&range[idx]) {
+                continue 'row;
+            }
+        }
+
+        match &average_range[idx] {
+            Value::Number(n) => {
+                sum += n;
+                count += 1;
+            }
+            Value::Error(e) => return Err(*e),
+            _ => {}
+        }
+    }
+
+    if count == 0 {
+        return Err(ErrorKind::Div0);
+    }
+    Ok(sum / count as f64)
 }
 
 /// SUMPRODUCT(array1, [array2], ...)
@@ -172,7 +284,10 @@ fn average(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
 }
 
 fn count(values: &[Value]) -> usize {
-    values.iter().filter(|v| matches!(v, Value::Number(_))).count()
+    values
+        .iter()
+        .filter(|v| matches!(v, Value::Number(_)))
+        .count()
 }
 
 fn counta(values: &[Value]) -> usize {

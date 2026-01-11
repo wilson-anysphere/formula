@@ -36,6 +36,10 @@ impl TestSheet {
         self.engine.recalculate();
     }
 
+    pub fn recalculate(&mut self) {
+        self.recalc();
+    }
+
     pub fn get(&self, addr: &str) -> Value {
         self.engine.get_cell_value(self.sheet, addr)
     }
@@ -50,10 +54,7 @@ impl TestSheet {
 pub fn assert_number(value: &Value, expected: f64) {
     match value {
         Value::Number(n) => {
-            assert!(
-                (*n - expected).abs() < 1e-9,
-                "expected {expected}, got {n}"
-            );
+            assert!((*n - expected).abs() < 1e-9, "expected {expected}, got {n}");
         }
         other => panic!("expected number {expected}, got {other:?}"),
     }

@@ -12,6 +12,18 @@ export default {
       ]
     },
     {
+      "name": "AGGREGATE",
+      "min_args": 3,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "any"
+      ]
+    },
+    {
       "name": "AND",
       "min_args": 1,
       "max_args": 255,
@@ -29,6 +41,62 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "AVERAGEIF",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "AVERAGEIFS",
+      "min_args": 3,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "CEILING",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "CEILING.MATH",
+      "min_args": 1,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "CEILING.PRECISE",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
       ]
     },
     {
@@ -119,6 +187,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any",
+        "any"
+      ]
+    },
+    {
+      "name": "COUNTIFS",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "any"
       ]
     },
@@ -231,6 +309,16 @@ export default {
       ]
     },
     {
+      "name": "EXP",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "FILTER",
       "min_args": 2,
       "max_args": 3,
@@ -251,6 +339,40 @@ export default {
       "arg_types": [
         "text",
         "text",
+        "number"
+      ]
+    },
+    {
+      "name": "FLOOR",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "FLOOR.MATH",
+      "min_args": 1,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "FLOOR.PRECISE",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
         "number"
       ]
     },
@@ -445,6 +567,17 @@ export default {
       ]
     },
     {
+      "name": "ISO.CEILING",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "ISTEXT",
       "min_args": 1,
       "max_args": 1,
@@ -493,6 +626,37 @@ export default {
       "return_type": "any",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "LN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "LOG",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "LOG10",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
       ]
     },
     {
@@ -697,12 +861,31 @@ export default {
       ]
     },
     {
+      "name": "PI",
+      "min_args": 0,
+      "max_args": 0,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": []
+    },
+    {
       "name": "PMT",
       "min_args": 3,
       "max_args": 5,
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "POWER",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
         "number"
       ]
     },
@@ -714,6 +897,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "PRODUCT",
+      "min_args": 0,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
       ]
     },
     {
@@ -901,6 +1094,16 @@ export default {
       ]
     },
     {
+      "name": "SQRT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "SUBSTITUTE",
       "min_args": 3,
       "max_args": 4,
@@ -914,8 +1117,41 @@ export default {
       ]
     },
     {
+      "name": "SUBTOTAL",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any"
+      ]
+    },
+    {
       "name": "SUM",
       "min_args": 0,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "SUMIF",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "SUMIFS",
+      "min_args": 3,
       "max_args": 255,
       "volatility": "non_volatile",
       "return_type": "number",
