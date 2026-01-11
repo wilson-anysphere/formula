@@ -41,7 +41,7 @@ class TauriPowerQueryRefreshStateStore implements RefreshStateStore {
     try {
       const payload = await this.invoke("power_query_refresh_state_get", { workbook_id: this.workbookId });
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
-      return payload as RefreshState;
+      return sanitizeState(payload);
     } catch {
       return {};
     }
@@ -49,11 +49,53 @@ class TauriPowerQueryRefreshStateStore implements RefreshStateStore {
 
   async save(state: RefreshState): Promise<void> {
     try {
-      await this.invoke("power_query_refresh_state_set", { workbook_id: this.workbookId, state });
+      await this.invoke("power_query_refresh_state_set", { workbook_id: this.workbookId, state: sanitizeState(state) });
     } catch {
       // Best-effort: persistence should never break refresh.
     }
   }
+}
+
+function sanitizePolicy(policy: unknown): RefreshPolicy | null {
+  if (!policy || typeof policy !== "object") return null;
+  const obj = policy as any;
+  const type = obj.type;
+  if (type === "manual") return { type: "manual" };
+  if (type === "on-open") return { type: "on-open" };
+  if (type === "interval") {
+    const intervalMs = obj.intervalMs;
+    if (typeof intervalMs !== "number" || !Number.isFinite(intervalMs) || intervalMs <= 0) return null;
+    return { type: "interval", intervalMs };
+  }
+  if (type === "cron") {
+    const cron = obj.cron;
+    if (typeof cron !== "string" || cron.trim().length === 0) return null;
+    return { type: "cron", cron: cron.trim() };
+  }
+  return null;
+}
+
+function sanitizeEntry(entry: unknown): RefreshStateEntry | null {
+  if (!entry || typeof entry !== "object") return null;
+  const obj = entry as any;
+  const policy = sanitizePolicy(obj.policy);
+  if (!policy) return null;
+  /** @type {RefreshStateEntry} */
+  const out = { policy };
+  const lastRunAtMs = obj.lastRunAtMs;
+  if (typeof lastRunAtMs === "number" && Number.isFinite(lastRunAtMs)) out.lastRunAtMs = lastRunAtMs;
+  return out;
+}
+
+function sanitizeState(input: unknown): RefreshState {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const out: RefreshState = Object.create(null);
+  for (const [queryId, value] of Object.entries(input as Record<string, unknown>)) {
+    const entry = sanitizeEntry(value);
+    if (!entry) continue;
+    out[queryId] = entry;
+  }
+  return out;
 }
 
 function safeStorage(storage: StorageLike): StorageLike {
@@ -114,8 +156,7 @@ function safeParseState(raw: string | null): RefreshState {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return parsed as RefreshState;
+    return sanitizeState(parsed);
   } catch {
     return {};
   }
@@ -158,7 +199,7 @@ export function createPowerQueryRefreshStateStore(
         return cloneState(FALLBACK_STATE_BY_KEY.get(key) ?? {});
       },
       async save(next) {
-        FALLBACK_STATE_BY_KEY.set(key, cloneState(next ?? {}));
+        FALLBACK_STATE_BY_KEY.set(key, cloneState(sanitizeState(next ?? {})));
       },
     };
   }
@@ -168,7 +209,7 @@ export function createPowerQueryRefreshStateStore(
       return safeParseState(safeStorage(storage).getItem(key));
     },
     async save(state) {
-      safeStorage(storage).setItem(key, JSON.stringify(state ?? {}));
+      safeStorage(storage).setItem(key, JSON.stringify(sanitizeState(state ?? {})));
     },
   };
 }
