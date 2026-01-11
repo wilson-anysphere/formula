@@ -91,6 +91,10 @@ async function requireDocRole(
     reply.code(404).send({ error: "doc_not_found" });
     return null;
   }
+  if (request.authOrgId && request.authOrgId !== membership.orgId) {
+    reply.code(404).send({ error: "doc_not_found" });
+    return null;
+  }
 
   if (
     !(await enforceOrgIpAllowlistForSessionWithAllowlist(
@@ -111,6 +115,7 @@ async function requireDocRole(
 }
 
 async function requireOrgMembership(request: FastifyRequest, orgId: string): Promise<boolean> {
+  if (request.authOrgId && request.authOrgId !== orgId) return false;
   const membership = await request.server.db.query(
     "SELECT 1 FROM org_members WHERE org_id = $1 AND user_id = $2",
     [orgId, request.user!.id]

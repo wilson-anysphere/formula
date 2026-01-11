@@ -31,6 +31,10 @@ async function requireDocRead(
   }
 
   const row = membership.rows[0] as { org_id: string; role: DocumentRole | null; ip_allowlist: unknown };
+  if (request.authOrgId && request.authOrgId !== row.org_id) {
+    reply.code(404).send({ error: "doc_not_found" });
+    return null;
+  }
   if (!(await enforceOrgIpAllowlistForSessionWithAllowlist(request, reply, row.org_id, row.ip_allowlist))) {
     return null;
   }

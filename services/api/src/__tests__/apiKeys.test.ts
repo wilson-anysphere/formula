@@ -248,6 +248,102 @@ describe("API keys", () => {
     expect(listBody.organizations[0]).toMatchObject({ id: orgAId, name: "Scoped Org A" });
   });
 
+  it("scopes API keys to their org for doc-scoped routes", async () => {
+    const register = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "doc-scoped-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "Doc Scoped Org A"
+      }
+    });
+    expect(register.statusCode).toBe(200);
+    const cookie = extractCookie(register.headers["set-cookie"]);
+    const orgAId = (register.json() as any).organization.id as string;
+    const userId = (register.json() as any).user.id as string;
+
+    await app.inject({
+      method: "PATCH",
+      url: `/orgs/${orgAId}/settings`,
+      headers: { cookie },
+      payload: { allowedAuthMethods: ["password", "api_key"] }
+    });
+
+    const createKey = await app.inject({
+      method: "POST",
+      url: `/orgs/${orgAId}/api-keys`,
+      headers: { cookie },
+      payload: { name: "scoped-docs" }
+    });
+    expect(createKey.statusCode).toBe(200);
+    const rawKey = (createKey.json() as any).key as string;
+
+    const createDocA = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { orgId: orgAId, title: "Doc A" }
+    });
+    expect(createDocA.statusCode).toBe(200);
+    const docAId = (createDocA.json() as any).document.id as string;
+
+    const getDocA = await app.inject({
+      method: "GET",
+      url: `/docs/${docAId}`,
+      headers: { authorization: `Bearer ${rawKey}` }
+    });
+    expect(getDocA.statusCode).toBe(200);
+
+    const orgBId = crypto.randomUUID();
+    await db.query("INSERT INTO organizations (id, name) VALUES ($1, $2)", [orgBId, "Doc Scoped Org B"]);
+    await db.query("INSERT INTO org_settings (org_id) VALUES ($1)", [orgBId]);
+    await db.query("INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'owner')", [orgBId, userId]);
+
+    const createDocB = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie },
+      payload: { orgId: orgBId, title: "Doc B" }
+    });
+    expect(createDocB.statusCode).toBe(200);
+    const docBId = (createDocB.json() as any).document.id as string;
+
+    const sessionDocB = await app.inject({
+      method: "GET",
+      url: `/docs/${docBId}`,
+      headers: { cookie }
+    });
+    expect(sessionDocB.statusCode).toBe(200);
+
+    const blockedDocB = await app.inject({
+      method: "GET",
+      url: `/docs/${docBId}`,
+      headers: { authorization: `Bearer ${rawKey}` }
+    });
+    expect(blockedDocB.statusCode).toBe(404);
+    expect((blockedDocB.json() as any).error).toBe("doc_not_found");
+
+    const blockedDlp = await app.inject({
+      method: "POST",
+      url: `/docs/${docBId}/dlp/evaluate`,
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { action: "export.csv" }
+    });
+    expect(blockedDlp.statusCode).toBe(404);
+    expect((blockedDlp.json() as any).error).toBe("doc_not_found");
+
+    const blockedCreateDocB = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { orgId: orgBId, title: "Blocked" }
+    });
+    expect(blockedCreateDocB.statusCode).toBe(403);
+    expect((blockedCreateDocB.json() as any).error).toBe("forbidden");
+  });
+
   it("blocks API keys when org allowed_auth_methods excludes api_key", async () => {
     const register = await app.inject({
       method: "POST",
