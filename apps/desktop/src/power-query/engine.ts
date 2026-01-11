@@ -438,7 +438,17 @@ function deleteIndexedDbDatabase(dbName: string): Promise<"success" | "blocked">
   });
 }
 
-type CacheCryptoProvider = import("../../../../packages/power-query/src/cache/encryptedStore.js").CacheCryptoProvider;
+type CacheCryptoProvider = {
+  keyVersion: number;
+  encryptBytes: (
+    plaintext: Uint8Array,
+    aad?: Uint8Array,
+  ) => Promise<{ keyVersion: number; iv: Uint8Array; tag: Uint8Array; ciphertext: Uint8Array }>;
+  decryptBytes: (
+    payload: { keyVersion: number; iv: Uint8Array; tag: Uint8Array; ciphertext: Uint8Array },
+    aad?: Uint8Array,
+  ) => Promise<Uint8Array>;
+};
 
 let desktopCacheCryptoProviderPromise: Promise<CacheCryptoProvider> | null = null;
 function createDesktopCacheCryptoProvider(): CacheCryptoProvider {
