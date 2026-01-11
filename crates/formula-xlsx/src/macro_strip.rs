@@ -38,9 +38,12 @@ fn compute_macro_delete_set(parts: &BTreeMap<String, Vec<u8>>) -> Result<BTreeSe
         }
     }
 
-    // ActiveX controls.
+    // ActiveX + legacy form controls.
     for name in parts.keys() {
-        if name.starts_with("xl/activeX/") || name.starts_with("xl/ctrlProps/") {
+        if name.starts_with("xl/activeX/")
+            || name.starts_with("xl/ctrlProps/")
+            || name.starts_with("xl/controls/")
+        {
             delete.insert(name.clone());
         }
     }
