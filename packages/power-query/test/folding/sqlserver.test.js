@@ -101,6 +101,30 @@ test("sqlserver: placeholder normalization converts ? -> @pN (ignores strings/co
   );
 });
 
+test("sqlserver: Date params are normalized to ISO strings without timezone suffix", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_sqlserver_date",
+    name: "SQL Server Date",
+    source: { type: "database", connection: {}, query: "SELECT * FROM events" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: {
+          type: "filterRows",
+          predicate: { type: "comparison", column: "CreatedAt", operator: "equals", value: new Date("2020-01-02T03:04:05.678Z") },
+        },
+      },
+    ],
+  };
+
+  const plan = folding.compile(query, { dialect: "sqlserver" });
+  assert.equal(plan.type, "sql");
+  assert.equal(plan.sql, "SELECT * FROM (SELECT * FROM events) AS t WHERE (t.[CreatedAt] = ?)");
+  assert.deepEqual(plan.params, ["2020-01-02T03:04:05.678"]);
+});
+
 test("sqlserver: folding explain + QueryEngine execution normalize placeholders + preserve explain steps", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined } | null} */
   let observed = null;
