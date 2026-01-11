@@ -200,6 +200,13 @@ fn decode_rgce_impl(
                     .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
                 stack.push(format!("{a}%"));
             }
+            PTG_SPILL => {
+                // PtgSpill: dynamic array spill range operator (`#`).
+                let a = stack
+                    .pop()
+                    .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
+                stack.push(format!("{a}#"));
+            }
             0x15 => {
                 let a = stack
                     .pop()
@@ -903,6 +910,7 @@ const PTG_AREA: u8 = 0x25;
 const PTG_REF3D: u8 = 0x3A;
 const PTG_AREA3D: u8 = 0x3B;
 const PTG_NAMEX: u8 = 0x39;
+const PTG_SPILL: u8 = 0x2F;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PtgClass {
@@ -930,6 +938,7 @@ enum Expr {
     Ref(Ref),
     Name(NameRef),
     Func { name: String, args: Vec<Expr> },
+    SpillRange(Box<Expr>),
     Unary { op: UnaryOp, expr: Box<Expr> },
     Binary { op: BinaryOp, left: Box<Expr>, right: Box<Expr> },
 }
@@ -991,6 +1000,10 @@ fn emit_expr(expr: &Expr, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<()
                 emit_expr(arg, ctx, out)?;
             }
             emit_func(name, args.len(), ctx, out)?;
+        }
+        Expr::SpillRange(inner) => {
+            emit_expr(inner, ctx, out)?;
+            out.push(PTG_SPILL);
         }
         Expr::Unary { op, expr } => {
             match op {
@@ -1260,7 +1273,7 @@ impl<'a> FormulaParser<'a> {
 
     fn parse_primary(&mut self) -> Result<Expr, String> {
         self.skip_ws();
-        match self.peek_char() {
+        let mut expr = match self.peek_char() {
             Some('(') => {
                 self.next_char();
                 let expr = self.parse_add_sub()?;
@@ -1268,13 +1281,22 @@ impl<'a> FormulaParser<'a> {
                 if self.next_char() != Some(')') {
                     return Err("expected ')'".to_string());
                 }
-                Ok(expr)
+                expr
             }
-            Some(ch) if ch.is_ascii_digit() || ch == '.' => self.parse_number(),
-            Some('\'') => self.parse_ident_or_ref(),
-            Some(ch) if is_ident_start(ch) => self.parse_ident_or_ref(),
-            _ => Err("unexpected token".to_string()),
+            Some(ch) if ch.is_ascii_digit() || ch == '.' => self.parse_number()?,
+            Some('\'') => self.parse_ident_or_ref()?,
+            Some(ch) if is_ident_start(ch) => self.parse_ident_or_ref()?,
+            _ => return Err("unexpected token".to_string()),
+        };
+
+        self.skip_ws();
+        while self.peek_char() == Some('#') {
+            self.next_char();
+            expr = Expr::SpillRange(Box::new(expr));
+            self.skip_ws();
         }
+
+        Ok(expr)
     }
 
     fn parse_ident_or_ref(&mut self) -> Result<Expr, String> {

@@ -96,6 +96,7 @@ pub enum SpannedExprKind<S> {
         args: Vec<SpannedExpr<S>>,
     },
     ImplicitIntersection(Box<SpannedExpr<S>>),
+    /// Dynamic array spill range operator (`#`), e.g. `A1#`.
     SpillRange(Box<SpannedExpr<S>>),
 }
 
@@ -331,8 +332,9 @@ impl<'a> Lexer<'a> {
                 }
             };
             let span = Span::new(start, self.pos);
+            let can_spill = matches!(&kind, TokenKind::Ident(_) | TokenKind::RParen);
             tokens.push(Token { kind, span });
-            self.prev_can_spill = matches!(tokens.last().map(|t| &t.kind), Some(TokenKind::Ident(_) | TokenKind::RParen));
+            self.prev_can_spill = can_spill;
         }
         tokens.push(Token {
             kind: TokenKind::End,
@@ -463,7 +465,11 @@ impl<'a> Lexer<'a> {
 
     fn lex_hash_or_error(&mut self) -> Result<TokenKind, FormulaParseError> {
         // Spill-range operator is postfix (`A1#`), while error literals start with `#` (`#REF!`).
-        if self.prev_can_spill {
+        let next = self.input[self.pos..].chars().nth(1);
+        let looks_like_error = next.is_some_and(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '_' | '/' | '.' | '!' | '?')
+        });
+        if self.prev_can_spill && !looks_like_error {
             self.pos += 1;
             Ok(TokenKind::Hash)
         } else {

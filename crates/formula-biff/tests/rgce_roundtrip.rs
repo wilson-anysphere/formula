@@ -45,3 +45,10 @@ fn rgce_roundtrip_implicit_intersection_range() {
     let decoded = decode_rgce(&rgce).expect("decode");
     assert_eq!(normalize("@A1:A3"), normalize(&decoded));
 }
+
+#[test]
+fn rgce_roundtrip_spill_range() {
+    let rgce = encode_rgce("A1#").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("A1#"), normalize(&decoded));
+}

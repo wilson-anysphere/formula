@@ -159,6 +159,22 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                     is_missing: false,
                 });
             }
+            // Spill range postfix (`#`).
+            0x2F => {
+                let prec = 60;
+                let expr = stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?;
+                let inner = if expr.precedence < prec && !expr.is_missing {
+                    format!("({})", expr.text)
+                } else {
+                    expr.text
+                };
+                stack.push(ExprFragment {
+                    text: format!("{inner}#"),
+                    precedence: prec,
+                    contains_union: expr.contains_union,
+                    is_missing: false,
+                });
+            }
             // Explicit parentheses.
             0x15 => {
                 let expr = stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?;
@@ -665,9 +681,7 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
             encode_expr(&p.expr, out)?;
             match p.op {
                 PostfixOp::Percent => out.push(0x14),
-                PostfixOp::SpillRange => {
-                    return Err(EncodeRgceError::Unsupported("spill range (#)"));
-                }
+                PostfixOp::SpillRange => out.push(0x2F),
             }
         }
         Expr::FunctionCall(call) => {

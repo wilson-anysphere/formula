@@ -1065,8 +1065,8 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_trivia();
             // Postfix operators (`%` and spill-range `#`).
-            let percent_bp = 60;
-            if matches!(self.peek_kind(), TokenKind::Percent) && percent_bp >= min_bp {
+            let postfix_bp = 60;
+            if matches!(self.peek_kind(), TokenKind::Percent) && postfix_bp >= min_bp {
                 self.next();
                 lhs = Expr::Postfix(PostfixExpr {
                     op: PostfixOp::Percent,
@@ -1074,7 +1074,7 @@ impl<'a> Parser<'a> {
                 });
                 continue;
             }
-            if matches!(self.peek_kind(), TokenKind::Hash) && percent_bp >= min_bp {
+            if matches!(self.peek_kind(), TokenKind::Hash) && postfix_bp >= min_bp {
                 self.next();
                 lhs = Expr::Postfix(PostfixExpr {
                     op: PostfixOp::SpillRange,
@@ -1147,8 +1147,9 @@ impl<'a> Parser<'a> {
 
         loop {
             self.skip_trivia();
-            let percent_bp = 60;
-            if matches!(self.peek_kind(), TokenKind::Percent) && percent_bp >= min_bp {
+            // Postfix operators (`%` and spill-range `#`).
+            let postfix_bp = 60;
+            if matches!(self.peek_kind(), TokenKind::Percent) && postfix_bp >= min_bp {
                 self.next();
                 lhs = Expr::Postfix(PostfixExpr {
                     op: PostfixOp::Percent,
@@ -1156,7 +1157,7 @@ impl<'a> Parser<'a> {
                 });
                 continue;
             }
-            if matches!(self.peek_kind(), TokenKind::Hash) && percent_bp >= min_bp {
+            if matches!(self.peek_kind(), TokenKind::Hash) && postfix_bp >= min_bp {
                 self.next();
                 lhs = Expr::Postfix(PostfixExpr {
                     op: PostfixOp::SpillRange,
