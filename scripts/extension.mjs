@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 
 const extensionPackage = require("../shared/extension-package/index.js");
 const signing = require("../shared/crypto/signing.js");
+const extensionManifest = require("../shared/extension-manifest/index.js");
 
 function usage() {
   // eslint-disable-next-line no-console
@@ -65,6 +66,40 @@ async function cmdPack(args) {
     console.error("No --private-key provided; generated an ephemeral Ed25519 keypair for signing.");
     // eslint-disable-next-line no-console
     console.error("Public key (save this to verify):\n" + publicKeyPem.trim());
+  }
+
+  const manifest = extensionManifest.validateExtensionManifest(
+    await extensionPackage.loadExtensionManifest(dir),
+    { enforceEngine: false },
+  );
+
+  async function assertEntrypoint(fieldName, relPath) {
+    const entryRel = String(relPath);
+    const entryPath = path.resolve(dir, entryRel);
+    if (!entryPath.startsWith(dir + path.sep)) {
+      throw new Error(`Manifest ${fieldName} must resolve inside extensionDir (got ${relPath})`);
+    }
+    try {
+      const stat = await fs.stat(entryPath);
+      if (!stat.isFile()) {
+        throw new Error(`Manifest ${fieldName} is not a file: ${relPath}`);
+      }
+    } catch (error) {
+      if (error && error.code === "ENOENT") {
+        throw new Error(
+          `Manifest ${fieldName} entrypoint is missing: ${relPath}. Did you forget to build the extension?`
+        );
+      }
+      throw error;
+    }
+  }
+
+  await assertEntrypoint("main", manifest.main);
+  if (typeof manifest.module === "string" && manifest.module.trim().length > 0) {
+    await assertEntrypoint("module", manifest.module);
+  }
+  if (typeof manifest.browser === "string" && manifest.browser.trim().length > 0) {
+    await assertEntrypoint("browser", manifest.browser);
   }
 
   const bytes = await extensionPackage.createExtensionPackage(dir, { formatVersion: 2, privateKeyPem });
