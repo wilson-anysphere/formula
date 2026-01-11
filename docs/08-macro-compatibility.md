@@ -974,6 +974,26 @@ interface UnsupportedFeature {
 
 ## Security
 
+### Trust Center (desktop)
+
+The desktop app implements a minimal "Trust Center" policy layer for VBA macro execution:
+
+- `blocked`: macros never run.
+- `trusted_once` / `trusted_always`: macros run based on a workbook fingerprint allow-list.
+- `trusted_signed_only`: macros run **only** when the workbook's VBA project signature is
+  **cryptographically verified**.
+
+Important notes:
+
+- Signature verification is performed against the embedded PKCS#7/CMS structure inside the
+  `\x05DigitalSignature*` OLE stream(s). This is intended to prevent treating "has a signature blob"
+  as "is signed".
+- Certificate chain trust is not currently evaluated (a valid signature does not imply a trusted
+  publisher). This can be extended in the future with an explicit `untrusted` state.
+- We do not currently re-compute the MS-OVBA project digest and compare it to the signed digest
+  structure ("binding" the signature to the VBA project streams). This can be added later to match
+  Excel's behavior more closely.
+
 ### Script Sandboxing
 
 ```typescript
