@@ -54,6 +54,10 @@ export class DesktopOAuthBroker implements OAuthBroker {
 
   async openAuthUrl(url: string) {
     if (!this.openAuthUrlHandler) {
+      if (typeof window !== "undefined" && typeof window.open === "function") {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
       throw new Error("No OAuth openAuthUrl handler registered");
     }
     await this.openAuthUrlHandler(url);
@@ -88,4 +92,3 @@ export class DesktopOAuthBroker implements OAuthBroker {
 }
 
 export const oauthBroker = new DesktopOAuthBroker();
-
