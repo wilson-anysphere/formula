@@ -373,6 +373,13 @@ describe("SAML SSO", () => {
       });
       expect(putProvider.statusCode).toBe(200);
 
+      const metadataRes = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/metadata` });
+      expect(metadataRes.statusCode).toBe(200);
+      expect(String(metadataRes.headers["content-type"] ?? "")).toContain("application/xml");
+      const metadataXml = metadataRes.body;
+      expect(metadataXml).toContain(`entityID="http://sp.example.test/metadata"`);
+      expect(metadataXml).toContain(`Location="${config.publicBaseUrl}/auth/saml/${orgId}/test/callback"`);
+
       const startRes = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
       expect(startRes.statusCode).toBe(302);
       const startUrl = new URL(startRes.headers.location as string);
