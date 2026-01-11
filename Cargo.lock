@@ -1551,6 +1551,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "pretty_assertions",
+ "proptest",
  "quick-xml 0.31.0",
  "tempfile",
  "thiserror 1.0.69",

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{self, BufReader, Read};
 
+use crate::biff12_varint;
 use thiserror::Error;
 
 // Record IDs (BIFF12 / MS-XLSB). Values taken from pyxlsb (public domain-ish) and MS-XLSB.
@@ -114,7 +115,10 @@ impl<R: Read> Biff12Reader<R> {
         }
     }
 
-    pub fn read_record<'a>(&mut self, buf: &'a mut Vec<u8>) -> Result<Option<Biff12Record<'a>>, Error> {
+    pub fn read_record<'a>(
+        &mut self,
+        buf: &'a mut Vec<u8>,
+    ) -> Result<Option<Biff12Record<'a>>, Error> {
         let Some(id) = self.read_id()? else {
             return Ok(None);
         };
@@ -130,39 +134,11 @@ impl<R: Read> Biff12Reader<R> {
     }
 
     fn read_id(&mut self) -> Result<Option<u32>, Error> {
-        let mut v: u32 = 0;
-        for i in 0..4 {
-            let Some(byte) = read_u8_opt(&mut self.inner)? else {
-                return Ok(None);
-            };
-            v |= (byte as u32) << (8 * i);
-            if byte & 0x80 == 0 {
-                break;
-            }
-        }
-        Ok(Some(v))
+        Ok(biff12_varint::read_record_id(&mut self.inner)?)
     }
 
     fn read_len(&mut self) -> Result<Option<u32>, Error> {
-        let mut v: u32 = 0;
-        for i in 0..4 {
-            let Some(byte) = read_u8_opt(&mut self.inner)? else {
-                return Ok(None);
-            };
-            v |= ((byte & 0x7F) as u32) << (7 * i);
-            if byte & 0x80 == 0 {
-                break;
-            }
-        }
-        Ok(Some(v))
-    }
-}
-
-fn read_u8_opt<R: Read>(mut r: R) -> Result<Option<u8>, Error> {
-    let mut buf = [0u8; 1];
-    match r.read(&mut buf)? {
-        0 => Ok(None),
-        _ => Ok(Some(buf[0])),
+        Ok(biff12_varint::read_record_len(&mut self.inner)?)
     }
 }
 
@@ -300,7 +276,9 @@ pub(crate) fn parse_workbook_sheets<R: Read>(
     Ok(sheets)
 }
 
-pub(crate) fn parse_shared_strings<R: Read>(shared_strings_bin: &mut R) -> Result<Vec<String>, Error> {
+pub(crate) fn parse_shared_strings<R: Read>(
+    shared_strings_bin: &mut R,
+) -> Result<Vec<String>, Error> {
     let mut reader = Biff12Reader::new(shared_strings_bin);
     let mut buf = Vec::new();
     let mut strings = Vec::new();
@@ -319,7 +297,10 @@ pub(crate) fn parse_shared_strings<R: Read>(shared_strings_bin: &mut R) -> Resul
     Ok(strings)
 }
 
-pub(crate) fn parse_sheet<R: Read>(sheet_bin: &mut R, shared_strings: &[String]) -> Result<SheetData, Error> {
+pub(crate) fn parse_sheet<R: Read>(
+    sheet_bin: &mut R,
+    shared_strings: &[String],
+) -> Result<SheetData, Error> {
     let mut cells = Vec::new();
     let dimension = parse_sheet_stream(sheet_bin, shared_strings, |cell| cells.push(cell))?;
     Ok(SheetData { dimension, cells })
