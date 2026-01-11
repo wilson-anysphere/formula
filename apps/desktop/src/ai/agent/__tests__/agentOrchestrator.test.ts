@@ -175,4 +175,72 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     expect(result.status).toBe("cancelled");
     expect(events).toEqual(["planning", "tool_call", "cancelled"]);
   });
+
+  it("can continue after approval denial when configured (agent re-plans)", async () => {
+    const documentController = new DocumentController();
+    documentController.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
+
+    let callCount = 0;
+    const llmClient = {
+      async chat(request: any) {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "write_cell", arguments: { cell: "Sheet1!A1", value: 99 } }]
+            }
+          };
+        }
+
+        const last = request.messages.at(-1);
+        expect(last.role).toBe("tool");
+        expect(last.toolCallId).toBe("call-1");
+        const payload = JSON.parse(last.content);
+        expect(payload.ok).toBe(false);
+        expect(payload.error?.code).toBe("approval_denied");
+
+        return {
+          message: {
+            role: "assistant",
+            content: "Okay, I won't make that change. Is there something else you'd like?"
+          }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+    const events: string[] = [];
+    const onApprovalRequired = vi.fn(async () => false);
+
+    const result = await runAgentTask({
+      goal: "Set A1 to 99",
+      workbookId: "wb-4",
+      documentController,
+      llmClient: llmClient as any,
+      auditStore,
+      onProgress: (event) => events.push(event.type),
+      onApprovalRequired,
+      continueOnApprovalDenied: true,
+      maxIterations: 4,
+      maxDurationMs: 10_000,
+      model: "unit-test-model"
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.final).toContain("Okay, I won't make that change");
+    expect(documentController.getCell("Sheet1", { row: 0, col: 0 }).value).toBe(1);
+    expect(onApprovalRequired).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(["planning", "tool_call", "tool_result", "planning", "assistant_message", "complete"]);
+
+    const auditEntries = await auditStore.listEntries({ session_id: result.session_id });
+    expect(auditEntries).toHaveLength(1);
+    expect(auditEntries[0]!.tool_calls[0]).toMatchObject({
+      name: "write_cell",
+      requires_approval: true,
+      approved: false,
+      ok: false
+    });
+  });
 });
