@@ -67,7 +67,8 @@ pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use pivots::{
     pivot_charts::PivotChartPart,
     slicers::{PivotSlicerParts, SlicerDefinition, TimelineDefinition},
-    PivotCacheDefinitionPart, PivotCacheRecordsPart, PivotTablePart, XlsxPivots,
+    PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
+    PivotCacheSourceType, PivotTablePart, XlsxPivots,
 };
 pub use read::{load_from_bytes, load_from_path};
 pub use reader::{read_workbook, read_workbook_from_reader};

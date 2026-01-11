@@ -6,8 +6,11 @@ use quick_xml::Reader;
 
 use crate::XlsxError;
 
+pub mod cache_definition;
 pub mod pivot_charts;
 pub mod slicers;
+
+pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PivotTablePart {
