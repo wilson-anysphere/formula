@@ -1,3 +1,5 @@
+import { colToName, fromA1, toA1 as toA1Shared } from "@formula/spreadsheet-frontend/a1";
+
 export type CellAddress = { row: number; col: number };
 
 export type RangeAddress = { start: CellAddress; end: CellAddress };
@@ -7,29 +9,21 @@ export function colToLetters(col: number): string {
     throw new Error(`colToLetters: invalid column index ${col}`);
   }
 
-  let n = col + 1;
-  let out = "";
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    out = String.fromCharCode(65 + rem) + out;
-    n = Math.floor((n - 1) / 26);
-  }
-  return out;
+  return colToName(col);
 }
 
 export function lettersToCol(letters: string): number | null {
   const normalized = letters.trim().toUpperCase();
   if (!/^[A-Z]+$/.test(normalized)) return null;
-
-  let col = 0;
-  for (const ch of normalized) {
-    col = col * 26 + (ch.charCodeAt(0) - 64);
+  try {
+    return fromA1(`${normalized}1`).col0;
+  } catch {
+    return null;
   }
-  return col - 1;
 }
 
 export function toA1(addr: CellAddress): string {
-  return `${colToLetters(addr.col)}${addr.row + 1}`;
+  return toA1Shared(addr.row, addr.col);
 }
 
 export function parseA1(a1: string): CellAddress | null {
@@ -37,13 +31,12 @@ export function parseA1(a1: string): CellAddress | null {
   const match = /^\$?([A-Za-z]{1,3})\$?(\d+)$/.exec(trimmed);
   if (!match) return null;
 
-  const col = lettersToCol(match[1]);
-  if (col === null) return null;
-
-  const rowNum = Number(match[2]);
-  if (!Number.isFinite(rowNum) || rowNum < 1) return null;
-
-  return { row: rowNum - 1, col };
+  try {
+    const { row0, col0 } = fromA1(`${match[1]}${match[2]}`);
+    return { row: row0, col: col0 };
+  } catch {
+    return null;
+  }
 }
 
 export function normalizeRange(start: CellAddress, end: CellAddress): RangeAddress {
@@ -79,4 +72,3 @@ export function parseA1Range(text: string): RangeAddress | null {
 
   return normalizeRange(start, end);
 }
-
