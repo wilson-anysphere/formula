@@ -8,8 +8,9 @@ import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
 import { DEFAULT_CLASSIFICATION, maxClassification, normalizeClassification } from "../../../../packages/security/dlp/src/classification.js";
 import { createDefaultOrgPolicy } from "../../../../packages/security/dlp/src/policy.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../../packages/security/dlp/src/policyEngine.js";
+import { effectiveCellClassification, a1ToCell } from "../../../../packages/security/dlp/src/selectors.js";
 
-import type { AiFunctionEvaluator, CellValue, SpreadsheetValue } from "./evaluateFormula.js";
+import type { AiFunctionEvaluator, CellValue, ProvenanceCellValue, SpreadsheetValue } from "./evaluateFormula.js";
 import { getDesktopAIAuditStore } from "../ai/audit/auditStore.js";
 
 import { loadDesktopLLMConfig } from "../ai/llm/settings.js";
@@ -45,10 +46,32 @@ export interface AiCellFunctionEngineOptions {
      */
     classify?: (value: SpreadsheetValue) => { level: string; labels?: string[] };
     /**
+     * Document id used to look up classification records.
+     */
+    documentId?: string;
+    /**
+     * Optional classification store used to resolve cell/range classifications.
+     */
+    classificationStore?: { list(documentId: string): Array<{ selector: any; classification: any }> };
+    /**
      * Optional audit logger for DLP decisions (e.g. `InMemoryAuditLogger`).
      */
     auditLogger?: { log(event: any): void };
     includeRestrictedContent?: boolean;
+  };
+  limits?: {
+    /**
+     * Maximum number of cells to serialize from range/array arguments.
+     */
+    maxInputCells?: number;
+    /**
+     * Hard cap on the user prompt message size (character-based heuristic).
+     */
+    maxPromptChars?: number;
+    /**
+     * Hard cap on `inputs_preview` stored in the AI audit entry.
+     */
+    maxAuditPreviewChars?: number;
   };
 }
 
@@ -78,8 +101,13 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
   private readonly dlpPolicy: any;
   private readonly classifyForDlp: (value: SpreadsheetValue) => { level: string; labels?: string[] };
+  private readonly dlpDocumentId?: string;
+  private readonly dlpClassificationStore?: { list(documentId: string): Array<{ selector: any; classification: any }> };
   private readonly dlpAuditLogger?: { log(event: any): void };
   private readonly includeRestrictedContent: boolean;
+  private readonly maxInputCells: number;
+  private readonly maxPromptChars: number;
+  private readonly maxAuditPreviewChars: number;
 
   constructor(options: AiCellFunctionEngineOptions = {}) {
     this.llmClient = options.llmClient ?? createDefaultClient();
@@ -95,8 +123,14 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
     this.dlpPolicy = options.dlp?.policy ?? createDefaultOrgPolicy();
     this.classifyForDlp = options.dlp?.classify ?? (() => ({ ...DEFAULT_CLASSIFICATION }));
+    this.dlpDocumentId = options.dlp?.documentId;
+    this.dlpClassificationStore = options.dlp?.classificationStore;
     this.dlpAuditLogger = options.dlp?.auditLogger;
     this.includeRestrictedContent = Boolean(options.dlp?.includeRestrictedContent);
+
+    this.maxInputCells = clampInt(options.limits?.maxInputCells ?? 200, { min: 1, max: 10_000 });
+    this.maxPromptChars = clampInt(options.limits?.maxPromptChars ?? 25_000, { min: 1_000, max: 1_000_000 });
+    this.maxAuditPreviewChars = clampInt(options.limits?.maxAuditPreviewChars ?? 2_000, { min: 200, max: 100_000 });
 
     this.loadCacheFromStorage();
   }
@@ -111,10 +145,14 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const argError = firstErrorCode(params.args);
     if (argError) return argError;
 
-    const rawPrompt = normalizePrompt(params.args[0] ?? null);
+    const promptArg = params.args[0] ?? null;
     const rawInputs = params.args.slice(1);
 
-    const { decision, selectionClassification, redactedCount, prompt, inputs } = this.applyDlp(rawPrompt, rawInputs);
+    const { decision, selectionClassification, redactedCount, prompt, inputs, inputsPreview } = this.prepareRequest({
+      promptArg,
+      inputs: rawInputs,
+      cellAddress,
+    });
 
     const inputsHash = hashText(stableJsonStringify(inputs));
     const cacheKey = `${fn}\u0000${prompt}\u0000${inputsHash}`;
@@ -126,6 +164,9 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         decision,
         selectionClassification,
         redactedCount,
+        inputs_hash: inputsHash,
+        inputs_preview: inputsPreview,
+        documentId: this.dlpDocumentId,
         cell: cellAddress,
         function: fn,
       });
@@ -135,11 +176,27 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         functionName: fn,
         prompt,
         inputsHash,
+        inputsPreview,
         cellAddress,
         dlp: { decision, selectionClassification, redactedCount },
       });
 
       return AI_CELL_DLP_ERROR;
+    }
+
+    if (decision.decision === DLP_DECISION.REDACT) {
+      this.dlpAuditLogger?.log({
+        type: "ai.cell_function",
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        decision,
+        selectionClassification,
+        redactedCount,
+        inputs_hash: inputsHash,
+        inputs_preview: inputsPreview,
+        documentId: this.dlpDocumentId,
+        cell: cellAddress,
+        function: fn,
+      });
     }
 
     const cached = this.cache.get(cacheKey);
@@ -153,6 +210,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       prompt,
       inputs,
       inputsHash,
+      inputsPreview,
       cellAddress,
       dlp: { decision, selectionClassification, redactedCount },
     });
@@ -174,12 +232,13 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private startRequest(params: {
     cacheKey: string;
     functionName: string;
-    prompt: string;
-    inputs: unknown;
-    inputsHash: string;
-    cellAddress?: string;
-    dlp: { decision: any; selectionClassification: any; redactedCount: number };
-  }): void {
+      prompt: string;
+      inputs: unknown;
+      inputsHash: string;
+      inputsPreview?: string;
+      cellAddress?: string;
+      dlp: { decision: any; selectionClassification: any; redactedCount: number };
+    }): void {
     const request = this.runRequest(params).finally(() => {
       this.inFlightByKey.delete(params.cacheKey);
     });
@@ -189,16 +248,18 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private async runRequest(params: {
     cacheKey: string;
     functionName: string;
-    prompt: string;
-    inputs: unknown;
-    inputsHash: string;
-    cellAddress?: string;
-    dlp: { decision: any; selectionClassification: any; redactedCount: number };
-  }): Promise<void> {
+      prompt: string;
+      inputs: unknown;
+      inputsHash: string;
+      inputsPreview?: string;
+      cellAddress?: string;
+      dlp: { decision: any; selectionClassification: any; redactedCount: number };
+    }): Promise<void> {
     const auditInput: any = {
       function: params.functionName,
       prompt: params.prompt,
       inputs_hash: params.inputsHash,
+      inputs_preview: params.inputsPreview,
       cell: params.cellAddress,
       workbookId: this.workbookId,
       dlp: {
@@ -226,6 +287,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
           functionName: params.functionName,
           prompt: params.prompt,
           inputs: params.inputs,
+          maxPromptChars: this.maxPromptChars,
         }),
       });
       recorder.recordModelLatency(nowMs() - started);
@@ -298,28 +360,117 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     }
   }
 
-  private applyDlp(
-    prompt: string,
-    inputs: CellValue[],
-  ): {
+  private sampleAndClassifyArg(
+    arg: CellValue,
+    records: Array<{ selector: any; classification: any }>,
+    defaultSheetId: string | null,
+  ): ClassifiedArg {
+    if (Array.isArray(arg)) {
+      const totalCells = arg.length;
+      const sampledCells = Math.min(totalCells, this.maxInputCells);
+      const items: ClassifiedItem[] = [];
+
+      for (let i = 0; i < sampledCells; i += 1) {
+        const entry = (arg as any[])[i];
+        if (isProvenanceCellValue(entry)) {
+          items.push({
+            value: entry.value,
+            classification: this.classificationForCellRef(entry.__cellRef, entry.value, records, defaultSheetId),
+          });
+        } else {
+          const value = entry as SpreadsheetValue;
+          items.push({ value, classification: this.classifyForDlp(value) });
+        }
+      }
+
+      return { kind: "range", items, totalCells, sampledCells, truncated: sampledCells < totalCells };
+    }
+
+    if (isProvenanceCellValue(arg)) {
+      return {
+        kind: "scalar",
+        items: [
+          {
+            value: arg.value,
+            classification: this.classificationForCellRef(arg.__cellRef, arg.value, records, defaultSheetId),
+          },
+        ],
+        totalCells: 1,
+        sampledCells: 1,
+        truncated: false,
+      };
+    }
+
+    const value = arg as SpreadsheetValue;
+    return {
+      kind: "scalar",
+      items: [{ value, classification: this.classifyForDlp(value) }],
+      totalCells: 1,
+      sampledCells: 1,
+      truncated: false,
+    };
+  }
+
+  private classificationForCellRef(
+    cellRef: string,
+    value: SpreadsheetValue,
+    records: Array<{ selector: any; classification: any }>,
+    defaultSheetId: string | null,
+  ): any {
+    const valueClassification = this.classifyForDlp(value);
+    if (!this.dlpDocumentId) return valueClassification;
+
+    const cleaned = String(cellRef).replaceAll("$", "").trim();
+    const bang = cleaned.indexOf("!");
+    const rawSheet = bang === -1 ? null : cleaned.slice(0, bang).trim();
+    const a1 = bang === -1 ? cleaned : cleaned.slice(bang + 1);
+
+    const sheetIdRaw = rawSheet
+      ? rawSheet.startsWith("'") && rawSheet.endsWith("'")
+        ? rawSheet.slice(1, -1)
+        : rawSheet
+      : null;
+    const sheetId = sheetIdRaw ?? defaultSheetId;
+    if (!sheetId) return valueClassification;
+
+    try {
+      const cell = a1ToCell(a1);
+      const storeClassification = effectiveCellClassification(
+        { documentId: this.dlpDocumentId, sheetId, row: cell.row, col: cell.col },
+        records,
+      );
+      return maxClassification(storeClassification, valueClassification);
+    } catch {
+      return valueClassification;
+    }
+  }
+
+  private prepareRequest(params: {
+    promptArg: CellValue;
+    inputs: CellValue[];
+    cellAddress?: string;
+  }): {
     decision: any;
     selectionClassification: any;
     redactedCount: number;
     prompt: string;
     inputs: unknown;
+    inputsPreview?: string;
   } {
-    const flattenedValues: SpreadsheetValue[] = [prompt];
-    for (const arg of inputs) {
-      if (Array.isArray(arg)) {
-        flattenedValues.push(...(arg as SpreadsheetValue[]));
-      } else {
-        flattenedValues.push(arg as SpreadsheetValue);
-      }
-    }
+    const records = this.dlpClassificationStore && this.dlpDocumentId ? this.dlpClassificationStore.list(this.dlpDocumentId) : [];
+    const defaultSheetId = sheetIdFromCellRef(params.cellAddress);
+
+    const prompt = this.sampleAndClassifyArg(params.promptArg, records, defaultSheetId);
+    const inputs = params.inputs.map((arg) => this.sampleAndClassifyArg(arg, records, defaultSheetId));
 
     let selectionClassification = { ...DEFAULT_CLASSIFICATION };
-    for (const value of flattenedValues) {
-      selectionClassification = maxClassification(selectionClassification, this.classifyForDlp(value));
+    for (const item of prompt.items) {
+      selectionClassification = maxClassification(selectionClassification, item.classification);
+    }
+    for (const arg of inputs) {
+      for (const item of arg.items) {
+        selectionClassification = maxClassification(selectionClassification, item.classification);
+      }
     }
 
     const decision = evaluatePolicy({
@@ -329,47 +480,35 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       options: { includeRestrictedContent: this.includeRestrictedContent },
     });
 
-    if (decision.decision !== DLP_DECISION.REDACT) {
-      return { decision, selectionClassification, redactedCount: 0, prompt, inputs: normalizeInputs(inputs) };
+    let redactedCount = 0;
+    if (decision.decision === DLP_DECISION.REDACT) {
+      for (const item of prompt.items) {
+        item.value = redactIfNeeded(item.value, item.classification, decision, this.dlpPolicy, () => {
+          redactedCount += 1;
+        }) as SpreadsheetValue;
+      }
+      for (const arg of inputs) {
+        for (const item of arg.items) {
+          item.value = redactIfNeeded(item.value, item.classification, decision, this.dlpPolicy, () => {
+            redactedCount += 1;
+          }) as SpreadsheetValue;
+        }
+      }
     }
 
-    let redactedCount = 0;
-    const safePrompt = normalizeScalar(
-      redactIfNeeded(prompt, this.classifyForDlp(prompt), decision, this.dlpPolicy, () => {
-        redactedCount += 1;
-      }) as SpreadsheetValue,
-    );
+    const safePrompt = renderPromptArg(prompt);
+    const safeInputs = renderInputs(inputs);
+    const inputsPreview =
+      decision.decision === DLP_DECISION.BLOCK ? undefined : truncateText(stableJsonStringify(safeInputs), this.maxAuditPreviewChars);
 
-    const safeInputs = normalizeInputs(
-      inputs.map((arg) => {
-        if (Array.isArray(arg)) {
-          return (arg as SpreadsheetValue[]).map((v) =>
-            redactIfNeeded(v, this.classifyForDlp(v), decision, this.dlpPolicy, () => {
-              redactedCount += 1;
-            }),
-          );
-        }
-        return redactIfNeeded(arg as SpreadsheetValue, this.classifyForDlp(arg as SpreadsheetValue), decision, this.dlpPolicy, () => {
-          redactedCount += 1;
-        });
-      }) as any,
-    );
-
-    this.dlpAuditLogger?.log({
-      type: "ai.cell_function",
-      action: DLP_ACTION.AI_CLOUD_PROCESSING,
-      decision,
-      selectionClassification,
-      redactedCount,
-    });
-
-    return { decision, selectionClassification, redactedCount, prompt: safePrompt, inputs: safeInputs };
+    return { decision, selectionClassification, redactedCount, prompt: safePrompt, inputs: safeInputs, inputsPreview };
   }
 
   private async auditBlockedRun(params: {
     functionName: string;
     prompt: string;
     inputsHash: string;
+    inputsPreview?: string;
     cellAddress?: string;
     dlp: { decision: any; selectionClassification: any; redactedCount: number };
   }): Promise<void> {
@@ -384,6 +523,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         function: params.functionName,
         prompt: params.prompt,
         inputs_hash: params.inputsHash,
+        inputs_preview: params.inputsPreview,
         cell: params.cellAddress,
         workbookId: this.workbookId,
         dlp: params.dlp,
@@ -394,7 +534,16 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   }
 }
 
-function buildMessages(params: { functionName: string; prompt: string; inputs: unknown }): LLMMessage[] {
+type ClassifiedItem = { value: SpreadsheetValue; classification: any };
+type ClassifiedArg = {
+  kind: "scalar" | "range";
+  items: ClassifiedItem[];
+  totalCells: number;
+  sampledCells: number;
+  truncated: boolean;
+};
+
+function buildMessages(params: { functionName: string; prompt: string; inputs: unknown; maxPromptChars?: number }): LLMMessage[] {
   const system: LLMMessage = {
     role: "system",
     content:
@@ -418,28 +567,46 @@ function buildMessages(params: { functionName: string; prompt: string; inputs: u
     userContent = `${prompt}\n\n${inputText}`;
   }
 
-  const user: LLMMessage = { role: "user", content: userContent };
+  const user: LLMMessage = {
+    role: "user",
+    content: typeof params.maxPromptChars === "number" ? truncateText(userContent, params.maxPromptChars) : userContent,
+  };
   return [system, user];
 }
 
-function normalizePrompt(arg: CellValue): string {
-  if (Array.isArray(arg)) {
-    return (arg as SpreadsheetValue[]).map((v) => normalizeScalar(v)).join(", ");
-  }
-  return normalizeScalar(arg as SpreadsheetValue);
+function sheetIdFromCellRef(cellAddress?: string): string | null {
+  if (!cellAddress) return null;
+  const bang = cellAddress.indexOf("!");
+  if (bang === -1) return null;
+  return cellAddress.slice(0, bang);
 }
 
-function normalizeInputs(args: CellValue[]): unknown {
-  if (args.length === 0) return null;
-  if (args.length === 1) {
-    const only = args[0] as any;
-    if (Array.isArray(only)) return (only as SpreadsheetValue[]).map((v) => normalizeScalar(v));
-    return normalizeScalar(only as SpreadsheetValue);
+function renderPromptArg(arg: ClassifiedArg): string {
+  if (arg.kind === "range") {
+    const text = arg.items.map((item) => normalizeScalar(item.value)).join(", ");
+    return arg.truncated ? `${text} …` : text;
   }
-  return args.map((arg) => {
-    if (Array.isArray(arg)) return (arg as SpreadsheetValue[]).map((v) => normalizeScalar(v));
-    return normalizeScalar(arg as SpreadsheetValue);
-  });
+  return normalizeScalar(arg.items[0]?.value ?? null);
+}
+
+function renderInputs(args: ClassifiedArg[]): unknown {
+  if (args.length === 0) return null;
+  if (args.length === 1) return renderInputArg(args[0]!);
+  return args.map((arg) => renderInputArg(arg));
+}
+
+function renderInputArg(arg: ClassifiedArg): unknown {
+  if (arg.kind === "range") {
+    const sample = arg.items.map((item) => normalizeScalar(item.value));
+    if (!arg.truncated) return sample;
+    return {
+      truncated: true,
+      total_cells: arg.totalCells,
+      sampled_cells: arg.sampledCells,
+      sample,
+    };
+  }
+  return normalizeScalar(arg.items[0]?.value ?? null);
 }
 
 function normalizeScalar(value: SpreadsheetValue): string {
@@ -452,18 +619,34 @@ function normalizeScalar(value: SpreadsheetValue): string {
 
 function firstErrorCode(args: CellValue[]): string | null {
   for (const arg of args) {
-    if (isErrorCode(arg)) return arg;
-    if (Array.isArray(arg)) {
-      for (const value of arg) {
-        if (isErrorCode(value)) return value;
-      }
-    }
+    const err = firstErrorCodeInValue(arg);
+    if (err) return err;
   }
   return null;
 }
 
 function isErrorCode(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("#");
+}
+
+function firstErrorCodeInValue(value: CellValue): string | null {
+  if (isErrorCode(value)) return value;
+  if (isProvenanceCellValue(value)) {
+    return isErrorCode(value.value) ? value.value : null;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const err = firstErrorCodeInValue(entry as any);
+      if (err) return err;
+    }
+  }
+  return null;
+}
+
+function isProvenanceCellValue(value: unknown): value is ProvenanceCellValue {
+  if (!value || typeof value !== "object") return false;
+  const v = value as any;
+  return typeof v.__cellRef === "string" && "value" in v;
 }
 
 function redactIfNeeded(
@@ -497,6 +680,19 @@ function sanitizeCellText(text: string): string {
   }
 
   return trimmed;
+}
+
+function truncateText(text: string, maxChars: number): string {
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
+  if (text.length <= maxChars) return text;
+  const suffix = "…[TRUNCATED]";
+  if (maxChars <= suffix.length) return text.slice(0, maxChars);
+  return `${text.slice(0, maxChars - suffix.length)}${suffix}`;
+}
+
+function clampInt(value: number, opts: { min: number; max: number }): number {
+  const n = Number.isFinite(value) ? Math.trunc(value) : opts.min;
+  return Math.max(opts.min, Math.min(opts.max, n));
 }
 
 function stableJsonStringify(value: unknown): string {

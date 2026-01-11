@@ -9,6 +9,8 @@ import { InMemoryAuditLogger } from "../../../../packages/security/dlp/src/audit
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
 import { CLASSIFICATION_LEVEL } from "../../../../packages/security/dlp/src/classification.js";
 import { createDefaultOrgPolicy } from "../../../../packages/security/dlp/src/policy.js";
+import { LocalClassificationStore, createMemoryStorage } from "../../../../packages/security/dlp/src/classificationStore.js";
+import { CLASSIFICATION_SCOPE } from "../../../../packages/security/dlp/src/selectors.js";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -138,22 +140,35 @@ describe("AiCellFunctionEngine", () => {
       redactDisallowed: false,
     };
 
+    const documentId = "unit-test-doc";
+    const storage = createMemoryStorage();
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      documentId,
+      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+    );
+
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
       dlp: {
         policy,
         auditLogger: dlpAudit,
-        classify: () => ({ level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] }),
+        documentId,
+        classificationStore,
+        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
       },
     });
 
-    const value = evaluateFormula('=AI("summarize", "top secret")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    const value = evaluateFormula('=AI("summarize", A1)', (ref) => (ref === "A1" ? "top secret" : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
     expect(value).toBe(AI_CELL_DLP_ERROR);
     expect(llmClient.chat).not.toHaveBeenCalled();
 
     const events = dlpAudit.list();
-    // InMemoryAuditLogger stores canonical audit events; the original payload lives under `details`.
     expect(events.some((e: any) => e.details?.type === "ai.cell_function")).toBe(true);
   });
 
@@ -166,20 +181,30 @@ describe("AiCellFunctionEngine", () => {
     };
 
     const policy = createDefaultOrgPolicy();
+    const documentId = "unit-test-doc";
+    const storage = createMemoryStorage();
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      documentId,
+      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] },
+    );
 
     const engine = new AiCellFunctionEngine({
       llmClient: llmClient as any,
       auditStore: new MemoryAIAuditStore(),
       dlp: {
         policy,
-        classify: (value) =>
-          String(value).includes("secret")
-            ? { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] }
-            : { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] },
+        documentId,
+        classificationStore,
+        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
       },
     });
 
-    const pending = evaluateFormula('=AI("summarize", "secret payload")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    const pending = evaluateFormula('=AI("summarize", A1)', (ref) => (ref === "A1" ? "secret payload" : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
     expect(pending).toBe(AI_CELL_PLACEHOLDER);
     await engine.waitForIdle();
 
@@ -187,5 +212,52 @@ describe("AiCellFunctionEngine", () => {
     const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
     expect(userMessage).toContain("[REDACTED]");
     expect(userMessage).not.toContain("secret payload");
+  });
+
+  it("propagates spreadsheet error codes from referenced cells", () => {
+    const llmClient = { chat: vi.fn() };
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+    });
+
+    const value = evaluateFormula('=AI("summarize", A1)', (ref) => (ref === "A1" ? "#DIV/0!" : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
+    expect(value).toBe("#DIV/0!");
+    expect(llmClient.chat).not.toHaveBeenCalled();
+  });
+
+  it("truncates large range inputs before sending to the LLM", async () => {
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      limits: { maxInputCells: 50 },
+    });
+
+    const getCellValue = (addr: string) => {
+      const idx = Number(addr.slice(1));
+      return `CELL_${String(idx).padStart(4, "0")}`;
+    };
+
+    const pending = evaluateFormula('=AI("summarize", A1:A200)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain('"truncated":true');
+    expect(userMessage).toContain('"total_cells":200');
+    expect(userMessage).toContain('"sampled_cells":50');
+    expect(userMessage).toContain("CELL_0001");
+    expect(userMessage).not.toContain("CELL_0200");
   });
 });

@@ -29,6 +29,7 @@ import {
 import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
+import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import {
   createEngineClient,
   engineApplyDeltas,
@@ -630,10 +631,19 @@ export class SpreadsheetApp {
       title: "Example Chart"
     });
 
+    const workbookId = opts.workbookId ?? "local-workbook";
+    const dlp = createDesktopDlpContext({ documentId: workbookId });
     this.aiCellFunctions = new AiCellFunctionEngine({
       onUpdate: () => this.refresh(),
       workbookId: opts.workbookId,
       cache: { persistKey: "formula:ai_cell_cache" },
+      dlp: {
+        policy: dlp.policy,
+        auditLogger: dlp.auditLogger,
+        documentId: dlp.documentId,
+        classificationStore: dlp.classificationStore,
+        classify: () => ({ level: "Public", labels: [] }),
+      },
     });
 
     // Initial layout + render.

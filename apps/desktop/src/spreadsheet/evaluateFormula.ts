@@ -2,7 +2,8 @@ import { parseA1Range, type RangeAddress } from "./a1.js";
 import { tokenizeFormula } from "../formula-bar/highlight/tokenizeFormula.js";
 
 export type SpreadsheetValue = number | string | boolean | null;
-export type CellValue = SpreadsheetValue | SpreadsheetValue[];
+export type ProvenanceCellValue = { __cellRef: string; value: SpreadsheetValue };
+export type CellValue = SpreadsheetValue | SpreadsheetValue[] | ProvenanceCellValue | ProvenanceCellValue[];
 
 export interface AiFunctionEvaluator {
   evaluateAiFunction(params: { name: string; args: CellValue[]; cellAddress?: string }): SpreadsheetValue;
@@ -127,6 +128,19 @@ function flattenNumbers(values: CellValue[], out: number[]): string | null {
 
 type GetCellValue = (address: string) => SpreadsheetValue;
 
+type EvalContext = {
+  /**
+   * When true, A1 references inside expressions are returned as provenance objects
+   * (`{__cellRef, value}`) instead of raw scalars/arrays.
+   *
+   * This is used for AI cell functions so downstream DLP enforcement can resolve
+   * classifications from the referenced cell address (not just the cell value).
+   */
+  preserveReferenceProvenance: boolean;
+};
+
+const DEFAULT_CONTEXT: EvalContext = { preserveReferenceProvenance: false };
+
 function splitSheetQualifier(input: string): { sheetName: string | null; ref: string } {
   const s = String(input).trim();
 
@@ -139,6 +153,13 @@ function splitSheetQualifier(input: string): { sheetName: string | null; ref: st
   if (unquoted) return { sheetName: unquoted[1], ref: unquoted[2] };
 
   return { sheetName: null, ref: s };
+}
+
+function sheetIdFromCellAddress(cellAddress?: string): string | null {
+  if (!cellAddress) return null;
+  const bang = cellAddress.indexOf("!");
+  if (bang === -1) return null;
+  return cellAddress.slice(0, bang);
 }
 
 function evalFunction(
@@ -184,20 +205,47 @@ function evalFunction(
   return "#NAME?";
 }
 
-function readReference(refText: string, getCellValue: GetCellValue): CellValue {
+function readReference(
+  refText: string,
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions,
+  context: EvalContext
+): CellValue {
   const { sheetName, ref } = splitSheetQualifier(refText);
   const range = parseA1Range(ref);
   if (!range) return "#REF!";
 
-  const prefix = sheetName ? `${sheetName}!` : "";
+  const defaultSheet = sheetIdFromCellAddress(options.cellAddress);
+  const provenanceSheet = sheetName ?? defaultSheet;
+  const getPrefix = sheetName ? `${sheetName}!` : "";
+
+  const readCell = (addr: string) => getCellValue(`${getPrefix}${addr}`);
+
   if (range.start.row === range.end.row && range.start.col === range.end.col) {
-    return getCellValue(`${prefix}${toA1(range.start)}`);
+    const addr = toA1(range.start);
+    const value = readCell(addr);
+    if (!context.preserveReferenceProvenance) return value;
+    const cellRef = provenanceSheet ? `${provenanceSheet}!${addr}` : addr;
+    return { __cellRef: cellRef, value };
   }
-  const values: SpreadsheetValue[] = [];
+
+  if (!context.preserveReferenceProvenance) {
+    const values: SpreadsheetValue[] = [];
+    for (let r = range.start.row; r <= range.end.row; r += 1) {
+      for (let c = range.start.col; c <= range.end.col; c += 1) {
+        const addr = toA1({ row: r, col: c });
+        values.push(readCell(addr));
+      }
+    }
+    return values;
+  }
+
+  const values: ProvenanceCellValue[] = [];
   for (let r = range.start.row; r <= range.end.row; r += 1) {
     for (let c = range.start.col; c <= range.end.col; c += 1) {
       const addr = toA1({ row: r, col: c });
-      values.push(getCellValue(`${prefix}${addr}`));
+      const cellRef = provenanceSheet ? `${provenanceSheet}!${addr}` : addr;
+      values.push({ __cellRef: cellRef, value: readCell(addr) });
     }
   }
   return values;
@@ -214,7 +262,17 @@ function toA1(addr: { row: number; col: number }): string {
   return `${col}${addr.row + 1}`;
 }
 
-function parsePrimary(parser: Parser, getCellValue: GetCellValue, options: EvaluateFormulaOptions): CellValue {
+function isAiFunctionName(name: string): boolean {
+  const upper = name.toUpperCase();
+  return upper === "AI" || upper === "AI.EXTRACT" || upper === "AI.CLASSIFY" || upper === "AI.TRANSLATE";
+}
+
+function parsePrimary(
+  parser: Parser,
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions,
+  context: EvalContext
+): CellValue {
   const tok = parser.peek();
   if (!tok) return null;
 
@@ -240,7 +298,7 @@ function parsePrimary(parser: Parser, getCellValue: GetCellValue, options: Evalu
 
   if (tok.type === "reference") {
     parser.consume();
-    return readReference(tok.value, getCellValue);
+    return readReference(tok.value, getCellValue, options, context);
   }
 
   if (tok.type === "function") {
@@ -249,9 +307,10 @@ function parsePrimary(parser: Parser, getCellValue: GetCellValue, options: Evalu
     if (!parser.match("paren", "(")) return "#VALUE!";
 
     const args: CellValue[] = [];
+    const argContext = isAiFunctionName(name) ? { preserveReferenceProvenance: true } : DEFAULT_CONTEXT;
     if (!parser.match("paren", ")")) {
       while (true) {
-        args.push(parseExpression(parser, getCellValue, options));
+        args.push(parseExpression(parser, getCellValue, options, argContext));
         if (parser.match("comma", ",")) continue;
         if (parser.match("paren", ")")) break;
         return "#VALUE!";
@@ -263,7 +322,7 @@ function parsePrimary(parser: Parser, getCellValue: GetCellValue, options: Evalu
 
   if (tok.type === "paren" && tok.value === "(") {
     parser.consume();
-    const inner = parseExpression(parser, getCellValue, options);
+    const inner = parseExpression(parser, getCellValue, options, context);
     if (!parser.match("paren", ")")) return "#VALUE!";
     return inner;
   }
@@ -271,27 +330,37 @@ function parsePrimary(parser: Parser, getCellValue: GetCellValue, options: Evalu
   return "#VALUE!";
 }
 
-function parseUnary(parser: Parser, getCellValue: GetCellValue, options: EvaluateFormulaOptions): CellValue {
+function parseUnary(
+  parser: Parser,
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions,
+  context: EvalContext
+): CellValue {
   const tok = parser.peek();
   if (tok?.type === "operator" && (tok.value === "+" || tok.value === "-")) {
     parser.consume();
-    const rhs = parseUnary(parser, getCellValue, options);
+    const rhs = parseUnary(parser, getCellValue, options, context);
     if (isErrorCode(rhs)) return rhs;
     if (Array.isArray(rhs)) return "#VALUE!";
     const num = toNumber(rhs as SpreadsheetValue);
     if (num === null) return "#VALUE!";
     return tok.value === "-" ? -num : num;
   }
-  return parsePrimary(parser, getCellValue, options);
+  return parsePrimary(parser, getCellValue, options, context);
 }
 
-function parseTerm(parser: Parser, getCellValue: GetCellValue, options: EvaluateFormulaOptions): CellValue {
-  let left = parseUnary(parser, getCellValue, options);
+function parseTerm(
+  parser: Parser,
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions,
+  context: EvalContext
+): CellValue {
+  let left = parseUnary(parser, getCellValue, options, context);
   while (true) {
     const tok = parser.peek();
     if (!tok || tok.type !== "operator" || (tok.value !== "*" && tok.value !== "/")) break;
     parser.consume();
-    const right = parseUnary(parser, getCellValue, options);
+    const right = parseUnary(parser, getCellValue, options, context);
     if (isErrorCode(left)) return left;
     if (isErrorCode(right)) return right;
     if (Array.isArray(left) || Array.isArray(right)) return "#VALUE!";
@@ -308,13 +377,18 @@ function parseTerm(parser: Parser, getCellValue: GetCellValue, options: Evaluate
   return left;
 }
 
-function parseExpression(parser: Parser, getCellValue: GetCellValue, options: EvaluateFormulaOptions): CellValue {
-  let left = parseTerm(parser, getCellValue, options);
+function parseExpression(
+  parser: Parser,
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions,
+  context: EvalContext
+): CellValue {
+  let left = parseTerm(parser, getCellValue, options, context);
   while (true) {
     const tok = parser.peek();
     if (!tok || tok.type !== "operator" || (tok.value !== "+" && tok.value !== "-")) break;
     parser.consume();
-    const right = parseTerm(parser, getCellValue, options);
+    const right = parseTerm(parser, getCellValue, options, context);
     if (isErrorCode(left)) return left;
     if (isErrorCode(right)) return right;
     if (Array.isArray(left) || Array.isArray(right)) return "#VALUE!";
@@ -340,7 +414,7 @@ export function evaluateFormula(
 
   const tokens = lex(text.slice(1), options);
   const parser = new Parser(tokens);
-  const value = parseExpression(parser, getCellValue, options);
+  const value = parseExpression(parser, getCellValue, options, DEFAULT_CONTEXT);
   if (isErrorCode(value)) return value;
   if (Array.isArray(value)) return (value[0] ?? null) as SpreadsheetValue;
   return value as SpreadsheetValue;

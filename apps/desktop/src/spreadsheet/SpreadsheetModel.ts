@@ -3,13 +3,16 @@ import { evaluateFormula, type SpreadsheetValue } from "./evaluateFormula.js";
 import { AiCellFunctionEngine } from "./AiCellFunctionEngine.js";
 import { normalizeRange, parseA1, rangeToA1, toA1, type CellAddress, type RangeAddress } from "./a1.js";
 import { TabCompletionEngine } from "@formula/ai-completion";
+import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 
 export type Cell = { input: string; value: SpreadsheetValue };
+
+const DEFAULT_SHEET_ID = "Sheet1";
 
 export class SpreadsheetModel {
   readonly formulaBar = new FormulaBarModel();
   readonly #cells = new Map<string, Cell>();
-  readonly #aiCellFunctions = new AiCellFunctionEngine({ onUpdate: () => this.#recomputeAiCells() });
+  readonly #aiCellFunctions: AiCellFunctionEngine;
   readonly #completion = new TabCompletionEngine();
   #completionRequest = 0;
   #pendingCompletion: Promise<void> | null = null;
@@ -18,6 +21,19 @@ export class SpreadsheetModel {
   #selection: RangeAddress = { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } };
 
   constructor(initial?: Record<string, string | number>) {
+    const workbookId = "local-workbook";
+    const dlp = createDesktopDlpContext({ documentId: workbookId });
+    this.#aiCellFunctions = new AiCellFunctionEngine({
+      onUpdate: () => this.#recomputeAiCells(),
+      dlp: {
+        policy: dlp.policy,
+        auditLogger: dlp.auditLogger,
+        documentId: dlp.documentId,
+        classificationStore: dlp.classificationStore,
+        classify: () => ({ level: "Public", labels: [] }),
+      },
+    });
+
     if (initial) {
       for (const [addr, input] of Object.entries(initial)) {
         this.setCellInput(addr, String(input));
@@ -51,7 +67,7 @@ export class SpreadsheetModel {
   setCellInput(address: string, input: string): void {
     const value = evaluateFormula(input, (ref) => this.getCellValue(ref), {
       ai: this.#aiCellFunctions,
-      cellAddress: address
+      cellAddress: `${DEFAULT_SHEET_ID}!${address}`,
     });
     this.#cells.set(address, { input, value });
     this.#cellsVersion += 1;
@@ -174,7 +190,7 @@ export class SpreadsheetModel {
       if (!isAiFormula(cell.input)) continue;
       const value = evaluateFormula(cell.input, (ref) => this.getCellValue(ref), {
         ai: this.#aiCellFunctions,
-        cellAddress: address
+        cellAddress: `${DEFAULT_SHEET_ID}!${address}`,
       });
       if (value === cell.value) continue;
       this.#cells.set(address, { input: cell.input, value });
