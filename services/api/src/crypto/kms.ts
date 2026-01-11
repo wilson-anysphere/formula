@@ -245,8 +245,15 @@ export class KmsProviderFactory {
 }
 
 class UnimplementedExternalKmsProvider implements EnvelopeKmsProvider {
-  constructor(private readonly options: { kmsProvider: string; kmsKeyId: string; orgId: string }) {}
-  readonly provider = this.options.kmsProvider;
+  readonly provider: string;
+
+  constructor(private readonly options: { kmsProvider: string; kmsKeyId: string; orgId: string }) {
+    // Parameter properties (`private readonly options`) are assigned in the
+    // constructor body, but class field initializers run before those
+    // assignments. Set `provider` here to avoid `this.options` being undefined
+    // when `useDefineForClassFields` is enabled.
+    this.provider = options.kmsProvider;
+  }
 
   async wrapKey(): Promise<unknown> {
     const { kmsProvider, kmsKeyId, orgId } = this.options;
