@@ -107,6 +107,7 @@ export function attachFilePersistence(doc: Y.Doc, opts: { filePath: string }): O
     if (destroyed) return;
     destroyed = true;
     doc.off("update", updateHandler);
+    doc.off("destroy", destroy);
     try {
       fs.closeSync(fd);
     } catch {
@@ -121,9 +122,17 @@ export function attachFilePersistence(doc: Y.Doc, opts: { filePath: string }): O
     destroy,
     clear: async () => {
       if (destroyed) return;
-      fs.ftruncateSync(fd, 0);
-      bestEffortFsync(fd);
+
+      // Clearing the persisted state makes the on-disk log no longer a valid
+      // replay source for the current in-memory document state. To avoid writing
+      // a partial log after clearing, we fully detach persistence (callers can
+      // re-attach if they want to resume persistence).
+      destroy();
+      try {
+        fs.rmSync(opts.filePath, { force: true });
+      } catch {
+        // ignore
+      }
     },
   };
 }
-

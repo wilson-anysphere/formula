@@ -30,16 +30,23 @@ export function attachIndexeddbPersistence(doc: Y.Doc, opts: { key: string }): O
     if (destroyed) return;
     destroyed = true;
     persistence.destroy?.();
+    doc.off("destroy", destroy);
   };
 
   const clear = async () => {
+    if (destroyed) return;
+
     // Prefer the library's API when available.
     if (typeof persistence.clearData === "function") {
+      destroyed = true;
+      doc.off("destroy", destroy);
       await persistence.clearData();
       return;
     }
     const ctor: any = IndexeddbPersistence as any;
     if (typeof ctor.clearData === "function") {
+      destroyed = true;
+      doc.off("destroy", destroy);
       await ctor.clearData(opts.key);
       return;
     }
@@ -54,4 +61,3 @@ export function attachIndexeddbPersistence(doc: Y.Doc, opts: { key: string }): O
 
   return { whenLoaded, destroy, clear };
 }
-

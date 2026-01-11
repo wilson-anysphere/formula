@@ -18,6 +18,9 @@ export type OfflinePersistenceHandle = {
    * Clear persisted state for this document key/path.
    *
    * This does not modify the in-memory Y.Doc; it only wipes the offline storage.
+   *
+   * Note: clearing typically detaches persistence. Re-attach a new persistence
+   * instance if you want to resume persisting after clearing.
    */
   clear: () => Promise<void>;
 };
@@ -41,4 +44,3 @@ export type OfflinePersistenceOptions = {
 };
 
 export type OfflinePersistenceAttach = (doc: Y.Doc, opts: OfflinePersistenceOptions) => OfflinePersistenceHandle;
-
