@@ -1,5 +1,6 @@
 use crate::date::ExcelDateSystem;
 use crate::functions::date_time::{datevalue, timevalue};
+use crate::functions::wildcard::WildcardPattern;
 use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::{parse_number, NumberLocale};
 use crate::{ErrorKind, Value};
@@ -27,32 +28,18 @@ enum CriteriaRhs {
 struct TextCriteria {
     /// Case-folded pattern used for `>`/`<` comparisons (wildcards treated as literals).
     literal_folded: String,
-    /// Case-folded wildcard tokens used for `=`/`<>` matching.
-    tokens: Vec<Token>,
-    /// Whether the token list contains wildcard operators (`*` or `?`).
-    has_wildcards: bool,
+    wildcard: WildcardPattern,
 }
 
 impl TextCriteria {
     fn new(raw: &str) -> Self {
         let folded = fold_case(raw);
-        let tokens = tokenize_pattern(&folded);
-        let has_wildcards = tokens
-            .iter()
-            .any(|t| matches!(t, Token::Star | Token::QMark));
-        let literal_folded = tokens
-            .iter()
-            .map(|t| match t {
-                Token::Star => '*',
-                Token::QMark => '?',
-                Token::Literal(c) => *c,
-            })
-            .collect();
+        let wildcard = WildcardPattern::new(&folded);
+        let literal_folded = wildcard.literal_pattern();
 
         Self {
             literal_folded,
-            tokens,
-            has_wildcards,
+            wildcard,
         }
     }
 }
@@ -185,16 +172,16 @@ fn matches_text_criteria(op: CriteriaOp, pattern: &TextCriteria, value: &Value) 
 
     match op {
         CriteriaOp::Eq => {
-            if !pattern.has_wildcards {
+            if !pattern.wildcard.has_wildcards() {
                 return value_folded == pattern.literal_folded;
             }
-            wildcard_match_tokens(&pattern.tokens, &value_folded)
+            pattern.wildcard.matches_folded(&value_folded)
         }
         CriteriaOp::Ne => {
-            if !pattern.has_wildcards {
+            if !pattern.wildcard.has_wildcards() {
                 return value_folded != pattern.literal_folded;
             }
-            !wildcard_match_tokens(&pattern.tokens, &value_folded)
+            !pattern.wildcard.matches_folded(&value_folded)
         }
         CriteriaOp::Lt => value_folded < pattern.literal_folded,
         CriteriaOp::Lte => value_folded <= pattern.literal_folded,
@@ -331,86 +318,6 @@ fn parse_date_time_criteria(raw: &str, system: ExcelDateSystem) -> Option<f64> {
         (None, Some(t)) => Some(t),
         (None, None) => None,
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Token {
-    Star,
-    QMark,
-    Literal(char),
-}
-
-fn tokenize_pattern(pattern: &str) -> Vec<Token> {
-    let mut tokens = Vec::new();
-    let mut chars = pattern.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '~' => {
-                let Some(&next) = chars.peek() else {
-                    tokens.push(Token::Literal('~'));
-                    continue;
-                };
-
-                if matches!(next, '*' | '?' | '~') {
-                    let _ = chars.next();
-                    tokens.push(Token::Literal(next));
-                } else {
-                    tokens.push(Token::Literal('~'));
-                }
-            }
-            '*' => tokens.push(Token::Star),
-            '?' => tokens.push(Token::QMark),
-            other => tokens.push(Token::Literal(other)),
-        }
-    }
-    tokens
-}
-
-fn wildcard_match_tokens(pattern: &[Token], text: &str) -> bool {
-    let text = text.chars().collect::<Vec<_>>();
-
-    let mut pi = 0usize;
-    let mut ti = 0usize;
-    let mut star: Option<usize> = None;
-    let mut star_text = 0usize;
-
-    while ti < text.len() {
-        if pi < pattern.len() {
-            match pattern[pi] {
-                Token::Literal(c) if c == text[ti] => {
-                    pi += 1;
-                    ti += 1;
-                    continue;
-                }
-                Token::QMark => {
-                    pi += 1;
-                    ti += 1;
-                    continue;
-                }
-                Token::Star => {
-                    star = Some(pi);
-                    pi += 1;
-                    star_text = ti;
-                    continue;
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(star_pos) = star {
-            pi = star_pos + 1;
-            star_text += 1;
-            ti = star_text;
-        } else {
-            return false;
-        }
-    }
-
-    while pi < pattern.len() && pattern[pi] == Token::Star {
-        pi += 1;
-    }
-
-    pi == pattern.len()
 }
 
 fn fold_case(input: &str) -> String {
