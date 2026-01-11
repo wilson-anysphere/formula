@@ -64,10 +64,8 @@ export class CommentManager {
 
   listAll(): Comment[] {
     const root = getCommentsRoot(this.doc);
-    const comments =
-      root.kind === "map"
-        ? Array.from(root.map.values()).map(yCommentToComment)
-        : root.array.toArray().map(yCommentToComment);
+    const entries = this.getAllYComments(root);
+    const comments = entries.map(({ yComment, mapKey }) => yCommentToComment(yComment, mapKey));
     comments.sort((a, b) => {
       if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
       return a.id.localeCompare(b.id);
@@ -197,7 +195,14 @@ export class CommentManager {
     if (root.kind === "map") {
       const yComment = root.map.get(commentId);
       if (!yComment) {
-        throw new Error(`Comment not found: ${commentId}`);
+        // Some historical docs used a legacy array schema and were later
+        // "clobbered" by instantiating the root as a Map. In that case the
+        // underlying list items still exist, but are not present in `map.get`.
+        const legacy = findLegacyListCommentById(root.map, commentId);
+        if (!legacy) {
+          throw new Error(`Comment not found: ${commentId}`);
+        }
+        return legacy;
       }
       return yComment;
     }
@@ -209,6 +214,31 @@ export class CommentManager {
     }
 
     throw new Error(`Comment not found: ${commentId}`);
+  }
+
+  private getAllYComments(root: CommentsRoot): Array<{ yComment: Y.Map<unknown>; mapKey?: string }> {
+    if (root.kind === "array") {
+      return root.array.toArray().map((yComment) => ({ yComment }));
+    }
+
+    // Canonical Map entries (keyed by id).
+    const byId = new Map<string, { yComment: Y.Map<unknown>; mapKey?: string }>();
+    root.map.forEach((value, key) => {
+      if (value instanceof Y.Map) {
+        byId.set(key, { yComment: value, mapKey: key });
+      }
+    });
+
+    // Legacy array items that ended up inside a Map root (see comment in
+    // `getYComment` above).
+    for (const yComment of iterLegacyListComments(root.map)) {
+      const id = String(yComment.get("id") ?? "");
+      if (!id) continue;
+      if (byId.has(id)) continue;
+      byId.set(id, { yComment });
+    }
+
+    return Array.from(byId.values());
   }
 }
 
@@ -241,11 +271,12 @@ export function getCommentsMap(doc: Y.Doc): YCommentsMap {
   return root.map;
 }
 
-export function yCommentToComment(yComment: Y.Map<unknown>): Comment {
+export function yCommentToComment(yComment: Y.Map<unknown>, mapKey?: string): Comment {
   const replies = (yComment.get("replies") as Y.Array<Y.Map<unknown>> | undefined)?.toArray().map(yReplyToReply) ?? [];
 
   return {
-    id: String(yComment.get("id") ?? ""),
+    // For the canonical Map schema, the map key is authoritative.
+    id: String(mapKey ?? yComment.get("id") ?? ""),
     cellRef: String(yComment.get("cellRef") ?? ""),
     kind: (yComment.get("kind") as CommentKind) ?? "threaded",
     author: {
@@ -259,6 +290,28 @@ export function yCommentToComment(yComment: Y.Map<unknown>): Comment {
     mentions: Array.isArray(yComment.get("mentions")) ? (yComment.get("mentions") as any) : [],
     replies,
   };
+}
+
+function iterLegacyListComments(type: any): Y.Map<unknown>[] {
+  const out: Y.Map<unknown>[] = [];
+  let item = type?._start ?? null;
+  while (item) {
+    if (!item.deleted && item.parentSub === null) {
+      const content = item.content?.getContent?.() ?? [];
+      for (const value of content) {
+        if (value instanceof Y.Map) out.push(value);
+      }
+    }
+    item = item.right;
+  }
+  return out;
+}
+
+function findLegacyListCommentById(type: any, commentId: string): Y.Map<unknown> | null {
+  for (const yComment of iterLegacyListComments(type)) {
+    if (String(yComment.get("id") ?? "") === commentId) return yComment;
+  }
+  return null;
 }
 
 export function yReplyToReply(yReply: Y.Map<unknown>): Reply {
@@ -331,18 +384,37 @@ export function createYReply(input: {
 export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown } = {}): boolean {
   if (!doc.share.has("comments")) return false;
   const root = getCommentsRoot(doc);
-  if (root.kind !== "array") return false;
+  const legacyList =
+    root.kind === "array"
+      ? root.array.toArray()
+      : // Some historical docs were instantiated as a Map even though their
+        // content is a legacy list (array) of comment maps.
+        iterLegacyListComments(root.map);
 
-  const legacy = root.array;
+  const hasLegacyListContent = legacyList.length > 0;
+  if (root.kind !== "array" && !hasLegacyListContent) return false;
+
+  const legacyRoot: Y.AbstractType<any> = root.kind === "array" ? root.array : root.map;
   doc.transact(
     () => {
-      /** @type {Array<[string, Y.Map<unknown>]>} */
-      const entries: Array<[string, Y.Map<unknown>]> = [];
-      for (const item of legacy.toArray()) {
+      /** @type {Map<string, Y.Map<unknown>>} */
+      const entries = new Map<string, Y.Map<unknown>>();
+
+      // Canonical Map entries (if present).
+      if (root.kind === "map") {
+        root.map.forEach((value, key) => {
+          if (!(value instanceof Y.Map)) return;
+          entries.set(key, cloneYjsValue(value) as Y.Map<unknown>);
+        });
+      }
+
+      // Legacy list entries (array schema, or clobbered Map schema).
+      for (const item of legacyList) {
         if (!(item instanceof Y.Map)) continue;
         const id = String(item.get("id") ?? "");
         if (!id) continue;
-        entries.push([id, cloneYjsValue(item) as Y.Map<unknown>]);
+        if (entries.has(id)) continue;
+        entries.set(id, cloneYjsValue(item) as Y.Map<unknown>);
       }
 
       // Root types are schema-defined by name; once "comments" is instantiated as
@@ -351,11 +423,11 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
       // To migrate in-place, we "tombstone" the legacy array under a new root
       // name and then create the canonical Map root at "comments".
       const legacyRootName = findAvailableLegacyRootName(doc);
-      doc.share.set(legacyRootName, legacy);
+      doc.share.set(legacyRootName, legacyRoot);
       doc.share.delete("comments");
 
       const map = doc.getMap("comments") as YCommentsMap;
-      for (const [id, value] of entries) {
+      for (const [id, value] of entries.entries()) {
         map.set(id, value);
       }
     },

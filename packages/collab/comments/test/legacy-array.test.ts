@@ -93,6 +93,62 @@ describe("collab comments legacy array schema", () => {
     expect(target.share.get("comments")).toBeInstanceOf(Y.Array);
   });
 
+  it("recovers legacy array comments after the root was instantiated as a Map (clobbered schema)", () => {
+    const source = new Y.Doc();
+    const legacy = source.getArray<Y.Map<unknown>>("comments");
+    legacy.push([
+      createYComment({
+        id: "c1",
+        cellRef: "A1",
+        kind: "threaded",
+        author: { id: "u1", name: "Alice" },
+        now: 1,
+        content: "Legacy",
+      }),
+    ]);
+
+    const snapshot = Y.encodeStateAsUpdate(source);
+
+    const target = new Y.Doc();
+    Y.applyUpdate(target, snapshot);
+
+    // Simulate the old bug: choosing the wrong constructor while the root is
+    // still a placeholder.
+    target.getMap("comments");
+    expect(target.share.get("comments")).toBeInstanceOf(Y.Map);
+
+    const mgr = new CommentManager(target);
+    expect(mgr.listAll().map((c) => c.id)).toEqual(["c1"]);
+
+    mgr.addReply({
+      commentId: "c1",
+      content: "Reply",
+      author: { id: "u1", name: "Alice" },
+      id: "r1",
+      now: 2,
+    });
+
+    // Adding a new comment should use the canonical map schema even though the
+    // legacy comment is stored as an array item inside the map root.
+    mgr.addComment({
+      cellRef: "A2",
+      kind: "threaded",
+      content: "New",
+      author: { id: "u1", name: "Alice" },
+      id: "c2",
+      now: 3,
+    });
+
+    expect(mgr.listAll().map((c) => c.id)).toEqual(["c1", "c2"]);
+
+    // Migration should normalize the legacy list item into a proper map entry.
+    expect(migrateCommentsArrayToMap(target)).toBe(true);
+    const map = getCommentsMap(target);
+    expect(map.size).toBe(2);
+    expect(map.has("c1")).toBe(true);
+    expect(map.has("c2")).toBe(true);
+  });
+
   it("converges when resolving and replying concurrently (legacy array root)", () => {
     const doc1 = new Y.Doc();
     const doc2 = new Y.Doc();
