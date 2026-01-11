@@ -8,6 +8,10 @@ import traceback
 import urllib.parse
 
 
+MAX_ERROR_MESSAGE_BYTES = 16 * 1024
+MAX_ERROR_STACK_BYTES = 64 * 1024
+
+
 class PermissionDenied(Exception):
     def __init__(self, request: dict, reason: str):
         super().__init__(reason)
@@ -70,6 +74,21 @@ def _format_exc_without_source() -> str:
         return "".join(tb.format())
     except Exception:
         return ""
+
+
+def _truncate_utf8(text: str, max_bytes: int) -> str:
+    if not isinstance(text, str):
+        text = str(text)
+    if len(text.encode("utf-8", errors="replace")) <= max_bytes:
+        return text
+
+    # Start with a rough cut (by code units) to avoid allocating massive intermediate buffers.
+    end = min(len(text), max_bytes)
+    truncated = text[:end]
+    while end > 0 and len(truncated.encode("utf-8", errors="replace")) > max_bytes:
+        end = int(end * 0.9)
+        truncated = text[:end]
+    return truncated + "…"
 
 
 def _is_within_scope(target_path: str, scope_path: str) -> bool:
@@ -602,34 +621,34 @@ def _main():
     except PermissionDenied as e:
         error_payload = {
             "name": "PermissionDeniedError",
-            "message": str(e),
-            "stack": _format_exc_without_source(),
+            "message": _truncate_utf8(str(e), MAX_ERROR_MESSAGE_BYTES),
+            "stack": _truncate_utf8(_format_exc_without_source(), MAX_ERROR_STACK_BYTES),
             "code": "PERMISSION_DENIED",
             "principal": principal,
             "request": e.request,
-            "reason": e.reason,
+            "reason": _truncate_utf8(e.reason, MAX_ERROR_MESSAGE_BYTES),
         }
     except OutputLimitExceeded as e:
         error_payload = {
             "name": "SandboxOutputLimitError",
-            "message": str(e),
-            "stack": _format_exc_without_source(),
+            "message": _truncate_utf8(str(e), MAX_ERROR_MESSAGE_BYTES),
+            "stack": _truncate_utf8(_format_exc_without_source(), MAX_ERROR_STACK_BYTES),
             "code": "SANDBOX_OUTPUT_LIMIT",
             "maxBytes": e.max_bytes,
         }
     except MemoryError as e:
         error_payload = {
             "name": "SandboxMemoryLimitError",
-            "message": str(e),
-            "stack": _format_exc_without_source(),
+            "message": _truncate_utf8(str(e), MAX_ERROR_MESSAGE_BYTES),
+            "stack": _truncate_utf8(_format_exc_without_source(), MAX_ERROR_STACK_BYTES),
             "code": "SANDBOX_MEMORY_LIMIT",
             "memoryMb": memory_mb,
         }
     except Exception as e:
         error_payload = {
             "name": e.__class__.__name__,
-            "message": str(e),
-            "stack": _format_exc_without_source(),
+            "message": _truncate_utf8(str(e), MAX_ERROR_MESSAGE_BYTES),
+            "stack": _truncate_utf8(_format_exc_without_source(), MAX_ERROR_STACK_BYTES),
             "code": "PYTHON_SANDBOX_ERROR",
         }
 

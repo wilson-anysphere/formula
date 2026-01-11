@@ -3,14 +3,33 @@ import { parentPort } from "node:worker_threads";
 
 import { createSandboxSecureApis } from "../secureApis/createSecureApis.js";
 
+const MAX_ERROR_MESSAGE_BYTES = 16 * 1024;
+const MAX_ERROR_STACK_BYTES = 64 * 1024;
+
+function truncateUtf8(text, maxBytes) {
+  const str = typeof text === "string" ? text : String(text);
+  if (Buffer.byteLength(str) <= maxBytes) return str;
+
+  let end = Math.min(str.length, maxBytes);
+  let truncated = str.slice(0, end);
+  while (end > 0 && Buffer.byteLength(truncated) > maxBytes) {
+    end = Math.floor(end * 0.9);
+    truncated = str.slice(0, end);
+  }
+  return `${truncated}…`;
+}
+
 function serializeError(error) {
   if (!error || typeof error !== "object") return { name: "Error", message: String(error) };
 
   return {
     name: typeof error.name === "string" ? error.name : "Error",
-    message: typeof error.message === "string" ? error.message : String(error),
+    message:
+      typeof error.message === "string"
+        ? truncateUtf8(error.message, MAX_ERROR_MESSAGE_BYTES)
+        : truncateUtf8(String(error), MAX_ERROR_MESSAGE_BYTES),
     code: typeof error.code === "string" ? error.code : undefined,
-    stack: typeof error.stack === "string" ? error.stack : undefined,
+    stack: typeof error.stack === "string" ? truncateUtf8(error.stack, MAX_ERROR_STACK_BYTES) : undefined,
     principal: error.principal,
     request: error.request,
     reason: error.reason
