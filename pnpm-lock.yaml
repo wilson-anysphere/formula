@@ -23,6 +23,9 @@ importers:
       '@formula/scripting':
         specifier: workspace:*
         version: link:packages/scripting
+      '@formula/workbook-backend':
+        specifier: workspace:*
+        version: link:packages/workbook-backend
       '@noble/curves':
         specifier: ^1.4.0
         version: 1.9.7
