@@ -342,4 +342,65 @@ describe("classificationResolver: selector precedence", () => {
       source: { scope: "sheet" }
     });
   });
+
+  it("range selector uses the smallest containing range classification", async () => {
+    const bigRange = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 0 }, end: { row: 10, col: 10 } }
+    };
+    await insertClassification(bigRange, { level: "Restricted", labels: ["Big"] });
+
+    const smallRange = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 2, col: 2 }, end: { row: 5, col: 5 } }
+    };
+    const smallKey = await insertClassification(smallRange, { level: "Internal", labels: ["Small"] });
+
+    const targetRange = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 3, col: 3 }, end: { row: 4, col: 4 } }
+    };
+
+    const resolved = await getEffectiveClassificationForSelector(db, docId, targetRange);
+    expect(resolved).toEqual({
+      classification: { level: "Internal", labels: ["Small"] },
+      source: { scope: "range", selectorKey: smallKey }
+    });
+  });
+
+  it("range selector merges labels across equally-small containing ranges", async () => {
+    const rangeA = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 0 }, end: { row: 4, col: 4 } }
+    };
+    await insertClassification(rangeA, { level: "Confidential", labels: ["A"] });
+
+    // Same selectorKey would conflict; use a distinct but equally-sized range.
+    const rangeB2 = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 1, col: 1 }, end: { row: 5, col: 5 } }
+    };
+    const keyB = await insertClassification(rangeB2, { level: "Restricted", labels: ["B"] });
+
+    const targetRange = {
+      scope: "range",
+      documentId: docId,
+      sheetId: "Sheet1",
+      range: { start: { row: 2, col: 2 }, end: { row: 3, col: 3 } }
+    };
+
+    const resolved = await getEffectiveClassificationForSelector(db, docId, targetRange);
+    expect(resolved.classification).toEqual({ level: "Restricted", labels: ["A", "B"] });
+    expect(resolved.source).toEqual({ scope: "range", selectorKey: keyB });
+  });
 });
