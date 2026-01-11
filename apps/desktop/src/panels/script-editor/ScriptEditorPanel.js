@@ -62,6 +62,7 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
 
   let editor = null;
   let currentCode = defaultScript();
+  const setCodeEvent = "formula:script-editor:set-code";
 
   const fallbackEditor = document.createElement("textarea");
   fallbackEditor.value = currentCode;
@@ -81,6 +82,18 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
     currentCode = fallbackEditor.value;
   });
   editorHost.appendChild(fallbackEditor);
+
+  const handleSetCode = (event) => {
+    const next = event?.detail?.code;
+    if (typeof next !== "string") return;
+    currentCode = next;
+    if (editor) {
+      editor.setValue(next);
+    } else {
+      fallbackEditor.value = next;
+    }
+  };
+  window.addEventListener(setCodeEvent, handleSetCode);
 
   const ensureMonaco = async () => {
     if (editor) return;
@@ -116,6 +129,7 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
 
   return {
     dispose: () => {
+      window.removeEventListener(setCodeEvent, handleSetCode);
       if (editor) {
         editor.dispose();
         editor = null;

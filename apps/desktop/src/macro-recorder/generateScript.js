@@ -98,10 +98,24 @@ export function generateTypeScriptMacro(actions) {
         body.push(`await ${sheetVar}.getRange(${literal(action.address)}).setValue(${literal(action.value)});`);
         break;
       }
+      case "setCellFormula": {
+        const sheetVar = ensureSheetVar(action.sheetName);
+        body.push(
+          `await ${sheetVar}.getRange(${literal(action.address)}).setFormulas(${literal([[action.formula]])});`,
+        );
+        break;
+      }
       case "setRangeValues": {
         const sheetVar = ensureSheetVar(action.sheetName);
         body.push(
           `await ${sheetVar}.getRange(${literal(action.address)}).setValues(${literal(action.values)});`,
+        );
+        break;
+      }
+      case "setRangeFormulas": {
+        const sheetVar = ensureSheetVar(action.sheetName);
+        body.push(
+          `await ${sheetVar}.getRange(${literal(action.address)}).setFormulas(${literal(action.formulas)});`,
         );
         break;
       }
@@ -145,6 +159,17 @@ export function generatePythonMacro(actions) {
   lines.push("    active = formula.active_sheet");
   lines.push("    return active if active.name == name else formula.get_sheet(name)");
   lines.push("");
+  lines.push("def _col_index_to_letters(index):");
+  lines.push("    n = int(index) + 1");
+  lines.push('    out = ""');
+  lines.push("    while n > 0:");
+  lines.push("        n, rem = divmod(n - 1, 26)");
+  lines.push("        out = chr(65 + rem) + out");
+  lines.push("    return out");
+  lines.push("");
+  lines.push("def _a1_from_rc(row, col):");
+  lines.push("    return f\"{_col_index_to_letters(col)}{int(row) + 1}\"");
+  lines.push("");
 
   const sheetVars = new Map();
 
@@ -161,12 +186,45 @@ export function generatePythonMacro(actions) {
     switch (action.type) {
       case "setCellValue": {
         const sheetVar = ensureSheetVar(action.sheetName);
-        lines.push(`${sheetVar}[${pythonLiteral(action.address)}] = ${pythonLiteral(action.value)}`);
+        let value = action.value;
+        if (typeof value === "string") {
+          const trimmed = value.trimStart();
+          if (!value.startsWith("'") && trimmed.startsWith("=") && trimmed.length > 1) {
+            // Python treats single-cell strings that start with "=" as formulas. When the recorder
+            // captured this as a *value* write, preserve it as literal text by prefixing Excel's
+            // apostrophe escape.
+            value = `'${value}`;
+          }
+        }
+        lines.push(`${sheetVar}[${pythonLiteral(action.address)}] = ${pythonLiteral(value)}`);
+        break;
+      }
+      case "setCellFormula": {
+        const sheetVar = ensureSheetVar(action.sheetName);
+        if (action.formula == null) {
+          lines.push(`${sheetVar}[${pythonLiteral(action.address)}].value = None`);
+        } else {
+          lines.push(`${sheetVar}[${pythonLiteral(action.address)}].formula = ${pythonLiteral(action.formula)}`);
+        }
         break;
       }
       case "setRangeValues": {
         const sheetVar = ensureSheetVar(action.sheetName);
         lines.push(`${sheetVar}[${pythonLiteral(action.address)}].value = ${pythonLiteral(action.values)}`);
+        break;
+      }
+      case "setRangeFormulas": {
+        const sheetVar = ensureSheetVar(action.sheetName);
+        const sel = parseA1(action.address);
+        const formulasVar = `_formulas_${lines.length}`;
+        lines.push(`${formulasVar} = ${pythonLiteral(action.formulas)}`);
+        lines.push(`for _r, _row in enumerate(${formulasVar}):`);
+        lines.push("    for _c, _formula in enumerate(_row):");
+        lines.push(`        _addr = _a1_from_rc(${sel.start_row} + _r, ${sel.start_col} + _c)`);
+        lines.push("        if _formula is None:");
+        lines.push(`            ${sheetVar}[_addr].value = None`);
+        lines.push("        else:");
+        lines.push(`            ${sheetVar}[_addr].formula = _formula`);
         break;
       }
       case "setFormat": {

@@ -4,9 +4,7 @@ function cellKey(row, col) {
   return `${row},${col}`;
 }
 
-function buildDenseRect(
-  actions,
-) {
+function buildDenseRect(actions, pickValue, makeRangeAction) {
   if (actions.length < 2) return null;
 
   let minRow = Number.POSITIVE_INFINITY;
@@ -21,7 +19,7 @@ function buildDenseRect(
     maxRow = Math.max(maxRow, row);
     minCol = Math.min(minCol, col);
     maxCol = Math.max(maxCol, col);
-    values.set(cellKey(row, col), action.value);
+    values.set(cellKey(row, col), pickValue(action));
   }
 
   const rows = maxRow - minRow + 1;
@@ -39,16 +37,11 @@ function buildDenseRect(
     matrix.push(row);
   }
 
-  return {
-    type: "setRangeValues",
-    sheetName: actions[0].sheetName,
-    address: formatRangeAddress({ startRow: minRow, startCol: minCol, endRow: maxRow, endCol: maxCol }),
-    values: matrix,
-  };
+  return makeRangeAction(actions[0].sheetName, { startRow: minRow, startCol: minCol, endRow: maxRow, endCol: maxCol }, matrix);
 }
 
-function optimizeCellRuns(actions) {
-  const rect = buildDenseRect(actions);
+function optimizeCellRuns(actions, pickValue, makeCellAction, makeRangeAction) {
+  const rect = buildDenseRect(actions, pickValue, makeRangeAction);
   if (rect) return [rect];
 
   // Fallback: merge per-row contiguous column segments.
@@ -69,16 +62,17 @@ function optimizeCellRuns(actions) {
       while (end < bucket.length && bucket[end].col === bucket[end - 1].col + 1) end++;
       const segment = bucket.slice(start, end);
       if (segment.length === 1) {
-        out.push(segment[0].action);
+        out.push(makeCellAction(segment[0].action));
       } else {
         const startCol = segment[0].col;
         const endCol = segment[segment.length - 1].col;
-        out.push({
-          type: "setRangeValues",
-          sheetName: segment[0].action.sheetName,
-          address: formatRangeAddress({ startRow: row, startCol, endRow: row, endCol }),
-          values: [segment.map((s) => s.action.value)],
-        });
+        out.push(
+          makeRangeAction(
+            segment[0].action.sheetName,
+            { startRow: row, startCol, endRow: row, endCol },
+            [segment.map((s) => pickValue(s.action))],
+          ),
+        );
       }
       start = end;
     }
@@ -87,9 +81,19 @@ function optimizeCellRuns(actions) {
   // Preserve original ordering across rows by sorting by (row, col).
   const ordering = new Map();
   actions.forEach((action, idx) => ordering.set(action.address, idx));
+  const actionOrderingKey = (action) => {
+    if (!("address" in action)) return 0;
+    const address = String(action.address);
+    const direct = ordering.get(address);
+    if (direct !== undefined) return direct;
+    const startCell = address.split(":")[0];
+    const startIdx = ordering.get(startCell);
+    if (startIdx !== undefined) return startIdx;
+    return 0;
+  };
   out.sort((a, b) => {
-    const aIdx = "address" in a ? ordering.get(a.address) ?? 0 : 0;
-    const bIdx = "address" in b ? ordering.get(b.address) ?? 0 : 0;
+    const aIdx = actionOrderingKey(a);
+    const bIdx = actionOrderingKey(b);
     return aIdx - bIdx;
   });
 
@@ -118,7 +122,7 @@ export function optimizeMacroActions(actions) {
   let i = 0;
   while (i < collapsedSelections.length) {
     const action = collapsedSelections[i];
-    if (action.type !== "setCellValue") {
+    if (action.type !== "setCellValue" && action.type !== "setCellFormula") {
       out.push(action);
       i += 1;
       continue;
@@ -128,12 +132,40 @@ export function optimizeMacroActions(actions) {
     let j = i + 1;
     while (j < collapsedSelections.length) {
       const next = collapsedSelections[j];
-      if (next.type !== "setCellValue" || next.sheetName !== action.sheetName) break;
+      if (next.type !== action.type || next.sheetName !== action.sheetName) break;
       run.push(next);
       j += 1;
     }
 
-    out.push(...optimizeCellRuns(run));
+    if (action.type === "setCellValue") {
+      out.push(
+        ...optimizeCellRuns(
+          run,
+          (a) => a.value,
+          (a) => a,
+          (sheetName, coords, values) => ({
+            type: "setRangeValues",
+            sheetName,
+            address: formatRangeAddress(coords),
+            values,
+          }),
+        ),
+      );
+    } else {
+      out.push(
+        ...optimizeCellRuns(
+          run,
+          (a) => a.formula,
+          (a) => a,
+          (sheetName, coords, formulas) => ({
+            type: "setRangeFormulas",
+            sheetName,
+            address: formatRangeAddress(coords),
+            formulas,
+          }),
+        ),
+      );
+    }
     i = j;
   }
 

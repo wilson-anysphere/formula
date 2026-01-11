@@ -17,6 +17,7 @@ test("macro recorder generates runnable Python that replays simple edits", async
   workbook.setSelection("Sheet1", "A1");
   const sheet = workbook.getActiveSheet();
   sheet.setCellValue("A1", 10);
+  sheet.setCellFormula("A2", "=A1*2");
   sheet.setCellValue("B1", 32);
   sheet.getRange("A1:B1").setFormat({ bold: true });
   sheet.setRangeValues("C1:D2", [
@@ -26,6 +27,10 @@ test("macro recorder generates runnable Python that replays simple edits", async
   workbook.setSelection("Sheet1", "A2");
 
   const actions = recorder.stop();
+  assert.ok(
+    actions.some((a) => a.type === "setCellFormula" && a.sheetName === "Sheet1" && a.address === "A2" && a.formula === "=A1*2"),
+    "expected recorder to capture setCellFormula(A2, =A1*2)",
+  );
   const script = generatePythonMacro(actions);
 
   const api = new MockWorkbook();
@@ -40,6 +45,16 @@ test("macro recorder generates runnable Python that replays simple edits", async
       range: { sheet_id: sheetId, start_row: 0, start_col: 0, end_row: 0, end_col: 1 },
     }),
     [[10, 32]],
+  );
+  assert.equal(
+    api.get_cell_formula({ range: { sheet_id: sheetId, start_row: 1, start_col: 0, end_row: 1, end_col: 0 } }),
+    "=A1*2",
+  );
+  assert.deepEqual(
+    api.get_range_values({
+      range: { sheet_id: sheetId, start_row: 1, start_col: 0, end_row: 1, end_col: 0 },
+    }),
+    [[20]],
   );
   assert.deepEqual(
     api.get_range_values({

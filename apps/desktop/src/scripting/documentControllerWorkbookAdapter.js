@@ -582,6 +582,24 @@ class DocumentControllerRangeAdapter {
     return out;
   }
 
+  getFormulas() {
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    const out = [];
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < cols; c++) {
+        const cell = this.sheet.workbook.documentController.getCell(this.sheet.name, {
+          row: this.coords.startRow + r,
+          col: this.coords.startCol + c,
+        });
+        row.push(cell.formula != null ? normalizeFormulaText(cell.formula) : null);
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
   setValues(values) {
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
@@ -593,6 +611,28 @@ class DocumentControllerRangeAdapter {
 
     this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, values, {
       label: "Script: set values",
+    });
+    this.sheet.workbook._notifyMutate();
+  }
+
+  setFormulas(formulas) {
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    if (!Array.isArray(formulas) || formulas.length !== rows || formulas.some((row) => row.length !== cols)) {
+      throw new Error(
+        `setFormulas expected ${rows}x${cols} matrix for range ${this.address}, got ${formulas.length}x${formulas[0]?.length ?? 0}`,
+      );
+    }
+
+    const values = formulas.map((row) =>
+      row.map((formula) => {
+        if (formula == null) return null;
+        return normalizeFormulaText(String(formula));
+      }),
+    );
+
+    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, values, {
+      label: "Script: set formulas",
     });
     this.sheet.workbook._notifyMutate();
   }

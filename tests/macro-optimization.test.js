@@ -24,6 +24,27 @@ test("optimizeMacroActions merges dense rectangles into setRangeValues", () => {
   });
 });
 
+test("optimizeMacroActions merges dense rectangles into setRangeFormulas", () => {
+  const actions = [
+    { type: "setCellFormula", sheetName: "Sheet1", address: "A1", formula: "=A1+1" },
+    { type: "setCellFormula", sheetName: "Sheet1", address: "B1", formula: "=B1+1" },
+    { type: "setCellFormula", sheetName: "Sheet1", address: "A2", formula: "=A2+1" },
+    { type: "setCellFormula", sheetName: "Sheet1", address: "B2", formula: "=B2+1" },
+  ];
+
+  const optimized = optimizeMacroActions(actions);
+  assert.equal(optimized.length, 1);
+  assert.deepEqual(optimized[0], {
+    type: "setRangeFormulas",
+    sheetName: "Sheet1",
+    address: "A1:B2",
+    formulas: [
+      ["=A1+1", "=B1+1"],
+      ["=A2+1", "=B2+1"],
+    ],
+  });
+});
+
 test("optimizeMacroActions collapses consecutive selections", () => {
   const actions = [
     { type: "setSelection", sheetName: "Sheet1", address: "A1" },
@@ -35,4 +56,3 @@ test("optimizeMacroActions collapses consecutive selections", () => {
   assert.deepEqual(optimized[0], { type: "setSelection", sheetName: "Sheet1", address: "B2" });
   assert.deepEqual(optimized[1], { type: "setCellValue", sheetName: "Sheet1", address: "A1", value: 1 });
 });
-

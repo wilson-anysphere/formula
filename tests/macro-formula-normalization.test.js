@@ -6,7 +6,17 @@ import { MacroRecorder, generateTypeScriptMacro } from "../apps/desktop/src/macr
 import { DocumentControllerWorkbookAdapter } from "../apps/desktop/src/scripting/documentControllerWorkbookAdapter.js";
 import { ScriptRuntime } from "../packages/scripting/src/node.js";
 
-test("macro recorder normalizes DocumentController formulas to include '=' prefix", async () => {
+let typescriptAvailable = true;
+try {
+  await import("typescript");
+} catch {
+  typescriptAvailable = false;
+}
+
+test(
+  "macro recorder normalizes DocumentController formulas to include '=' prefix",
+  { skip: typescriptAvailable ? false : "typescript not installed" },
+  async () => {
   const controller = new DocumentController();
   const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
 
@@ -20,7 +30,7 @@ test("macro recorder normalizes DocumentController formulas to include '=' prefi
   const actions = recorder.stop();
   assert.deepEqual(actions, [
     { type: "setSelection", sheetName: "Sheet1", address: "A1" },
-    { type: "setCellValue", sheetName: "Sheet1", address: "A1", value: "=A1+B1" },
+    { type: "setCellFormula", sheetName: "Sheet1", address: "A1", formula: "=A1+B1" },
   ]);
 
   const script = generateTypeScriptMacro(actions);
@@ -38,4 +48,5 @@ test("macro recorder normalizes DocumentController formulas to include '=' prefi
 
   workbook.dispose();
   freshWorkbook.dispose();
-});
+},
+);

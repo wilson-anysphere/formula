@@ -8,6 +8,7 @@ import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
+import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
 import { renderMacroRunner, TauriMacroBackend, WebMacroBackend, type MacroRunRequest, type MacroTrustDecision } from "./macros";
 import { applyMacroCellUpdates } from "./macros/applyUpdates";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
@@ -21,6 +22,14 @@ import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
 
 const workbookSheetNames = new Map<string, string>();
+
+// Tauri/desktop state (declared early so panel wiring can reference them without TDZ errors).
+type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
+let tauriBackend: TauriWorkbookBackend | null = null;
+let activeWorkbook: WorkbookInfo | null = null;
+let pendingBackendSync: Promise<void> = Promise.resolve();
+let queuedInvoke: TauriInvoke | null = null;
+let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -209,6 +218,23 @@ if (
     },
   });
 
+  const macroRecorder = new MacroRecorder(scriptingWorkbook);
+
+  // SpreadsheetApp selection changes live outside the DocumentController mutation stream. Emit
+  // selectionChanged events from the UI so the macro recorder can capture selection steps.
+  let lastSelectionKey = "";
+  scriptingWorkbook.events.on("selectionChanged", (evt: any) => {
+    lastSelectionKey = `${evt.sheetName}:${evt.address}`;
+  });
+  app.subscribeSelection((selection) => {
+    const first = selection.ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+    const address = formatRangeAddress(first);
+    const sheetName = app.getCurrentSheetId();
+    const key = `${sheetName}:${address}`;
+    if (key === lastSelectionKey) return;
+    scriptingWorkbook.events.emit("selectionChanged", { sheetName, address });
+  });
+
   function zoneVisible(zone: { panels: string[]; collapsed: boolean }) {
     return zone.panels.length > 0 && !zone.collapsed;
   }
@@ -293,17 +319,71 @@ if (
       body.textContent = "Loading macros…";
       queueMicrotask(() => {
         try {
+          body.replaceChildren();
+          body.style.display = "flex";
+          body.style.flexDirection = "column";
+          body.style.gap = "12px";
+          body.style.padding = "8px";
+          body.style.overflow = "auto";
+
+          const recorderPanel = document.createElement("div");
+          recorderPanel.style.display = "flex";
+          recorderPanel.style.flexDirection = "column";
+          recorderPanel.style.gap = "8px";
+          recorderPanel.style.paddingBottom = "12px";
+          recorderPanel.style.borderBottom = "1px solid var(--panel-border)";
+
+          const runnerPanel = document.createElement("div");
+          runnerPanel.style.flex = "1";
+          runnerPanel.style.minHeight = "0";
+
+          body.appendChild(recorderPanel);
+          body.appendChild(runnerPanel);
+
+          const scriptStorageId = activeWorkbook?.path ?? workbookId;
+
+          // Prefer a composite backend in desktop builds: run VBA via Tauri (when available),
+          // and run modern scripts (TypeScript/Python) via the web backend + local storage.
           const backend = (() => {
             try {
               const baseBackend = new TauriMacroBackend({ invoke: queuedInvoke ?? undefined });
-               return {
-                 listMacros: (id: string) => baseBackend.listMacros(id),
-                 getMacroSecurityStatus: (id: string) => baseBackend.getMacroSecurityStatus(id),
-                 setMacroTrust: (id: string, decision: MacroTrustDecision) => baseBackend.setMacroTrust(id, decision),
-                 runMacro: async (request: MacroRunRequest) => {
-                   // Allow any microtask-batched workbook edits to enqueue before the
-                   // macro runs so backend state reflects the latest grid changes.
-                   await new Promise<void>((resolve) => queueMicrotask(resolve));
+              const scriptBackend = new WebMacroBackend({
+                getDocumentController: () => app.getDocument(),
+                getActiveSheetId: () => app.getCurrentSheetId(),
+              });
+
+              /** @type {Map<string, "tauri" | "web">} */
+              const macroOrigin = new Map<string, "tauri" | "web">();
+
+              return {
+                listMacros: async (id: string) => {
+                  const [tauriMacros, webMacros] = await Promise.all([
+                    baseBackend.listMacros(id).catch(() => []),
+                    scriptBackend.listMacros(scriptStorageId).catch(() => []),
+                  ]);
+
+                  macroOrigin.clear();
+                  for (const macro of tauriMacros) macroOrigin.set(macro.id, "tauri");
+                  for (const macro of webMacros) {
+                    if (!macroOrigin.has(macro.id)) macroOrigin.set(macro.id, "web");
+                  }
+
+                  const byId = new Map<string, any>();
+                  for (const macro of webMacros) byId.set(macro.id, macro);
+                  for (const macro of tauriMacros) byId.set(macro.id, macro);
+                  return [...byId.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+                },
+                getMacroSecurityStatus: (id: string) => baseBackend.getMacroSecurityStatus(id),
+                setMacroTrust: (id: string, decision: MacroTrustDecision) => baseBackend.setMacroTrust(id, decision),
+                runMacro: async (request: MacroRunRequest) => {
+                  const origin = macroOrigin.get(request.macroId);
+                  if (origin === "web") {
+                    return scriptBackend.runMacro({ ...request, workbookId: scriptStorageId });
+                  }
+
+                  // Allow any microtask-batched workbook edits to enqueue before the macro runs
+                  // so backend state reflects the latest grid changes.
+                  await new Promise<void>((resolve) => queueMicrotask(resolve));
                   await drainBackendSync();
                   return baseBackend.runMacro(request);
                 },
@@ -312,24 +392,195 @@ if (
               return getMacrosBackend();
             }
           })();
-          void renderMacroRunner(body, backend, workbookId, {
-            onApplyUpdates: async (updates) => {
-              const doc = app.getDocument();
-              doc.beginBatch({ label: "Run macro" });
-              let committed = false;
-              try {
-                applyMacroCellUpdates(doc, updates);
-                committed = true;
-              } finally {
-                if (committed) doc.endBatch();
-                else doc.cancelBatch();
-              }
-              app.refresh();
-              await app.whenIdle();
-              app.refresh();
-            },
-          }).catch((err) => {
-            body.textContent = `Failed to load macros: ${String(err)}`;
+
+          const refreshRunner = () =>
+            renderMacroRunner(runnerPanel, backend, workbookId, {
+              onApplyUpdates: async (updates) => {
+                const doc = app.getDocument();
+                doc.beginBatch({ label: "Run macro" });
+                let committed = false;
+                try {
+                  applyMacroCellUpdates(doc, updates);
+                  committed = true;
+                } finally {
+                  if (committed) doc.endBatch();
+                  else doc.cancelBatch();
+                }
+                app.refresh();
+                await app.whenIdle();
+                app.refresh();
+              },
+            });
+
+          const title = document.createElement("div");
+          title.textContent = "Macro Recorder";
+          title.style.fontWeight = "600";
+          recorderPanel.appendChild(title);
+
+          const status = document.createElement("div");
+          status.style.fontSize = "12px";
+          status.style.color = "var(--text-secondary)";
+          recorderPanel.appendChild(status);
+
+          const buttons = document.createElement("div");
+          buttons.style.display = "flex";
+          buttons.style.flexWrap = "wrap";
+          buttons.style.gap = "8px";
+          recorderPanel.appendChild(buttons);
+
+          const startButton = document.createElement("button");
+          startButton.type = "button";
+          startButton.textContent = "Start Recording";
+          buttons.appendChild(startButton);
+
+          const stopButton = document.createElement("button");
+          stopButton.type = "button";
+          stopButton.textContent = "Stop Recording";
+          buttons.appendChild(stopButton);
+
+          const copyTsButton = document.createElement("button");
+          copyTsButton.type = "button";
+          copyTsButton.textContent = "Copy TypeScript";
+          buttons.appendChild(copyTsButton);
+
+          const copyPyButton = document.createElement("button");
+          copyPyButton.type = "button";
+          copyPyButton.textContent = "Copy Python";
+          buttons.appendChild(copyPyButton);
+
+          const openScriptEditorButton = document.createElement("button");
+          openScriptEditorButton.type = "button";
+          openScriptEditorButton.textContent = "Open in Script Editor";
+          buttons.appendChild(openScriptEditorButton);
+
+          const saveButton = document.createElement("button");
+          saveButton.type = "button";
+          saveButton.textContent = "Save as Macro…";
+          buttons.appendChild(saveButton);
+
+          const meta = document.createElement("div");
+          meta.style.fontSize = "12px";
+          meta.style.color = "var(--text-secondary)";
+          recorderPanel.appendChild(meta);
+
+          const preview = document.createElement("pre");
+          preview.style.whiteSpace = "pre-wrap";
+          preview.style.margin = "0";
+          preview.style.padding = "8px";
+          preview.style.border = "1px solid var(--panel-border)";
+          preview.style.borderRadius = "6px";
+          preview.style.maxHeight = "240px";
+          preview.style.overflow = "auto";
+          recorderPanel.appendChild(preview);
+
+          const copyText = async (text: string) => {
+            try {
+              await navigator.clipboard.writeText(text);
+            } catch {
+              const textarea = document.createElement("textarea");
+              textarea.value = text;
+              textarea.style.position = "fixed";
+              textarea.style.left = "-9999px";
+              document.body.appendChild(textarea);
+              textarea.select();
+              document.execCommand("copy");
+              textarea.remove();
+            }
+          };
+
+          const openScriptEditor = (code: string) => {
+            const placement = getPanelPlacement(layoutController.layout, PanelIds.SCRIPT_EDITOR);
+            if (placement.kind === "closed") layoutController.openPanel(PanelIds.SCRIPT_EDITOR);
+            const dispatch = () => {
+              window.dispatchEvent(new CustomEvent("formula:script-editor:set-code", { detail: { code } }));
+            };
+            // Allow the layout to mount the panel before we attempt to populate the editor.
+            requestAnimationFrame(() => requestAnimationFrame(dispatch));
+          };
+
+          const storedMacroKey = (id: string) => `formula:macros:${id}`;
+          const saveScriptsToStorage = (macroName: string, scripts: { ts: string; py: string }) => {
+            try {
+              const storage = globalThis.localStorage;
+              if (!storage) return;
+              const key = storedMacroKey(scriptStorageId);
+              const raw = storage.getItem(key);
+              const existing = raw ? JSON.parse(raw) : [];
+              const list = Array.isArray(existing) ? existing.filter((m) => m && typeof m === "object") : [];
+              const baseId = `recorded-${Date.now()}`;
+              list.push(
+                {
+                  id: `${baseId}-ts`,
+                  name: `${macroName} (TS)`,
+                  language: "typescript",
+                  module: "recorded",
+                  code: scripts.ts,
+                },
+                {
+                  id: `${baseId}-py`,
+                  name: `${macroName} (Python)`,
+                  language: "python",
+                  module: "recorded",
+                  code: scripts.py,
+                },
+              );
+              storage.setItem(key, JSON.stringify(list));
+            } catch {
+              // Ignore storage errors (disabled storage, quota, etc).
+            }
+          };
+
+          const currentActions = () => macroRecorder.getOptimizedActions();
+
+          const updateRecorderUi = () => {
+            status.textContent = macroRecorder.recording ? "Recording…" : "Not recording";
+            const raw = macroRecorder.getRawActions();
+            const optimized = macroRecorder.getOptimizedActions();
+            meta.textContent = `Recorded: ${raw.length} steps · Optimized: ${optimized.length} steps`;
+            preview.textContent = optimized.length ? JSON.stringify(optimized, null, 2) : "(no recorded actions)";
+          };
+
+          startButton.onclick = () => {
+            macroRecorder.start();
+            updateRecorderUi();
+          };
+
+          stopButton.onclick = () => {
+            macroRecorder.stop();
+            updateRecorderUi();
+          };
+
+          copyTsButton.onclick = async () => {
+            const actions = currentActions();
+            if (actions.length === 0) return;
+            await copyText(generateTypeScriptMacro(actions));
+          };
+
+          copyPyButton.onclick = async () => {
+            const actions = currentActions();
+            if (actions.length === 0) return;
+            await copyText(generatePythonMacro(actions));
+          };
+
+          openScriptEditorButton.onclick = () => {
+            const actions = currentActions();
+            if (actions.length === 0) return;
+            openScriptEditor(generateTypeScriptMacro(actions));
+          };
+
+          saveButton.onclick = async () => {
+            const actions = currentActions();
+            if (actions.length === 0) return;
+            const name = window.prompt("Macro name:", "Recorded Macro");
+            if (!name) return;
+            saveScriptsToStorage(name, { ts: generateTypeScriptMacro(actions), py: generatePythonMacro(actions) });
+            await refreshRunner();
+          };
+
+          updateRecorderUi();
+
+          void refreshRunner().catch((err) => {
+            runnerPanel.textContent = `Failed to load macros: ${String(err)}`;
           });
         } catch (err) {
           body.textContent = `Macros backend not available: ${String(err)}`;
@@ -765,13 +1016,6 @@ function normalizeSheetList(info: WorkbookInfo): { id: string; name: string }[] 
     .map((s) => ({ id: String((s as any).id ?? ""), name: String((s as any).name ?? (s as any).id ?? "") }))
     .filter((s) => s.id.trim() !== "");
 }
-
-let tauriBackend: TauriWorkbookBackend | null = null;
-let activeWorkbook: WorkbookInfo | null = null;
-let pendingBackendSync: Promise<void> = Promise.resolve();
-type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
-let queuedInvoke: TauriInvoke | null = null;
-let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 
 async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
   const doc = app.getDocument();

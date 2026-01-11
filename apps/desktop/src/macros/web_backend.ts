@@ -165,7 +165,7 @@ export class WebMacroBackend implements MacroBackend {
       // ignore – the UI will surface errors when the user runs a Python macro.
     });
 
-    return this.getMacros(workbookId).map(({ code: _code, ...info }) => info);
+    return this.getMacros(workbookId, { refresh: true }).map(({ code: _code, ...info }) => info);
   }
 
   async getMacroSecurityStatus(_workbookId: string): Promise<MacroSecurityStatus> {
@@ -179,7 +179,7 @@ export class WebMacroBackend implements MacroBackend {
   }
 
   async runMacro(request: MacroRunRequest): Promise<MacroRunResult> {
-    const macro = this.getMacros(request.workbookId).find((m) => m.id === request.macroId);
+    const macro = this.getMacros(request.workbookId, { refresh: true }).find((m) => m.id === request.macroId);
     if (!macro) {
       return { ok: false, output: [], error: { message: `Unknown macro id: ${request.macroId}` } };
     }
@@ -200,9 +200,14 @@ export class WebMacroBackend implements MacroBackend {
     return this.options.getActiveSheetId?.() ?? "Sheet1";
   }
 
-  private getMacros(workbookId: string): StoredMacro[] {
-    const cached = this.macrosCache.get(workbookId);
-    if (cached) return cached;
+  private getMacros(workbookId: string): StoredMacro[];
+  private getMacros(workbookId: string, options: { refresh?: boolean }): StoredMacro[];
+  private getMacros(workbookId: string, options: { refresh?: boolean } = {}): StoredMacro[] {
+    const refresh = options.refresh === true;
+    if (!refresh) {
+      const cached = this.macrosCache.get(workbookId);
+      if (cached) return cached;
+    }
 
     const stored = this.readMacrosFromStorage(workbookId);
     const byId = new Map<string, StoredMacro>();

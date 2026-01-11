@@ -6,7 +6,17 @@ import { MacroRecorder, generateTypeScriptMacro } from "../apps/desktop/src/macr
 import { DocumentControllerWorkbookAdapter } from "../apps/desktop/src/scripting/documentControllerWorkbookAdapter.js";
 import { ScriptRuntime } from "../packages/scripting/src/node.js";
 
-test("macro recorder generates runnable TypeScript that replays formula edits against DocumentController", async () => {
+let typescriptAvailable = true;
+try {
+  await import("typescript");
+} catch {
+  typescriptAvailable = false;
+}
+
+test(
+  "macro recorder generates runnable TypeScript that replays formula edits against DocumentController",
+  { skip: typescriptAvailable ? false : "typescript not installed" },
+  async () => {
   const controller = new DocumentController();
   const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
 
@@ -23,7 +33,7 @@ test("macro recorder generates runnable TypeScript that replays formula edits ag
   assert.deepEqual(actions, [
     { type: "setSelection", sheetName: "Sheet1", address: "A1" },
     { type: "setRangeValues", sheetName: "Sheet1", address: "A1:B1", values: [[1, 2]] },
-    { type: "setCellValue", sheetName: "Sheet1", address: "C1", value: "=A1+B1" },
+    { type: "setCellFormula", sheetName: "Sheet1", address: "C1", formula: "=A1+B1" },
     { type: "setSelection", sheetName: "Sheet1", address: "C1" },
   ]);
   const script = generateTypeScriptMacro(actions);
@@ -46,4 +56,5 @@ test("macro recorder generates runnable TypeScript that replays formula edits ag
 
   workbook.dispose();
   freshWorkbook.dispose();
-});
+},
+);

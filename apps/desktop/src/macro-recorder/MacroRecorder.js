@@ -13,24 +13,73 @@ export class MacroRecorder {
     this.recording = true;
     this.actions = [];
 
+    const isFormulaInput = (value) => {
+      if (typeof value !== "string") return false;
+      if (value.startsWith("'")) return false;
+      const trimmed = value.trimStart();
+      return trimmed.startsWith("=") && trimmed.length > 1;
+    };
+
     this.unsubscribes.push(
       this.workbook.events.on("cellChanged", (evt) => {
         if (!this.recording) return;
         if (evt.values.length === 1 && evt.values[0].length === 1 && !evt.address.includes(":")) {
+          const value = evt.values[0][0];
+          if (isFormulaInput(value)) {
+            this.actions.push({
+              type: "setCellFormula",
+              sheetName: evt.sheetName,
+              address: evt.address,
+              formula: value,
+            });
+          } else {
+            this.actions.push({
+              type: "setCellValue",
+              sheetName: evt.sheetName,
+              address: evt.address,
+              value,
+            });
+          }
+          return;
+        }
+
+        const allFormulas = evt.values.every((row) => row.every((value) => isFormulaInput(value)));
+        if (allFormulas) {
           this.actions.push({
-            type: "setCellValue",
+            type: "setRangeFormulas",
             sheetName: evt.sheetName,
             address: evt.address,
-            value: evt.values[0][0],
+            formulas: evt.values,
+          });
+        } else {
+          this.actions.push({
+            type: "setRangeValues",
+            sheetName: evt.sheetName,
+            address: evt.address,
+            values: evt.values,
+          });
+        }
+      }),
+    );
+
+    this.unsubscribes.push(
+      this.workbook.events.on("formulaChanged", (evt) => {
+        if (!this.recording) return;
+        if (evt.formulas.length === 1 && evt.formulas[0].length === 1 && !evt.address.includes(":")) {
+          this.actions.push({
+            type: "setCellFormula",
+            sheetName: evt.sheetName,
+            address: evt.address,
+            formula: evt.formulas[0][0],
           });
           return;
         }
 
         this.actions.push({
-          type: "setRangeValues",
+          type: "setRangeFormulas",
           sheetName: evt.sheetName,
           address: evt.address,
-          values: evt.values,
+          formulas: evt.formulas,
         });
       }),
     );
