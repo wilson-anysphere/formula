@@ -149,14 +149,17 @@ parentPort.on("message", async (message) => {
     const triggerBytes = Math.floor(memoryLimitBytes * 0.9);
     memoryInterval = setInterval(() => {
       if (memoryLimitSent) return;
-      const heapUsed = process.memoryUsage().heapUsed;
-      if (heapUsed > triggerBytes) {
+      const { heapUsed, external } = process.memoryUsage();
+      const usedBytes = heapUsed + external;
+      if (usedBytes > triggerBytes) {
         memoryLimitSent = true;
         parentPort.postMessage({
           type: "limit",
           limit: "memory",
           memoryMb,
-          usedMb: Math.round(heapUsed / 1024 / 1024)
+          usedMb: Math.round(usedBytes / 1024 / 1024),
+          heapUsedMb: Math.round(heapUsed / 1024 / 1024),
+          externalMb: Math.round(external / 1024 / 1024)
         });
       }
     }, 25);
