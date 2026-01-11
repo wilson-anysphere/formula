@@ -8,7 +8,8 @@ import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/l
 import { createAiChatOrchestrator } from "../../ai/chat/orchestrator.js";
 import { runAgentTask, type AgentProgressEvent, type AgentTaskResult } from "../../ai/agent/agentOrchestrator.js";
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
-import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
+import { HashEmbedder } from "../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
+import { InMemoryVectorStore } from "../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
 import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
