@@ -13,8 +13,10 @@ describe("runChatWithToolsAudited", () => {
     const toolExecutor = new SpreadsheetLLMToolExecutor(workbook, { require_approval_for_mutations: true });
 
     let callCount = 0;
+    const requests: any[] = [];
     const client = {
-      async chat() {
+      async chat(request: any) {
+        requests.push(request);
         callCount++;
         if (callCount === 1) {
           return {
@@ -60,6 +62,7 @@ describe("runChatWithToolsAudited", () => {
     });
 
     expect(result.final).toBe("done");
+    expect(requests[0]?.model).toBe("unit-test-model");
     expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBe(1);
 
     const entries = await auditStore.listEntries({ session_id: "session-1" });
@@ -74,4 +77,3 @@ describe("runChatWithToolsAudited", () => {
     expect(entries[0]!.user_feedback).toBe("accepted");
   });
 });
-

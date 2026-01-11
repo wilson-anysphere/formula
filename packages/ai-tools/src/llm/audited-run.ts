@@ -69,6 +69,7 @@ export async function runChatWithToolsAudited(params: AuditedRunParams): Promise
       client: auditedClient as any,
       toolExecutor: params.tool_executor as any,
       messages: params.messages as any,
+      model: params.audit.model,
       maxIterations: params.max_iterations,
       model: params.model ?? params.audit.model,
       temperature: params.temperature,
