@@ -151,9 +151,14 @@ export async function parquetFileToArrowTable(handle, options = {}) {
     let emittedHeader = false;
 
     if (onGridBatch && includeHeader) {
-      const wasmSchema = parquetFile.schema();
-      const schemaTable = arrow.tableFromIPC(wasmSchema.intoIPCStream());
-      const columnNames = schemaTable.schema.fields.map((field) => field.name);
+      let columnNames = null;
+      if (Array.isArray(readerOptions.columns) && readerOptions.columns.length > 0) {
+        columnNames = readerOptions.columns;
+      } else {
+        const wasmSchema = parquetFile.schema();
+        const schemaTable = arrow.tableFromIPC(wasmSchema.intoIPCStream());
+        columnNames = schemaTable.schema.fields.map((field) => field.name);
+      }
       await onGridBatch({ rowOffset: 0, values: [columnNames] });
       emittedHeader = true;
       globalRowOffset = 1;
@@ -216,9 +221,14 @@ export async function* parquetFileToGridBatches(handle, options = {}) {
     let globalRowOffset = 0;
 
     if (includeHeader) {
-      const wasmSchema = parquetFile.schema();
-      const schemaTable = arrow.tableFromIPC(wasmSchema.intoIPCStream());
-      const columnNames = schemaTable.schema.fields.map((field) => field.name);
+      let columnNames = null;
+      if (Array.isArray(readerOptions.columns) && readerOptions.columns.length > 0) {
+        columnNames = readerOptions.columns;
+      } else {
+        const wasmSchema = parquetFile.schema();
+        const schemaTable = arrow.tableFromIPC(wasmSchema.intoIPCStream());
+        columnNames = schemaTable.schema.fields.map((field) => field.name);
+      }
       yield { rowOffset: 0, values: [columnNames] };
     }
 

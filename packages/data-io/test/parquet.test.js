@@ -130,6 +130,29 @@ test('parquetFileToGridBatches streams grid batches without materializing an Arr
   assert.deepEqual(grid[3], [3, 'Carla', true, 3.75]);
 });
 
+test('parquetFileToGridBatches respects projected columns for header + rows', { skip: !parquetAvailable }, async () => {
+  const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
+  const parquetBytes = new Uint8Array(await readFile(parquetPath));
+
+  const blob = new Blob([parquetBytes]);
+  const grid = [];
+
+  for await (const batch of parquetFileToGridBatches(blob, {
+    batchSize: 2,
+    gridBatchSize: 2,
+    includeHeader: true,
+    columns: ['id', 'score'],
+  })) {
+    for (let i = 0; i < batch.values.length; i++) {
+      grid[batch.rowOffset + i] = batch.values[i];
+    }
+  }
+
+  assert.deepEqual(grid[0], ['id', 'score']);
+  assert.deepEqual(grid[1], [1, 1.5]);
+  assert.deepEqual(grid[3], [3, 3.75]);
+});
+
 test('Parquet export produces a readable parquet file', { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
   const parquetBytes = new Uint8Array(await readFile(parquetPath));

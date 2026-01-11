@@ -2596,8 +2596,29 @@ export class QueryEngine {
     const state = { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
     const callStack = new Set([query.id]);
 
-    options.onProgress?.({ type: "source:start", queryId: query.id, sourceType: query.source.type });
-    const source = await this.loadSourceBatchesForStreaming(query.source, context, callStack, options, state);
+    let streamingSource = query.source;
+    if (streamingSource.type === "parquet") {
+      const projection = computeParquetProjectionColumns(steps);
+      const rowLimit = computeParquetRowLimit(steps, options.limit);
+      const nextOptions = projection || rowLimit != null ? { ...(streamingSource.options ?? {}) } : null;
+
+      if (projection && projection.length > 0 && nextOptions) {
+        const existing = Array.isArray(streamingSource.options?.columns) ? streamingSource.options.columns : [];
+        nextOptions.columns = Array.from(new Set([...existing, ...projection]));
+      }
+
+      if (rowLimit != null && nextOptions) {
+        const existing = typeof streamingSource.options?.limit === "number" ? streamingSource.options.limit : null;
+        nextOptions.limit = existing == null ? rowLimit : Math.min(existing, rowLimit);
+      }
+
+      if (nextOptions) {
+        streamingSource = { ...streamingSource, options: nextOptions };
+      }
+    }
+
+    options.onProgress?.({ type: "source:start", queryId: query.id, sourceType: streamingSource.type });
+    const source = await this.loadSourceBatchesForStreaming(streamingSource, context, callStack, options, state);
 
     const pipeline = compileStreamingPipeline(operations, source.columns);
     const outputColumns = pipeline.columns;
@@ -2683,7 +2704,7 @@ export class QueryEngine {
 
       await emitAvailable(true);
     } finally {
-      options.onProgress?.({ type: "source:complete", queryId: query.id, sourceType: query.source.type });
+      options.onProgress?.({ type: "source:complete", queryId: query.id, sourceType: streamingSource.type });
     }
 
     return {
