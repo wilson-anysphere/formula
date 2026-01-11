@@ -1059,6 +1059,19 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                         },
                                     )
                                 }
+                                FnArgValue::ReferenceUnion(_) => {
+                                    let value = Value::Error(ErrorKind::Value);
+                                    (
+                                        EvalValue::Scalar(value.clone()),
+                                        TraceNode {
+                                            kind: TraceKind::NameRef { name: nref.name.clone() },
+                                            span: expr.span,
+                                            value,
+                                            reference: None,
+                                            children: Vec::new(),
+                                        },
+                                    )
+                                }
                             }
                         }
                         None => {
@@ -1210,6 +1223,10 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             ExcelError::Num => ErrorKind::Num,
                         }),
                     },
+                    crate::eval::BinaryOp::Range
+                    | crate::eval::BinaryOp::Intersect
+                    | crate::eval::BinaryOp::Union
+                    | crate::eval::BinaryOp::Concat => Value::Error(ErrorKind::Value),
                 };
                 (
                     EvalValue::Scalar(out.clone()),

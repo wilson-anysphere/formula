@@ -99,6 +99,30 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
             }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => {
+                                any = true;
+                                if n == 0.0 {
+                                    all_true = false;
+                                }
+                            }
+                            Value::Bool(b) => {
+                                any = true;
+                                if !b {
+                                    all_true = false;
+                                }
+                            }
+                            // Text and blanks in references are ignored.
+                            Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -164,6 +188,29 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                         }
                         Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                    }
+                }
+            }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => {
+                                any = true;
+                                if n != 0.0 {
+                                    any_true = true;
+                                }
+                            }
+                            Value::Bool(b) => {
+                                any = true;
+                                if b {
+                                    any_true = true;
+                                }
+                            }
+                            Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
                     }
                 }
             }

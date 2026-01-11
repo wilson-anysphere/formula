@@ -39,12 +39,26 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PostfixOp {
+    Percent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
+    /// The range operator (`:`).
+    Range,
+    /// The intersection operator (space).
+    Intersect,
+    /// The union operator (`,`; lexed separately from function argument separators).
+    Union,
+    /// Exponentiation (`^`).
+    Pow,
     Add,
     Sub,
     Mul,
     Div,
-    Pow,
+    /// String concatenation (`&`).
+    Concat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -64,12 +78,16 @@ pub enum Expr<S> {
     Bool(bool),
     Blank,
     Error(ErrorKind),
+    NameRef(NameRef<S>),
     CellRef(CellRef<S>),
     RangeRef(RangeRef<S>),
     StructuredRef(crate::structured_refs::StructuredRef),
-    NameRef(NameRef<S>),
     Unary {
         op: UnaryOp,
+        expr: Box<Expr<S>>,
+    },
+    Postfix {
+        op: PostfixOp,
         expr: Box<Expr<S>>,
     },
     Binary {
@@ -102,6 +120,10 @@ impl<S: Clone> Expr<S> {
             Expr::Bool(b) => Expr::Bool(*b),
             Expr::Blank => Expr::Blank,
             Expr::Error(e) => Expr::Error(*e),
+            Expr::NameRef(r) => Expr::NameRef(NameRef {
+                sheet: f(&r.sheet),
+                name: r.name.clone(),
+            }),
             Expr::CellRef(r) => Expr::CellRef(CellRef {
                 sheet: f(&r.sheet),
                 addr: r.addr,
@@ -112,11 +134,11 @@ impl<S: Clone> Expr<S> {
                 end: r.end,
             }),
             Expr::StructuredRef(r) => Expr::StructuredRef(r.clone()),
-            Expr::NameRef(n) => Expr::NameRef(NameRef {
-                sheet: f(&n.sheet),
-                name: n.name.clone(),
-            }),
             Expr::Unary { op, expr } => Expr::Unary {
+                op: *op,
+                expr: Box::new(expr.map_sheets(f)),
+            },
+            Expr::Postfix { op, expr } => Expr::Postfix {
                 op: *op,
                 expr: Box::new(expr.map_sheets(f)),
             },

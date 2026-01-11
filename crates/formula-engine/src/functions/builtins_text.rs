@@ -37,6 +37,17 @@ fn concat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
             }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        match v.coerce_to_string() {
+                            Ok(s) => out.push_str(&s),
+                            Err(e) => return Value::Error(e),
+                        }
+                    }
+                }
+            }
         }
     }
     Value::Text(out)

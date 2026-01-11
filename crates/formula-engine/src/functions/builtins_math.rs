@@ -56,6 +56,19 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
             }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => acc += n,
+                            // Excel quirk: logicals/text in references are ignored by SUM.
+                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -128,6 +141,22 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
             }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => {
+                                acc += n;
+                                count += 1;
+                            }
+                            // Ignore logical/text/blank in references.
+                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -165,6 +194,21 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
+                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    match v {
+                        Value::Error(e) => return Value::Error(e),
+                        Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Spill { .. } => {}
+                    }
+                }
+            }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
                         let v = ctx.get_cell_value(r.sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
@@ -175,6 +219,7 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             }
         }
+    }
 
     Value::Number(best.unwrap_or(0.0))
 }
@@ -207,6 +252,21 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
+                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    match v {
+                        Value::Error(e) => return Value::Error(e),
+                        Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Spill { .. } => {}
+                    }
+                }
+            }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
                         let v = ctx.get_cell_value(r.sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
@@ -217,6 +277,7 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             }
         }
+    }
 
     Value::Number(best.unwrap_or(0.0))
 }
@@ -249,6 +310,16 @@ fn count_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     let v = ctx.get_cell_value(r.sheet_id, addr);
                     if matches!(v, Value::Number(_)) {
                         total += 1;
+                    }
+                }
+            }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        if matches!(v, Value::Number(_)) {
+                            total += 1;
+                        }
                     }
                 }
             }
@@ -288,6 +359,16 @@ fn counta_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
             }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        if !matches!(v, Value::Blank) {
+                            total += 1;
+                        }
+                    }
+                }
+            }
         }
     }
     Value::Number(total as f64)
@@ -323,6 +404,18 @@ fn countblank_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         || matches!(v, Value::Text(ref s) if s.is_empty())
                     {
                         total += 1;
+                    }
+                }
+            }
+            ArgValue::ReferenceUnion(ranges) => {
+                for r in ranges {
+                    for addr in r.iter_cells() {
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        if matches!(v, Value::Blank)
+                            || matches!(v, Value::Text(ref s) if s.is_empty())
+                        {
+                            total += 1;
+                        }
                     }
                 }
             }

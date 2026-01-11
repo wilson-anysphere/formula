@@ -49,6 +49,7 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
             }
         }
         eval::Expr::Unary { expr, .. } => collect_unknown_function_calls(expr, unknown),
+        eval::Expr::Postfix { expr, .. } => collect_unknown_function_calls(expr, unknown),
         eval::Expr::Binary { left, right, .. } | eval::Expr::Compare { left, right, .. } => {
             collect_unknown_function_calls(left, unknown);
             collect_unknown_function_calls(right, unknown);
@@ -59,9 +60,9 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
         | eval::Expr::Bool(_)
         | eval::Expr::Blank
         | eval::Expr::Error(_)
+        | eval::Expr::NameRef(_)
         | eval::Expr::CellRef(_)
         | eval::Expr::RangeRef(_)
-        | eval::Expr::StructuredRef(_)
-        | eval::Expr::NameRef(_) => {}
+        | eval::Expr::StructuredRef(_) => {}
     }
 }

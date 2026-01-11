@@ -350,7 +350,6 @@ fn array_functions_spill_and_respect_spill_blocking() {
         engine.get_cell_value("Sheet1", "D1"),
         Value::Error(ErrorKind::Spill)
     );
-
     // SEQUENCE spills a 2x2 matrix starting at D2.
     assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(2.0));

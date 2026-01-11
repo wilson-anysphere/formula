@@ -36,6 +36,7 @@ fn transpose_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
             Array::new(rows, cols, values)
         }
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
     };
 
     let mut out_values = Vec::with_capacity(input.rows.saturating_mul(input.cols));

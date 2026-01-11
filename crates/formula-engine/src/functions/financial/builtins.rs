@@ -66,6 +66,20 @@ fn collect_npv_values_from_arg(
             }
             Ok(out)
         }
+        ArgValue::ReferenceUnion(ranges) => {
+            let mut out = Vec::new();
+            for r in ranges {
+                for addr in r.iter_cells() {
+                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    match v {
+                        Value::Error(e) => return Err(e),
+                        Value::Number(n) => out.push(n),
+                        Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => out.push(0.0),
+                    }
+                }
+            }
+            Ok(out)
+        }
     }
 }
 
@@ -98,6 +112,20 @@ fn collect_irr_values_from_arg(
             }
             Ok(out)
         }
+        ArgValue::ReferenceUnion(ranges) => {
+            let mut out = Vec::new();
+            for r in ranges {
+                for addr in r.iter_cells() {
+                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    match v {
+                        Value::Error(e) => return Err(e),
+                        Value::Number(n) => out.push(n),
+                        Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => out.push(0.0),
+                    }
+                }
+            }
+            Ok(out)
+        }
     }
 }
 
@@ -112,6 +140,16 @@ fn collect_numbers_strict_from_arg(
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(r.sheet_id, addr);
                 out.push(v.coerce_to_number()?);
+            }
+            Ok(out)
+        }
+        ArgValue::ReferenceUnion(ranges) => {
+            let mut out = Vec::new();
+            for r in ranges {
+                for addr in r.iter_cells() {
+                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                    out.push(v.coerce_to_number()?);
+                }
             }
             Ok(out)
         }

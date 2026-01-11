@@ -1,5 +1,5 @@
 use crate::eval::address::CellAddr;
-use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, SheetReference, UnaryOp};
+use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, PostfixOp, SheetReference, UnaryOp};
 use crate::error::ExcelError;
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
 use crate::value::{Array, ErrorKind, Value};
@@ -66,7 +66,7 @@ impl ResolvedRange {
 #[derive(Debug, Clone)]
 enum EvalValue {
     Scalar(Value),
-    Reference(ResolvedRange),
+    Reference(Vec<ResolvedRange>),
 }
 
 pub struct Evaluator<'a, R: ValueResolver> {
@@ -109,27 +109,27 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             Expr::Error(e) => EvalValue::Scalar(Value::Error(*e)),
             Expr::CellRef(r) => match self.resolve_sheet_id(&r.sheet) {
                 Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
-                    EvalValue::Reference(ResolvedRange {
+                    EvalValue::Reference(vec![ResolvedRange {
                         sheet_id,
                         start: r.addr,
                         end: r.addr,
-                    })
+                    }])
                 }
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
             Expr::RangeRef(r) => match self.resolve_sheet_id(&r.sheet) {
                 Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
-                    EvalValue::Reference(ResolvedRange {
+                    EvalValue::Reference(vec![ResolvedRange {
                         sheet_id,
                         start: r.start,
                         end: r.end,
-                    })
+                    }])
                 }
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
             Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref) {
                 Some((sheet_id, start, end)) if self.resolver.sheet_exists(sheet_id) => {
-                    EvalValue::Reference(ResolvedRange { sheet_id, start, end })
+                    EvalValue::Reference(vec![ResolvedRange { sheet_id, start, end }])
                 }
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Name)),
             },
@@ -151,45 +151,83 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     }
                 }
             }
-            Expr::Binary { op, left, right } => {
-                let l = self.eval_scalar(left);
-                if let Value::Error(e) = l {
-                    return EvalValue::Scalar(Value::Error(e));
-                }
-                let r = self.eval_scalar(right);
-                if let Value::Error(e) = r {
-                    return EvalValue::Scalar(Value::Error(e));
-                }
-                let ln = match l.coerce_to_number() {
-                    Ok(n) => n,
-                    Err(e) => return EvalValue::Scalar(Value::Error(e)),
-                };
-                let rn = match r.coerce_to_number() {
-                    Ok(n) => n,
-                    Err(e) => return EvalValue::Scalar(Value::Error(e)),
-                };
-                let out = match op {
-                    BinaryOp::Add => Value::Number(ln + rn),
-                    BinaryOp::Sub => Value::Number(ln - rn),
-                    BinaryOp::Mul => Value::Number(ln * rn),
-                    BinaryOp::Div => {
-                        if rn == 0.0 {
-                            Value::Error(ErrorKind::Div0)
-                        } else {
-                            Value::Number(ln / rn)
-                        }
+            Expr::Postfix { op, expr } => match op {
+                PostfixOp::Percent => {
+                    let v = self.eval_scalar(expr);
+                    if let Value::Error(e) = v {
+                        return EvalValue::Scalar(Value::Error(e));
                     }
-                    BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
-                        Ok(n) => Value::Number(n),
-                        Err(e) => Value::Error(match e {
-                            ExcelError::Div0 => ErrorKind::Div0,
-                            ExcelError::Value => ErrorKind::Value,
-                            ExcelError::Num => ErrorKind::Num,
-                        }),
-                    },
-                };
-                EvalValue::Scalar(out)
-            }
+                    let n = match v.coerce_to_number() {
+                        Ok(n) => n,
+                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
+                    };
+                    EvalValue::Scalar(Value::Number(n / 100.0))
+                }
+            },
+            Expr::Binary { op, left, right } => match *op {
+                BinaryOp::Range | BinaryOp::Union | BinaryOp::Intersect => {
+                    self.eval_reference_binary(*op, left, right)
+                }
+                BinaryOp::Concat => {
+                    let l = self.eval_scalar(left);
+                    if let Value::Error(e) = l {
+                        return EvalValue::Scalar(Value::Error(e));
+                    }
+                    let r = self.eval_scalar(right);
+                    if let Value::Error(e) = r {
+                        return EvalValue::Scalar(Value::Error(e));
+                    }
+                    let ls = match l.coerce_to_string() {
+                        Ok(s) => s,
+                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
+                    };
+                    let rs = match r.coerce_to_string() {
+                        Ok(s) => s,
+                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
+                    };
+                    EvalValue::Scalar(Value::Text(format!("{ls}{rs}")))
+                }
+                BinaryOp::Pow | BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                    let l = self.eval_scalar(left);
+                    if let Value::Error(e) = l {
+                        return EvalValue::Scalar(Value::Error(e));
+                    }
+                    let r = self.eval_scalar(right);
+                    if let Value::Error(e) = r {
+                        return EvalValue::Scalar(Value::Error(e));
+                    }
+                    let ln = match l.coerce_to_number() {
+                        Ok(n) => n,
+                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
+                    };
+                    let rn = match r.coerce_to_number() {
+                        Ok(n) => n,
+                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
+                    };
+                    let out = match *op {
+                        BinaryOp::Add => Value::Number(ln + rn),
+                        BinaryOp::Sub => Value::Number(ln - rn),
+                        BinaryOp::Mul => Value::Number(ln * rn),
+                        BinaryOp::Div => {
+                            if rn == 0.0 {
+                                Value::Error(ErrorKind::Div0)
+                            } else {
+                                Value::Number(ln / rn)
+                            }
+                        }
+                        BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
+                            Ok(n) => Value::Number(n),
+                            Err(e) => Value::Error(match e {
+                                ExcelError::Div0 => ErrorKind::Div0,
+                                ExcelError::Value => ErrorKind::Value,
+                                ExcelError::Num => ErrorKind::Num,
+                            }),
+                        },
+                        _ => unreachable!("handled by match guard"),
+                    };
+                    EvalValue::Scalar(out)
+                }
+            },
             Expr::Compare { op, left, right } => {
                 let l = self.eval_scalar(left);
                 if let Value::Error(e) = l {
@@ -210,8 +248,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 let v = self.eval_value(inner);
                 match v {
                     EvalValue::Scalar(v) => EvalValue::Scalar(v),
-                    EvalValue::Reference(range) => {
-                        EvalValue::Scalar(self.apply_implicit_intersection(range))
+                    EvalValue::Reference(ranges) => {
+                        EvalValue::Scalar(self.apply_implicit_intersection(&ranges))
                     }
                 }
             }
@@ -273,7 +311,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     fn eval_scalar(&self, expr: &CompiledExpr) -> Value {
         match self.eval_value(expr) {
             EvalValue::Scalar(v) => v,
-            EvalValue::Reference(range) => self.deref_reference_scalar(range),
+            EvalValue::Reference(ranges) => self.deref_reference_scalar(&ranges),
         }
     }
 
@@ -285,17 +323,26 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn deref_reference_scalar(&self, range: ResolvedRange) -> Value {
-        if range.is_single_cell() {
-            self.resolver.get_cell_value(range.sheet_id, range.start)
-        } else {
-            // Dynamic array spilling is not implemented yet; multi-cell references used as
-            // scalars behave like a spill attempt.
-            Value::Error(ErrorKind::Spill)
+    fn deref_reference_scalar(&self, ranges: &[ResolvedRange]) -> Value {
+        match ranges {
+            [only] if only.is_single_cell() => self.resolver.get_cell_value(only.sheet_id, only.start),
+            _ => {
+                // Multi-cell references used as scalars behave like a spill attempt.
+                Value::Error(ErrorKind::Spill)
+            }
         }
     }
 
-    fn deref_reference_dynamic(&self, range: ResolvedRange) -> Value {
+    fn deref_reference_dynamic(&self, ranges: Vec<ResolvedRange>) -> Value {
+        match ranges.as_slice() {
+            [] => Value::Error(ErrorKind::Ref),
+            [only] => self.deref_reference_dynamic_single(*only),
+            // Discontiguous unions cannot be represented as a single rectangular spill.
+            _ => Value::Error(ErrorKind::Value),
+        }
+    }
+
+    fn deref_reference_dynamic_single(&self, range: ResolvedRange) -> Value {
         if range.is_single_cell() {
             return self.resolver.get_cell_value(range.sheet_id, range.start);
         }
@@ -305,16 +352,35 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         let mut values = Vec::with_capacity(rows.saturating_mul(cols));
         for row in range.start.row..=range.end.row {
             for col in range.start.col..=range.end.col {
-                values.push(
-                    self.resolver
-                        .get_cell_value(range.sheet_id, CellAddr { row, col }),
-                );
+                values.push(self.resolver.get_cell_value(range.sheet_id, CellAddr { row, col }));
             }
         }
         Value::Array(Array::new(rows, cols, values))
     }
 
-    fn apply_implicit_intersection(&self, range: ResolvedRange) -> Value {
+    fn apply_implicit_intersection(&self, ranges: &[ResolvedRange]) -> Value {
+        match ranges {
+            [] => Value::Error(ErrorKind::Value),
+            [only] => self.apply_implicit_intersection_single(*only),
+            many => {
+                // If multiple areas intersect, Excel's implicit intersection is ambiguous. We
+                // approximate by succeeding only when exactly one area intersects.
+                let mut hits = Vec::new();
+                for r in many {
+                    let v = self.apply_implicit_intersection_single(*r);
+                    if !matches!(v, Value::Error(ErrorKind::Value)) {
+                        hits.push(v);
+                    }
+                }
+                match hits.as_slice() {
+                    [only] => only.clone(),
+                    _ => Value::Error(ErrorKind::Value),
+                }
+            }
+        }
+    }
+
+    fn apply_implicit_intersection_single(&self, range: ResolvedRange) -> Value {
         if range.is_single_cell() {
             return self.resolver.get_cell_value(range.sheet_id, range.start);
         }
@@ -325,17 +391,25 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         // 1D ranges intersect on the matching row/column.
         if range.start.col == range.end.col {
             if cur.row >= range.start.row && cur.row <= range.end.row {
-                return self
-                    .resolver
-                    .get_cell_value(range.sheet_id, CellAddr { row: cur.row, col: range.start.col });
+                return self.resolver.get_cell_value(
+                    range.sheet_id,
+                    CellAddr {
+                        row: cur.row,
+                        col: range.start.col,
+                    },
+                );
             }
             return Value::Error(ErrorKind::Value);
         }
         if range.start.row == range.end.row {
             if cur.col >= range.start.col && cur.col <= range.end.col {
-                return self
-                    .resolver
-                    .get_cell_value(range.sheet_id, CellAddr { row: range.start.row, col: cur.col });
+                return self.resolver.get_cell_value(
+                    range.sheet_id,
+                    CellAddr {
+                        row: range.start.row,
+                        col: cur.col,
+                    },
+                );
             }
             return Value::Error(ErrorKind::Value);
         }
@@ -352,19 +426,148 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         Value::Error(ErrorKind::Value)
     }
 
+    fn eval_reference_binary(&self, op: BinaryOp, left: &CompiledExpr, right: &CompiledExpr) -> EvalValue {
+        let left = match self.eval_reference_operand(left) {
+            Ok(r) => r,
+            Err(v) => return EvalValue::Scalar(v),
+        };
+        let right = match self.eval_reference_operand(right) {
+            Ok(r) => r,
+            Err(v) => return EvalValue::Scalar(v),
+        };
+
+        match op {
+            BinaryOp::Union => {
+                let Some(sheet_id) = left.first().map(|r| r.sheet_id) else {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                };
+                if left.iter().any(|r| r.sheet_id != sheet_id) || right.iter().any(|r| r.sheet_id != sheet_id) {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                }
+
+                let mut out = left;
+                out.extend(right);
+                EvalValue::Reference(out)
+            }
+            BinaryOp::Intersect => {
+                let mut out = Vec::new();
+                for a in &left {
+                    for b in &right {
+                        if a.sheet_id != b.sheet_id {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                        }
+                        if let Some(r) = intersect_ranges(*a, *b) {
+                            out.push(r);
+                        }
+                    }
+                }
+                if out.is_empty() {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Null));
+                }
+                EvalValue::Reference(out)
+            }
+            BinaryOp::Range => {
+                let (Some(a), Some(b)) = (left.first().copied(), right.first().copied()) else {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                };
+                if left.len() != 1 || right.len() != 1 {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Value));
+                }
+                if a.sheet_id != b.sheet_id {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                }
+
+                let a = a.normalized();
+                let b = b.normalized();
+
+                let start = CellAddr {
+                    row: a.start.row.min(b.start.row),
+                    col: a.start.col.min(b.start.col),
+                };
+                let end = CellAddr {
+                    row: a.end.row.max(b.end.row),
+                    col: a.end.col.max(b.end.col),
+                };
+
+                EvalValue::Reference(vec![ResolvedRange {
+                    sheet_id: a.sheet_id,
+                    start,
+                    end,
+                }])
+            }
+            _ => EvalValue::Scalar(Value::Error(ErrorKind::Value)),
+        }
+    }
+
+    fn eval_reference_operand(&self, expr: &CompiledExpr) -> Result<Vec<ResolvedRange>, Value> {
+        match self.eval_value(expr) {
+            EvalValue::Reference(r) => Ok(r),
+            EvalValue::Scalar(Value::Error(e)) => Err(Value::Error(e)),
+            EvalValue::Scalar(_) => Err(Value::Error(ErrorKind::Value)),
+        }
+    }
+
     // Built-in functions are implemented in `crate::functions` and dispatched via
     // `crate::functions::call_function`.
+}
+
+fn intersect_ranges(a: ResolvedRange, b: ResolvedRange) -> Option<ResolvedRange> {
+    if a.sheet_id != b.sheet_id {
+        return None;
+    }
+    let a = a.normalized();
+    let b = b.normalized();
+
+    let start_row = a.start.row.max(b.start.row);
+    let end_row = a.end.row.min(b.end.row);
+    if start_row > end_row {
+        return None;
+    }
+    let start_col = a.start.col.max(b.start.col);
+    let end_col = a.end.col.min(b.end.col);
+    if start_col > end_col {
+        return None;
+    }
+
+    Some(ResolvedRange {
+        sheet_id: a.sheet_id,
+        start: CellAddr {
+            row: start_row,
+            col: start_col,
+        },
+        end: CellAddr {
+            row: end_row,
+            col: end_col,
+        },
+    })
 }
 
 impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn eval_arg(&self, expr: &CompiledExpr) -> FnArgValue {
         match self.eval_value(expr) {
             EvalValue::Scalar(v) => FnArgValue::Scalar(v),
-            EvalValue::Reference(r) => FnArgValue::Reference(FnReference {
-                sheet_id: r.sheet_id,
-                start: r.start,
-                end: r.end,
-            }),
+            EvalValue::Reference(mut ranges) => {
+                // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
+                // multi-area union).
+                ranges.sort_by_key(|r| (r.sheet_id, r.start.row, r.start.col, r.end.row, r.end.col));
+                match ranges.as_slice() {
+                    [only] => FnArgValue::Reference(FnReference {
+                        sheet_id: only.sheet_id,
+                        start: only.start,
+                        end: only.end,
+                    }),
+                    _ => FnArgValue::ReferenceUnion(
+                        ranges
+                            .into_iter()
+                            .map(|r| FnReference {
+                                sheet_id: r.sheet_id,
+                                start: r.start,
+                                end: r.end,
+                            })
+                            .collect(),
+                    ),
+                }
+            }
         }
     }
 
@@ -373,12 +576,11 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn apply_implicit_intersection(&self, reference: FnReference) -> Value {
-        let range = ResolvedRange {
+        Evaluator::apply_implicit_intersection(self, &[ResolvedRange {
             sheet_id: reference.sheet_id,
             start: reference.start,
             end: reference.end,
-        };
-        Evaluator::apply_implicit_intersection(self, range)
+        }])
     }
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {

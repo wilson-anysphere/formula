@@ -88,6 +88,8 @@ impl Reference {
 pub enum ArgValue {
     Scalar(Value),
     Reference(Reference),
+    /// A multi-area reference produced by the union/intersection operators.
+    ReferenceUnion(Vec<Reference>),
 }
 
 pub trait FunctionContext {
@@ -158,5 +160,22 @@ pub(crate) fn eval_scalar_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) ->
     match ctx.eval_arg(expr) {
         ArgValue::Scalar(v) => v,
         ArgValue::Reference(r) => ctx.apply_implicit_intersection(r),
+        ArgValue::ReferenceUnion(ranges) => apply_implicit_intersection_union(ctx, &ranges),
+    }
+}
+
+fn apply_implicit_intersection_union(ctx: &dyn FunctionContext, ranges: &[Reference]) -> Value {
+    // Excel's implicit intersection on a multi-area reference is ambiguous; we approximate by
+    // succeeding only when exactly one area intersects.
+    let mut hits = Vec::new();
+    for r in ranges {
+        let v = ctx.apply_implicit_intersection(*r);
+        if !matches!(v, Value::Error(ErrorKind::Value)) {
+            hits.push(v);
+        }
+    }
+    match hits.as_slice() {
+        [only] => only.clone(),
+        _ => Value::Error(ErrorKind::Value),
     }
 }

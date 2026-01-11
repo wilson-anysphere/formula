@@ -26,6 +26,7 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let table_ref = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => r,
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
     let table = table_ref.normalized();
@@ -92,6 +93,7 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let table_ref = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => r,
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
     let table = table_ref.normalized();
@@ -153,6 +155,7 @@ inventory::submit! {
 fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let array = match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => r.normalized(),
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
     let row = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
@@ -204,6 +207,7 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let array = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => r.normalized(),
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
 
@@ -256,6 +260,7 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let lookup_range = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => r.normalized(),
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
 
@@ -314,10 +319,12 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let lookup_range = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => r.normalized(),
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
     let return_range = match ctx.eval_arg(&args[2]) {
         ArgValue::Reference(r) => r.normalized(),
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
 

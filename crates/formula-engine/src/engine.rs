@@ -1,5 +1,6 @@
 use crate::eval::{
-    parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError, Parser, RangeRef, SheetReference,
+    compile_canonical_expr, parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError, Parser,
+    RangeRef, SheetReference,
 };
 use crate::editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
@@ -310,6 +311,7 @@ impl Engine {
         // Mark downstream dependents dirty.
         self.mark_dirty_dependents_with_reasons(key);
         self.calc_graph.mark_dirty(cell_id);
+        self.sync_dirty_from_calc_graph();
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -463,9 +465,9 @@ impl Engine {
         let cell_id = cell_id_from_key(key);
         self.clear_spill_for_cell(key);
 
-        let parsed = Parser::parse(formula)?;
-        let compiled = self.compile_expr(&parsed, sheet_id);
-        self.clear_cell_name_refs(key);
+        let parsed = crate::parse_formula(formula, crate::ParseOptions::default())?;
+        let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
+        let compiled = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet);
         let tables_by_sheet: Vec<Vec<Table>> =
             self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
  
@@ -500,6 +502,7 @@ impl Engine {
         // Recalculate this cell and anything depending on it.
         self.mark_dirty_including_self_with_reasons(key);
         self.calc_graph.mark_dirty(cell_id);
+        self.sync_dirty_from_calc_graph();
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -1365,19 +1368,6 @@ impl Engine {
         }
     }
 
-    fn compile_expr(&mut self, expr: &Expr<String>, current_sheet: SheetId) -> CompiledExpr {
-        let mut map = |sref: &SheetReference<String>| match sref {
-            SheetReference::Current => SheetReference::Sheet(current_sheet),
-            SheetReference::Sheet(name) => self
-                .workbook
-                .sheet_id(name)
-                .map(SheetReference::Sheet)
-                .unwrap_or_else(|| SheetReference::External(name.clone())),
-            SheetReference::External(wb) => SheetReference::External(wb.clone()),
-        };
-        expr.map_sheets(&mut map)
-    }
-
     fn compile_name_expr(&mut self, expr: &Expr<String>) -> CompiledExpr {
         let mut map = |sref: &SheetReference<String>| match sref {
             SheetReference::Current => SheetReference::Current,
@@ -1468,7 +1458,6 @@ impl Engine {
             self.calc_graph.mark_dirty(cell_id);
         }
     }
-
     fn rebuild_graph(&mut self) -> Result<(), EngineError> {
         let sheet_names = sheet_names_by_id(&self.workbook);
         let mut formulas: Vec<(String, CellAddr, String)> = Vec::new();
@@ -1701,6 +1690,12 @@ impl Engine {
                     queue.push_back((cell, dep));
                 }
             }
+        }
+    }
+
+    fn sync_dirty_from_calc_graph(&mut self) {
+        for id in self.calc_graph.dirty_cells() {
+            self.dirty.insert(cell_key_from_id(id));
         }
     }
 }
@@ -2323,6 +2318,8 @@ fn analyze_expr(
     (precedents, names, volatile, thread_safe)
 }
 
+const MAX_AUDIT_RANGE_EXPANSION_CELLS: u64 = 10_000;
+
 fn walk_expr(
     expr: &CompiledExpr,
     current_cell: CellKey,
@@ -2352,12 +2349,27 @@ fn walk_expr(
                 } else {
                     (end.col, start.col)
                 };
-                for row in r1..=r2 {
-                    for col in c1..=c2 {
-                        precedents.insert(CellKey {
-                            sheet,
-                            addr: CellAddr { row, col },
-                        });
+
+                let height = (r2 - r1 + 1) as u64;
+                let width = (c2 - c1 + 1) as u64;
+                let cell_count = height.saturating_mul(width);
+
+                if cell_count <= MAX_AUDIT_RANGE_EXPANSION_CELLS {
+                    for row in r1..=r2 {
+                        for col in c1..=c2 {
+                            precedents.insert(CellKey {
+                                sheet,
+                                addr: CellAddr { row, col },
+                            });
+                        }
+                    }
+                } else if let Some(sheet_cells) = workbook.sheets.get(sheet) {
+                    // Avoid catastrophic expansion for full row/col references (e.g. `A:A`).
+                    // For auditing, include only cells that currently exist in the sparse workbook.
+                    for addr in sheet_cells.cells.keys() {
+                        if addr.row >= r1 && addr.row <= r2 && addr.col >= c1 && addr.col <= c2 {
+                            precedents.insert(CellKey { sheet, addr: *addr });
+                        }
                     }
                 }
             }
@@ -2379,12 +2391,25 @@ fn walk_expr(
                 } else {
                     (end.col, start.col)
                 };
-                for row in r1..=r2 {
-                    for col in c1..=c2 {
-                        precedents.insert(CellKey {
-                            sheet: sheet_id,
-                            addr: CellAddr { row, col },
-                        });
+
+                let height = (r2 - r1 + 1) as u64;
+                let width = (c2 - c1 + 1) as u64;
+                let cell_count = height.saturating_mul(width);
+
+                if cell_count <= MAX_AUDIT_RANGE_EXPANSION_CELLS {
+                    for row in r1..=r2 {
+                        for col in c1..=c2 {
+                            precedents.insert(CellKey {
+                                sheet: sheet_id,
+                                addr: CellAddr { row, col },
+                            });
+                        }
+                    }
+                } else if let Some(sheet_cells) = workbook.sheets.get(sheet_id) {
+                    for addr in sheet_cells.cells.keys() {
+                        if addr.row >= r1 && addr.row <= r2 && addr.col >= c1 && addr.col <= c2 {
+                            precedents.insert(CellKey { sheet: sheet_id, addr: *addr });
+                        }
                     }
                 }
             }
@@ -2424,7 +2449,7 @@ fn walk_expr(
             }
             visiting_names.remove(&visit_key);
         }
-        Expr::Unary { expr, .. } => walk_expr(
+        Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => walk_expr(
             expr,
             current_cell,
             tables_by_sheet,
@@ -2498,7 +2523,11 @@ fn walk_expr(
                 visiting_names,
             )
         }
-        Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
+        Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Bool(_)
+        | Expr::Blank
+        | Expr::Error(_) => {}
     }
 }
 
@@ -2597,7 +2626,7 @@ fn walk_calc_expr(
             }
             visiting_names.remove(&visit_key);
         }
-        Expr::Unary { expr, .. } => {
+        Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => {
             walk_calc_expr(expr, current_cell, tables_by_sheet, workbook, precedents, visiting_names)
         }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {

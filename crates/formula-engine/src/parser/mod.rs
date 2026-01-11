@@ -1021,7 +1021,7 @@ impl<'a> Parser<'a> {
         match self.peek_kind() {
             TokenKind::Plus => {
                 self.next();
-                let expr = self.parse_expression_best_effort(70);
+                let expr = self.parse_expression_best_effort(50);
                 Expr::Unary(UnaryExpr {
                     op: UnaryOp::Plus,
                     expr: Box::new(expr),
@@ -1029,7 +1029,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Minus => {
                 self.next();
-                let expr = self.parse_expression_best_effort(70);
+                let expr = self.parse_expression_best_effort(50);
                 Expr::Unary(UnaryExpr {
                     op: UnaryOp::Minus,
                     expr: Box::new(expr),
@@ -1037,7 +1037,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::At => {
                 self.next();
-                let expr = self.parse_expression_best_effort(70);
+                let expr = self.parse_expression_best_effort(50);
                 Expr::Unary(UnaryExpr {
                     op: UnaryOp::ImplicitIntersection,
                     expr: Box::new(expr),
@@ -1350,7 +1350,7 @@ impl<'a> Parser<'a> {
         match self.peek_kind() {
             TokenKind::Plus => {
                 self.next();
-                let expr = self.parse_expression(70)?;
+                let expr = self.parse_expression(50)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Plus,
                     expr: Box::new(expr),
@@ -1358,7 +1358,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Minus => {
                 self.next();
-                let expr = self.parse_expression(70)?;
+                let expr = self.parse_expression(50)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Minus,
                     expr: Box::new(expr),
@@ -1366,7 +1366,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::At => {
                 self.next();
-                let expr = self.parse_expression(70)?;
+                let expr = self.parse_expression(50)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::ImplicitIntersection,
                     expr: Box::new(expr),
