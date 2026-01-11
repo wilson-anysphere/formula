@@ -1,7 +1,13 @@
 const GLOBAL_STATE_KEY = Symbol.for("formula.extensionApi.state");
 const state = globalThis[GLOBAL_STATE_KEY] ?? {
   transport: null,
-  currentContext: { extensionId: "", extensionPath: "" },
+  currentContext: {
+    extensionId: "",
+    extensionPath: "",
+    extensionUri: "",
+    globalStoragePath: "",
+    workspaceStoragePath: ""
+  },
   nextRequestId: 1,
   pendingRequests: new Map(),
   commandHandlers: new Map(),
@@ -21,7 +27,10 @@ function __setTransport(nextTransport) {
 function __setContext(ctx) {
   state.currentContext = {
     extensionId: String(ctx?.extensionId ?? ""),
-    extensionPath: String(ctx?.extensionPath ?? "")
+    extensionPath: String(ctx?.extensionPath ?? ""),
+    extensionUri: String(ctx?.extensionUri ?? ""),
+    globalStoragePath: String(ctx?.globalStoragePath ?? ""),
+    workspaceStoragePath: String(ctx?.workspaceStoragePath ?? "")
   };
 }
 
@@ -509,6 +518,9 @@ const context = new Proxy(
     get(_target, prop) {
       if (prop === "extensionId") return state.currentContext.extensionId;
       if (prop === "extensionPath") return state.currentContext.extensionPath;
+      if (prop === "extensionUri") return state.currentContext.extensionUri;
+      if (prop === "globalStoragePath") return state.currentContext.globalStoragePath;
+      if (prop === "workspaceStoragePath") return state.currentContext.workspaceStoragePath;
       return undefined;
     }
   }

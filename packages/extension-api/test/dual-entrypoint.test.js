@@ -60,10 +60,19 @@ test("dual entrypoint: transport/context state is shared between CJS and ESM", a
       }
     }
   });
-  cjsApi.__setContext({ extensionId: "formula.test", extensionPath: "/tmp/ext" });
+  cjsApi.__setContext({
+    extensionId: "formula.test",
+    extensionPath: "/tmp/ext",
+    extensionUri: "file:///tmp/ext",
+    globalStoragePath: "/tmp/ext/globalStorage",
+    workspaceStoragePath: "/tmp/ext/workspaceStorage"
+  });
 
   assert.equal(esmApi.context.extensionId, "formula.test");
   assert.equal(esmApi.context.extensionPath, "/tmp/ext");
+  assert.equal(esmApi.context.extensionUri, "file:///tmp/ext");
+  assert.equal(esmApi.context.globalStoragePath, "/tmp/ext/globalStorage");
+  assert.equal(esmApi.context.workspaceStoragePath, "/tmp/ext/workspaceStorage");
 
   const value = await esmApi.cells.getCell(1, 2);
   assert.equal(value, 42);
