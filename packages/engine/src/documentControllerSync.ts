@@ -123,7 +123,9 @@ export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: a
 export async function engineApplyDeltas(
   engine: EngineSyncTarget,
   deltas: readonly DocumentCellDelta[],
+  options: { recalculate?: boolean } = {},
 ): Promise<void> {
+  const shouldRecalculate = options.recalculate ?? true;
   const updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }> = [];
 
   for (const delta of deltas) {
@@ -144,5 +146,7 @@ export async function engineApplyDeltas(
   } else {
     await Promise.all(updates.map((u) => engine.setCell(u.address, u.value, u.sheet)));
   }
-  await engine.recalculate();
+  if (shouldRecalculate) {
+    await engine.recalculate();
+  }
 }

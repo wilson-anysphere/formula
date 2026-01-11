@@ -636,16 +636,26 @@ export class SpreadsheetApp {
       await engineHydrateFromDocument(engine, this.document);
 
       this.wasmEngine = engine;
-      this.wasmUnsubscribe = this.document.on("change", ({ deltas, source }: { deltas: any[]; source?: string }) => {
-        if (!this.wasmEngine || this.wasmSyncSuspended) return;
+      this.wasmUnsubscribe = this.document.on(
+        "change",
+        ({ deltas, source, recalc }: { deltas: any[]; source?: string; recalc?: boolean }) => {
+          if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
-        if (source === "applyState") {
-          void this.enqueueWasmSync((worker) => engineHydrateFromDocument(worker, this.document));
-          return;
+          if (source === "applyState") {
+            void this.enqueueWasmSync((worker) => engineHydrateFromDocument(worker, this.document));
+            return;
+          }
+
+          if (!Array.isArray(deltas) || deltas.length === 0) {
+            if (recalc) {
+              void this.enqueueWasmSync((worker) => worker.recalculate());
+            }
+            return;
+          }
+
+          void this.enqueueWasmSync((worker) => engineApplyDeltas(worker, deltas, { recalculate: recalc !== false }));
         }
-
-        void this.enqueueWasmSync((worker) => engineApplyDeltas(worker, deltas));
-      });
+      );
     } catch {
       // Ignore initialization failures (e.g. missing WASM bundle).
       engine?.terminate();

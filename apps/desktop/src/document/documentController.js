@@ -242,7 +242,7 @@ export class DocumentController {
    * Subscribe to controller events.
    *
    * Events:
-   * - `change`: { deltas: CellDelta[], source?: string }
+   * - `change`: { deltas: CellDelta[], source?: string, recalc?: boolean }
    * - `history`: { canUndo: boolean, canRedo: boolean }
    * - `dirty`: { isDirty: boolean }
    * - `update`: emitted after any applied change (including undo/redo) for versioning adapters
@@ -820,6 +820,7 @@ export class DocumentController {
 
     this.#commitHistoryEntry(batch);
     this.engine?.recalculate();
+    this.#emit("change", { deltas: [], source: "endBatch", recalc: true });
   }
 
   /**
@@ -849,6 +850,9 @@ export class DocumentController {
 
     this.engine?.endBatch?.();
     if (hadDeltas) this.engine?.recalculate();
+    if (hadDeltas) {
+      this.#emit("change", { deltas: [], source: "cancelBatch", recalc: true });
+    }
 
     this.#emitHistory();
     this.#emitDirty();
@@ -1056,7 +1060,7 @@ export class DocumentController {
     }
 
     if (options.emitChange) {
-      const payload = { deltas: deltas.map(cloneDelta) };
+      const payload = { deltas: deltas.map(cloneDelta), recalc: options.recalc };
       if (options.source) payload.source = options.source;
       this.#emit("change", payload);
     }
