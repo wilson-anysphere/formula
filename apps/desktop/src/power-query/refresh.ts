@@ -17,11 +17,11 @@ type RefreshEvent = any;
 
 export type DesktopPowerQueryEvent =
   | RefreshEvent
-  | { type: "apply:started"; jobId: string; queryId: string; destination: QuerySheetDestination }
-  | { type: "apply:progress"; jobId: string; queryId: string; rowsWritten: number }
-  | { type: "apply:completed"; jobId: string; queryId: string; result: ApplyToDocumentResult }
-  | { type: "apply:error"; jobId: string; queryId: string; error: unknown }
-  | { type: "apply:cancelled"; jobId: string; queryId: string };
+  | { type: "apply:started"; jobId: string; queryId: string; destination: QuerySheetDestination; sessionId?: string }
+  | { type: "apply:progress"; jobId: string; queryId: string; rowsWritten: number; sessionId?: string }
+  | { type: "apply:completed"; jobId: string; queryId: string; result: ApplyToDocumentResult; sessionId?: string }
+  | { type: "apply:error"; jobId: string; queryId: string; error: unknown; sessionId?: string }
+  | { type: "apply:cancelled"; jobId: string; queryId: string; sessionId?: string };
 
 class Emitter<T> {
   listeners: Set<(payload: T) => void> = new Set();

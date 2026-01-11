@@ -218,7 +218,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
     const destination = query.destination;
     if (!isQuerySheetDestination(destination)) return;
 
-    this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId } as any);
+    this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId });
   }
 
   async applyCompletedJob(evt: any): Promise<void> {
@@ -237,7 +237,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
 
     const cancelledQueries = this.cancelledQueriesBySession.get(sessionId);
     if (this.cancelledSessions.has(sessionId) || cancelledQueries?.has(queryId)) {
-      this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId } as any);
+      this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId });
       return;
     }
 
@@ -247,7 +247,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
     const applyKey = jobId.startsWith(`${sessionId}:`) ? jobId : `${sessionId}:${jobId}`;
     this.applyControllers.set(applyKey, { sessionId, jobId, queryId, controller });
 
-    this.emitter.emit({ type: "apply:started", jobId, queryId, destination, sessionId } as any);
+    this.emitter.emit({ type: "apply:started", jobId, queryId, destination, sessionId });
 
     // Serialize apply operations. The DocumentController batching model is global
     // (single `activeBatch`), so overlapping apply operations can corrupt undo
@@ -268,16 +268,16 @@ export class DesktopPowerQueryRefreshOrchestrator {
                   queryId,
                   rowsWritten: progress.totalRowsWritten,
                   sessionId,
-                } as any);
+                });
               }
             },
           });
-          this.emitter.emit({ type: "apply:completed", jobId, queryId, result, sessionId } as any);
+          this.emitter.emit({ type: "apply:completed", jobId, queryId, result, sessionId });
         } catch (error) {
           if (controller.signal.aborted || isAbortError(error)) {
-            this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId } as any);
+            this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId });
           } else {
-            this.emitter.emit({ type: "apply:error", jobId, queryId, error, sessionId } as any);
+            this.emitter.emit({ type: "apply:error", jobId, queryId, error, sessionId });
           }
         } finally {
           this.applyControllers.delete(applyKey);
