@@ -644,3 +644,166 @@ fn patch_sheet_bin_streaming_can_patch_formula_rgcb_bytes() {
     assert_eq!(payload[22..22 + cce], rgce);
     assert_eq!(payload[22 + cce..], new_rgcb);
 }
+
+#[test]
+fn patch_sheet_bin_streaming_inserts_bool_and_error_cells_matches_in_memory() {
+    const BOOLERR: u32 = 0x0003;
+    const BOOL: u32 = 0x0004;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [
+        CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Bool(true),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        },
+        CellEdit {
+            row: 4,
+            col: 2,
+            new_value: CellValue::Error(0x07),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        },
+    ];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) = find_cell_record(&patched_stream, 0, 1).expect("find inserted bool cell");
+    assert_eq!(id, BOOL, "expected BrtCellBool/BOOL record id");
+    assert_eq!(payload[8], 1);
+
+    let (id, payload) = find_cell_record(&patched_stream, 4, 2).expect("find inserted error cell");
+    assert_eq!(id, BOOLERR, "expected BrtCellBoolErr/BOOLERR record id");
+    assert_eq!(payload[8], 0x07);
+}
+
+#[test]
+fn patch_sheet_bin_streaming_inserts_formula_bool_and_error_cells_matches_in_memory() {
+    const FORMULA_BOOL: u32 = 0x000A;
+    const FORMULA_BOOLERR: u32 = 0x000B;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let rgce_bool_true = vec![0x1D, 0x01]; // PtgBool TRUE
+    let rgce_err_div0 = vec![0x1C, 0x07]; // PtgErr #DIV/0!
+
+    let edits = [
+        CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Bool(true),
+            new_formula: Some(rgce_bool_true.clone()),
+            new_rgcb: None,
+            shared_string_index: None,
+        },
+        CellEdit {
+            row: 4,
+            col: 2,
+            new_value: CellValue::Error(0x07),
+            new_formula: Some(rgce_err_div0.clone()),
+            new_rgcb: None,
+            shared_string_index: None,
+        },
+    ];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) =
+        find_cell_record(&patched_stream, 0, 1).expect("find inserted formula bool cell");
+    assert_eq!(id, FORMULA_BOOL, "expected BrtFmlaBool/FORMULA_BOOL record id");
+    assert_eq!(payload[8], 1);
+    let cce = u32::from_le_bytes(payload[11..15].try_into().unwrap()) as usize;
+    assert_eq!(payload[15..15 + cce], rgce_bool_true);
+
+    let (id, payload) =
+        find_cell_record(&patched_stream, 4, 2).expect("find inserted formula error cell");
+    assert_eq!(
+        id, FORMULA_BOOLERR,
+        "expected BrtFmlaError/FORMULA_BOOLERR record id"
+    );
+    assert_eq!(payload[8], 0x07);
+    let cce = u32::from_le_bytes(payload[11..15].try_into().unwrap()) as usize;
+    assert_eq!(payload[15..15 + cce], rgce_err_div0);
+}
+
+#[test]
+fn patch_sheet_bin_streaming_inserts_formula_string_cell_matches_in_memory() {
+    const FORMULA_STRING: u32 = 0x0008;
+
+    fn ptg_str(s: &str) -> Vec<u8> {
+        let mut out = vec![0x17]; // PtgStr
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        for unit in units {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out
+    }
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let rgce = ptg_str("Hello");
+    let edits = [CellEdit {
+        row: 0,
+        col: 1,
+        new_value: CellValue::Text("Hello".to_string()),
+        new_formula: Some(rgce.clone()),
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) =
+        find_cell_record(&patched_stream, 0, 1).expect("find inserted formula string cell");
+    assert_eq!(
+        id, FORMULA_STRING,
+        "expected BrtFmlaString/FORMULA_STRING record id"
+    );
+
+    let cch = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
+    let flags = u16::from_le_bytes(payload[12..14].try_into().unwrap());
+    assert_eq!(flags, 0);
+
+    let utf16_start = 14usize;
+    let utf16_end = utf16_start + cch * 2;
+    let raw = &payload[utf16_start..utf16_end];
+    let mut units = Vec::with_capacity(cch);
+    for chunk in raw.chunks_exact(2) {
+        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    assert_eq!(String::from_utf16_lossy(&units), "Hello");
+
+    let cce = u32::from_le_bytes(payload[utf16_end..utf16_end + 4].try_into().unwrap()) as usize;
+    assert_eq!(payload[utf16_end + 4..utf16_end + 4 + cce], rgce);
+    assert!(payload[utf16_end + 4 + cce..].is_empty());
+}
