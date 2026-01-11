@@ -219,10 +219,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
   const frozenRows = props.frozenRows ?? 0;
   const frozenCols = props.frozenCols ?? 0;
-  const frozenRowsRef = useRef(frozenRows);
-  const frozenColsRef = useRef(frozenCols);
-  frozenRowsRef.current = frozenRows;
-  frozenColsRef.current = frozenCols;
 
   const headerRows = frozenRows > 0 ? 1 : 0;
   const headerCols = frozenCols > 0 ? 1 : 0;
