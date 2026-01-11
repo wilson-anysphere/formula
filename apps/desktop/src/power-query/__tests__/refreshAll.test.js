@@ -157,6 +157,78 @@ test("DesktopPowerQueryRefreshOrchestrator refreshes dependencies once and appli
   orchestrator.dispose();
 });
 
+test("DesktopPowerQueryRefreshOrchestrator serializes apply operations to avoid nested document batches", async () => {
+  const table1 = DataTable.fromGrid(
+    [["A"], ...Array.from({ length: 10 }, (_, idx) => [idx + 1])],
+    { hasHeaders: true, inferTypes: true },
+  );
+  const table2 = DataTable.fromGrid(
+    [["B"], ...Array.from({ length: 3 }, (_, idx) => [`v${idx + 1}`])],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const engine = new ScriptedEngine({
+    q1: { table: table1 },
+    q2: { table: table2 },
+  });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  // Concurrency > 1 means refresh completion events can interleave, so apply must be queued.
+  const orchestrator = new DesktopPowerQueryRefreshOrchestrator({ engine, document: doc, concurrency: 2, batchSize: 1 });
+
+  const q1 = {
+    id: "q1",
+    name: "Q1",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  };
+
+  const q2 = {
+    id: "q2",
+    name: "Q2",
+    source: { type: "range", range: { values: [["Y"], [2]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 3 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  };
+
+  orchestrator.registerQuery(q1);
+  orchestrator.registerQuery(q2);
+
+  const applied = new Promise((resolve) => {
+    /** @type {Set<string>} */
+    const done = new Set();
+    const unsub = orchestrator.onEvent((evt) => {
+      if (evt.type === "apply:completed" && (evt.queryId === "q1" || evt.queryId === "q2")) {
+        done.add(evt.queryId);
+        if (done.size === 2) {
+          unsub();
+          resolve(done);
+        }
+      }
+    });
+  });
+
+  const handle = orchestrator.refreshAll(["q1", "q2"]);
+  await handle.promise;
+  await applied;
+
+  // Each apply should be its own batch/undo entry. Without apply serialization, concurrent
+  // applies would nest and collapse into a single history entry.
+  assert.equal(doc.history.length, 2);
+  assert.equal(doc.batchDepth, 0);
+
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, "A");
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, 1);
+
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 3 }).value, "B");
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 3 }).value, "v1");
+
+  orchestrator.dispose();
+});
+
 test("DesktopPowerQueryRefreshOrchestrator cancels downstream targets on dependency error but continues independent branches", async () => {
   const tableOther = DataTable.fromGrid([["Other"], ["ok"]], { hasHeaders: true, inferTypes: true });
 
@@ -298,4 +370,3 @@ test("DesktopPowerQueryRefreshOrchestrator cancel() aborts execution and apply",
 
   orchestrator.dispose();
 });
-

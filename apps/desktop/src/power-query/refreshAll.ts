@@ -111,6 +111,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
   emitter = new Emitter<DesktopPowerQueryEvent>();
   queries = new Map<string, Query>();
   applyControllers = new Map<string, ApplyControllerEntry>();
+  applyQueue: Promise<void> = Promise.resolve();
   cancelledSessions = new Set<string>();
   activeSessions = new Map<string, () => void>();
 
@@ -227,33 +228,40 @@ export class DesktopPowerQueryRefreshOrchestrator {
 
     this.emitter.emit({ type: "apply:started", jobId, queryId, destination, sessionId } as any);
 
-    try {
-      const result = await applyTableToDocument(this.doc, table, destination, {
-        batchSize: this.batchSize,
-        signal: controller.signal,
-        label: `Refresh query: ${query.name}`,
-        queryId,
-        onProgress: async (progress) => {
-          if (progress.type === "batch") {
-            this.emitter.emit({
-              type: "apply:progress",
-              jobId,
-              queryId,
-              rowsWritten: progress.totalRowsWritten,
-              sessionId,
-            } as any);
+    // Serialize apply operations. The DocumentController batching model is global
+    // (single `activeBatch`), so overlapping apply operations can corrupt undo
+    // grouping and prevent cancellation from reverting partial writes.
+    this.applyQueue = this.applyQueue
+      .then(async () => {
+        try {
+          const result = await applyTableToDocument(this.doc, table, destination, {
+            batchSize: this.batchSize,
+            signal: controller.signal,
+            label: `Refresh query: ${query.name}`,
+            queryId,
+            onProgress: async (progress) => {
+              if (progress.type === "batch") {
+                this.emitter.emit({
+                  type: "apply:progress",
+                  jobId,
+                  queryId,
+                  rowsWritten: progress.totalRowsWritten,
+                  sessionId,
+                } as any);
+              }
+            },
+          });
+          this.emitter.emit({ type: "apply:completed", jobId, queryId, result, sessionId } as any);
+        } catch (error) {
+          if (controller.signal.aborted || isAbortError(error)) {
+            this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId } as any);
+          } else {
+            this.emitter.emit({ type: "apply:error", jobId, queryId, error, sessionId } as any);
           }
-        },
-      });
-      this.emitter.emit({ type: "apply:completed", jobId, queryId, result, sessionId } as any);
-    } catch (error) {
-      if (controller.signal.aborted || isAbortError(error)) {
-        this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId } as any);
-      } else {
-        this.emitter.emit({ type: "apply:error", jobId, queryId, error, sessionId } as any);
-      }
-    } finally {
-      this.applyControllers.delete(applyKey);
-    }
+        } finally {
+          this.applyControllers.delete(applyKey);
+        }
+      })
+      .catch(() => {});
   }
 }
