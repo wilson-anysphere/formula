@@ -148,6 +148,20 @@ test("group-by: two-key groupByMin2/groupByMax2 propagate NaN and preserve signe
   assert.ok(Number.isNaN(maxOut.maxs[1]));
 });
 
+test("KernelEngine: groupBySum2 runs on CPU and returns expected results", async () => {
+  const engine = new KernelEngine({ precision: "excel", gpu: { enabled: false } });
+  const keysA = new Uint32Array([1, 1, 2, 2, 2]);
+  const keysB = new Uint32Array([10, 10, 10, 11, 11]);
+  const values = new Float64Array([1, 2, 3, 4, 5]);
+
+  const out = await engine.groupBySum2(keysA, keysB, values);
+  assert.deepEqual(Array.from(out.uniqueKeysA), [1, 2, 2]);
+  assert.deepEqual(Array.from(out.uniqueKeysB), [10, 10, 11]);
+  assert.deepEqual(Array.from(out.counts), [2, 1, 2]);
+  assert.deepEqual(Array.from(out.sums), [3, 3, 9]);
+  assert.equal(engine.lastKernelBackend().groupBySum2, "cpu");
+});
+
 test("hashJoin: inner join correctness with duplicates", async () => {
   const cpu = new CpuBackend();
   const leftKeys = new Uint32Array([1, 2, 2, 3]);
