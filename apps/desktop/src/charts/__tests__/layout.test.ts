@@ -253,4 +253,17 @@ describe("charts/layout", () => {
     expect(layout.axes.y.ticks.length).toBeLessThanOrEqual(7);
     expect(layout.axes.y.gridlines.length).toBeGreaterThan(0);
   });
+
+  test("pie (fixture) layout omits axes and keeps plot area separate from legend", () => {
+    const model = parseChartModelFromFixture("pie.xlsx", "pie");
+    const viewport = { x: 0, y: 0, width: 480, height: 320 };
+    const layout = computeChartLayout(model, DEFAULT_CHART_THEME, viewport);
+
+    expect(Object.keys(layout.axes)).toEqual([]);
+    expect(Object.keys(layout.scales)).toEqual([]);
+
+    expect(layout.legendRect).not.toBeNull();
+    expectNonOverlapping(layout.titleRect, layout.plotAreaRect);
+    expectNonOverlapping(layout.legendRect, layout.plotAreaRect);
+  });
 });

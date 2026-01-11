@@ -175,6 +175,27 @@ export function computeChartLayout(
     }
   }
 
+  if (model.chartType.kind === "pie") {
+    const inset = PLOT_INSET_TOP_PX;
+    const plotAreaRect: Rect = {
+      x: round(plotContainerRect.x + inset),
+      y: round(plotContainerRect.y + inset),
+      width: Math.max(1, round(plotContainerRect.width - inset * 2)),
+      height: Math.max(1, round(plotContainerRect.height - inset * 2)),
+    };
+
+    return {
+      chartAreaRect,
+      plotAreaRect,
+      titleRect,
+      titleText,
+      legendRect,
+      legend,
+      axes: {},
+      scales: {},
+    };
+  }
+
   const { xAxis, yAxis } = resolvePrimaryAxes(model);
 
   const axisFont = theme.fonts.axis;
