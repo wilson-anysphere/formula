@@ -177,6 +177,11 @@ class ExtensionHost {
     });
 
     const extensionId = `${manifest.publisher}.${manifest.name}`;
+    if (/[/\\]/.test(extensionId) || extensionId.includes("\0")) {
+      throw new Error(
+        `Invalid extension id: ${extensionId} (publisher/name must not contain path separators)`
+      );
+    }
 
     const extensionRoot = path.resolve(extensionPath);
     const globalStoragePath = path.join(this._extensionDataRoot, extensionId, "globalStorage");

@@ -8,7 +8,19 @@ async function installExtensionFromDirectory(sourceDir, installRoot) {
   const manifestPath = path.join(sourceDir, "package.json");
   const raw = await fs.readFile(manifestPath, "utf8");
   const manifest = JSON.parse(raw);
+  if (!manifest?.publisher || typeof manifest.publisher !== "string") {
+    throw new Error("Extension manifest missing required string field: publisher");
+  }
+  if (!manifest?.name || typeof manifest.name !== "string") {
+    throw new Error("Extension manifest missing required string field: name");
+  }
+
   const extensionId = `${manifest.publisher}.${manifest.name}`;
+  if (/[/\\]/.test(extensionId) || extensionId.includes("\0")) {
+    throw new Error(
+      `Invalid extension id: ${extensionId} (publisher/name must not contain path separators)`
+    );
+  }
 
   const destDir = path.join(installRoot, extensionId);
   await fs.mkdir(installRoot, { recursive: true });
@@ -38,4 +50,3 @@ module.exports = {
   uninstallExtension,
   listInstalledExtensions
 };
-

@@ -45,3 +45,33 @@ test("installer workflow: install -> list -> load -> uninstall", async () => {
   assert.deepEqual(await listInstalledExtensions(installRoot), []);
 });
 
+test("installExtensionFromDirectory rejects manifests with unsafe publisher/name segments", async (t) => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-install-unsafe-"));
+  t.after(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const source = path.join(tmpDir, "src");
+  const installRoot = path.join(tmpDir, "extensions");
+  await fs.mkdir(path.join(source, "dist"), { recursive: true });
+  await fs.writeFile(
+    path.join(source, "package.json"),
+    JSON.stringify(
+      {
+        name: "evil",
+        publisher: "../escape",
+        version: "1.0.0",
+        main: "./dist/extension.js",
+        engines: { formula: "^1.0.0" },
+      },
+      null,
+      2
+    )
+  );
+  await fs.writeFile(path.join(source, "dist", "extension.js"), "module.exports = {};\n");
+
+  await assert.rejects(
+    () => installExtensionFromDirectory(source, installRoot),
+    /Invalid extension id/
+  );
+});

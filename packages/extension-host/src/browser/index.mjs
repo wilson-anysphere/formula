@@ -431,6 +431,11 @@ class BrowserExtensionHost {
       enforceEngine: true
     });
     const extensionId = `${manifest.publisher}.${manifest.name}`;
+    if (/[/\\]/.test(extensionId) || extensionId.includes("\0")) {
+      throw new Error(
+        `Invalid extension id: ${extensionId} (publisher/name must not contain path separators)`
+      );
+    }
 
     const baseUrl = new URL("./", resolvedUrl);
     const entry = manifest.browser ?? manifest.module ?? manifest.main;
