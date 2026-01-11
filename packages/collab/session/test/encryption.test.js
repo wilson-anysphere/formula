@@ -86,6 +86,11 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   const maskedLegacy = await sessionB.getCell("Sheet1:0,1");
   assert.equal(maskedLegacy?.value, "###");
   assert.equal(maskedLegacy?.encrypted, true);
+
+  // Canonical callers should still observe legacy-stored encrypted cells.
+  const maskedLegacyCanonical = await sessionB.getCell("Sheet1:0:1");
+  assert.equal(maskedLegacyCanonical?.value, "###");
+  assert.equal(maskedLegacyCanonical?.encrypted, true);
   assert.equal(sessionB.canReadCell({ sheetId: "Sheet1", row: 0, col: 1 }), false);
   assert.equal(sessionB.canEditCell({ sheetId: "Sheet1", row: 0, col: 1 }), false);
   assert.equal(await sessionB.safeSetCellValue("Sheet1:0:1", "hacked-legacy"), false);
@@ -97,6 +102,7 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   const sessionBWithKey = createCollabSession({ doc: docB, encryption: { keyForCell: keyForProtected } });
   assert.equal((await sessionBWithKey.getCell("Sheet1:0:0"))?.value, "top-secret");
   assert.equal((await sessionBWithKey.getCell("Sheet1:0,1"))?.value, "legacy-secret");
+  assert.equal((await sessionBWithKey.getCell("Sheet1:0:1"))?.value, "legacy-secret");
 
   sessionA.destroy();
   sessionBWithKey.destroy();

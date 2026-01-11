@@ -822,14 +822,51 @@ export class CollabSession {
   }
 
   async getCell(cellKey: string): Promise<CollabCell | null> {
-    const cellData = this.cells.get(cellKey);
-    const cell = getYMapCell(cellData);
+    const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
+
+    // Cell keys can be stored under legacy encodings (`${sheetId}:${row},${col}` or
+    // `r{row}c{col}`). Prefer the canonical key but fall back to legacy keys so
+    // callers using canonical keys can still read documents with historical data.
+    const keys = parsed
+      ? Array.from(
+          new Set([
+            makeCellKey(parsed),
+            `${parsed.sheetId}:${parsed.row},${parsed.col}`,
+            ...(parsed.sheetId === this.defaultSheetId ? [`r${parsed.row}c${parsed.col}`] : []),
+          ])
+        )
+      : [cellKey];
+
+    /** @type {Y.Map<unknown> | null} */
+    let cell: Y.Map<unknown> | null = null;
+
+    // If any key for this coordinate is encrypted, treat the cell as encrypted
+    // and do not fall back to plaintext duplicates.
+    for (const key of keys) {
+      const cellData = this.cells.get(key);
+      const candidate = getYMapCell(cellData);
+      if (!candidate) continue;
+      if (candidate.get("enc") !== undefined) {
+        cell = candidate;
+        break;
+      }
+    }
+
+    if (!cell) {
+      for (const key of keys) {
+        const cellData = this.cells.get(key);
+        const candidate = getYMapCell(cellData);
+        if (!candidate) continue;
+        cell = candidate;
+        break;
+      }
+    }
+
     if (!cell) return null;
 
     const encRaw = cell.get("enc");
     if (encRaw !== undefined) {
       if (isEncryptedCellPayload(encRaw)) {
-        const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
         if (!parsed) {
           return {
             value: maskCellValue(null),
