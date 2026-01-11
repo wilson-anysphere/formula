@@ -438,3 +438,110 @@ fn patch_writer_allows_only_expected_calc_chain_side_effects() {
         "xl/styles.bin must be preserved in patched workbook"
     );
 }
+
+#[test]
+fn patch_writer_preserves_unknown_parts_with_minimal_open_options() {
+    let base_path = fixture_path();
+    let base_bytes = std::fs::read(&base_path).expect("read base fixture");
+    let variant_bytes = build_fixture_with_calc_chain_and_styles(&base_bytes);
+
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("with_calc_chain.xlsb");
+    let out_path = tmpdir.path().join("patched.xlsb");
+    std::fs::write(&input_path, variant_bytes).expect("write variant fixture");
+
+    let options = OpenOptions {
+        preserve_unknown_parts: false,
+        preserve_parsed_parts: false,
+        preserve_worksheets: false,
+    };
+    let wb = XlsbWorkbook::open_with_options(&input_path, options).expect("open variant xlsb");
+
+    let workbook_rels_xml = zip_read_to_string(&input_path, "xl/_rels/workbook.bin.rels");
+    let calc_chain_rid = calc_chain_relationship_id(&workbook_rels_xml)
+        .expect("calcChain relationship id present in injected fixture");
+
+    wb.save_with_edits(&out_path, 0, 0, 1, 123.0)
+        .expect("save_with_edits");
+
+    let report = xlsx_diff::diff_workbooks(&input_path, &out_path).expect("diff workbooks");
+    assert_no_unexpected_extra_parts(&report);
+
+    let allowed_parts = BTreeSet::from([
+        "xl/worksheets/sheet1.bin".to_string(),
+        "xl/calcChain.bin".to_string(),
+        "[Content_Types].xml".to_string(),
+        "xl/_rels/workbook.bin.rels".to_string(),
+    ]);
+
+    let missing_parts: Vec<_> = report
+        .differences
+        .iter()
+        .filter(|d| d.kind == "missing_part")
+        .map(|d| d.part.clone())
+        .collect();
+    assert_eq!(
+        missing_parts,
+        vec!["xl/calcChain.bin".to_string()],
+        "expected only calcChain.bin to be missing; report:\n{}",
+        format_report(&report)
+    );
+
+    for diff in report
+        .differences
+        .iter()
+        .filter(|d| d.part == "[Content_Types].xml")
+    {
+        let mentions_calc_chain = diff.path.contains("calcChain")
+            || diff
+                .expected
+                .as_deref()
+                .map_or(false, |value| value.contains("calcChain"))
+            || diff
+                .actual
+                .as_deref()
+                .map_or(false, |value| value.contains("calcChain"));
+        assert!(
+            mentions_calc_chain,
+            "unexpected diff in [Content_Types].xml:\n{diff}\nfull report:\n{}",
+            format_report(&report)
+        );
+    }
+    for diff in report
+        .differences
+        .iter()
+        .filter(|d| d.part == "xl/_rels/workbook.bin.rels")
+    {
+        let mentions_calc_chain = diff.path.contains(&calc_chain_rid)
+            || diff.path.contains("calcChain")
+            || diff
+                .expected
+                .as_deref()
+                .map_or(false, |value| value.contains("calcChain"))
+            || diff
+                .actual
+                .as_deref()
+                .map_or(false, |value| value.contains("calcChain"));
+        assert!(
+            mentions_calc_chain,
+            "unexpected diff in xl/_rels/workbook.bin.rels:\n{diff}\nfull report:\n{}",
+            format_report(&report)
+        );
+    }
+
+    let diff_parts: BTreeSet<String> = report.differences.iter().map(|d| d.part.clone()).collect();
+    let unexpected_parts: Vec<_> = diff_parts
+        .difference(&allowed_parts)
+        .cloned()
+        .collect();
+    assert!(
+        unexpected_parts.is_empty(),
+        "unexpected diff parts: {unexpected_parts:?}\n{}",
+        format_report(&report)
+    );
+
+    assert!(
+        zip_has_part(&out_path, "xl/unknown.bin"),
+        "patched workbook should retain unknown parts even with minimal OpenOptions"
+    );
+}
