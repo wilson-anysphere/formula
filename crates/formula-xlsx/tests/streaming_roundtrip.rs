@@ -2,6 +2,8 @@ use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
+use formula_model::rich_text::{RichText, RichTextRunStyle};
+use formula_model::Color;
 use formula_model::{CellRef, CellValue};
 use formula_xlsx::{
     load_from_bytes, patch_xlsx_streaming, patch_xlsx_streaming_workbook_cell_patches, CellPatch,
@@ -429,6 +431,132 @@ fn streaming_patch_inserts_sheet_data_when_missing() -> Result<(), Box<dyn std::
     assert!(
         sheet_xml.contains(r#"<c r=\"A1\""#) || sheet_xml.contains(r#"<c r="A1""#),
         "patched worksheet should include the new cell"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_preserves_shared_string_cells() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/shared-strings.xlsx");
+    let bytes = fs::read(&fixture_path)?;
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A1")?,
+        CellValue::String("Patched".to_string()),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = doc
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A1"))
+        .expect("A1 should exist");
+    assert_eq!(
+        cell.attribute("t"),
+        Some("s"),
+        "patched shared-string cell should remain t=\"s\""
+    );
+
+    let mut shared_strings_xml = String::new();
+    archive
+        .by_name("xl/sharedStrings.xml")?
+        .read_to_string(&mut shared_strings_xml)?;
+    assert!(
+        shared_strings_xml.contains("Patched"),
+        "sharedStrings.xml should contain the new string"
+    );
+
+    let tmpdir = tempfile::tempdir()?;
+    let out_path = tmpdir.path().join("patched.xlsx");
+    fs::write(&out_path, out.get_ref())?;
+    let report = xlsx_diff::diff_workbooks(&fixture_path, &out_path)?;
+    for diff in &report.differences {
+        assert_ne!(diff.kind, "missing_part", "missing part {}", diff.part);
+        assert_ne!(diff.kind, "extra_part", "extra part {}", diff.part);
+    }
+
+    let changed_parts: std::collections::BTreeSet<String> = report
+        .differences
+        .iter()
+        .map(|d| d.part.clone())
+        .collect();
+    assert_eq!(
+        changed_parts,
+        std::collections::BTreeSet::from([
+            "xl/sharedStrings.xml".to_string(),
+            "xl/worksheets/sheet1.xml".to_string(),
+        ])
+    );
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_writes_rich_text_via_shared_strings() -> Result<(), Box<dyn std::error::Error>>
+{
+    let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/styles/rich-text-shared-strings.xlsx");
+    let bytes = fs::read(&fixture_path)?;
+
+    let rich = RichText::from_segments(vec![
+        ("Red".to_string(), RichTextRunStyle::default()),
+        (
+            "Blue".to_string(),
+            RichTextRunStyle {
+                bold: Some(true),
+                color: Some(Color::new_argb(0xFFFF0000)),
+                ..Default::default()
+            },
+        ),
+    ]);
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A2")?,
+        CellValue::RichText(rich),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = doc
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A2"))
+        .expect("A2 should exist");
+    assert_eq!(cell.attribute("t"), Some("s"));
+
+    let mut shared_strings_xml = String::new();
+    archive
+        .by_name("xl/sharedStrings.xml")?
+        .read_to_string(&mut shared_strings_xml)?;
+
+    assert!(
+        shared_strings_xml.contains("Red") && shared_strings_xml.contains("Blue"),
+        "sharedStrings.xml should contain rich text segments"
+    );
+    assert!(
+        shared_strings_xml.contains("<r>"),
+        "sharedStrings.xml should include rich text runs"
     );
 
     Ok(())

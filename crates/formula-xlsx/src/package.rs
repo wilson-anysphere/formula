@@ -330,6 +330,7 @@ impl XlsxPackage {
                     &mut zip,
                     name,
                     sheet_patches,
+                    None,
                 )?;
             } else {
                 zip.write_all(bytes)?;

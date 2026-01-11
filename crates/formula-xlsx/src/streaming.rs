@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
+use formula_model::rich_text::RichText;
 use formula_model::{CellRef, CellValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
@@ -13,12 +14,15 @@ use crate::recalc_policy::{
     content_types_remove_calc_chain, workbook_rels_remove_calc_chain,
     workbook_xml_force_full_calc_on_load, RecalcPolicyError,
 };
+use crate::shared_strings::{parse_shared_strings_xml, write_shared_strings_xml, SharedStrings};
 use crate::styles::XlsxStylesEditor;
 use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
 use crate::RecalcPolicy;
 
 const REL_TYPE_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+const REL_TYPE_SHARED_STRINGS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 #[derive(Debug, Error)]
 pub enum StreamingPatchError {
@@ -132,6 +136,7 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
         output,
         &patches_by_part,
         &HashMap::new(),
+        &HashMap::new(),
         recalc_policy,
     )?;
     Ok(())
@@ -230,6 +235,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
         output,
         &patches_by_part,
         &pre_read_parts,
+        &HashMap::new(),
         recalc_policy,
     )?;
     Ok(())
@@ -252,6 +258,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
     let mut archive = ZipArchive::new(input)?;
 
     let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut updated_parts: HashMap<String, Vec<u8>> = HashMap::new();
     let workbook_xml = read_zip_part(&mut archive, "xl/workbook.xml", &mut pre_read_parts)?;
     let workbook_xml = String::from_utf8(workbook_xml).map_err(crate::XlsxError::from)?;
     let workbook_sheets = parse_workbook_sheets(&workbook_xml)?;
@@ -301,7 +308,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
         let after_xfs = styles_editor.styles_part().cell_xfs_count();
 
         if before_xfs != after_xfs {
-            pre_read_parts.insert(styles_part, styles_editor.to_styles_xml_bytes());
+            updated_parts.insert(styles_part.clone(), styles_editor.to_styles_xml_bytes());
         }
 
         Some(style_id_to_xf)
@@ -372,9 +379,261 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
         output,
         &patches_by_part,
         &pre_read_parts,
+        &updated_parts,
         recalc_policy,
     )?;
     Ok(())
+}
+
+fn plan_shared_strings<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
+    pre_read_parts: &HashMap<String, Vec<u8>>,
+) -> Result<
+    (
+        Option<String>,
+        HashMap<String, HashMap<(u32, u32), u32>>,
+        Option<Vec<u8>>,
+    ),
+    StreamingPatchError,
+> {
+    let any_string_patch = patches_by_part
+        .values()
+        .flat_map(|patches| patches.iter())
+        .any(|p| matches!(p.value, CellValue::String(_) | CellValue::RichText(_)));
+    if !any_string_patch {
+        return Ok((None, HashMap::new(), None));
+    }
+
+    let Some(shared_strings_part) = resolve_shared_strings_part_name(archive, pre_read_parts)?
+    else {
+        return Ok((None, HashMap::new(), None));
+    };
+
+    let existing_types = scan_existing_cell_types(archive, patches_by_part)?;
+
+    let mut needs_shared_strings = false;
+    for (part, patches) in patches_by_part {
+        for patch in patches {
+            let existing_t = existing_types
+                .get(part)
+                .and_then(|m| m.get(&(patch.cell.row, patch.cell.col)))
+                .and_then(|t| t.as_deref());
+            if patch_wants_shared_string(patch, existing_t, true) {
+                needs_shared_strings = true;
+                break;
+            }
+        }
+        if needs_shared_strings {
+            break;
+        }
+    }
+
+    if !needs_shared_strings {
+        return Ok((Some(shared_strings_part), HashMap::new(), None));
+    }
+
+    let mut shared_strings_bytes = Vec::new();
+    {
+        let mut file = archive.by_name(&shared_strings_part)?;
+        file.read_to_end(&mut shared_strings_bytes)?;
+    }
+    let mut shared_strings = SharedStringsState::from_part(&shared_strings_bytes)?;
+
+    // Deterministic insertion order: sort by (worksheet part, row, col).
+    let mut shared_patches: Vec<(&str, &WorksheetCellPatch)> = patches_by_part
+        .iter()
+        .flat_map(|(part, patches)| patches.iter().map(move |p| (part.as_str(), p)))
+        .filter(|(part, patch)| {
+            let existing_t = existing_types
+                .get(*part)
+                .and_then(|m| m.get(&(patch.cell.row, patch.cell.col)))
+                .and_then(|t| t.as_deref());
+            patch_wants_shared_string(patch, existing_t, true)
+        })
+        .collect();
+    shared_patches.sort_by_key(|(part, patch)| (*part, patch.cell.row, patch.cell.col));
+
+    let mut indices_by_part: HashMap<String, HashMap<(u32, u32), u32>> = HashMap::new();
+    for (part, patch) in shared_patches {
+        let idx = match &patch.value {
+            CellValue::String(s) => shared_strings.get_or_insert_plain(s),
+            CellValue::RichText(rich) => shared_strings.get_or_insert_rich(rich),
+            _ => continue,
+        };
+        indices_by_part
+            .entry(part.to_string())
+            .or_default()
+            .insert((patch.cell.row, patch.cell.col), idx);
+    }
+
+    let updated_shared_strings = shared_strings.write_if_dirty()?;
+    Ok((Some(shared_strings_part), indices_by_part, updated_shared_strings))
+}
+
+fn resolve_shared_strings_part_name<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    pre_read_parts: &HashMap<String, Vec<u8>>,
+) -> Result<Option<String>, StreamingPatchError> {
+    let workbook_rels = if let Some(bytes) = pre_read_parts.get("xl/_rels/workbook.xml.rels") {
+        Some(bytes.clone())
+    } else {
+        read_zip_part_optional(archive, "xl/_rels/workbook.xml.rels")?
+    };
+
+    if let Some(bytes) = workbook_rels {
+        let rels = parse_relationships(&bytes)?;
+        if let Some(rel) = rels
+            .iter()
+            .find(|rel| rel.type_uri == REL_TYPE_SHARED_STRINGS)
+        {
+            return Ok(Some(resolve_target("xl/workbook.xml", &rel.target)));
+        }
+    }
+
+    // Fallback: common path when workbook.xml.rels is missing the sharedStrings relationship.
+    if zip_part_exists(archive, "xl/sharedStrings.xml")? {
+        return Ok(Some("xl/sharedStrings.xml".to_string()));
+    }
+
+    Ok(None)
+}
+
+fn scan_existing_cell_types<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
+) -> Result<HashMap<String, HashMap<(u32, u32), Option<String>>>, StreamingPatchError> {
+    let mut out: HashMap<String, HashMap<(u32, u32), Option<String>>> = HashMap::new();
+
+    for (part, patches) in patches_by_part {
+        let mut targets: HashMap<String, (u32, u32)> = HashMap::new();
+        for patch in patches {
+            if matches!(patch.value, CellValue::String(_) | CellValue::RichText(_)) {
+                targets.insert(patch.cell.to_a1(), (patch.cell.row, patch.cell.col));
+            }
+        }
+        if targets.is_empty() {
+            continue;
+        }
+
+        let mut file = match archive.by_name(part) {
+            Ok(file) => file,
+            Err(zip::result::ZipError::FileNotFound) => {
+                return Err(StreamingPatchError::MissingWorksheetPart(part.clone()));
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        let found = scan_worksheet_cell_types(&mut file, &targets)?;
+        out.insert(part.clone(), found);
+    }
+
+    Ok(out)
+}
+
+fn scan_worksheet_cell_types<R: Read>(
+    input: R,
+    targets: &HashMap<String, (u32, u32)>,
+) -> Result<HashMap<(u32, u32), Option<String>>, StreamingPatchError> {
+    let mut out: HashMap<(u32, u32), Option<String>> = HashMap::new();
+    let mut remaining = targets.len();
+    if remaining == 0 {
+        return Ok(out);
+    }
+
+    let mut reader = Reader::from_reader(BufReader::new(input));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(ref e) | Event::Empty(ref e) if e.name().as_ref() == b"c" => {
+                let mut r: Option<String> = None;
+                let mut t: Option<String> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"r" => r = Some(attr.unescape_value()?.into_owned()),
+                        b"t" => t = Some(attr.unescape_value()?.into_owned()),
+                        _ => {}
+                    }
+                }
+                if let Some(r) = r {
+                    if let Some(&(row, col)) = targets.get(&r) {
+                        out.insert((row, col), t);
+                        remaining = remaining.saturating_sub(1);
+                        if remaining == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn patch_wants_shared_string(
+    patch: &WorksheetCellPatch,
+    existing_t: Option<&str>,
+    shared_strings_available: bool,
+) -> bool {
+    if !shared_strings_available {
+        return false;
+    }
+
+    match &patch.value {
+        CellValue::String(_) => {
+            if existing_t.is_some_and(should_preserve_unknown_t) {
+                return false;
+            }
+
+            match existing_t {
+                Some("inlineStr" | "str") => return false,
+                Some("s") => return true,
+                _ => {}
+            }
+
+            // Preserve streaming patcher's historical behavior for formula string results: use
+            // `t="str"` unless the original cell already used shared strings.
+            if patch.formula.is_some() {
+                return false;
+            }
+
+            true
+        }
+        CellValue::RichText(_) => !existing_t.is_some_and(should_preserve_unknown_t),
+        _ => false,
+    }
+}
+
+fn zip_part_exists<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<bool, StreamingPatchError> {
+    match archive.by_name(name) {
+        Ok(_) => Ok(true),
+        Err(zip::result::ZipError::FileNotFound) => Ok(false),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn read_zip_part_optional<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, StreamingPatchError> {
+    let mut file = match archive.by_name(name) {
+        Ok(file) => file,
+        Err(zip::result::ZipError::FileNotFound) => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    let mut buf = Vec::with_capacity(file.size() as usize);
+    file.read_to_end(&mut buf)?;
+    Ok(Some(buf))
 }
 
 fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
@@ -382,8 +641,12 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     output: W,
     patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
     pre_read_parts: &HashMap<String, Vec<u8>>,
+    updated_parts: &HashMap<String, Vec<u8>>,
     recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
+    let (shared_strings_part, shared_string_indices, shared_strings_updated) =
+        plan_shared_strings(archive, patches_by_part, pre_read_parts)?;
+
     let mut missing_parts: BTreeMap<String, ()> =
         patches_by_part.keys().map(|k| (k.clone(), ())).collect();
 
@@ -406,7 +669,20 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         if let Some(patches) = patches_by_part.get(&name) {
             zip.start_file(name.clone(), options)?;
             missing_parts.remove(&name);
-            patch_worksheet_xml_streaming(&mut file, &mut zip, &name, patches)?;
+            let indices = shared_string_indices.get(&name);
+            patch_worksheet_xml_streaming(&mut file, &mut zip, &name, patches, indices)?;
+        } else if let Some(bytes) = updated_parts.get(&name) {
+            zip.start_file(name.clone(), options)?;
+            zip.write_all(bytes)?;
+        } else if shared_strings_part.as_deref() == Some(name.as_str())
+            && shared_strings_updated.is_some()
+        {
+            zip.start_file(name.clone(), options)?;
+            zip.write_all(
+                shared_strings_updated
+                    .as_deref()
+                    .expect("checked is_some above"),
+            )?;
         } else if let Some(bytes) = pre_read_parts.get(&name) {
             if should_patch_recalc_part(&name, recalc_policy) {
                 zip.start_file(name.clone(), options)?;
@@ -494,6 +770,72 @@ fn read_zip_part<R: Read + Seek>(
     Ok(buf)
 }
 
+#[derive(Debug, Default)]
+struct SharedStringsState {
+    items: Vec<RichText>,
+    plain_index: HashMap<String, u32>,
+    dirty: bool,
+}
+
+impl SharedStringsState {
+    fn from_part(bytes: &[u8]) -> Result<Self, StreamingPatchError> {
+        let xml = String::from_utf8(bytes.to_vec()).map_err(crate::XlsxError::from)?;
+        let parsed = parse_shared_strings_xml(&xml).map_err(|e| {
+            crate::XlsxError::Invalid(format!("sharedStrings.xml parse error: {e}"))
+        })?;
+
+        let mut plain_index = HashMap::new();
+        for (idx, item) in parsed.items.iter().enumerate() {
+            if item.runs.is_empty() {
+                plain_index.insert(item.text.clone(), idx as u32);
+            }
+        }
+
+        Ok(Self {
+            items: parsed.items,
+            plain_index,
+            dirty: false,
+        })
+    }
+
+    fn get_or_insert_plain(&mut self, text: &str) -> u32 {
+        if let Some(idx) = self.plain_index.get(text).copied() {
+            return idx;
+        }
+        let idx = self.items.len() as u32;
+        self.items.push(RichText::new(text.to_string()));
+        self.plain_index.insert(text.to_string(), idx);
+        self.dirty = true;
+        idx
+    }
+
+    fn get_or_insert_rich(&mut self, rich: &RichText) -> u32 {
+        if let Some((idx, _)) = self
+            .items
+            .iter()
+            .enumerate()
+            .find(|(_, item)| *item == rich)
+        {
+            return idx as u32;
+        }
+        let idx = self.items.len() as u32;
+        self.items.push(rich.clone());
+        self.dirty = true;
+        idx
+    }
+
+    fn write_if_dirty(&self) -> Result<Option<Vec<u8>>, StreamingPatchError> {
+        if !self.dirty {
+            return Ok(None);
+        }
+        let xml = write_shared_strings_xml(&SharedStrings {
+            items: self.items.clone(),
+        })
+        .map_err(|e| crate::XlsxError::Invalid(format!("sharedStrings.xml write error: {e}")))?;
+        Ok(Some(xml.into_bytes()))
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CellPatchInternal {
     row_1: u32,
@@ -501,6 +843,7 @@ struct CellPatchInternal {
     value: CellValue,
     formula: Option<String>,
     xf_index: Option<u32>,
+    shared_string_idx: Option<u32>,
 }
 
 struct RowState {
@@ -514,6 +857,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     output: W,
     worksheet_part: &str,
     patches: &[WorksheetCellPatch],
+    shared_string_indices: Option<&HashMap<(u32, u32), u32>>,
 ) -> Result<(), StreamingPatchError> {
     let patch_bounds = bounds_for_patches(patches);
 
@@ -521,6 +865,8 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     for patch in patches {
         let row_1 = patch.cell.row + 1;
         let col_0 = patch.cell.col;
+        let shared_string_idx = shared_string_indices
+            .and_then(|m| m.get(&(patch.cell.row, patch.cell.col)).copied());
         patches_by_row
             .entry(row_1)
             .or_default()
@@ -530,6 +876,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 value: patch.value.clone(),
                 formula: patch.formula.clone(),
                 xf_index: patch.xf_index,
+                shared_string_idx,
             });
     }
     for row_patches in patches_by_row.values_mut() {
@@ -899,14 +1246,12 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         c.push_attribute(("r", a1.as_str()));
     }
 
-    let (cell_t, mut body_kind) = cell_representation(&patch.value, patch_formula)?;
-    let mut cell_t_owned = cell_t.map(|t| t.to_string());
-    if let (Some(existing_t), CellValue::String(s)) = (existing_t.as_deref(), &patch.value) {
-        if should_preserve_unknown_t(existing_t) {
-            cell_t_owned = Some(existing_t.to_string());
-            body_kind = CellBodyKind::V(s.clone());
-        }
-    }
+    let (cell_t_owned, body_kind) = cell_representation(
+        &patch.value,
+        patch_formula,
+        existing_t.as_deref(),
+        patch.shared_string_idx,
+    )?;
 
     if let Some(xf_index) = style_override {
         if xf_index != 0 {
@@ -1151,8 +1496,7 @@ fn write_patched_cell<W: Write>(
 ) -> Result<(), StreamingPatchError> {
     let patch_formula = patch.formula.as_deref();
     let mut existing_t: Option<String> = None;
-    let (cell_t, mut body_kind) = cell_representation(&patch.value, patch_formula)?;
-    let mut cell_t_owned = cell_t.map(|t| t.to_string());
+    let mut shared_string_idx = patch.shared_string_idx;
 
     let mut c = BytesStart::new("c");
     let inserted_a1 = original.is_none().then(|| cell_ref.to_a1());
@@ -1170,17 +1514,23 @@ fn write_patched_cell<W: Write>(
             }
             c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
         }
-    } else {
-        let a1 = inserted_a1.as_ref().expect("just set");
-        c.push_attribute(("r", a1.as_str()));
+        } else {
+            let a1 = inserted_a1.as_ref().expect("just set");
+            c.push_attribute(("r", a1.as_str()));
+        }
+
+    if existing_t.as_deref() == Some("inlineStr") && matches!(patch.value, CellValue::String(_)) {
+        // Preserve inline string storage for existing cells even if the pre-scan marked this patch
+        // for shared strings (best-effort).
+        shared_string_idx = None;
     }
 
-    if let (Some(existing_t), CellValue::String(s)) = (existing_t.as_deref(), &patch.value) {
-        if should_preserve_unknown_t(existing_t) {
-            cell_t_owned = Some(existing_t.to_string());
-            body_kind = CellBodyKind::V(s.clone());
-        }
-    }
+    let (cell_t_owned, body_kind) = cell_representation(
+        &patch.value,
+        patch_formula,
+        existing_t.as_deref(),
+        shared_string_idx,
+    )?;
 
     if let Some(xf_index) = style_override {
         if xf_index != 0 {
@@ -1233,21 +1583,61 @@ enum CellBodyKind {
 fn cell_representation(
     value: &CellValue,
     formula: Option<&str>,
-) -> Result<(Option<&'static str>, CellBodyKind), StreamingPatchError> {
+    existing_t: Option<&str>,
+    shared_string_idx: Option<u32>,
+) -> Result<(Option<String>, CellBodyKind), StreamingPatchError> {
     match value {
         CellValue::Empty => Ok((None, CellBodyKind::None)),
         CellValue::Number(n) => Ok((None, CellBodyKind::V(n.to_string()))),
         CellValue::Boolean(b) => Ok((
-            Some("b"),
+            Some("b".to_string()),
             CellBodyKind::V(if *b { "1" } else { "0" }.to_string()),
         )),
-        CellValue::Error(err) => Ok((Some("e"), CellBodyKind::V(err.as_str().to_string()))),
+        CellValue::Error(err) => Ok((
+            Some("e".to_string()),
+            CellBodyKind::V(err.as_str().to_string()),
+        )),
         CellValue::String(s) => {
-            if formula.is_some() {
-                Ok((Some("str"), CellBodyKind::V(s.clone())))
-            } else {
-                Ok((Some("inlineStr"), CellBodyKind::InlineStr(s.clone())))
+            if let Some(existing_t) = existing_t {
+                if should_preserve_unknown_t(existing_t) {
+                    return Ok((Some(existing_t.to_string()), CellBodyKind::V(s.clone())));
+                }
+                match existing_t {
+                    "inlineStr" => {
+                        return Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone())));
+                    }
+                    "str" => {
+                        return Ok((Some("str".to_string()), CellBodyKind::V(s.clone())));
+                    }
+                    _ => {}
+                }
             }
+
+            if let Some(idx) = shared_string_idx {
+                return Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())));
+            }
+
+            if formula.is_some() {
+                Ok((Some("str".to_string()), CellBodyKind::V(s.clone())))
+            } else {
+                Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone())))
+            }
+        }
+        CellValue::RichText(rich) => {
+            if let Some(existing_t) = existing_t {
+                if should_preserve_unknown_t(existing_t) {
+                    return Ok((Some(existing_t.to_string()), CellBodyKind::V(rich.text.clone())));
+                }
+            }
+
+            if let Some(idx) = shared_string_idx {
+                return Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())));
+            }
+
+            Ok((
+                Some("inlineStr".to_string()),
+                CellBodyKind::InlineStr(rich.text.clone()),
+            ))
         }
         other => Err(StreamingPatchError::UnsupportedCellValue(other.clone())),
     }
