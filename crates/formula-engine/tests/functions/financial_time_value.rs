@@ -1,4 +1,4 @@
-use formula_engine::functions::financial::{effect, fv, ipmt, nominal, nper, pmt, ppmt, pv, rate};
+use formula_engine::functions::financial::{effect, fv, ipmt, nominal, nper, pmt, ppmt, pv, rate, rri};
 use formula_engine::ExcelError;
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {
@@ -74,6 +74,16 @@ fn effect_and_nominal_roundtrip() {
 
     assert_eq!(effect(nominal_rate, 0.0), Err(ExcelError::Num));
     assert_eq!(nominal(eff, 0.0), Err(ExcelError::Num));
+}
+
+#[test]
+fn rri_matches_simple_growth() {
+    let rate = rri(2.0, 100.0, 121.0).unwrap();
+    assert_close(rate, 0.1, 1e-12);
+
+    assert_eq!(rri(0.0, 100.0, 121.0), Err(ExcelError::Num));
+    assert_eq!(rri(2.0, 0.0, 121.0), Err(ExcelError::Num));
+    assert_eq!(rri(2.0, -100.0, 121.0), Err(ExcelError::Num));
 }
 
 #[test]

@@ -482,6 +482,37 @@ fn nominal_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "RRI",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: rri_fn,
+    }
+}
+
+fn rri_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let nper = match eval_number_arg(ctx, &args[0]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let pv = match eval_number_arg(ctx, &args[1]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let fv = match eval_number_arg(ctx, &args[2]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(super::rri(nper, pv, fv))
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "IPMT",
         min_args: 4,
         max_args: 6,

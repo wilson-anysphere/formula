@@ -33,6 +33,9 @@ fn evaluates_time_value_financial_functions() {
     engine
         .set_cell_formula("Sheet1", "A5", "=NOMINAL(A4, 4)")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", "=RRI(2, 100, 121)")
+        .unwrap();
 
     engine.recalculate();
 
@@ -59,6 +62,11 @@ fn evaluates_time_value_financial_functions() {
     assert_close(
         assert_number(engine.get_cell_value("Sheet1", "A5")),
         0.0525,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A6")),
+        0.1,
         1e-12,
     );
 }

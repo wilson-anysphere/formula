@@ -269,6 +269,29 @@ pub fn nominal(effect_rate: f64, npery: f64) -> ExcelResult<f64> {
     }
 }
 
+/// Equivalent interest rate for the growth of an investment.
+pub fn rri(nper: f64, pv: f64, fv: f64) -> ExcelResult<f64> {
+    if !nper.is_finite() || !pv.is_finite() || !fv.is_finite() {
+        return Err(ExcelError::Num);
+    }
+    if nper <= 0.0 || pv == 0.0 {
+        return Err(ExcelError::Num);
+    }
+
+    let ratio = fv / pv;
+    if ratio <= 0.0 || !ratio.is_finite() {
+        return Err(ExcelError::Num);
+    }
+
+    let exponent = 1.0 / nper;
+    let result = ratio.powf(exponent) - 1.0;
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(ExcelError::Num)
+    }
+}
+
 /// Interest payment for a given period.
 pub fn ipmt(
     rate: f64,
