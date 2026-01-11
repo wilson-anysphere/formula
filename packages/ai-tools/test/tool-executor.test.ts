@@ -180,6 +180,29 @@ describe("ToolExecutor", () => {
     ]);
   });
 
+  it("quotes sheet names with spaces when formatting results", async () => {
+    const workbook = new InMemoryWorkbook(["My Sheet"]);
+    const executor = new ToolExecutor(workbook, { default_sheet: "My Sheet" });
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "A1:B1",
+        values: [[1, 2]],
+      },
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "A1:B1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.range).toBe("'My Sheet'!A1:B1");
+  });
+
   it("create_pivot_table writes a pivot output table", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);

@@ -89,8 +89,15 @@ export function parseA1Cell(input: string, defaultSheet: string = DEFAULT_SHEET_
   return { sheet, row, col };
 }
 
+function formatSheetName(sheet: string): string {
+  // Excel style: quote sheet names containing spaces/special characters
+  // using single quotes and escaping embedded quotes via doubling.
+  if (/^[A-Za-z0-9_]+$/.test(sheet)) return sheet;
+  return `'${sheet.replace(/'/g, "''")}'`;
+}
+
 export function formatA1Cell(address: CellAddress): string {
-  return `${address.sheet}!${columnIndexToLabel(address.col)}${address.row}`;
+  return `${formatSheetName(address.sheet)}!${columnIndexToLabel(address.col)}${address.row}`;
 }
 
 export function parseA1Range(input: string, defaultSheet: string = DEFAULT_SHEET_NAME): RangeAddress {
@@ -115,7 +122,7 @@ export function formatA1Range(range: RangeAddress): string {
   const start = `${columnIndexToLabel(range.startCol)}${range.startRow}`;
   const end = `${columnIndexToLabel(range.endCol)}${range.endRow}`;
   const body = start === end ? start : `${start}:${end}`;
-  return `${range.sheet}!${body}`;
+  return `${formatSheetName(range.sheet)}!${body}`;
 }
 
 export function rangeSize(range: RangeAddress): { rows: number; cols: number } {
