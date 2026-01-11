@@ -212,6 +212,16 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "HLOOKUP",
+    description: "Looks for a value in the top row of a table.",
+    args: [
+      { name: "lookup_value", type: "value" },
+      { name: "table_array", type: "range" },
+      { name: "row_index_num", type: "number" },
+      { name: "range_lookup", type: "boolean", optional: true },
+    ],
+  },
+  {
     name: "XLOOKUP",
     description: "Looks up a value in a range or an array.",
     args: [
@@ -221,6 +231,40 @@ const CURATED_FUNCTIONS = [
       { name: "if_not_found", type: "value", optional: true },
       { name: "match_mode", type: "number", optional: true },
       { name: "search_mode", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "NPV",
+    description: "Returns the net present value of an investment based on a series of periodic cash flows and a discount rate.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "IRR",
+    description: "Returns the internal rate of return for a series of cash flows.",
+    args: [
+      { name: "values", type: "range" },
+      { name: "guess", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "XNPV",
+    description: "Returns the net present value for a schedule of cash flows that is not necessarily periodic.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "values", type: "range" },
+      { name: "dates", type: "range" },
+    ],
+  },
+  {
+    name: "XIRR",
+    description: "Returns the internal rate of return for a schedule of cash flows that is not necessarily periodic.",
+    args: [
+      { name: "values", type: "range" },
+      { name: "dates", type: "range" },
+      { name: "guess", type: "number", optional: true },
     ],
   },
   {
@@ -262,6 +306,13 @@ const CURATED_FUNCTIONS = [
     description: "Combines several text strings into one text string.",
     args: [
       { name: "text1", type: "value", repeating: true },
+    ],
+  },
+  {
+    name: "TRANSPOSE",
+    description: "Returns the transpose of an array or range.",
+    args: [
+      { name: "array", type: "range" },
     ],
   },
 ];

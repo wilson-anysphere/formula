@@ -120,6 +120,28 @@ test("Typing =MAX(A suggests a contiguous range above the current cell", async (
   );
 });
 
+test("Typing =IRR(A suggests a contiguous range above the current cell", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=IRR(A",
+    cursorPosition: 6,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=IRR(A1:A10)"),
+    `Expected an IRR range suggestion, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
 test("Typing =TOD suggests TODAY() (zero-arg function inserts closing paren)", async () => {
   const engine = new TabCompletionEngine();
 
