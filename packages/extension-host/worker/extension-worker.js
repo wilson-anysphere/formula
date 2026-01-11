@@ -394,6 +394,7 @@ function checkForDynamicImport(source, filename) {
   let i = 0;
   let state = "code"; // code | single | double | template | regex | lineComment | blockComment
   let regexAllowed = true;
+  let afterPropertyDot = false;
   const templateBraceStack = [];
 
   while (i < len) {
@@ -405,6 +406,7 @@ function checkForDynamicImport(source, filename) {
           templateBraceStack[templateBraceStack.length - 1] += 1;
         }
         regexAllowed = true;
+        afterPropertyDot = false;
         i += 1;
         continue;
       }
@@ -419,6 +421,7 @@ function checkForDynamicImport(source, filename) {
         }
         templateBraceStack[templateBraceStack.length - 1] -= 1;
         regexAllowed = false;
+        afterPropertyDot = false;
         i += 1;
         continue;
       }
@@ -431,12 +434,14 @@ function checkForDynamicImport(source, filename) {
       if (ch === "'" || ch === '"') {
         i = skipString(i + 1, ch);
         regexAllowed = false;
+        afterPropertyDot = false;
         continue;
       }
 
       if (ch === "`") {
         state = "template";
         regexAllowed = false;
+        afterPropertyDot = false;
         i += 1;
         continue;
       }
@@ -453,26 +458,45 @@ function checkForDynamicImport(source, filename) {
         continue;
       }
 
+      if (ch === ".") {
+        // Distinguish property access (`obj.import()`) from spread (`...import()`).
+        if (src[i + 1] === "." && src[i + 2] === ".") {
+          afterPropertyDot = false;
+          regexAllowed = true;
+          i += 3;
+          continue;
+        }
+
+        afterPropertyDot = true;
+        regexAllowed = true;
+        i += 1;
+        continue;
+      }
+
       if (ch === "/") {
         if (regexAllowed) {
           i = skipRegex(i + 1);
           regexAllowed = false;
+          afterPropertyDot = false;
           continue;
         }
         // division operator
         regexAllowed = true;
+        afterPropertyDot = false;
         i += 1;
         continue;
       }
 
       if (ch === "(" || ch === "[" || ch === "," || ch === ";" || ch === ":" || ch === "?" || ch === "=") {
         regexAllowed = true;
+        afterPropertyDot = false;
         i += 1;
         continue;
       }
 
       if (ch === ")" || ch === "]") {
         regexAllowed = false;
+        afterPropertyDot = false;
         i += 1;
         continue;
       }
@@ -482,6 +506,7 @@ function checkForDynamicImport(source, filename) {
         // If a regex is allowed here, treat it as a prefix operator (expression still expected).
         // Otherwise it's postfix (expression ended).
         regexAllowed = Boolean(regexAllowed);
+        afterPropertyDot = false;
         i += 2;
         continue;
       }
@@ -500,6 +525,7 @@ function checkForDynamicImport(source, filename) {
         ch === "-"
       ) {
         regexAllowed = true;
+        afterPropertyDot = false;
         i += 1;
         continue;
       }
@@ -508,7 +534,7 @@ function checkForDynamicImport(source, filename) {
         let j = i + 1;
         while (j < len && isIdentifierChar(src[j])) j += 1;
         const ident = src.slice(i, j);
-        if (ident === "import") {
+        if (ident === "import" && !afterPropertyDot) {
           const afterImport = skipWhitespaceAndComments(j);
           if (src[afterImport] === "(") {
             const argStart = skipWhitespaceAndComments(afterImport + 1);
@@ -521,6 +547,7 @@ function checkForDynamicImport(source, filename) {
           }
         }
         regexAllowed = false;
+        afterPropertyDot = false;
         i = j;
         continue;
       }
@@ -529,11 +556,13 @@ function checkForDynamicImport(source, filename) {
         let j = i + 1;
         while (j < len && /[0-9._xobA-Fa-f]/.test(src[j])) j += 1;
         regexAllowed = false;
+        afterPropertyDot = false;
         i = j;
         continue;
       }
 
       // Unknown token char, keep scanning.
+      afterPropertyDot = false;
       i += 1;
       continue;
     }
@@ -546,6 +575,7 @@ function checkForDynamicImport(source, filename) {
       if (ch === "`") {
         state = "code";
         regexAllowed = false;
+        afterPropertyDot = false;
         i += 1;
         continue;
       }
@@ -553,6 +583,7 @@ function checkForDynamicImport(source, filename) {
         templateBraceStack.push(0);
         state = "code";
         regexAllowed = true;
+        afterPropertyDot = false;
         i += 2;
         continue;
       }
