@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputJsonPath = path.join(repoRoot, "shared", "functionCatalog.json");
 const outputModulePath = path.join(repoRoot, "shared", "functionCatalog.mjs");
-const outputTypesPath = path.join(repoRoot, "shared", "functionCatalog.mjs.d.ts");
+// When the runtime module is `.mjs`, TypeScript expects an ESM-flavored declaration file (`.d.mts`).
+const outputTypesPath = path.join(repoRoot, "shared", "functionCatalog.d.mts");
 
 const defaultGlobalCargoHome = path.resolve(os.homedir(), ".cargo");
 const envCargoHome = process.env.CARGO_HOME;
