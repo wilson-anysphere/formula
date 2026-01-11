@@ -164,12 +164,22 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
       model: (client as any).model ?? "gpt-4o-mini",
       getActiveSheetId: props.getActiveSheetId,
       createChart: props.createChart,
+      auditStore,
       onApprovalRequired,
       previewOptions: { approval_cell_threshold: 0 },
       sessionId: `${workbookId}:${sessionId.current}`,
       contextManager,
     });
-  }, [client, contextManager, onApprovalRequired, props.createChart, props.getActiveSheetId, props.getDocumentController, workbookId]);
+  }, [
+    auditStore,
+    client,
+    contextManager,
+    onApprovalRequired,
+    props.createChart,
+    props.getActiveSheetId,
+    props.getDocumentController,
+    workbookId,
+  ]);
 
   const sendMessage: AIChatPanelSendMessage = useMemo(() => {
     return async (args) => {
