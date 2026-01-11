@@ -104,6 +104,31 @@ describe("charts scene graph", () => {
     expect(calls).toContain("bezierCurveTo");
   });
 
+  it("emits clip-rule for evenodd clip paths in SVG", () => {
+    const clipPath = path().moveTo(0, 0).lineTo(30, 0).lineTo(0, 30).closePath().build();
+    const scene: Scene = {
+      nodes: [
+        {
+          kind: "clip",
+          clip: { kind: "path", path: clipPath, fillRule: "evenodd" },
+          children: [
+            {
+              kind: "rect",
+              x: 0,
+              y: 0,
+              width: 50,
+              height: 50,
+              fill: { color: "#ff0000" },
+            },
+          ],
+        },
+      ],
+    };
+
+    const svg = renderSceneToSvg(scene, { width: 50, height: 50 });
+    expect(svg).toContain('clip-rule="evenodd"');
+  });
+
   it("supports rounded rects + clip-shape transforms on Canvas", () => {
     const scene: Scene = {
       nodes: [

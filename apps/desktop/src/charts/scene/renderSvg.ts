@@ -109,6 +109,11 @@ function fillRuleAttr(rule: FillRule | undefined): string[] {
   return [];
 }
 
+function clipRuleAttr(rule: FillRule | undefined): string[] {
+  if (rule === "evenodd") return ['clip-rule="evenodd"'];
+  return [];
+}
+
 function renderClipShape(shape: ClipShape): string {
   if (shape.kind === "rect") {
     const attrs = [
@@ -125,7 +130,7 @@ function renderClipShape(shape: ClipShape): string {
   }
 
   const attrs = [`d="${pathToSvgD(shape.path)}"`];
-  attrs.push(...fillRuleAttr(shape.fillRule));
+  attrs.push(...clipRuleAttr(shape.fillRule));
   const t = transformToSvg(shape.transform);
   if (t) attrs.push(`transform="${t}"`);
   return `<path ${attrs.join(" ")} />`;
