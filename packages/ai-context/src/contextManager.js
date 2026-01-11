@@ -341,7 +341,12 @@ export class ContextManager {
         : undefined,
     });
 
-    const [queryVector] = await embedder.embedTexts([params.query]);
+    // If DLP is enabled, redact the query before sending it to the embedder. This avoids
+    // leaking user-provided sensitive tokens (e.g. an email/SSN pasted into the prompt)
+    // to cloud embedding providers, and also improves retrieval when stored chunk text
+    // has been redacted to deterministic placeholders.
+    const queryForEmbedding = dlp && !includeRestrictedContent ? this.redactor(params.query) : params.query;
+    const [queryVector] = await embedder.embedTexts([queryForEmbedding]);
     const hits = await vectorStore.query(queryVector, topK, {
       workbookId: params.workbook.id,
       filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
