@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import "fake-indexeddb/auto";
+let indexedDbAvailable = true;
+try {
+  await import("fake-indexeddb/auto");
+} catch {
+  indexedDbAvailable = false;
+}
 
 import { CacheManager } from "../../src/cache/cache.js";
 import { IndexedDBCacheStore } from "../../src/cache/indexeddb.js";
@@ -32,7 +37,10 @@ async function closeAndDelete(store, dbName) {
   await deleteDatabase(dbName);
 }
 
-test("IndexedDBCacheStore quotas: evicts least-recently-used when maxEntries is exceeded", async () => {
+test(
+  "IndexedDBCacheStore quotas: evicts least-recently-used when maxEntries is exceeded",
+  { skip: !indexedDbAvailable },
+  async () => {
   let now = 0;
   const dbName = `pq-cache-idb-quota-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const store = new IndexedDBCacheStore({ dbName, now: () => now });
@@ -52,9 +60,13 @@ test("IndexedDBCacheStore quotas: evicts least-recently-used when maxEntries is 
   } finally {
     await closeAndDelete(store, dbName);
   }
-});
+  },
+);
 
-test("IndexedDBCacheStore quotas: get updates access time and affects eviction order", async () => {
+test(
+  "IndexedDBCacheStore quotas: get updates access time and affects eviction order",
+  { skip: !indexedDbAvailable },
+  async () => {
   let now = 0;
   const dbName = `pq-cache-idb-quota-access-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const store = new IndexedDBCacheStore({ dbName, now: () => now });
@@ -78,9 +90,13 @@ test("IndexedDBCacheStore quotas: get updates access time and affects eviction o
   } finally {
     await closeAndDelete(store, dbName);
   }
-});
+  },
+);
 
-test("IndexedDBCacheStore quotas: expired entries are removed before LRU eviction", async () => {
+test(
+  "IndexedDBCacheStore quotas: expired entries are removed before LRU eviction",
+  { skip: !indexedDbAvailable },
+  async () => {
   let now = 0;
   const dbName = `pq-cache-idb-quota-expiry-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const store = new IndexedDBCacheStore({ dbName, now: () => now });
@@ -106,5 +122,5 @@ test("IndexedDBCacheStore quotas: expired entries are removed before LRU evictio
   } finally {
     await closeAndDelete(store, dbName);
   }
-});
-
+  },
+);
