@@ -101,6 +101,19 @@ export class BranchService {
   }
 
   /**
+   * Read the current branch name.
+   *
+   * For collaborative stores (e.g. YjsBranchStore), this reflects the global
+   * checked-out branch shared via the store; for local-only stores it reflects
+   * this BranchService instance's local pointer.
+   *
+   * @returns {Promise<string>}
+   */
+  async getCurrentBranchName() {
+    return this.#getCurrentBranchName();
+  }
+
+  /**
    * @param {string} name
    */
   async #setCurrentBranchName(name) {
