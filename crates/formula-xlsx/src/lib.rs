@@ -80,7 +80,7 @@ pub use pivots::{
     },
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
     PivotCacheSourceType, PivotTableDataField, PivotTableDefinition, PivotTableField,
-    PivotTablePart, PreservedPivotParts, XlsxPivots,
+    PivotTablePart, PreservedPivotParts, RelationshipStub, XlsxPivots,
 };
 pub use recalc_policy::RecalcPolicy;
 pub use read::{load_from_bytes, load_from_path, read_workbook_model_from_bytes};

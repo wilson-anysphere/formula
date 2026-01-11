@@ -401,7 +401,11 @@ fn formula_text_differs(baseline_file_text: Option<&str>, model_formula: Option<
 
 fn normalize_formula_for_compare(formula: Option<&str>) -> Option<String> {
     let formula = formula?;
-    let stripped = strip_leading_equals(formula);
+    // SpreadsheetML `<f>` text is typically stored without surrounding whitespace, but
+    // fixtures (and some generators) may pretty-print formulas with indentation/newlines.
+    // Treat those as semantically equivalent so we don't trigger recalc safety on a no-op save.
+    let trimmed = formula.trim();
+    let stripped = strip_leading_equals(trimmed).trim();
     if stripped.is_empty() {
         return None;
     }
