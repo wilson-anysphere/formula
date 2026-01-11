@@ -89,7 +89,7 @@ Request/response shape:
 - When updating an existing config, you can keep previously stored secret values by sending `"***"` for secret fields (the same masked value returned by `GET`).
 - Setting `enabled: false` disables exports and deletes any stored secrets; re-enabling requires supplying secret values again.
 
-Auth secrets are stored encrypted in the database-backed secret store (`secrets` table; key = `SECRET_STORE_KEY`) and referenced from `org_siem_configs.config` via `{ "secretRef": "siem:<orgId>:..." }` entries (never plaintext).
+Auth secrets are stored encrypted in the database-backed secret store (`secrets` table; configured via `SECRET_STORE_KEYS_JSON` or legacy `SECRET_STORE_KEY`) and referenced from `org_siem_configs.config` via `{ "secretRef": "siem:<orgId>:..." }` entries (never plaintext).
 
 Example payload:
 

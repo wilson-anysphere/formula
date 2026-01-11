@@ -40,7 +40,7 @@ production requires:
 
 - `COOKIE_SECURE=true`
 - `SYNC_TOKEN_SECRET` set to a non-dev value
-- `SECRET_STORE_KEY` set to a non-dev value
+- `SECRET_STORE_KEYS_JSON` configured (recommended), or `SECRET_STORE_KEY` set to a non-dev value
 - `LOCAL_KMS_MASTER_KEY` set to a non-dev value
 
 For OIDC SSO deployments, also set:
@@ -109,7 +109,33 @@ The API includes a small database-backed encrypted secret store (`secrets` table
 - OIDC client secrets
 - SIEM auth configuration (see [`docs/siem.md`](./siem.md))
 
-Secrets are encrypted with `SECRET_STORE_KEY`. Keep this value stable for a given database; changing it makes previously stored secrets undecryptable.
+### Key configuration
+
+The preferred configuration is `SECRET_STORE_KEYS_JSON`, which enables key rotation without downtime:
+
+```json
+{
+  "currentKeyId": "k2026-01",
+  "keys": {
+    "k2025-12": "<base64(32-byte key)>",
+    "k2026-01": "<base64(32-byte key)>"
+  }
+}
+```
+
+If `SECRET_STORE_KEYS_JSON` is not set, the API falls back to legacy single-key mode using `SECRET_STORE_KEY` (compatible with older deployments).
+
+Note: legacy deployments derive the actual AES-256 key as `sha256(SECRET_STORE_KEY)`. When migrating from `SECRET_STORE_KEY` to `SECRET_STORE_KEYS_JSON`, include the derived key as one of the entries so existing secrets remain decryptable.
+
+### Rotation tooling
+
+After updating `SECRET_STORE_KEYS_JSON.currentKeyId` to a new key, re-encrypt existing rows with:
+
+```bash
+pnpm -C services/api secrets:rotate
+```
+
+This scans the `secrets` table and re-encrypts any secrets not using the current key id into the latest format. It is safe to run while the API is online.
 
 ## Persistence (local docker compose)
 
