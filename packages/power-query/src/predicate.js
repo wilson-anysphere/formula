@@ -191,10 +191,10 @@ export function predicateToSql(predicate, options = {}) {
   function toSql(node) {
     switch (node.type) {
       case "and":
-        if (node.predicates.length === 0) return "(TRUE)";
+        if (node.predicates.length === 0) return "(1=1)";
         return `(${node.predicates.map(toSql).join(" AND ")})`;
       case "or":
-        if (node.predicates.length === 0) return "(FALSE)";
+        if (node.predicates.length === 0) return "(1=0)";
         return `(${node.predicates.map(toSql).join(" OR ")})`;
       case "not":
         return `(NOT ${toSql(node.predicate)})`;
