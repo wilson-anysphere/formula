@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ArrowColumnarSheet,
+  arrowTableFromColumns,
+  arrowTableFromIPC,
   arrowTableToGridBatches,
+  arrowTableToIPC,
   arrowTableToParquet,
   parquetFileToArrowTable,
   parquetToArrowTable,
@@ -125,4 +128,23 @@ test('ArrowColumnarSheet provides a columnar backing store', async () => {
   assert.equal(sheet.columnCount, 4);
   assert.equal(sheet.getCell(0, 0), 'id');
   assert.equal(sheet.getCell(3, 1), 'Carla');
+});
+
+test('Arrow IPC roundtrip preserves schema and values', () => {
+  const table = arrowTableFromColumns({
+    id: [1, 2, 3],
+    name: ['Alice', 'Bob', 'Carla'],
+    occurredAt: [new Date('2024-01-01T00:00:00.000Z'), null, new Date('2024-01-03T12:34:56.000Z')],
+  });
+
+  const bytes = arrowTableToIPC(table);
+  const roundTrip = arrowTableFromIPC(bytes);
+
+  assert.equal(roundTrip.numRows, table.numRows);
+  assert.deepEqual(
+    roundTrip.schema.fields.map((f) => f.name),
+    table.schema.fields.map((f) => f.name),
+  );
+  assert.equal(roundTrip.getChildAt(0).get(0), 1);
+  assert.equal(roundTrip.getChildAt(1).get(2), 'Carla');
 });
