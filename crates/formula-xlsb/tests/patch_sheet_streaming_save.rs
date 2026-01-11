@@ -182,3 +182,62 @@ fn save_with_cell_edits_streaming_can_patch_formula_rgcb_bytes() {
     assert_eq!(formula.extra, encoded_45.rgcb);
     assert_eq!(formula.text.as_deref(), Some("SUM({4,5})"));
 }
+
+#[test]
+fn save_with_cell_edits_streaming_can_insert_formula_rgcb_bytes() {
+    let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context("=SUM({4,5})", &ctx, CellCoord::new(5, 3)).expect("encode rgce");
+    assert!(
+        !encoded.rgcb.is_empty(),
+        "expected array formula encoding to produce rgcb bytes"
+    );
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("ArrayRgcbInsert");
+    builder.set_cell_number(0, 0, 1.0);
+
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let fixture_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&fixture_path, builder.build_bytes()).expect("write xlsb fixture");
+
+    let wb = XlsbWorkbook::open(&fixture_path).expect("open xlsb fixture");
+
+    let edits = [CellEdit {
+        row: 5,
+        col: 3,
+        new_value: CellValue::Number(9.0),
+        new_formula: Some(encoded.rgce.clone()),
+        new_rgcb: Some(encoded.rgcb.clone()),
+        shared_string_index: None,
+    }];
+
+    let in_memory_path = tmpdir.path().join("patched_in_memory_rgcb_insert.xlsb");
+    let streaming_path = tmpdir.path().join("patched_streaming_rgcb_insert.xlsb");
+
+    wb.save_with_cell_edits(&in_memory_path, 0, &edits)
+        .expect("save_with_cell_edits");
+    wb.save_with_cell_edits_streaming(&streaming_path, 0, &edits)
+        .expect("save_with_cell_edits_streaming");
+
+    let report =
+        xlsx_diff::diff_workbooks(&in_memory_path, &streaming_path).expect("diff workbooks");
+    assert!(
+        report.is_empty(),
+        "expected no OPC part diffs between in-memory and streaming rgcb insertion edits, got:\n{}",
+        format_report(&report)
+    );
+
+    let wb2 = XlsbWorkbook::open(&streaming_path).expect("open patched xlsb");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let cell = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 5 && c.col == 3)
+        .expect("D6 exists");
+    assert_eq!(cell.value, CellValue::Number(9.0));
+    let formula = cell.formula.as_ref().expect("formula metadata");
+    assert_eq!(formula.extra, encoded.rgcb);
+    assert_eq!(formula.text.as_deref(), Some("SUM({4,5})"));
+}
