@@ -20,6 +20,7 @@ import {
 } from "@formula/collab-encryption";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
+import { bindYjsToDocumentController } from "../../binder/index.js";
 import {
   makeCellKey as makeCellKeyImpl,
   normalizeCellKey as normalizeCellKeyImpl,
@@ -815,3 +816,35 @@ export function createCollabSession(options: CollabSessionOptions = {}): CollabS
 
 // Backwards-compatible alias (Task 133 naming).
 export const createSession = createCollabSession;
+
+export function bindCollabSessionToDocumentController(options: {
+  session: CollabSession;
+  documentController: any;
+  undoService?: { transact?: (fn: () => void) => void; origin?: any } | null;
+  defaultSheetId?: string;
+  userId?: string | null;
+}) {
+  const { session, documentController, undoService, defaultSheetId, userId } = options ?? ({} as any);
+  if (!session) throw new Error("bindCollabSessionToDocumentController requires { session }");
+  if (!documentController)
+    throw new Error("bindCollabSessionToDocumentController requires { documentController }");
+
+  // Session undo is implemented via Yjs' UndoManager and doesn't expose an origin token,
+  // but the CollabSession does. Provide it so the binder can ignore local transactions.
+  const defaultUndoService =
+    session.undo && typeof session.undo === "object" ? ({ ...session.undo, origin: session.origin } as any) : null;
+
+  return bindYjsToDocumentController({
+    ydoc: session.doc,
+    documentController,
+    undoService: undoService === undefined ? defaultUndoService : undoService,
+    defaultSheetId,
+    userId,
+    canReadCell: (cell) => session.canReadCell(cell),
+    canEditCell: (cell) => session.canEditCell(cell),
+    // The binder will only call this when canReadCell() is false, but use the session
+    // helper to keep masking behavior consistent.
+    maskCellValue: (value, cell) =>
+      cell ? session.maskValueIfUnreadable({ ...cell, value }) : maskCellValue(value),
+  });
+}

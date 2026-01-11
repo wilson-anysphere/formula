@@ -6,6 +6,7 @@ import {
   encryptCellPlaintext,
   isEncryptedCellPayload,
 } from "../encryption/src/index.node.js";
+import { maskCellValue as defaultMaskCellValue } from "../permissions/index.js";
 
 const MASKED_CELL_VALUE = "###";
 
@@ -152,6 +153,9 @@ function sameNormalizedCell(a, b) {
  *     keyForCell: (cell: { sheetId: string, row: number, col: number }) => { keyId: string, keyBytes: Uint8Array } | null,
  *     shouldEncryptCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
  *   } | null,
+ *   canReadCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
+ *   canEditCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
+ *   maskCellValue?: (value: unknown, cell?: { sheetId: string, row: number, col: number }) => unknown,
  * }} options
  */
 export function bindYjsToDocumentController(options) {
@@ -162,6 +166,9 @@ export function bindYjsToDocumentController(options) {
     defaultSheetId = "Sheet1",
     userId = null,
     encryption = null,
+    canReadCell = null,
+    canEditCell = null,
+    maskCellValue = defaultMaskCellValue,
   } = options ?? {};
 
   if (!ydoc) throw new Error("bindYjsToDocumentController requires { ydoc }");
@@ -201,6 +208,26 @@ export function bindYjsToDocumentController(options) {
   let cache = new Map();
 
   let applyingRemote = false;
+
+  const readGuard = typeof canReadCell === "function" ? canReadCell : null;
+  const editGuard = typeof canEditCell === "function" ? canEditCell : null;
+  const maskFn = typeof maskCellValue === "function" ? maskCellValue : defaultMaskCellValue;
+
+  // Ensure local user edits in DocumentController are permission-aware by default.
+  // DocumentController.applyExternalDeltas intentionally bypasses canEditCell, but user
+  // mutations (setCellValue, setCellFormula, etc) consult this hook.
+  const prevDocumentCanEditCell =
+    documentController && typeof documentController === "object" && "canEditCell" in documentController
+      ? documentController.canEditCell
+      : undefined;
+  const didPatchDocumentCanEditCell = Boolean(editGuard && prevDocumentCanEditCell !== undefined);
+  if (didPatchDocumentCanEditCell) {
+    if (typeof prevDocumentCanEditCell === "function") {
+      documentController.canEditCell = (cell) => prevDocumentCanEditCell.call(documentController, cell) && editGuard(cell);
+    } else {
+      documentController.canEditCell = editGuard;
+    }
+  }
 
   /**
    * Track raw Yjs keys that correspond to a canonical `${sheetId}:${row}:${col}` key.
@@ -331,6 +358,10 @@ export function bindYjsToDocumentController(options) {
 
       const currValue = curr?.formula ? null : (curr?.value ?? null);
       const currFormula = curr?.formula ?? null;
+      const canRead = readGuard ? readGuard(parsed) : true;
+      const shouldMask = !canRead && (currValue != null || currFormula != null);
+      const displayValue = shouldMask ? maskFn(currFormula ?? currValue ?? null, parsed) : currValue;
+      const displayFormula = shouldMask ? null : currFormula;
 
       let styleId = before.styleId;
       if (curr?.formatKey !== undefined) {
@@ -349,7 +380,7 @@ export function bindYjsToDocumentController(options) {
 
       if (sameNormalizedCell(prev, next)) continue;
 
-      const after = { value: currValue, formula: currFormula, styleId };
+      const after = { value: displayValue, formula: displayFormula, styleId };
       if (
         (before.value ?? null) === (after.value ?? null) &&
         (before.formula ?? null) === (after.formula ?? null) &&
@@ -385,12 +416,18 @@ export function bindYjsToDocumentController(options) {
         documentController.applyExternalDeltas(deltas);
       } else {
         // Fallback for older DocumentController versions: apply via user mutations without feedback.
-        for (const delta of deltas) {
-          if (delta.after.formula != null) {
-            documentController.setCellFormula(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.formula);
-          } else {
-            documentController.setCellValue(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.value);
+        const prevCanEdit = "canEditCell" in documentController ? documentController.canEditCell : undefined;
+        if (prevCanEdit !== undefined) documentController.canEditCell = null;
+        try {
+          for (const delta of deltas) {
+            if (delta.after.formula != null) {
+              documentController.setCellFormula(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.formula);
+            } else {
+              documentController.setCellValue(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.value);
+            }
           }
+        } finally {
+          if (prevCanEdit !== undefined) documentController.canEditCell = prevCanEdit;
         }
       }
     } finally {
@@ -618,7 +655,59 @@ export function bindYjsToDocumentController(options) {
     if (applyingRemote) return;
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
     if (deltas.length === 0) return;
-    enqueueWrite(deltas);
+
+    if (!editGuard) {
+      enqueueWrite(deltas);
+      return;
+    }
+
+    /** @type {any[]} */
+    const allowed = [];
+    /** @type {any[]} */
+    const deniedInverse = [];
+
+    for (const delta of deltas) {
+      if (editGuard({ sheetId: delta.sheetId, row: delta.row, col: delta.col })) {
+        allowed.push(delta);
+      } else {
+        deniedInverse.push({
+          sheetId: delta.sheetId,
+          row: delta.row,
+          col: delta.col,
+          before: delta.after,
+          after: delta.before,
+        });
+      }
+    }
+
+    if (allowed.length > 0) enqueueWrite(allowed);
+
+    if (deniedInverse.length > 0) {
+      // Keep local UI state aligned with the shared document when a user attempts to
+      // edit a restricted cell.
+      applyingRemote = true;
+      try {
+        if (typeof documentController.applyExternalDeltas === "function") {
+          documentController.applyExternalDeltas(deniedInverse, { recalc: false });
+        } else {
+          const prevCanEdit = "canEditCell" in documentController ? documentController.canEditCell : undefined;
+          if (prevCanEdit !== undefined) documentController.canEditCell = null;
+          try {
+            for (const delta of deniedInverse) {
+              if (delta.after.formula != null) {
+                documentController.setCellFormula(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.formula);
+              } else {
+                documentController.setCellValue(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.value);
+              }
+            }
+          } finally {
+            if (prevCanEdit !== undefined) documentController.canEditCell = prevCanEdit;
+          }
+        }
+      } finally {
+        applyingRemote = false;
+      }
+    }
   };
 
   const unsubscribe = documentController.on("change", handleDocumentChange);
@@ -632,6 +721,9 @@ export function bindYjsToDocumentController(options) {
     destroy() {
       unsubscribe?.();
       cells.unobserveDeep(handleCellsDeepChange);
+      if (didPatchDocumentCanEditCell) {
+        documentController.canEditCell = prevDocumentCanEditCell;
+      }
     },
   };
 }
