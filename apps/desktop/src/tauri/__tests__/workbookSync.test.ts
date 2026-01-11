@@ -81,6 +81,34 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
+  it("ignores document changes tagged as macro updates (already applied in the backend)", async () => {
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    const before = document.getCell("Sheet1", { row: 0, col: 0 });
+    document.applyExternalDeltas(
+      [
+        {
+          sheetId: "Sheet1",
+          row: 0,
+          col: 0,
+          before,
+          after: { value: 1, formula: null, styleId: before.styleId },
+        },
+      ],
+      { source: "macro" },
+    );
+
+    expect(document.getCell("Sheet1", { row: 0, col: 0 }).value).toBe(1);
+
+    await flushMicrotasks();
+
+    expect(invoke).not.toHaveBeenCalled();
+
+    sync.stop();
+  });
+
   it("markSaved flushes pending edits before saving and clears frontend dirty state", async () => {
     const document = new DocumentController();
     const sync = startWorkbookSync({ document: document as any });

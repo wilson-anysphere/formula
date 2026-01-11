@@ -185,8 +185,9 @@ export function startWorkbookSync(args: {
   let flushQueued = false;
   let flushPromise: Promise<void> | null = null;
 
-  const stopListening = args.document.on("change", ({ deltas }) => {
+  const stopListening = args.document.on("change", ({ deltas, source }) => {
     if (stopped) return;
+    if (source === "macro") return;
     if (!Array.isArray(deltas) || deltas.length === 0) return;
     for (const delta of deltas) {
       // Ignore format-only deltas (we can't mirror those over set_cell/set_range yet).

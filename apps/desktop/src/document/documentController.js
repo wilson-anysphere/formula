@@ -718,7 +718,7 @@ export class DocumentController {
    * mark the document dirty.
    *
    * @param {CellDelta[]} deltas
-   * @param {{ recalc?: boolean }} [options]
+   * @param {{ recalc?: boolean, source?: string }} [options]
    */
   applyExternalDeltas(deltas, options = {}) {
     if (!deltas || deltas.length === 0) return;
@@ -728,7 +728,8 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const recalc = options.recalc ?? true;
-    this.#applyDeltas(deltas, { recalc, emitChange: true });
+    const source = typeof options.source === "string" ? options.source : undefined;
+    this.#applyDeltas(deltas, { recalc, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     this.savedCursor = null;

@@ -1,5 +1,4 @@
 import type { DocumentController } from "../document/documentController.js";
-import { applyMacroCellUpdates } from "./applyUpdates";
 import type { MacroCellUpdate, MacroPermission } from "./types";
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
@@ -77,6 +76,13 @@ function valuesEqual(a: unknown, b: unknown): boolean {
 
 function inputEquals(before: CellState, after: CellState): boolean {
   return valuesEqual(before.value ?? null, after.value ?? null) && (before.formula ?? null) === (after.formula ?? null);
+}
+
+function normalizeFormulaText(formula: unknown): string | null {
+  if (typeof formula !== "string") return null;
+  const trimmed = formula.trimStart();
+  if (trimmed === "") return null;
+  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
 }
 
 function normalizeUpdates(raw: any[] | undefined): MacroCellUpdate[] | undefined {
@@ -370,15 +376,28 @@ export class MacroEventBridge {
   applyMacroUpdates(updates: readonly MacroCellUpdate[], options: { label: string }): void {
     if (!Array.isArray(updates) || updates.length === 0) return;
     this.withWorksheetChangeSuppressed(() => {
-      this.document.beginBatch({ label: options.label });
-      let committed = false;
-      try {
-        applyMacroCellUpdates(this.document, updates);
-        committed = true;
-      } finally {
-        if (committed) this.document.endBatch();
-        else this.document.cancelBatch();
+      const deltas: any[] = [];
+      for (const update of updates) {
+        const sheetId = String(update?.sheetId ?? "").trim();
+        if (!sheetId) continue;
+        const row = Number(update?.row);
+        const col = Number(update?.col);
+        if (!Number.isInteger(row) || row < 0) continue;
+        if (!Number.isInteger(col) || col < 0) continue;
+
+        const before = this.document.getCell(sheetId, { row, col });
+        const formula = normalizeFormulaText(update.formula);
+        const value = formula ? null : (update.value ?? null);
+        const after = { value, formula, styleId: before.styleId ?? 0 };
+
+        if (inputEquals(before, after)) continue;
+        deltas.push({ sheetId, row, col, before, after });
       }
+
+      if (deltas.length === 0) return;
+      // These updates already came from the backend (VBA runtime). Apply them without creating
+      // a new undo step and tag them so `startWorkbookSync` doesn't echo them back.
+      this.document.applyExternalDeltas(deltas, { source: "macro" });
     });
   }
 
