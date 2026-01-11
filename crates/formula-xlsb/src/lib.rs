@@ -17,3 +17,14 @@ pub use parser::{Cell, CellValue, Dimension, Error, Formula, SheetData, SheetMet
 
 #[cfg(feature = "write")]
 pub use formula_biff::{encode_rgce as encode_formula_rgce, EncodeRgceError};
+
+/// Parse a worksheet `.bin` stream (BIFF12) and return all discovered cells.
+///
+/// This is primarily intended for tests and tools that already have the
+/// worksheet bytes available (e.g. from an OPC reader).
+pub fn parse_sheet_bin<R: std::io::Read>(
+    sheet_bin: &mut R,
+    shared_strings: &[String],
+) -> Result<SheetData, Error> {
+    parser::parse_sheet(sheet_bin, shared_strings)
+}
