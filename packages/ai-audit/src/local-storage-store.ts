@@ -25,7 +25,7 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
 
   async logEntry(entry: AIAuditEntry): Promise<void> {
     const entries = this.loadEntries();
-    entries.push(structuredClone(entry));
+    entries.push(cloneAuditEntry(entry));
     entries.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
     while (entries.length > this.maxEntries) entries.shift();
     this.saveEntries(entries);
@@ -107,5 +107,25 @@ function getLocalStorageOrNull(): Storage | null {
     return storage;
   } catch {
     return null;
+  }
+}
+
+function cloneAuditEntry(entry: AIAuditEntry): AIAuditEntry {
+  const structuredCloneFn =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    typeof (globalThis as any)?.structuredClone === "function" ? ((globalThis as any).structuredClone as any) : null;
+  if (structuredCloneFn) {
+    try {
+      return structuredCloneFn(entry);
+    } catch {
+      // Fall back to JSON-based cloning.
+    }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(entry)) as AIAuditEntry;
+  } catch {
+    // Last resort: return as-is (audit entries should be JSON-serializable in practice).
+    return entry;
   }
 }

@@ -5,7 +5,7 @@ export class MemoryAIAuditStore implements AIAuditStore {
   private readonly entries: AIAuditEntry[] = [];
 
   async logEntry(entry: AIAuditEntry): Promise<void> {
-    this.entries.push(structuredClone(entry));
+    this.entries.push(cloneAuditEntry(entry));
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
@@ -16,3 +16,21 @@ export class MemoryAIAuditStore implements AIAuditStore {
   }
 }
 
+function cloneAuditEntry(entry: AIAuditEntry): AIAuditEntry {
+  const structuredCloneFn =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    typeof (globalThis as any)?.structuredClone === "function" ? ((globalThis as any).structuredClone as any) : null;
+  if (structuredCloneFn) {
+    try {
+      return structuredCloneFn(entry);
+    } catch {
+      // Fall back to JSON-based cloning.
+    }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(entry)) as AIAuditEntry;
+  } catch {
+    return entry;
+  }
+}

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { LocalStorageAIAuditStore } from "../src/local-storage-store.ts";
+import { MemoryAIAuditStore } from "../src/memory-store.ts";
 
 const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+const originalStructuredCloneDescriptor = Object.getOwnPropertyDescriptor(globalThis, "structuredClone");
 
 function restoreLocalStorage() {
   if (originalLocalStorageDescriptor) {
@@ -11,6 +13,15 @@ function restoreLocalStorage() {
   } else {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete globalThis.localStorage;
+  }
+}
+
+function restoreStructuredClone() {
+  if (originalStructuredCloneDescriptor) {
+    Object.defineProperty(globalThis, "structuredClone", originalStructuredCloneDescriptor);
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete globalThis.structuredClone;
   }
 }
 
@@ -87,3 +98,24 @@ test("LocalStorageAIAuditStore sticks to memory fallback when setItem fails", as
   }
 });
 
+test("Audit stores fall back to JSON cloning when structuredClone is missing", async () => {
+  try {
+    Object.defineProperty(globalThis, "structuredClone", { value: undefined, configurable: true, writable: true });
+    Object.defineProperty(globalThis, "localStorage", { value: undefined, configurable: true, writable: true });
+
+    const localStore = new LocalStorageAIAuditStore({ key: "audit_test_no_structured_clone" });
+    await localStore.logEntry(makeEntry("4", "s4"));
+    const localEntries = await localStore.listEntries({ session_id: "s4" });
+    assert.equal(localEntries.length, 1);
+    assert.equal(localEntries[0].id, "4");
+
+    const memoryStore = new MemoryAIAuditStore();
+    await memoryStore.logEntry(makeEntry("5", "s5"));
+    const memoryEntries = await memoryStore.listEntries({ session_id: "s5" });
+    assert.equal(memoryEntries.length, 1);
+    assert.equal(memoryEntries[0].id, "5");
+  } finally {
+    restoreLocalStorage();
+    restoreStructuredClone();
+  }
+});
