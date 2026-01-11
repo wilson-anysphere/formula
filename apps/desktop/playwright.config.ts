@@ -42,7 +42,10 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `pnpm exec vite --port ${desktopPort} --strictPort`,
+      // The python runtime e2e tests expect the Pyodide distribution to be
+      // self-hosted under `apps/desktop/public/pyodide/...`. The assets are
+      // intentionally gitignored, so ensure they exist before starting Vite.
+      command: `node scripts/ensure-pyodide-assets.mjs && pnpm exec vite --port ${desktopPort} --strictPort`,
       port: desktopPort,
       reuseExistingServer: false,
       env: withEnv({ FORMULA_E2E: "0" })
