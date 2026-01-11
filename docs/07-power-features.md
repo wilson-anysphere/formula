@@ -372,6 +372,55 @@ Notes:
 - `handle.cancel()` aborts the entire session. Some hosts may also use `handle.cancelQuery(queryId)` to abort a single query branch (cancelling downstream dependents while allowing independent targets to continue).
 - Hosts can also use `orchestrator.triggerOnOpen()` to refresh all registered queries with `refreshPolicy: { type: "on-open" }` using the same dependency-aware semantics.
 
+### Query Result Caching
+
+Power Query refreshes are often repeatable (same source + same steps). Formula's `QueryEngine` supports caching results to make repeated refreshes fast, including for large columnar datasets (Parquet/Arrow pipelines).
+
+Key points:
+
+- Cache keys incorporate the full query signature:
+  - source request (including stable credential identity)
+  - executed step list
+  - execution options (e.g. `limit`)
+- Cache entries are validated by default using **source state** (mtime/ETag) when the connector supports it, preventing stale results.
+- Cache payloads support both row-backed and columnar results:
+  - **DataTable**: JSON-friendly rows, with tagged cells to preserve Dates, BigInt, NaN/±Infinity, and Uint8Array values.
+  - **ArrowTableAdapter**: stored as **Arrow IPC stream bytes** (plus Power Query column metadata) so Parquet-backed refreshes can be restored without re-reading or re-decoding the Parquet file.
+
+Cache stores:
+
+- `MemoryCacheStore`: in-memory (fastest; non-persistent)
+- `IndexedDBCacheStore`: browser persistence (stores `Uint8Array` IPC bytes via structured clone)
+- `FileSystemCacheStore`: Node persistence (`<hash>.json` + `<hash>.bin` for Arrow IPC bytes)
+- `EncryptedFileSystemCacheStore`: Node persistence with encryption-at-rest (AES-256-GCM) and the same `.bin` blob strategy for Arrow IPC bytes
+
+Example (in-memory caching):
+
+```js
+import {
+  QueryEngine,
+  CacheManager,
+  MemoryCacheStore,
+} from "../packages/power-query/src/index.js";
+
+const cache = new CacheManager({ store: new MemoryCacheStore() });
+
+const engine = new QueryEngine({
+  cache,
+  defaultCacheTtlMs: 60_000,
+  fileAdapter: {
+    // Provide stat() to enable source-state validation for file sources.
+    stat: async (path) => ({ mtimeMs: (await fs.stat(path)).mtimeMs }),
+    readText: async (path) => fs.readFile(path, "utf8"),
+    readBinary: async (path) => new Uint8Array(await fs.readFile(path)),
+  },
+});
+
+const { table, meta } = await engine.executeQueryWithMeta(query, context, {
+  cache: { mode: "use", validation: "source-state" },
+});
+```
+
 ### Query Folding
 
 Push operations to the data source when possible:
