@@ -29,6 +29,11 @@ COPY services/api/migrations ./migrations
 # Runtime dependency for DLP evaluation (used via relative imports).
 COPY shared/dlp-core /app/shared/dlp-core
 
+# Shared crypto modules (encryption-at-rest).
+# Note: we also copy packages/security/package.json so Node treats crypto/*.js as ESM.
+COPY packages/security/package.json /app/packages/security/package.json
+COPY packages/security/crypto /app/packages/security/crypto
+
 RUN npm run build
 
 FROM node:20-alpine
@@ -43,5 +48,8 @@ COPY --from=build /app/services/api/migrations ./migrations
 COPY --from=build /app/services/api/package.json ./package.json
 
 COPY --from=build /app/shared /app/shared
+
+COPY --from=build /app/packages/security/package.json /app/packages/security/package.json
+COPY --from=build /app/packages/security/crypto /app/packages/security/crypto
 
 CMD ["node", "dist/index.js"]
