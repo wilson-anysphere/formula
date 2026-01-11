@@ -23,6 +23,8 @@ Authorization: Bearer <token>
 - For package downloads, the `ETag` is the package sha256.
 - Responses are served with `Cache-Control: public, max-age=0, must-revalidate` so intermediaries may cache
   but must revalidate via `ETag` before reuse.
+- `304` package download responses still include the same `X-*` metadata headers as `200` responses (sha256,
+  signature, format version, publisher, key id) so clients can update caches without re-downloading bytes.
 
 ## Endpoints
 
@@ -83,6 +85,7 @@ Returns extension metadata, including versions and the publisher signing key(s).
 **Response body**
 
 - `publisherPublicKeyPem`: the publisher's *primary* public key (backward compatibility for older clients).
+  - When all publisher keys are revoked, this is `null` and installs must fail (by design).
 - `publisherKeys`: array of known publisher keys:
 
   ```ts

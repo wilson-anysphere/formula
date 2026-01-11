@@ -65,6 +65,9 @@ X-Publisher-Key-Id: <publisher_keys.id>
 
 This identifies the exact key that signed the requested version.
 
+The header is included on both `200 OK` responses and `304 Not Modified` revalidation responses so
+clients can keep cached metadata in sync without forcing a full package re-download.
+
 ### `GET /api/extensions/:id`
 
 Extension metadata includes the publisher key set:
@@ -107,3 +110,10 @@ Admin API (currently internal):
 ```
 POST /api/publishers/:publisher/keys/:id/revoke
 ```
+
+---
+
+## Key id uniqueness
+
+Key ids are SHA-256 fingerprints of the public key bytes and are treated as globally unique by the
+marketplace. Attempting to register the same key id under multiple publishers is rejected.
