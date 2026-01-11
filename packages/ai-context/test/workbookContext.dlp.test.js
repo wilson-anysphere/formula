@@ -296,3 +296,51 @@ test("buildWorkbookContext: structured Restricted classifications can block when
   assert.equal(auditEvents[0].type, "ai.workbook_context");
   assert.equal(auditEvents[0].decision.decision, "block");
 });
+
+test("buildWorkbookContext: classificationStore records are enforced for non-regex restricted content", async () => {
+  const workbook = makeSensitiveWorkbook();
+  workbook.sheets[0].cells[1][0].v = "TopSecret";
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const classificationStore = {
+    list(documentId) {
+      assert.equal(documentId, workbook.id);
+      return [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Contacts",
+            range: { start: { row: 0, col: 0 }, end: { row: 1, col: 2 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ];
+    },
+  };
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "TopSecret",
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Confidential", redactDisallowed: true }),
+      classificationStore,
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.match(out.retrieved[0].text, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+
+  assert.ok(embedder.seen.length >= 1);
+  // First embedder call is for the chunk text; the query may still contain the search term.
+  assert.doesNotMatch(embedder.seen[0], /TopSecret/);
+});
