@@ -24,6 +24,7 @@ mod merge;
 mod outline;
 pub mod pivots;
 pub mod rich_text;
+mod protection;
 mod style;
 mod theme;
 pub mod table;
@@ -44,6 +45,10 @@ pub use formula_text::{display_formula_text, normalize_formula_text};
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};
 pub use merge::{MergeError, MergedRegion, MergedRegions};
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
+pub use protection::{
+    hash_legacy_password, verify_legacy_password, SheetProtection, SheetProtectionAction,
+    WorkbookProtection,
+};
 pub use style::{
     Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,
     HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::drawings::ImageStore;
 use crate::{
     rewrite_sheet_names_in_formula, CalcSettings, SheetVisibility, Style, StyleTable, TabColor,
-    Table, ThemePalette, Worksheet, WorksheetId,
+    Table, ThemePalette, WorkbookProtection, Worksheet, WorksheetId,
 };
 
 /// Identifier for a workbook.
@@ -46,6 +46,9 @@ pub struct Workbook {
     /// Workbook theme palette used to resolve `Color::Theme` references.
     #[serde(default, skip_serializing_if = "ThemePalette::is_default")]
     pub theme: ThemePalette,
+    /// Workbook protection state (Excel-compatible).
+    #[serde(default, skip_serializing_if = "WorkbookProtection::is_default")]
+    pub workbook_protection: WorkbookProtection,
 
     /// Next worksheet id to allocate (runtime-only).
     #[serde(skip)]
@@ -89,6 +92,7 @@ impl Workbook {
             images: ImageStore::default(),
             calc_settings: CalcSettings::default(),
             theme: ThemePalette::default(),
+            workbook_protection: WorkbookProtection::default(),
             next_sheet_id: 1,
         }
     }
@@ -233,6 +237,8 @@ impl<'de> Deserialize<'de> for Workbook {
             calc_settings: CalcSettings,
             #[serde(default)]
             theme: ThemePalette,
+            #[serde(default)]
+            workbook_protection: WorkbookProtection,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -261,6 +267,7 @@ impl<'de> Deserialize<'de> for Workbook {
             images: helper.images,
             calc_settings: helper.calc_settings,
             theme: helper.theme,
+            workbook_protection: helper.workbook_protection,
             next_sheet_id,
         })
     }

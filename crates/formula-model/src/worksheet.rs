@@ -9,7 +9,8 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 use crate::drawings::DrawingObject;
 use crate::{
     A1ParseError, Cell, CellKey, CellRef, CellValue, DataValidation, DataValidationAssignment,
-    DataValidationId, Hyperlink, MergeError, MergedRegions, Range, Table,
+    DataValidationId, Hyperlink, MergeError, MergedRegions, Range, SheetProtection,
+    SheetProtectionAction, StyleTable, Table,
 };
 
 /// Identifier for a worksheet within a workbook.
@@ -205,6 +206,9 @@ pub struct Worksheet {
     /// Next data validation id to allocate (runtime-only).
     #[serde(skip)]
     next_data_validation_id: DataValidationId,
+    /// Sheet protection options (Excel-compatible).
+    #[serde(default, skip_serializing_if = "SheetProtection::is_default")]
+    pub sheet_protection: SheetProtection,
 }
 
 impl Worksheet {
@@ -233,6 +237,68 @@ impl Worksheet {
             hyperlinks: Vec::new(),
             data_validations: Vec::new(),
             next_data_validation_id: 1,
+            sheet_protection: SheetProtection::default(),
+        }
+    }
+
+    /// Returns whether a cell can be edited (i.e. its value/formula changed) given the current
+    /// worksheet protection state.
+    ///
+    /// Note: this is a helper for UI/engine consumers; it does not enforce edits automatically.
+    pub fn is_cell_editable(&self, cell_ref: CellRef, styles: &StyleTable) -> bool {
+        if cell_ref.row >= crate::cell::EXCEL_MAX_ROWS
+            || cell_ref.col >= crate::cell::EXCEL_MAX_COLS
+        {
+            return false;
+        }
+
+        if !self.sheet_protection.enabled {
+            return true;
+        }
+
+        // Editing any cell in a merged region edits the anchor cell.
+        let anchor = self.merged_regions.resolve_cell(cell_ref);
+        let style_id = self
+            .cells
+            .get(&CellKey::from_ref(anchor))
+            .map(|c| c.style_id)
+            .unwrap_or(0);
+
+        let style = styles.styles.get(style_id as usize);
+        let locked = style
+            .and_then(|s| s.protection.as_ref())
+            .map(|p| p.locked)
+            .unwrap_or(true);
+
+        !locked
+    }
+
+    /// Returns whether an operation is allowed given the current worksheet protection state.
+    ///
+    /// Note: this is a helper for UI/engine consumers; it does not enforce edits automatically.
+    pub fn can_perform(&self, action: SheetProtectionAction) -> bool {
+        if !self.sheet_protection.enabled {
+            return true;
+        }
+
+        match action {
+            SheetProtectionAction::SelectLockedCells => self.sheet_protection.select_locked_cells,
+            SheetProtectionAction::SelectUnlockedCells => {
+                self.sheet_protection.select_unlocked_cells
+            }
+            SheetProtectionAction::FormatCells => self.sheet_protection.format_cells,
+            SheetProtectionAction::FormatColumns => self.sheet_protection.format_columns,
+            SheetProtectionAction::FormatRows => self.sheet_protection.format_rows,
+            SheetProtectionAction::InsertColumns => self.sheet_protection.insert_columns,
+            SheetProtectionAction::InsertRows => self.sheet_protection.insert_rows,
+            SheetProtectionAction::InsertHyperlinks => self.sheet_protection.insert_hyperlinks,
+            SheetProtectionAction::DeleteColumns => self.sheet_protection.delete_columns,
+            SheetProtectionAction::DeleteRows => self.sheet_protection.delete_rows,
+            SheetProtectionAction::Sort => self.sheet_protection.sort,
+            SheetProtectionAction::AutoFilter => self.sheet_protection.auto_filter,
+            SheetProtectionAction::PivotTables => self.sheet_protection.pivot_tables,
+            SheetProtectionAction::EditObjects => self.sheet_protection.edit_objects,
+            SheetProtectionAction::EditScenarios => self.sheet_protection.edit_scenarios,
         }
     }
 
@@ -944,6 +1010,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             hyperlinks: Vec<Hyperlink>,
             #[serde(default)]
             data_validations: Vec<DataValidationAssignment>,
+            #[serde(default)]
+            sheet_protection: SheetProtection,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -1036,6 +1104,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             hyperlinks: helper.hyperlinks,
             data_validations: helper.data_validations,
             next_data_validation_id,
+            sheet_protection: helper.sheet_protection,
         })
     }
 }
