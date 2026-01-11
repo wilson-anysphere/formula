@@ -424,15 +424,28 @@ export class CanvasGridRenderer {
     let targetScrollY = baseScrollY * clamped;
 
     const anchorX = options?.anchorX;
-    if (anchorX !== undefined && Number.isFinite(anchorX) && anchorX >= viewportAfter.frozenWidth) {
-      const beforeSheetX = anchorX < prevViewport.frozenWidth ? anchorX : anchorX + prevScroll.x;
+    if (
+      anchorX !== undefined &&
+      Number.isFinite(anchorX) &&
+      // Only anchor when the zoom gesture is inside the scrollable quadrant both before and after
+      // the zoom change. Frozen quadrants do not scroll, so attempting to anchor them produces
+      // unexpected jumps when the frozen boundary moves due to zoom.
+      anchorX >= prevViewport.frozenWidth &&
+      anchorX >= viewportAfter.frozenWidth
+    ) {
+      const beforeSheetX = anchorX + prevScroll.x;
       const baseX = beforeSheetX / prevZoom;
       targetScrollX = baseX * clamped - anchorX;
     }
 
     const anchorY = options?.anchorY;
-    if (anchorY !== undefined && Number.isFinite(anchorY) && anchorY >= viewportAfter.frozenHeight) {
-      const beforeSheetY = anchorY < prevViewport.frozenHeight ? anchorY : anchorY + prevScroll.y;
+    if (
+      anchorY !== undefined &&
+      Number.isFinite(anchorY) &&
+      anchorY >= prevViewport.frozenHeight &&
+      anchorY >= viewportAfter.frozenHeight
+    ) {
+      const beforeSheetY = anchorY + prevScroll.y;
       const baseY = beforeSheetY / prevZoom;
       targetScrollY = baseY * clamped - anchorY;
     }

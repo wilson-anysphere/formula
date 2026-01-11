@@ -96,6 +96,28 @@ describe("CanvasGridRenderer zoom", () => {
     expect(after!.height).toBe(20);
   });
 
+  it("does not anchor scroll when zooming with an anchor inside the frozen quadrant", () => {
+    const provider: CellProvider = { getCell: (row, col) => ({ row, col, value: null }) };
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 100, colCount: 100, defaultRowHeight: 10, defaultColWidth: 100 });
+    const grid = document.createElement("canvas");
+    const content = document.createElement("canvas");
+    const selection = document.createElement("canvas");
+    renderer.attach({ grid, content, selection });
+    renderer.resize(200, 200, 1);
+    renderer.setFrozen(0, 1);
+
+    renderer.setScroll(200, 0);
+    expect(renderer.scroll.getScroll().x).toBe(200);
+
+    // Anchor inside the frozen column (frozenWidth=100 at zoom=1). Zooming out shrinks the frozen
+    // width to 50; we still should not "anchor" because frozen quadrants do not scroll.
+    renderer.setZoom(0.5, { anchorX: 50, anchorY: 0 });
+
+    // Base scroll is 200; at 0.5 zoom it should scale to 100.
+    expect(renderer.scroll.getScroll().x).toBe(100);
+  });
+
   it("renders the selection fill handle scaled with zoom", () => {
     const provider: CellProvider = { getCell: () => null };
 
