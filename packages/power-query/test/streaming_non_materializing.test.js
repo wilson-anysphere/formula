@@ -474,6 +474,47 @@ test("executeQueryStreaming(..., materialize:false) streams promoteHeaders when 
   assert.deepEqual(streamed, expected);
 });
 
+test("executeQueryStreaming(..., materialize:false) streams promoteHeaders after earlier streamable steps", async () => {
+  const csvText = ["junk,ignore", "Region,Sales", "East,100", "West,200", "East,150"].join("\n") + "\n";
+
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("readText should not be called in streaming mode");
+      },
+      readTextStream: async function* () {
+        yield "junk,ignore\nRegion,Sales\nEast,1";
+        yield "00\nWest,200\nEast,150\n";
+      },
+    },
+  });
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readText: async () => csvText,
+    },
+  });
+
+  const query = {
+    id: "q_stream_promote_headers_after_skip",
+    name: "Promote headers after skip",
+    source: { type: "csv", path: "/tmp/promote_after_skip.csv", options: { hasHeaders: false } },
+    steps: [
+      { id: "s_skip", name: "Skip", operation: { type: "skip", count: 1 } },
+      { id: "s_promote", name: "Promote headers", operation: { type: "promoteHeaders" } },
+      { id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } } },
+      { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["Region", "Sales"] } },
+    ],
+  };
+
+  const batches = [];
+  await engineStreaming.executeQueryStreaming(query, {}, { batchSize: 2, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
+
 test("executeQueryStreaming(..., materialize:false) streams demoteHeaders", async () => {
   const csvText = ["A,B", "1,2", "3,4"].join("\n") + "\n";
 

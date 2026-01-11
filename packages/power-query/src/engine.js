@@ -2907,9 +2907,14 @@ export class QueryEngine {
     let inputColumns = source.columns;
     let inputBatches = source.batches;
 
-    if (pipelineOperations[0]?.type === "promoteHeaders") {
-      pipelineOperations = pipelineOperations.slice(1);
-      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(inputColumns, inputBatches, options.signal));
+    const promoteIndex = pipelineOperations.findIndex((op) => op.type === "promoteHeaders");
+    if (promoteIndex >= 0) {
+      const prefixOps = pipelineOperations.slice(0, promoteIndex);
+      const suffixOps = pipelineOperations.slice(promoteIndex + 1);
+      const prefixPipeline = compileStreamingPipeline(prefixOps, inputColumns);
+      const prefixBatches = applyStreamingPipelineToBatches(prefixPipeline, inputBatches, options.signal);
+      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(prefixPipeline.columns, prefixBatches, options.signal));
+      pipelineOperations = suffixOps;
     }
 
     const pipeline = compileStreamingPipeline(pipelineOperations, inputColumns);
@@ -3353,9 +3358,14 @@ export class QueryEngine {
     let inputColumns = source.columns;
     let inputBatches = source.batches;
 
-    if (pipelineOperations[0]?.type === "promoteHeaders") {
-      pipelineOperations = pipelineOperations.slice(1);
-      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(inputColumns, inputBatches, options.signal));
+    const promoteIndex = pipelineOperations.findIndex((op) => op.type === "promoteHeaders");
+    if (promoteIndex >= 0) {
+      const prefixOps = pipelineOperations.slice(0, promoteIndex);
+      const suffixOps = pipelineOperations.slice(promoteIndex + 1);
+      const prefixPipeline = compileStreamingPipeline(prefixOps, inputColumns);
+      const prefixBatches = applyStreamingPipelineToBatches(prefixPipeline, inputBatches, options.signal);
+      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(prefixPipeline.columns, prefixBatches, options.signal));
+      pipelineOperations = suffixOps;
     }
 
     const pipeline = compileStreamingPipeline(pipelineOperations, inputColumns);
@@ -3454,11 +3464,32 @@ function normalizeCsvRow(row, width) {
 }
 
 /**
+ * Apply a compiled streaming pipeline to a batch stream.
+ *
+ * @param {{ transformBatch: (rows: unknown[][]) => { rows: unknown[][]; done: boolean } }} pipeline
+ * @param {AsyncIterable<unknown[][]>} batches
+ * @param {AbortSignal | undefined} signal
+ * @returns {AsyncIterable<unknown[][]>}
+ */
+async function* applyStreamingPipelineToBatches(pipeline, batches, signal) {
+  for await (const batchRows of batches) {
+    throwIfAborted(signal);
+    const result = pipeline.transformBatch(batchRows);
+    if (result.rows.length > 0) yield result.rows;
+    if (result.done) return;
+  }
+
+  const flushed = pipeline.transformBatch([]);
+  if (flushed.rows.length > 0) yield flushed.rows;
+}
+
+/**
  * Apply `promoteHeaders` without materializing the full table.
  *
- * This is only safe when `promoteHeaders` is the first operation in the pipeline. We
- * consume the first data row from the source batches, use its values to derive unique
- * column names, then drop that row from the remaining batches.
+ * The engine uses this when `promoteHeaders` appears in an otherwise streamable pipeline.
+ * We consume the first data row from the provided batch stream (representing the table state
+ * at the promoteHeaders step), use its values to derive unique column names, then drop that
+ * row from the remaining batches.
  *
  * @param {import("./table.js").Column[]} columns
  * @param {AsyncIterable<unknown[][]>} batches
