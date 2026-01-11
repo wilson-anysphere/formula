@@ -15,6 +15,7 @@ function colNameToIndex(col: string): number {
  * Supports:
  * - A1 refs with/without `$` (e.g. `A1`, `$A$1`, `$A1`, `A$1`)
  * - simple ranges (`A1:B2`) by shifting each endpoint independently
+ * - whole-row / whole-column references (`A:A`, `A:B`, `1:1`, `1:10`)
  * - basic sheet-qualified refs (`Sheet1!A1`, `'Sheet Name'!A1`)
  *
  * Known limitations (intentionally, for now):
@@ -65,15 +66,77 @@ export function shiftA1References(formula: string, deltaRows: number, deltaCols:
 }
 
 function shiftSegment(segment: string, deltaRows: number, deltaCols: number): string {
+  const sheetPrefixRe = "(?:(?:'(?:[^']|'')+'|[A-Za-z0-9_]+)!)?";
+  const tokenBoundaryPrefixRe = "(^|[^A-Za-z0-9_])";
+
+  const shiftCol = (col: string, isAbs: boolean) => (isAbs ? colNameToIndex(col) : colNameToIndex(col) + deltaCols);
+  const shiftRow = (row: number, isAbs: boolean) => (isAbs ? row : row + deltaRows);
+
+  const replaceColRange = (
+    _match: string,
+    prefix: string,
+    sheetPrefix: string,
+    startAbs: string,
+    startCol: string,
+    endAbs: string,
+    endCol: string
+  ) => {
+    const nextStart = shiftCol(startCol, Boolean(startAbs));
+    const nextEnd = shiftCol(endCol, Boolean(endAbs));
+    if (nextStart < 0 || nextEnd < 0) return `${prefix}${sheetPrefix}#REF!`;
+    return `${prefix}${sheetPrefix}${startAbs}${colToName(nextStart)}:${endAbs}${colToName(nextEnd)}`;
+  };
+
+  const replaceRowRange = (
+    _match: string,
+    prefix: string,
+    sheetPrefix: string,
+    startAbs: string,
+    startRow: string,
+    endAbs: string,
+    endRow: string
+  ) => {
+    const startRow0 = Number.parseInt(startRow, 10) - 1;
+    const endRow0 = Number.parseInt(endRow, 10) - 1;
+    const nextStart = shiftRow(startRow0, Boolean(startAbs));
+    const nextEnd = shiftRow(endRow0, Boolean(endAbs));
+    if (nextStart < 0 || nextEnd < 0) return `${prefix}${sheetPrefix}#REF!`;
+    return `${prefix}${sheetPrefix}${startAbs}${nextStart + 1}:${endAbs}${nextEnd + 1}`;
+  };
+
   // The leading group captures either start-of-string (empty) or a delimiter
   // character so we can enforce a "token boundary" without needing lookbehind.
   //
   // We avoid matching tokens followed by `(` to reduce false-positives on
   // functions like `LOG10(`.
-  const regex =
-    /(^|[^A-Za-z0-9_])((?:(?:'(?:[^']|'')+'|[A-Za-z0-9_]+)!)?)(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d*)(?!\d)(?!\s*\()/g;
+  const colRangeRegex = new RegExp(
+    `${tokenBoundaryPrefixRe}(${sheetPrefixRe})(\\$?)([A-Za-z]{1,3}):(\\$?)([A-Za-z]{1,3})(?![A-Za-z0-9_])(?!\\s*\\()`,
+    "g"
+  );
 
-  return segment.replace(regex, (_match, prefix: string, sheetPrefix: string, colAbs: string, col: string, rowAbs: string, row: string) => {
+  const rowRangeRegex = new RegExp(
+    `${tokenBoundaryPrefixRe}(${sheetPrefixRe})(\\$?)([1-9]\\d*):(\\$?)([1-9]\\d*)(?!\\d)(?!\\s*\\()`,
+    "g"
+  );
+
+  const cellRefRegex = new RegExp(
+    `${tokenBoundaryPrefixRe}(${sheetPrefixRe})(\\$?)([A-Za-z]{1,3})(\\$?)([1-9]\\d*)(?!\\d)(?!\\s*\\()`,
+    "g"
+  );
+
+  const withColRanges = segment.replace(
+    colRangeRegex,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    replaceColRange as any
+  );
+
+  const withRowRanges = withColRanges.replace(
+    rowRangeRegex,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    replaceRowRange as any
+  );
+
+  return withRowRanges.replace(cellRefRegex, (_match, prefix: string, sheetPrefix: string, colAbs: string, col: string, rowAbs: string, row: string) => {
     const col0 = colNameToIndex(col);
     const row0 = Number.parseInt(row, 10) - 1;
 

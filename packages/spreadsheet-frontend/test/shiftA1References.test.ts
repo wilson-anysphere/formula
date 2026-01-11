@@ -19,6 +19,13 @@ describe("shiftA1References", () => {
     expect(shiftA1References("=SUM($A1:B$2)", 1, 1)).toBe("=SUM($A2:C$2)");
   });
 
+  it("shifts whole-row and whole-column references", () => {
+    expect(shiftA1References("=SUM(A:A)", 0, 1)).toBe("=SUM(B:B)");
+    expect(shiftA1References("=SUM(1:1)", 1, 0)).toBe("=SUM(2:2)");
+    expect(shiftA1References("=SUM(Sheet1!A:B)", 0, 2)).toBe("=SUM(Sheet1!C:D)");
+    expect(shiftA1References("=SUM('Sheet Name'!$1:2)", 3, 0)).toBe("=SUM('Sheet Name'!$1:5)");
+  });
+
   it("shifts sheet-qualified references", () => {
     expect(shiftA1References("=Sheet1!A1+1", 2, 0)).toBe("=Sheet1!A3+1");
     expect(shiftA1References("='Sheet Name'!$A$1", 3, 2)).toBe("='Sheet Name'!$A$1");
