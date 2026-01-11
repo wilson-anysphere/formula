@@ -2,6 +2,9 @@ use crate::sort_filter::sort::datetime_to_excel_serial_1900;
 use crate::sort_filter::types::{CellValue, RangeData, RangeRef};
 use chrono::{Local, NaiveDate, NaiveDateTime};
 use std::collections::{BTreeMap, HashMap};
+use thiserror::Error;
+
+use formula_model::autofilter as model_af;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FilterViewId(pub String);
@@ -78,6 +81,121 @@ pub struct AutoFilter {
     pub range: RangeRef,
     /// Column index relative to `range.start_col`.
     pub columns: BTreeMap<usize, ColumnFilter>,
+}
+
+#[derive(Debug, Error)]
+pub enum ModelAutoFilterError {
+    #[error("autofilter range exceeds engine bounds")]
+    RangeOverflow,
+    #[error("autofilter column id exceeds engine bounds")]
+    ColumnOverflow,
+}
+
+impl TryFrom<&model_af::SheetAutoFilter> for AutoFilter {
+    type Error = ModelAutoFilterError;
+
+    fn try_from(value: &model_af::SheetAutoFilter) -> Result<Self, Self::Error> {
+        let range = RangeRef {
+            start_row: usize::try_from(value.range.start.row).map_err(|_| ModelAutoFilterError::RangeOverflow)?,
+            start_col: usize::try_from(value.range.start.col).map_err(|_| ModelAutoFilterError::RangeOverflow)?,
+            end_row: usize::try_from(value.range.end.row).map_err(|_| ModelAutoFilterError::RangeOverflow)?,
+            end_col: usize::try_from(value.range.end.col).map_err(|_| ModelAutoFilterError::RangeOverflow)?,
+        };
+
+        let mut columns: BTreeMap<usize, ColumnFilter> = BTreeMap::new();
+
+        for col in &value.filter_columns {
+            let col_id = usize::try_from(col.col_id).map_err(|_| ModelAutoFilterError::ColumnOverflow)?;
+
+            let criteria_src: Vec<model_af::FilterCriterion> = if !col.criteria.is_empty() {
+                col.criteria.clone()
+            } else {
+                // Backwards compatibility: older schema used the `values` list only.
+                col.values
+                    .iter()
+                    .map(|v| {
+                        if let Ok(n) = v.parse::<f64>() {
+                            model_af::FilterCriterion::Equals(model_af::FilterValue::Number(n))
+                        } else {
+                            model_af::FilterCriterion::Equals(model_af::FilterValue::Text(v.clone()))
+                        }
+                    })
+                    .collect()
+            };
+
+            let mut criteria = Vec::new();
+            for c in &criteria_src {
+                if let Some(mapped) = model_criterion_to_engine(c) {
+                    criteria.push(mapped);
+                }
+            }
+
+            columns.insert(
+                col_id,
+                ColumnFilter {
+                    join: match col.join {
+                        model_af::FilterJoin::Any => FilterJoin::Any,
+                        model_af::FilterJoin::All => FilterJoin::All,
+                    },
+                    criteria,
+                },
+            );
+        }
+
+        Ok(Self { range, columns })
+    }
+}
+
+fn model_criterion_to_engine(c: &model_af::FilterCriterion) -> Option<FilterCriterion> {
+    match c {
+        model_af::FilterCriterion::Blanks => Some(FilterCriterion::Blanks),
+        model_af::FilterCriterion::NonBlanks => Some(FilterCriterion::NonBlanks),
+        model_af::FilterCriterion::Equals(v) => Some(FilterCriterion::Equals(model_value_to_engine(v))),
+        model_af::FilterCriterion::TextMatch(m) => Some(FilterCriterion::TextMatch(TextMatch {
+            kind: match m.kind {
+                model_af::TextMatchKind::Contains => TextMatchKind::Contains,
+                model_af::TextMatchKind::BeginsWith => TextMatchKind::BeginsWith,
+                model_af::TextMatchKind::EndsWith => TextMatchKind::EndsWith,
+            },
+            pattern: m.pattern.clone(),
+            case_sensitive: m.case_sensitive,
+        })),
+        model_af::FilterCriterion::Number(cmp) => Some(FilterCriterion::Number(match cmp {
+            model_af::NumberComparison::GreaterThan(v) => NumberComparison::GreaterThan(*v),
+            model_af::NumberComparison::GreaterThanOrEqual(v) => NumberComparison::GreaterThanOrEqual(*v),
+            model_af::NumberComparison::LessThan(v) => NumberComparison::LessThan(*v),
+            model_af::NumberComparison::LessThanOrEqual(v) => NumberComparison::LessThanOrEqual(*v),
+            model_af::NumberComparison::Between { min, max } => NumberComparison::Between { min: *min, max: *max },
+            model_af::NumberComparison::NotEqual(v) => NumberComparison::NotEqual(*v),
+        })),
+        model_af::FilterCriterion::Date(cmp) => Some(FilterCriterion::Date(match cmp {
+            model_af::DateComparison::After(dt) => DateComparison::After(*dt),
+            model_af::DateComparison::Before(dt) => DateComparison::Before(*dt),
+            model_af::DateComparison::Between { start, end } => DateComparison::Between { start: *start, end: *end },
+            model_af::DateComparison::OnDate(d) => DateComparison::OnDate(*d),
+            model_af::DateComparison::Today => DateComparison::Today,
+            model_af::DateComparison::Yesterday => DateComparison::Yesterday,
+            model_af::DateComparison::Tomorrow => DateComparison::Tomorrow,
+        })),
+        model_af::FilterCriterion::OpaqueDynamic(d) => match d.filter_type.as_str() {
+            "today" => Some(FilterCriterion::Date(DateComparison::Today)),
+            "yesterday" => Some(FilterCriterion::Date(DateComparison::Yesterday)),
+            "tomorrow" => Some(FilterCriterion::Date(DateComparison::Tomorrow)),
+            _ => None,
+        },
+        // Unsupported criteria types are ignored by the engine filter evaluator
+        // (they are still preserved in the model for XLSX round-trip).
+        model_af::FilterCriterion::OpaqueCustom(_) => None,
+    }
+}
+
+fn model_value_to_engine(v: &model_af::FilterValue) -> FilterValue {
+    match v {
+        model_af::FilterValue::Text(s) => FilterValue::Text(s.clone()),
+        model_af::FilterValue::Number(n) => FilterValue::Number(*n),
+        model_af::FilterValue::DateTime(dt) => FilterValue::DateTime(*dt),
+        model_af::FilterValue::Bool(b) => FilterValue::Bool(*b),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

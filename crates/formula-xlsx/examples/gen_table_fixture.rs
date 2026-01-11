@@ -1,4 +1,5 @@
 use formula_model::table::{AutoFilter, FilterColumn, Table, TableColumn, TableStyleInfo};
+use formula_model::{FilterCriterion, FilterJoin, FilterValue};
 use formula_model::{Cell, CellRef, CellValue, Range, Workbook};
 
 fn main() {
@@ -145,9 +146,16 @@ fn main() {
             range: Range::from_a1("A1:D4").unwrap(),
             filter_columns: vec![FilterColumn {
                 col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![
+                    FilterCriterion::Equals(FilterValue::Text("Apple".into())),
+                    FilterCriterion::Equals(FilterValue::Text("Cherry".into())),
+                ],
                 values: vec!["Apple".into(), "Cherry".into()],
+                raw_xml: Vec::new(),
             }],
             sort_state: None,
+            raw_xml: Vec::new(),
         }),
         relationship_id: Some("rId1".into()),
         part_path: None,

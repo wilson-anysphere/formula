@@ -1,6 +1,7 @@
 use formula_model::table::{
     AutoFilter, FilterColumn, SortCondition, SortState, Table, TableColumn, TableStyleInfo,
 };
+use formula_model::{FilterCriterion, FilterJoin, FilterValue};
 use formula_model::Range;
 use quick_xml::{de::from_str, se::to_string};
 use serde::{Deserialize, Serialize};
@@ -82,6 +83,8 @@ struct FilterColumnXml {
 
 #[derive(Debug, Deserialize)]
 struct FiltersXml {
+    #[serde(rename = "@blank")]
+    blank: Option<u8>,
     #[serde(rename = "filter", default)]
     filters: Vec<FilterXml>,
 }
@@ -136,12 +139,33 @@ pub fn parse_table(xml: &str) -> Result<Table, String> {
         let filter_columns = af
             .filter_columns
             .into_iter()
-            .map(|fc| FilterColumn {
-                col_id: fc.col_id,
-                values: fc
-                    .filters
-                    .map(|f| f.filters.into_iter().map(|x| x.val).collect())
-                    .unwrap_or_default(),
+            .map(|fc| {
+                let (values, include_blank) = match fc.filters {
+                    Some(filters) => (
+                        filters.filters.into_iter().map(|x| x.val).collect::<Vec<_>>(),
+                        filters.blank.unwrap_or(0) != 0,
+                    ),
+                    None => (Vec::new(), false),
+                };
+ 
+                let mut criteria = Vec::new();
+                if include_blank {
+                    criteria.push(FilterCriterion::Blanks);
+                }
+                criteria.extend(
+                    values
+                        .iter()
+                        .cloned()
+                        .map(|v| FilterCriterion::Equals(FilterValue::Text(v))),
+                );
+ 
+                FilterColumn {
+                    col_id: fc.col_id,
+                    join: FilterJoin::Any,
+                    criteria,
+                    values,
+                    raw_xml: Vec::new(),
+                }
             })
             .collect();
         let sort_state = af.sort_state.map(|s| SortState {
@@ -161,6 +185,7 @@ pub fn parse_table(xml: &str) -> Result<Table, String> {
             range,
             filter_columns,
             sort_state,
+            raw_xml: Vec::new(),
         })
     });
 
@@ -260,6 +285,8 @@ struct FilterColumnXmlOut {
 
 #[derive(Debug, Serialize)]
 struct FiltersXmlOut {
+    #[serde(rename = "@blank", skip_serializing_if = "Option::is_none")]
+    blank: Option<u8>,
     #[serde(rename = "filter", skip_serializing_if = "Vec::is_empty", default)]
     filters: Vec<FilterXmlOut>,
 }
@@ -300,16 +327,44 @@ pub fn write_table_xml(table: &Table) -> Result<String, String> {
                 .iter()
                 .map(|fc| FilterColumnXmlOut {
                     col_id: fc.col_id,
-                    filters: if fc.values.is_empty() {
-                        None
-                    } else {
-                        Some(FiltersXmlOut {
-                            filters: fc
-                                .values
+                    filters: {
+                        let include_blank = fc
+                            .criteria
+                            .iter()
+                            .any(|c| matches!(c, FilterCriterion::Blanks));
+
+                        let values: Vec<String> = if !fc.values.is_empty() {
+                            fc.values.clone()
+                        } else {
+                            fc.criteria
                                 .iter()
-                                .map(|v| FilterXmlOut { val: v.clone() })
-                                .collect(),
-                        })
+                                .filter_map(|c| match c {
+                                    FilterCriterion::Equals(FilterValue::Text(s)) => Some(s.clone()),
+                                    FilterCriterion::Equals(FilterValue::Number(n)) => {
+                                        Some(n.to_string())
+                                    }
+                                    FilterCriterion::Equals(FilterValue::Bool(b)) => {
+                                        Some(b.to_string())
+                                    }
+                                    FilterCriterion::Equals(FilterValue::DateTime(dt)) => {
+                                        Some(dt.to_string())
+                                    }
+                                    _ => None,
+                                })
+                                .collect()
+                        };
+
+                        if values.is_empty() && !include_blank {
+                            None
+                        } else {
+                            Some(FiltersXmlOut {
+                                blank: include_blank.then_some(1),
+                                filters: values
+                                    .iter()
+                                    .map(|v| FilterXmlOut { val: v.clone() })
+                                    .collect(),
+                            })
+                        }
                     },
                 })
                 .collect(),

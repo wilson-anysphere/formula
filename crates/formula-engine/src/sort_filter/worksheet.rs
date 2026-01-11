@@ -1,7 +1,9 @@
 use crate::sort_filter::sort::{compute_header_rows, compute_row_permutation};
 use crate::sort_filter::{apply_autofilter, AutoFilter, CellValue, FilterResult, RowPermutation, SortSpec};
 use crate::{parse_formula, CellAddr, LocaleConfig, ParseOptions, SerializeOptions};
-use formula_model::{CellRef, CellValue as ModelCellValue, Outline, Range, RowProperties, Worksheet};
+use formula_model::{
+    CellRef, CellValue as ModelCellValue, Outline, Range, RowProperties, SheetAutoFilter, Worksheet,
+};
 
 pub fn sort_worksheet_range(sheet: &mut Worksheet, range: Range, spec: &SortSpec) -> RowPermutation {
     let row_count = range.height() as usize;
@@ -77,7 +79,7 @@ pub fn apply_autofilter_to_outline(
     sheet: &Worksheet,
     outline: &mut Outline,
     range: Range,
-    filter: Option<&AutoFilter>,
+    filter: Option<&SheetAutoFilter>,
 ) -> FilterResult {
     let row_count = range.height() as usize;
     let col_count = range.width() as usize;
@@ -106,6 +108,13 @@ pub fn apply_autofilter_to_outline(
             hidden_sheet_rows: Vec::new(),
         };
     };
+ 
+    let Ok(filter) = AutoFilter::try_from(filter) else {
+        return FilterResult {
+            visible_rows: vec![true; row_count],
+            hidden_sheet_rows: Vec::new(),
+        };
+    };
 
     let range_ref = crate::sort_filter::RangeRef {
         start_row: range.start.row as usize,
@@ -129,7 +138,7 @@ pub fn apply_autofilter_to_outline(
     let range_data = crate::sort_filter::RangeData::new(range_ref, rows)
         .expect("worksheet range should always produce rectangular RangeData");
 
-    let result = apply_autofilter(&range_data, filter);
+    let result = apply_autofilter(&range_data, &filter);
 
     for hidden_row_0based in &result.hidden_sheet_rows {
         outline.rows.set_filter_hidden((*hidden_row_0based as u32) + 1, true);

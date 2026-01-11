@@ -16,6 +16,7 @@ mod date_system;
 mod display;
 /// Drawing primitives (images, shapes, charts, etc.).
 pub mod drawings;
+pub mod autofilter;
 mod error;
 mod formula_rewrite;
 mod formula_text;
@@ -61,6 +62,10 @@ pub use names::{
     XLNM_PRINT_TITLES,
 };
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
+pub use autofilter::{
+    DateComparison, FilterCriterion, FilterJoin, FilterValue, NumberComparison, OpaqueCustomFilter,
+    OpaqueDynamicFilter, SheetAutoFilter, TextMatch, TextMatchKind,
+};
 pub use protection::{
     hash_legacy_password, verify_legacy_password, SheetProtection, SheetProtectionAction,
     WorkbookProtection,

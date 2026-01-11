@@ -1,6 +1,8 @@
 use crate::{CellRef, Range};
 use serde::{Deserialize, Serialize};
 
+pub use crate::autofilter::{FilterColumn, SheetAutoFilter as AutoFilter, SortCondition, SortState};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableStyleInfo {
     pub name: String,
@@ -18,32 +20,6 @@ pub struct TableColumn {
     pub formula: Option<String>,
     /// Totals row formula (stored without leading '=').
     pub totals_formula: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FilterColumn {
-    /// 0-based column offset within the table's autofilter range.
-    pub col_id: u32,
-    /// Allowed values for the filter (Excel "filters" element).
-    pub values: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SortCondition {
-    pub range: Range,
-    pub descending: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SortState {
-    pub conditions: Vec<SortCondition>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AutoFilter {
-    pub range: Range,
-    pub filter_columns: Vec<FilterColumn>,
-    pub sort_state: Option<SortState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

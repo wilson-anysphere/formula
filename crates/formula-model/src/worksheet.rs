@@ -13,7 +13,8 @@ use crate::{
     CfStyleOverride, Comment, CommentError, CommentPatch, ConditionalFormattingEngine,
     DataValidation, DataValidationAssignment, DataValidationId, DifferentialFormatProvider,
     FormulaEvaluator, Hyperlink, MergeError, MergedRegions, Outline, OutlineEntry, Range, Reply,
-    SheetProtection, SheetProtectionAction, SheetSelection, SheetView, StyleTable, Table,
+    SheetAutoFilter, SheetProtection, SheetProtectionAction, SheetSelection, SheetView, StyleTable,
+    Table,
 };
 
 /// Identifier for a worksheet within a workbook.
@@ -215,6 +216,10 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tables: Vec<Table>,
 
+    /// Worksheet-level AutoFilter (`<autoFilter>`), if present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_filter: Option<SheetAutoFilter>,
+
     /// Conditional formatting rules for this worksheet.
     #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "conditional_formatting")]
     pub conditional_formatting_rules: Vec<CfRule>,
@@ -286,6 +291,7 @@ impl Worksheet {
             zoom,
             view,
             tables: Vec::new(),
+            auto_filter: None,
             conditional_formatting_rules: Vec::new(),
             conditional_formatting_dxfs: Vec::new(),
             conditional_formatting_engine: RefCell::new(ConditionalFormattingEngine::default()),
@@ -1534,6 +1540,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             cells: HashMap<CellKey, Cell>,
             #[serde(default)]
             tables: Vec<Table>,
+            #[serde(default)]
+            auto_filter: Option<SheetAutoFilter>,
             #[serde(default, alias = "conditional_formatting")]
             conditional_formatting_rules: Vec<CfRule>,
             #[serde(default)]
@@ -1683,6 +1691,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             zoom,
             view,
             tables: helper.tables,
+            auto_filter: helper.auto_filter,
             conditional_formatting_rules: helper.conditional_formatting_rules,
             conditional_formatting_dxfs: helper.conditional_formatting_dxfs,
             conditional_formatting_engine: RefCell::new(ConditionalFormattingEngine::default()),

@@ -1,11 +1,13 @@
 use crate::autofilter::parse::{parse_autofilter, AutoFilterParseError};
 use crate::autofilter::write::write_autofilter_to;
 use crate::XlsxError;
-use formula_engine::sort_filter::AutoFilter;
+use formula_model::SheetAutoFilter;
 use quick_xml::events::Event;
 use quick_xml::{Reader, Writer};
 
-pub fn parse_worksheet_autofilter(xml: &str) -> Result<Option<AutoFilter>, AutoFilterParseError> {
+pub fn parse_worksheet_autofilter(
+    xml: &str,
+) -> Result<Option<SheetAutoFilter>, AutoFilterParseError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -32,7 +34,7 @@ pub fn parse_worksheet_autofilter(xml: &str) -> Result<Option<AutoFilter>, AutoF
 
 pub fn write_worksheet_autofilter(
     worksheet_xml: &str,
-    filter: Option<&AutoFilter>,
+    filter: Option<&SheetAutoFilter>,
 ) -> Result<String, XlsxError> {
     let mut reader = Reader::from_str(worksheet_xml);
     reader.config_mut().trim_text(false);
@@ -90,27 +92,24 @@ pub fn write_worksheet_autofilter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_engine::sort_filter::{ColumnFilter, FilterCriterion, FilterJoin, FilterValue, RangeRef};
+    use formula_model::autofilter::{FilterColumn, FilterCriterion, FilterJoin, FilterValue};
+    use formula_model::{CellRef, Range};
     use pretty_assertions::assert_eq;
-    use std::collections::BTreeMap;
 
     #[test]
     fn inserts_autofilter_when_missing() {
         let worksheet_xml = r#"<worksheet><sheetData/></worksheet>"#;
-        let filter = AutoFilter {
-            range: RangeRef {
-                start_row: 0,
-                start_col: 0,
-                end_row: 2,
-                end_col: 0,
-            },
-            columns: BTreeMap::from([(
-                0,
-                ColumnFilter {
-                    join: FilterJoin::Any,
-                    criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".into()))],
-                },
-            )]),
+        let filter = SheetAutoFilter {
+            range: Range::new(CellRef::new(0, 0), CellRef::new(2, 0)),
+            filter_columns: vec![FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".into()))],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            }],
+            sort_state: None,
+            raw_xml: Vec::new(),
         };
 
         let written = write_worksheet_autofilter(worksheet_xml, Some(&filter)).unwrap();
@@ -132,28 +131,24 @@ mod tests {
     fn replaces_existing_autofilter() {
         let worksheet_xml =
             r#"<worksheet><sheetData/><autoFilter ref="A1:A3"><filterColumn colId="0"><filters><filter val="Bob"/></filters></filterColumn></autoFilter></worksheet>"#;
-        let filter = AutoFilter {
-            range: RangeRef {
-                start_row: 0,
-                start_col: 0,
-                end_row: 2,
-                end_col: 0,
-            },
-            columns: BTreeMap::from([(
-                0,
-                ColumnFilter {
-                    join: FilterJoin::Any,
-                    criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".into()))],
-                },
-            )]),
+        let filter = SheetAutoFilter {
+            range: Range::new(CellRef::new(0, 0), CellRef::new(2, 0)),
+            filter_columns: vec![FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Equals(FilterValue::Text("Alice".into()))],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            }],
+            sort_state: None,
+            raw_xml: Vec::new(),
         };
 
         let written = write_worksheet_autofilter(worksheet_xml, Some(&filter)).unwrap();
         let parsed = parse_worksheet_autofilter(&written).unwrap().unwrap();
         assert_eq!(
-            parsed.columns.get(&0).unwrap().criteria,
+            parsed.filter_columns[0].criteria,
             vec![FilterCriterion::Equals(FilterValue::Text("Alice".into()))]
         );
     }
 }
-

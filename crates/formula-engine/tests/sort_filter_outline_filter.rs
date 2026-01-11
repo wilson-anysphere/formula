@@ -1,9 +1,8 @@
-use formula_engine::sort_filter::{
-    apply_autofilter_to_outline, AutoFilter, ColumnFilter, FilterCriterion, FilterJoin, FilterValue,
-    TextMatch, TextMatchKind,
+use formula_engine::sort_filter::apply_autofilter_to_outline;
+use formula_model::{
+    CellRef, CellValue, FilterColumn, FilterCriterion, FilterJoin, FilterValue, Outline, Range,
+    SheetAutoFilter, TextMatch, TextMatchKind, Worksheet,
 };
-use formula_model::{CellRef, CellValue, Outline, Range, Worksheet};
-use std::collections::BTreeMap;
 
 #[test]
 fn autofilter_updates_outline_filter_hidden_flags_and_can_be_cleared() {
@@ -14,19 +13,21 @@ fn autofilter_updates_outline_filter_hidden_flags_and_can_be_cleared() {
 
     let range = Range::from_a1("A1:A3").unwrap();
 
-    let filter = AutoFilter {
-        range: formula_engine::sort_filter::parse_a1_range("A1:A3").unwrap(),
-        columns: BTreeMap::from([(
-            0,
-            ColumnFilter {
-                join: FilterJoin::Any,
-                criteria: vec![FilterCriterion::TextMatch(TextMatch {
-                    kind: TextMatchKind::Contains,
-                    pattern: "ali".into(),
-                    case_sensitive: false,
-                })],
-            },
-        )]),
+    let filter = SheetAutoFilter {
+        range,
+        filter_columns: vec![FilterColumn {
+            col_id: 0,
+            join: FilterJoin::Any,
+            criteria: vec![FilterCriterion::TextMatch(TextMatch {
+                kind: TextMatchKind::Contains,
+                pattern: "ali".into(),
+                case_sensitive: false,
+            })],
+            values: Vec::new(),
+            raw_xml: Vec::new(),
+        }],
+        sort_state: None,
+        raw_xml: Vec::new(),
     };
 
     let mut outline = Outline::default();
@@ -56,15 +57,17 @@ fn autofilter_preserves_user_hidden_rows() {
 
     let range = Range::from_a1("A1:A3").unwrap();
 
-    let filter = AutoFilter {
-        range: formula_engine::sort_filter::parse_a1_range("A1:A3").unwrap(),
-        columns: BTreeMap::from([(
-            0,
-            ColumnFilter {
-                join: FilterJoin::Any,
-                criteria: vec![FilterCriterion::Equals(FilterValue::Text("a".into()))],
-            },
-        )]),
+    let filter = SheetAutoFilter {
+        range,
+        filter_columns: vec![FilterColumn {
+            col_id: 0,
+            join: FilterJoin::Any,
+            criteria: vec![FilterCriterion::Equals(FilterValue::Text("a".into()))],
+            values: Vec::new(),
+            raw_xml: Vec::new(),
+        }],
+        sort_state: None,
+        raw_xml: Vec::new(),
     };
 
     let mut outline = Outline::default();
@@ -81,4 +84,3 @@ fn autofilter_preserves_user_hidden_rows() {
     assert!(outline.rows.entry(3).hidden.user);
     assert!(!outline.rows.entry(3).hidden.filter);
 }
-
