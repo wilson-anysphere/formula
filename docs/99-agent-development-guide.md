@@ -377,7 +377,10 @@ export MAKEFLAGS="-j4"
 export RUSTFLAGS="-C codegen-units=4"
 
 # Repo-local Cargo home (avoids cross-agent ~/.cargo lock contention)
-if [ -z "${CARGO_HOME:-}" ]; then
+# Some runners pre-set `CARGO_HOME=$HOME/.cargo`; treat that as "unset" so we
+# still get per-repo isolation by default.
+DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
+if [ -z "${CARGO_HOME:-}" ] || [ "${CARGO_HOME}" = "${DEFAULT_GLOBAL_CARGO_HOME}" ]; then
   export CARGO_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/cargo-home"
 fi
 mkdir -p "$CARGO_HOME"
