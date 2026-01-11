@@ -128,6 +128,64 @@ test("QueryEngine: cache key varies by credentialId and does not embed raw secre
   assert.equal(stableStringify(signature).includes(secret), false);
 });
 
+test("QueryEngine: reads legacy v1 DataTable cache entries", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readText: async () => {
+        readCount += 1;
+        return ["Region,Sales", "East,100", "West,200"].join("\n");
+      },
+    },
+  });
+
+  const query = {
+    id: "q_sales_legacy_cache",
+    name: "Sales",
+    source: { type: "csv", path: "/tmp/sales.csv", options: { hasHeaders: true } },
+    steps: [],
+  };
+
+  const cacheKey = await engine.getCacheKey(query, {}, {});
+  assert.ok(cacheKey);
+
+  const serializedTable = {
+    columns: [
+      { name: "Region", type: "string" },
+      { name: "Sales", type: "number" },
+    ],
+    rows: [
+      ["East", 100],
+      ["West", 200],
+    ],
+  };
+
+  await cache.set(cacheKey, {
+    version: 1,
+    table: serializedTable,
+    meta: {
+      queryId: query.id,
+      refreshedAtMs: 0,
+      sources: [],
+      outputSchema: { columns: serializedTable.columns, inferred: true },
+      outputRowCount: serializedTable.rows.length,
+    },
+  });
+
+  const result = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(result.meta.cache?.hit, true);
+  assert.equal(readCount, 0, "cache hit should not re-read the source");
+  assert.deepEqual(result.table.toGrid(), [
+    ["Region", "Sales"],
+    ["East", 100],
+    ["West", 200],
+  ]);
+});
+
 test("QueryEngine: corrupted cache entry is treated as a miss and refreshed", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });
