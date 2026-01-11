@@ -32,6 +32,26 @@ export default {
       ]
     },
     {
+      "name": "CHOOSECOLS",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "CHOOSEROWS",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "CLEAN",
       "min_args": 1,
       "max_args": 1,
@@ -156,6 +176,18 @@ export default {
       ]
     },
     {
+      "name": "DROP",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "EDATE",
       "min_args": 2,
       "max_args": 2,
@@ -261,6 +293,16 @@ export default {
       "max_args": 1,
       "volatility": "non_volatile",
       "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "HSTACK",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
       "arg_types": [
         "any"
       ]
@@ -849,6 +891,16 @@ export default {
       ]
     },
     {
+      "name": "SORTBY",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "SUBSTITUTE",
       "min_args": 3,
       "max_args": 4,
@@ -903,6 +955,18 @@ export default {
       ]
     },
     {
+      "name": "TAKE",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "TEXT",
       "min_args": 2,
       "max_args": 2,
@@ -948,12 +1012,36 @@ export default {
       ]
     },
     {
+      "name": "TOCOL",
+      "min_args": 1,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "bool"
+      ]
+    },
+    {
       "name": "TODAY",
       "min_args": 0,
       "max_args": 0,
       "volatility": "volatile",
       "return_type": "number",
       "arg_types": []
+    },
+    {
+      "name": "TOROW",
+      "min_args": 1,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "bool"
+      ]
     },
     {
       "name": "TRANSPOSE",
@@ -1031,6 +1119,16 @@ export default {
       ]
     },
     {
+      "name": "VSTACK",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "WEEKDAY",
       "min_args": 1,
       "max_args": 2,
@@ -1074,6 +1172,30 @@ export default {
         "number",
         "number",
         "any",
+        "any"
+      ]
+    },
+    {
+      "name": "WRAPCOLS",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "any"
+      ]
+    },
+    {
+      "name": "WRAPROWS",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
         "any"
       ]
     },

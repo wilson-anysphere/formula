@@ -261,3 +261,246 @@ fn sort_rejects_invalid_order_and_index() {
         Value::Error(ErrorKind::Value)
     );
 }
+
+#[test]
+fn sort_treats_blank_optional_args_as_defaults() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+
+    // Leave sort_order blank to reach by_col argument; Excel treats this as omitted.
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SORT(A1:A3,1,,FALSE)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C3"), Value::Number(3.0));
+}
+
+#[test]
+fn sortby_sorts_rows_and_columns() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 20.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SORTBY(A1:A3,B1:B3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(1.0));
+
+    // Column sort: sort the columns of A1:C1 based on a 1x3 key vector.
+    engine.set_cell_value("Sheet1", "F1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "G1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "H1", 3.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "F2", "=SORTBY(F1:H1,{3,1,2})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "F2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H2"), Value::Number(1.0));
+}
+
+#[test]
+fn take_and_drop_slice_arrays() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1,2,3;4,5,6;7,8,9}")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    engine
+        .set_cell_formula("Sheet1", "E1", "=TAKE(A1:C3,2,-2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F2"), Value::Number(6.0));
+
+    engine
+        .set_cell_formula("Sheet1", "G1", "=TAKE(A1:C3,-1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(7.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Number(8.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I1"), Value::Number(9.0));
+
+    engine
+        .set_cell_formula("Sheet1", "E4", "=DROP(A1:C3,1,1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E4"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F4"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E5"), Value::Number(8.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F5"), Value::Number(9.0));
+
+    engine
+        .set_cell_formula("Sheet1", "G4", "=DROP(A1:C3,-1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "G4"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H4"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I4"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G5"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H5"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I5"), Value::Number(6.0));
+}
+
+#[test]
+fn choosecols_and_chooserows_support_negative_indices() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1,2,3;4,5,6}")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    engine
+        .set_cell_formula("Sheet1", "E1", "=CHOOSECOLS(A1:C2,3,1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F2"), Value::Number(4.0));
+
+    engine
+        .set_cell_formula("Sheet1", "G1", "=CHOOSECOLS(A1:C2,-1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(6.0));
+
+    engine
+        .set_cell_formula("Sheet1", "I1", "=CHOOSEROWS(A1:C2,-1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "I1"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "J1"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "K1"), Value::Number(6.0));
+
+    engine
+        .set_cell_formula("Sheet1", "L1", "=CHOOSECOLS(A1:C2,0)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "L1"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn hstack_and_vstack_fill_missing_with_na() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=HSTACK({1;2},{3;4;5})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(4.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A3"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Number(5.0));
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=VSTACK({1,2},{3})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(3.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E2"),
+        Value::Error(ErrorKind::NA)
+    );
+}
+
+#[test]
+fn tocol_and_torow_flatten_arrays_with_ignore_modes() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TOCOL({1,2;3,4})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(4.0));
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=TOCOL({1,,2},1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
+
+    engine
+        .set_cell_formula("Sheet1", "E1", "=TOCOL({1,#VALUE!,2},2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(2.0));
+
+    engine
+        .set_cell_formula("Sheet1", "G1", "=TOROW({1,2;3,4},0,TRUE)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    // Scan by column when the third argument is TRUE.
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "J1"), Value::Number(4.0));
+}
+
+#[test]
+fn wraprows_and_wrapcols_wrap_vectors_with_padding() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=WRAPROWS({1;2;3;4;5},2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(5.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B3"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=WRAPCOLS({1;2;3;4;5},2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(4.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "F2"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    engine
+        .set_cell_formula("Sheet1", "H1", "=WRAPROWS({1;2;3},2,0)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "I2"), Value::Number(0.0));
+}

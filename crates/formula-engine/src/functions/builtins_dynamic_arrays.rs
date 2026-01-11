@@ -123,37 +123,19 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let sort_index = if args.len() >= 2 {
-        match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        }
-    } else {
-        1
+    let sort_index = match eval_optional_i64(ctx, args.get(1), 1) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
-    let sort_order = if args.len() >= 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        }
-    } else {
-        1
+    let descending = match eval_optional_sort_descending(ctx, args.get(2), false) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
-    let by_col = if args.len() >= 4 {
-        match eval_scalar_arg(ctx, &args[3]).coerce_to_bool() {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        }
-    } else {
-        false
-    };
-
-    let descending = match sort_order {
-        1 => false,
-        -1 => true,
-        _ => return Value::Error(ErrorKind::Value),
+    let by_col = match eval_optional_bool(ctx, args.get(3), false) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     if by_col {
@@ -214,6 +196,136 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
     for &row in &order {
         for col in 0..array.cols {
+            values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+        }
+    }
+
+    Value::Array(Array::new(array.rows, array.cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "SORTBY",
+        min_args: 2,
+        max_args: 255,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: sortby_fn,
+    }
+}
+
+fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let mut key_arrays = Vec::new();
+    let mut descending_flags = Vec::new();
+
+    let mut idx = 1usize;
+    while idx < args.len() {
+        let by_array = match eval_array_arg(ctx, &args[idx]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        idx += 1;
+
+        let desc = match args.get(idx) {
+            Some(order_expr) => {
+                idx += 1;
+                match eval_optional_sort_descending(ctx, Some(order_expr), false) {
+                    Ok(v) => v,
+                    Err(e) => return Value::Error(e),
+                }
+            }
+            None => false,
+        };
+
+        key_arrays.push(by_array);
+        descending_flags.push(desc);
+    }
+
+    let Some(first_key) = key_arrays.first() else {
+        return Value::Error(ErrorKind::Value);
+    };
+
+    let sorts_rows = first_key.rows == array.rows && first_key.cols == 1;
+    let sorts_cols = first_key.rows == 1 && first_key.cols == array.cols;
+    if !sorts_rows && !sorts_cols {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    if sorts_rows {
+        for key in &key_arrays {
+            if key.rows != array.rows || key.cols != 1 {
+                return Value::Error(ErrorKind::Value);
+            }
+        }
+
+        let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(key_arrays.len());
+        for key in key_arrays {
+            let mut out = Vec::with_capacity(array.rows);
+            for row in 0..array.rows {
+                out.push(sort_key(key.get(row, 0).unwrap_or(&Value::Blank)));
+            }
+            keys.push(out);
+        }
+
+        let mut order: Vec<usize> = (0..array.rows).collect();
+        order.sort_by(|&a, &b| {
+            for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
+                let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+            }
+            a.cmp(&b)
+        });
+
+        let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+        for &row in &order {
+            for col in 0..array.cols {
+                values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+            }
+        }
+
+        return Value::Array(Array::new(array.rows, array.cols, values));
+    }
+
+    // Sort columns.
+    for key in &key_arrays {
+        if key.rows != 1 || key.cols != array.cols {
+            return Value::Error(ErrorKind::Value);
+        }
+    }
+
+    let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(key_arrays.len());
+    for key in key_arrays {
+        let mut out = Vec::with_capacity(array.cols);
+        for col in 0..array.cols {
+            out.push(sort_key(key.get(0, col).unwrap_or(&Value::Blank)));
+        }
+        keys.push(out);
+    }
+
+    let mut order: Vec<usize> = (0..array.cols).collect();
+    order.sort_by(|&a, &b| {
+        for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
+            let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        }
+        a.cmp(&b)
+    });
+
+    let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+    for row in 0..array.rows {
+        for &col in &order {
             values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
         }
     }
@@ -458,6 +570,353 @@ fn unique_columns(array: Array, exactly_once: bool) -> Value {
     Value::Array(Array::new(array.rows, selected.len(), values))
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "TAKE",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: take_fn,
+    }
+}
+
+fn take_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let cols = match eval_optional_i64(
+        ctx,
+        args.get(2),
+        i64::try_from(array.cols).unwrap_or(i64::MAX),
+    ) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let (row_start, out_rows) = take_span(array.rows, rows);
+    let (col_start, out_cols) = take_span(array.cols, cols);
+
+    let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    for r in 0..out_rows {
+        for c in 0..out_cols {
+            values.push(
+                array
+                    .get(row_start.saturating_add(r), col_start.saturating_add(c))
+                    .cloned()
+                    .unwrap_or(Value::Blank),
+            );
+        }
+    }
+
+    Value::Array(Array::new(out_rows, out_cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "DROP",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: drop_fn,
+    }
+}
+
+fn drop_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let cols = match eval_optional_i64(ctx, args.get(2), 0) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let (row_start, out_rows) = drop_span(array.rows, rows);
+    let (col_start, out_cols) = drop_span(array.cols, cols);
+
+    let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    for r in 0..out_rows {
+        for c in 0..out_cols {
+            values.push(
+                array
+                    .get(row_start.saturating_add(r), col_start.saturating_add(c))
+                    .cloned()
+                    .unwrap_or(Value::Blank),
+            );
+        }
+    }
+
+    Value::Array(Array::new(out_rows, out_cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "CHOOSECOLS",
+        min_args: 2,
+        max_args: 255,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: choosecols_fn,
+    }
+}
+
+fn choosecols_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let mut cols = Vec::with_capacity(args.len().saturating_sub(1));
+    for expr in &args[1..] {
+        let idx = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let Some(col) = normalize_index(idx, array.cols) else {
+            return Value::Error(ErrorKind::Value);
+        };
+        cols.push(col);
+    }
+
+    let mut values = Vec::with_capacity(array.rows.saturating_mul(cols.len()));
+    for row in 0..array.rows {
+        for &col in &cols {
+            values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+        }
+    }
+
+    Value::Array(Array::new(array.rows, cols.len(), values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "CHOOSEROWS",
+        min_args: 2,
+        max_args: 255,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: chooserows_fn,
+    }
+}
+
+fn chooserows_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let mut rows = Vec::with_capacity(args.len().saturating_sub(1));
+    for expr in &args[1..] {
+        let idx = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let Some(row) = normalize_index(idx, array.rows) else {
+            return Value::Error(ErrorKind::Value);
+        };
+        rows.push(row);
+    }
+
+    let mut values = Vec::with_capacity(rows.len().saturating_mul(array.cols));
+    for &row in &rows {
+        for col in 0..array.cols {
+            values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+        }
+    }
+
+    Value::Array(Array::new(rows.len(), array.cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "HSTACK",
+        min_args: 1,
+        max_args: 255,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: hstack_fn,
+    }
+}
+
+fn hstack_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let mut arrays = Vec::with_capacity(args.len());
+    for expr in args {
+        let array = match eval_array_arg(ctx, expr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        arrays.push(array);
+    }
+
+    let out_rows = arrays.iter().map(|a| a.rows).max().unwrap_or(0);
+    let out_cols: usize = arrays.iter().map(|a| a.cols).sum();
+
+    let mut values = vec![Value::Error(ErrorKind::NA); out_rows.saturating_mul(out_cols)];
+    let mut col_offset = 0usize;
+    for array in arrays {
+        for row in 0..array.rows {
+            for col in 0..array.cols {
+                let idx = row
+                    .saturating_mul(out_cols)
+                    .saturating_add(col_offset.saturating_add(col));
+                if let Some(dst) = values.get_mut(idx) {
+                    *dst = array.get(row, col).cloned().unwrap_or(Value::Blank);
+                }
+            }
+        }
+        col_offset = col_offset.saturating_add(array.cols);
+    }
+
+    Value::Array(Array::new(out_rows, out_cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "VSTACK",
+        min_args: 1,
+        max_args: 255,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: vstack_fn,
+    }
+}
+
+fn vstack_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let mut arrays = Vec::with_capacity(args.len());
+    for expr in args {
+        let array = match eval_array_arg(ctx, expr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        arrays.push(array);
+    }
+
+    let out_rows: usize = arrays.iter().map(|a| a.rows).sum();
+    let out_cols = arrays.iter().map(|a| a.cols).max().unwrap_or(0);
+
+    let mut values = vec![Value::Error(ErrorKind::NA); out_rows.saturating_mul(out_cols)];
+    let mut row_offset = 0usize;
+    for array in arrays {
+        for row in 0..array.rows {
+            let dst_row = row_offset.saturating_add(row);
+            for col in 0..array.cols {
+                let idx = dst_row.saturating_mul(out_cols).saturating_add(col);
+                if let Some(dst) = values.get_mut(idx) {
+                    *dst = array.get(row, col).cloned().unwrap_or(Value::Blank);
+                }
+            }
+        }
+        row_offset = row_offset.saturating_add(array.rows);
+    }
+
+    Value::Array(Array::new(out_rows, out_cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "TOCOL",
+        min_args: 1,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Bool],
+        implementation: tocol_fn,
+    }
+}
+
+fn tocol_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    to_vector_fn(ctx, args, true)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "TOROW",
+        min_args: 1,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Bool],
+        implementation: torow_fn,
+    }
+}
+
+fn torow_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    to_vector_fn(ctx, args, false)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "WRAPROWS",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Any],
+        implementation: wraprows_fn,
+    }
+}
+
+fn wraprows_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    wrap_vector_fn(ctx, args, true)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "WRAPCOLS",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Any],
+        implementation: wrapcols_fn,
+    }
+}
+
+fn wrapcols_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    wrap_vector_fn(ctx, args, false)
+}
+
 fn eval_array_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Array, ErrorKind> {
     arg_value_to_array(ctx, ctx.eval_arg(expr))
 }
@@ -483,4 +942,250 @@ fn arg_value_to_array(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Array,
         }
         ArgValue::ReferenceUnion(_) => Err(ErrorKind::Value),
     }
+}
+
+fn eval_optional_i64(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+    default: i64,
+) -> Result<i64, ErrorKind> {
+    let Some(expr) = expr else {
+        return Ok(default);
+    };
+    let v = eval_scalar_arg(ctx, expr);
+    match v {
+        Value::Blank => Ok(default),
+        Value::Error(e) => Err(e),
+        other => other.coerce_to_i64(),
+    }
+}
+
+fn eval_optional_bool(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+    default: bool,
+) -> Result<bool, ErrorKind> {
+    let Some(expr) = expr else {
+        return Ok(default);
+    };
+    let v = eval_scalar_arg(ctx, expr);
+    match v {
+        Value::Blank => Ok(default),
+        Value::Error(e) => Err(e),
+        other => other.coerce_to_bool(),
+    }
+}
+
+fn eval_optional_sort_descending(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+    default_descending: bool,
+) -> Result<bool, ErrorKind> {
+    let Some(expr) = expr else {
+        return Ok(default_descending);
+    };
+    let v = eval_scalar_arg(ctx, expr);
+    match v {
+        Value::Blank => Ok(default_descending),
+        Value::Error(e) => Err(e),
+        other => match other.coerce_to_i64() {
+            Ok(1) => Ok(false),
+            Ok(-1) => Ok(true),
+            Ok(_) => Err(ErrorKind::Value),
+            Err(e) => Err(e),
+        },
+    }
+}
+
+fn take_span(len: usize, n: i64) -> (usize, usize) {
+    if len == 0 {
+        return (0, 0);
+    }
+    if n == 0 {
+        return (0, 0);
+    }
+
+    let len_u64 = len as u64;
+    let mag = n.unsigned_abs().min(len_u64);
+    let count = usize::try_from(mag).unwrap_or(len);
+
+    if n.is_negative() {
+        (len.saturating_sub(count), count)
+    } else {
+        (0, count)
+    }
+}
+
+fn drop_span(len: usize, n: i64) -> (usize, usize) {
+    if len == 0 {
+        return (0, 0);
+    }
+    if n == 0 {
+        return (0, len);
+    }
+
+    let len_u64 = len as u64;
+    let mag = n.unsigned_abs().min(len_u64);
+    let drop = usize::try_from(mag).unwrap_or(len);
+
+    if n.is_negative() {
+        (0, len.saturating_sub(drop))
+    } else {
+        (drop.min(len), len.saturating_sub(drop))
+    }
+}
+
+fn normalize_index(index: i64, len: usize) -> Option<usize> {
+    if len == 0 || index == 0 {
+        return None;
+    }
+
+    let len_i64 = i64::try_from(len).ok()?;
+    let pos = if index > 0 {
+        index - 1
+    } else {
+        len_i64 + index
+    };
+    if pos < 0 || pos >= len_i64 {
+        return None;
+    }
+    usize::try_from(pos).ok()
+}
+
+fn to_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], to_col: bool) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let ignore = match eval_optional_i64(ctx, args.get(1), 0) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let ignore_blanks = ignore == 1 || ignore == 3;
+    let ignore_errors = ignore == 2 || ignore == 3;
+    if ignore < 0 || ignore > 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let scan_by_column = match eval_optional_bool(ctx, args.get(2), false) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+    let push_cell = |v: Value, out: &mut Vec<Value>| {
+        if ignore_blanks && matches!(v, Value::Blank) {
+            return;
+        }
+        if ignore_errors && matches!(v, Value::Error(_)) {
+            return;
+        }
+        out.push(v);
+    };
+
+    if scan_by_column {
+        for col in 0..array.cols {
+            for row in 0..array.rows {
+                push_cell(
+                    array.get(row, col).cloned().unwrap_or(Value::Blank),
+                    &mut values,
+                );
+            }
+        }
+    } else {
+        for row in 0..array.rows {
+            for col in 0..array.cols {
+                push_cell(
+                    array.get(row, col).cloned().unwrap_or(Value::Blank),
+                    &mut values,
+                );
+            }
+        }
+    }
+
+    if values.is_empty() {
+        return Value::Array(Array::new(0, 0, Vec::new()));
+    }
+
+    if to_col {
+        Value::Array(Array::new(values.len(), 1, values))
+    } else {
+        Value::Array(Array::new(1, values.len(), values))
+    }
+}
+
+fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: bool) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let wrap_count = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    if wrap_count <= 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let wrap_count = match usize::try_from(wrap_count) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+
+    let pad_with = if let Some(expr) = args.get(2) {
+        let v = eval_scalar_arg(ctx, expr);
+        match v {
+            Value::Error(e) => return Value::Error(e),
+            Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
+            other => other,
+        }
+    } else {
+        Value::Error(ErrorKind::NA)
+    };
+
+    let mut flat = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+    for row in 0..array.rows {
+        for col in 0..array.cols {
+            flat.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+        }
+    }
+
+    if flat.is_empty() {
+        return Value::Array(Array::new(0, 0, Vec::new()));
+    }
+
+    if wrap_rows {
+        let out_cols = wrap_count;
+        let out_rows = flat.len().div_ceil(out_cols);
+
+        let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+        for idx in 0..out_rows.saturating_mul(out_cols) {
+            if let Some(v) = flat.get(idx).cloned() {
+                values.push(v);
+            } else {
+                values.push(pad_with.clone());
+            }
+        }
+
+        return Value::Array(Array::new(out_rows, out_cols, values));
+    }
+
+    let out_rows = wrap_count;
+    let out_cols = flat.len().div_ceil(out_rows);
+
+    let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    for row in 0..out_rows {
+        for col in 0..out_cols {
+            let idx = col.saturating_mul(out_rows).saturating_add(row);
+            if let Some(v) = flat.get(idx).cloned() {
+                values.push(v);
+            } else {
+                values.push(pad_with.clone());
+            }
+        }
+    }
+
+    Value::Array(Array::new(out_rows, out_cols, values))
 }
