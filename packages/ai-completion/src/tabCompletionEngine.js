@@ -358,7 +358,9 @@ export class TabCompletionEngine {
       const name = (entry?.name ?? "").toString();
       if (!name) continue;
       if (rawPrefix && !startsWithIgnoreCase(name, rawPrefix)) continue;
-      addReplacement(name, { confidence: clamp01(0.65 + ratioBoost(rawPrefix, name) * 0.25) });
+      addReplacement(completeIdentifier(name, rawPrefix), {
+        confidence: clamp01(0.65 + ratioBoost(rawPrefix, name) * 0.25),
+      });
     }
 
     // 2) Structured references (tables)
@@ -374,11 +376,14 @@ export class TabCompletionEngine {
     const sheetNames = await safeProviderCall(provider.getSheetNames);
     const sheetArg = splitSheetQualifiedArg(rawPrefix);
     if (sheetArg) {
+      const typedQuoted = rawPrefix.startsWith("'");
       const matchingSheets = sheetNames
         .filter((s) => typeof s === "string" && s.length > 0)
         .filter((s) => startsWithIgnoreCase(s, sheetArg.sheetPrefix));
 
       for (const sheetName of matchingSheets) {
+        if (needsSheetQuotes(sheetName) && !typedQuoted) continue;
+
         const rangeCandidates = suggestRanges({
           currentArgText: sheetArg.rangePrefix,
           cellRef,
@@ -386,8 +391,7 @@ export class TabCompletionEngine {
           sheetName,
         });
         for (const candidate of rangeCandidates) {
-          const sheetPrefix = formatSheetPrefix(sheetName);
-          addReplacement(`${sheetPrefix}${candidate.range}`, {
+          addReplacement(`${rawPrefix}${candidate.range.slice(sheetArg.rangePrefix.length)}`, {
             confidence: Math.min(0.85, candidate.confidence + 0.05),
           });
         }
@@ -419,7 +423,7 @@ export class TabCompletionEngine {
       const name = (entry?.name ?? "").toString();
       if (!name) continue;
       if (!startsWithIgnoreCase(name, prefix)) continue;
-      const replacement = name;
+      const replacement = completeIdentifier(name, prefix);
       const newText = replaceSpan(input, token.start, token.end, replacement);
       suggestions.push({
         text: newText,
@@ -562,6 +566,29 @@ function applyNameCase(name, typedPrefix) {
   return name;
 }
 
+function applyIdentifierCase(name, typedPrefix) {
+  if (!typedPrefix) return name;
+
+  // If the user is typing in uppercase, treat that as an explicit signal to
+  // uppercase the full identifier (common for people who prefer Excel-style
+  // uppercase references).
+  if (typedPrefix === typedPrefix.toUpperCase()) return name.toUpperCase();
+
+  // If the user is typing in lowercase, preserve internal capitalization for
+  // CamelCase identifiers (e.g. named ranges), but avoid producing "suM"-style
+  // completions for ALL-CAPS identifiers by downcasing them fully.
+  if (typedPrefix === typedPrefix.toLowerCase() && name === name.toUpperCase()) return name.toLowerCase();
+
+  return name;
+}
+
+function completeIdentifier(name, typedPrefix) {
+  if (!typedPrefix) return name;
+  const cased = applyIdentifierCase(name, typedPrefix);
+  if (typedPrefix.length >= cased.length) return typedPrefix;
+  return `${typedPrefix}${cased.slice(typedPrefix.length)}`;
+}
+
 /**
  * @param {Suggestion[]} suggestions
  */
@@ -652,8 +679,12 @@ function splitSheetQualifiedArg(text) {
   return { sheetPrefix, rangePrefix };
 }
 
+function needsSheetQuotes(sheetName) {
+  return /[^A-Za-z0-9_]/.test(sheetName);
+}
+
 function formatSheetPrefix(sheetName) {
-  const needsQuotes = /[^A-Za-z0-9_]/.test(sheetName);
+  const needsQuotes = needsSheetQuotes(sheetName);
   if (!needsQuotes) return `${sheetName}!`;
   const escaped = sheetName.replaceAll("'", "''");
   return `'${escaped}'!`;
@@ -680,16 +711,17 @@ function suggestStructuredRefs(prefix, tables) {
       const colName = (col ?? "").toString();
       if (!colName) continue;
       if (colPrefix && !startsWithIgnoreCase(colName, colPrefix)) continue;
-      const text = `${tableName}[${colName}]`;
+      const canonical = `${tableName}[${colName}]`;
+      if (trimmed && !startsWithIgnoreCase(canonical, trimmed)) continue;
+      const text = completeIdentifier(canonical, trimmed);
       out.push({
         text,
         confidence: clamp01(0.6 + ratioBoost(colPrefix || tablePrefix, colName || tableName) * 0.25),
       });
       // Lower confidence alternative that includes #All.
-      out.push({
-        text: `${tableName}[[#All],[${colName}]]`,
-        confidence: 0.35,
-      });
+      const allCanonical = `${tableName}[[#All],[${colName}]]`;
+      if (trimmed && !startsWithIgnoreCase(allCanonical, trimmed)) continue;
+      out.push({ text: completeIdentifier(allCanonical, trimmed), confidence: 0.35 });
     }
   }
 

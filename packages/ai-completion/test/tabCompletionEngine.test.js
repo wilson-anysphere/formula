@@ -285,6 +285,29 @@ test("Named ranges are suggested in range arguments (=SUM(Sal → SalesData)", a
   );
 });
 
+test("Named ranges preserve the typed prefix case (lowercase)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [{ name: "SalesData", range: "Sheet1!A1:A10" }],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(sal";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(salesData)"),
+    `Expected a named-range suggestion that preserves prefix case, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Local-model prompt formatting is stable and completion inserts at the cursor", async () => {
   /** @type {string | null} */
   let seenPrompt = null;
@@ -374,6 +397,29 @@ test("Structured references are suggested from table schemas", async () => {
   );
 });
 
+test("Structured references preserve the typed prefix case (lowercase)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [{ name: "Table1", columns: ["Amount"] }],
+    },
+  });
+
+  const currentInput = "=SUM(tab";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(table1[Amount])"),
+    `Expected a structured reference suggestion that preserves prefix case, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
@@ -406,6 +452,40 @@ test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   assert.ok(
     suggestions.some((s) => s.text === "=SUM(Sheet2!A1:A10)"),
     `Expected a sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Sheet-qualified ranges preserve the typed prefix case for sheet names", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(sheet2!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(sheet2!A1:A10)"),
+    `Expected a sheet-qualified range suggestion that preserves prefix case, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
@@ -477,7 +557,7 @@ test("Sheet-qualified ranges escape apostrophes in sheet names", async () => {
   );
 });
 
-test("Sheet-qualified range suggestions auto-quote unquoted sheet names with spaces", async () => {
+test("Sheet-qualified range suggestions do not attempt to add missing quotes (not a pure insertion)", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`My Sheet!A${r}`] = r;
 
@@ -497,7 +577,9 @@ test("Sheet-qualified range suggestions auto-quote unquoted sheet names with spa
     },
   });
 
-  // User typed an invalid unquoted sheet name; completion should fix it by quoting.
+  // We intentionally don't suggest quote-fixing completions here because adding
+  // a leading quote would modify text *before* the cursor (the formula bar only
+  // shows/apply "pure insertion" completions).
   const currentInput = "=SUM(My Sheet!A";
   const suggestions = await engine.getSuggestions({
     currentInput,
@@ -506,42 +588,5 @@ test("Sheet-qualified range suggestions auto-quote unquoted sheet names with spa
     surroundingCells: cellContext,
   });
 
-  assert.ok(
-    suggestions.some((s) => s.text === "=SUM('My Sheet'!A1:A10)"),
-    `Expected an auto-quoted sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
-  );
-});
-
-test("Sheet-qualified range suggestions auto-quote unquoted sheet names with apostrophes", async () => {
-  const values = {};
-  for (let r = 1; r <= 10; r++) values[`Bob's Sheet!A${r}`] = r;
-
-  const cellContext = {
-    getCellValue(row, col, sheetName) {
-      const sheet = sheetName ?? "Sheet1";
-      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
-      return values[a1] ?? null;
-    },
-  };
-
-  const engine = new TabCompletionEngine({
-    schemaProvider: {
-      getNamedRanges: () => [],
-      getSheetNames: () => ["Sheet1", "Bob's Sheet"],
-      getTables: () => [],
-    },
-  });
-
-  const currentInput = "=SUM(Bob's Sheet!A";
-  const suggestions = await engine.getSuggestions({
-    currentInput,
-    cursorPosition: currentInput.length,
-    cellRef: { row: 10, col: 1 },
-    surroundingCells: cellContext,
-  });
-
-  assert.ok(
-    suggestions.some((s) => s.text === "=SUM('Bob''s Sheet'!A1:A10)"),
-    `Expected an auto-quoted sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
-  );
+  assert.equal(suggestions.length, 0);
 });
