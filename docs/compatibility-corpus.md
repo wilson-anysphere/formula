@@ -71,6 +71,7 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
   - redacts author fields in `docProps/core.xml` and sensitive fields in `docProps/app.xml`
   - removes workbook defined names (`<definedNames>`) which often embed business terms
   - scrubs comments (`xl/comments*.xml`), headers/footers, drawing text, and table/table-column names
+    - structured references in formulas are rewritten to match sanitized table/column names
   - rewrites/scrubs `docProps/app.xml` `TitlesOfParts` (sheet title metadata)
 
 As a defense-in-depth safety net, `tools/corpus/sanitize.py` also includes a **leak scanner**

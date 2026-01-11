@@ -58,6 +58,21 @@ class LeakScanResult:
         return not self.findings
 
 
+@dataclass(frozen=True)
+class TableContext:
+    """A rectangular A1 range plus a per-table column rename map.
+
+    Used to rewrite *unqualified* structured references inside table formulas
+    (e.g. `[@Amount]`) based on which table the formula cell belongs to.
+    """
+
+    start_row: int
+    end_row: int
+    start_col: int
+    end_col: int
+    column_map: dict[str, str]
+
+
 def _hash_text(value: str, *, salt: str) -> str:
     # Use a stable, corpus-level salt so identical strings hash identically across files,
     # but remain resistant to rainbow-table attacks when the salt is private.
@@ -301,6 +316,7 @@ def _sanitize_table(
     options: SanitizeOptions,
     table_rename_map: dict[str, str] | None = None,
     table_column_rename_map: dict[str, dict[str, str]] | None = None,
+    sheet_rename_map: dict[str, str] | None = None,
 ) -> bytes:
     root = ET.fromstring(xml)
     if root.tag.split("}")[-1] != "table":
@@ -337,6 +353,22 @@ def _sanitize_table(
                 label = col.attrib.get("totalsRowLabel")
                 if label:
                     col.attrib["totalsRowLabel"] = _sanitize_text(label, options=options)
+
+            # Table column formulas can include unqualified structured references like `[@Col]`.
+            # Rewrite them to match the sanitized column names.
+            for el in root.iter():
+                if el.tag.split("}")[-1] not in {"calculatedColumnFormula", "totalsRowFormula"}:
+                    continue
+                if not el.text:
+                    continue
+                el.text = _sanitize_formula_text(
+                    el.text,
+                    options=options,
+                    sheet_rename_map=sheet_rename_map or {},
+                    table_rename_map=table_rename_map or {},
+                    table_column_rename_map=table_column_rename_map or {},
+                )
+                el.text = _rewrite_unqualified_structured_refs(el.text, column_map=col_map)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -740,6 +772,99 @@ def _rewrite_structured_refs_for_table(
     return "".join(out)
 
 
+def _split_formula_by_string_literals(formula: str) -> list[tuple[str, bool]]:
+    """Return [(segment, is_string_literal)] preserving order."""
+
+    out: list[tuple[str, bool]] = []
+    i = 0
+    while i < len(formula):
+        if formula[i] != '"':
+            j = i
+            while j < len(formula) and formula[j] != '"':
+                j += 1
+            out.append((formula[i:j], False))
+            i = j
+            continue
+
+        # String literal (Excel): "..." with doubled quotes escaping.
+        j = i + 1
+        while j < len(formula):
+            if formula[j] == '"':
+                if j + 1 < len(formula) and formula[j + 1] == '"':
+                    j += 2
+                    continue
+                j += 1
+                break
+            j += 1
+        out.append((formula[i:j], True))
+        i = j
+
+    return out
+
+
+def _rewrite_unqualified_structured_refs(formula: str, *, column_map: dict[str, str]) -> str:
+    """Rewrite `[@Col]` / `[Col]` references outside of string literals."""
+
+    if not column_map:
+        return formula
+
+    replacements = sorted(column_map.items(), key=lambda kv: len(kv[0]), reverse=True)
+    parts: list[str] = []
+    for seg, is_string in _split_formula_by_string_literals(formula):
+        if is_string:
+            parts.append(seg)
+            continue
+        for old, new in replacements:
+            if not old:
+                continue
+            seg = seg.replace(f"[@{old}]", f"[@{new}]")
+            seg = seg.replace(f"[{old}]", f"[{new}]")
+        parts.append(seg)
+    return "".join(parts)
+
+
+_A1_CELL_RE = re.compile(r"^\$?([A-Za-z]+)\$?(\d+)$")
+
+
+def _a1_col_to_index(col: str) -> int:
+    idx = 0
+    for ch in col.upper():
+        if not ("A" <= ch <= "Z"):
+            break
+        idx = idx * 26 + (ord(ch) - ord("A") + 1)
+    return idx
+
+
+def _a1_cell_to_row_col(cell: str) -> tuple[int, int] | None:
+    m = _A1_CELL_RE.match(cell.strip())
+    if not m:
+        return None
+    col_s, row_s = m.group(1), m.group(2)
+    return int(row_s), _a1_col_to_index(col_s)
+
+
+def _a1_range_to_bounds(ref: str) -> tuple[int, int, int, int] | None:
+    ref = ref.strip()
+    if not ref:
+        return None
+    if ":" in ref:
+        start, end = ref.split(":", 1)
+    else:
+        start = end = ref
+    start_rc = _a1_cell_to_row_col(start)
+    end_rc = _a1_cell_to_row_col(end)
+    if not start_rc or not end_rc:
+        return None
+    r1, c1 = start_rc
+    r2, c2 = end_rc
+    return min(r1, r2), max(r1, r2), min(c1, c2), max(c1, c2)
+
+
+def _cell_in_bounds(row: int, col: int, bounds: tuple[int, int, int, int]) -> bool:
+    r1, r2, c1, c2 = bounds
+    return r1 <= row <= r2 and c1 <= col <= c2
+
+
 def _rewrite_formula_table_column_references(
     formula: str, *, table_column_rename_map: dict[str, dict[str, str]]
 ) -> str:
@@ -792,6 +917,7 @@ def _sanitize_formula_cells_in_worksheet(
     sheet_rename_map: dict[str, str],
     table_rename_map: dict[str, str],
     table_column_rename_map: dict[str, dict[str, str]],
+    table_contexts: list[TableContext] | None = None,
 ) -> None:
     for c in root.iter(qn(NS_MAIN, "c")):
         f_el = c.find(qn(NS_MAIN, "f"))
@@ -804,6 +930,18 @@ def _sanitize_formula_cells_in_worksheet(
             table_rename_map=table_rename_map,
             table_column_rename_map=table_column_rename_map,
         )
+        if table_contexts:
+            addr = c.attrib.get("r")
+            if addr:
+                rc = _a1_cell_to_row_col(addr)
+                if rc:
+                    row, col = rc
+                    for ctx in table_contexts:
+                        if _cell_in_bounds(row, col, (ctx.start_row, ctx.end_row, ctx.start_col, ctx.end_col)):
+                            f_el.text = _rewrite_unqualified_structured_refs(
+                                f_el.text or "", column_map=ctx.column_map
+                            )
+                            break
 
     if sheet_rename_map:
         for hl in root.iter():
@@ -977,6 +1115,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
 
         table_rename_map: dict[str, str] = {}
         table_column_rename_map: dict[str, dict[str, str]] = {}
+        table_part_context: dict[str, TableContext] = {}
         if options.scrub_metadata or options.hash_strings:
             table_parts = sorted([n for n in names if n.startswith("xl/tables/") and n.endswith(".xml")])
             idx = 1
@@ -1013,6 +1152,17 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                     col_idx += 1
                 if col_map:
                     table_column_rename_map[new_table] = col_map
+                    ref = t_root.attrib.get("ref") or ""
+                    bounds = _a1_range_to_bounds(ref)
+                    if bounds:
+                        r1, r2, c1, c2 = bounds
+                        table_part_context[part] = TableContext(
+                            start_row=r1,
+                            end_row=r2,
+                            start_col=c1,
+                            end_col=c2,
+                            column_map=col_map,
+                        )
 
                 idx += 1
 
@@ -1067,12 +1217,54 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         ):
                             # Rewrite formula sheet/table references and scrub string literals.
                             ws_root = ET.fromstring(new)
+                            sheet_table_contexts: list[TableContext] | None = None
+                            if table_part_context:
+                                rels_name = posixpath.join(
+                                    posixpath.dirname(name),
+                                    "_rels",
+                                    posixpath.basename(name) + ".rels",
+                                )
+                                if rels_name in names and rels_name not in removed_parts:
+                                    try:
+                                        rels_root = ET.fromstring(zin.read(rels_name))
+                                        table_rids: dict[str, str] = {}
+                                        for rel in list(rels_root):
+                                            if rel.tag != qn(NS_REL, "Relationship"):
+                                                continue
+                                            if not rel.attrib.get("Type", "").endswith("/table"):
+                                                continue
+                                            rid = rel.attrib.get("Id")
+                                            target = rel.attrib.get("Target")
+                                            if not rid or not target:
+                                                continue
+                                            table_rids[rid] = _resolve_rel_target(rels_name, target)
+                                        if table_rids:
+                                            sheet_table_contexts = []
+                                            for tp in ws_root.iter():
+                                                if tp.tag.split("}")[-1] != "tablePart":
+                                                    continue
+                                                rid = None
+                                                for k, v in tp.attrib.items():
+                                                    if k.split("}")[-1] == "id":
+                                                        rid = v
+                                                        break
+                                                if not rid:
+                                                    continue
+                                                table_part = table_rids.get(rid)
+                                                if not table_part:
+                                                    continue
+                                                ctx = table_part_context.get(table_part)
+                                                if ctx:
+                                                    sheet_table_contexts.append(ctx)
+                                    except Exception:
+                                        sheet_table_contexts = None
                             _sanitize_formula_cells_in_worksheet(
                                 ws_root,
                                 options=options,
                                 sheet_rename_map=sheet_rename_map,
                                 table_rename_map=table_rename_map,
                                 table_column_rename_map=table_column_rename_map,
+                                table_contexts=sheet_table_contexts,
                             )
                             new = ET.tostring(ws_root, encoding="utf-8", xml_declaration=True)
                         rewritten.append(name)
@@ -1119,6 +1311,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                             options=options,
                             table_rename_map=table_rename_map,
                             table_column_rename_map=table_column_rename_map,
+                            sheet_rename_map=sheet_rename_map or None,
                         )
                         rewritten.append(name)
                     elif name.startswith("xl/drawings/") and name.endswith(".xml") and (
