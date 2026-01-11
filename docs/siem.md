@@ -74,7 +74,7 @@ SIEM delivery is configured per organization and persisted in Postgres (`org_sie
 
 Endpoints:
 
-- `PUT /orgs/:orgId/siem` – upsert SIEM configuration for an org (enables exports).
+- `PUT /orgs/:orgId/siem` – upsert SIEM configuration for an org and set `enabled` (defaults to `true` on first create).
 - `GET /orgs/:orgId/siem` – fetch sanitized config (auth secrets are masked as `"***"`).
 - `DELETE /orgs/:orgId/siem` – remove SIEM configuration (disables exports).
 
@@ -83,6 +83,7 @@ Request/response shape:
 - `GET` returns `{ enabled, config }`.
 - `PUT` accepts either `{ enabled, config }` (preferred) or the `config` object itself (backwards compatible).
 - When updating an existing config, you can keep previously stored secret values by sending `"***"` for secret fields (the same masked value returned by `GET`).
+- Setting `enabled: false` disables exports and deletes any stored secrets; re-enabling requires supplying secret values again.
 
 Auth secrets are stored encrypted in the database-backed secret store (`secrets` table; key = `SECRET_STORE_KEY`) and referenced from `org_siem_configs.config` via `{ "secretRef": "siem:<orgId>:..." }` entries (never plaintext).
 
