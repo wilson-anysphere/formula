@@ -88,7 +88,7 @@ export class OAuth2Manager {
     /** @type {Map<string, CachedTokenState>} */
     this.cache = new Map();
 
-    /** @type {Map<string, Promise<OAuth2AccessTokenResult>>} */
+    /** @type {Map<string, { kind: "refresh" | "exchange", promise: Promise<OAuth2AccessTokenResult> }>} */
     this.inFlight = new Map();
   }
 
@@ -180,7 +180,7 @@ export class OAuth2Manager {
     const nowMs = now();
 
     const existingInFlight = this.inFlight.get(cacheKey);
-    if (existingInFlight) return await existingInFlight;
+    if (existingInFlight) return await existingInFlight.promise;
 
     const cached = this.cache.get(cacheKey);
     if (!options.forceRefresh && this.isAccessTokenValid(cached, nowMs) && cached?.accessToken) {
@@ -196,11 +196,11 @@ export class OAuth2Manager {
       now,
     });
 
-    this.inFlight.set(cacheKey, promise);
+    this.inFlight.set(cacheKey, { kind: "refresh", promise });
     try {
       return await promise;
     } finally {
-      if (this.inFlight.get(cacheKey) === promise) this.inFlight.delete(cacheKey);
+      if (this.inFlight.get(cacheKey)?.promise === promise) this.inFlight.delete(cacheKey);
     }
   }
 
@@ -299,25 +299,34 @@ export class OAuth2Manager {
     const storeKey = { providerId: options.providerId, scopesHash: normalized.scopesHash };
     const cacheKey = OAuth2Manager.keyString(storeKey);
 
-    const existingInFlight = this.inFlight.get(cacheKey);
-    if (existingInFlight) return await existingInFlight;
+    while (true) {
+      const existingInFlight = this.inFlight.get(cacheKey);
+      if (existingInFlight) {
+        if (existingInFlight.kind === "exchange") return await existingInFlight.promise;
+        // A refresh is currently running; wait for it to settle, then perform
+        // the exchange. Do not propagate refresh errors here because callers
+        // might be exchanging a new authorization code specifically to recover.
+        await existingInFlight.promise.catch(() => undefined);
+        continue;
+      }
 
-    const promise = this.acquireFromAuthorizationCode({
-      provider,
-      storeKey,
-      code: options.code,
-      redirectUri: options.redirectUri ?? provider.redirectUri ?? "",
-      codeVerifier: options.codeVerifier,
-      scopes: normalized.scopes,
-      signal: options.signal,
-      now: options.now ?? this.now,
-    });
+      const promise = this.acquireFromAuthorizationCode({
+        provider,
+        storeKey,
+        code: options.code,
+        redirectUri: options.redirectUri ?? provider.redirectUri ?? "",
+        codeVerifier: options.codeVerifier,
+        scopes: normalized.scopes,
+        signal: options.signal,
+        now: options.now ?? this.now,
+      });
 
-    this.inFlight.set(cacheKey, promise);
-    try {
-      return await promise;
-    } finally {
-      if (this.inFlight.get(cacheKey) === promise) this.inFlight.delete(cacheKey);
+      this.inFlight.set(cacheKey, { kind: "exchange", promise });
+      try {
+        return await promise;
+      } finally {
+        if (this.inFlight.get(cacheKey)?.promise === promise) this.inFlight.delete(cacheKey);
+      }
     }
   }
 

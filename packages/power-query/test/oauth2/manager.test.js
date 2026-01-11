@@ -267,3 +267,70 @@ test("OAuth2Manager: clears persisted refresh token when the server returns inva
   const entry = await store.get({ providerId: "example", scopesHash });
   assert.equal(entry, null);
 });
+
+test("OAuth2Manager: authorization code exchange is not skipped by an in-flight refresh", async () => {
+  const store = new InMemoryOAuthTokenStore();
+  const now = () => 1_000;
+  const { scopesHash, scopes } = normalizeScopes(["read"]);
+  await store.set(
+    { providerId: "example", scopesHash },
+    { providerId: "example", scopesHash, scopes, refreshToken: "refresh-1" },
+  );
+
+  /** @type {() => void} */
+  let allowRefresh;
+  const refreshGate = new Promise((resolve) => {
+    allowRefresh = resolve;
+  });
+
+  let refreshCalls = 0;
+  let exchangeCalls = 0;
+
+  /** @type {typeof fetch} */
+  const mockFetch = async (url, init) => {
+    if (url !== "https://auth.example/token") throw new Error(`Unexpected URL: ${url}`);
+    const body = init?.body;
+    const params = body instanceof URLSearchParams ? body : new URLSearchParams(String(body ?? ""));
+    const grantType = params.get("grant_type");
+    if (grantType === "refresh_token") {
+      refreshCalls++;
+      await refreshGate;
+      return jsonResponse({
+        access_token: "access-refresh",
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: "refresh-2",
+      });
+    }
+    if (grantType === "authorization_code") {
+      exchangeCalls++;
+      return jsonResponse({
+        access_token: "access-exchange",
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: "refresh-exchange",
+      });
+    }
+    throw new Error(`Unexpected grant_type: ${grantType}`);
+  };
+
+  const manager = new OAuth2Manager({ tokenStore: store, fetch: mockFetch, now });
+  manager.registerProvider({ id: "example", clientId: "client", tokenEndpoint: "https://auth.example/token", redirectUri: "https://app/callback" });
+
+  const refreshPromise = manager.getAccessToken({ providerId: "example", scopes: ["read"] });
+  const exchangePromise = manager.exchangeAuthorizationCode({
+    providerId: "example",
+    code: "auth-code",
+    redirectUri: "https://app/callback",
+    codeVerifier: "verifier",
+    scopes: ["read"],
+  });
+
+  allowRefresh();
+  const [refreshResult, exchangeResult] = await Promise.all([refreshPromise, exchangePromise]);
+
+  assert.equal(refreshResult.accessToken, "access-refresh");
+  assert.equal(exchangeResult.accessToken, "access-exchange");
+  assert.equal(refreshCalls, 1);
+  assert.equal(exchangeCalls, 1);
+});
