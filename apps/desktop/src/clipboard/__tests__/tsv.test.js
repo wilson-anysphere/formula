@@ -23,3 +23,16 @@ test("clipboard TSV serializes to tab-separated lines", () => {
 
   assert.equal(tsv, "A\t1\ntrue\t");
 });
+
+test("clipboard TSV serializes formulas and escapes leading '='/' in strings", () => {
+  const tsv = serializeCellGridToTsv([
+    [{ value: null, formula: "=A1*2" }, { value: "=literal" }, { value: "'leading" }],
+  ]);
+
+  assert.equal(tsv, "=A1*2\t'=literal\t''leading");
+
+  const grid = parseTsvToCellGrid(tsv);
+  assert.equal(grid[0][0].formula, "=A1*2");
+  assert.equal(grid[0][1].value, "=literal");
+  assert.equal(grid[0][2].value, "'leading");
+});

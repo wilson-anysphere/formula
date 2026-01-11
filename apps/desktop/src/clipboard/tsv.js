@@ -15,6 +15,11 @@ function isLikelyDateNumberFormat(fmt) {
  * @returns {string}
  */
 function cellValueToPlainText(cell) {
+  const formula = cell.formula;
+  if (typeof formula === "string" && formula.trim() !== "") {
+    return formula;
+  }
+
   const value = cell.value;
   if (value == null) return "";
 
@@ -22,6 +27,12 @@ function cellValueToPlainText(cell) {
   // round-trip as plain text (like Excel/Sheets) rather than `[object Object]`.
   if (typeof value === "object" && typeof value.text === "string") {
     return value.text;
+  }
+
+  if (typeof value === "string" && (value.startsWith("=") || value.startsWith("'"))) {
+    // Escape TSV so we don't accidentally treat literal strings (e.g. "=literal") as formulas
+    // when parsing the clipboard text back into a cell grid.
+    return `'${value}`;
   }
 
   const numberFormat = cell.format?.numberFormat;
@@ -57,6 +68,11 @@ export function parseTsvToCellGrid(tsv) {
   return lines.map((line) => {
     const parts = line.split("\t");
     return parts.map((raw) => {
+      if (raw.startsWith("'")) {
+        // Excel convention: a leading apostrophe forces text.
+        return { value: raw.slice(1), formula: null, format: null };
+      }
+
       if (raw.startsWith("=") && raw.length > 1) {
         return { value: null, formula: raw, format: null };
       }

@@ -36,12 +36,17 @@ function createTauriClipboardProvider() {
 
   return {
     async read() {
+      // Prefer rich reads via the WebView Clipboard API when available so we can
+      // ingest HTML tables + formats from external spreadsheets.
+      const web = await createWebClipboardProvider().read();
+      if (typeof web.html === "string" || typeof web.text === "string") return web;
+
       if (tauriClipboard?.readText) {
         const text = await tauriClipboard.readText();
         return { text: text ?? undefined };
       }
-      // Fall back to browser text read when the plugin is unavailable.
-      return createWebClipboardProvider().read();
+
+      return web;
     },
     async write(payload) {
       if (tauriClipboard?.writeText) {
@@ -54,6 +59,7 @@ function createTauriClipboardProvider() {
       if (payload.html && typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
         try {
           const item = new ClipboardItem({
+            "text/plain": new Blob([payload.text], { type: "text/plain" }),
             "text/html": new Blob([payload.html], { type: "text/html" }),
           });
           await navigator.clipboard.write([item]);
@@ -126,4 +132,3 @@ function createWebClipboardProvider() {
     },
   };
 }
-

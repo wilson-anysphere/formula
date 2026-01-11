@@ -37,7 +37,13 @@ function isLikelyDateNumberFormat(fmt) {
  */
 function cellValueToHtml(cell) {
   const value = cell.value;
-  if (value == null) return "";
+  if (value == null) {
+    const formula = cell.formula;
+    if (typeof formula === "string" && formula.trim() !== "") {
+      return escapeHtml(formula).replaceAll("\n", "<br>");
+    }
+    return "";
+  }
 
   // DocumentController rich text values should copy as plain text.
   if (typeof value === "object" && typeof value.text === "string") {
@@ -137,7 +143,11 @@ export function serializeCellGridToHtml(grid) {
         .map((cell) => {
           const style = formatToInlineStyle(cell.format);
           const styleAttr = style ? ` style="${escapeHtml(style)}"` : "";
-          const formulaAttr = cell.formula ? ` data-formula="${escapeHtml(cell.formula)}"` : "";
+          const formulaAttr = cell.formula
+            ? ` data-formula="${escapeHtml(cell.formula)}" data-sheets-formula="${escapeHtml(
+                cell.formula,
+              )}" x:formula="${escapeHtml(cell.formula)}"`
+            : "";
           const numberFormatAttr =
             cell.format?.numberFormat != null
               ? ` data-number-format="${escapeHtml(cell.format.numberFormat)}"`
