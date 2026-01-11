@@ -1936,6 +1936,38 @@ mod tests {
     }
 
     #[test]
+    fn csv_imported_columnar_values_are_visible_through_get_cell_and_get_range() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let table = import_csv_to_columnar_table(
+            std::io::Cursor::new("value\n1\n2\n3\n"),
+            CsvOptions::default(),
+        )
+        .expect("import csv");
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_columnar_table(Arc::new(table));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 0).unwrap().value,
+            CellScalar::Number(1.0)
+        );
+
+        let range = state.get_range(&sheet_id, 0, 0, 2, 0).unwrap();
+        assert_eq!(range.len(), 3);
+        assert_eq!(range[0].len(), 1);
+        assert_eq!(range[0][0].value, CellScalar::Number(1.0));
+        assert_eq!(range[1][0].value, CellScalar::Number(2.0));
+        assert_eq!(range[2][0].value, CellScalar::Number(3.0));
+    }
+
+    #[test]
     fn cross_sheet_references_recalculate() {
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());

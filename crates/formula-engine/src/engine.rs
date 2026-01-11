@@ -165,12 +165,6 @@ impl Workbook {
         self.sheets[key.sheet].cells.entry(key.addr).or_default()
     }
 
-    fn get_cell_value(&self, key: CellKey) -> Value {
-        self.get_cell(key)
-            .map(|c| c.value.clone())
-            .unwrap_or(Value::Blank)
-    }
-
     fn set_tables(&mut self, sheet: SheetId, tables: Vec<Table>) {
         if let Some(s) = self.sheets.get_mut(sheet) {
             s.tables = tables;
@@ -664,7 +658,21 @@ impl Engine {
         if let Some(v) = self.spilled_cell_value(key) {
             return v;
         }
-        self.workbook.get_cell_value(key)
+        if let Some(cell) = self.workbook.get_cell(key) {
+            return cell.value.clone();
+        }
+
+        if let Some(provider) = &self.external_value_provider {
+            // Use the workbook's canonical display name to keep provider lookups stable even when
+            // callers pass a different sheet-name casing.
+            if let Some(sheet_name) = self.workbook.sheet_names.get(sheet_id) {
+                if let Some(v) = provider.get(sheet_name, addr) {
+                    return v;
+                }
+            }
+        }
+
+        Value::Blank
     }
 
     /// Returns the spill range (origin inclusive) for a cell if it is an array-spill
