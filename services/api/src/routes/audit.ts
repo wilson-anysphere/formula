@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { PassThrough } from "node:stream";
 import { z } from "zod";
-import { auditLogRowToAuditEvent, redactAuditEvent, serializeBatch } from "@formula/audit-core";
+import { auditLogRowToAuditEvent, redactAuditEvent, serializeBatch, type PostgresAuditLogRow } from "@formula/audit-core";
 import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
@@ -285,11 +285,11 @@ export function registerAuditRoutes(app: FastifyInstance): void {
           }
 
           for (const row of result.rows) {
-            const createdAt = toDate((row as any).created_at);
-            const id = String((row as any).id);
+            const createdAt = toDate((row as PostgresAuditLogRow).created_at);
+            const id = String((row as PostgresAuditLogRow).id);
             cursor = { lastCreatedAt: createdAt, lastEventId: id };
 
-            const event = redactAuditEvent(auditLogRowToAuditEvent(row as any));
+            const event = redactAuditEvent(auditLogRowToAuditEvent(row as PostgresAuditLogRow));
             const eventCursor = encodeStreamCursor(cursor);
             stream.write(`id: ${eventCursor}\n`);
             stream.write("event: audit\n");
@@ -373,7 +373,7 @@ export function registerAuditRoutes(app: FastifyInstance): void {
         values
       );
 
-      const events = result.rows.map((row) => redactAuditEvent(auditLogRowToAuditEvent(row as any)));
+      const events = result.rows.map((row) => redactAuditEvent(auditLogRowToAuditEvent(row as PostgresAuditLogRow)));
       return { events };
     }
   );
@@ -427,7 +427,7 @@ export function registerAuditRoutes(app: FastifyInstance): void {
         values
       );
 
-      const events = result.rows.map((row) => auditLogRowToAuditEvent(row as any));
+      const events = result.rows.map((row) => auditLogRowToAuditEvent(row as PostgresAuditLogRow));
       const format = parsed.data.format ?? "json";
       const { contentType, body } = serializeBatch(events, { format });
 
