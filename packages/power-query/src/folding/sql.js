@@ -237,7 +237,10 @@ export class QueryFoldingEngine {
         const where = predicateToSql(operation.predicate, {
           alias: "t",
           quoteIdentifier,
-          castText: dialect.castText,
+          // Local filter semantics stringify null/undefined to "" before applying
+          // contains/startsWith/endsWith. Use COALESCE to preserve that behavior
+          // for LIKE-based predicates.
+          castText: (expr) => `COALESCE(${dialect.castText(expr)}, '')`,
           param,
         });
         return {
