@@ -253,17 +253,24 @@ export class CellStructuralConflictMonitor {
       this._localOpQueue.sort((a, b) => a.createdAt - b.createdAt);
     }
 
-    // `transaction.afterState` only advances when a transaction inserts new
+    // `transaction.afterState` only advances when the transaction inserts new
     // structs. Pure deletions (DeleteSet-only transactions) leave the state
-    // vector unchanged, which would make delete-vs-edit conflicts look
-    // causally ordered when they were actually concurrent.
+    // vector unchanged, which would make delete-vs-edit conflicts look causally
+    // ordered when they were actually concurrent.
     //
-    // We always write these records into `_ops` in a follow-up transaction that
-    // *does* insert new structs (one per record). Predict that follow-up state
-    // vector by bumping the local client's clock by the number of records.
+    // In that case, we know we will insert at least one new struct when writing
+    // our op log entries (one per record), so we can treat the op log insertion
+    // as the "clock tick" that represents this mutation.
+    //
+    // For transactions that *do* insert structs, prefer the original
+    // `transaction.afterState` so other clients only need to have seen the cell
+    // change itself to establish causal ordering (they shouldn't also need to
+    // have received the op log update).
     const afterStateVector = new Map(transaction.afterState);
-    const clientId = this.doc.clientID;
-    afterStateVector.set(clientId, (afterStateVector.get(clientId) ?? 0) + records.length);
+    if (stateVectorsEqual(transaction.afterState, transaction.beforeState)) {
+      const clientId = this.doc.clientID;
+      afterStateVector.set(clientId, (afterStateVector.get(clientId) ?? 0) + records.length);
+    }
     const afterState = encodeStateVector(afterStateVector);
     for (const record of records) {
       record.afterState = afterState;
@@ -810,14 +817,28 @@ export class CellStructuralConflictMonitor {
   * @param {Map<number, number>} sv
   * @returns {Array<[number, number]>}
   */
- function encodeStateVector(sv) {
-   const out = [];
-   for (const [client, clock] of sv.entries()) {
-     out.push([client, clock]);
-   }
-   out.sort((a, b) => a[0] - b[0]);
-   return out;
- }
+function encodeStateVector(sv) {
+  const out = [];
+  for (const [client, clock] of sv.entries()) {
+    out.push([client, clock]);
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  return out;
+}
+
+/**
+ * @param {Map<number, number>} a
+ * @param {Map<number, number>} b
+ */
+function stateVectorsEqual(a, b) {
+  for (const [client, clock] of a.entries()) {
+    if ((b.get(client) ?? 0) !== clock) return false;
+  }
+  for (const [client, clock] of b.entries()) {
+    if ((a.get(client) ?? 0) !== clock) return false;
+  }
+  return true;
+}
  
  /**
   * @param {Array<[number, number]> | Record<string, number> | null | undefined} encoded
