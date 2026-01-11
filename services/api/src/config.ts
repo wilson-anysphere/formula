@@ -234,7 +234,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
     const invalidSecrets: string[] = [];
     if (config.syncTokenSecret === DEV_SYNC_TOKEN_SECRET) invalidSecrets.push("SYNC_TOKEN_SECRET");
-    if (rawJsonIsEmpty(env) && secretStoreKey === DEV_SECRET_STORE_KEY) invalidSecrets.push("SECRET_STORE_KEY");
+    const devSecretStoreKey = deriveSecretStoreKey(DEV_SECRET_STORE_KEY);
+    const usingDevSecretStoreKey = Object.values(config.secretStoreKeys.keys).some(
+      (key) => Buffer.compare(key, devSecretStoreKey) === 0
+    );
+    if (usingDevSecretStoreKey) {
+      invalidSecrets.push(rawJsonIsEmpty(env) ? "SECRET_STORE_KEY" : "SECRET_STORE_KEYS_JSON");
+    }
     if (config.localKmsMasterKey === DEV_LOCAL_KMS_MASTER_KEY) invalidSecrets.push("LOCAL_KMS_MASTER_KEY");
     if (invalidSecrets.length > 0) {
       throw new Error(
@@ -254,4 +260,3 @@ function rawJsonIsEmpty(env: NodeJS.ProcessEnv): boolean {
   const rawJson = typeof env.SECRET_STORE_KEYS_JSON === "string" ? env.SECRET_STORE_KEYS_JSON.trim() : "";
   return rawJson.length === 0;
 }
-
