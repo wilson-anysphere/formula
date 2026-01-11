@@ -195,13 +195,13 @@ fn resolve_this_row(
     origin_cell: CellAddr,
     columns: &StructuredColumns,
 ) -> Result<Vec<(CellAddr, CellAddr)>, String> {
-    let row = origin_cell.row;
     let data_range = table
         .data_range()
         .ok_or_else(|| "table has no data rows".to_string())?;
-    if row < data_range.start.row || row > data_range.end.row {
+    if !data_range.contains(addr_to_model(origin_cell)) {
         return Err("this-row structured reference used outside of table data row".to_string());
     }
+    let row = origin_cell.row;
 
     match columns {
         StructuredColumns::All => Ok(vec![(

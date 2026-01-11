@@ -139,9 +139,17 @@ fn parse_inner_spec(inner: &str) -> Option<(Option<StructuredRefItem>, Structure
         // Simple form: "@Col", "Col", "#Headers", etc.
         let trimmed = inner.trim();
         if let Some(stripped) = trimmed.strip_prefix('@') {
+            let stripped = stripped.trim();
+            if stripped.is_empty() {
+                return Some((Some(StructuredRefItem::ThisRow), StructuredColumns::All));
+            }
+            if stripped.starts_with('[') {
+                let cols = parse_columns_only(stripped)?;
+                return Some((Some(StructuredRefItem::ThisRow), cols));
+            }
             return Some((
                 Some(StructuredRefItem::ThisRow),
-                StructuredColumns::Single(unescape_column_name(stripped.trim())),
+                StructuredColumns::Single(unescape_column_name(stripped)),
             ));
         }
 
@@ -149,11 +157,65 @@ fn parse_inner_spec(inner: &str) -> Option<(Option<StructuredRefItem>, Structure
             return Some((Some(item), StructuredColumns::All));
         }
 
-        Some((None, StructuredColumns::Single(unescape_column_name(trimmed))))
+        Some((
+            None,
+            StructuredColumns::Single(unescape_column_name(trimmed)),
+        ))
     }
 }
 
-fn parse_bracket_group_or_range(part: &str) -> Option<(Option<StructuredRefItem>, StructuredColumns)> {
+fn parse_columns_only(spec: &str) -> Option<StructuredColumns> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return Some(StructuredColumns::All);
+    }
+    if !spec.starts_with('[') {
+        return Some(StructuredColumns::Single(unescape_column_name(spec)));
+    }
+
+    let parts = split_top_level(spec, ',');
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut columns: Vec<StructuredColumn> = Vec::new();
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        let range_parts = split_top_level(part, ':');
+        if range_parts.len() == 2 {
+            let start = strip_wrapping_brackets(range_parts[0])?;
+            let end = strip_wrapping_brackets(range_parts[1])?;
+            columns.push(StructuredColumn::Range {
+                start: unescape_column_name(start),
+                end: unescape_column_name(end),
+            });
+            continue;
+        }
+
+        let inner = strip_wrapping_brackets(part)?;
+        columns.push(StructuredColumn::Single(unescape_column_name(inner)));
+    }
+
+    let cols = match columns.as_slice() {
+        [] => StructuredColumns::All,
+        [StructuredColumn::Single(name)] => StructuredColumns::Single(name.clone()),
+        [StructuredColumn::Range { start, end }] => StructuredColumns::Range {
+            start: start.clone(),
+            end: end.clone(),
+        },
+        _ => StructuredColumns::Multi(columns),
+    };
+
+    Some(cols)
+}
+
+fn parse_bracket_group_or_range(
+    part: &str,
+) -> Option<(Option<StructuredRefItem>, StructuredColumns)> {
     let part = part.trim();
     if part.is_empty() {
         return None;
@@ -299,6 +361,19 @@ mod tests {
                 StructuredColumn::Single("Col1".into()),
                 StructuredColumn::Single("Col3".into()),
             ])
+        );
+    }
+
+    #[test]
+    fn parses_this_row_column_range_ref() {
+        let (sref, _) = parse_structured_ref("[@[Col1]:[Col3]]", 0).unwrap();
+        assert_eq!(sref.item, Some(StructuredRefItem::ThisRow));
+        assert_eq!(
+            sref.columns,
+            StructuredColumns::Range {
+                start: "Col1".into(),
+                end: "Col3".into(),
+            }
         );
     }
 }

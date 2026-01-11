@@ -197,6 +197,17 @@ fn this_row_structured_refs_still_work() {
 }
 
 #[test]
+fn this_row_bracketed_column_range_syntax_works() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet1", "D2", "=SUM([@[Col1]:[Col3]])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(111.0));
+}
+
+#[test]
 fn dependency_graph_tracks_multi_area_structured_refs() {
     let mut engine = setup_engine_with_table();
     engine
