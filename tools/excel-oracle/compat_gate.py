@@ -31,9 +31,10 @@ DEFAULT_INCLUDE_TAGS = [
     "IF",
     "IFERROR",
     "error",
-    # Simple spill/reference behavior (range reference spill). Other dynamic array
-    # functions remain excluded until implemented.
+    # Minimal spill coverage (range reference + a couple of array functions).
     "range",
+    "TRANSPOSE",
+    "SEQUENCE",
 ]
 
 

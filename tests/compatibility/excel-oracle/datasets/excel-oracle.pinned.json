@@ -10,7 +10,7 @@
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
     "sha256": "e8bfcab0a0113829c840b2c9461b33dd33b996340a9b88a232c1405a7c77ddf7",
-    "count": 398
+    "count": 400
   },
   "results": [
     {
@@ -3975,6 +3975,66 @@
             {
               "t": "n",
               "v": 3.0
+            }
+          ]
+        ]
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "spill_transpose_b72ce234f655",
+      "outputCell": "E1",
+      "result": {
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 1.0
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 2.0
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 3.0
+            }
+          ]
+        ]
+      },
+      "address": "E1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "spill_sequence_fafca1fa5240",
+      "outputCell": "C1",
+      "result": {
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 1.0
+            },
+            {
+              "t": "n",
+              "v": 2.0
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 3.0
+            },
+            {
+              "t": "n",
+              "v": 4.0
             }
           ]
         ]
