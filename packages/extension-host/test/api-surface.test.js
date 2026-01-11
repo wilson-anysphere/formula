@@ -850,3 +850,130 @@ test("api surface: ui.showInputBox/showQuickPick return deterministic placeholde
   const result = await host.executeCommand(commandId);
   assert.deepEqual(result, { input: "Alice", pick: 1 });
 });
+
+test("api surface: ui.registerContextMenu adds and removes runtime menu items", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-ui-menus-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const registerCmd = "uiExt.registerMenu";
+  const unregisterCmd = "uiExt.unregisterMenu";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "ui-menus-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${registerCmd}`, `onCommand:${unregisterCmd}`],
+      contributes: {
+        commands: [
+          { command: registerCmd, title: "Register Menu" },
+          { command: unregisterCmd, title: "Unregister Menu" }
+        ]
+      },
+      permissions: ["ui.commands", "ui.menus"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      let disposable = null;
+
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          registerCmd
+        )}, async () => {
+          disposable = await formula.ui.registerContextMenu("cell/context", [
+            { command: ${JSON.stringify(registerCmd)}, when: "cellHasValue", group: "extensions" }
+          ]);
+          return true;
+        }));
+
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          unregisterCmd
+        )}, async () => {
+          disposable?.dispose();
+          disposable = null;
+          return true;
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = await host.loadExtension(extDir);
+
+  await host.executeCommand(registerCmd);
+  assert.deepEqual(host.getContributedMenu("cell/context"), [
+    {
+      extensionId,
+      command: registerCmd,
+      when: "cellHasValue",
+      group: "extensions"
+    }
+  ]);
+
+  await host.executeCommand(unregisterCmd);
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    if (host.getContributedMenu("cell/context").length === 0) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.fail("Timed out waiting for context menu unregister");
+});
+
+test("permissions: ui.registerContextMenu requires ui.menus", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-ui-menus-deny-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "uiExt.registerDenied";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "ui-menus-denied-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Register Menu Denied" }] },
+      permissions: ["ui.commands", "ui.menus"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          await formula.ui.registerContextMenu("cell/context", [{ command: ${JSON.stringify(commandId)} }]);
+          return true;
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async ({ permissions }) => !permissions.includes("ui.menus")
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+  await assert.rejects(() => host.executeCommand(commandId), /Permission denied: ui\.menus/);
+});

@@ -376,7 +376,25 @@ const ui = {
   },
 
   async showQuickPick(items, options) {
-    return rpcCall("ui", "showQuickPick", [Array.isArray(items) ? items : [], options ?? {}]);
+    const result = await rpcCall("ui", "showQuickPick", [Array.isArray(items) ? items : [], options ?? {}]);
+    if (result === null || result === undefined) return undefined;
+    return result;
+  },
+
+  async registerContextMenu(menuId, items) {
+    const id = String(menuId);
+    if (id.trim().length === 0) throw new Error("Menu id must be a non-empty string");
+    if (!Array.isArray(items)) throw new Error("Menu items must be an array");
+
+    const result = await rpcCall("ui", "registerContextMenu", [id, items]);
+    const registrationId = String(result?.id ?? "");
+    if (registrationId.trim().length === 0) {
+      throw new Error("Failed to register context menu: missing registration id");
+    }
+
+    return new DisposableImpl(() => {
+      rpcCall("ui", "unregisterContextMenu", [registrationId]).catch(notifyError);
+    });
   },
 
   async createPanel(id, options) {

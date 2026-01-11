@@ -131,6 +131,12 @@ export namespace ui {
     placeHolder?: string;
   }
 
+  interface MenuItem {
+    command: string;
+    when?: string;
+    group?: string;
+  }
+
   interface PanelOptions {
     title: string;
     icon?: string;
@@ -140,6 +146,7 @@ export namespace ui {
   function showMessage(message: string, type?: MessageType): Promise<void>;
   function showInputBox(options: InputBoxOptions): Promise<string | undefined>;
   function showQuickPick<T>(items: QuickPickItem<T>[], options?: QuickPickOptions): Promise<T | undefined>;
+  function registerContextMenu(menuId: string, items: MenuItem[]): Promise<Disposable>;
   function createPanel(id: string, options: PanelOptions): Promise<Panel>;
 }
 

@@ -38,6 +38,8 @@ const API_PERMISSIONS = {
   "ui.setPanelHtml": ["ui.panels"],
   "ui.postMessageToPanel": ["ui.panels"],
   "ui.disposePanel": ["ui.panels"],
+  "ui.registerContextMenu": ["ui.menus"],
+  "ui.unregisterContextMenu": ["ui.menus"],
 
   "functions.register": [],
   "functions.unregister": [],
@@ -102,6 +104,7 @@ class ExtensionHost {
     this._extensions = new Map();
     this._commands = new Map(); // commandId -> extensionId
     this._panels = new Map(); // panelId -> { id, title, html }
+    this._contextMenus = new Map(); // registrationId -> { id, extensionId, menuId, items }
     this._customFunctions = new Map(); // functionName -> extensionId
     this._messages = [];
     this._clipboardText = "";
@@ -447,6 +450,17 @@ class ExtensionHost {
         });
       }
     }
+    for (const record of this._contextMenus.values()) {
+      if (record.menuId !== id) continue;
+      for (const item of record.items) {
+        out.push({
+          extensionId: record.extensionId,
+          command: item.command,
+          when: item.when ?? null,
+          group: item.group ?? null
+        });
+      }
+    }
     return out;
   }
 
@@ -484,6 +498,7 @@ class ExtensionHost {
     this._extensions.clear();
     this._commands.clear();
     this._panels.clear();
+    this._contextMenus.clear();
     this._customFunctions.clear();
     this._messages = [];
 
@@ -624,6 +639,11 @@ class ExtensionHost {
     // Remove panels owned by this extension worker; they can no longer receive messages.
     for (const [panelId, panel] of this._panels.entries()) {
       if (panel?.extensionId === extension.id) this._panels.delete(panelId);
+    }
+
+    // Remove context menus registered by this extension worker; they would otherwise leak.
+    for (const [registrationId, record] of this._contextMenus.entries()) {
+      if (record?.extensionId === extension.id) this._contextMenus.delete(registrationId);
     }
 
     // Reject outstanding requests bound for this worker.
@@ -835,6 +855,39 @@ class ExtensionHost {
           return first.value;
         }
         return first;
+      }
+
+      case "ui.registerContextMenu": {
+        const menuId = String(args[0]);
+        const items = Array.isArray(args[1]) ? args[1] : [];
+        if (menuId.trim().length === 0) throw new Error("Menu id must be a non-empty string");
+
+        const normalized = [];
+        for (const [idx, item] of items.entries()) {
+          if (!item || typeof item !== "object") {
+            throw new Error(`Menu item at index ${idx} must be an object`);
+          }
+          const command = String(item.command ?? "");
+          if (command.trim().length === 0) {
+            throw new Error(`Menu item at index ${idx} must include a non-empty command`);
+          }
+          const when = item.when === undefined ? null : item.when === null ? null : String(item.when);
+          const group = item.group === undefined ? null : item.group === null ? null : String(item.group);
+          normalized.push({ command, when, group });
+        }
+
+        const id = crypto.randomUUID();
+        this._contextMenus.set(id, { id, extensionId: extension.id, menuId, items: normalized });
+        return { id };
+      }
+
+      case "ui.unregisterContextMenu": {
+        const id = String(args[0]);
+        const record = this._contextMenus.get(id);
+        if (record && record.extensionId === extension.id) {
+          this._contextMenus.delete(id);
+        }
+        return null;
       }
 
       case "ui.createPanel": {
