@@ -11,6 +11,21 @@ import { fetchWithOrgTls, type OrgTlsPolicy } from "../http/tls";
 
 type RetriableError = Error & { retriable?: boolean; status?: number; responseBody?: string };
 
+function isNonRetriableTlsError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as any).code as unknown;
+  if (typeof code !== "string" || code.length === 0) return false;
+
+  // Certificate validation / TLS configuration errors won't be fixed by retries.
+  if (code.startsWith("ERR_SSL_")) return true;
+  if (code.startsWith("ERR_TLS_CERT_")) return true;
+  if (code === "ERR_TLS_PROTOCOL_VERSION") return true;
+  if (code.includes("CERT")) return true;
+  if (code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE") return true;
+
+  return false;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -190,6 +205,8 @@ export async function sendSiemBatch(
             cause && typeof cause === "object" && "retriable" in cause ? (cause as any).retriable : undefined;
           if (typeof causeRetriable === "boolean") {
             error.retriable = causeRetriable;
+          } else if (isNonRetriableTlsError(cause)) {
+            error.retriable = false;
           } else {
             error.retriable = true;
           }
