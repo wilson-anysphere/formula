@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use quick_xml::Reader;
@@ -15,8 +16,11 @@ pub enum PivotCacheValue {
     Bool(bool),
     /// `<e v="..."/>`
     Error(String),
-    /// `<d v="..."/>`
-    DateTime(f64),
+    /// `<d v="..."/>` (often ISO-8601 / RFC3339).
+    ///
+    /// Excel stores real date/time values as strings in pivot caches, so we keep
+    /// the raw attribute value (instead of coercing to an Excel serial number).
+    DateTime(String),
     /// `<x v="..."/>` (shared item index)
     Index(u32),
 }
@@ -368,10 +372,7 @@ fn parse_datetime(v: Option<String>) -> PivotCacheValue {
     let Some(v) = v else {
         return PivotCacheValue::Missing;
     };
-    let Ok(n) = v.trim().parse::<f64>() else {
-        return PivotCacheValue::Missing;
-    };
-    PivotCacheValue::DateTime(n)
+    PivotCacheValue::DateTime(v)
 }
 
 fn parse_index(v: Option<String>) -> PivotCacheValue {
@@ -405,6 +406,20 @@ fn parse_bool(v: Option<String>) -> PivotCacheValue {
 
     let v = v.trim();
     PivotCacheValue::Bool(v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+/// Best-effort conversion of a pivot cache `<d v="..."/>` value into a `NaiveDate`.
+///
+/// Pivot caches commonly store ISO-8601 / RFC3339 strings (e.g. `2024-01-15T00:00:00Z`).
+/// Timelines typically operate on the date component.
+pub fn pivot_cache_datetime_to_naive_date(v: &str) -> Option<NaiveDate> {
+    let v = v.trim();
+    let date_part = v.split(['T', ' ']).next()?;
+    let mut parts = date_part.split('-');
+    let year = parts.next()?.parse::<i32>().ok()?;
+    let month = parts.next()?.parse::<u32>().ok()?;
+    let day = parts.next()?.parse::<u32>().ok()?;
+    NaiveDate::from_ymd_opt(year, month, day)
 }
 
 #[cfg(test)]

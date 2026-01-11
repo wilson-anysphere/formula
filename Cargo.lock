@@ -1657,6 +1657,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "cfb 0.10.0",
+ "chrono",
  "formula-engine",
  "formula-model",
  "formula-vba",

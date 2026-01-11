@@ -6,6 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "XLSX/XLSM import/export and package preservation utilities for Formula."
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
 formula-vba = { path = "../formula-vba" }
