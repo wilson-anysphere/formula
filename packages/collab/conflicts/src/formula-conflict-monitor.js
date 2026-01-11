@@ -235,9 +235,9 @@ export class FormulaConflictMonitor {
       const choice = /** @type {any} */ (chosen);
       if (!choice || typeof choice !== "object") return false;
 
-      const cell = this._ensureCell(conflict.cellKey);
-      const currentFormula = (cell.get("formula") ?? "").toString();
-      const currentValue = cell.get("value") ?? null;
+      const cell = /** @type {any} */ (this.cells.get(conflict.cellKey));
+      const currentFormula = (cell?.get?.("formula") ?? "").toString();
+      const currentValue = cell?.get?.("value") ?? null;
 
       if (choice.type === "formula") {
         const chosenFormula = String(choice.formula ?? "");
