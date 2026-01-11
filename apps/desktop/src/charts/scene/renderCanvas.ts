@@ -1,7 +1,7 @@
 import { paintToRgba, rgbaToCss } from "./color.js";
 import { applyPathToCanvas } from "./path.js";
 import { applyInverseTransformToCanvas, applyTransformToCanvas } from "./transform.js";
-import type { ClipShape, Node, Paint, PathNode, RectNode, Scene, Stroke, TextNode } from "./types.js";
+import type { CircleNode, ClipShape, Node, Paint, PathNode, PolylineNode, RectNode, Scene, Stroke, TextNode } from "./types.js";
 import { fontSpecToCss } from "./text.js";
 
 function applyFill(ctx: CanvasRenderingContext2D, paint: Paint | undefined): boolean {
@@ -64,6 +64,12 @@ export function renderSceneToCanvas(scene: Scene, ctx: CanvasRenderingContext2D)
       case "line":
         renderLine(node);
         break;
+      case "polyline":
+        renderPolyline(node);
+        break;
+      case "circle":
+        renderCircle(node);
+        break;
       case "path":
         renderPath(node);
         break;
@@ -95,6 +101,30 @@ export function renderSceneToCanvas(scene: Scene, ctx: CanvasRenderingContext2D)
     ctx.beginPath();
     ctx.moveTo(node.x1, node.y1);
     ctx.lineTo(node.x2, node.y2);
+    if (applyStroke(ctx, node.stroke)) ctx.stroke();
+    ctx.restore();
+  };
+
+  const renderPolyline = (node: PolylineNode): void => {
+    if (node.points.length === 0) return;
+    ctx.save();
+    applyTransformToCanvas(ctx, node.transform);
+    ctx.beginPath();
+    ctx.moveTo(node.points[0].x, node.points[0].y);
+    for (let i = 1; i < node.points.length; i += 1) {
+      ctx.lineTo(node.points[i].x, node.points[i].y);
+    }
+    if (applyFill(ctx, node.fill)) ctx.fill();
+    if (applyStroke(ctx, node.stroke)) ctx.stroke();
+    ctx.restore();
+  };
+
+  const renderCircle = (node: CircleNode): void => {
+    ctx.save();
+    applyTransformToCanvas(ctx, node.transform);
+    ctx.beginPath();
+    ctx.arc(node.cx, node.cy, node.r, 0, Math.PI * 2);
+    if (applyFill(ctx, node.fill)) ctx.fill();
     if (applyStroke(ctx, node.stroke)) ctx.stroke();
     ctx.restore();
   };

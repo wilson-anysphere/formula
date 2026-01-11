@@ -1,5 +1,4 @@
 import { parseA1Range } from "./a1.js";
-import { defaultChartTheme, renderChartToSvg, resolveChartData as resolveChartDataFromModel } from "./renderChart.js";
 
 function fmt(n) {
   if (!Number.isFinite(n)) return "0";
@@ -324,10 +323,11 @@ export function renderChartSvg(chart, provider, opts) {
  * @param {any} [liveData]
  * @param {{ width?: number; height?: number; theme?: any }} [opts]
  */
-export function renderChartSvgFromModel(model, liveData, opts) {
+export async function renderChartSvgFromModel(model, liveData, opts) {
   const width = opts?.width ?? 320;
   const height = opts?.height ?? 200;
-  const theme = opts?.theme ?? defaultChartTheme;
-  const data = resolveChartDataFromModel(model, liveData);
-  return renderChartToSvg(model, data, theme, { width, height });
+  const mod = await import("./renderChart.ts");
+  const theme = opts?.theme ?? mod.defaultChartTheme;
+  const data = mod.resolveChartData(model, liveData);
+  return mod.renderChartToSvg(model, data, theme, { width, height });
 }

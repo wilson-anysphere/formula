@@ -56,6 +56,24 @@ export interface LineNode {
   transform?: Transform[];
 }
 
+export interface PolylineNode {
+  kind: "polyline";
+  points: Array<{ x: number; y: number }>;
+  fill?: Paint;
+  stroke: Stroke;
+  transform?: Transform[];
+}
+
+export interface CircleNode {
+  kind: "circle";
+  cx: number;
+  cy: number;
+  r: number;
+  fill?: Paint;
+  stroke?: Stroke;
+  transform?: Transform[];
+}
+
 export interface PathNode {
   kind: "path";
   path: PathData;
@@ -93,5 +111,4 @@ export interface ClipNode {
   transform?: Transform[];
 }
 
-export type Node = RectNode | LineNode | PathNode | TextNode | GroupNode | ClipNode;
-
+export type Node = RectNode | LineNode | PolylineNode | CircleNode | PathNode | TextNode | GroupNode | ClipNode;

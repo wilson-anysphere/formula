@@ -6,6 +6,7 @@ import { transformToSvg } from "./transform.js";
 import type {
   ClipNode,
   ClipShape,
+  CircleNode,
   FillRule,
   FontSpec,
   GroupNode,
@@ -13,6 +14,7 @@ import type {
   Node,
   Paint,
   PathNode,
+  PolylineNode,
   RectNode,
   Scene,
   Stroke,
@@ -139,6 +141,10 @@ export function renderSceneToSvg(scene: Scene, options: { width: number; height:
         return renderRect(node);
       case "line":
         return renderLine(node);
+      case "polyline":
+        return renderPolyline(node);
+      case "circle":
+        return renderCircle(node);
       case "path":
         return renderPath(node);
       case "text":
@@ -177,6 +183,32 @@ export function renderSceneToSvg(scene: Scene, options: { width: number; height:
     const t = transformToSvg(node.transform);
     if (t) attrs.push(`transform="${t}"`);
     return `<line ${attrs.join(" ")} />`;
+  };
+
+  const renderPolyline = (node: PolylineNode): string => {
+    const attrs: string[] = [];
+    const points = node.points
+      .map((p) => `${formatNumber(p.x)},${formatNumber(p.y)}`)
+      .join(" ");
+    attrs.push(`points="${points}"`);
+    attrs.push(...paintAttrs(node.fill, "fill"));
+    attrs.push(...strokeAttrs(node.stroke));
+    const t = transformToSvg(node.transform);
+    if (t) attrs.push(`transform="${t}"`);
+    return `<polyline ${attrs.join(" ")} />`;
+  };
+
+  const renderCircle = (node: CircleNode): string => {
+    const attrs: string[] = [
+      `cx="${formatNumber(node.cx)}"`,
+      `cy="${formatNumber(node.cy)}"`,
+      `r="${formatNumber(node.r)}"`,
+    ];
+    attrs.push(...paintAttrs(node.fill, "fill"));
+    attrs.push(...strokeAttrs(node.stroke));
+    const t = transformToSvg(node.transform);
+    if (t) attrs.push(`transform="${t}"`);
+    return `<circle ${attrs.join(" ")} />`;
   };
 
   const renderPath = (node: PathNode): string => {
