@@ -4271,7 +4271,6 @@ fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::Cel
 
 fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> bool {
     fn parses_numeric_criteria_literal(raw: &str) -> bool {
-        let raw = raw.trim();
         let rest = if let Some(r) = raw.strip_prefix(">=") {
             r
         } else if let Some(r) = raw.strip_prefix("<=") {
