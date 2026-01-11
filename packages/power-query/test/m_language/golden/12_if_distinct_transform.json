@@ -1,0 +1,57 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["Id", "Sales"],
+        [1, 10],
+        [1, -5],
+        [2, 0]
+      ],
+      "hasHeaders": true
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_addColumn",
+      "name": "Added Column",
+      "operation": {
+        "type": "addColumn",
+        "name": "Positive",
+        "formula": "(((([Sales]) > (0))) ? ([Sales]) : (null))"
+      }
+    },
+    {
+      "id": "s2_removeRowsWithErrors",
+      "name": "Removed Errors",
+      "operation": {
+        "type": "removeRowsWithErrors",
+        "columns": null
+      }
+    },
+    {
+      "id": "s3_distinctRows",
+      "name": "Removed Duplicates",
+      "operation": {
+        "type": "distinctRows",
+        "columns": ["Id"]
+      }
+    },
+    {
+      "id": "s4_transformColumns",
+      "name": "Transformed Columns",
+      "operation": {
+        "type": "transformColumns",
+        "transforms": [
+          {
+            "column": "Positive",
+            "formula": "((((_) == (null))) ? (0) : (_))",
+            "newType": "number"
+          }
+        ]
+      }
+    }
+  ]
+}

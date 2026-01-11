@@ -208,7 +208,16 @@ export function computeParquetProjectionColumns(steps) {
   return Array.from(required);
 }
 
-const LIMIT_UNSAFE_OPS = new Set(["filterRows", "sortRows", "groupBy", "pivot", "unpivot", "splitColumn"]);
+const LIMIT_UNSAFE_OPS = new Set([
+  "filterRows",
+  "sortRows",
+  "distinctRows",
+  "removeRowsWithErrors",
+  "groupBy",
+  "pivot",
+  "unpivot",
+  "splitColumn",
+]);
 
 /**
  * Compute a safe Parquet reader `limit` value to push down.

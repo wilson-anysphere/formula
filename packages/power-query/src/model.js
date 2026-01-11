@@ -160,11 +160,15 @@
  * @typedef {{ type: "unpivot"; columns: string[]; nameColumn: string; valueColumn: string }} UnpivotOp
  * @typedef {{ type: "merge"; rightQuery: string; joinType: "inner" | "left" | "right" | "full"; leftKey: string; rightKey: string }} MergeOp
  * @typedef {{ type: "append"; queries: string[] }} AppendOp
+ * @typedef {{ type: "distinctRows"; columns: string[] | null }} DistinctRowsOp
+ * @typedef {{ type: "removeRowsWithErrors"; columns: string[] | null }} RemoveRowsWithErrorsOp
+ * @typedef {{ column: string; formula: string; newType: DataType | null }} TransformColumnSpec
+ * @typedef {{ type: "transformColumns"; transforms: TransformColumnSpec[] }} TransformColumnsOp
  * @typedef {{ type: "fillDown"; columns: string[] }} FillDownOp
  * @typedef {{ type: "replaceValues"; column: string; find: unknown; replace: unknown }} ReplaceValuesOp
  * @typedef {{ type: "splitColumn"; column: string; delimiter: string }} SplitColumnOp
  *
- * @typedef {SelectColumnsOp | RemoveColumnsOp | FilterRowsOp | SortRowsOp | GroupByOp | AddColumnOp | RenameColumnOp | ChangeTypeOp | TakeOp | PivotOp | UnpivotOp | MergeOp | AppendOp | FillDownOp | ReplaceValuesOp | SplitColumnOp} QueryOperation
+ * @typedef {SelectColumnsOp | RemoveColumnsOp | FilterRowsOp | SortRowsOp | GroupByOp | AddColumnOp | RenameColumnOp | ChangeTypeOp | TakeOp | PivotOp | UnpivotOp | MergeOp | AppendOp | DistinctRowsOp | RemoveRowsWithErrorsOp | TransformColumnsOp | FillDownOp | ReplaceValuesOp | SplitColumnOp} QueryOperation
  */
 
 /**

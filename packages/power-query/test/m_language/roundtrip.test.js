@@ -32,3 +32,21 @@ in
   assert.deepEqual(toJson(query2), toJson(query));
 });
 
+test("m_language round-trip: prettyPrintQueryToM (if/then/else)", () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Sales"},
+    {50},
+    {150}
+  }),
+  #"Added Column" = Table.AddColumn(Source, "Bucket", each if [Sales] > 100 then "High" else "Low")
+in
+  #"Added Column"
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});

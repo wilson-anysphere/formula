@@ -13,7 +13,24 @@ import { MLanguageSyntaxError } from "./errors.js";
  * }} Token
  */
 
-const KEYWORDS = new Set(["let", "in", "each", "and", "or", "not", "true", "false", "null", "type"]);
+const KEYWORDS = new Set([
+  "let",
+  "in",
+  "each",
+  "and",
+  "or",
+  "not",
+  "true",
+  "false",
+  "null",
+  "type",
+  "if",
+  "then",
+  "else",
+  "try",
+  "otherwise",
+  "as",
+]);
 
 /**
  * @param {string} char
@@ -167,6 +184,31 @@ export function tokenizeM(source) {
       continue;
     }
 
+    // String: '...' (best-effort; not part of canonical M syntax but appears in some generators)
+    if (char === "'") {
+      advance(1);
+      let value = "";
+      while (!eof()) {
+        const c = source[offset];
+        if (c === "'") {
+          const next = source[offset + 1];
+          if (next === "'") {
+            value += "'";
+            advance(2);
+            continue;
+          }
+          advance(1);
+          push("string", value, start, loc());
+          value = "";
+          break;
+        }
+        value += c;
+        advance(1);
+      }
+      if (value !== "") error("Unterminated string literal", start);
+      continue;
+    }
+
     // Hash identifiers (e.g. #date)
     if (char === "#" && isIdentifierStart(source[offset + 1] ?? "")) {
       advance(1);
@@ -236,7 +278,7 @@ export function tokenizeM(source) {
 
     // Operators / punctuation
     const twoChar = source.slice(offset, offset + 2);
-    if (twoChar === "<>" || twoChar === "<=" || twoChar === ">=") {
+    if (twoChar === "<>" || twoChar === "<=" || twoChar === ">=" || twoChar === "=>") {
       advance(2);
       push("operator", twoChar, start, loc());
       continue;
@@ -265,4 +307,3 @@ export function tokenizeM(source) {
   tokens.push({ type: "eof", value: "", start: end, end });
   return tokens;
 }
-

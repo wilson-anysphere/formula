@@ -21,7 +21,27 @@ function escapeMString(name) {
  * @returns {boolean}
  */
 function isBareIdentifier(name) {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !["let", "in", "each", "and", "or", "not", "type"].includes(name);
+  return (
+    /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
+    ![
+      "let",
+      "in",
+      "each",
+      "and",
+      "or",
+      "not",
+      "type",
+      "if",
+      "then",
+      "else",
+      "try",
+      "otherwise",
+      "as",
+      "true",
+      "false",
+      "null",
+    ].includes(name)
+  );
 }
 
 /**
@@ -110,8 +130,10 @@ function sourceToM(source) {
 function predicateToM(predicate) {
   switch (predicate.type) {
     case "and":
+      if (predicate.predicates.length === 0) return "true";
       return predicate.predicates.map(predicateToM).join(" and ");
     case "or":
+      if (predicate.predicates.length === 0) return "false";
       return predicate.predicates.map(predicateToM).join(" or ");
     case "not":
       return `not (${predicateToM(predicate.predicate)})`;
@@ -186,14 +208,151 @@ function aggregationOpToM(op) {
 }
 
 /**
+ * @param {import("../model.js").DataType} type
+ * @returns {string}
+ */
+function dataTypeToMTypeExpr(type) {
+  switch (type) {
+    case "string":
+      return "type text";
+    case "number":
+      return "type number";
+    case "boolean":
+      return "type logical";
+    case "date":
+      return "type date";
+    case "any":
+    default:
+      return "type any";
+  }
+}
+
+/**
  * @param {string} formula
  * @returns {string}
  */
 function jsFormulaToM(formula) {
-  // Best-effort: convert the restricted JS-ish row formula subset back into
-  // the M-ish subset this parser understands.
+  // Best-effort: convert the restricted JS-ish row/value formula subset back
+  // into the M-ish subset this parser understands.
+  let expr = formula.trim();
+  if (expr.startsWith("=")) expr = expr.slice(1).trim();
+
+  /**
+   * @param {string} input
+   * @returns {string}
+   */
+  function stripOuterParens(input) {
+    let out = input.trim();
+    while (out.startsWith("(") && out.endsWith(")")) {
+      let depth = 0;
+      let inSingle = false;
+      let inDouble = false;
+      let wraps = true;
+      for (let i = 0; i < out.length; i++) {
+        const ch = out[i];
+        if (inSingle) {
+          if (ch === "'" && out[i - 1] !== "\\") inSingle = false;
+          continue;
+        }
+        if (inDouble) {
+          if (ch === '"' && out[i - 1] !== "\\") inDouble = false;
+          continue;
+        }
+        if (ch === "'") {
+          inSingle = true;
+          continue;
+        }
+        if (ch === '"') {
+          inDouble = true;
+          continue;
+        }
+        if (ch === "(") depth += 1;
+        else if (ch === ")") {
+          depth -= 1;
+          if (depth === 0 && i < out.length - 1) {
+            wraps = false;
+            break;
+          }
+        }
+      }
+      if (!wraps || depth !== 0) break;
+      out = out.slice(1, -1).trim();
+    }
+    return out;
+  }
+
+  /**
+   * @param {string} input
+   * @returns {{ q: number; colon: number } | null}
+   */
+  function findTopLevelTernary(input) {
+    let depth = 0;
+    let bracketDepth = 0;
+    let inSingle = false;
+    let inDouble = false;
+    let qIndex = -1;
+    let nested = 0;
+
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i];
+
+      if (inSingle) {
+        if (ch === "'" && input[i - 1] !== "\\") inSingle = false;
+        continue;
+      }
+      if (inDouble) {
+        if (ch === '"' && input[i - 1] !== "\\") inDouble = false;
+        continue;
+      }
+      if (ch === "'") {
+        inSingle = true;
+        continue;
+      }
+      if (ch === '"') {
+        inDouble = true;
+        continue;
+      }
+
+      if (ch === "(") depth += 1;
+      else if (ch === ")") depth -= 1;
+      else if (ch === "[") bracketDepth += 1;
+      else if (ch === "]") bracketDepth -= 1;
+
+      if (depth !== 0 || bracketDepth !== 0) continue;
+
+      if (ch === "?") {
+        if (qIndex === -1) qIndex = i;
+        else nested += 1;
+        continue;
+      }
+      if (ch === ":" && qIndex !== -1) {
+        if (nested === 0) return { q: qIndex, colon: i };
+        nested -= 1;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * @param {string} input
+   * @returns {string}
+   */
+  function ternaryToIf(input) {
+    const compact = stripOuterParens(input);
+    const match = findTopLevelTernary(compact);
+    if (!match) return compact.trim();
+
+    const test = ternaryToIf(compact.slice(0, match.q));
+    const consequent = ternaryToIf(compact.slice(match.q + 1, match.colon));
+    const alternate = ternaryToIf(compact.slice(match.colon + 1));
+    return `if ${test} then ${consequent} else ${alternate}`;
+  }
+
+  expr = ternaryToIf(expr);
+
   return (
-    formula
+    expr
       .replaceAll("&&", " and ")
       .replaceAll("||", " or ")
       // Replace != before !
@@ -235,20 +394,26 @@ function operationToM(operation, inputName) {
       const body = jsFormulaToM(operation.formula);
       return `Table.AddColumn(${inputName}, ${escapeMString(operation.name)}, each ${body})`;
     }
+    case "distinctRows": {
+      const cols = operation.columns && operation.columns.length > 0 ? `, ${valueToM(operation.columns)}` : "";
+      return `Table.Distinct(${inputName}${cols})`;
+    }
+    case "removeRowsWithErrors": {
+      const cols = operation.columns && operation.columns.length > 0 ? `, ${valueToM(operation.columns)}` : "";
+      return `Table.RemoveRowsWithErrors(${inputName}${cols})`;
+    }
     case "renameColumn":
       return `Table.RenameColumns(${inputName}, {{${escapeMString(operation.oldName)}, ${escapeMString(operation.newName)}}})`;
     case "changeType": {
-      const typeName =
-        operation.newType === "string"
-          ? "type text"
-          : operation.newType === "number"
-            ? "type number"
-            : operation.newType === "boolean"
-              ? "type logical"
-              : operation.newType === "date"
-                ? "type date"
-                : "type any";
-      return `Table.TransformColumnTypes(${inputName}, {{${escapeMString(operation.column)}, ${typeName}}})`;
+      return `Table.TransformColumnTypes(${inputName}, {{${escapeMString(operation.column)}, ${dataTypeToMTypeExpr(operation.newType)}}})`;
+    }
+    case "transformColumns": {
+      const specs = operation.transforms.map((t) => {
+        const body = jsFormulaToM(t.formula);
+        const type = t.newType ? `, ${dataTypeToMTypeExpr(t.newType)}` : "";
+        return `{${escapeMString(t.column)}, each ${body}${type}}`;
+      });
+      return `Table.TransformColumns(${inputName}, {${specs.join(", ")}})`;
     }
     case "pivot":
       return `Table.Pivot(${inputName}, {}, ${escapeMString(operation.rowColumn)}, ${escapeMString(operation.valueColumn)}, ${aggregationOpToM(operation.aggregation)})`;

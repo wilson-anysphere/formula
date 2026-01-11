@@ -138,6 +138,100 @@ function removeColumns(table, columns) {
 
 /**
  * @param {ITable} table
+ * @param {string[] | null} columns
+ * @returns {ITable}
+ */
+function distinctRows(table, columns) {
+  const indices = columns && columns.length > 0 ? indicesForColumns(table, columns) : table.columns.map((_c, idx) => idx);
+  const seen = new Set();
+
+  if (table instanceof ArrowTableAdapter) {
+    const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
+    /** @type {unknown[][]} */
+    const outColumns = table.columns.map(() => []);
+
+    for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+      const keyValues = indices.map((idx) => distinctKey(normalizeMissing(vectors[idx].get(rowIndex))));
+      const key = JSON.stringify(keyValues);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
+        outColumns[colIndex].push(vectors[colIndex].get(rowIndex));
+      }
+    }
+
+    const out = Object.fromEntries(table.columns.map((col, idx) => [col.name, outColumns[idx]]));
+    return new ArrowTableAdapter(arrowTableFromColumns(out), table.columns);
+  }
+
+  const materialized = ensureDataTable(table);
+  const rows = materialized.rows;
+  const outRows = [];
+  for (const row of rows) {
+    const keyValues = indices.map((idx) => distinctKey(normalizeMissing(row[idx])));
+    const key = JSON.stringify(keyValues);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    outRows.push(row);
+  }
+  return new DataTable(materialized.columns, outRows);
+}
+
+/**
+ * @param {ITable} table
+ * @param {string[] | null} columns
+ * @returns {ITable}
+ */
+function removeRowsWithErrors(table, columns) {
+  const indices = columns && columns.length > 0 ? indicesForColumns(table, columns) : table.columns.map((_c, idx) => idx);
+
+  /**
+   * @param {unknown} value
+   * @returns {boolean}
+   */
+  const isErrorValue = (value) => value instanceof Error;
+
+  if (table instanceof ArrowTableAdapter) {
+    const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
+    /** @type {unknown[][]} */
+    const outColumns = table.columns.map(() => []);
+
+    for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+      let hasError = false;
+      for (const idx of indices) {
+        if (isErrorValue(vectors[idx].get(rowIndex))) {
+          hasError = true;
+          break;
+        }
+      }
+      if (hasError) continue;
+      for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
+        outColumns[colIndex].push(vectors[colIndex].get(rowIndex));
+      }
+    }
+
+    const out = Object.fromEntries(table.columns.map((col, idx) => [col.name, outColumns[idx]]));
+    return new ArrowTableAdapter(arrowTableFromColumns(out), table.columns);
+  }
+
+  const materialized = ensureDataTable(table);
+  const rows = materialized.rows;
+  const outRows = [];
+  for (const row of rows) {
+    let hasError = false;
+    for (const idx of indices) {
+      if (isErrorValue(row[idx])) {
+        hasError = true;
+        break;
+      }
+    }
+    if (!hasError) outRows.push(row);
+  }
+  return new DataTable(materialized.columns, outRows);
+}
+
+/**
+ * @param {ITable} table
  * @param {import("./model.js").FilterPredicate} predicate
  * @returns {ITable}
  */
@@ -570,6 +664,36 @@ export function compileRowFormula(table, formula) {
 }
 
 /**
+ * Compile a `transformColumns` formula into a value function.
+ *
+ * @param {string} formula
+ * @returns {(value: unknown) => unknown}
+ */
+function compileValueFormula(formula) {
+  let expr = formula.trim();
+  if (expr.startsWith("=")) expr = expr.slice(1).trim();
+
+  if (/[{};]/.test(expr)) {
+    throw new Error("Formula contains unsupported characters");
+  }
+
+  if (
+    /\b(?:while|for|function|class|return|new|this|globalThis|process|require|import|eval|Function|constructor|prototype)\b/.test(
+      expr,
+    )
+  ) {
+    throw new Error("Formula contains unsupported identifiers");
+  }
+
+  if (!/^[\d\s+\-*/%().,<>=!&|?:'"[\]A-Za-z_]+$/.test(expr)) {
+    throw new Error("Formula contains unsupported tokens");
+  }
+
+  // eslint-disable-next-line no-new-func
+  return new Function("_", `"use strict"; return (${expr});`);
+}
+
+/**
  * @param {DataTable} table
  * @param {string} name
  * @param {string} formula
@@ -584,6 +708,36 @@ function addColumn(table, name, formula) {
   const rows = table.rows.map((row) => [...row, compute(row)]);
   const type = inferColumnType(rows.map((row) => row[row.length - 1]));
   const columns = [...table.columns, { name, type }];
+  return new DataTable(columns, rows);
+}
+
+/**
+ * @param {DataTable} table
+ * @param {import("./model.js").TransformColumnsOp} op
+ * @returns {DataTable}
+ */
+function transformColumns(table, op) {
+  const transforms = op.transforms.map((t) => ({
+    ...t,
+    idx: table.getColumnIndex(t.column),
+    fn: compileValueFormula(t.formula),
+  }));
+
+  const rows = table.rows.map((row) => row.slice());
+  for (const t of transforms) {
+    for (const row of rows) {
+      const next = t.fn(row[t.idx]);
+      row[t.idx] = t.newType ? coerceType(t.newType, next) : next;
+    }
+  }
+
+  const columns = table.columns.map((col, idx) => {
+    const t = transforms.find((x) => x.idx === idx);
+    if (!t) return col;
+    const type = t.newType ?? inferColumnType(rows.map((r) => r[idx]));
+    return { ...col, type };
+  });
+
   return new DataTable(columns, rows);
 }
 
@@ -915,6 +1069,12 @@ export function applyOperation(table, operation) {
       return renameColumn(table, operation.oldName, operation.newName);
     case "changeType":
       return changeType(table, operation.column, operation.newType);
+    case "distinctRows":
+      return distinctRows(table, operation.columns);
+    case "removeRowsWithErrors":
+      return removeRowsWithErrors(table, operation.columns);
+    case "transformColumns":
+      return transformColumns(ensureDataTable(table), operation);
     case "take":
       return take(table, operation.count);
     case "pivot":

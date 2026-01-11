@@ -168,6 +168,10 @@ function compileExpression(ctx, expr, preferredStepName = null) {
     case "FieldAccessExpression":
     case "ItemAccessExpression":
     case "EachExpression":
+    case "IfExpression":
+    case "FunctionExpression":
+    case "TryExpression":
+    case "AsExpression":
     case "UnaryExpression":
     case "BinaryExpression": {
       // These can be constants in some contexts; allow evaluation when explicitly requested.
@@ -207,6 +211,10 @@ function compileLet(ctx, expr) {
 function compileCall(ctx, expr, preferredStepName) {
   const name = calleeName(expr.callee);
   if (!name) ctx.error(expr, "Unsupported call target");
+
+  if (name === "Table.Combine") {
+    return { kind: "pipeline", pipeline: compileTableCombineCall(ctx, expr, preferredStepName) };
+  }
 
   if (TABLE_FUNCTIONS.has(name)) {
     return { kind: "pipeline", pipeline: compileTableFunctionCall(ctx, name, expr, preferredStepName) };
@@ -374,6 +382,45 @@ function compileTableFunctionCall(ctx, fnName, expr, preferredStepName) {
 }
 
 /**
+ * `Table.Combine({tbl1, tbl2, ...})`
+ *
+ * This maps to our internal `append` operation, which expects additional
+ * tables to come from query references.
+ *
+ * @param {CompilerContext} ctx
+ * @param {MCallExpression} expr
+ * @param {string | null} preferredStepName
+ * @returns {Pipeline}
+ */
+function compileTableCombineCall(ctx, expr, preferredStepName) {
+  const listExpr = expr.args[0];
+  if (!listExpr || listExpr.type !== "ListExpression" || listExpr.elements.length === 0) {
+    ctx.error(expr, "Table.Combine expects a non-empty list of tables");
+  }
+
+  const first = compileExpression(ctx, listExpr.elements[0]);
+  if (first.kind !== "pipeline") ctx.error(listExpr.elements[0], "Table.Combine list elements must be tables");
+
+  const queryIds = [];
+  for (const element of listExpr.elements.slice(1)) {
+    const compiled = compileExpression(ctx, element);
+    if (compiled.kind !== "pipeline") ctx.error(element, "Table.Combine list elements must be tables");
+    if (compiled.pipeline.source.type !== "query" || compiled.pipeline.steps.length > 0) {
+      ctx.error(element, "In this subset, Table.Combine can only append Query.Reference(...) tables");
+    }
+    queryIds.push(compiled.pipeline.source.queryId);
+  }
+
+  // Single-table `Table.Combine` is a no-op.
+  if (queryIds.length === 0) return first.pipeline;
+
+  const stepName = preferredStepName ?? defaultStepName("Table.Combine");
+  const operation = { type: "append", queries: queryIds };
+  const steps = [...first.pipeline.steps, ctx.makeStep(stepName, operation)];
+  return { source: first.pipeline.source, steps, schema: null };
+}
+
+/**
  * @param {CompilerContext} ctx
  * @param {string} fnName
  * @param {MCallExpression} expr
@@ -407,6 +454,18 @@ function compileTableOperation(ctx, fnName, expr, schema) {
       }
       const predicate = compilePredicate(ctx, predicateExpr.body, schema);
       return { operations: [{ type: "filterRows", predicate }], schema };
+    }
+    case "Table.Distinct": {
+      const colsExpr = expr.args[1] ?? null;
+      const columns = colsExpr ? expectTextList(ctx, colsExpr, "Table.Distinct") : null;
+      if (columns) validateColumnsExist(ctx, expr, schema, columns);
+      return { operations: [{ type: "distinctRows", columns }], schema };
+    }
+    case "Table.RemoveRowsWithErrors": {
+      const colsExpr = expr.args[1] ?? null;
+      const columns = colsExpr ? expectTextList(ctx, colsExpr, "Table.RemoveRowsWithErrors") : null;
+      if (columns) validateColumnsExist(ctx, expr, schema, columns);
+      return { operations: [{ type: "removeRowsWithErrors", columns }], schema };
     }
     case "Table.Group": {
       const groupCols = expectTextList(ctx, expr.args[1], "Table.Group");
@@ -537,6 +596,27 @@ function compileTableOperation(ctx, fnName, expr, schema) {
       const delimiter = compileDelimiter(ctx, splitterExpr);
       return { operations: [{ type: "splitColumn", column, delimiter }], schema: null };
     }
+    case "Table.TransformColumns": {
+      const specsExpr = expr.args[1];
+      if (!specsExpr || !isList(specsExpr)) ctx.error(expr, "Table.TransformColumns expects a list of transforms");
+      const transforms = specsExpr.elements.map((node) => compileTransformColumnSpec(ctx, node, schema));
+      return { operations: [{ type: "transformColumns", transforms }], schema };
+    }
+    case "Table.Join":
+    case "Table.NestedJoin": {
+      const leftKey = expectJoinKey(ctx, expr.args[1], fnName);
+      validateColumnsExist(ctx, expr, schema, [leftKey]);
+      const rightTableExpr = expr.args[2];
+      if (!rightTableExpr) ctx.error(expr, `${fnName} requires a right table argument`);
+      const rightKey = expectJoinKey(ctx, expr.args[3], fnName);
+      const joinKindExpr = fnName === "Table.Join" ? expr.args[4] ?? null : expr.args[5] ?? null;
+      const joinType = compileJoinKind(ctx, joinKindExpr);
+      const rightQuery = expectQueryReferenceId(ctx, rightTableExpr, fnName);
+      return {
+        operations: [{ type: "merge", rightQuery, joinType, leftKey, rightKey }],
+        schema: null,
+      };
+    }
     default:
       ctx.error(expr, `Unsupported table function '${fnName}'`);
   }
@@ -562,6 +642,9 @@ function applySchemaAfterOperation(ctx, node, schema, operation) {
     case "changeType":
     case "filterRows":
     case "sortRows":
+    case "distinctRows":
+    case "removeRowsWithErrors":
+    case "transformColumns":
     case "fillDown":
     case "replaceValues":
       return schema;
@@ -614,6 +697,21 @@ function collectFieldReferences(expr, out = new Set()) {
     case "FieldAccessExpression":
       if (expr.base == null) out.add(expr.field);
       if (expr.base) collectFieldReferences(expr.base, out);
+      return out;
+    case "IfExpression":
+      collectFieldReferences(expr.test, out);
+      collectFieldReferences(expr.consequent, out);
+      collectFieldReferences(expr.alternate, out);
+      return out;
+    case "TryExpression":
+      collectFieldReferences(expr.expression, out);
+      if (expr.otherwise) collectFieldReferences(expr.otherwise, out);
+      return out;
+    case "AsExpression":
+      collectFieldReferences(expr.expression, out);
+      return out;
+    case "FunctionExpression":
+      collectFieldReferences(expr.body, out);
       return out;
     case "BinaryExpression":
       collectFieldReferences(expr.left, out);
@@ -777,6 +875,103 @@ function compileDelimiter(ctx, expr) {
 
 /**
  * @param {CompilerContext} ctx
+ * @param {MExpression | undefined | null} expr
+ * @param {string} fnName
+ * @returns {string}
+ */
+function expectJoinKey(ctx, expr, fnName) {
+  if (!expr) ctx.error(exprSpanStart(), `${fnName} requires join key columns`);
+  const value = evaluateConstant(ctx, expr);
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && value.length === 1) {
+    const first = value[0];
+    if (typeof first === "string") return first;
+    return String(first);
+  }
+  ctx.error(expr, `${fnName} join keys must be a column name or a single-item list of column names`);
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression | null} expr
+ * @returns {"inner" | "left" | "right" | "full"}
+ */
+function compileJoinKind(ctx, expr) {
+  if (!expr) return "inner";
+  if (isIdentifier(expr)) {
+    const name = identifierPartsToName(expr.parts);
+    switch (name) {
+      case "JoinKind.Inner":
+        return "inner";
+      case "JoinKind.LeftOuter":
+        return "left";
+      case "JoinKind.RightOuter":
+        return "right";
+      case "JoinKind.FullOuter":
+        return "full";
+      default:
+        break;
+    }
+  }
+  const value = evaluateConstant(ctx, expr);
+  if (typeof value === "string") {
+    const lower = value.toLowerCase();
+    if (lower === "inner") return "inner";
+    if (lower === "left") return "left";
+    if (lower === "right") return "right";
+    if (lower === "full") return "full";
+    if (lower === "leftouter") return "left";
+    if (lower === "rightouter") return "right";
+    if (lower === "fullouter") return "full";
+  }
+  ctx.error(expr, "Unsupported join kind (expected JoinKind.Inner/LeftOuter/RightOuter/FullOuter)");
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @param {string} context
+ * @returns {string}
+ */
+function expectQueryReferenceId(ctx, expr, context) {
+  const compiled = compileExpression(ctx, expr);
+  if (compiled.kind !== "pipeline") ctx.error(expr, `${context} expects a table value`);
+  if (compiled.pipeline.source.type !== "query" || compiled.pipeline.steps.length > 0) {
+    ctx.error(expr, `${context} expects a Query.Reference(...) table in this subset`);
+  }
+  return compiled.pipeline.source.queryId;
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @param {string[] | null} schema
+ * @returns {{ column: string; formula: string; newType: DataType | null }}
+ */
+function compileTransformColumnSpec(ctx, expr, schema) {
+  if (!isList(expr) || expr.elements.length < 2) {
+    ctx.error(expr, "Transform spec must be a list like {\"Column\", each _ * 2, type number}");
+  }
+  const column = expectText(ctx, expr.elements[0]);
+  validateColumnsExist(ctx, expr, schema, [column]);
+
+  const fnExpr = expr.elements[1];
+  let formula;
+  if (fnExpr.type === "EachExpression") {
+    formula = mExpressionToJsValueFormula(ctx, fnExpr.body);
+  } else if (fnExpr.type === "Literal" && fnExpr.literalType === "string") {
+    formula = fnExpr.value;
+  } else {
+    ctx.error(fnExpr, "Transform must be an 'each' expression or a string formula");
+  }
+
+  const newTypeExpr = expr.elements[2];
+  const newType = newTypeExpr ? compileDataType(ctx, newTypeExpr) : null;
+  return { column, formula, newType };
+}
+
+/**
+ * @param {CompilerContext} ctx
  * @param {MExpression} expr
  * @param {string[] | null} schema
  * @returns {FilterPredicate}
@@ -785,6 +980,31 @@ function compilePredicate(ctx, expr, schema) {
   switch (expr.type) {
     case "ParenthesizedExpression":
       return compilePredicate(ctx, expr.expression, schema);
+    case "AsExpression":
+      return compilePredicate(ctx, expr.expression, schema);
+    case "TryExpression":
+      // Best-effort: errors are not modeled in predicate compilation yet.
+      return compilePredicate(ctx, expr.expression, schema);
+    case "Literal":
+      if (expr.literalType === "boolean") {
+        // Represent boolean constants with empty boolean operators:
+        // - `and []` is true (vacuously)
+        // - `or []` is false
+        return expr.value ? { type: "and", predicates: [] } : { type: "or", predicates: [] };
+      }
+      ctx.error(expr, "Only logical literals (true/false) are supported in predicates");
+    case "IfExpression": {
+      const test = compilePredicate(ctx, expr.test, schema);
+      const consequent = compilePredicate(ctx, expr.consequent, schema);
+      const alternate = compilePredicate(ctx, expr.alternate, schema);
+      return {
+        type: "or",
+        predicates: [
+          { type: "and", predicates: [test, consequent] },
+          { type: "and", predicates: [{ type: "not", predicate: test }, alternate] },
+        ],
+      };
+    }
     case "BinaryExpression": {
       if (expr.operator === "and" || expr.operator === "or") {
         const left = compilePredicate(ctx, expr.left, schema);
@@ -964,6 +1184,19 @@ function mExpressionToJsFormula(ctx, expr) {
       // printer always emits explicit grouping around operators. Dropping
       // them keeps formulas stable across pretty-print round trips.
       return mExpressionToJsFormula(ctx, expr.expression);
+    case "IfExpression": {
+      const test = mExpressionToJsFormula(ctx, expr.test);
+      const consequent = mExpressionToJsFormula(ctx, expr.consequent);
+      const alternate = mExpressionToJsFormula(ctx, expr.alternate);
+      return `((${test}) ? (${consequent}) : (${alternate}))`;
+    }
+    case "TryExpression":
+      // Best-effort: our expression engine does not model M error values today,
+      // so `try` is treated as transparent for formula compilation.
+      return mExpressionToJsFormula(ctx, expr.expression);
+    case "AsExpression":
+      // Type assertions don't affect the formula subset we evaluate today.
+      return mExpressionToJsFormula(ctx, expr.expression);
     case "Literal":
       if (expr.literalType === "string") return JSON.stringify(expr.value);
       if (expr.literalType === "number") return String(expr.value);
@@ -973,6 +1206,9 @@ function mExpressionToJsFormula(ctx, expr) {
     case "FieldAccessExpression":
       if (expr.base != null) ctx.error(expr, "Only implicit [Column] references are supported in formulas");
       return `[${expr.field}]`;
+    case "Identifier":
+      // `each` formulas in this subset only support `[Column]` references.
+      ctx.error(expr, "Identifiers are not supported in formulas (use [Column] references)");
     case "UnaryExpression": {
       const arg = mExpressionToJsFormula(ctx, expr.argument);
       if (expr.operator === "not") return `(!(${arg}))`;
@@ -986,6 +1222,59 @@ function mExpressionToJsFormula(ctx, expr) {
     }
     default:
       ctx.error(expr, "Unsupported expression in formula");
+  }
+}
+
+/**
+ * Convert a subset of M expressions into a JS expression string that will be
+ * evaluated against a single value (bound as `_`).
+ *
+ * This is used for `Table.TransformColumns`.
+ *
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @returns {string}
+ */
+function mExpressionToJsValueFormula(ctx, expr) {
+  switch (expr.type) {
+    case "ParenthesizedExpression":
+      return mExpressionToJsValueFormula(ctx, expr.expression);
+    case "IfExpression": {
+      const test = mExpressionToJsValueFormula(ctx, expr.test);
+      const consequent = mExpressionToJsValueFormula(ctx, expr.consequent);
+      const alternate = mExpressionToJsValueFormula(ctx, expr.alternate);
+      return `((${test}) ? (${consequent}) : (${alternate}))`;
+    }
+    case "TryExpression":
+      return mExpressionToJsValueFormula(ctx, expr.expression);
+    case "AsExpression":
+      return mExpressionToJsValueFormula(ctx, expr.expression);
+    case "Identifier": {
+      const name = identifierPartsToName(expr.parts);
+      if (name === "_") return "_";
+      ctx.error(expr, `Unsupported identifier '${name}' in value formula (expected _)`);
+    }
+    case "Literal":
+      if (expr.literalType === "string") return JSON.stringify(expr.value);
+      if (expr.literalType === "number") return String(expr.value);
+      if (expr.literalType === "boolean") return expr.value ? "true" : "false";
+      if (expr.literalType === "null") return "null";
+      ctx.error(expr, "Date literals are not supported in formulas");
+    case "UnaryExpression": {
+      const arg = mExpressionToJsValueFormula(ctx, expr.argument);
+      if (expr.operator === "not") return `(!(${arg}))`;
+      return `(${expr.operator}(${arg}))`;
+    }
+    case "BinaryExpression": {
+      const left = mExpressionToJsValueFormula(ctx, expr.left);
+      const right = mExpressionToJsValueFormula(ctx, expr.right);
+      const op = binaryOperatorToJs(expr.operator);
+      return `((${left}) ${op} (${right}))`;
+    }
+    case "FieldAccessExpression":
+      ctx.error(expr, "Column references are not supported in Table.TransformColumns formulas (use _)");
+    default:
+      ctx.error(expr, "Unsupported expression in Table.TransformColumns formula");
   }
 }
 
@@ -1021,6 +1310,77 @@ function evaluateConstant(ctx, expr) {
       return expr.value;
     case "ParenthesizedExpression":
       return evaluateConstant(ctx, expr.expression);
+    case "UnaryExpression": {
+      const value = evaluateConstant(ctx, expr.argument);
+      switch (expr.operator) {
+        case "not":
+          return !Boolean(value);
+        case "+":
+          return typeof value === "number" ? value : Number(value);
+        case "-":
+          return typeof value === "number" ? -value : -Number(value);
+        default:
+          ctx.error(expr, `Unsupported unary operator '${expr.operator}' in constant context`);
+      }
+    }
+    case "BinaryExpression": {
+      const left = evaluateConstant(ctx, expr.left);
+      const right = evaluateConstant(ctx, expr.right);
+      switch (expr.operator) {
+        case "and":
+          return Boolean(left) && Boolean(right);
+        case "or":
+          return Boolean(left) || Boolean(right);
+        case "=":
+          return left === right;
+        case "<>":
+          return left !== right;
+        case "<":
+          return /** @type {any} */ (left) < /** @type {any} */ (right);
+        case "<=":
+          return /** @type {any} */ (left) <= /** @type {any} */ (right);
+        case ">":
+          return /** @type {any} */ (left) > /** @type {any} */ (right);
+        case ">=":
+          return /** @type {any} */ (left) >= /** @type {any} */ (right);
+        case "+":
+          return /** @type {any} */ (left) + /** @type {any} */ (right);
+        case "-":
+          return /** @type {any} */ (left) - /** @type {any} */ (right);
+        case "*":
+          return /** @type {any} */ (left) * /** @type {any} */ (right);
+        case "/":
+          return /** @type {any} */ (left) / /** @type {any} */ (right);
+        case "&":
+          return String(left ?? "") + String(right ?? "");
+        default:
+          ctx.error(expr, `Unsupported binary operator '${expr.operator}' in constant context`);
+      }
+    }
+    case "IfExpression": {
+      const test = evaluateConstant(ctx, expr.test);
+      return test ? evaluateConstant(ctx, expr.consequent) : evaluateConstant(ctx, expr.alternate);
+    }
+    case "TryExpression": {
+      try {
+        return evaluateConstant(ctx, expr.expression);
+      } catch (err) {
+        if (expr.otherwise) return evaluateConstant(ctx, expr.otherwise);
+        return null;
+      }
+    }
+    case "AsExpression":
+      return evaluateConstant(ctx, expr.expression);
+    case "FunctionExpression": {
+      if (ctx.sourceText) {
+        const start = expr.span.start.offset;
+        const end = expr.span.end.offset;
+        if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end >= start) {
+          return ctx.sourceText.slice(start, end);
+        }
+      }
+      return "<function>";
+    }
     case "Identifier": {
       const name = identifierPartsToName(expr.parts);
       const bound = ctx.env.get(name);

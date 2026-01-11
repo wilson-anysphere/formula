@@ -1,0 +1,29 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "query",
+    "queryId": "q_sales"
+  },
+  "steps": [
+    {
+      "id": "s1_append",
+      "name": "Appended Queries",
+      "operation": {
+        "type": "append",
+        "queries": ["q_more_sales"]
+      }
+    },
+    {
+      "id": "s2_merge",
+      "name": "Merged Queries",
+      "operation": {
+        "type": "merge",
+        "rightQuery": "q_targets",
+        "joinType": "left",
+        "leftKey": "Id",
+        "rightKey": "Id"
+      }
+    }
+  ]
+}

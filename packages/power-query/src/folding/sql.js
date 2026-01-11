@@ -106,9 +106,11 @@ export class QueryFoldingEngine {
       "removeColumns",
       "filterRows",
       "sortRows",
+      "distinctRows",
       "groupBy",
       "renameColumn",
       "changeType",
+      "transformColumns",
       "addColumn",
       "merge",
       "append",
@@ -395,6 +397,20 @@ export class QueryFoldingEngine {
           connection: state.connection,
         };
       }
+      case "distinctRows": {
+        if (!state.columns) return null;
+        // Folding `Table.Distinct` safely requires a stable, explicit projection.
+        // We only fold the full-row distinct case; distinct-by-columns semantics
+        // require "first row wins" behavior that SQL cannot guarantee without
+        // additional ordering constraints.
+        if (operation.columns && operation.columns.length > 0) return null;
+        const cols = state.columns.map((c) => `t.${quoteIdentifier(c)}`).join(", ");
+        return {
+          fragment: { sql: `SELECT DISTINCT ${cols} FROM ${from}`, params },
+          columns: state.columns.slice(),
+          connection: state.connection,
+        };
+      }
       case "groupBy": {
         if (operation.groupColumns.length === 0 && operation.aggregations.length === 0) return null;
         if (hasDuplicateStrings(operation.groupColumns)) return null;
@@ -481,6 +497,36 @@ export class QueryFoldingEngine {
 
         return {
           fragment: { sql: `SELECT ${cols.join(", ")} FROM ${from}`, params },
+          columns: state.columns.slice(),
+          connection: state.connection,
+        };
+      }
+      case "transformColumns": {
+        if (!state.columns) return null;
+        const byName = new Map(operation.transforms.map((t) => [t.column, t]));
+        const projections = [];
+        for (const name of state.columns) {
+          const t = byName.get(name);
+          if (!t) {
+            projections.push(`t.${quoteIdentifier(name)}`);
+            continue;
+          }
+
+          // Only fold pure type-casts where the transformation is identity.
+          const formula = typeof t.formula === "string" ? t.formula.trim() : "";
+          if (formula !== "_" && formula !== "(_)") return null;
+          if (!t.newType || t.newType === "any") {
+            projections.push(`t.${quoteIdentifier(name)}`);
+            continue;
+          }
+
+          const expr = changeTypeToSqlExpr(dialect, `t.${quoteIdentifier(name)}`, t.newType);
+          if (!expr) return null;
+          projections.push(`${expr} AS ${quoteIdentifier(name)}`);
+        }
+
+        return {
+          fragment: { sql: `SELECT ${projections.join(", ")} FROM ${from}`, params },
           columns: state.columns.slice(),
           connection: state.connection,
         };

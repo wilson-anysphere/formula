@@ -107,11 +107,49 @@
  */
 
 /**
+  * @typedef {{
+  *   type: "EachExpression";
+  *   body: MExpression;
+  *   span: MSpan;
+  * }} MEachExpression
+  */
+
+/**
  * @typedef {{
- *   type: "EachExpression";
+ *   type: "IfExpression";
+ *   test: MExpression;
+ *   consequent: MExpression;
+ *   alternate: MExpression;
+ *   span: MSpan;
+ * }} MIfExpression
+ */
+
+/**
+ * @typedef {{
+ *   type: "FunctionExpression";
+ *   parameters: MIdentifierName[];
  *   body: MExpression;
  *   span: MSpan;
- * }} MEachExpression
+ * }} MFunctionExpression
+ */
+
+/**
+ * @typedef {{
+ *   type: "TryExpression";
+ *   expression: MExpression;
+ *   otherwise: MExpression | null;
+ *   span: MSpan;
+ * }} MTryExpression
+ */
+
+/**
+ * `expr as type`
+ * @typedef {{
+ *   type: "AsExpression";
+ *   expression: MExpression;
+ *   asType: MExpression;
+ *   span: MSpan;
+ * }} MAsExpression
  */
 
 /**
@@ -151,7 +189,7 @@
  */
 
 /**
- * @typedef {MLetExpression | MIdentifier | MLiteral | MListExpression | MRecordExpression | MFieldAccessExpression | MItemAccessExpression | MCallExpression | MEachExpression | MUnaryExpression | MBinaryExpression | MTypeExpression | MParenthesizedExpression} MExpression
+ * @typedef {MLetExpression | MIdentifier | MLiteral | MListExpression | MRecordExpression | MFieldAccessExpression | MItemAccessExpression | MCallExpression | MEachExpression | MIfExpression | MFunctionExpression | MTryExpression | MAsExpression | MUnaryExpression | MBinaryExpression | MTypeExpression | MParenthesizedExpression} MExpression
  */
 
 /**
@@ -164,4 +202,3 @@ export function span(start, end) {
 }
 
 export {};
-

@@ -141,3 +141,151 @@ in
   ]);
 });
 
+test("m_language execution: if/then/else in addColumn", async () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Sales"},
+    {10},
+    {-5},
+    {0}
+  }),
+  #"Added Column" = Table.AddColumn(Source, "Positive", each if [Sales] > 0 then [Sales] else null)
+in
+  #"Added Column"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Sales", "Positive"],
+    [10, 10],
+    [-5, null],
+    [0, null],
+  ]);
+});
+
+test("m_language execution: if/then/else in filter predicate", async () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Sales"},
+    {50},
+    {150}
+  }),
+  #"Filtered Rows" = Table.SelectRows(Source, each if [Sales] > 100 then true else false)
+in
+  #"Filtered Rows"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [["Sales"], [150]]);
+});
+
+test("m_language execution: Table.Combine + Table.Distinct", async () => {
+  const q1 = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id"},
+    {1},
+    {2}
+  })
+in
+  Source
+`,
+    { id: "q1", name: "Q1" },
+  );
+
+  const q2 = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id"},
+    {2},
+    {3}
+  })
+in
+  Source
+`,
+    { id: "q2", name: "Q2" },
+  );
+
+  const combined = compileMToQuery(
+    `
+let
+  A = Query.Reference("q1"),
+  B = Query.Reference("q2"),
+  #"Appended Queries" = Table.Combine({A, B}),
+  #"Removed Duplicates" = Table.Distinct(#"Appended Queries")
+in
+  #"Removed Duplicates"
+`,
+    { id: "q_combined", name: "Combined" },
+  );
+
+  assert.deepEqual(combined.steps.map((s) => s.operation.type), ["append", "distinctRows"]);
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(combined, { queries: { q1, q2 } }, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Id"],
+    [1],
+    [2],
+    [3],
+  ]);
+});
+
+test("m_language execution: Table.Join maps to merge", async () => {
+  const sales = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Sales"},
+    {1, 100},
+    {2, 200}
+  })
+in
+  Source
+`,
+    { id: "q_sales", name: "Sales" },
+  );
+
+  const targets = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target"},
+    {2, "B"}
+  })
+in
+  Source
+`,
+    { id: "q_targets", name: "Targets" },
+  );
+
+  const joinQuery = compileMToQuery(
+    `
+let
+  Sales = Query.Reference("q_sales"),
+  Targets = Query.Reference("q_targets"),
+  #"Merged Queries" = Table.Join(Sales, {"Id"}, Targets, {"Id"}, JoinKind.LeftOuter)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join", name: "Join" },
+  );
+
+  assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(joinQuery, { queries: { q_sales: sales, q_targets: targets } }, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Sales", "Target"],
+    [1, 100, null],
+    [2, 200, "B"],
+  ]);
+});

@@ -12,12 +12,18 @@ export const TABLE_FUNCTION_STEP_NAMES = {
   "Table.RemoveColumns": "Removed Columns",
   "Table.Sort": "Sorted Rows",
   "Table.SelectRows": "Filtered Rows",
+  "Table.Distinct": "Removed Duplicates",
   "Table.Group": "Grouped Rows",
   "Table.AddColumn": "Added Column",
   "Table.RenameColumns": "Renamed Columns",
   "Table.TransformColumnTypes": "Changed Type",
+  "Table.TransformColumns": "Transformed Columns",
   "Table.Pivot": "Pivoted Column",
   "Table.Unpivot": "Unpivoted Columns",
+  "Table.Join": "Merged Queries",
+  "Table.NestedJoin": "Merged Queries",
+  "Table.Combine": "Appended Queries",
+  "Table.RemoveRowsWithErrors": "Removed Errors",
   "Table.FillDown": "Filled Down",
   "Table.ReplaceValue": "Replaced Value",
   "Table.SplitColumn": "Split Column",
@@ -127,4 +133,3 @@ export function listAggregationFromIdentifier(name) {
       return null;
   }
 }
-

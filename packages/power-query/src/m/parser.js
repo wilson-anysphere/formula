@@ -99,8 +99,6 @@ class Parser {
 
   /** @returns {MExpression} */
   parseExpression() {
-    if (this.match("keyword", "let")) return this.parseLetExpression();
-    if (this.match("keyword", "each")) return this.parseEachExpression();
     return this.parseBinaryExpression(0);
   }
 
@@ -168,6 +166,13 @@ class Parser {
 
   /** @returns {MExpression} */
   parseUnaryExpression() {
+    // Keyword-led primary expressions. We parse these here so they can appear
+    // anywhere an expression is expected (e.g. `1 + if ... then ... else ...`).
+    if (this.match("keyword", "let")) return this.parseLetExpression();
+    if (this.match("keyword", "each")) return this.parseEachExpression();
+    if (this.match("keyword", "if")) return this.parseIfExpression();
+    if (this.match("keyword", "try")) return this.parseTryExpression();
+
     if (this.match("keyword", "not")) {
       const start = this.next().start;
       const argument = this.parseUnaryExpression();
@@ -206,6 +211,12 @@ class Parser {
         const key = this.parseExpression();
         const end = this.expect("punct", "}", ["}"]).end;
         expr = { type: "ItemAccessExpression", base: expr, key, span: span(expr.span.start, end) };
+        continue;
+      }
+      if (this.match("keyword", "as")) {
+        this.next();
+        const asType = this.parseAsTypeExpression();
+        expr = { type: "AsExpression", expression: expr, asType, span: span(expr.span.start, asType.span.end) };
         continue;
       }
       break;
@@ -271,6 +282,9 @@ class Parser {
         return this.parseIdentifierExpression();
       case "punct": {
         if (t.value === "(") {
+          if (this.isFunctionExpressionStart()) {
+            return this.parseFunctionExpression();
+          }
           const start = this.next().start;
           const expr = this.parseExpression();
           const end = this.expect("punct", ")", [")"]).end;
@@ -284,6 +298,76 @@ class Parser {
         break;
     }
     this.unexpected(["expression"]);
+  }
+
+  /** @returns {MExpression} */
+  parseIfExpression() {
+    const start = this.expect("keyword", "if").start;
+    const test = this.parseExpression();
+    this.expect("keyword", "then", ["then"]);
+    const consequent = this.parseExpression();
+    this.expect("keyword", "else", ["else"]);
+    const alternate = this.parseExpression();
+    return { type: "IfExpression", test, consequent, alternate, span: span(start, alternate.span.end) };
+  }
+
+  /** @returns {MExpression} */
+  parseTryExpression() {
+    const start = this.expect("keyword", "try").start;
+    const expression = this.parseExpression();
+    let otherwise = null;
+    if (this.consume("keyword", "otherwise")) {
+      otherwise = this.parseExpression();
+    }
+    const end = (otherwise ?? expression).span.end;
+    return { type: "TryExpression", expression, otherwise, span: span(start, end) };
+  }
+
+  /** @returns {MExpression} */
+  parseAsTypeExpression() {
+    if (this.match("keyword", "type")) {
+      return this.parseTypeExpression();
+    }
+    return this.parseIdentifierExpression();
+  }
+
+  /**
+   * Lookahead for `(<params>) => <body>`.
+   * @returns {boolean}
+   */
+  isFunctionExpressionStart() {
+    if (!this.match("punct", "(")) return false;
+    let depth = 0;
+    for (let i = this.pos; i < this.tokens.length; i++) {
+      const tok = this.tokens[i];
+      if (tok.type === "punct" && tok.value === "(") depth += 1;
+      else if (tok.type === "punct" && tok.value === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          const next = this.tokens[i + 1];
+          return next?.type === "operator" && next.value === "=>";
+        }
+      }
+    }
+    return false;
+  }
+
+  /** @returns {MExpression} */
+  parseFunctionExpression() {
+    const start = this.expect("punct", "(", ["("]).start;
+    /** @type {MIdentifierName[]} */
+    const parameters = [];
+    if (!this.match("punct", ")")) {
+      while (true) {
+        parameters.push(this.parseIdentifierName());
+        if (this.consume("punct", ",")) continue;
+        break;
+      }
+    }
+    this.expect("punct", ")", [")"]);
+    this.expect("operator", "=>", ["=>"]);
+    const body = this.parseExpression();
+    return { type: "FunctionExpression", parameters, body, span: span(start, body.span.end) };
   }
 
   /** @returns {MExpression} */
