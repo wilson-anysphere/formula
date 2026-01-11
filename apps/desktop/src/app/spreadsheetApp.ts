@@ -286,6 +286,17 @@ export class SpreadsheetApp {
   private visibleRowStart = 0;
   private visibleColStart = 0;
 
+  private viewportMappingState:
+    | {
+        scrollX: number;
+        scrollY: number;
+        viewportWidth: number;
+        viewportHeight: number;
+        rowCount: number;
+        colCount: number;
+      }
+    | null = null;
+
   // Maps from sheet row/col -> visual index (excluding hidden rows/cols).
   // These allow O(1) cell->pixel conversions for any in-bounds cell.
   private rowToVisual = new Map<number, number>();
@@ -927,7 +938,7 @@ export class SpreadsheetApp {
     this.selection = setActiveCell(this.selection, { row: target.row, col: target.col }, this.limits);
     this.ensureActiveCellVisible();
     const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (didScroll) this.updateViewportMapping();
+    if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
@@ -963,7 +974,7 @@ export class SpreadsheetApp {
     // become "lost" offscreen.
     const didScrollCell = this.scrollCellIntoView(this.selection.active);
     const didScroll = didScrollRange || didScrollCell;
-    if (didScroll) this.updateViewportMapping();
+    if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
@@ -1016,6 +1027,7 @@ export class SpreadsheetApp {
   }
 
   getFillHandleRect(): { x: number; y: number; width: number; height: number } | null {
+    this.ensureViewportMappingCurrent();
     return this.selectionRenderer.getFillHandleRect(this.selection, {
       getCellRect: (cell) => this.getCellRect(cell),
       visibleRows: this.visibleRows,
@@ -1339,7 +1351,7 @@ export class SpreadsheetApp {
   }
 
   private renderGrid(): void {
-    this.updateViewportMapping();
+    this.ensureViewportMappingCurrent();
 
     const ctx = this.gridCtx;
     ctx.save();
@@ -1658,6 +1670,7 @@ export class SpreadsheetApp {
   }
 
   private renderSelection(): void {
+    this.ensureViewportMappingCurrent();
     const clipRect = {
       x: this.rowHeaderWidth,
       y: this.colHeaderHeight,
@@ -1884,6 +1897,29 @@ export class SpreadsheetApp {
     this.visibleColStart = firstCol;
     this.visibleRows = this.rowIndexByVisual.slice(firstRow, lastRow);
     this.visibleCols = this.colIndexByVisual.slice(firstCol, lastCol);
+  }
+
+  private ensureViewportMappingCurrent(): void {
+    const viewportWidth = this.viewportWidth();
+    const viewportHeight = this.viewportHeight();
+    const rowCount = this.rowIndexByVisual.length;
+    const colCount = this.colIndexByVisual.length;
+
+    const state = this.viewportMappingState;
+    if (
+      state &&
+      state.scrollX === this.scrollX &&
+      state.scrollY === this.scrollY &&
+      state.viewportWidth === viewportWidth &&
+      state.viewportHeight === viewportHeight &&
+      state.rowCount === rowCount &&
+      state.colCount === colCount
+    ) {
+      return;
+    }
+
+    this.updateViewportMapping();
+    this.viewportMappingState = { scrollX: this.scrollX, scrollY: this.scrollY, viewportWidth, viewportHeight, rowCount, colCount };
   }
 
   private computeScrollbarThumb(options: {
@@ -3002,7 +3038,7 @@ export class SpreadsheetApp {
 
       this.ensureActiveCellVisible();
       const didScroll = this.scrollCellIntoView(this.selection.active);
-      if (didScroll) this.updateViewportMapping();
+      if (didScroll) this.ensureViewportMappingCurrent();
       this.renderSelection();
       this.updateStatus();
       if (didScroll) this.refresh("scroll");
@@ -3025,7 +3061,7 @@ export class SpreadsheetApp {
         : setActiveCell(this.selection, { row, col }, this.limits);
       this.ensureActiveCellVisible();
       const didScroll = this.scrollCellIntoView(this.selection.active);
-      if (didScroll) this.updateViewportMapping();
+      if (didScroll) this.ensureViewportMappingCurrent();
       this.renderSelection();
       this.updateStatus();
       if (didScroll) this.refresh("scroll");
@@ -3055,7 +3091,7 @@ export class SpreadsheetApp {
     e.preventDefault();
     this.selection = next;
     const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (didScroll) this.updateViewportMapping();
+    if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
     if (didScroll) this.refresh("scroll");
@@ -3423,7 +3459,7 @@ export class SpreadsheetApp {
     this.referencePreview = null;
     this.ensureActiveCellVisible();
     const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (didScroll) this.updateViewportMapping();
+    if (didScroll) this.ensureViewportMappingCurrent();
     this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
@@ -3439,6 +3475,7 @@ export class SpreadsheetApp {
     ctx.restore();
 
     if (!this.referencePreview) return;
+    this.ensureViewportMappingCurrent();
 
     const startRow = Math.min(this.referencePreview.start.row, this.referencePreview.end.row);
     const endRow = Math.max(this.referencePreview.start.row, this.referencePreview.end.row);
