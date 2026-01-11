@@ -85,7 +85,7 @@ The grid is canvas-rendered, but includes baseline accessibility scaffolding:
 - Canvases are `aria-hidden`.
 - The active cell is also exposed via an offscreen `role="gridcell"` element wired up with `aria-activedescendant` (including `aria-rowindex`/`aria-colindex`).
 - A visually-hidden `role="status"` live region announces:
-  - active cell address (A1-style when headers are enabled via `frozenRows/frozenCols`)
+  - active cell address (A1-style when headers are enabled via `headerRows/headerCols`)
   - active cell value
   - active selection range
 - Keyboard navigation is supported via arrow keys when the grid container is focused.
@@ -116,7 +116,7 @@ When the grid container is focused, `CanvasGrid` supports spreadsheet-like navig
 
 - Arrow keys move the active cell.
 - Shift+arrows extends the active selection range.
-- Ctrl/Cmd+arrows jump to the first/last row/col (data region, excluding header row/col when `frozenRows/frozenCols` are used as headers).
+- Ctrl/Cmd+arrows jump to the first/last row/col (data region, excluding header rows/cols when `headerRows/headerCols` are configured).
 - PageUp/PageDown (and Alt+PageUp/PageDown for horizontal paging).
 - Home/End (+Ctrl/Cmd for absolute edges).
 - Tab/Enter move the active cell; when a multi-cell range is selected, Tab/Enter move *within* the selection range (wrapping) instead of collapsing it.
