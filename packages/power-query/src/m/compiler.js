@@ -367,7 +367,7 @@ function compileSourceFunctionCall(ctx, name, expr) {
       }
       if (!query) ctx.error(expr, "Sql.Database requires a query string in this subset");
       /** @type {QuerySource} */
-      const source = { type: "database", connection: { kind: "sql", server, database }, query };
+      const source = { type: "database", connection: { kind: "sql", server, database }, query, dialect: "sqlserver" };
       return { source, steps: [], schema: null };
     }
     case "Query.Reference": {

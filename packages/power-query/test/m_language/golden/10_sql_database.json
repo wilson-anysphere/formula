@@ -8,7 +8,8 @@
       "server": "server1",
       "database": "db1"
     },
-    "query": "select * from t"
+    "query": "select * from t",
+    "dialect": "sqlserver"
   },
   "steps": [
     {
@@ -21,4 +22,3 @@
     }
   ]
 }
-
