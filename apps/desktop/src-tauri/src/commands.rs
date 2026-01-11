@@ -579,13 +579,20 @@ pub async fn save_workbook(
 
     let save_path_clone = save_path.clone();
     let written_bytes = tauri::async_runtime::spawn_blocking(move || {
-        crate::persistence::write_xlsx_from_storage(
-            &storage,
-            workbook_id,
-            &workbook,
-            std::path::Path::new(&save_path_clone),
-        )
-        .map_err(|e| e.to_string())
+        let path = std::path::Path::new(&save_path_clone);
+        // Prefer the existing patch-based save path when we have the original XLSX bytes.
+        // This preserves unknown parts (theme, comments, conditional formatting, etc.) by
+        // rewriting only the modified worksheet XML.
+        //
+        // Fall back to the storage->model export path for non-XLSX origins (csv/xls/xlsb) and
+        // for new workbooks without an `origin_xlsx_bytes` baseline.
+        if workbook.origin_xlsx_bytes.is_some() {
+            crate::file_io::write_xlsx_blocking(path, &workbook)
+                .map_err(|e| e.to_string())
+        } else {
+            crate::persistence::write_xlsx_from_storage(&storage, workbook_id, &workbook, path)
+                .map_err(|e| e.to_string())
+        }
     })
     .await
     .map_err(|e| e.to_string())??;
