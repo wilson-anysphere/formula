@@ -6,6 +6,17 @@ export { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm";
 export { EngineWorker } from "./EngineWorker";
 export type { MessageChannelLike, MessagePortLike, WorkerLike } from "./EngineWorker";
 
+export { WasmWorkbookBackend } from "./backend/WasmWorkbookBackend";
+export type {
+  WorkbookBackend,
+  WorkbookInfo,
+  SheetInfo,
+  SheetUsedRange,
+  RangeCellEdit,
+  RangeData,
+  CellValue,
+} from "./backend/workbookBackend";
+
 export {
   engineApplyDeltas,
   engineHydrateFromDocument,

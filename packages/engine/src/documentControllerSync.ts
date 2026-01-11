@@ -1,4 +1,6 @@
 import type { CellChange } from "./protocol";
+import { toA1 } from "./backend/a1";
+import { normalizeFormulaText } from "./backend/formula";
 
 export type EngineCellScalar = number | string | boolean | null;
 
@@ -29,21 +31,6 @@ export interface EngineSyncTarget {
   recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
 }
 
-function colToName(col0: number): string {
-  let n = col0 + 1;
-  let out = "";
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    out = String.fromCharCode(65 + rem) + out;
-    n = Math.floor((n - 1) / 26);
-  }
-  return out;
-}
-
-function toA1(row0: number, col0: number): string {
-  return `${colToName(col0)}${row0 + 1}`;
-}
-
 function parseRowColKey(key: string): { row: number; col: number } | null {
   const [rowStr, colStr] = key.split(",");
   const row = Number(rowStr);
@@ -51,12 +38,6 @@ function parseRowColKey(key: string): { row: number; col: number } | null {
   if (!Number.isInteger(row) || row < 0) return null;
   if (!Number.isInteger(col) || col < 0) return null;
   return { row, col };
-}
-
-function normalizeFormulaText(formula: string): string {
-  const trimmed = formula.trimStart();
-  if (trimmed.startsWith("=")) return trimmed;
-  return `=${trimmed}`;
 }
 
 function isRichTextValue(value: unknown): value is { text: string } {
