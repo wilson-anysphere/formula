@@ -52,6 +52,43 @@ function getYArray(value: unknown): any | null {
   return maybe;
 }
 
+function replaceForeignRootType<T extends Y.AbstractType<any>>(params: {
+  doc: Y.Doc;
+  name: string;
+  existing: any;
+  create: () => T;
+}): T {
+  const { doc, name, existing, create } = params;
+  const t = create();
+
+  // Copy the internal linked-list structures that hold the CRDT content. This mirrors
+  // Yjs' own `Doc.get()` logic when converting a root placeholder (`AbstractType`)
+  // into a concrete type, but also supports the case where the existing root was
+  // created by a different Yjs module instance (e.g. CJS `applyUpdate`).
+  (t as any)._map = existing?._map;
+  (t as any)._start = existing?._start;
+  (t as any)._length = existing?._length;
+
+  // Update parent pointers so future updates can resolve the correct root key via
+  // `findRootTypeKey` when encoding.
+  const map = existing?._map;
+  if (map instanceof Map) {
+    map.forEach((item: any) => {
+      for (let n = item; n !== null; n = n.left) {
+        n.parent = t;
+      }
+    });
+  }
+
+  for (let n = existing?._start ?? null; n !== null; n = n.right) {
+    n.parent = t;
+  }
+
+  doc.share.set(name, t as any);
+  (t as any)._integrate(doc as any, null);
+  return t;
+}
+
 function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
   // Yjs root types are schema-defined: you must know whether a key is a Map or
   // Array. When applying updates into a fresh Doc, root types can temporarily
@@ -62,18 +99,29 @@ function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
   // historical schemas (Map or Array) we peek at the underlying state before
   // choosing a constructor.
   const existing = doc.share.get("comments");
-
   let root: Y.AbstractType<any>;
+
   if (!existing) {
     root = doc.getMap("comments");
   } else {
     const existingMap = getYMap(existing);
     if (existingMap) {
-      root = existingMap;
+      root =
+        existingMap instanceof Y.Map
+          ? existingMap
+          : replaceForeignRootType({ doc, name: "comments", existing: existingMap, create: () => new Y.Map() });
     } else {
       const existingArray = getYArray(existing);
       if (existingArray) {
-        root = existingArray;
+        root =
+          existingArray instanceof Y.Array
+            ? existingArray
+            : replaceForeignRootType({
+                doc,
+                name: "comments",
+                existing: existingArray,
+                create: () => new Y.Array(),
+              });
       } else {
         const placeholder = existing as any;
         const hasStart = placeholder?._start != null; // sequence item => likely array
@@ -478,6 +526,28 @@ export class CollabSession {
   private readonly offlineAutoConnectAfterLoad: boolean;
   private readonly formulaConflictsIncludeValueConflicts: boolean;
   private isDestroyed = false;
+
+  private ensureLocalCellMapForWrite(cellKey: string): void {
+    const existingCell = getYMapCell(this.cells.get(cellKey));
+    if (!existingCell || existingCell instanceof Y.Map) return;
+
+    // Normalize foreign nested Y.Maps (e.g. created by a different `yjs` module
+    // instance via CJS `applyUpdate`) into local types before mutating them.
+    //
+    // This conversion is intentionally performed in an *untracked* transaction
+    // (no origin) so collaborative undo only captures the user's actual edit.
+    this.doc.transact(() => {
+      const cellData = this.cells.get(cellKey);
+      const cell = getYMapCell(cellData);
+      if (!cell || cell instanceof Y.Map) return;
+
+      const local = new Y.Map();
+      cell.forEach((v: any, k: string) => {
+        local.set(k, v);
+      });
+      this.cells.set(cellKey, local);
+    });
+  }
 
   private getEncryptedPayloadForCell(cell: CellAddress): unknown | undefined {
     // Cells may exist under historical key encodings (`${sheetId}:${row},${col}`) or
@@ -1093,6 +1163,7 @@ export class CollabSession {
     }
 
     const monitor = this.formulaConflictMonitor;
+    this.ensureLocalCellMapForWrite(cellKey);
     this.transactLocal(() => {
       const modified = Date.now();
 
@@ -1183,6 +1254,7 @@ export class CollabSession {
       });
 
       const userId = this.permissions?.userId ?? null;
+      this.ensureLocalCellMapForWrite(cellKey);
       this.transactLocal(() => {
         const modified = Date.now();
         const keysToUpdate = Array.from(
@@ -1234,6 +1306,7 @@ export class CollabSession {
 
     const userId = this.permissions?.userId ?? null;
 
+    this.ensureLocalCellMapForWrite(cellKey);
     this.transactLocal(() => {
       let cellData = this.cells.get(cellKey);
       let cell = getYMapCell(cellData);

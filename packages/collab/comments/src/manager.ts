@@ -190,7 +190,7 @@ export class CommentManager {
     now?: number;
     id?: string;
   }): string {
-    const yComment = this.getYComment(input.commentId);
+    const yComment = this.getYCommentForWrite(input.commentId);
 
     const replies = yComment.get("replies") as Y.Array<Y.Map<unknown>> | undefined;
     if (!replies) {
@@ -228,7 +228,7 @@ export class CommentManager {
   }
 
   setResolved(input: { commentId: string; resolved: boolean; now?: number }): void {
-    const yComment = this.getYComment(input.commentId);
+    const yComment = this.getYCommentForWrite(input.commentId);
     const now = input.now ?? Date.now();
 
     this.transact(() => {
@@ -238,7 +238,7 @@ export class CommentManager {
   }
 
   setCommentContent(input: { commentId: string; content: string; now?: number }): void {
-    const yComment = this.getYComment(input.commentId);
+    const yComment = this.getYCommentForWrite(input.commentId);
     const now = input.now ?? Date.now();
 
     this.transact(() => {
@@ -248,7 +248,7 @@ export class CommentManager {
   }
 
   setReplyContent(input: { commentId: string; replyId: string; content: string; now?: number }): void {
-    const yComment = this.getYComment(input.commentId);
+    const yComment = this.getYCommentForWrite(input.commentId);
 
     const replies = yComment.get("replies") as Y.Array<Y.Map<unknown>> | undefined;
     if (!replies) {
@@ -274,6 +274,53 @@ export class CommentManager {
       yReply.set("updatedAt", now);
       yComment.set("updatedAt", now);
     });
+  }
+
+  /**
+   * Ensure the returned comment map (and its nested Yjs types) are from this module's
+   * Yjs instance before mutating them.
+   *
+   * UndoManager (from this module's `yjs` import) cannot reliably undo edits that
+   * were applied through a different Yjs module instance (e.g. CJS `applyUpdate`),
+   * because map overwrites delete the previous item and later need to "redo" it.
+   * If the previous item is owned by a foreign Yjs build, UndoManager will skip it.
+   *
+   * We avoid that by cloning foreign comment trees into local types in an *untracked*
+   * transaction (no origin), and then performing the actual edit in the session's
+   * tracked transaction.
+   */
+  private getYCommentForWrite(commentId: string): Y.Map<unknown> {
+    const root = getCommentsRoot(this.doc);
+    const yComment = this.getYComment(commentId);
+
+    // If we can't insert local types into the root (e.g. the root itself was
+    // created by a foreign Yjs instance), fall back to the original comment map.
+    // This keeps cross-instance CommentManager usage working even when undo isn't
+    // involved.
+    if (root.kind === "map" && !(root.map instanceof Y.Map)) return yComment;
+    if (root.kind === "array" && !(root.array instanceof Y.Array)) return yComment;
+
+    if (!hasForeignYjsTypes(yComment)) return yComment;
+
+    if (root.kind === "array") {
+      const index = root.array
+        .toArray()
+        .findIndex((item) => item === yComment || String(item.get("id") ?? "") === commentId);
+      if (index < 0) return yComment;
+
+      const local = cloneYjsValueToLocal(yComment) as Y.Map<unknown>;
+      this.doc.transact(() => {
+        root.array.delete(index, 1);
+        root.array.insert(index, [local]);
+      });
+      return local;
+    }
+
+    const local = cloneYjsValueToLocal(yComment) as Y.Map<unknown>;
+    this.doc.transact(() => {
+      root.map.set(commentId, local);
+    });
+    return local;
   }
 
   private getYComment(commentId: string): Y.Map<unknown> {
@@ -676,6 +723,77 @@ function cloneYjsValue(value: any, ctors: DocTypeConstructors): any {
 
   if (Array.isArray(value)) {
     return value.map((v) => cloneYjsValue(v, ctors));
+  }
+
+  if (value && typeof value === "object") {
+    return structuredClone(value);
+  }
+
+  return value;
+}
+
+function hasForeignYjsTypes(value: unknown, seen: Set<any> = new Set()): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
+
+  const map = getYMap(value);
+  if (map) {
+    if (!(map instanceof Y.Map)) return true;
+    let foreign = false;
+    map.forEach((v: unknown) => {
+      if (hasForeignYjsTypes(v, seen)) foreign = true;
+    });
+    return foreign;
+  }
+
+  const array = getYArray(value);
+  if (array) {
+    if (!(array instanceof Y.Array)) return true;
+    for (const item of array.toArray()) {
+      if (hasForeignYjsTypes(item, seen)) return true;
+    }
+    return false;
+  }
+
+  if (isYText(value)) {
+    return !(value instanceof Y.Text);
+  }
+
+  return false;
+}
+
+function cloneYjsValueToLocal(value: any, seen: Map<any, any> = new Map()): any {
+  if (value && typeof value === "object") {
+    const cached = seen.get(value);
+    if (cached) return cached;
+  }
+
+  const map = getYMap(value);
+  if (map) {
+    const out = new Y.Map();
+    seen.set(value, out);
+    map.forEach((v: any, k: string) => {
+      out.set(k, cloneYjsValueToLocal(v, seen));
+    });
+    return out;
+  }
+
+  const array = getYArray(value);
+  if (array) {
+    const out = new Y.Array();
+    seen.set(value, out);
+    for (const item of array.toArray()) {
+      out.push([cloneYjsValueToLocal(item, seen)]);
+    }
+    return out;
+  }
+
+  if (isYText(value)) {
+    const out = new Y.Text();
+    seen.set(value, out);
+    out.applyDelta(structuredClone(value.toDelta()));
+    return out;
   }
 
   if (value && typeof value === "object") {

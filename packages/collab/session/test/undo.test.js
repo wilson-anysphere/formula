@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
@@ -61,4 +62,43 @@ test("CollabSession undo only reverts local edits (in-memory sync)", async () =>
   disconnect();
   docA.destroy();
   docB.destroy();
+});
+
+test("CollabSession undo captures cell edits when cell maps were created by a different Yjs instance (CJS applyUpdate)", async () => {
+  const require = createRequire(import.meta.url);
+  // eslint-disable-next-line import/no-named-as-default-member
+  const Ycjs = require("yjs");
+
+  const remote = new Ycjs.Doc();
+  const cells = remote.getMap("cells");
+  remote.transact(() => {
+    const cell = new Ycjs.Map();
+    cell.set("value", "from-cjs");
+    cell.set("formula", null);
+    cell.set("modified", 1);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  // Ensure the root exists in this module so the update only introduces foreign
+  // nested cell maps (not a foreign `cells` root, which would prevent session
+  // construction).
+  doc.getMap("cells");
+  Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
+
+  const session = createCollabSession({ doc, undo: {} });
+
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-cjs");
+
+  await session.setCellValue("Sheet1:0:0", "edited");
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "edited");
+  assert.equal(session.undo?.canUndo(), true);
+
+  session.undo?.undo();
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-cjs");
+
+  session.destroy();
+  doc.destroy();
 });

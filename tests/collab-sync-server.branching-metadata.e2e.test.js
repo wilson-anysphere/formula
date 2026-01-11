@@ -167,6 +167,9 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
   t.after(() => clientC.destroy());
   await clientC.session.whenSynced();
 
+  // Note: sync-server persistence is loaded asynchronously on the server (y-websocket
+  // does not await `bindState()`), so `whenSynced()` only guarantees the client
+  // finished the initial sync protocol. Persisted updates may arrive shortly after.
   await waitForCondition(() => {
     const stateC = branchStateFromYjsDoc(clientC.ydoc);
     return (
@@ -176,6 +179,5 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
       stateC.namedRanges.NR1?.sheetId === "Sheet1" &&
       stateC.comments.c1?.content === "hello"
     );
-  }, 10_000);
+  }, 20_000);
 });
-

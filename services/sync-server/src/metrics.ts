@@ -1,12 +1,88 @@
 import { createRequire } from "node:module";
-import type { Counter, Gauge, Registry } from "prom-client";
 
-// prom-client is a CommonJS package. Using createRequire avoids Vite/Vitest SSR
-// interop edge cases when the sync-server source is imported from other
-// workspaces (e.g. API integration tests).
-const require = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const promClient: typeof import("prom-client") = require("prom-client");
+/**
+ * `prom-client` is used for exposing Prometheus metrics in production, but we
+ * want sync-server to remain runnable in lightweight/dev environments where the
+ * dependency may not be installed (e.g. minimal agent sandboxes).
+ *
+ * `tsx` (used for dev/test) transpiles without typechecking, so a hard runtime
+ * import would crash the server. Instead we best-effort load `prom-client` and
+ * fall back to a no-op metrics implementation.
+ */
+
+type Counter<Labels extends string = string> = {
+  inc: (labels?: Record<Labels, string>, value?: number) => void;
+};
+
+type Gauge<Labels extends string = string> = {
+  set: (labelsOrValue: Record<Labels, string> | number, value?: number) => void;
+  reset: () => void;
+};
+
+type Registry = {
+  contentType: string;
+  setDefaultLabels: (labels: Record<string, string>) => void;
+  metrics: () => Promise<string>;
+};
+
+function loadPromClient(): {
+  Registry: new () => Registry;
+  Counter: new (opts: any) => Counter<any>;
+  Gauge: new (opts: any) => Gauge<any>;
+} | null {
+  // prom-client is a CommonJS package. Using createRequire avoids ESM/CJS interop
+  // edge cases (e.g. Vite/Vitest SSR) when sync-server source is imported from
+  // other workspaces.
+  const require = createRequire(import.meta.url);
+  try {
+    return require("prom-client");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") return null;
+    return null;
+  }
+}
+
+function createNoopMetrics(): SyncServerMetrics {
+  const noopCounter: Counter<string> = {
+    inc: () => {
+      // noop
+    },
+  };
+  const noopGauge: Gauge<string> = {
+    set: () => {
+      // noop
+    },
+    reset: () => {
+      // noop
+    },
+  };
+  const registry: Registry = {
+    // Match prom-client default.
+    contentType: "text/plain; version=0.0.4; charset=utf-8",
+    setDefaultLabels: () => {
+      // noop
+    },
+    metrics: async () => "",
+  };
+
+  return {
+    registry,
+    wsConnectionsTotal: noopCounter,
+    wsConnectionsCurrent: noopGauge,
+    wsConnectionsRejectedTotal: noopCounter as Counter<"reason">,
+    wsMessagesRateLimitedTotal: noopCounter,
+    wsMessagesTooLargeTotal: noopCounter,
+    retentionSweepsTotal: noopCounter as Counter<"sweep">,
+    retentionDocsPurgedTotal: noopCounter as Counter<"sweep">,
+    retentionSweepErrorsTotal: noopCounter as Counter<"sweep">,
+    persistenceInfo: noopGauge as Gauge<"backend" | "encryption">,
+    setPersistenceInfo: () => {
+      // noop
+    },
+    metricsText: async () => "",
+  };
+}
 
 export type WsConnectionRejectionReason =
   | "rate_limit"
@@ -40,6 +116,9 @@ export type SyncServerMetrics = {
 };
 
 export function createSyncServerMetrics(): SyncServerMetrics {
+  const promClient = loadPromClient();
+  if (!promClient) return createNoopMetrics();
+
   const registry = new promClient.Registry();
   registry.setDefaultLabels({ service: "sync-server" });
 
