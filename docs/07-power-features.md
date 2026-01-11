@@ -371,6 +371,7 @@ Notes:
 - Event `job.id` values are namespaced with the refresh session (`${sessionId}:...`) so they are safe to treat as globally unique across concurrent refreshAll runs.
 - `handle.cancel()` aborts the entire session. Some hosts may also use `handle.cancelQuery(queryId)` to abort a single query branch (cancelling downstream dependents while allowing independent targets to continue).
 - Hosts can also use `orchestrator.triggerOnOpen()` to refresh all registered queries with `refreshPolicy: { type: "on-open" }` using the same dependency-aware semantics.
+- For "refresh this one query (plus its dependencies)" UX, `orchestrator.refresh(queryId)` is a convenience wrapper around `refreshAll([queryId])` that returns a single-query promise.
 
 ### Query Result Caching
 
