@@ -1857,13 +1857,14 @@ export class QueryEngine {
     if (source.type === "range") {
       const hasHeaders = source.range.hasHeaders ?? true;
       const table = DataTable.fromGrid(source.range.values, { hasHeaders, inferTypes: true });
-      this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? "workbook:range"]);
+      const sourceId = getSourceIdForQuerySource(source) ?? "workbook:range";
+      this.setTableSourceIds(table, [sourceId]);
       const meta = {
         refreshedAt: new Date(state.now()),
         schema: { columns: table.columns, inferred: true },
         rowCount: table.rowCount,
         rowCountEstimate: table.rowCount,
-        provenance: { kind: "range" },
+        provenance: { kind: "range", sourceId },
       };
       options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
       return { table, meta, sources: [meta] };
@@ -1879,13 +1880,14 @@ export class QueryEngine {
       if (!table) {
         throw new Error(`Unknown table '${source.table}'`);
       }
-      this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? `workbook:table:${source.table}`]);
+      const sourceId = getSourceIdForQuerySource(source) ?? `workbook:table:${source.table}`;
+      this.setTableSourceIds(table, [sourceId]);
       const meta = {
         refreshedAt: new Date(state.now()),
         schema: { columns: table.columns, inferred: true },
         rowCount: table.rowCount,
         rowCountEstimate: table.rowCount,
-        provenance: { kind: "table", table: source.table },
+        provenance: { kind: "table", table: source.table, sourceId },
       };
       options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
       return { table, meta, sources: [meta] };

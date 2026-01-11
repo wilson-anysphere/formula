@@ -28,7 +28,7 @@ import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend, type WorkbookInfo } from "./tauri/workbookBackend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
-import { refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
+import { refreshDefinedNameSignaturesFromBackend, refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
 
 const workbookSheetNames = new Map<string, string>();
 
@@ -1266,6 +1266,15 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     return { ...(table as any), sheet_id };
   });
   refreshTableSignaturesFromBackend(doc, normalizedTables as any, { workbookSignature });
+  const normalizedDefinedNames = definedNames.map((entry) => {
+    const refers_to = typeof (entry as any)?.refers_to === "string" ? String((entry as any).refers_to) : "";
+    const { sheetName: explicitSheetName } = splitSheetQualifier(refers_to);
+    const sheetIdFromRef = explicitSheetName ? sheetIdByName.get(explicitSheetName) ?? explicitSheetName : null;
+    const rawScopeSheet = typeof (entry as any)?.sheet_id === "string" ? String((entry as any).sheet_id) : null;
+    const sheetIdFromScope = rawScopeSheet ? sheetIdByName.get(rawScopeSheet) ?? rawScopeSheet : null;
+    return { ...(entry as any), sheet_id: sheetIdFromScope ?? sheetIdFromRef };
+  });
+  refreshDefinedNameSignaturesFromBackend(doc, normalizedDefinedNames as any, { workbookSignature });
 
   for (const entry of definedNames) {
     const name = typeof (entry as any)?.name === "string" ? String((entry as any).name) : "";

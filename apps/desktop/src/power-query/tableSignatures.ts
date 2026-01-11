@@ -1,7 +1,8 @@
 import { hashValue } from "../../../../packages/power-query/src/cache/key.js";
+import { parseA1Range, splitSheetQualifier } from "../../../../packages/search/index.js";
 
 import type { DocumentController } from "../document/documentController.js";
-import type { TableInfo } from "../tauri/workbookBackend";
+import type { DefinedNameInfo, TableInfo } from "../tauri/workbookBackend";
 
 export type TableRectangle = {
   sheetId: string;
@@ -13,6 +14,7 @@ export type TableRectangle = {
 
 type TableRegistryEntry = {
   name: string;
+  kind: "table" | "defined-name";
   rectangle: TableRectangle;
   definitionHash: string;
   version: number;
@@ -111,7 +113,12 @@ export class TableSignatureRegistry {
       }
     }
 
+    // Preserve non-table entries (e.g. defined names) so callers can refresh tables
+    // and defined names independently.
     const next = new Map<string, TableRegistryEntry>();
+    for (const entry of this.#tablesByName.values()) {
+      if (entry.kind !== "table") next.set(entry.name, entry);
+    }
 
     for (const table of tables) {
       const name = typeof (table as any)?.name === "string" ? String((table as any).name) : "";
@@ -137,12 +144,83 @@ export class TableSignatureRegistry {
       const definitionHash = computeDefinitionHash(rectangle, columns);
 
       const existing = this.#tablesByName.get(name);
-      if (existing) {
+      if (existing && existing.kind === "table") {
         const changed = existing.definitionHash !== definitionHash;
         const version = changed ? existing.version + 1 : existing.version;
         next.set(name, { ...existing, rectangle, definitionHash, version });
       } else {
-        next.set(name, { name, rectangle, definitionHash, version: 0 });
+        next.set(name, { name, kind: "table", rectangle, definitionHash, version: 0 });
+      }
+    }
+
+    this.#tablesByName = next;
+    this.rebuildSheetIndex();
+  }
+
+  /**
+   * Refresh the registry from backend `list_defined_names` results.
+   *
+   * Only simple A1-range defined names are tracked; formula-based names are ignored.
+   */
+  refreshFromDefinedNames(definedNames: DefinedNameInfo[], options: { workbookSignature?: string } = {}): void {
+    if (typeof options.workbookSignature === "string" && options.workbookSignature.length > 0) {
+      const nextHash = hashValue(options.workbookSignature);
+      if (nextHash !== this.#workbookSignatureHash) {
+        this.#workbookSignatureHash = nextHash;
+        this.#tablesByName = new Map();
+        this.#tablesBySheetId = new Map();
+      }
+    }
+
+    const next = new Map<string, TableRegistryEntry>();
+    // Preserve non-defined-name entries (tables).
+    for (const entry of this.#tablesByName.values()) {
+      if (entry.kind !== "defined-name") next.set(entry.name, entry);
+    }
+
+    for (const def of definedNames) {
+      const name = typeof (def as any)?.name === "string" ? String((def as any).name) : "";
+      if (!name) continue;
+
+      // Table definitions win over defined names with the same name.
+      const existingNonDefined = next.get(name);
+      if (existingNonDefined && existingNonDefined.kind === "table") continue;
+
+      const rawRefersTo = typeof (def as any)?.refers_to === "string" ? String((def as any).refers_to) : "";
+      const trimmed = rawRefersTo.trim();
+      if (!trimmed) continue;
+      const refersTo = trimmed.startsWith("=") ? trimmed.slice(1).trim() : trimmed;
+
+      const { sheetName, ref } = splitSheetQualifier(refersTo);
+      const sheetId =
+        sheetName ?? (typeof (def as any)?.sheet_id === "string" ? String((def as any).sheet_id) : "");
+      if (!sheetId) continue;
+
+      let parsed;
+      try {
+        parsed = parseA1Range(ref);
+      } catch {
+        // Skip non-range formulas (OFFSET, structured refs, etc).
+        continue;
+      }
+
+      const rectangle: TableRectangle = {
+        sheetId,
+        startRow: parsed.startRow,
+        startCol: parsed.startCol,
+        endRow: parsed.endRow,
+        endCol: parsed.endCol,
+      };
+
+      const definitionHash = hashValue({ kind: "defined-name", sheetId, ...parsed });
+
+      const existing = this.#tablesByName.get(name);
+      if (existing && existing.kind === "defined-name") {
+        const changed = existing.definitionHash !== definitionHash;
+        const version = changed ? existing.version + 1 : existing.version;
+        next.set(name, { ...existing, rectangle, definitionHash, version });
+      } else {
+        next.set(name, { name, kind: "defined-name", rectangle, definitionHash, version: 0 });
       }
     }
 
@@ -231,4 +309,12 @@ export function refreshTableSignaturesFromBackend(
   options: { workbookSignature?: string } = {},
 ): void {
   getTableSignatureRegistry(doc).refreshFromTables(tables, options);
+}
+
+export function refreshDefinedNameSignaturesFromBackend(
+  doc: DocumentController,
+  definedNames: DefinedNameInfo[],
+  options: { workbookSignature?: string } = {},
+): void {
+  getTableSignatureRegistry(doc).refreshFromDefinedNames(definedNames, options);
 }

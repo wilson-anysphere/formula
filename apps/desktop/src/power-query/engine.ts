@@ -5,6 +5,7 @@ import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/mem
 import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
 import { DataTable } from "../../../../packages/power-query/src/table.js";
+import { parseA1Range, splitSheetQualifier } from "../../../../packages/search/index.js";
 import type { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
 import type { QueryExecutionContext } from "../../../../packages/power-query/src/engine.js";
 
@@ -623,7 +624,62 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
               );
             }
             if (!info) {
-              throw new Error(`Unknown table '${tableName}'`);
+              const definedNames = (await tauriInvoke("list_defined_names")) as any;
+              const names = Array.isArray(definedNames) ? definedNames : [];
+              let defined = names.find((n) => n && typeof n === "object" && (n as any).name === tableName);
+              if (!defined) {
+                const lower = tableName.toLowerCase();
+                defined = names.find(
+                  (n) => n && typeof n === "object" && typeof (n as any).name === "string" && (n as any).name.toLowerCase() === lower,
+                );
+              }
+              if (!defined) {
+                throw new Error(`Unknown table or defined name '${tableName}'`);
+              }
+
+              const rawRefersTo = typeof (defined as any).refers_to === "string" ? String((defined as any).refers_to) : "";
+              const refersTo = rawRefersTo.trim().startsWith("=") ? rawRefersTo.trim().slice(1).trim() : rawRefersTo.trim();
+              const { sheetName, ref } = splitSheetQualifier(refersTo);
+              const sheetId =
+                sheetName ?? (typeof (defined as any).sheet_id === "string" ? String((defined as any).sheet_id) : null);
+              if (!sheetId || sheetId.trim() === "") {
+                throw new Error(
+                  `Defined name '${tableName}' refers to '${rawRefersTo}', but no sheet was provided. Only simple A1 ranges are supported (e.g. Sheet1!$A$1:$B$2)`,
+                );
+              }
+
+              let range;
+              try {
+                range = parseA1Range(ref);
+              } catch {
+                throw new Error(
+                  `Defined name '${tableName}' refers to unsupported formula '${rawRefersTo}'. Only simple A1 ranges are supported (e.g. Sheet1!$A$1:$B$2)`,
+                );
+              }
+
+              const rangePayload = (await tauriInvoke("get_range", {
+                sheet_id: sheetId,
+                start_row: range.startRow,
+                start_col: range.startCol,
+                end_row: range.endRow,
+                end_col: range.endCol,
+              })) as any;
+
+              const rows = Array.isArray(rangePayload?.values) ? rangePayload.values : [];
+              /** @type {unknown[][]} */
+              const grid = rows.map((row: any) =>
+                Array.isArray(row)
+                  ? row.map((cell) => (cell && typeof cell === "object" ? (cell as any).value ?? null : null))
+                  : [],
+              );
+
+              const hasHeaders =
+                grid.length >= 2 &&
+                Array.isArray(grid[0]) &&
+                (grid[0] as any[]).some((v) => typeof v === "string" && v.trim() !== "") &&
+                (grid[0] as any[]).every((v) => v == null || typeof v === "string");
+
+              return DataTable.fromGrid(grid, { hasHeaders, inferTypes: true });
             }
 
             const columns = Array.isArray((info as any).columns) ? ((info as any).columns as string[]) : [];

@@ -147,8 +147,15 @@ export function getSourceIdForQuerySource(source) {
       return getSqlSourceId(source.connection);
     }
     case "range":
+      // Allow hosts to override workbook range identities (e.g. defined names).
+      // @ts-ignore - runtime indexing
+      if (typeof source.sourceId === "string" && source.sourceId.length > 0) return source.sourceId;
       return "workbook:range";
     case "table":
+      // Allow hosts to override workbook table identities (e.g. treat defined names
+      // as `workbook:range:<name>` while still using the `table` QuerySource shape).
+      // @ts-ignore - runtime indexing
+      if (typeof source.sourceId === "string" && source.sourceId.length > 0) return source.sourceId;
       return `workbook:table:${source.table}`;
     case "query":
       return null;
@@ -201,8 +208,13 @@ export function getSourceIdForProvenance(provenance) {
       return typeof connectionId === "string" && connectionId.length > 0 ? getSqlSourceId(connectionId) : null;
     }
     case "range":
+      // @ts-ignore - runtime indexing
+      if (typeof provenance.sourceId === "string") return provenance.sourceId;
       return "workbook:range";
     case "table": {
+      // @ts-ignore - runtime indexing
+      const sourceId = provenance.sourceId;
+      if (typeof sourceId === "string" && sourceId.length > 0) return sourceId;
       // @ts-ignore - runtime indexing
       const table = provenance.table;
       return typeof table === "string" ? `workbook:table:${table}` : "workbook:table";
