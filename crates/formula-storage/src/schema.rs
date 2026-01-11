@@ -365,6 +365,36 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
             params![&workbook_id, u32::MAX as i64],
         )?;
 
+        // If the database already contains duplicate model sheet ids (possible if a prior client
+        // wrote invalid state), clear all but the first occurrence so the unique index below can
+        // be created successfully.
+        {
+            let mut seen: HashSet<u32> = HashSet::new();
+            let mut stmt = tx.prepare(
+                r#"
+                SELECT id, model_sheet_id
+                FROM sheets
+                WHERE workbook_id = ?1 AND model_sheet_id IS NOT NULL
+                ORDER BY model_sheet_id, COALESCE(position, 0), id
+                "#,
+            )?;
+            let rows = stmt.query_map(params![&workbook_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?;
+            for row in rows {
+                let (sheet_id, raw) = row?;
+                let Ok(id) = u32::try_from(raw) else {
+                    continue;
+                };
+                if !seen.insert(id) {
+                    tx.execute(
+                        "UPDATE sheets SET model_sheet_id = NULL WHERE id = ?1",
+                        params![sheet_id],
+                    )?;
+                }
+            }
+        }
+
         let mut used: HashSet<u32> = HashSet::new();
         let mut max_existing: u32 = 0;
         {
