@@ -182,60 +182,73 @@ export class MarketplaceClient {
     const headers = cached?.etag ? { "If-None-Match": cached.etag } : undefined;
     let response = await fetch(url, { headers });
     if (response.status === 404) return null;
-    if (response.status === 304) {
-      if (cached && cachedBytes) {
-        const headerSha = response.headers.get("x-package-sha256");
-        const headerShaNorm = headerSha ? String(headerSha).trim().toLowerCase() : null;
-        if (headerShaNorm && (!isSha256Hex(headerShaNorm) || headerShaNorm !== String(cached.sha256).toLowerCase())) {
-          response = await fetch(url);
-        } else {
-          const headerPublisherKeyId = response.headers.get("x-publisher-key-id");
-          const resolvedPublisherKeyId =
-            headerPublisherKeyId && headerPublisherKeyId.trim().length > 0
-              ? String(headerPublisherKeyId).trim()
-              : cached.publisherKeyId || null;
+      if (response.status === 304) {
+        if (cached && cachedBytes) {
+          const headerSha = response.headers.get("x-package-sha256");
+          const headerShaNorm = headerSha ? String(headerSha).trim().toLowerCase() : null;
+          if (headerShaNorm && (!isSha256Hex(headerShaNorm) || headerShaNorm !== String(cached.sha256).toLowerCase())) {
+            response = await fetch(url);
+          } else {
+            const headerPublisherKeyId = response.headers.get("x-publisher-key-id");
+            const resolvedPublisherKeyId =
+              headerPublisherKeyId && headerPublisherKeyId.trim().length > 0
+                ? String(headerPublisherKeyId).trim()
+                : cached.publisherKeyId || null;
 
-          // 304 responses still include metadata headers; refresh our on-disk cache index
-          // opportunistically so older caches can learn about newly-added headers.
-          const refreshed = { ...cached };
-          const headerSignature = response.headers.get("x-package-signature");
-          const headerFormatVersion = response.headers.get("x-package-format-version");
-          const headerPublisher = response.headers.get("x-publisher");
-          const headerEtag = response.headers.get("etag");
+            // 304 responses still include metadata headers; refresh our on-disk cache index
+            // opportunistically so older caches can learn about newly-added headers.
+            const refreshed = { ...cached };
+            const headerSignature = response.headers.get("x-package-signature");
+            const headerFormatVersion = response.headers.get("x-package-format-version");
+            const headerPublisher = response.headers.get("x-publisher");
+            const headerScanStatus = response.headers.get("x-package-scan-status");
+            const headerEtag = response.headers.get("etag");
+            const headerFilesSha = response.headers.get("x-package-files-sha256");
 
-          if (headerShaNorm && isSha256Hex(headerShaNorm)) {
-            refreshed.sha256 = headerShaNorm;
-          }
-          if (headerEtag && headerEtag.trim().length > 0) {
-            refreshed.etag = String(headerEtag).trim();
-          }
-          if (headerSignature && headerSignature.trim().length > 0) {
-            refreshed.signatureBase64 = String(headerSignature).trim();
-          }
-          if (headerPublisher && headerPublisher.trim().length > 0) {
-            refreshed.publisher = String(headerPublisher).trim();
-          }
-          if (headerFormatVersion && headerFormatVersion.trim().length > 0) {
-            const parsed = Number(headerFormatVersion);
-            if (Number.isFinite(parsed) && parsed > 0) {
-              refreshed.formatVersion = parsed;
+            if (headerShaNorm && isSha256Hex(headerShaNorm)) {
+              refreshed.sha256 = headerShaNorm;
             }
-          }
-          if (resolvedPublisherKeyId) {
-            refreshed.publisherKeyId = resolvedPublisherKeyId;
-          }
+            if (headerEtag && headerEtag.trim().length > 0) {
+              refreshed.etag = String(headerEtag).trim();
+            }
+            if (headerSignature && headerSignature.trim().length > 0) {
+              refreshed.signatureBase64 = String(headerSignature).trim();
+            }
+            if (headerPublisher && headerPublisher.trim().length > 0) {
+              refreshed.publisher = String(headerPublisher).trim();
+            }
+            if (headerScanStatus && headerScanStatus.trim().length > 0) {
+              refreshed.scanStatus = String(headerScanStatus).trim();
+            }
+            if (headerFormatVersion && headerFormatVersion.trim().length > 0) {
+              const parsed = Number(headerFormatVersion);
+              if (Number.isFinite(parsed) && parsed > 0) {
+                refreshed.formatVersion = parsed;
+              }
+            }
+            if (resolvedPublisherKeyId) {
+              refreshed.publisherKeyId = resolvedPublisherKeyId;
+            }
+            if (headerFilesSha && headerFilesSha.trim().length > 0) {
+              const normalized = String(headerFilesSha).trim().toLowerCase();
+              if (isSha256Hex(normalized)) {
+                refreshed.filesSha256 = normalized;
+              }
+            }
 
-          const cacheIndexChanged =
-            refreshed.sha256 !== cached.sha256 ||
-            refreshed.etag !== cached.etag ||
-            refreshed.signatureBase64 !== cached.signatureBase64 ||
-            refreshed.publisher !== cached.publisher ||
-            refreshed.formatVersion !== cached.formatVersion ||
-            refreshed.publisherKeyId !== cached.publisherKeyId;
+            const cacheIndexChanged =
+              refreshed.sha256 !== cached.sha256 ||
+              refreshed.etag !== cached.etag ||
+              refreshed.signatureBase64 !== cached.signatureBase64 ||
+              refreshed.publisher !== cached.publisher ||
+              refreshed.scanStatus !== cached.scanStatus ||
+              refreshed.formatVersion !== cached.formatVersion ||
+              refreshed.publisherKeyId !== cached.publisherKeyId ||
+              refreshed.filesSha256 !== cached.filesSha256;
 
-          if (this.cacheDir && cacheBase && indexPath && cacheIndexChanged) {
-            try {
-              await atomicWriteJson(indexPath, refreshed);
+            if (this.cacheDir && cacheBase && indexPath && cacheIndexChanged) {
+              try {
+                await atomicWriteJson(indexPath, refreshed);
             } catch {
               // ignore cache update failures
             }
@@ -248,6 +261,8 @@ export class MarketplaceClient {
             formatVersion: Number(refreshed.formatVersion || 1),
             publisher: refreshed.publisher || null,
             publisherKeyId: resolvedPublisherKeyId,
+            scanStatus: refreshed.scanStatus || null,
+            filesSha256: refreshed.filesSha256 || null,
           };
         }
       } else {
@@ -269,6 +284,8 @@ export class MarketplaceClient {
     const formatVersion = Number(response.headers.get("x-package-format-version") || "1");
     const publisher = response.headers.get("x-publisher");
     const publisherKeyId = response.headers.get("x-publisher-key-id");
+    const scanStatus = response.headers.get("x-package-scan-status");
+    const filesShaHeader = response.headers.get("x-package-files-sha256");
     const bytes = Buffer.from(await response.arrayBuffer());
 
     const computedSha = sha256Hex(bytes);
@@ -288,6 +305,8 @@ export class MarketplaceClient {
         formatVersion,
         publisher: publisher || null,
         publisherKeyId: publisherKeyId || null,
+        scanStatus: scanStatus ? String(scanStatus).trim() : null,
+        filesSha256: filesShaHeader ? String(filesShaHeader).trim().toLowerCase() : null,
       };
       const bytesPath = path.join(cacheBase, `${safePathComponent(computedSha)}.fextpkg`);
       try {
@@ -298,6 +317,15 @@ export class MarketplaceClient {
       }
     }
 
-    return { bytes, signatureBase64, sha256: expectedSha, formatVersion, publisher, publisherKeyId };
+    return {
+      bytes,
+      signatureBase64,
+      sha256: expectedSha,
+      formatVersion,
+      publisher,
+      publisherKeyId,
+      scanStatus: scanStatus ? String(scanStatus).trim() : null,
+      filesSha256: filesShaHeader ? String(filesShaHeader).trim().toLowerCase() : null,
+    };
   }
 }

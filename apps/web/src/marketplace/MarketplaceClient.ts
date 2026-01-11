@@ -51,6 +51,8 @@ export interface MarketplaceDownloadResult {
   formatVersion: number | null;
   publisher: string | null;
   publisherKeyId: string | null;
+  scanStatus: string | null;
+  filesSha256: string | null;
 }
 
 export interface MarketplaceClientOptions {
@@ -161,6 +163,8 @@ export class MarketplaceClient {
       formatHeader && Number.isFinite(Number(formatHeader)) ? Number.parseInt(formatHeader, 10) : null;
     const publisher = res.headers.get("x-publisher");
     const publisherKeyId = res.headers.get("x-publisher-key-id");
+    const scanStatus = res.headers.get("x-package-scan-status");
+    const filesSha256 = res.headers.get("x-package-files-sha256");
 
     return {
       bytes,
@@ -168,7 +172,9 @@ export class MarketplaceClient {
       sha256: expectedSha,
       formatVersion,
       publisher: publisher ? String(publisher) : null,
-      publisherKeyId: publisherKeyId ? String(publisherKeyId) : null
+      publisherKeyId: publisherKeyId ? String(publisherKeyId) : null,
+      scanStatus: scanStatus ? String(scanStatus) : null,
+      filesSha256: filesSha256 ? String(filesSha256) : null,
     };
   }
 }
