@@ -253,7 +253,7 @@ class UnimplementedExternalKmsProvider implements EnvelopeKmsProvider {
     throw new Error(
       `KMS provider "${kmsProvider}" is configured for org ${orgId} (kms_key_id=${kmsKeyId}), ` +
         "but is not implemented in this reference repo. " +
-        "Set org_settings.kms_provider = 'local' for dev/test or implement the provider in services/api/src/crypto/kms.ts."
+        "Set org_settings.kms_provider = 'local' for dev/test or implement the provider under packages/security/crypto/kms/providers.js."
     );
   }
 
@@ -262,7 +262,7 @@ class UnimplementedExternalKmsProvider implements EnvelopeKmsProvider {
     throw new Error(
       `KMS provider "${kmsProvider}" is configured for org ${orgId} (kms_key_id=${kmsKeyId}), ` +
         "but is not implemented in this reference repo. " +
-        "Set org_settings.kms_provider = 'local' for dev/test or implement the provider in services/api/src/crypto/kms.ts."
+        "Set org_settings.kms_provider = 'local' for dev/test or implement the provider under packages/security/crypto/kms/providers.js."
     );
   }
 }
