@@ -909,11 +909,50 @@ impl ParserImpl {
                 }
             };
             self.expect(TokenKind::Bang)?;
-            SheetReference::SheetRange(start_name, end_name)
+            if crate::eval::is_valid_external_sheet_key(&start_name) {
+                // Excel treats `[Book]Sheet1:Sheet3!A1` as an external workbook 3D span where the
+                // bracketed workbook prefix applies to both endpoints. We don't support external
+                // workbook 3D spans today, but we still want debug tracing to behave like the main
+                // engine for degenerate spans like `[Book]Sheet1:Sheet1!A1`.
+                //
+                // When the endpoint sheet names match, collapse to the single external sheet key
+                // (`[Book]Sheet1`) so evaluation can consult the external provider.
+                let Some((_, sheet_part)) = start_name.split_once(']') else {
+                    return Ok(SpannedExpr {
+                        span: Span::new(sheet_tok.span.start, end_tok.span.end),
+                        kind: SpannedExprKind::Error(ErrorKind::Ref),
+                    });
+                };
+                if sheet_part.eq_ignore_ascii_case(&end_name) {
+                    SheetReference::External(start_name)
+                } else {
+                    // Preserve the full span in the sheet key so `resolve_sheet_id` reliably
+                    // yields `#REF!`.
+                    SheetReference::External(format!("{start_name}:{end_name}"))
+                }
+            } else {
+                SheetReference::SheetRange(start_name, end_name)
+            }
         } else {
             self.expect(TokenKind::Bang)?;
             match split_sheet_span_name(&start_name) {
-                Some((start, end)) => SheetReference::SheetRange(start, end),
+                Some((start, end)) => {
+                    if crate::eval::is_valid_external_sheet_key(&start) {
+                        let Some((_, sheet_part)) = start.split_once(']') else {
+                            return Ok(SpannedExpr {
+                                span: Span::new(sheet_tok.span.start, sheet_tok.span.end),
+                                kind: SpannedExprKind::Error(ErrorKind::Ref),
+                            });
+                        };
+                        if sheet_part.eq_ignore_ascii_case(&end) {
+                            SheetReference::External(start)
+                        } else {
+                            SheetReference::External(format!("{start}:{end}"))
+                        }
+                    } else {
+                        SheetReference::SheetRange(start, end)
+                    }
+                }
                 None => SheetReference::Sheet(start_name),
             }
         };
