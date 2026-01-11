@@ -949,6 +949,38 @@ fn roundup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     round_impl(ctx, args, RoundMode::Up)
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "TRUNC",
+        min_args: 1,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number],
+        implementation: trunc_fn,
+    }
+}
+
+fn trunc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let digits = if args.len() == 2 {
+        array_lift::eval_arg(ctx, &args[1])
+    } else {
+        Value::Number(0.0)
+    };
+    array_lift::lift2(number, digits, |number, digits| {
+        let number = number.coerce_to_number()?;
+        let digits = digits.coerce_to_i64()?;
+        Ok(Value::Number(round_with_mode(
+            number,
+            digits as i32,
+            RoundMode::Down,
+        )))
+    })
+}
+
 fn round_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], mode: RoundMode) -> Value {
     let number = array_lift::eval_arg(ctx, &args[0]);
     let digits = array_lift::eval_arg(ctx, &args[1]);

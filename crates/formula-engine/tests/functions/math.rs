@@ -70,6 +70,22 @@ fn round_variants() {
 }
 
 #[test]
+fn trunc_truncates_toward_zero() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=TRUNC(8.9)"), 8.0);
+    assert_number(&sheet.eval("=TRUNC(-8.9)"), -8.0);
+    assert_number(&sheet.eval("=TRUNC(1.29,1)"), 1.2);
+    assert_number(&sheet.eval("=TRUNC(-1.29,1)"), -1.2);
+    assert_number(&sheet.eval("=TRUNC(1234.567,-2)"), 1200.0);
+    assert_number(&sheet.eval("=TRUNC(-1234.567,-2)"), -1200.0);
+
+    sheet.set_formula("A1", "=TRUNC({1.9;2.1})");
+    sheet.recalc();
+    assert_number(&sheet.get("A1"), 1.0);
+    assert_number(&sheet.get("A2"), 2.0);
+}
+
+#[test]
 fn int_abs_mod() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=INT(2.9)"), 2.0);
