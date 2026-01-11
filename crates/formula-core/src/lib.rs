@@ -424,6 +424,7 @@ pub fn parse_range(range: &str) -> Result<(CellCoord, CellCoord), ()> {
 
 const ERROR_DIV0: &str = "#DIV/0!";
 const ERROR_NAME: &str = "#NAME?";
+const ERROR_NA: &str = "#N/A";
 const ERROR_REF: &str = "#REF!";
 const ERROR_VALUE: &str = "#VALUE!";
 const ERROR_NUM: &str = "#NUM!";
@@ -432,6 +433,7 @@ const ERROR_NUM: &str = "#NUM!";
 enum Expr {
     Empty,
     Number(f64),
+    Scalar(JsonValue),
     Reference(CellCoord),
     Range(CellCoord, CellCoord),
     Unary {
@@ -467,6 +469,8 @@ enum BinaryOp {
 #[derive(Clone, Debug, PartialEq)]
 enum FormulaToken {
     Number(f64),
+    String(String),
+    ErrorCode(String),
     Ident(String),
     Plus,
     Minus,
@@ -562,6 +566,8 @@ impl FormulaParser {
         match self.bump() {
             None => Expr::Empty,
             Some(FormulaToken::Number(n)) => Expr::Number(n),
+            Some(FormulaToken::String(s)) => Expr::Scalar(JsonValue::String(s)),
+            Some(FormulaToken::ErrorCode(code)) => Expr::Scalar(JsonValue::String(code)),
             Some(FormulaToken::Ident(name)) => self.parse_ident_primary(name),
             Some(FormulaToken::LParen) => {
                 let inner = self.parse_expression();
@@ -575,6 +581,13 @@ impl FormulaParser {
     }
 
     fn parse_ident_primary(&mut self, ident: String) -> Expr {
+        if ident == "TRUE" {
+            return Expr::Scalar(JsonValue::Bool(true));
+        }
+        if ident == "FALSE" {
+            return Expr::Scalar(JsonValue::Bool(false));
+        }
+
         if matches!(self.peek(), Some(FormulaToken::LParen)) {
             self.bump();
             let mut args = Vec::new();
@@ -645,6 +658,43 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, ()> {
         }
 
         match ch {
+            '"' => {
+                chars.next();
+                let mut buf = String::new();
+                while let Some(next) = chars.next() {
+                    if next == '"' {
+                        if matches!(chars.peek(), Some('"')) {
+                            // Match the JS evaluator behavior: keep doubled quotes as-is.
+                            buf.push('"');
+                            buf.push('"');
+                            chars.next();
+                            continue;
+                        }
+                        break;
+                    }
+                    buf.push(next);
+                }
+                tokens.push(FormulaToken::String(buf));
+            }
+            '#' => {
+                chars.next();
+                let mut buf = String::from("#");
+                let mut saw_char = false;
+                while let Some(next) = chars.peek().copied() {
+                    if next.is_whitespace()
+                        || matches!(next, ',' | ')' | '(' | '+' | '-' | '*' | '/')
+                    {
+                        break;
+                    }
+                    saw_char = true;
+                    buf.push(next);
+                    chars.next();
+                }
+                if !saw_char {
+                    return Err(());
+                }
+                tokens.push(FormulaToken::ErrorCode(buf));
+            }
             '0'..='9' | '.' => {
                 let mut buf = String::new();
                 while let Some(ch2) = chars.peek().copied() {
@@ -780,6 +830,7 @@ where
         Expr::Empty => Ok(EvalValue::Scalar(JsonValue::Null)),
         Expr::Error(code) => Ok(EvalValue::Scalar(JsonValue::String((*code).to_string()))),
         Expr::Number(n) => Ok(EvalValue::Scalar(number_to_json(*n))),
+        Expr::Scalar(value) => Ok(EvalValue::Scalar(value.clone())),
         Expr::Reference(coord) => Ok(EvalValue::Scalar(get_cell(*coord)?)),
         Expr::Range(start, end) => {
             let (top_left, bottom_right) = normalize_range(*start, *end);
@@ -925,7 +976,75 @@ fn eval_function(name: &str, args: &[EvalValue]) -> EvalValue {
         return EvalValue::Scalar(number_to_json(sum));
     }
 
+    if upper == "AVERAGE" {
+        let mut nums = Vec::new();
+        if let Some(err) = flatten_numbers(args, &mut nums) {
+            return EvalValue::Scalar(JsonValue::String(err));
+        }
+        if nums.is_empty() {
+            return EvalValue::Scalar(number_to_json(0.0));
+        }
+        let sum: f64 = nums.iter().sum();
+        return EvalValue::Scalar(number_to_json(sum / nums.len() as f64));
+    }
+
+    if upper == "IF" {
+        let cond = args
+            .get(0)
+            .cloned()
+            .unwrap_or(EvalValue::Scalar(JsonValue::Null));
+        if let EvalValue::Scalar(ref scalar) = cond {
+            if let Some(err) = is_error_code(scalar) {
+                return EvalValue::Scalar(JsonValue::String(err.to_string()));
+            }
+        }
+
+        let cond_num = match &cond {
+            EvalValue::Scalar(value) => to_number(value),
+            EvalValue::Array(_) => None,
+        };
+        let truthy = match cond_num {
+            Some(num) => num != 0.0,
+            None => js_truthy(&cond),
+        };
+
+        let chosen = if truthy { args.get(1) } else { args.get(2) }
+            .cloned()
+            .unwrap_or(EvalValue::Scalar(JsonValue::Null));
+
+        if let EvalValue::Scalar(ref scalar) = chosen {
+            if let Some(err) = is_error_code(scalar) {
+                return EvalValue::Scalar(JsonValue::String(err.to_string()));
+            }
+        }
+
+        return match chosen {
+            EvalValue::Scalar(v) => EvalValue::Scalar(v),
+            EvalValue::Array(arr) => {
+                EvalValue::Scalar(arr.into_iter().next().unwrap_or(JsonValue::Null))
+            }
+        };
+    }
+
+    if upper == "VLOOKUP" {
+        return EvalValue::Scalar(JsonValue::String(ERROR_NA.to_string()));
+    }
+
     EvalValue::Scalar(JsonValue::String(ERROR_NAME.to_string()))
+}
+
+fn js_truthy(value: &EvalValue) -> bool {
+    match value {
+        // JS arrays are objects, so Boolean([]) is always true.
+        EvalValue::Array(_) => true,
+        EvalValue::Scalar(scalar) => match scalar {
+            JsonValue::Null => false,
+            JsonValue::Bool(b) => *b,
+            JsonValue::Number(num) => num.as_f64().is_some_and(|v| v != 0.0),
+            JsonValue::String(s) => !s.is_empty(),
+            _ => true,
+        },
+    }
 }
 
 fn flatten_numbers(values: &[EvalValue], out: &mut Vec<f64>) -> Option<String> {
@@ -1009,5 +1128,42 @@ mod tests {
         wb.recalculate(None).unwrap();
         let cell = wb.get_cell("B1", None).unwrap();
         assert_eq!(cell.value, json!(ERROR_DIV0));
+    }
+
+    #[test]
+    fn average_over_values_evaluates() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("=AVERAGE(1,2)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        let cell = wb.get_cell("A1", None).unwrap();
+        assert_eq!(cell.value, json!(1.5));
+    }
+
+    #[test]
+    fn if_function_selects_branches() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("=IF(1,2,3)"), None).unwrap();
+        wb.set_cell("A2", json!("=IF(0,2,3)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(2.0));
+        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(3.0));
+    }
+
+    #[test]
+    fn vlookup_is_stubbed_to_na() {
+        let mut wb = Workbook::new();
+        wb.set_range(
+            "A1:B2",
+            vec![vec![json!(1), json!(2)], vec![json!(3), json!(4)]],
+            None,
+        )
+        .unwrap();
+        wb.set_cell("C1", json!("=VLOOKUP(1,A1:B2,2,FALSE)"), None)
+            .unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("C1", None).unwrap().value, json!(ERROR_NA));
     }
 }
