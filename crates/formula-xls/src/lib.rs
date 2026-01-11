@@ -406,22 +406,30 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         // the sheet even when the value is empty so those cells round-trip.
         if let (Some(xf_style_ids), Some(sheet_cell_xfs)) = (xf_style_ids.as_deref(), sheet_cell_xfs)
         {
+            let mut out_of_range_xf_count: usize = 0;
             for (&cell_ref, &xf_idx) in sheet_cell_xfs {
                 if cell_ref.row >= EXCEL_MAX_ROWS || cell_ref.col >= EXCEL_MAX_COLS {
                     continue;
                 }
-                // For merged regions, the model only stores value/style on the
-                // top-left anchor. Avoid applying the style from a non-anchor cell
-                // to the anchor.
+
+                // Normalise style assignments to merged-cell anchors so formatting inside a merged
+                // region round-trips consistently with the importer’s value/formula semantics.
                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
-                if anchor != cell_ref {
+
+                let Some(style_id) = xf_style_ids.get(xf_idx as usize).copied() else {
+                    out_of_range_xf_count = out_of_range_xf_count.saturating_add(1);
                     continue;
-                }
-                let style_id = xf_style_ids.get(xf_idx as usize).copied().flatten();
+                };
                 let Some(style_id) = style_id else {
                     continue;
                 };
                 sheet.set_style_id(anchor, style_id);
+            }
+
+            if out_of_range_xf_count > 0 {
+                warnings.push(ImportWarning::new(format!(
+                    "skipped {out_of_range_xf_count} cells in sheet `{sheet_name}` with out-of-range XF indices"
+                )));
             }
         }
     }

@@ -437,7 +437,12 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
         }
         if let Some(mask) = xf_is_interesting {
             let idx = xf as usize;
-            if idx >= mask.len() || !mask[idx] {
+            // Retain out-of-range XF indices so callers can surface an aggregated warning.
+            if idx >= mask.len() {
+                out.insert(CellRef::new(row, col), xf);
+                return;
+            }
+            if !mask[idx] {
                 return;
             }
         }
