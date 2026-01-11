@@ -4,6 +4,7 @@ import { IndexedDBCacheStore } from "../../../../packages/power-query/src/cache/
 import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/memory.js";
 import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
+import { DataTable } from "../../../../packages/power-query/src/table.js";
 import type { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
 
 import { enforceExternalConnector } from "../dlp/enforceExternalConnector.js";
@@ -470,6 +471,62 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
   const cache = options.cache ?? createDefaultCacheManager();
   const fileAdapter = options.fileAdapter ?? createDefaultFileAdapter();
 
+  const tauriInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+  const tableAdapter =
+    typeof tauriInvoke === "function"
+      ? {
+          getTable: async (tableName: string, adapterOptions?: { signal?: AbortSignal }) => {
+            if (adapterOptions?.signal?.aborted) {
+              const err = new Error("Aborted");
+              err.name = "AbortError";
+              throw err;
+            }
+
+            const tables = (await tauriInvoke("list_tables")) as any;
+            const list = Array.isArray(tables) ? tables : [];
+            let info = list.find((t) => t && typeof t === "object" && (t as any).name === tableName);
+            if (!info) {
+              const lower = tableName.toLowerCase();
+              info = list.find(
+                (t) => t && typeof t === "object" && typeof (t as any).name === "string" && (t as any).name.toLowerCase() === lower,
+              );
+            }
+            if (!info) {
+              throw new Error(`Unknown table '${tableName}'`);
+            }
+
+            const columns = Array.isArray((info as any).columns) ? ((info as any).columns as string[]) : [];
+            const width = columns.length;
+            const range = (await tauriInvoke("get_range", {
+              sheet_id: (info as any).sheet_id,
+              start_row: (info as any).start_row,
+              start_col: (info as any).start_col,
+              end_row: (info as any).end_row,
+              end_col: (info as any).end_col,
+            })) as any;
+
+            const rows = Array.isArray(range?.values) ? range.values : [];
+            /** @type {unknown[][]} */
+            const grid = rows.map((row: any) => {
+              const values = Array.isArray(row) ? row.map((cell) => (cell && typeof cell === "object" ? (cell as any).value ?? null : null)) : [];
+              if (width === 0) return values;
+              const out = values.slice(0, width);
+              while (out.length < width) out.push(null);
+              return out;
+            });
+
+            if (grid.length === 0) {
+              grid.push(columns.slice());
+            } else if (columns.length > 0) {
+              grid[0] = columns.slice();
+            }
+
+            return DataTable.fromGrid(grid, { hasHeaders: true, inferTypes: true });
+          },
+          // Extension point: add `getTableSignature` once we can surface stable workbook table versions.
+        }
+      : undefined;
+
   const http =
     options.fetch || options.oauth2Manager
       ? new HttpConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
@@ -498,6 +555,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
         readBinary: fileAdapter.readBinary,
         stat: fileAdapter.stat,
       },
+      tableAdapter,
       connectors: http ? { http } : undefined,
       privacyMode: options.privacyMode,
       onCredentialRequest: options.onCredentialRequest,

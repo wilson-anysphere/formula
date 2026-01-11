@@ -98,6 +98,80 @@ test("createDesktopQueryEngine uses file mtimes to validate cache entries", asyn
   }
 });
 
+test("createDesktopQueryEngine resolves table sources via Tauri list_tables/get_range", async () => {
+  const originalTauri = globalThis.__TAURI__;
+
+  /** @type {{ cmd: string, args: any }[]} */
+  const calls = [];
+
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd === "list_tables") {
+          return [
+            {
+              name: "Sales",
+              sheet_id: "sheet1",
+              start_row: 5,
+              start_col: 2,
+              end_row: 7,
+              end_col: 3,
+              columns: ["Region", "Sales"],
+            },
+          ];
+        }
+        if (cmd === "get_range") {
+          assert.deepEqual(args, { sheet_id: "sheet1", start_row: 5, start_col: 2, end_row: 7, end_col: 3 });
+          return {
+            // Intentionally return incorrect header cells; the adapter should prefer TableInfo.columns.
+            values: [
+              [
+                { value: "WrongRegion", formula: null, display_value: "WrongRegion" },
+                { value: "WrongSales", formula: null, display_value: "WrongSales" },
+              ],
+              [
+                { value: "East", formula: null, display_value: "East" },
+                { value: 100, formula: null, display_value: "100" },
+              ],
+              [
+                { value: "West", formula: null, display_value: "West" },
+                { value: 200, formula: null, display_value: "200" },
+              ],
+            ],
+            start_row: 5,
+            start_col: 2,
+          };
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const engine = createDesktopQueryEngine();
+
+    const query = {
+      id: "q_table",
+      name: "Sales Table",
+      source: { type: "table", table: "Sales" },
+      steps: [],
+    };
+
+    const table = await engine.executeQuery(query, {}, {});
+    assert.deepEqual(table.toGrid(), [
+      ["Region", "Sales"],
+      ["East", 100],
+      ["West", 200],
+    ]);
+
+    assert.ok(calls.some((c) => c.cmd === "list_tables"));
+    assert.ok(calls.some((c) => c.cmd === "get_range"));
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});
+
 test("createDesktopQueryEngine enforces DLP policy on external connector permissions", async () => {
   const policy = createDefaultOrgPolicy();
 

@@ -201,6 +201,13 @@ async function loadDataIoModule() {
  *   Defaults to `"ignore"` for backwards compatibility.
  * @property {QueryEngineHooks["onPermissionRequest"] | undefined} [onPermissionRequest]
  * @property {QueryEngineHooks["onCredentialRequest"] | undefined} [onCredentialRequest]
+ * @property {{
+ *   getTable: (tableName: string, options?: { signal?: AbortSignal }) => Promise<ITable>;
+ *   // Optional stable signature/version for a table. If omitted (or returns `undefined`),
+ *   // table sources are treated as uncacheable so cached results cannot become stale
+ *   // when workbook tables change.
+ *   getTableSignature?: (tableName: string) => Promise<unknown>;
+ * } | undefined} [tableAdapter]
  */
 
 /**
@@ -318,6 +325,7 @@ export class QueryEngine {
     this.onCredentialRequest = options.onCredentialRequest ?? null;
     this.fileAdapter = options.fileAdapter ?? null;
     this.privacyMode = options.privacyMode ?? "ignore";
+    this.tableAdapter = options.tableAdapter ?? null;
 
     /** @type {WeakMap<object, Set<string>>} */
     this._tableSourceIds = new WeakMap();
@@ -1390,12 +1398,17 @@ export class QueryEngine {
     }
     if (source.type === "table") {
       const sourceId = getSourceIdForQuerySource(source);
-      const signature =
-        typeof context.getTableSignature === "function"
-          ? context.getTableSignature(source.table)
-          : context.tableSignatures
-            ? context.tableSignatures[source.table]
-            : undefined;
+      /** @type {unknown} */
+      let signature;
+      if (typeof context.getTableSignature === "function") {
+        signature = context.getTableSignature(source.table);
+      }
+      if (signature === undefined && context.tableSignatures) {
+        signature = context.tableSignatures[source.table];
+      }
+      if (signature === undefined && typeof this.tableAdapter?.getTableSignature === "function") {
+        signature = await this.tableAdapter.getTableSignature(source.table);
+      }
       const privacyLevel = getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId);
       if (signature === undefined) {
         return { type: "table", sourceId, privacyLevel, table: source.table, missingSignature: true, $cacheable: false };
@@ -1665,7 +1678,12 @@ export class QueryEngine {
     }
 
     if (source.type === "table") {
-      const table = context.tables?.[source.table];
+      /** @type {ITable | undefined} */
+      let table = context.tables?.[source.table];
+      if (!table && typeof this.tableAdapter?.getTable === "function") {
+        table = await this.tableAdapter.getTable(source.table, { signal: options.signal });
+        throwIfAborted(options.signal);
+      }
       if (!table) {
         throw new Error(`Unknown table '${source.table}'`);
       }
