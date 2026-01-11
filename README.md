@@ -163,6 +163,8 @@ Enable:
   - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON` (KeyRing JSON string), or
   - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH` (path to a JSON file containing KeyRing JSON)
 
+The server will refuse to start if encryption is enabled but key material is missing (always in production; also in dev/test when `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring` is set).
+
 When encryption is enabled, existing legacy plaintext `.yjs` files in `SYNC_SERVER_DATA_DIR` are migrated to the encrypted, append-only format **on startup** (atomic per file).
 
 Manage KeyRing material (generate / rotate / validate):
@@ -199,6 +201,8 @@ Enable:
 - Provide key material via **one** of:
   - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON`, or
   - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH`
+
+The server will refuse to start if encryption is enabled but key material is missing.
 
 Optional migration strictness:
 

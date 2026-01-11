@@ -51,11 +51,13 @@ The included `LocalKmsProvider` is meant for tests and single-node dev. Producti
 
 ### Sync server (Yjs persistence)
 
-`services/sync-server` supports **encryption at rest** for the `file` persistence backend (append-only `.yjs` update logs).
+`services/sync-server` supports **encryption at rest** for persisted Yjs state in both supported persistence backends:
+
+- `file`: append-only `.yjs` update logs on disk
+- `leveldb`: encrypted LevelDB *values* (updates, state vectors, metadata)
 
 Enable:
 
-- `SYNC_SERVER_PERSISTENCE_BACKEND=file`
 - `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring`
 - Provide key material via **one** of:
   - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON` (KeyRing JSON string), or
@@ -77,6 +79,8 @@ For production images / built output, you can run the compiled entrypoint:
 node services/sync-server/dist/keyring-cli.js generate --out keyring.json
 ```
 
+#### File persistence (`SYNC_SERVER_PERSISTENCE_BACKEND=file`)
+
 When enabled, plaintext `.yjs` files in `SYNC_SERVER_DATA_DIR` are migrated to the encrypted format on startup (write temp + rename, idempotent).
 
 On-disk format is a small, append-friendly container:
@@ -88,6 +92,17 @@ On-disk format is a small, append-friendly container:
 Records use AES-256-GCM with an AAD context that includes a stable scope + schema version + `doc = sha256(docName)` so ciphertext cannot be swapped across documents.
 
 Key rotation is handled by replacing the KeyRing JSON with a new `currentVersion` + key while retaining older key versions so existing records remain decryptable until compaction rewrites them.
+
+#### LevelDB persistence (`SYNC_SERVER_PERSISTENCE_BACKEND=leveldb`)
+
+When enabled, LevelDB persistence encrypts all persisted *values* (Yjs updates, state vectors, and metadata) using AES-256-GCM. LevelDB keys remain plaintext; enable `SYNC_SERVER_LEVELDB_DOCNAME_HASHING=1` to avoid writing raw doc ids into the LevelDB keyspace.
+
+Migration strictness:
+
+- `SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT=1|0`
+  - Default: `1` in `NODE_ENV=production`, `0` in dev/test.
+  - Strict (`1`): rejects legacy plaintext values.
+  - Non-strict (`0`): allows reading legacy plaintext values for migration/backcompat; new writes are encrypted.
 
 ## Encryption in Transit
 
