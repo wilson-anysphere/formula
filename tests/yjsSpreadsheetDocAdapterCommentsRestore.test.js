@@ -51,6 +51,42 @@ test("Yjs doc adapter restore rehydrates comments array even if target doc hasn'
   assert.equal(restoredComment.get("content"), "Original comment");
 });
 
+test("Yjs doc adapter restore preserves legacy list comments when comments root is clobbered as a map", () => {
+  const legacy = new Y.Doc();
+  const comments = legacy.getArray("comments");
+  const legacyComment = new Y.Map();
+  legacyComment.set("id", "c1");
+  legacyComment.set("cellRef", "A1");
+  legacyComment.set("content", "Legacy comment");
+  comments.push([legacyComment]);
+  const legacySnapshot = Y.encodeStateAsUpdate(legacy);
+
+  const mixed = new Y.Doc();
+  Y.applyUpdate(mixed, legacySnapshot);
+
+  // Simulate the old bug: choose the wrong constructor first, then add a map
+  // entry. Now the root contains both map entries and legacy list items.
+  const mixedComments = mixed.getMap("comments");
+  const newComment = new Y.Map();
+  newComment.set("id", "c2");
+  newComment.set("cellRef", "A2");
+  newComment.set("content", "New comment");
+  mixedComments.set("c2", newComment);
+
+  const mixedSnapshot = Y.encodeStateAsUpdate(mixed);
+
+  const target = new Y.Doc();
+  const adapter = createYjsSpreadsheetDocAdapter(target);
+  adapter.applyState(mixedSnapshot);
+
+  const restored = target.getMap("comments");
+  assert.equal(restored.size, 2);
+  assert.ok(restored.get("c1") instanceof Y.Map);
+  assert.ok(restored.get("c2") instanceof Y.Map);
+  assert.equal(restored.get("c1").get("content"), "Legacy comment");
+  assert.equal(restored.get("c2").get("content"), "New comment");
+});
+
 test("Yjs doc adapter restore rehydrates additional map roots present only in the snapshot", () => {
   const source = new Y.Doc();
   const settings = source.getMap("settings");

@@ -6,6 +6,45 @@ import { cloneYjsValue } from "./cloneYjsValue.js";
  */
 
 /**
+ * @param {any} value
+ * @returns {string | null}
+ */
+function coerceString(value) {
+  if (value instanceof Y.Text) return value.toString();
+  if (typeof value === "string") return value;
+  if (value == null) return null;
+  return String(value);
+}
+
+/**
+ * Recover list items (sequence entries with `parentSub === null`) stored on a map
+ * root.
+ *
+ * This can happen if a document originally used a legacy Array schema, but the
+ * root was later instantiated as a Map (e.g. by calling `doc.getMap(name)` first
+ * while the root was still a placeholder). In that case the list content is
+ * invisible via `map.keys()` but still exists in the CRDT.
+ *
+ * @param {any} mapType
+ * @returns {Y.Map<any>[]}
+ */
+function legacyListItemsFromMapRoot(mapType) {
+  /** @type {Y.Map<any>[]} */
+  const out = [];
+  let item = mapType?._start ?? null;
+  while (item) {
+    if (!item.deleted && item.parentSub === null) {
+      const content = item.content?.getContent?.() ?? [];
+      for (const value of content) {
+        if (value instanceof Y.Map) out.push(value);
+      }
+    }
+    item = item.right;
+  }
+  return out;
+}
+
+/**
  * Create a VersionManager-compatible adapter around a Y.Doc.
  *
  * Note: restoring a snapshot is implemented by mutating the current `doc` in
@@ -228,7 +267,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
           if (kind === "map") {
             const target = doc.getMap(name);
             const source = restored.getMap(name);
-      
+       
 
             for (const key of Array.from(target.keys())) {
               target.delete(key);
@@ -237,6 +276,20 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             source.forEach((value, key) => {
               target.set(key, cloneYjsValue(value));
             });
+
+            // Special-case: comments historically existed as a list (Array) but
+            // could be accidentally instantiated as a Map. If that happens, the
+            // legacy list items still exist on the Map root (as list entries with
+            // `parentSub === null`) but are invisible via `map.keys()`. Preserve
+            // them by migrating into proper map entries keyed by comment id.
+            if (name === "comments") {
+              for (const item of legacyListItemsFromMapRoot(source)) {
+                const id = coerceString(item.get("id"));
+                if (!id) continue;
+                if (target.has(id)) continue;
+                target.set(id, cloneYjsValue(item));
+              }
+            }
             continue;
           }
 
