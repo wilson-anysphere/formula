@@ -453,6 +453,23 @@ test("RefreshOrchestrator: supports injecting a shared now() for the session", a
   assert.equal(results["Q1"].meta.refreshedAt.getTime(), 123);
 });
 
+test("RefreshOrchestrator: injected now() is used for graph error timestamps", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1, now: () => 123 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+
+  /** @type {any[]} */
+  const events = [];
+  orchestrator.onEvent((evt) => events.push(evt));
+
+  const handle = orchestrator.refreshAll(["Missing"]);
+  await assert.rejects(handle.promise, /Unknown query 'Missing'/);
+
+  const errEvt = events.find((e) => e.type === "error");
+  assert.ok(errEvt);
+  assert.equal(errEvt.job.queuedAt.getTime(), 123);
+});
+
 test("RefreshOrchestrator: cycle detection emits a clear error", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
@@ -589,6 +606,27 @@ test("RefreshOrchestrator: cancellation rejects even when dependents were never 
   handle.cancel();
   await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
   assert.deepEqual(new Set(cancelled), new Set(["A", "B", "C"]));
+});
+
+test("RefreshOrchestrator: injected now() is used for synthetic cancelled timestamps", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1, now: () => 123 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+
+  /** @type {any[]} */
+  const events = [];
+  orchestrator.onEvent((evt) => events.push(evt));
+
+  const handle = orchestrator.refreshAll(["B"]);
+  assert.equal(engine.calls.length, 1);
+  handle.cancel();
+  await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
+
+  const cancelledB = events.find((e) => e.type === "cancelled" && e.job.queryId === "B");
+  assert.ok(cancelledB);
+  assert.equal(cancelledB.job.queuedAt.getTime(), 123);
+  assert.equal(cancelledB.job.completedAt.getTime(), 123);
 });
 
 test("RefreshOrchestrator: dependency error rejects and cancels unscheduled dependents", async () => {
