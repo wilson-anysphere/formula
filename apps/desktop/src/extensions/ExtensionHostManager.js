@@ -96,6 +96,12 @@ export class ExtensionHostManager {
     if (extensionManager) {
       this.bindToExtensionManager(extensionManager);
     }
+
+    // `syncInstalledExtensions()` can be triggered from multiple sources (e.g. installer events,
+    // explicit UI refresh calls). Serialize sync runs and coalesce concurrent requests so we don't
+    // unload/reload the same extension simultaneously.
+    this._syncRunner = null;
+    this._syncRequested = false;
   }
 
   get spreadsheet() {
@@ -217,7 +223,7 @@ export class ExtensionHostManager {
     });
   }
 
-  async syncInstalledExtensions() {
+  async _syncInstalledExtensionsOnce() {
     const state = await this._loadInstalledState();
     const installed = state.installed ?? {};
     const installedIds = new Set(Object.keys(installed));
@@ -278,6 +284,28 @@ export class ExtensionHostManager {
         console.warn(`Failed to load extension ${id}: ${String(error?.message ?? error)}`);
       }
     }
+  }
+
+  async syncInstalledExtensions() {
+    this._syncRequested = true;
+
+    if (this._syncRunner) {
+      return this._syncRunner;
+    }
+
+    this._syncRunner = (async () => {
+      try {
+        while (this._syncRequested) {
+          this._syncRequested = false;
+          await this._syncInstalledExtensionsOnce();
+        }
+      } finally {
+        this._syncRequested = false;
+        this._syncRunner = null;
+      }
+    })();
+
+    return this._syncRunner;
   }
 
   async executeCommand(commandId, ...args) {

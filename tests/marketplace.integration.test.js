@@ -482,7 +482,14 @@ test("installed extension tampering is detected, quarantines execution, and repa
       permissionPrompt: async () => true,
     });
 
-    await assert.rejects(() => runtime.startup(), /integrity check failed|corrupt|checksum|size mismatch/i);
+    // Startup should quarantine the tampered install (mark state corrupted) but allow the
+    // runtime to continue booting so other extensions can still run.
+    await runtime.startup();
+
+    // The tampered extension should not be loaded into the runtime.
+    await assert.rejects(() => runtime.executeCommand("sampleHello.sumSelection"), /Unknown command/i);
+    const contributions = runtime.listContributions();
+    assert.ok(!contributions.commands.some((cmd) => cmd.command === "sampleHello.sumSelection"));
 
     const corruptedState = await manager.getInstalled(extensionId);
     assert.ok(corruptedState?.corrupted);
