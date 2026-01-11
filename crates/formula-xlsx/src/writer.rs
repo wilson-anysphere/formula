@@ -36,7 +36,7 @@ pub fn write_workbook_to_writer<W: Write + Seek>(workbook: &Workbook, writer: W)
         .sheets
         .iter()
         .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
-        .filter(|style_id| *style_id != 0 && workbook.styles.get(*style_id).is_some());
+        .filter(|style_id| *style_id != 0);
     let style_to_xf = styles_part
         .xf_indices_for_style_ids(style_ids, &style_table)
         .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;

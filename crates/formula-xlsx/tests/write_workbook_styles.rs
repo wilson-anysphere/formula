@@ -47,6 +47,33 @@ fn write_workbook_emits_style_xfs_and_cell_s_mapping() -> Result<(), Box<dyn std
     Ok(())
 }
 
+#[test]
+fn write_workbook_errors_on_unknown_style_id() -> Result<(), Box<dyn std::error::Error>> {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1");
+    {
+        let sheet = workbook.sheet_mut(sheet_id).unwrap();
+        let mut cell = Cell::new(CellValue::Number(1.0));
+        cell.style_id = 999;
+        sheet.set_cell(CellRef::from_a1("A1")?, cell);
+    }
+
+    let dir = tempdir()?;
+    let out_path = dir.path().join("invalid.xlsx");
+    let err = formula_xlsx::write_workbook(&workbook, &out_path).unwrap_err();
+    match err {
+        formula_xlsx::XlsxWriteError::Invalid(message) => {
+            assert!(
+                message.contains("unknown style_id"),
+                "unexpected error: {message}"
+            );
+        }
+        other => panic!("expected Invalid error, got {other:?}"),
+    }
+
+    Ok(())
+}
+
 fn assert_sheet_has_style_index(
     bytes: &[u8],
     sheet_part: &str,
