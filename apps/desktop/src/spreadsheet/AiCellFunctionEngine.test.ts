@@ -172,6 +172,43 @@ describe("AiCellFunctionEngine", () => {
     expect(events.some((e: any) => e.details?.type === "ai.cell_function")).toBe(true);
   });
 
+  it("DLP does not allow restricted cells to be smuggled via nested formulas (e.g. IF)", () => {
+    const llmClient = { chat: vi.fn() };
+
+    const policy = createDefaultOrgPolicy();
+    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
+      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
+      redactDisallowed: false,
+    };
+
+    const documentId = "unit-test-doc";
+    const storage = createMemoryStorage();
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      documentId,
+      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+    );
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      dlp: {
+        policy,
+        documentId,
+        classificationStore,
+        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
+      },
+    });
+
+    const value = evaluateFormula('=AI("summarize", IF(TRUE, A1, "x"))', (ref) => (ref === "A1" ? "top secret" : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
+    expect(value).toBe(AI_CELL_DLP_ERROR);
+    expect(llmClient.chat).not.toHaveBeenCalled();
+  });
+
   it("DLP redacts inputs before sending to the LLM", async () => {
     const llmClient = {
       chat: vi.fn(async () => ({

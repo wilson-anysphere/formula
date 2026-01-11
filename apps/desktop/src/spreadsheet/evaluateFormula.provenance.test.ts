@@ -41,11 +41,27 @@ describe("evaluateFormula (AI provenance)", () => {
 
     const getCellValue = (addr: string) => (addr === "A1" ? 1 : addr === "A2" ? 2 : null);
 
-    // Nested SUM should evaluate normally (i.e. references within SUM are plain numbers).
+    // Nested SUM should evaluate normally inside AI arguments.
     const result = evaluateFormula('=AI("sum", SUM(A1:A2))', getCellValue, { ai, cellAddress: "Sheet1!B1" });
     expect(result).toBe("ok");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args?.[1]).toBe(3);
   });
-});
 
+  it("preserves provenance through nested expressions inside AI arguments (e.g. IF)", () => {
+    const calls: any[] = [];
+    const ai = {
+      evaluateAiFunction: (params: any) => {
+        calls.push(params);
+        return "ok";
+      },
+    };
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "secret" : null);
+
+    const result = evaluateFormula('=AI("summarize", IF(TRUE, A1, "x"))', getCellValue, { ai, cellAddress: "Sheet1!B1" });
+    expect(result).toBe("ok");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args?.[1]).toEqual({ __cellRef: "Sheet1!A1", value: "secret" });
+  });
+});

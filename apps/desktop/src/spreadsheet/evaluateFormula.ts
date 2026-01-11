@@ -25,12 +25,25 @@ function isErrorCode(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("#");
 }
 
-function toNumber(value: SpreadsheetValue): number | null {
-  if (value === null) return 0;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
+function isProvenanceCellValue(value: unknown): value is ProvenanceCellValue {
+  if (!value || typeof value !== "object") return false;
+  const v = value as any;
+  return typeof v.__cellRef === "string" && "value" in v;
+}
+
+function unwrapProvenance(value: CellValue): CellValue {
+  return isProvenanceCellValue(value) ? value.value : value;
+}
+
+function toNumber(value: CellValue): number | null {
+  const unwrapped = unwrapProvenance(value);
+  if (Array.isArray(unwrapped)) return null;
+  const scalar = unwrapped as SpreadsheetValue;
+  if (scalar === null) return 0;
+  if (typeof scalar === "number") return Number.isFinite(scalar) ? scalar : null;
+  if (typeof scalar === "boolean") return scalar ? 1 : 0;
+  if (typeof scalar === "string") {
+    const trimmed = scalar.trim();
     if (trimmed === "") return 0;
     const num = Number(trimmed);
     return Number.isFinite(num) ? num : null;
@@ -113,14 +126,15 @@ class Parser {
 
 function flattenNumbers(values: CellValue[], out: number[]): string | null {
   for (const val of values) {
-    if (isErrorCode(val)) return val;
     if (Array.isArray(val)) {
-      const nested: CellValue[] = val as SpreadsheetValue[];
+      const nested: CellValue[] = val as CellValue[];
       const err = flattenNumbers(nested, out);
       if (err) return err;
       continue;
     }
-    const num = toNumber(val as SpreadsheetValue);
+    const scalar = unwrapProvenance(val);
+    if (isErrorCode(scalar)) return scalar;
+    const num = toNumber(scalar);
     if (num !== null) out.push(num);
   }
   return null;
@@ -167,7 +181,7 @@ function evalFunction(
   args: CellValue[],
   getCellValue: GetCellValue,
   options: EvaluateFormulaOptions
-): SpreadsheetValue {
+): CellValue {
   const upper = name.toUpperCase();
   if (upper === "AI" || upper === "AI.EXTRACT" || upper === "AI.CLASSIFY" || upper === "AI.TRANSLATE") {
     return options.ai ? options.ai.evaluateAiFunction({ name: upper, args, cellAddress: options.cellAddress }) : "#NAME?";
@@ -189,13 +203,15 @@ function evalFunction(
 
   if (upper === "IF") {
     const cond = args[0] ?? null;
-    if (isErrorCode(cond)) return cond;
-    const condNum = Array.isArray(cond) ? null : toNumber(cond as SpreadsheetValue);
-    const truthy = condNum !== null ? condNum !== 0 : Boolean(cond);
+    const condScalar = unwrapProvenance(cond);
+    if (isErrorCode(condScalar)) return condScalar;
+    const condNum = Array.isArray(condScalar) ? null : toNumber(condScalar);
+    const truthy = condNum !== null ? condNum !== 0 : Boolean(condScalar);
     const chosen = truthy ? (args[1] ?? null) : (args[2] ?? null);
-    if (isErrorCode(chosen)) return chosen;
-    if (Array.isArray(chosen)) return (chosen[0] ?? null) as SpreadsheetValue;
-    return chosen as SpreadsheetValue;
+    const chosenScalar = Array.isArray(chosen) ? ((chosen[0] ?? null) as CellValue) : chosen;
+    const chosenUnwrapped = unwrapProvenance(chosenScalar);
+    if (isErrorCode(chosenUnwrapped)) return chosenUnwrapped;
+    return chosenScalar;
   }
 
   if (upper === "VLOOKUP") {
@@ -307,7 +323,7 @@ function parsePrimary(
     if (!parser.match("paren", "(")) return "#VALUE!";
 
     const args: CellValue[] = [];
-    const argContext = isAiFunctionName(name) ? { preserveReferenceProvenance: true } : DEFAULT_CONTEXT;
+    const argContext = isAiFunctionName(name) ? { preserveReferenceProvenance: true } : context;
     if (!parser.match("paren", ")")) {
       while (true) {
         args.push(parseExpression(parser, getCellValue, options, argContext));
@@ -340,9 +356,10 @@ function parseUnary(
   if (tok?.type === "operator" && (tok.value === "+" || tok.value === "-")) {
     parser.consume();
     const rhs = parseUnary(parser, getCellValue, options, context);
-    if (isErrorCode(rhs)) return rhs;
-    if (Array.isArray(rhs)) return "#VALUE!";
-    const num = toNumber(rhs as SpreadsheetValue);
+    const rhsScalar = unwrapProvenance(rhs);
+    if (isErrorCode(rhsScalar)) return rhsScalar;
+    if (Array.isArray(rhsScalar)) return "#VALUE!";
+    const num = toNumber(rhsScalar);
     if (num === null) return "#VALUE!";
     return tok.value === "-" ? -num : num;
   }
@@ -361,11 +378,13 @@ function parseTerm(
     if (!tok || tok.type !== "operator" || (tok.value !== "*" && tok.value !== "/")) break;
     parser.consume();
     const right = parseUnary(parser, getCellValue, options, context);
-    if (isErrorCode(left)) return left;
-    if (isErrorCode(right)) return right;
-    if (Array.isArray(left) || Array.isArray(right)) return "#VALUE!";
-    const leftNum = toNumber(left as SpreadsheetValue);
-    const rightNum = toNumber(right as SpreadsheetValue);
+    const leftScalar = unwrapProvenance(left);
+    const rightScalar = unwrapProvenance(right);
+    if (isErrorCode(leftScalar)) return leftScalar;
+    if (isErrorCode(rightScalar)) return rightScalar;
+    if (Array.isArray(leftScalar) || Array.isArray(rightScalar)) return "#VALUE!";
+    const leftNum = toNumber(leftScalar);
+    const rightNum = toNumber(rightScalar);
     if (leftNum === null || rightNum === null) return "#VALUE!";
     if (tok.value === "/") {
       if (rightNum === 0) return "#DIV/0!";
@@ -389,11 +408,13 @@ function parseExpression(
     if (!tok || tok.type !== "operator" || (tok.value !== "+" && tok.value !== "-")) break;
     parser.consume();
     const right = parseTerm(parser, getCellValue, options, context);
-    if (isErrorCode(left)) return left;
-    if (isErrorCode(right)) return right;
-    if (Array.isArray(left) || Array.isArray(right)) return "#VALUE!";
-    const leftNum = toNumber(left as SpreadsheetValue);
-    const rightNum = toNumber(right as SpreadsheetValue);
+    const leftScalar = unwrapProvenance(left);
+    const rightScalar = unwrapProvenance(right);
+    if (isErrorCode(leftScalar)) return leftScalar;
+    if (isErrorCode(rightScalar)) return rightScalar;
+    if (Array.isArray(leftScalar) || Array.isArray(rightScalar)) return "#VALUE!";
+    const leftNum = toNumber(leftScalar);
+    const rightNum = toNumber(rightScalar);
     if (leftNum === null || rightNum === null) return "#VALUE!";
     left = tok.value === "+" ? leftNum + rightNum : leftNum - rightNum;
   }
@@ -416,6 +437,7 @@ export function evaluateFormula(
   const parser = new Parser(tokens);
   const value = parseExpression(parser, getCellValue, options, DEFAULT_CONTEXT);
   if (isErrorCode(value)) return value;
+  if (isProvenanceCellValue(value)) return value.value;
   if (Array.isArray(value)) return (value[0] ?? null) as SpreadsheetValue;
   return value as SpreadsheetValue;
 }
