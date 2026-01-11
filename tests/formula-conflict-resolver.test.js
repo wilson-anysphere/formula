@@ -50,3 +50,12 @@ test("resolveFormulaConflict: empty vs non-empty formulas surface a conflict", (
 
   assert.equal(decision.kind, "conflict");
 });
+
+test("resolveFormulaConflict: string literal differences are not treated as equivalent", () => {
+  const decision = resolveFormulaConflict({
+    localFormula: '=IF(A1="Hello World",1,0)',
+    remoteFormula: '=IF(A1="HelloWorld",1,0)'
+  });
+
+  assert.equal(decision.kind, "conflict");
+});

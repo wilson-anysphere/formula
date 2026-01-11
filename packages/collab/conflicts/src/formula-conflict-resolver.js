@@ -84,7 +84,73 @@ function tryParse(formula) {
  */
 function normalizeFormulaText(formula) {
   const stripped = formula.trim().replace(/^\s*=\s*/, "");
-  return stripped.replaceAll(/\s+/g, "").toUpperCase();
+  return normalizeFormulaTextPreservingQuotes(stripped);
+}
+
+/**
+ * Best-effort text normalization used only for the substring extension fallback.
+ *
+ * Must preserve string literals and quoted sheet names to avoid incorrectly
+ * treating them as case/whitespace-insensitive.
+ *
+ * @param {string} input
+ */
+function normalizeFormulaTextPreservingQuotes(input) {
+  let out = "";
+  let inString = false;
+  let inQuotedSheet = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+
+    if (inString) {
+      out += ch;
+      if (ch === "\"") {
+        if (input[i + 1] === "\"") {
+          out += "\"";
+          i += 1;
+        } else {
+          inString = false;
+        }
+      }
+      continue;
+    }
+
+    if (inQuotedSheet) {
+      if (ch === "'") {
+        out += "'";
+        if (input[i + 1] === "'") {
+          out += "'";
+          i += 1;
+        } else {
+          inQuotedSheet = false;
+        }
+      } else {
+        out += ch.toUpperCase();
+      }
+      continue;
+    }
+
+    if (ch === "\"") {
+      inString = true;
+      out += ch;
+      continue;
+    }
+
+    if (ch === "'") {
+      inQuotedSheet = true;
+      out += ch;
+      continue;
+    }
+
+    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
+      continue;
+    }
+
+    out += ch.toUpperCase();
+  }
+
+  return out;
 }
 
 /**

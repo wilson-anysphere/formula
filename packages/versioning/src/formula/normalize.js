@@ -99,10 +99,85 @@ export function normalizeFormula(formula) {
     return serializeAst(parseFormula(trimmed));
   } catch {
     // If we can't parse, fall back to a conservative normalization:
-    // - trim whitespace
-    // - collapse internal whitespace
-    // - uppercase (Excel functions are case-insensitive)
-    return trimmed.replace(/\s+/g, "").toUpperCase();
+    // - remove whitespace *outside* of string literals / quoted sheet names
+    // - uppercase *outside* of string literals
+    //
+    // This avoids incorrectly treating string literals as case/whitespace-insensitive
+    // (e.g. ="Hello World" vs ="HelloWorld") while still allowing benign formatting
+    // differences to compare equal.
+    return normalizeFormulaFallbackText(trimmed);
   }
 }
 
+/**
+ * Best-effort textual normalization when the minimal AST parser can't handle a
+ * formula (e.g. comparisons, structured references, etc).
+ *
+ * The key invariant is that we must not change the contents of string literals
+ * (double quotes) since they are semantically significant in Excel.
+ *
+ * Quoted sheet names in formulas use single quotes; those are case-insensitive,
+ * but whitespace is significant, so we preserve it.
+ *
+ * @param {string} input
+ */
+function normalizeFormulaFallbackText(input) {
+  let out = "";
+  let inString = false;
+  let inQuotedSheet = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+
+    if (inString) {
+      out += ch;
+      if (ch === "\"") {
+        // Escaped quote inside string literal: ""
+        if (input[i + 1] === "\"") {
+          out += "\"";
+          i += 1;
+        } else {
+          inString = false;
+        }
+      }
+      continue;
+    }
+
+    if (inQuotedSheet) {
+      if (ch === "'") {
+        out += "'";
+        // Escaped single quote inside sheet name: ''
+        if (input[i + 1] === "'") {
+          out += "'";
+          i += 1;
+        } else {
+          inQuotedSheet = false;
+        }
+      } else {
+        // Sheet names are case-insensitive, but whitespace is significant.
+        out += ch.toUpperCase();
+      }
+      continue;
+    }
+
+    if (ch === "\"") {
+      inString = true;
+      out += ch;
+      continue;
+    }
+
+    if (ch === "'") {
+      inQuotedSheet = true;
+      out += ch;
+      continue;
+    }
+
+    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
+      continue;
+    }
+
+    out += ch.toUpperCase();
+  }
+
+  return out;
+}
