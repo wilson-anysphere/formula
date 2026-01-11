@@ -1,10 +1,11 @@
 # Pyodide assets (local hosting)
 
 The desktop Vite dev server enables `crossOriginIsolated` (COOP/COEP) so the
-Pyodide-based Python runtime can use `SharedArrayBuffer`.
+Pyodide-based Python runtime can run Pyodide in a Worker and use `SharedArrayBuffer`
+for synchronous spreadsheet RPC.
 
 In that mode, we **self-host** the Pyodide distribution files under the Vite
-origin:
+origin (COEP-friendly same-origin assets):
 
 `/pyodide/v0.25.1/full/*`
 

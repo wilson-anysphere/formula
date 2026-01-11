@@ -55,12 +55,19 @@ import { PyodideRuntime } from "@formula/python-runtime";
 
 const runtime = new PyodideRuntime({
   api: mySpreadsheetBridge,
-  // Recommended to self-host Pyodide assets for crossOriginIsolated environments:
+  // Optional: choose a backend mode ("auto" | "worker" | "mainThread").
+  // - auto (default): prefers worker mode when COOP/COEP + SharedArrayBuffer are available.
+  // - worker: force worker mode (requires crossOriginIsolated + SharedArrayBuffer).
+  // - mainThread: force main-thread Pyodide (UI will block while scripts run).
+  // mode: "auto",
+  //
+  // Recommended to self-host Pyodide assets (especially for crossOriginIsolated environments):
   // indexURL: "/pyodide/v0.25.1/full/",
 });
 
 await runtime.initialize({
   // Optional overrides:
+  // mode: "auto",
   // permissions: { filesystem: "none", network: "none" },
   // rpcTimeoutMs: 5000,
 });
@@ -71,10 +78,14 @@ formula.active_sheet["A1"] = 123
 `);
 ```
 
-### Worker / SharedArrayBuffer requirement
+### Backends: Worker vs main-thread
 
-The Pyodide runtime keeps the Python `formula` API synchronous by using a
-SharedArrayBuffer + Atomics-based RPC between the Worker (Pyodide) and the host.
+The Pyodide runtime supports two internal backends:
+
+- **Worker backend (preferred)**: loads Pyodide in a Worker and keeps the Python `formula` API synchronous via a
+  `SharedArrayBuffer + Atomics` RPC bridge between the Worker (Pyodide) and the host.
+- **Main-thread backend (fallback)**: loads Pyodide on the main thread and calls the host spreadsheet bridge
+  synchronously. This works in non-COOP/COEP contexts but will block the UI while Python runs.
 
 That typically requires `crossOriginIsolated` in browsers, which means serving
 your app with COOP/COEP headers:
@@ -82,8 +93,12 @@ your app with COOP/COEP headers:
 - `Cross-Origin-Opener-Policy: same-origin`
 - `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`)
 
-If SharedArrayBuffer is not available, scripts can still run, but calls into
-`formula` will raise.
+In `mode: "auto"` (default), the runtime selects the Worker backend when possible and otherwise falls back to the
+main-thread backend.
+
+Notes:
+- Main-thread mode requires the spreadsheet bridge to be synchronous (methods must not return Promises).
+- Timeouts/interrupts are best-effort in main-thread mode (the UI may freeze during long-running scripts).
 
 For the `apps/desktop` Vite webview in this repository:
 

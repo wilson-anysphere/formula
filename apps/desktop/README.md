@@ -2,9 +2,14 @@
 
 ## Pyodide / Python scripting
 
-The Pyodide-based Python runtime (`@formula/python-runtime`) uses
-`SharedArrayBuffer + Atomics` for synchronous spreadsheet RPC. In browsers and
-webviews this requires a **cross-origin isolated** context.
+The Pyodide-based Python runtime (`@formula/python-runtime`) supports two internal backends:
+
+- **Worker backend (preferred)**: runs Pyodide in a Worker and uses `SharedArrayBuffer + Atomics` to keep spreadsheet RPC synchronous.
+  This requires a **cross-origin isolated** context (COOP/COEP).
+- **Main-thread backend (fallback)**: runs Pyodide on the main thread and calls the spreadsheet bridge synchronously.
+  This works in non-COOP/COEP contexts but may freeze the UI while Python runs.
+
+In `mode: "auto"` (default), the runtime prefers the Worker backend when possible and falls back to the main thread otherwise.
 
 This app’s Vite dev/preview servers are configured to enable that:
 
