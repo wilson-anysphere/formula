@@ -12,6 +12,16 @@ export default {
       ]
     },
     {
+      "name": "ACOS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "AGGREGATE",
       "min_args": 3,
       "max_args": 255,
@@ -31,6 +41,37 @@ export default {
       "return_type": "bool",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "ASIN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "ATAN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "ATAN2",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
       ]
     },
     {
@@ -169,6 +210,16 @@ export default {
       "return_type": "text",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "COS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
       ]
     },
     {
@@ -1272,6 +1323,16 @@ export default {
       ]
     },
     {
+      "name": "SIN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "SLN",
       "min_args": 3,
       "max_args": 3,
@@ -1410,6 +1471,16 @@ export default {
       "arg_types": [
         "any",
         "number",
+        "number"
+      ]
+    },
+    {
+      "name": "TAN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "number"
       ]
     },

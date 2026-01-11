@@ -205,6 +205,231 @@ fn pi_fn(_ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "SIN",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: sin_fn,
+    }
+}
+
+fn sin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let value = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[0]));
+    elementwise_unary(&value, |elem| match elem {
+        Value::Error(e) => Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number() {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            match crate::functions::math::sin(n) {
+                Ok(out) => Value::Number(out),
+                Err(e) => Value::Error(excel_error_kind(e)),
+            }
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COS",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: cos_fn,
+    }
+}
+
+fn cos_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let value = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[0]));
+    elementwise_unary(&value, |elem| match elem {
+        Value::Error(e) => Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number() {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            match crate::functions::math::cos(n) {
+                Ok(out) => Value::Number(out),
+                Err(e) => Value::Error(excel_error_kind(e)),
+            }
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "TAN",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: tan_fn,
+    }
+}
+
+fn tan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let value = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[0]));
+    elementwise_unary(&value, |elem| match elem {
+        Value::Error(e) => Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number() {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            match crate::functions::math::tan(n) {
+                Ok(out) => Value::Number(out),
+                Err(e) => Value::Error(excel_error_kind(e)),
+            }
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ASIN",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: asin_fn,
+    }
+}
+
+fn asin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let value = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[0]));
+    elementwise_unary(&value, |elem| match elem {
+        Value::Error(e) => Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number() {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            match crate::functions::math::asin(n) {
+                Ok(out) => Value::Number(out),
+                Err(e) => Value::Error(excel_error_kind(e)),
+            }
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ACOS",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: acos_fn,
+    }
+}
+
+fn acos_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let value = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[0]));
+    elementwise_unary(&value, |elem| match elem {
+        Value::Error(e) => Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number() {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            match crate::functions::math::acos(n) {
+                Ok(out) => Value::Number(out),
+                Err(e) => Value::Error(excel_error_kind(e)),
+            }
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ATAN",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: atan_fn,
+    }
+}
+
+fn atan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let value = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[0]));
+    elementwise_unary(&value, |elem| match elem {
+        Value::Error(e) => Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number() {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            match crate::functions::math::atan(n) {
+                Ok(out) => Value::Number(out),
+                Err(e) => Value::Error(excel_error_kind(e)),
+            }
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ATAN2",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number],
+        implementation: atan2_fn,
+    }
+}
+
+fn atan2_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let x_num = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[0]));
+    let y_num = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[1]));
+    elementwise_binary(&x_num, &y_num, |x_num, y_num| {
+        if let Value::Error(e) = x_num {
+            return Value::Error(*e);
+        }
+        if let Value::Error(e) = y_num {
+            return Value::Error(*e);
+        }
+        let x = match x_num.coerce_to_number() {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let y = match y_num.coerce_to_number() {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        match crate::functions::math::atan2(x, y) {
+            Ok(out) => Value::Number(out),
+            Err(e) => Value::Error(excel_error_kind(e)),
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "EXP",
         min_args: 1,
         max_args: 1,

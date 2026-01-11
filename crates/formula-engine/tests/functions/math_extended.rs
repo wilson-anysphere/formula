@@ -32,6 +32,35 @@ fn pi_returns_expected_constant() {
 }
 
 #[test]
+fn trig_functions_match_excel_semantics() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(&sheet.eval("=SIN(0)"), 0.0);
+    assert_number(&sheet.eval("=COS(0)"), 1.0);
+    assert_number(&sheet.eval("=TAN(0)"), 0.0);
+
+    assert_number(&sheet.eval("=ASIN(1)"), std::f64::consts::FRAC_PI_2);
+    assert_number(&sheet.eval("=ACOS(1)"), 0.0);
+    assert_number(&sheet.eval("=ATAN(1)"), std::f64::consts::FRAC_PI_4);
+
+    assert_eq!(sheet.eval("=ASIN(2)"), Value::Error(ErrorKind::Num));
+    assert_eq!(sheet.eval("=ACOS(-2)"), Value::Error(ErrorKind::Num));
+
+    // Excel's ATAN2 argument order is (x, y).
+    assert_number(&sheet.eval("=ATAN2(1,0)"), 0.0);
+    assert_number(&sheet.eval("=ATAN2(0,1)"), std::f64::consts::FRAC_PI_2);
+    assert_number(&sheet.eval("=ATAN2(-1,0)"), std::f64::consts::PI);
+    assert_number(&sheet.eval("=ATAN2(-1,-0)"), std::f64::consts::PI);
+    assert_eq!(sheet.eval("=ATAN2(0,0)"), Value::Error(ErrorKind::Div0));
+
+    // Elementwise spilling.
+    sheet.set_formula("A1", "=SIN({0;PI()/2})");
+    sheet.recalculate();
+    assert_number(&sheet.get("A1"), 0.0);
+    assert_number(&sheet.get("A2"), 1.0);
+}
+
+#[test]
 fn elementwise_math_spills_for_array_inputs() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=LN({1;EXP(1)})");
@@ -131,4 +160,3 @@ fn subtotal_and_aggregate_cover_common_subtypes() {
     assert_number(&sheet.eval("=AGGREGATE(9,2,E1:E3)"), 3.0);
     assert_eq!(sheet.eval("=AGGREGATE(9,4,E1:E3)"), Value::Error(ErrorKind::Div0));
 }
-

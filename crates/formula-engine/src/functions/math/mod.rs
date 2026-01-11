@@ -2,6 +2,7 @@ mod aggregates;
 mod criteria;
 mod random;
 mod rounding;
+mod trig;
 
 pub use aggregates::{
     aggregate, averageif, averageifs, countifs, subtotal, sumif, sumifs, sumproduct,
@@ -10,6 +11,7 @@ pub use random::{rand, randbetween};
 pub use rounding::{
     ceiling, ceiling_math, ceiling_precise, floor, floor_math, floor_precise, iso_ceiling,
 };
+pub use trig::{acos, asin, atan, atan2, cos, sin, tan};
 
 use crate::error::{ExcelError, ExcelResult};
 
