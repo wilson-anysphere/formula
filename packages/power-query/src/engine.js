@@ -403,21 +403,28 @@ export class QueryEngine {
       if (cacheKey && cacheMode === "use") {
         const cached = await this.cache.getEntry(cacheKey);
         if (cached) {
-          options.onProgress?.({ type: "cache:hit", queryId: query.id, cacheKey });
           const completedAt = new Date(state.now());
           const payload = /** @type {any} */ (cached.value);
-          const table =
-            payload?.version === 2
-              ? deserializeAnyTable(payload.table)
-              : payload?.version === 1
-                ? deserializeTable(payload.table)
-                : payload?.table?.kind
-                  ? deserializeAnyTable(payload.table)
-                  : deserializeTable(payload.table);
-          const meta = deserializeQueryMeta(payload.meta, startedAt, completedAt, { key: cacheKey, hit: true });
-          return { table, meta };
+          try {
+            const table =
+              payload?.version === 2
+                ? deserializeAnyTable(payload.table)
+                : payload?.version === 1
+                  ? deserializeTable(payload.table)
+                  : payload?.table?.kind
+                    ? deserializeAnyTable(payload.table)
+                    : deserializeTable(payload.table);
+            const meta = deserializeQueryMeta(payload.meta, startedAt, completedAt, { key: cacheKey, hit: true });
+            options.onProgress?.({ type: "cache:hit", queryId: query.id, cacheKey });
+            return { table, meta };
+          } catch {
+            // Treat cache corruption as a miss so we can recover on the next refresh.
+            await this.cache.delete(cacheKey);
+            options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
+          }
+        } else {
+          options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
         }
-        options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
       }
     }
 

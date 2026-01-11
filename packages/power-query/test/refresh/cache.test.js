@@ -126,6 +126,43 @@ test("QueryEngine: cache key varies by credentialId and does not embed raw secre
   assert.equal(stableStringify(signature).includes(secret), false);
 });
 
+test("QueryEngine: corrupted cache entry is treated as a miss and refreshed", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readText: async () => {
+        readCount += 1;
+        return ["Region,Sales", "East,100", "West,200"].join("\n");
+      },
+    },
+  });
+
+  const query = {
+    id: "q_sales_corrupt_cache",
+    name: "Sales",
+    source: { type: "csv", path: "/tmp/sales.csv", options: { hasHeaders: true } },
+    steps: [],
+  };
+
+  const cacheKey = await engine.getCacheKey(query, {}, {});
+  assert.ok(cacheKey, "cache key should be computed when cache is enabled");
+
+  // Simulate a corrupted cache entry (e.g. partial write / old format).
+  await cache.set(cacheKey, { version: 2, table: null, meta: null });
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false, "corrupted cache should not be treated as a hit");
+  assert.equal(readCount, 1);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true, "engine should refresh and then hit on subsequent executions");
+  assert.equal(readCount, 1, "cache hit should not re-read the source");
+});
+
 test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the source", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });
@@ -205,4 +242,3 @@ test("QueryEngine: Arrow cache roundtrip preserves date columns", async () => {
   assert.ok(second.table instanceof ArrowTableAdapter);
   assert.deepEqual(second.table.toGrid(), firstGrid);
 });
-
