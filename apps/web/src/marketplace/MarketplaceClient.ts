@@ -45,6 +45,8 @@ export interface MarketplaceExtensionDetails extends MarketplaceExtensionSummary
   deprecated: boolean;
   blocked: boolean;
   malicious: boolean;
+  publisherRevoked?: boolean;
+  publisherRevokedAt?: string | null;
 }
 
 export interface MarketplaceDownloadResult {
