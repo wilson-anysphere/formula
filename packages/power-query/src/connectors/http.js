@@ -115,7 +115,9 @@ export class HttpConnector {
    * Lightweight source-state probe for cache validation.
    *
    * Uses an HTTP HEAD request (when `fetch` is available) to capture `etag` and
-   * `last-modified` headers.
+   * `last-modified` headers. When `options.knownEtag` / `options.knownSourceTimestamp`
+   * are provided, the connector sends a conditional request and treats HTTP 304
+   * as "unchanged".
    *
    * @param {HttpConnectorRequest} request
    * @param {ConnectorExecuteOptions} [options]
@@ -131,6 +133,12 @@ export class HttpConnector {
     }
 
     if (!this.fetchFn) return {};
+
+    const knownEtag = typeof options.knownEtag === "string" && options.knownEtag !== "" ? options.knownEtag : undefined;
+    const knownSourceTimestamp =
+      options.knownSourceTimestamp instanceof Date && !Number.isNaN(options.knownSourceTimestamp.getTime())
+        ? options.knownSourceTimestamp
+        : undefined;
 
     /** @type {Record<string, string>} */
     const headers = { ...(request.headers ?? {}) };
@@ -197,6 +205,13 @@ export class HttpConnector {
       oauth2Auth = { type: "oauth2", ...credentialOAuth2 };
     }
 
+    const hasHeader = (name) => Object.keys(headers).some((key) => key.toLowerCase() === name);
+    if (knownEtag && !hasHeader("if-none-match")) {
+      headers["If-None-Match"] = knownEtag;
+    } else if (!knownEtag && knownSourceTimestamp && !hasHeader("if-modified-since")) {
+      headers["If-Modified-Since"] = knownSourceTimestamp.toUTCString();
+    }
+
     const applyOAuthHeader = async (forceRefresh = false) => {
       if (!oauth2Auth) return;
       if (!this.oauth2Manager) {
@@ -214,20 +229,29 @@ export class HttpConnector {
 
     await applyOAuthHeader(false);
 
+    const fetchOnce = async () => await this.fetchFn(request.url, { method: "HEAD", headers, signal });
     let response;
     try {
-      response = await this.fetchFn(request.url, { method: "HEAD", headers, signal });
+      response = await fetchOnce();
     } catch {
       return {};
+    }
+
+    if (response.status === 304) {
+      return { etag: knownEtag, sourceTimestamp: knownSourceTimestamp };
     }
 
     if (!response.ok && oauth2Auth && this.oauth2RetryStatusCodes.includes(response.status)) {
       await applyOAuthHeader(true);
       try {
-        response = await this.fetchFn(request.url, { method: "HEAD", headers, signal });
+        response = await fetchOnce();
       } catch {
         return {};
       }
+    }
+
+    if (response.status === 304) {
+      return { etag: knownEtag, sourceTimestamp: knownSourceTimestamp };
     }
 
     if (!response.ok) return {};

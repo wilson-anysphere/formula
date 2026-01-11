@@ -52,6 +52,11 @@
  * @property {AbortSignal | undefined} [signal]
  * @property {unknown} [credentials]
  * @property {(() => number) | undefined} [now]
+ * @property {string | undefined} [knownEtag]
+ *   Optional previously observed ETag for conditional `getSourceState` probes.
+ * @property {Date | undefined} [knownSourceTimestamp]
+ *   Optional previously observed source timestamp for conditional `getSourceState`
+ *   probes (used when an ETag is not available).
  */
 
 /**

@@ -1152,6 +1152,8 @@ test("QueryEngine: invalidates HTTP cache entries when ETag/Last-Modified change
   let etag = '"v1"';
   let lastModified = "Mon, 01 Jan 2024 00:00:00 GMT";
   let getCount = 0;
+  /** @type {Array<Record<string, string> | undefined>} */
+  const headHeaders = [];
 
   /**
    * @param {{
@@ -1185,6 +1187,9 @@ test("QueryEngine: invalidates HTTP cache entries when ETag/Last-Modified change
   const fetchMock = async (_url, init) => {
     const method = String(init?.method ?? "GET").toUpperCase();
     if (method === "HEAD") {
+      // Capture headers so cache validation can assert conditional requests.
+      // @ts-ignore - fetch init headers are passed as a plain object in tests.
+      headHeaders.push(init?.headers);
       return makeResponse({ headers: { etag, "last-modified": lastModified } });
     }
     getCount += 1;
@@ -1211,14 +1216,239 @@ test("QueryEngine: invalidates HTTP cache entries when ETag/Last-Modified change
   const first = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(first.meta.cache?.hit, false);
   assert.equal(getCount, 1);
+  assert.equal(headHeaders.length, 1);
+  assert.equal(
+    Object.keys(headHeaders[0] ?? {}).some((name) => name.toLowerCase() === "if-none-match"),
+    false,
+    "initial source probe should not include conditional headers",
+  );
 
   const second = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(second.meta.cache?.hit, true);
   assert.equal(getCount, 1, "cache hit should not refetch the resource");
+  assert.equal(headHeaders.length, 2);
+  assert.equal(
+    Object.entries(headHeaders[1] ?? {}).find(([name]) => name.toLowerCase() === "if-none-match")?.[1],
+    '"v1"',
+    "cache validation should send If-None-Match when cached etag exists",
+  );
 
   etag = '"v2"';
   lastModified = "Tue, 02 Jan 2024 00:00:00 GMT";
   const third = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(third.meta.cache?.hit, false);
   assert.equal(getCount, 2, "changed source state should invalidate the cache entry");
+});
+
+test("QueryEngine: treats conditional HTTP 304 responses as cache hits", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  const etag = '"v1"';
+  const lastModified = "Mon, 01 Jan 2024 00:00:00 GMT";
+  let getCount = 0;
+  /** @type {number[]} */
+  const headStatuses = [];
+  /** @type {Array<Record<string, string> | undefined>} */
+  const headHeaders = [];
+
+  /**
+   * @param {{
+   *   status?: number;
+   *   headers?: Record<string, string>;
+   *   body?: string;
+   * }} init
+   */
+  function makeResponse(init = {}) {
+    const status = init.status ?? 200;
+    const headers = new Map(Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+    const body = init.body ?? "";
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: {
+        get(name) {
+          return headers.get(String(name).toLowerCase()) ?? null;
+        },
+      },
+      async text() {
+        return body;
+      },
+      async json() {
+        return JSON.parse(body);
+      },
+    };
+  }
+
+  /** @type {typeof fetch} */
+  const fetchMock = async (_url, init) => {
+    const method = String(init?.method ?? "GET").toUpperCase();
+    if (method === "HEAD") {
+      // @ts-ignore - fetch init headers are passed as a plain object in tests.
+      headHeaders.push(init?.headers);
+      const ifNoneMatch = Object.entries(/** @type {any} */ (init?.headers ?? {})).find(([name]) => name.toLowerCase() === "if-none-match")?.[1];
+      if (ifNoneMatch === etag) {
+        headStatuses.push(304);
+        return makeResponse({ status: 304 });
+      }
+      headStatuses.push(200);
+      return makeResponse({ headers: { etag, "last-modified": lastModified } });
+    }
+    getCount += 1;
+    return makeResponse({
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ id: 1 }]),
+    });
+  };
+
+  const engine = new QueryEngine({
+    cache,
+    defaultCacheTtlMs: 10_000,
+    connectors: { http: new HttpConnector({ fetch: fetchMock }) },
+  });
+
+  const query = {
+    id: "q_http_304",
+    name: "HTTP (304)",
+    source: { type: "api", url: "https://example.com/data", method: "GET", headers: {} },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(getCount, 1);
+  assert.deepEqual(headStatuses, [200]);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(getCount, 1, "304 validation should still count as a cache hit and avoid GET");
+  assert.deepEqual(headStatuses, [200, 304]);
+  assert.equal(
+    Object.entries(headHeaders[1] ?? {}).find(([name]) => name.toLowerCase() === "if-none-match")?.[1],
+    '"v1"',
+  );
+});
+
+test("QueryEngine: sends If-Modified-Since when cached Last-Modified exists but no ETag", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  const lastModified = "Mon, 01 Jan 2024 00:00:00 GMT";
+  let getCount = 0;
+  /** @type {number[]} */
+  const headStatuses = [];
+  /** @type {Array<Record<string, string> | undefined>} */
+  const headHeaders = [];
+
+  /**
+   * @param {{
+   *   status?: number;
+   *   headers?: Record<string, string>;
+   *   body?: string;
+   * }} init
+   */
+  function makeResponse(init = {}) {
+    const status = init.status ?? 200;
+    const headers = new Map(Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+    const body = init.body ?? "";
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: {
+        get(name) {
+          return headers.get(String(name).toLowerCase()) ?? null;
+        },
+      },
+      async text() {
+        return body;
+      },
+      async json() {
+        return JSON.parse(body);
+      },
+    };
+  }
+
+  /** @type {typeof fetch} */
+  const fetchMock = async (_url, init) => {
+    const method = String(init?.method ?? "GET").toUpperCase();
+    if (method === "HEAD") {
+      // @ts-ignore - fetch init headers are passed as a plain object in tests.
+      headHeaders.push(init?.headers);
+      const ifModifiedSince = Object.entries(/** @type {any} */ (init?.headers ?? {})).find(([name]) => name.toLowerCase() === "if-modified-since")?.[1];
+      if (ifModifiedSince === lastModified) {
+        headStatuses.push(304);
+        return makeResponse({ status: 304 });
+      }
+      headStatuses.push(200);
+      return makeResponse({ headers: { "last-modified": lastModified } });
+    }
+    getCount += 1;
+    return makeResponse({
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ id: 1 }]),
+    });
+  };
+
+  const engine = new QueryEngine({
+    cache,
+    defaultCacheTtlMs: 10_000,
+    connectors: { http: new HttpConnector({ fetch: fetchMock }) },
+  });
+
+  const query = {
+    id: "q_http_modified_since",
+    name: "HTTP (If-Modified-Since)",
+    source: { type: "api", url: "https://example.com/data", method: "GET", headers: {} },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(getCount, 1);
+  assert.deepEqual(headStatuses, [200]);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(getCount, 1);
+  assert.deepEqual(headStatuses, [200, 304]);
+  assert.equal(
+    Object.entries(headHeaders[1] ?? {}).find(([name]) => name.toLowerCase() === "if-modified-since")?.[1],
+    lastModified,
+  );
+});
+
+test("HttpConnector: getSourceState returns known source state on 304", async () => {
+  const knownEtag = '"v1"';
+  const knownSourceTimestamp = new Date("2024-01-01T00:00:00.000Z");
+  let headerChecked = false;
+
+  /** @type {typeof fetch} */
+  const fetchMock = async (_url, init) => {
+    const method = String(init?.method ?? "GET").toUpperCase();
+    if (method !== "HEAD") throw new Error("expected HEAD");
+    const ifNoneMatch = Object.entries(/** @type {any} */ (init?.headers ?? {})).find(([name]) => name.toLowerCase() === "if-none-match")?.[1];
+    assert.equal(ifNoneMatch, knownEtag);
+    headerChecked = true;
+    return {
+      ok: false,
+      status: 304,
+      headers: { get: () => null },
+      async text() {
+        return "";
+      },
+      async json() {
+        return {};
+      },
+    };
+  };
+
+  const connector = new HttpConnector({ fetch: fetchMock });
+  const state = await connector.getSourceState(
+    { url: "https://example.com/data", method: "GET", headers: {}, responseType: "auto" },
+    { knownEtag, knownSourceTimestamp },
+  );
+  assert.equal(headerChecked, true);
+  assert.deepEqual(state, { etag: knownEtag, sourceTimestamp: knownSourceTimestamp });
 });

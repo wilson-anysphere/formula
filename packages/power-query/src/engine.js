@@ -1337,6 +1337,14 @@ export class QueryEngine {
       const probe = target.connector?.getSourceState;
       if (typeof probe !== "function") continue;
 
+      const knownEtag = typeof cached.etag === "string" && cached.etag !== "" ? cached.etag : undefined;
+      /** @type {Date | undefined} */
+      let knownSourceTimestamp;
+      if (typeof cached.sourceTimestampMs === "number" && Number.isFinite(cached.sourceTimestampMs)) {
+        const parsed = new Date(cached.sourceTimestampMs);
+        if (!Number.isNaN(parsed.getTime())) knownSourceTimestamp = parsed;
+      }
+
       /** @type {import("./connectors/types.js").SourceState} */
       let currentState = {};
       try {
@@ -1344,6 +1352,8 @@ export class QueryEngine {
           signal: options.signal,
           credentials: target.credentials,
           now: state.now,
+          knownEtag,
+          knownSourceTimestamp,
         });
       } catch {
         // If the probe fails (offline / server doesn't support HEAD), fall back to the cached result.
