@@ -1,5 +1,6 @@
 use formula_engine::eval::{parse_a1, EvalContext, Evaluator, SheetReference, ValueResolver};
-use formula_engine::{Engine, Value};
+use formula_engine::{Engine, ExternalValueProvider, Value};
+use std::sync::Arc;
 
 fn cell_addr_to_a1(addr: formula_engine::eval::CellAddr) -> String {
     fn col_to_name(mut col: u32) -> String {
@@ -113,4 +114,32 @@ fn bytecode_cache_reuses_filled_formula_patterns_in_engine() {
     engine.set_cell_formula("Sheet1", "C3", "=A3+B3").unwrap();
 
     assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_respects_external_value_provider() {
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: formula_engine::eval::CellAddr) -> Option<Value> {
+            if sheet != "Sheet1" {
+                return None;
+            }
+            match (addr.row, addr.col) {
+                (0, 0) => Some(Value::Number(1.0)),
+                (1, 0) => Some(Value::Number(2.0)),
+                (2, 0) => Some(Value::Number(3.0)),
+                _ => None,
+            }
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_cell_formula("Sheet1", "B1", "=SUM(A1:A3)").unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
+    assert!(engine.bytecode_program_count() > 0);
 }

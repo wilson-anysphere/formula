@@ -2752,7 +2752,11 @@ struct EngineBytecodeGrid<'a> {
 
 impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     fn get_value(&self, coord: bytecode::CellCoord) -> bytecode::Value {
-        if coord.row < 0 || coord.col < 0 {
+        if coord.row < 0
+            || coord.col < 0
+            || coord.row >= EXCEL_MAX_ROWS_I32
+            || coord.col >= EXCEL_MAX_COLS_I32
+        {
             return bytecode::Value::Error(bytecode::ErrorKind::Ref);
         }
         let addr = CellAddr {
