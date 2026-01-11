@@ -299,4 +299,59 @@ describe("VBA event macros wiring", () => {
 
     wiring.dispose();
   });
+
+  it("fires Worksheet_SelectionChange when only the active cell changes within a selection", async () => {
+    vi.useFakeTimers();
+
+    const calls: Array<{ cmd: string; args?: any }> = [];
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_selection_change") return { ok: true, output: [], updates: [] };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    await flushMicrotasks();
+    calls.length = 0;
+
+    // Select a 2x2 range.
+    app.emitSelection([{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }]);
+    // Move the active cell within that selection without changing the selection rect.
+    app.emitSelection([{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }], { active: { row: 1, col: 0 } });
+
+    await vi.advanceTimersByTimeAsync(100);
+    await flushMicrotasks();
+
+    const selectionCalls = calls.filter((c) => c.cmd === "fire_selection_change");
+    expect(selectionCalls).toHaveLength(1);
+    expect(selectionCalls[0]?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      start_row: 0,
+      start_col: 0,
+      end_row: 1,
+      end_col: 1,
+    });
+
+    wiring.dispose();
+  });
 });

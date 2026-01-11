@@ -54,6 +54,27 @@ const WORKBOOK_OPEN_EVENT_ID = "Workbook_Open";
 const WORKBOOK_BEFORE_CLOSE_EVENT_ID = "Workbook_BeforeClose";
 const SELECTION_CHANGE_DEBOUNCE_MS = 100;
 
+function errorMessage(err: unknown): string {
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    try {
+      return String((err as any).message);
+    } catch {
+      return "Unknown error";
+    }
+  }
+  try {
+    return String(err);
+  } catch {
+    return "Unknown error";
+  }
+}
+
+function isNoWorkbookLoadedError(err: unknown): boolean {
+  return errorMessage(err).toLowerCase().includes("no workbook loaded");
+}
+
 function valuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -106,18 +127,25 @@ async function setMacroUiContext(args: InstallVbaEventMacrosArgs): Promise<void>
   const active = args.app.getActiveCell();
   const selection = getUiSelectionRect(args.app);
 
-  await args.invoke("set_macro_ui_context", {
-    workbook_id: args.workbookId,
-    sheet_id: sheetId,
-    active_row: active.row,
-    active_col: active.col,
-    selection: {
-      start_row: selection.startRow,
-      start_col: selection.startCol,
-      end_row: selection.endRow,
-      end_col: selection.endCol,
-    },
-  });
+  try {
+    await args.invoke("set_macro_ui_context", {
+      workbook_id: args.workbookId,
+      sheet_id: sheetId,
+      active_row: active.row,
+      active_col: active.col,
+      selection: {
+        start_row: selection.startRow,
+        start_col: selection.startCol,
+        end_row: selection.endRow,
+        end_col: selection.endCol,
+      },
+    });
+  } catch (err) {
+    if (isNoWorkbookLoadedError(err)) return;
+    // Older backends may not expose UI context sync (event macros still run, but
+    // `ActiveCell`/`Selection` may be stale).
+    console.warn("Failed to sync macro UI context:", err);
+  }
 }
 
 function normalizeUpdates(raw: any[] | undefined): MacroCellUpdate[] | undefined {
@@ -284,11 +312,18 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       await args.drainBackendSync();
       await setMacroUiContext(args);
 
-      const raw = await args.invoke(cmd, {
-        workbook_id: args.workbookId,
-        permissions: [],
-        ...cmdArgs,
-      });
+      let raw: any;
+      try {
+        raw = await args.invoke(cmd, {
+          workbook_id: args.workbookId,
+          permissions: [],
+          ...cmdArgs,
+        });
+      } catch (err) {
+        if (isNoWorkbookLoadedError(err)) return;
+        console.warn(`VBA event macro (${cmd}) invoke failed:`, err);
+        return;
+      }
 
       const result = normalizeMacroEventResult(raw);
       if (result.blocked) {
@@ -300,11 +335,11 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
         console.warn(`VBA event macro (${cmd}) requested additional permissions; refusing to escalate.`);
         eventsDisabled = true;
         return;
-       }
+      }
 
-       if (result.updates && result.updates.length) {
+      if (result.updates && result.updates.length) {
         await applyMacroUpdates(result.updates, { label: EVENT_MACRO_BATCH_LABEL });
-       }
+      }
 
       // If the macro errored without an explicit Trust Center block, keep processing future events.
       // The backend already returns `ok=true` when no event handler exists.
@@ -495,7 +530,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (!selection || !Array.isArray(selection.ranges)) return;
     if (eventsDisabled) return;
     if (!eventsAllowed) return;
-    if (runningEventMacro || applyingMacroUpdates) return;
+    if (applyingMacroUpdates) return;
 
     if (!sawInitialSelection) {
       sawInitialSelection = true;
@@ -512,7 +547,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     });
 
     const sheetId = args.app.getCurrentSheetId();
-    const key = `${sheetId}:${rect.startRow},${rect.startCol}:${rect.endRow},${rect.endCol}`;
+    const key = `${sheetId}:${rect.startRow},${rect.startCol}:${rect.endRow},${rect.endCol}@${active.row},${active.col}`;
     if (key === pendingSelectionKey) return;
 
     pendingSelectionKey = key;
@@ -573,10 +608,17 @@ export async function fireWorkbookBeforeCloseBestEffort(args: InstallVbaEventMac
   await args.drainBackendSync();
   await setMacroUiContext(args);
 
-  const raw = await args.invoke("fire_workbook_before_close", {
-    workbook_id: args.workbookId,
-    permissions: [],
-  });
+  let raw: any;
+  try {
+    raw = await args.invoke("fire_workbook_before_close", {
+      workbook_id: args.workbookId,
+      permissions: [],
+    });
+  } catch (err) {
+    if (isNoWorkbookLoadedError(err)) return;
+    console.warn("Failed to invoke Workbook_BeforeClose:", err);
+    return;
+  }
 
   const result = normalizeMacroEventResult(raw);
   if (result.blocked) return;
