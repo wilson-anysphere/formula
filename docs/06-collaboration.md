@@ -84,17 +84,20 @@ class CollaborativeDocument {
     const sheets = this.doc.getArray("sheets");
     const cells = this.doc.getMap("cells");
     const metadata = this.doc.getMap("metadata");
-    
+    const namedRanges = this.doc.getMap("namedRanges");
+     
     // Initialize default sheet if empty
     if (sheets.length === 0) {
-      sheets.push([this.createSheet("Sheet1")]);
+      // Note: we default to a stable sheet id ("Sheet1") for backwards compatibility
+      // with existing code that assumes a Sheet1 sheetId.
+      sheets.push([this.createSheet({ id: "Sheet1", name: "Sheet1" })]);
     }
   }
-  
-  private createSheet(name: string): Y.Map<any> {
+   
+  private createSheet(input: { id: string; name: string }): Y.Map<any> {
     const sheet = new Y.Map();
-    sheet.set("id", crypto.randomUUID());
-    sheet.set("name", name);
+    sheet.set("id", input.id);
+    sheet.set("name", input.name);
     sheet.set("frozenRows", 0);
     sheet.set("frozenCols", 0);
     return sheet;
