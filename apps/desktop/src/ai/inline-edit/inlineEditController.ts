@@ -5,11 +5,15 @@ import type { Range } from "../../selection/types";
 import { ToolExecutor, PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
 
+import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
+
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/local-storage-store.js";
 
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { InlineEditOverlay } from "./inlineEditOverlay";
+
+const OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
 
 export interface InlineEditLLMClient {
   chat: (request: any) => Promise<any>;
@@ -69,10 +73,12 @@ export class InlineEditController {
 
   private async runInlineEdit(params: { sheetId: string; range: Range; prompt: string }): Promise<void> {
     if (this.isRunning) return;
-    const client = this.options.llmClient;
-    const model = this.options.model ?? "unknown-model";
+    const client = this.options.llmClient ?? createDefaultInlineEditClient({ model: this.options.model });
+    const model = this.options.model ?? (client as any)?.model ?? "gpt-4o-mini";
     if (!client) {
-      this.overlay.showError("AI client is not configured.");
+      this.overlay.showError(
+        "AI client is not configured. Open the AI panel to set an OpenAI API key (stored in localStorage)."
+      );
       return;
     }
 
@@ -162,6 +168,31 @@ function createSessionId(): string {
     return (globalThis.crypto as any).randomUUID();
   }
   return `inline-edit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createDefaultInlineEditClient(opts: { model?: string } = {}): InlineEditLLMClient | null {
+  const apiKey = loadOpenAIApiKeyFromRuntime();
+  if (!apiKey) return null;
+  try {
+    return new OpenAIClient({ apiKey, model: opts.model });
+  } catch {
+    return null;
+  }
+}
+
+function loadOpenAIApiKeyFromRuntime(): string | null {
+  try {
+    const stored = globalThis.localStorage?.getItem(OPENAI_API_KEY_STORAGE_KEY);
+    if (stored) return stored;
+  } catch {
+    // ignore (storage may be disabled)
+  }
+
+  // Allow Vite devs to inject a key without touching localStorage.
+  const envKey = (import.meta as any)?.env?.VITE_OPENAI_API_KEY;
+  if (typeof envKey === "string" && envKey.length > 0) return envKey;
+
+  return null;
 }
 
 function buildMessages(options: {

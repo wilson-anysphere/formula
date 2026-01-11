@@ -303,7 +303,15 @@ export class FormulaBarView {
     if (!hint) {
       this.#hintEl.textContent = "";
     } else {
-      const sig = hint.parts.map((p) => p.text).join("");
+      const sig = hint.parts
+        .map((p) => {
+          if (p.kind !== "paramActive") return p.text;
+          // Signature parts use brackets for optional params; avoid double-bracketing
+          // when the active param is already optional.
+          if (p.text.startsWith("[") && p.text.endsWith("]")) return p.text;
+          return `[${p.text}]`;
+        })
+        .join("");
       const summary = hint.signature.summary?.trim?.() ?? "";
       this.#hintEl.textContent = summary ? `${sig} — ${summary}` : sig;
     }
