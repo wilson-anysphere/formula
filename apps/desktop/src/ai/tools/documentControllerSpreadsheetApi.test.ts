@@ -288,7 +288,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(controller.getCell("Sheet1", "A1").formula).toBe("SUM(B1:B3)");
+    expect(controller.getCell("Sheet1", "A1").formula).toBe("=SUM(B1:B3)");
 
     const cell = api.getCell({ sheet: "Sheet1", row: 1, col: 1 });
     expect(cell.formula).toBe("=SUM(B1:B3)");
