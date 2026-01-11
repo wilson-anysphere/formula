@@ -74,11 +74,20 @@ Authenticated/mutation endpoints are served with `Cache-Control: no-store`.
 
 ### `GET /api/extensions/:id` (extension metadata)
 
-Returns extension metadata, including versions and the publisher public key.
+Returns extension metadata, including versions and the publisher signing key(s).
 
 **Response headers**
 
 - `ETag`: changes when the extension metadata changes.
+
+**Response body**
+
+- `publisherPublicKeyPem`: the publisher's *primary* public key (backward compatibility for older clients).
+- `publisherKeys`: array of known publisher keys:
+
+  ```ts
+  publisherKeys: Array<{ id: string; publicKeyPem: string; revoked: boolean }>;
+  ```
 
 ### `GET /api/extensions/:id/download/:version` (download package)
 
@@ -92,6 +101,7 @@ Downloads raw package bytes.
 - `X-Package-Signature`: base64 signature (detached for v1; for v2 this matches the in-package signature payload)
 - `X-Package-Format-Version`: `1` or `2`
 - `X-Publisher`: publisher id
+- `X-Publisher-Key-Id`: key id (sha256 fingerprint) identifying which publisher key signed this version
 
 **Client integrity requirement**
 
