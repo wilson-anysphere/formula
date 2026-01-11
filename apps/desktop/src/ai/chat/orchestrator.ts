@@ -6,7 +6,8 @@ import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/l
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 
-import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
+import { HashEmbedder } from "../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
+import { InMemoryVectorStore } from "../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
 
 import type { ToolExecutionResult } from "../../../../../packages/ai-tools/src/executor/tool-executor.js";
 import type {
