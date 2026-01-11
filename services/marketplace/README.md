@@ -47,6 +47,18 @@ Downloads are blocked when scan status is `failed`. Operators can tighten policy
 - `X-Publisher`
 - `X-Publisher-Key-Id` (when known)
 
+## Extension metadata
+
+`GET /api/extensions/:id` returns extension metadata including a `versions[]` array. Each version entry
+includes:
+
+- `version`, `sha256`, `uploadedAt`, `yanked`
+- `scanStatus` (from `package_scans`)
+- `signingKeyId` (publisher signing key id used for that version, when known)
+- `formatVersion` (1 or 2)
+
+Extensions from revoked publishers are hidden from public `search`/`getExtension`/download routes.
+
 ## Publisher governance
 
 Publisher keys are stored in `publisher_keys` (migration `004_publisher_keys.sql`).
@@ -79,4 +91,3 @@ Admin endpoints require `adminToken` to be configured when starting the server.
 
 - `GET /api/admin/extensions/:id` returns extension metadata even when hidden (blocked/malicious or
   publisher revoked).
-
