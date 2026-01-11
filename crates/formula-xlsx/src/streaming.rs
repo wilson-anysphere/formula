@@ -14,7 +14,8 @@ use crate::recalc_policy::{
     content_types_remove_calc_chain, workbook_rels_remove_calc_chain,
     workbook_xml_force_full_calc_on_load, RecalcPolicyError,
 };
-use crate::shared_strings::{parse_shared_strings_xml, write_shared_strings_xml, SharedStrings};
+use crate::shared_strings::parse_shared_strings_xml;
+use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::styles::XlsxStylesEditor;
 use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
 use crate::RecalcPolicy;
@@ -776,7 +777,7 @@ fn read_zip_part<R: Read + Seek>(
     Ok(buf)
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SharedStringsState {
     original_xml: Vec<u8>,
     original_len: usize,
@@ -852,12 +853,25 @@ impl SharedStringsState {
             return Ok(Some(updated));
         }
 
-        // Fallback: rewrite the full part if we can't apply the minimal edit.
-        let xml = write_shared_strings_xml(&SharedStrings {
-            items: self.items.clone(),
-        })
-        .map_err(|e| crate::XlsxError::Invalid(format!("sharedStrings.xml write error: {e}")))?;
-        Ok(Some(xml.into_bytes()))
+        // Fallback: use the general-purpose SharedStringsEditor so we still preserve unknown XML
+        // subtrees even when we can't apply the formatting-preserving patch above.
+        let mut editor = SharedStringsEditor::parse(&self.original_xml).map_err(|e| {
+            crate::XlsxError::Invalid(format!("sharedStrings.xml parse error: {e}"))
+        })?;
+        for item in new_items {
+            if item.runs.is_empty() {
+                editor.get_or_insert_plain(&item.text);
+            } else {
+                editor.get_or_insert_rich(item);
+            }
+        }
+
+        let unique_count = self.items.len() as u32;
+        let count_hint = editor.original_count().map(|c| c.max(unique_count));
+        let updated = editor.to_xml_bytes(count_hint).map_err(|e| {
+            crate::XlsxError::Invalid(format!("sharedStrings.xml write error: {e}"))
+        })?;
+        Ok(Some(updated))
     }
 }
 

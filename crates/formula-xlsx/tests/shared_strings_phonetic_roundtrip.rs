@@ -1,7 +1,10 @@
 use std::io::{Cursor, Read, Write};
 
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::{load_from_bytes, CellPatch, WorkbookCellPatches, XlsxPackage};
+use formula_xlsx::{
+    load_from_bytes, patch_xlsx_streaming, CellPatch, WorkbookCellPatches, WorksheetCellPatch,
+    XlsxPackage,
+};
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -150,6 +153,45 @@ fn patch_pipeline_preserves_unknown_shared_strings_and_appends_new_entry() -> Re
     assert!(
         sheet_xml.contains(r#"<c r="A2" t="s""#) || sheet_xml.contains(r#"r="A2" t="s""#),
         "expected patched cell A2 to use shared strings, got: {sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_preserves_unknown_shared_strings_and_appends_new_entry(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_fixture_xlsx();
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A2")?,
+        CellValue::String("PatchedStreaming".to_string()),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let saved = out.into_inner();
+    let ss_xml = zip_part(&saved, "xl/sharedStrings.xml");
+    let sheet_xml = zip_part(&saved, "xl/worksheets/sheet1.xml");
+
+    assert!(
+        ss_xml.contains(PHONETIC_MARKER),
+        "expected streaming-patched sharedStrings.xml to preserve phonetic subtree"
+    );
+    assert!(
+        ss_xml.contains(EXTLST_MARKER),
+        "expected streaming-patched sharedStrings.xml to preserve <extLst> subtree"
+    );
+    assert!(
+        ss_xml.contains("PatchedStreaming"),
+        "expected streaming-patched sharedStrings.xml to include newly inserted string"
+    );
+    assert!(
+        sheet_xml.contains(r#"<c r="A2" t="s""#) || sheet_xml.contains(r#"r="A2" t="s""#),
+        "expected streaming-patched cell A2 to use shared strings, got: {sheet_xml}"
     );
 
     Ok(())
