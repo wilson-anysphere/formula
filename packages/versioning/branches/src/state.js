@@ -32,6 +32,7 @@ export function emptyDocumentState() {
     schemaVersion: 1,
     sheets: { order: [], metaById: {} },
     cells: {},
+    metadata: {},
     namedRanges: {},
     comments: {},
   };
@@ -80,6 +81,7 @@ export function normalizeDocumentState(input) {
       schemaVersion: 1,
       sheets: { order: Object.keys(cells), metaById: {} },
       cells,
+      metadata: {},
       namedRanges: {},
       comments: {},
     };
@@ -93,6 +95,7 @@ export function normalizeDocumentState(input) {
         ? structuredClone(raw.cells)
         : // Some callers might still pass the legacy `sheets` field for cells.
           (isRecord(raw.sheets) && !Array.isArray(raw.sheets?.order) ? structuredClone(raw.sheets) : {}),
+      metadata: isRecord(raw.metadata) ? structuredClone(raw.metadata) : {},
       namedRanges: isRecord(raw.namedRanges) ? structuredClone(raw.namedRanges) : {},
       comments: isRecord(raw.comments) ? structuredClone(raw.comments) : {},
     };
@@ -101,6 +104,7 @@ export function normalizeDocumentState(input) {
   // --- Normalize workbook-level collections ---
 
   if (!isRecord(state.cells)) state.cells = {};
+  if (!isRecord(state.metadata)) state.metadata = {};
   if (!isRecord(state.namedRanges)) state.namedRanges = {};
   if (!isRecord(state.comments)) state.comments = {};
 
@@ -158,4 +162,3 @@ export function normalizeDocumentState(input) {
 
   return state;
 }
-

@@ -31,7 +31,7 @@
 /**
  * Multi-sheet document state.
  *
- * Legacy (v0) state shape used by early BranchService versions.
+ * Legacy (v0) state shape used by early BranchService versions (cells only).
  *
  * @typedef {{
  *   sheets: Record<string, CellMap>
@@ -66,6 +66,7 @@
  *   schemaVersion: 1,
  *   sheets: SheetsState,
  *   cells: Record<string, CellMap>,
+ *   metadata: Record<string, any>,
  *   namedRanges: Record<string, any>,
  *   comments: Record<string, any>
  * }} WorkbookDocumentState
@@ -107,6 +108,12 @@
  *   type: "sheet",
  *   reason: "rename" | "order" | "presence",
  *   sheetId?: string,
+ *   base: any,
+ *   ours: any,
+ *   theirs: any
+ * } | {
+ *   type: "metadata",
+ *   key: string,
  *   base: any,
  *   ours: any,
  *   theirs: any

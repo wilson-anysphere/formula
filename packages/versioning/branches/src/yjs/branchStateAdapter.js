@@ -414,6 +414,19 @@ export function branchStateFromYjsDoc(doc) {
   }
 
   /** @type {Record<string, any>} */
+  const metadata = {};
+  if (doc.share.has("metadata")) {
+    try {
+      const metadataMap = doc.getMap("metadata");
+      for (const key of Array.from(metadataMap.keys()).sort()) {
+        metadata[key] = yjsValueToJson(metadataMap.get(key));
+      }
+    } catch {
+      // Ignore: unsupported root type.
+    }
+  }
+
+  /** @type {Record<string, any>} */
   const comments = {};
   if (doc.share.has("comments")) {
     // Yjs root types are schema-defined: you must know whether a key is a Map or
@@ -507,6 +520,7 @@ export function branchStateFromYjsDoc(doc) {
     schemaVersion: 1,
     sheets: { order, metaById },
     cells,
+    metadata,
     namedRanges,
     comments,
   });
@@ -702,6 +716,13 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       for (const key of Array.from(namedRangesMap.keys())) namedRangesMap.delete(key);
       for (const [key, value] of Object.entries(normalized.namedRanges ?? {})) {
         namedRangesMap.set(key, structuredClone(value));
+      }
+
+      // --- Metadata ---
+      const metadataMap = doc.getMap("metadata");
+      for (const key of Array.from(metadataMap.keys())) metadataMap.delete(key);
+      for (const [key, value] of Object.entries(normalized.metadata ?? {})) {
+        metadataMap.set(key, structuredClone(value));
       }
 
       // --- Comments ---

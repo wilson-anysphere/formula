@@ -169,6 +169,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     const sheets = sessionA.doc.getArray("sheets");
     if (sheets.length > 0) sheets.delete(0, sheets.length);
     sheets.push([{ id: "Sheet1", name: "FeatureName" }]);
+    sessionA.doc.getMap("metadata").set("scenario", "feature");
     sessionA.doc.getMap("namedRanges").set("NR1", {
       sheetId: "Sheet1",
       rect: { r0: 0, c0: 0, r1: 0, c1: 0 },
@@ -265,6 +266,8 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   });
   await waitForCondition(() => commentContentFromDoc(sessionB.doc, "c1") === "feature comment", 10_000);
   assert.equal(commentContentFromDoc(sessionB.doc, "c1"), "feature comment");
+  await waitForCondition(() => sessionB.doc.getMap("metadata").get("scenario") === "feature", 10_000);
+  assert.equal(sessionB.doc.getMap("metadata").get("scenario"), "feature");
 
   // --- Branch metadata propagates too (stored in the same Y.Doc) ---
   await waitForCondition(() => {
@@ -340,6 +343,8 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     sheetId: "Sheet1",
   });
   assert.equal(commentContentFromDoc(sessionC.doc, "c1"), "feature comment");
+  await waitForCondition(() => sessionC.doc.getMap("metadata").get("scenario") === "feature", 10_000);
+  assert.equal(sessionC.doc.getMap("metadata").get("scenario"), "feature");
 
   // --- Branch metadata persisted inside the Y.Doc ---
   const branches = sessionC.doc.getMap("branching:branches");

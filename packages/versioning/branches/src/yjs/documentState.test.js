@@ -40,6 +40,7 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
         C1: { formula: "=SUM(1,2)" },
       },
     },
+    metadata: {},
     namedRanges: {},
     comments: {},
   });

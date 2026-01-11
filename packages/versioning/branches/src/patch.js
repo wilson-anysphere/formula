@@ -24,6 +24,7 @@ import { normalizeDocumentState } from "./state.js";
  *     metaById?: Record<string, SheetMeta | null>
  *   } | Record<string, Record<string, Cell | null>>,
  *   cells?: Record<string, Record<string, Cell | null>>,
+ *   metadata?: Record<string, any | null>,
  *   namedRanges?: Record<string, any | null>,
  *   comments?: Record<string, any | null>
  * }} Patch
@@ -44,7 +45,7 @@ function isLegacyCellPatch(patch) {
   if (!isRecord(patch)) return false;
   if (patch.schemaVersion === 1) return false;
   if (!isRecord(patch.sheets)) return false;
-  if ("cells" in patch || "namedRanges" in patch || "comments" in patch) return false;
+  if ("cells" in patch || "metadata" in patch || "namedRanges" in patch || "comments" in patch) return false;
   return true;
 }
 
@@ -98,6 +99,26 @@ export function diffDocumentStates(base, next) {
     // @ts-expect-error - Patch.sheets union type.
     patch.sheets.order = structuredClone(nextState.sheets.order);
   }
+
+  // --- Workbook metadata ---
+
+  /** @type {Record<string, any | null>} */
+  const metadataPatch = {};
+  const metadataKeys = new Set([
+    ...Object.keys(baseState.metadata ?? {}),
+    ...Object.keys(nextState.metadata ?? {}),
+  ]);
+
+  for (const key of metadataKeys) {
+    const baseVal = baseState.metadata?.[key];
+    const nextVal = nextState.metadata?.[key];
+    const baseNorm = baseVal === undefined ? null : baseVal;
+    const nextNorm = nextVal === undefined ? null : nextVal;
+    if (deepEqual(baseNorm, nextNorm)) continue;
+    metadataPatch[key] = nextVal === undefined ? null : structuredClone(nextVal);
+  }
+
+  if (Object.keys(metadataPatch).length > 0) patch.metadata = metadataPatch;
 
   // --- Named ranges ---
 
@@ -237,6 +258,14 @@ export function applyPatch(state, patch) {
       } else {
         sheet[cell] = cellValue;
       }
+    }
+  }
+
+  // --- Apply workbook metadata ---
+  if (isRecord(patch.metadata)) {
+    for (const [key, value] of Object.entries(patch.metadata)) {
+      if (value === null) delete out.metadata[key];
+      else out.metadata[key] = value;
     }
   }
 

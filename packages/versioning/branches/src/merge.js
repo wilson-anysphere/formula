@@ -184,7 +184,7 @@ function mergeCell(base, ours, theirs) {
  * @param {Record<string, any>} baseRecord
  * @param {Record<string, any>} oursRecord
  * @param {Record<string, any>} theirsRecord
- * @param {{ conflictType: "namedRange" | "comment", keyField: string }} opts
+ * @param {{ conflictType: "metadata" | "namedRange" | "comment", keyField: string }} opts
  * @returns {{ merged: Record<string, any>, conflicts: MergeConflict[] }}
  */
 function mergeKeyedRecords(baseRecord, oursRecord, theirsRecord, opts) {
@@ -474,6 +474,14 @@ export function mergeDocumentStates({ base, ours, theirs }) {
   const conflicts = [];
 
   // --- Workbook-level maps ---
+  const metadata = mergeKeyedRecords(
+    baseState.metadata ?? {},
+    oursState.metadata ?? {},
+    theirsState.metadata ?? {},
+    { conflictType: "metadata", keyField: "key" },
+  );
+  conflicts.push(...metadata.conflicts);
+
   const namedRanges = mergeKeyedRecords(
     baseState.namedRanges ?? {},
     oursState.namedRanges ?? {},
@@ -726,6 +734,7 @@ export function mergeDocumentStates({ base, ours, theirs }) {
     schemaVersion: 1,
     sheets: { order: orderMerge.order, metaById },
     cells,
+    metadata: metadata.merged,
     namedRanges: namedRanges.merged,
     comments: comments.merged,
   };
@@ -741,6 +750,7 @@ export function mergeDocumentStates({ base, ours, theirs }) {
  *   manualMoveTo?: string,
  *   manualSheetName?: string | null,
  *   manualSheetOrder?: string[],
+ *   manualMetadataValue?: any,
  *   manualNamedRangeValue?: any,
  *   manualCommentValue?: any,
  *   manualSheetState?: any
@@ -860,6 +870,18 @@ export function applyConflictResolutions(mergeResult, resolutions) {
         if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
         continue;
       }
+    }
+
+    if (conflict.type === "metadata") {
+      const key = conflict.key;
+      let value;
+      if (resolution.choice === "ours") value = conflict.ours;
+      else if (resolution.choice === "theirs") value = conflict.theirs;
+      else value = resolution.manualMetadataValue;
+
+      if (value === null || value === undefined) delete merged.metadata[key];
+      else merged.metadata[key] = value;
+      continue;
     }
 
     if (conflict.type === "namedRange") {

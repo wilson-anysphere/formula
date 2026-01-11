@@ -82,6 +82,7 @@ test("legacy commits preserve workbook metadata (sheets/namedRanges/comments)", 
       },
     },
     cells: { Sheet1: { A1: { value: 1 } }, Sheet2: {} },
+    metadata: { scenario: "base" },
     namedRanges: { NR1: { sheetId: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } } },
     comments: { c1: { id: "c1", cellRef: "A1", content: "hello", resolved: false, replies: [] } },
   });
@@ -95,6 +96,7 @@ test("legacy commits preserve workbook metadata (sheets/namedRanges/comments)", 
   assert.deepEqual(state.cells.Sheet1, { A1: { value: 2 } });
   assert.deepEqual(state.cells.Sheet2, {});
   assert.ok(state.sheets.order.includes("Sheet2"));
+  assert.equal(state.metadata.scenario, "base");
   assert.ok(state.namedRanges.NR1);
   assert.equal(state.comments.c1?.content, "hello");
 });
