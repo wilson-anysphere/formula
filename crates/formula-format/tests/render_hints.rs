@@ -34,6 +34,11 @@ fn bracket_currency_tokens_resolve_default_symbol_for_locale() {
         render_value(Value::Number(1234.5), Some("[$€-407]#,##0.00"), &options).text,
         "€1.234,50"
     );
+
+    assert_eq!(
+        render_value(Value::Number(1234.5), Some("[$€-40C]#,##0.00"), &options).text,
+        format!("€1\u{00A0}234,50")
+    );
 }
 
 #[test]

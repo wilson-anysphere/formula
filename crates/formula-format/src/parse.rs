@@ -363,6 +363,9 @@ fn locale_for_lcid(lcid: u32) -> Option<Locale> {
     Some(match lcid {
         0x0409 | 0x0809 | 0x1009 => Locale::en_us(), // en-US, en-GB, en-CA
         0x0407 => Locale::de_de(),                  // de-DE
+        0x040c => Locale::fr_fr(),                  // fr-FR
+        0x0410 => Locale::it_it(),                  // it-IT
+        0x040a => Locale::es_es(),                  // es-ES
         _ => return None,
     })
 }

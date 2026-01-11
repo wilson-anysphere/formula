@@ -51,6 +51,33 @@ impl Locale {
             time_sep: ':',
         }
     }
+
+    pub const fn fr_fr() -> Self {
+        Self {
+            decimal_sep: ',',
+            thousands_sep: '\u{00A0}',
+            date_sep: '/',
+            time_sep: ':',
+        }
+    }
+
+    pub const fn it_it() -> Self {
+        Self {
+            decimal_sep: ',',
+            thousands_sep: '.',
+            date_sep: '/',
+            time_sep: ':',
+        }
+    }
+
+    pub const fn es_es() -> Self {
+        Self {
+            decimal_sep: ',',
+            thousands_sep: '.',
+            date_sep: '/',
+            time_sep: ':',
+        }
+    }
 }
 
 /// Formatting options that affect how serial dates and numbers are rendered.
