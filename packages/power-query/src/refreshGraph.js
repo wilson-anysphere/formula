@@ -276,6 +276,10 @@ export class RefreshOrchestrator {
     const targetIds = queryIds ? Array.from(new Set(queryIds)) : Array.from(this.registrations.keys());
     const targetSet = new Set(targetIds);
 
+    if (targetIds.length === 0) {
+      return { sessionId, queryIds: targetIds, promise: Promise.resolve({}), cancel: () => {} };
+    }
+
     /**
      * @param {Error} error
      * @param {string} queryId
