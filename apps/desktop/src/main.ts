@@ -1640,6 +1640,16 @@ try {
     if (closeInFlight) return;
     closeInFlight = true;
     try {
+      if (quit && queuedInvoke) {
+        try {
+          // Best-effort Workbook_BeforeClose when quitting via the tray menu. (Window close
+          // requests fire this event from the Rust host already.)
+          await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+        } catch (err) {
+          console.warn("Workbook_BeforeClose event macro failed:", err);
+        }
+      }
+
       const doc = app.getDocument();
       if (doc.isDirty) {
         const discard = window.confirm("You have unsaved changes. Discard them?");

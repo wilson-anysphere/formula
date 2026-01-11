@@ -8,12 +8,14 @@ type Range = { startRow: number; startCol: number; endRow: number; endCol: numbe
 
 type SelectionState = { ranges: Range[] };
 
+type CellState = { value: unknown; formula: string | null };
+
 type CellDelta = {
   sheetId: string;
   row: number;
   col: number;
-  before: unknown;
-  after: unknown;
+  before: CellState;
+  after: CellState;
 };
 
 type DocumentControllerLike = {
@@ -51,6 +53,21 @@ const EVENT_MACRO_BATCH_LABEL = "VBA event macro";
 const WORKBOOK_OPEN_EVENT_ID = "Workbook_Open";
 const WORKBOOK_BEFORE_CLOSE_EVENT_ID = "Workbook_BeforeClose";
 const SELECTION_CHANGE_DEBOUNCE_MS = 100;
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== "object" || typeof b !== "object") return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function inputEquals(before: CellState, after: CellState): boolean {
+  return valuesEqual(before.value ?? null, after.value ?? null) && (before.formula ?? null) === (after.formula ?? null);
+}
 
 function normalizeRect(rect: Rect): Rect {
   const startRow = Math.min(rect.startRow, rect.endRow);
@@ -452,6 +469,9 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (!eventsAllowed) return;
 
     for (const delta of deltas) {
+      if (!delta?.before || !delta?.after) continue;
+      if (inputEquals(delta.before, delta.after)) continue;
+
       const sheetId = String(delta?.sheetId ?? "").trim();
       if (!sheetId) continue;
       const row = Number(delta?.row);
