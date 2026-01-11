@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Deterministically generate a curated (~1k) Excel formula corpus.
+Deterministically generate a curated (~2k) Excel formula corpus.
 
 This corpus is intentionally "small enough to run in real Excel in CI",
 but broad enough to cover many P0/P1 function behaviors and edge cases.
@@ -152,7 +152,7 @@ def generate_cases() -> dict[str, Any]:
                 inputs=[CellInput("A1", a), CellInput("B1", b)],
             )
 
-    # Keep ROUND* combinations capped so the corpus stays ~1k cases total.
+    # Keep ROUND* combinations capped so the corpus stays <2k cases total.
     round_vals = [0, 0.1, 0.5, 1.5, 2.5, 10.25, -10.25, 1234.5678, -1234.5678, 1e-7]
     round_digits = [-2, -1, 0, 1, 2]
     for func in ["ROUND", "ROUNDUP", "ROUNDDOWN"]:
@@ -165,6 +165,33 @@ def generate_cases() -> dict[str, Any]:
                     formula=f"={func}(A1,B1)",
                     inputs=[CellInput("A1", v), CellInput("B1", d)],
                 )
+
+    # ------------------------------------------------------------------
+    # Extended math functions (function-catalog backfill)
+    # ------------------------------------------------------------------
+    _add_case(cases, prefix="pi", tags=["math", "PI"], formula="=PI()")
+    _add_case(cases, prefix="sin", tags=["math", "SIN", "PI"], formula="=SIN(PI())")
+    _add_case(cases, prefix="cos", tags=["math", "COS"], formula="=COS(0)")
+    _add_case(cases, prefix="tan", tags=["math", "TAN"], formula="=TAN(0)")
+    _add_case(cases, prefix="acos", tags=["math", "ACOS"], formula="=ACOS(1)")
+    _add_case(cases, prefix="asin", tags=["math", "ASIN"], formula="=ASIN(0)")
+    _add_case(cases, prefix="atan", tags=["math", "ATAN"], formula="=ATAN(1)")
+    _add_case(cases, prefix="atan2", tags=["math", "ATAN2"], formula="=ATAN2(1,1)")
+    _add_case(cases, prefix="exp_ln", tags=["math", "EXP", "LN"], formula="=LN(EXP(1))")
+    _add_case(cases, prefix="log", tags=["math", "LOG"], formula="=LOG(100,10)")
+    _add_case(cases, prefix="log10", tags=["math", "LOG10"], formula="=LOG10(100)")
+    _add_case(cases, prefix="power", tags=["math", "POWER"], formula="=POWER(2,3)")
+    _add_case(cases, prefix="sqrt", tags=["math", "SQRT"], formula="=SQRT(4)")
+    _add_case(cases, prefix="product", tags=["math", "PRODUCT"], formula="=PRODUCT(1,2,3)")
+    _add_case(cases, prefix="sumsq", tags=["math", "SUMSQ"], formula="=SUMSQ(1,2,3)")
+    _add_case(cases, prefix="trunc", tags=["math", "TRUNC"], formula="=TRUNC(3.14159,2)")
+    _add_case(cases, prefix="ceiling", tags=["math", "CEILING"], formula="=CEILING(1.2,1)")
+    _add_case(cases, prefix="ceiling_math", tags=["math", "CEILING.MATH"], formula="=CEILING.MATH(1.2,1)")
+    _add_case(cases, prefix="ceiling_precise", tags=["math", "CEILING.PRECISE"], formula="=CEILING.PRECISE(1.2,1)")
+    _add_case(cases, prefix="iso_ceiling", tags=["math", "ISO.CEILING"], formula="=ISO.CEILING(1.2,1)")
+    _add_case(cases, prefix="floor", tags=["math", "FLOOR"], formula="=FLOOR(1.2,1)")
+    _add_case(cases, prefix="floor_math", tags=["math", "FLOOR.MATH"], formula="=FLOOR.MATH(1.2,1)")
+    _add_case(cases, prefix="floor_precise", tags=["math", "FLOOR.PRECISE"], formula="=FLOOR.PRECISE(1.2,1)")
 
     # ------------------------------------------------------------------
     # Aggregates over ranges
@@ -204,6 +231,97 @@ def generate_cases() -> dict[str, Any]:
         tags=["agg", "SUM", "coercion"],
         formula="=SUM(A1:A3)",
         inputs=[CellInput("A1", 1), CellInput("A2", "text"), CellInput("A3", 3)],
+    )
+
+    # COUNT / COUNTA / COUNTBLANK
+    count_range_inputs = [
+        CellInput("A1", 1),
+        CellInput("A2", "x"),
+        CellInput("A3", True),
+        CellInput("A4", None),  # blank
+        CellInput("A5", ""),  # empty string counts as blank for COUNTBLANK
+        CellInput("A6", formula="=1/0"),  # errors are ignored by COUNT* in Excel
+    ]
+    _add_case(cases, prefix="count", tags=["agg", "COUNT"], formula="=COUNT(A1:A6)", inputs=count_range_inputs)
+    _add_case(cases, prefix="counta", tags=["agg", "COUNTA"], formula="=COUNTA(A1:A6)", inputs=count_range_inputs)
+    _add_case(cases, prefix="countblank", tags=["agg", "COUNTBLANK"], formula="=COUNTBLANK(A1:A6)", inputs=count_range_inputs)
+
+    # COUNTIF (include numeric, text + wildcards, blanks)
+    countif_num_inputs = [CellInput("A1", 1), CellInput("A2", 2), CellInput("A3", 3), CellInput("A4", 4)]
+    _add_case(
+        cases,
+        prefix="countif",
+        tags=["agg", "COUNTIF"],
+        formula='=COUNTIF(A1:A4,">2")',
+        inputs=countif_num_inputs,
+    )
+    countif_text_inputs = [
+        CellInput("A1", "apple"),
+        CellInput("A2", "banana"),
+        CellInput("A3", "apricot"),
+        CellInput("A4", None),
+        CellInput("A5", ""),
+    ]
+    _add_case(
+        cases,
+        prefix="countif",
+        tags=["agg", "COUNTIF"],
+        formula='=COUNTIF(A1:A5,"ap*")',
+        inputs=countif_text_inputs,
+    )
+    _add_case(
+        cases,
+        prefix="countif",
+        tags=["agg", "COUNTIF"],
+        formula='=COUNTIF(A1:A5,"")',
+        inputs=countif_text_inputs,
+        description="Blank criteria matches truly blank cells and empty-string cells",
+    )
+
+    # SUMPRODUCT
+    sumproduct_inputs = [
+        CellInput("A1", 1),
+        CellInput("A2", 2),
+        CellInput("A3", 3),
+        CellInput("B1", 4),
+        CellInput("B2", 5),
+        CellInput("B3", 6),
+    ]
+    _add_case(
+        cases,
+        prefix="sumproduct",
+        tags=["agg", "SUMPRODUCT"],
+        formula="=SUMPRODUCT(A1:A3,B1:B3)",
+        inputs=sumproduct_inputs,
+    )
+    _add_case(
+        cases,
+        prefix="sumproduct",
+        tags=["agg", "SUMPRODUCT", "error"],
+        formula="=SUMPRODUCT(A1:A2,B1:B2)",
+        inputs=[
+            CellInput("A1", 1),
+            CellInput("A2", formula="=1/0"),
+            CellInput("B1", 2),
+            CellInput("B2", 3),
+        ],
+        description="SUMPRODUCT propagates errors from any element",
+    )
+
+    subtotal_inputs = [CellInput("A1", 1), CellInput("A2", 2), CellInput("A3", 3)]
+    _add_case(
+        cases,
+        prefix="subtotal",
+        tags=["agg", "SUBTOTAL"],
+        formula="=SUBTOTAL(9,A1:A3)",
+        inputs=subtotal_inputs,
+    )
+    _add_case(
+        cases,
+        prefix="aggregate",
+        tags=["agg", "AGGREGATE"],
+        formula="=AGGREGATE(9,4,A1:A3)",
+        inputs=subtotal_inputs,
     )
 
     # ------------------------------------------------------------------
@@ -569,6 +687,90 @@ def generate_cases() -> dict[str, Any]:
     )
 
     # ------------------------------------------------------------------
+    # Statistical / regression functions (function-catalog backfill)
+    # ------------------------------------------------------------------
+    # Prefer array literals to keep the corpus compact and deterministic.
+    _add_case(cases, prefix="avedev", tags=["stat", "AVEDEV"], formula="=AVEDEV({1,2,3,4})")
+    _add_case(cases, prefix="averagea", tags=["stat", "AVERAGEA"], formula='=AVERAGEA({1,"x",TRUE})')
+    _add_case(cases, prefix="maxa", tags=["stat", "MAXA"], formula='=MAXA({1,"x",TRUE})')
+    _add_case(cases, prefix="mina", tags=["stat", "MINA"], formula='=MINA({1,"x",FALSE})')
+    _add_case(cases, prefix="median", tags=["stat", "MEDIAN"], formula="=MEDIAN({1,2,3,4})")
+    _add_case(cases, prefix="mode", tags=["stat", "MODE"], formula="=MODE({1,1,2,3})")
+    _add_case(cases, prefix="mode_sngl", tags=["stat", "MODE.SNGL"], formula="=MODE.SNGL({1,1,2,3})")
+    _add_case(cases, prefix="mode_mult", tags=["stat", "MODE.MULT"], formula="=MODE.MULT({1,1,2,2,3})", output_cell="C1")
+
+    _add_case(cases, prefix="devsq", tags=["stat", "DEVSQ"], formula="=DEVSQ({1,2,3})")
+    _add_case(cases, prefix="geomean", tags=["stat", "GEOMEAN"], formula="=GEOMEAN({1,2,3,4})")
+    _add_case(cases, prefix="harmean", tags=["stat", "HARMEAN"], formula="=HARMEAN({1,2,4})")
+
+    _add_case(cases, prefix="large", tags=["stat", "LARGE"], formula="=LARGE({1,2,3,4},2)")
+    _add_case(cases, prefix="small", tags=["stat", "SMALL"], formula="=SMALL({1,2,3,4},2)")
+
+    _add_case(cases, prefix="percentile", tags=["stat", "PERCENTILE"], formula="=PERCENTILE({1,2,3,4},0.25)")
+    _add_case(cases, prefix="percentile_inc", tags=["stat", "PERCENTILE.INC"], formula="=PERCENTILE.INC({1,2,3,4},0.25)")
+    _add_case(cases, prefix="percentile_exc", tags=["stat", "PERCENTILE.EXC"], formula="=PERCENTILE.EXC({1,2,3,4},0.25)")
+
+    _add_case(cases, prefix="quartile", tags=["stat", "QUARTILE"], formula="=QUARTILE({1,2,3,4},1)")
+    _add_case(cases, prefix="quartile_inc", tags=["stat", "QUARTILE.INC"], formula="=QUARTILE.INC({1,2,3,4},1)")
+    _add_case(cases, prefix="quartile_exc", tags=["stat", "QUARTILE.EXC"], formula="=QUARTILE.EXC({1,2,3,4},1)")
+
+    _add_case(cases, prefix="rank", tags=["stat", "RANK"], formula="=RANK(2,{1,2,2,3})")
+    _add_case(cases, prefix="rank_eq", tags=["stat", "RANK.EQ"], formula="=RANK.EQ(2,{1,2,2,3})")
+    _add_case(cases, prefix="rank_avg", tags=["stat", "RANK.AVG"], formula="=RANK.AVG(2,{1,2,2,3})")
+
+    _add_case(cases, prefix="stdev", tags=["stat", "STDEV"], formula="=STDEV({1,2,3,4})")
+    _add_case(cases, prefix="stdev_s", tags=["stat", "STDEV.S"], formula="=STDEV.S({1,2,3,4})")
+    _add_case(cases, prefix="stdev_p", tags=["stat", "STDEV.P"], formula="=STDEV.P({1,2,3,4})")
+    _add_case(cases, prefix="stdeva", tags=["stat", "STDEVA"], formula="=STDEVA({1,2,3,TRUE})")
+    _add_case(cases, prefix="stdevp", tags=["stat", "STDEVP"], formula="=STDEVP({1,2,3,TRUE})")
+    _add_case(cases, prefix="stdevpa", tags=["stat", "STDEVPA"], formula="=STDEVPA({1,2,3,TRUE})")
+
+    _add_case(cases, prefix="var", tags=["stat", "VAR"], formula="=VAR({1,2,3,4})")
+    _add_case(cases, prefix="var_s", tags=["stat", "VAR.S"], formula="=VAR.S({1,2,3,4})")
+    _add_case(cases, prefix="var_p", tags=["stat", "VAR.P"], formula="=VAR.P({1,2,3,4})")
+    _add_case(cases, prefix="vara", tags=["stat", "VARA"], formula="=VARA({1,2,3,TRUE})")
+    _add_case(cases, prefix="varp", tags=["stat", "VARP"], formula="=VARP({1,2,3,TRUE})")
+    _add_case(cases, prefix="varpa", tags=["stat", "VARPA"], formula="=VARPA({1,2,3,TRUE})")
+
+    _add_case(cases, prefix="trimmean", tags=["stat", "TRIMMEAN"], formula="=TRIMMEAN({1,2,3,100},0.5)")
+
+    _add_case(cases, prefix="correl", tags=["stat", "CORREL"], formula="=CORREL({1,2,3},{1,5,7})")
+    _add_case(cases, prefix="pearson", tags=["stat", "PEARSON"], formula="=PEARSON({1,2,3},{1,5,7})")
+    _add_case(cases, prefix="covar", tags=["stat", "COVAR"], formula="=COVAR({1,2,3},{1,5,7})")
+    _add_case(cases, prefix="cov_p", tags=["stat", "COVARIANCE.P"], formula="=COVARIANCE.P({1,2,3},{1,5,7})")
+    _add_case(cases, prefix="cov_s", tags=["stat", "COVARIANCE.S"], formula="=COVARIANCE.S({1,2,3},{1,5,7})")
+
+    _add_case(cases, prefix="rsq", tags=["stat", "RSQ"], formula="=RSQ({1,2,3},{1,2,3})")
+    _add_case(cases, prefix="slope", tags=["stat", "SLOPE"], formula="=SLOPE({1,2,3},{1,2,3})")
+    _add_case(cases, prefix="intercept", tags=["stat", "INTERCEPT"], formula="=INTERCEPT({1,2,3},{1,2,3})")
+    _add_case(cases, prefix="forecast", tags=["stat", "FORECAST"], formula="=FORECAST(4,{1,2,3},{1,2,3})")
+    _add_case(cases, prefix="forecast_linear", tags=["stat", "FORECAST.LINEAR"], formula="=FORECAST.LINEAR(4,{1,2,3},{1,2,3})")
+
+    # MAXIFS / MINIFS (criteria-based aggregates)
+    maxifs_inputs = [
+        CellInput("A1", 10),
+        CellInput("A2", 20),
+        CellInput("A3", 30),
+        CellInput("B1", "A"),
+        CellInput("B2", "B"),
+        CellInput("B3", "A"),
+    ]
+    _add_case(
+        cases,
+        prefix="maxifs",
+        tags=["agg", "MAXIFS"],
+        formula='=MAXIFS(A1:A3,B1:B3,"A")',
+        inputs=maxifs_inputs,
+    )
+    _add_case(
+        cases,
+        prefix="minifs",
+        tags=["agg", "MINIFS"],
+        formula='=MINIFS(A1:A3,B1:B3,"A")',
+        inputs=maxifs_inputs,
+    )
+
+    # ------------------------------------------------------------------
     # Logical functions
     # ------------------------------------------------------------------
     bool_inputs = [True, False]
@@ -618,9 +820,28 @@ def generate_cases() -> dict[str, Any]:
 
     _add_case(cases, prefix="iferror", tags=["logical", "IFERROR"], formula="=IFERROR(A1,42)", inputs=[CellInput("A1", formula="=1/0")])
     _add_case(cases, prefix="iferror", tags=["logical", "IFERROR"], formula="=IFERROR(A1,42)", inputs=[CellInput("A1", 1)])
+    _add_case(cases, prefix="ifna", tags=["logical", "IFNA"], formula="=IFNA(A1,42)", inputs=[CellInput("A1", formula="=NA()")])
+    _add_case(
+        cases,
+        prefix="ifna",
+        tags=["logical", "IFNA", "error"],
+        formula="=IFNA(A1,42)",
+        inputs=[CellInput("A1", formula="=1/0")],
+        description="IFNA only catches #N/A (other errors propagate)",
+    )
+    _add_case(cases, prefix="ifna", tags=["logical", "IFNA"], formula="=IFNA(A1,42)", inputs=[CellInput("A1", 1)])
+
+    _add_case(cases, prefix="ifs", tags=["logical", "IFS"], formula="=IFS(FALSE,1,TRUE,2)")
+    _add_case(
+        cases,
+        prefix="switch",
+        tags=["logical", "SWITCH"],
+        formula='=SWITCH(2,1,"one",2,"two","other")',
+    )
+    _add_case(cases, prefix="xor", tags=["logical", "XOR"], formula="=XOR(TRUE,FALSE,TRUE)")
 
     # ------------------------------------------------------------------
-    # Text functions (avoid locale-sensitive formatting)
+    # Text functions (keep cases deterministic; avoid locale-dependent parsing where possible)
     # ------------------------------------------------------------------
     strings = ["", "a", "foo", "Hello", "12345", "a b c", "This is a test", "こんにちは"]
     num_chars = [0, 1, 2, 3, 5]
@@ -697,6 +918,110 @@ def generate_cases() -> dict[str, Any]:
             inputs=[CellInput("A1", s)],
         )
 
+    # Additional text functions
+    _add_case(
+        cases,
+        prefix="clean",
+        tags=["text", "CLEAN"],
+        formula="=CLEAN(A1)",
+        inputs=[CellInput("A1", "a\u0000\u0009b\u001Fc\u007Fd")],
+        description="CLEAN strips non-printable ASCII control codes",
+    )
+    _add_case(
+        cases,
+        prefix="trim",
+        tags=["text", "TRIM"],
+        formula="=TRIM(A1)",
+        inputs=[CellInput("A1", "  a   b  ")],
+    )
+    _add_case(
+        cases,
+        prefix="trim",
+        tags=["text", "TRIM"],
+        formula="=TRIM(A1)",
+        inputs=[CellInput("A1", "\ta  b")],
+        description="TRIM collapses spaces but preserves tabs",
+    )
+    _add_case(cases, prefix="upper", tags=["text", "UPPER"], formula="=UPPER(A1)", inputs=[CellInput("A1", "Abc")])
+    _add_case(cases, prefix="lower", tags=["text", "LOWER"], formula="=LOWER(A1)", inputs=[CellInput("A1", "AbC")])
+    _add_case(
+        cases,
+        prefix="proper",
+        tags=["text", "PROPER"],
+        formula="=PROPER(A1)",
+        inputs=[CellInput("A1", "hELLO wORLD")],
+    )
+    _add_case(
+        cases,
+        prefix="exact",
+        tags=["text", "EXACT"],
+        formula="=EXACT(A1,B1)",
+        inputs=[CellInput("A1", "Hello"), CellInput("B1", "hello")],
+    )
+    _add_case(
+        cases,
+        prefix="exact",
+        tags=["text", "EXACT"],
+        formula="=EXACT(A1,B1)",
+        inputs=[CellInput("A1", "Hello"), CellInput("B1", "Hello")],
+    )
+    _add_case(cases, prefix="replace", tags=["text", "REPLACE"], formula='=REPLACE("abcdef",2,3,"X")')
+    _add_case(cases, prefix="replace", tags=["text", "REPLACE"], formula='=REPLACE("abc",5,1,"X")')
+
+    # CONCAT (unlike CONCATENATE, CONCAT flattens ranges)
+    _add_case(
+        cases,
+        prefix="concat_new",
+        tags=["text", "CONCAT"],
+        formula='=CONCAT(A1:A2,"c")',
+        inputs=[CellInput("A1", "a"), CellInput("A2", "b")],
+    )
+
+    # TEXTJOIN
+    textjoin_inputs = [
+        CellInput("A1", "a"),
+        CellInput("A2", None),
+        CellInput("A3", ""),
+        CellInput("A4", 1),
+    ]
+    _add_case(
+        cases,
+        prefix="textjoin",
+        tags=["text", "TEXTJOIN"],
+        formula='=TEXTJOIN(",",TRUE,A1:A4)',
+        inputs=textjoin_inputs,
+    )
+    _add_case(
+        cases,
+        prefix="textjoin",
+        tags=["text", "TEXTJOIN"],
+        formula='=TEXTJOIN(",",FALSE,A1:A4)',
+        inputs=textjoin_inputs,
+    )
+
+    # TEXT / VALUE / NUMBERVALUE / DOLLAR
+    _add_case(cases, prefix="text_fmt", tags=["text", "TEXT"], formula='=TEXT(1234.567,"#,##0.00")')
+    _add_case(cases, prefix="text_pct", tags=["text", "TEXT"], formula='=TEXT(1.23,"0%")')
+    _add_case(cases, prefix="text_cur", tags=["text", "TEXT"], formula='=TEXT(-1,"$0.00")')
+    _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("1,234.5")')
+    _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("(1,000)")')
+    _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("10%")')
+    _add_case(cases, prefix="value", tags=["text", "VALUE", "error"], formula='=VALUE("nope")')
+    _add_case(
+        cases,
+        prefix="numbervalue",
+        tags=["text", "NUMBERVALUE"],
+        formula='=NUMBERVALUE("1.234,5", ",", ".")',
+    )
+    _add_case(
+        cases,
+        prefix="numbervalue",
+        tags=["text", "NUMBERVALUE", "error"],
+        formula='=NUMBERVALUE("1,23", ",", ",")',
+    )
+    _add_case(cases, prefix="dollar", tags=["text", "DOLLAR"], formula="=DOLLAR(1234.567,2)")
+    _add_case(cases, prefix="dollar", tags=["text", "DOLLAR"], formula="=DOLLAR(-1234.567,2)")
+
     # ------------------------------------------------------------------
     # Date functions (compare on raw serial values; display is locale-dependent)
     # ------------------------------------------------------------------
@@ -743,6 +1068,80 @@ def generate_cases() -> dict[str, Any]:
             output_cell="D1",
         )
 
+    # Additional date/time functions (keep results numeric to avoid locale-dependent display text).
+    _add_case(cases, prefix="datevalue", tags=["date", "DATEVALUE"], formula='=DATEVALUE("2020-01-01")')
+    _add_case(cases, prefix="datevalue", tags=["date", "DATEVALUE", "error"], formula='=DATEVALUE("nope")')
+
+    _add_case(cases, prefix="time", tags=["date", "TIME"], formula="=TIME(1,30,0)")
+    _add_case(cases, prefix="time", tags=["date", "TIME"], formula="=TIME(24,0,0)")
+    _add_case(cases, prefix="time", tags=["date", "TIME", "error"], formula="=TIME(-1,0,0)")
+
+    _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE"], formula='=TIMEVALUE("1:30")')
+    _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE"], formula='=TIMEVALUE("1:30 PM")')
+    _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE", "error"], formula='=TIMEVALUE("nope")')
+
+    _add_case(cases, prefix="hour", tags=["date", "HOUR"], formula="=HOUR(TIME(1,2,3))")
+    _add_case(cases, prefix="minute", tags=["date", "MINUTE"], formula="=MINUTE(TIME(1,2,3))")
+    _add_case(cases, prefix="second", tags=["date", "SECOND"], formula="=SECOND(TIME(1,2,3))")
+
+    _add_case(cases, prefix="edate", tags=["date", "EDATE"], formula="=EDATE(DATE(2020,1,31),1)")
+    _add_case(cases, prefix="eomonth", tags=["date", "EOMONTH"], formula="=EOMONTH(DATE(2020,1,15),0)")
+    _add_case(cases, prefix="eomonth", tags=["date", "EOMONTH"], formula="=EOMONTH(DATE(2020,1,15),1)")
+
+    _add_case(cases, prefix="weekday", tags=["date", "WEEKDAY"], formula="=WEEKDAY(1)")
+    _add_case(cases, prefix="weekday", tags=["date", "WEEKDAY"], formula="=WEEKDAY(1,2)")
+    _add_case(cases, prefix="weekday", tags=["date", "WEEKDAY", "error"], formula="=WEEKDAY(1,0)")
+
+    _add_case(cases, prefix="weeknum", tags=["date", "WEEKNUM"], formula="=WEEKNUM(DATE(2020,1,1),1)")
+    _add_case(cases, prefix="weeknum", tags=["date", "WEEKNUM"], formula="=WEEKNUM(DATE(2020,1,5),2)")
+    _add_case(cases, prefix="weeknum", tags=["date", "WEEKNUM"], formula="=WEEKNUM(DATE(2021,1,1),21)")
+    _add_case(cases, prefix="weeknum", tags=["date", "WEEKNUM", "error"], formula="=WEEKNUM(1,9)")
+
+    _add_case(cases, prefix="workday", tags=["date", "WORKDAY"], formula="=WORKDAY(DATE(2020,1,1),1)")
+    _add_case(
+        cases,
+        prefix="workday",
+        tags=["date", "WORKDAY"],
+        formula="=WORKDAY(DATE(2020,1,1),1,DATE(2020,1,2))",
+    )
+
+    _add_case(
+        cases,
+        prefix="networkdays",
+        tags=["date", "NETWORKDAYS"],
+        formula="=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10))",
+    )
+    _add_case(
+        cases,
+        prefix="networkdays",
+        tags=["date", "NETWORKDAYS"],
+        formula="=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10),{DATE(2020,1,2),DATE(2020,1,3)})",
+    )
+
+    _add_case(cases, prefix="workday_intl", tags=["date", "WORKDAY.INTL"], formula="=WORKDAY.INTL(DATE(2020,1,3),1,11)")
+    _add_case(cases, prefix="workday_intl", tags=["date", "WORKDAY.INTL", "error"], formula="=WORKDAY.INTL(DATE(2020,1,3),1,99)")
+    _add_case(cases, prefix="workday_intl", tags=["date", "WORKDAY.INTL", "error"], formula='=WORKDAY.INTL(DATE(2020,1,3),1,"abc")')
+
+    _add_case(
+        cases,
+        prefix="networkdays_intl",
+        tags=["date", "NETWORKDAYS.INTL"],
+        formula="=NETWORKDAYS.INTL(DATE(2020,1,1),DATE(2020,1,10),11)",
+    )
+    _add_case(
+        cases,
+        prefix="networkdays_intl",
+        tags=["date", "NETWORKDAYS.INTL", "error"],
+        formula="=NETWORKDAYS.INTL(DATE(2020,1,1),DATE(2020,1,10),99)",
+    )
+
+    _add_case(cases, prefix="days", tags=["date", "DAYS"], formula="=DAYS(DATE(2020,1,10),DATE(2020,1,1))")
+    _add_case(cases, prefix="days360", tags=["date", "DAYS360"], formula="=DAYS360(DATE(2020,1,1),DATE(2020,2,1))")
+    _add_case(cases, prefix="datedif", tags=["date", "DATEDIF"], formula='=DATEDIF(DATE(2020,1,1),DATE(2021,2,1),"y")')
+    _add_case(cases, prefix="yearfrac", tags=["date", "YEARFRAC"], formula="=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1))")
+    _add_case(cases, prefix="iso_weeknum", tags=["date", "ISO.WEEKNUM"], formula="=ISO.WEEKNUM(DATE(2021,1,1))")
+    _add_case(cases, prefix="isoweeknum", tags=["date", "ISOWEEKNUM"], formula="=ISOWEEKNUM(DATE(2021,1,1))")
+
     # ------------------------------------------------------------------
     # Lookup basics: VLOOKUP + INDEX/MATCH
     # ------------------------------------------------------------------
@@ -785,6 +1184,61 @@ def generate_cases() -> dict[str, Any]:
             output_cell="E1",
         )
 
+    # HLOOKUP uses a horizontal table (keys in first row).
+    h_keys = [1, 2, 3, 10, 20]
+    h_vals = ["one", "two", "three", "ten", "twenty"]
+    h_inputs = []
+    for col, (k, v) in enumerate(zip(h_keys, h_vals), start=1):
+        col_letter = chr(ord("A") + col - 1)
+        h_inputs.append(CellInput(f"{col_letter}1", k))
+        h_inputs.append(CellInput(f"{col_letter}2", v))
+    for key in [1, 2, 3, 10, 20, 4]:
+        _add_case(
+            cases,
+            prefix="hlookup",
+            tags=["lookup", "HLOOKUP"],
+            formula="=HLOOKUP(F1,A1:E2,2,FALSE)",
+            inputs=[*h_inputs, CellInput("F1", key)],
+            output_cell="G1",
+        )
+
+    # XLOOKUP / XMATCH (Excel 365+)
+    for key in [1, 2, 3, 10, 20, 4]:
+        _add_case(
+            cases,
+            prefix="xlookup",
+            tags=["lookup", "XLOOKUP"],
+            formula='=XLOOKUP(D1,A1:A5,B1:B5,"NF")',
+            inputs=[*table_inputs, CellInput("D1", key)],
+            output_cell="E1",
+        )
+        _add_case(
+            cases,
+            prefix="xmatch",
+            tags=["lookup", "XMATCH"],
+            formula="=XMATCH(D1,A1:A5,0)",
+            inputs=[*table_inputs, CellInput("D1", key)],
+            output_cell="E1",
+        )
+
+    # GETPIVOTDATA requires a real pivot table; without one, Excel returns #REF!.
+    _add_case(
+        cases,
+        prefix="getpivotdata",
+        tags=["lookup", "GETPIVOTDATA", "error"],
+        formula='=GETPIVOTDATA("Sales",A1)',
+        inputs=[CellInput("A1", 0)],
+        output_cell="C1",
+        description="No pivot table present; GETPIVOTDATA should return #REF!",
+    )
+
+    # Reference helpers
+    _add_case(cases, prefix="address", tags=["ref", "ADDRESS"], formula="=ADDRESS(2,3)")
+    _add_case(cases, prefix="row", tags=["ref", "ROW"], formula="=ROW(A10)")
+    _add_case(cases, prefix="column", tags=["ref", "COLUMN"], formula="=COLUMN(C5)")
+    _add_case(cases, prefix="rows", tags=["ref", "ROWS"], formula="=ROWS(A1:B3)")
+    _add_case(cases, prefix="columns", tags=["ref", "COLUMNS"], formula="=COLUMNS(A1:B3)")
+
     # ------------------------------------------------------------------
     # Financial functions (P1)
     # ------------------------------------------------------------------
@@ -796,10 +1250,17 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="fv", tags=["financial", "FV"], formula="=FV(0.05, 10, -100)")
     _add_case(cases, prefix="pmt", tags=["financial", "PMT"], formula="=PMT(0, 2, 10)")
     _add_case(cases, prefix="pmt", tags=["financial", "PMT"], formula="=PMT(0.05, 10, 1000)")
+    _add_case(cases, prefix="ipmt", tags=["financial", "IPMT"], formula="=IPMT(0.05, 1, 10, 1000)")
+    _add_case(cases, prefix="ipmt", tags=["financial", "IPMT"], formula="=IPMT(0.05, 10, 10, 1000, 0, 1)")
+    _add_case(cases, prefix="ppmt", tags=["financial", "PPMT"], formula="=PPMT(0.05, 1, 10, 1000)")
+    _add_case(cases, prefix="ppmt", tags=["financial", "PPMT"], formula="=PPMT(0.05, 10, 10, 1000, 0, 1)")
     _add_case(cases, prefix="nper", tags=["financial", "NPER"], formula="=NPER(0, -10, 100)")
     _add_case(cases, prefix="nper", tags=["financial", "NPER"], formula="=NPER(0.05, -100, 1000)")
     _add_case(cases, prefix="rate", tags=["financial", "RATE"], formula="=RATE(10, -100, 1000)")
     _add_case(cases, prefix="rate", tags=["financial", "RATE"], formula="=RATE(12, -50, 500)")
+    _add_case(cases, prefix="effect", tags=["financial", "EFFECT"], formula="=EFFECT(0.1,12)")
+    _add_case(cases, prefix="nominal", tags=["financial", "NOMINAL"], formula="=NOMINAL(0.1,12)")
+    _add_case(cases, prefix="rri", tags=["financial", "RRI"], formula="=RRI(10,-100,200)")
     _add_case(cases, prefix="sln", tags=["financial", "SLN"], formula="=SLN(30, 0, 3)")
     _add_case(cases, prefix="syd", tags=["financial", "SYD"], formula="=SYD(30, 0, 3, 1)")
     _add_case(cases, prefix="ddb", tags=["financial", "DDB"], formula="=DDB(1000, 100, 5, 1)")
@@ -820,6 +1281,14 @@ def generate_cases() -> dict[str, Any]:
         prefix="irr",
         tags=["financial", "IRR"],
         formula="=IRR(A1:A4)",
+        inputs=cf_inputs,
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="mirr",
+        tags=["financial", "MIRR"],
+        formula="=MIRR(A1:A4,0.1,0.12)",
         inputs=cf_inputs,
         output_cell="C1",
     )
@@ -894,6 +1363,204 @@ def generate_cases() -> dict[str, Any]:
         description="Dynamic array function (Excel 365+)",
     )
 
+    # FILTER / SORT / UNIQUE (simple spill cases)
+    filter_inputs = [CellInput(f"A{i}", i) for i in range(1, 6)]
+    _add_case(
+        cases,
+        prefix="spill_filter",
+        tags=["spill", "FILTER", "dynarr"],
+        formula="=FILTER(A1:A5,A1:A5>2)",
+        inputs=filter_inputs,
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="spill_filter",
+        tags=["spill", "FILTER", "dynarr"],
+        formula='=FILTER(A1:A5,A1:A5>10,"none")',
+        inputs=filter_inputs,
+        output_cell="C1",
+        description="if_empty fallback (no matches)",
+    )
+
+    sort_inputs = [CellInput("A1", 3), CellInput("A2", 1), CellInput("A3", 2)]
+    _add_case(
+        cases,
+        prefix="spill_sort",
+        tags=["spill", "SORT", "dynarr"],
+        formula="=SORT(A1:A3)",
+        inputs=sort_inputs,
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="spill_sort",
+        tags=["spill", "SORT", "dynarr"],
+        formula="=SORT(A1:A3,1,-1)",
+        inputs=sort_inputs,
+        output_cell="C1",
+    )
+
+    unique_inputs = [
+        CellInput("A1", 1),
+        CellInput("A2", 1),
+        CellInput("A3", 2),
+        CellInput("A4", 3),
+        CellInput("A5", 3),
+        CellInput("A6", 3),
+    ]
+    _add_case(
+        cases,
+        prefix="spill_unique",
+        tags=["spill", "UNIQUE", "dynarr"],
+        formula="=UNIQUE(A1:A6)",
+        inputs=unique_inputs,
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="spill_unique",
+        tags=["spill", "UNIQUE", "dynarr"],
+        formula="=UNIQUE(A1:A6,FALSE,TRUE)",
+        inputs=unique_inputs,
+        output_cell="C1",
+        description="Return values that occur exactly once",
+    )
+
+    # Dynamic array helpers / shape functions (function-catalog backfill)
+    _add_case(cases, prefix="choose", tags=["lookup", "CHOOSE"], formula='=CHOOSE(2,"one","two","three")')
+    _add_case(
+        cases,
+        prefix="choosecols",
+        tags=["spill", "CHOOSECOLS", "dynarr"],
+        formula="=CHOOSECOLS({1,2,3;4,5,6},1,3)",
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="chooserows",
+        tags=["spill", "CHOOSEROWS", "dynarr"],
+        formula="=CHOOSEROWS({1,2;3,4;5,6},1,3)",
+        output_cell="C1",
+    )
+    _add_case(cases, prefix="hstack", tags=["spill", "HSTACK", "dynarr"], formula="=HSTACK({1,2},{3,4})", output_cell="C1")
+    _add_case(cases, prefix="vstack", tags=["spill", "VSTACK", "dynarr"], formula="=VSTACK({1,2},{3,4})", output_cell="C1")
+    _add_case(cases, prefix="take", tags=["spill", "TAKE", "dynarr"], formula="=TAKE({1,2,3;4,5,6},1,2)", output_cell="C1")
+    _add_case(cases, prefix="drop", tags=["spill", "DROP", "dynarr"], formula="=DROP({1,2,3;4,5,6},1,1)", output_cell="C1")
+    _add_case(cases, prefix="tocol", tags=["spill", "TOCOL", "dynarr"], formula="=TOCOL({1,2;3,4})", output_cell="C1")
+    _add_case(cases, prefix="torow", tags=["spill", "TOROW", "dynarr"], formula="=TOROW({1,2;3,4})", output_cell="C1")
+    _add_case(cases, prefix="wraprows", tags=["spill", "WRAPROWS", "dynarr"], formula="=WRAPROWS({1,2,3,4,5,6},2)", output_cell="C1")
+    _add_case(cases, prefix="wrapcols", tags=["spill", "WRAPCOLS", "dynarr"], formula="=WRAPCOLS({1,2,3,4,5,6},2)", output_cell="C1")
+    _add_case(
+        cases,
+        prefix="expand",
+        tags=["spill", "EXPAND", "dynarr"],
+        formula="=EXPAND({1,2;3,4},3,3,0)",
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="sortby",
+        tags=["spill", "SORTBY", "dynarr"],
+        formula='=SORTBY({"b";"a";"c"},{2;1;3})',
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="makearray",
+        tags=["spill", "MAKEARRAY", "LAMBDA", "dynarr"],
+        formula="=MAKEARRAY(2,3,LAMBDA(r,c,r*10+c))",
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="map",
+        tags=["spill", "MAP", "LAMBDA", "dynarr"],
+        formula="=MAP({1,2,3},LAMBDA(x,x*2))",
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="reduce",
+        tags=["spill", "REDUCE", "LAMBDA", "dynarr"],
+        formula="=REDUCE(0,{1,2,3},LAMBDA(acc,x,acc+x))",
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="scan",
+        tags=["spill", "SCAN", "LAMBDA", "dynarr"],
+        formula="=SCAN(0,{1,2,3},LAMBDA(acc,x,acc+x))",
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="byrow",
+        tags=["spill", "BYROW", "LAMBDA", "dynarr"],
+        formula="=BYROW({1,2;3,4},LAMBDA(r,SUM(r)))",
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="bycol",
+        tags=["spill", "BYCOL", "LAMBDA", "dynarr"],
+        formula="=BYCOL({1,2;3,4},LAMBDA(c,SUM(c)))",
+        output_cell="C1",
+    )
+    _add_case(cases, prefix="let", tags=["lambda", "LET"], formula="=LET(a,2,b,a*3,c,b+1,c)")
+    _add_case(cases, prefix="lambda", tags=["lambda", "LAMBDA"], formula="=LAMBDA(x,x+1)(2)")
+    _add_case(
+        cases,
+        prefix="isomitted",
+        tags=["lambda", "LAMBDA", "ISOMITTED"],
+        formula="=LAMBDA(x,y,ISOMITTED(y))(1)",
+        description="Missing LAMBDA arguments bind as blank and are detectable via ISOMITTED",
+    )
+
+    # ------------------------------------------------------------------
+    # Information functions
+    # ------------------------------------------------------------------
+    _add_case(cases, prefix="isblank", tags=["info", "ISBLANK"], formula="=ISBLANK(A1)")
+    _add_case(
+        cases,
+        prefix="isblank",
+        tags=["info", "ISBLANK"],
+        formula="=ISBLANK(A1)",
+        inputs=[CellInput("A1", "")],
+        description="Empty string is not considered blank",
+    )
+
+    _add_case(cases, prefix="isnumber", tags=["info", "ISNUMBER"], formula="=ISNUMBER(A1)", inputs=[CellInput("A1", 1)])
+    _add_case(cases, prefix="isnumber", tags=["info", "ISNUMBER"], formula="=ISNUMBER(A1)", inputs=[CellInput("A1", "1")])
+    _add_case(cases, prefix="istext", tags=["info", "ISTEXT"], formula="=ISTEXT(A1)", inputs=[CellInput("A1", "x")])
+    _add_case(cases, prefix="istext", tags=["info", "ISTEXT"], formula="=ISTEXT(A1)", inputs=[CellInput("A1", 1)])
+    _add_case(cases, prefix="islogical", tags=["info", "ISLOGICAL"], formula="=ISLOGICAL(A1)", inputs=[CellInput("A1", True)])
+    _add_case(cases, prefix="islogical", tags=["info", "ISLOGICAL"], formula="=ISLOGICAL(A1)", inputs=[CellInput("A1", 0)])
+
+    _add_case(cases, prefix="iserror", tags=["info", "ISERROR"], formula="=ISERROR(A1)", inputs=[CellInput("A1", formula="=1/0")])
+    _add_case(cases, prefix="iserror", tags=["info", "ISERROR"], formula="=ISERROR(A1)", inputs=[CellInput("A1", 1)])
+    _add_case(cases, prefix="iserr", tags=["info", "ISERR"], formula="=ISERR(A1)", inputs=[CellInput("A1", formula="=1/0")])
+    _add_case(cases, prefix="iserr", tags=["info", "ISERR"], formula="=ISERR(A1)", inputs=[CellInput("A1", formula="=NA()")])
+    _add_case(cases, prefix="isna", tags=["info", "ISNA"], formula="=ISNA(A1)", inputs=[CellInput("A1", formula="=NA()")])
+    _add_case(cases, prefix="isna", tags=["info", "ISNA"], formula="=ISNA(A1)", inputs=[CellInput("A1", formula="=1/0")])
+
+    _add_case(cases, prefix="errtype", tags=["info", "ERROR.TYPE"], formula="=ERROR.TYPE(1/0)")
+    _add_case(cases, prefix="errtype", tags=["info", "ERROR.TYPE"], formula="=ERROR.TYPE(NA())")
+    _add_case(cases, prefix="errtype", tags=["info", "ERROR.TYPE", "error"], formula="=ERROR.TYPE(1)")
+
+    _add_case(cases, prefix="type", tags=["info", "TYPE"], formula="=TYPE(1)")
+    _add_case(cases, prefix="type", tags=["info", "TYPE"], formula='=TYPE("x")')
+    _add_case(cases, prefix="type", tags=["info", "TYPE"], formula="=TYPE(TRUE)")
+    _add_case(cases, prefix="type", tags=["info", "TYPE"], formula="=TYPE(NA())")
+
+    _add_case(cases, prefix="n", tags=["info", "N"], formula="=N(TRUE)")
+    _add_case(cases, prefix="n", tags=["info", "N"], formula='=N("x")')
+    _add_case(cases, prefix="n", tags=["info", "N"], formula="=N(NA())")
+
+    _add_case(cases, prefix="t", tags=["info", "T"], formula='=T("x")')
+    _add_case(cases, prefix="t", tags=["info", "T"], formula="=T(1)")
+    _add_case(cases, prefix="t", tags=["info", "T"], formula="=T(NA())")
+
     # ------------------------------------------------------------------
     # Explicit error values
     # ------------------------------------------------------------------
@@ -903,7 +1570,7 @@ def generate_cases() -> dict[str, Any]:
 
     return {
         "schemaVersion": 1,
-        "caseSet": "p0-p1-curated-1k",
+        "caseSet": "p0-p1-curated-2k",
         "defaultSheet": "Sheet1",
         "cases": cases,
     }

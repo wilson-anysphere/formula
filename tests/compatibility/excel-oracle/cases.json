@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "caseSet": "p0-p1-curated-1k",
+  "caseSet": "p0-p1-curated-2k",
   "defaultSheet": "Sheet1",
   "cases": [
     {
@@ -12369,6 +12369,238 @@
       "id": "rounddown_7899b049fc1c"
     },
     {
+      "formula": "=PI()",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "PI"
+      ],
+      "id": "pi_e9223e20070f"
+    },
+    {
+      "formula": "=SIN(PI())",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SIN",
+        "PI"
+      ],
+      "id": "sin_54b69db3665f"
+    },
+    {
+      "formula": "=COS(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COS"
+      ],
+      "id": "cos_e984aae7a2ad"
+    },
+    {
+      "formula": "=TAN(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "TAN"
+      ],
+      "id": "tan_58b57e0add5c"
+    },
+    {
+      "formula": "=ACOS(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ACOS"
+      ],
+      "id": "acos_b9d31a44c297"
+    },
+    {
+      "formula": "=ASIN(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ASIN"
+      ],
+      "id": "asin_3ff370d4077f"
+    },
+    {
+      "formula": "=ATAN(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ATAN"
+      ],
+      "id": "atan_2105c1558c07"
+    },
+    {
+      "formula": "=ATAN2(1,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ATAN2"
+      ],
+      "id": "atan2_586acbd1e15a"
+    },
+    {
+      "formula": "=LN(EXP(1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "EXP",
+        "LN"
+      ],
+      "id": "exp_ln_da02be2fc11f"
+    },
+    {
+      "formula": "=LOG(100,10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "LOG"
+      ],
+      "id": "log_05ac5d0f9951"
+    },
+    {
+      "formula": "=LOG10(100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "LOG10"
+      ],
+      "id": "log10_143ba4a7bba4"
+    },
+    {
+      "formula": "=POWER(2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "POWER"
+      ],
+      "id": "power_9a8e793aecf8"
+    },
+    {
+      "formula": "=SQRT(4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SQRT"
+      ],
+      "id": "sqrt_7c4262b53ba6"
+    },
+    {
+      "formula": "=PRODUCT(1,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "PRODUCT"
+      ],
+      "id": "product_df50002d4743"
+    },
+    {
+      "formula": "=SUMSQ(1,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SUMSQ"
+      ],
+      "id": "sumsq_9cfa5532ebae"
+    },
+    {
+      "formula": "=TRUNC(3.14159,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "TRUNC"
+      ],
+      "id": "trunc_aa6a91d8ce3a"
+    },
+    {
+      "formula": "=CEILING(1.2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "CEILING"
+      ],
+      "id": "ceiling_27d3566810fb"
+    },
+    {
+      "formula": "=CEILING.MATH(1.2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "CEILING.MATH"
+      ],
+      "id": "ceiling_math_a293041f9e93"
+    },
+    {
+      "formula": "=CEILING.PRECISE(1.2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "CEILING.PRECISE"
+      ],
+      "id": "ceiling_precise_706384e29ad3"
+    },
+    {
+      "formula": "=ISO.CEILING(1.2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ISO.CEILING"
+      ],
+      "id": "iso_ceiling_cfc56a1fe0da"
+    },
+    {
+      "formula": "=FLOOR(1.2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "FLOOR"
+      ],
+      "id": "floor_401d603d0b85"
+    },
+    {
+      "formula": "=FLOOR.MATH(1.2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "FLOOR.MATH"
+      ],
+      "id": "floor_math_361e2ddf5272"
+    },
+    {
+      "formula": "=FLOOR.PRECISE(1.2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "FLOOR.PRECISE"
+      ],
+      "id": "floor_precise_50e867625242"
+    },
+    {
       "formula": "=SUM(A1:A3)",
       "outputCell": "C1",
       "inputs": [
@@ -15173,6 +15405,311 @@
         "coercion"
       ],
       "id": "sum_rng_text_9ca3ab1db1c7"
+    },
+    {
+      "formula": "=COUNT(A1:A6)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "x"
+        },
+        {
+          "cell": "A3",
+          "value": true
+        },
+        {
+          "cell": "A4",
+          "value": null
+        },
+        {
+          "cell": "A5",
+          "value": ""
+        },
+        {
+          "cell": "A6",
+          "formula": "=1/0"
+        }
+      ],
+      "tags": [
+        "agg",
+        "COUNT"
+      ],
+      "id": "count_9f09ddbe2624"
+    },
+    {
+      "formula": "=COUNTA(A1:A6)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "x"
+        },
+        {
+          "cell": "A3",
+          "value": true
+        },
+        {
+          "cell": "A4",
+          "value": null
+        },
+        {
+          "cell": "A5",
+          "value": ""
+        },
+        {
+          "cell": "A6",
+          "formula": "=1/0"
+        }
+      ],
+      "tags": [
+        "agg",
+        "COUNTA"
+      ],
+      "id": "counta_fe713a7845f9"
+    },
+    {
+      "formula": "=COUNTBLANK(A1:A6)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "x"
+        },
+        {
+          "cell": "A3",
+          "value": true
+        },
+        {
+          "cell": "A4",
+          "value": null
+        },
+        {
+          "cell": "A5",
+          "value": ""
+        },
+        {
+          "cell": "A6",
+          "formula": "=1/0"
+        }
+      ],
+      "tags": [
+        "agg",
+        "COUNTBLANK"
+      ],
+      "id": "countblank_a7893d156cfc"
+    },
+    {
+      "formula": "=COUNTIF(A1:A4,\">2\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "A4",
+          "value": 4
+        }
+      ],
+      "tags": [
+        "agg",
+        "COUNTIF"
+      ],
+      "id": "countif_0e40b37ffcca"
+    },
+    {
+      "formula": "=COUNTIF(A1:A5,\"ap*\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "banana"
+        },
+        {
+          "cell": "A3",
+          "value": "apricot"
+        },
+        {
+          "cell": "A4",
+          "value": null
+        },
+        {
+          "cell": "A5",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "agg",
+        "COUNTIF"
+      ],
+      "id": "countif_354947e9136d"
+    },
+    {
+      "formula": "=COUNTIF(A1:A5,\"\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "banana"
+        },
+        {
+          "cell": "A3",
+          "value": "apricot"
+        },
+        {
+          "cell": "A4",
+          "value": null
+        },
+        {
+          "cell": "A5",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "agg",
+        "COUNTIF"
+      ],
+      "description": "Blank criteria matches truly blank cells and empty-string cells",
+      "id": "countif_8975e0252359"
+    },
+    {
+      "formula": "=SUMPRODUCT(A1:A3,B1:B3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B1",
+          "value": 4
+        },
+        {
+          "cell": "B2",
+          "value": 5
+        },
+        {
+          "cell": "B3",
+          "value": 6
+        }
+      ],
+      "tags": [
+        "agg",
+        "SUMPRODUCT"
+      ],
+      "id": "sumproduct_7f05b78508e6"
+    },
+    {
+      "formula": "=SUMPRODUCT(A1:A2,B1:B2)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "B1",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "agg",
+        "SUMPRODUCT",
+        "error"
+      ],
+      "description": "SUMPRODUCT propagates errors from any element",
+      "id": "sumproduct_cfdb87b4a2b9"
+    },
+    {
+      "formula": "=SUBTOTAL(9,A1:A3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "agg",
+        "SUBTOTAL"
+      ],
+      "id": "subtotal_19eeeb0a7aa5"
+    },
+    {
+      "formula": "=AGGREGATE(9,4,A1:A3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "agg",
+        "AGGREGATE"
+      ],
+      "id": "aggregate_efc13f8c8c2e"
     },
     {
       "formula": "=COUNTIF(A1:A15,\"ap*\")",
@@ -18539,6 +19076,526 @@
       "id": "criteria_averageifs_24e89939805d"
     },
     {
+      "formula": "=AVEDEV({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "AVEDEV"
+      ],
+      "id": "avedev_729230866b90"
+    },
+    {
+      "formula": "=AVERAGEA({1,\"x\",TRUE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "AVERAGEA"
+      ],
+      "id": "averagea_203a425dd151"
+    },
+    {
+      "formula": "=MAXA({1,\"x\",TRUE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "MAXA"
+      ],
+      "id": "maxa_6170f7a8f5cc"
+    },
+    {
+      "formula": "=MINA({1,\"x\",FALSE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "MINA"
+      ],
+      "id": "mina_298dcaa2eea7"
+    },
+    {
+      "formula": "=MEDIAN({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "MEDIAN"
+      ],
+      "id": "median_c5f2ff5a2da5"
+    },
+    {
+      "formula": "=MODE({1,1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "MODE"
+      ],
+      "id": "mode_e5db8590c2d7"
+    },
+    {
+      "formula": "=MODE.SNGL({1,1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "MODE.SNGL"
+      ],
+      "id": "mode_sngl_052f19e1a8a4"
+    },
+    {
+      "formula": "=MODE.MULT({1,1,2,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "MODE.MULT"
+      ],
+      "id": "mode_mult_47358d122c9d"
+    },
+    {
+      "formula": "=DEVSQ({1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "DEVSQ"
+      ],
+      "id": "devsq_c4977316e91e"
+    },
+    {
+      "formula": "=GEOMEAN({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "GEOMEAN"
+      ],
+      "id": "geomean_611ed7533d0f"
+    },
+    {
+      "formula": "=HARMEAN({1,2,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "HARMEAN"
+      ],
+      "id": "harmean_5aea8861994a"
+    },
+    {
+      "formula": "=LARGE({1,2,3,4},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "LARGE"
+      ],
+      "id": "large_de18bd067da8"
+    },
+    {
+      "formula": "=SMALL({1,2,3,4},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "SMALL"
+      ],
+      "id": "small_e5fdf46bf122"
+    },
+    {
+      "formula": "=PERCENTILE({1,2,3,4},0.25)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PERCENTILE"
+      ],
+      "id": "percentile_9f408f158b44"
+    },
+    {
+      "formula": "=PERCENTILE.INC({1,2,3,4},0.25)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PERCENTILE.INC"
+      ],
+      "id": "percentile_inc_1a1795251429"
+    },
+    {
+      "formula": "=PERCENTILE.EXC({1,2,3,4},0.25)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PERCENTILE.EXC"
+      ],
+      "id": "percentile_exc_8cb094597481"
+    },
+    {
+      "formula": "=QUARTILE({1,2,3,4},1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "QUARTILE"
+      ],
+      "id": "quartile_6aed64177c5d"
+    },
+    {
+      "formula": "=QUARTILE.INC({1,2,3,4},1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "QUARTILE.INC"
+      ],
+      "id": "quartile_inc_30e29aa20c59"
+    },
+    {
+      "formula": "=QUARTILE.EXC({1,2,3,4},1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "QUARTILE.EXC"
+      ],
+      "id": "quartile_exc_332afa5a06f9"
+    },
+    {
+      "formula": "=RANK(2,{1,2,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "RANK"
+      ],
+      "id": "rank_ec90f6aff27e"
+    },
+    {
+      "formula": "=RANK.EQ(2,{1,2,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "RANK.EQ"
+      ],
+      "id": "rank_eq_363a4ada7b54"
+    },
+    {
+      "formula": "=RANK.AVG(2,{1,2,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "RANK.AVG"
+      ],
+      "id": "rank_avg_74e45d3e499f"
+    },
+    {
+      "formula": "=STDEV({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "STDEV"
+      ],
+      "id": "stdev_0a96f1384a88"
+    },
+    {
+      "formula": "=STDEV.S({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "STDEV.S"
+      ],
+      "id": "stdev_s_cd61844eb1a4"
+    },
+    {
+      "formula": "=STDEV.P({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "STDEV.P"
+      ],
+      "id": "stdev_p_83e540d2248d"
+    },
+    {
+      "formula": "=STDEVA({1,2,3,TRUE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "STDEVA"
+      ],
+      "id": "stdeva_4ae3feadb2ae"
+    },
+    {
+      "formula": "=STDEVP({1,2,3,TRUE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "STDEVP"
+      ],
+      "id": "stdevp_ae18309dd22c"
+    },
+    {
+      "formula": "=STDEVPA({1,2,3,TRUE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "STDEVPA"
+      ],
+      "id": "stdevpa_4afcab335718"
+    },
+    {
+      "formula": "=VAR({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "VAR"
+      ],
+      "id": "var_6e886c159a59"
+    },
+    {
+      "formula": "=VAR.S({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "VAR.S"
+      ],
+      "id": "var_s_19bb98b5e80b"
+    },
+    {
+      "formula": "=VAR.P({1,2,3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "VAR.P"
+      ],
+      "id": "var_p_44e420d97f60"
+    },
+    {
+      "formula": "=VARA({1,2,3,TRUE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "VARA"
+      ],
+      "id": "vara_d962cdb39f16"
+    },
+    {
+      "formula": "=VARP({1,2,3,TRUE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "VARP"
+      ],
+      "id": "varp_aac6b8c95a96"
+    },
+    {
+      "formula": "=VARPA({1,2,3,TRUE})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "VARPA"
+      ],
+      "id": "varpa_89cbcaacc70c"
+    },
+    {
+      "formula": "=TRIMMEAN({1,2,3,100},0.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "TRIMMEAN"
+      ],
+      "id": "trimmean_ded6b994d483"
+    },
+    {
+      "formula": "=CORREL({1,2,3},{1,5,7})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "CORREL"
+      ],
+      "id": "correl_77381123d78f"
+    },
+    {
+      "formula": "=PEARSON({1,2,3},{1,5,7})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PEARSON"
+      ],
+      "id": "pearson_4925235eaff7"
+    },
+    {
+      "formula": "=COVAR({1,2,3},{1,5,7})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "COVAR"
+      ],
+      "id": "covar_4e8f5a0cfbf7"
+    },
+    {
+      "formula": "=COVARIANCE.P({1,2,3},{1,5,7})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "COVARIANCE.P"
+      ],
+      "id": "cov_p_5d3954a8f1e1"
+    },
+    {
+      "formula": "=COVARIANCE.S({1,2,3},{1,5,7})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "COVARIANCE.S"
+      ],
+      "id": "cov_s_0e5594a412ed"
+    },
+    {
+      "formula": "=RSQ({1,2,3},{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "RSQ"
+      ],
+      "id": "rsq_42efc8727d8e"
+    },
+    {
+      "formula": "=SLOPE({1,2,3},{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "SLOPE"
+      ],
+      "id": "slope_bdaedaabe775"
+    },
+    {
+      "formula": "=INTERCEPT({1,2,3},{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "INTERCEPT"
+      ],
+      "id": "intercept_9e8040c353e5"
+    },
+    {
+      "formula": "=FORECAST(4,{1,2,3},{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST"
+      ],
+      "id": "forecast_36d0e747e1aa"
+    },
+    {
+      "formula": "=FORECAST.LINEAR(4,{1,2,3},{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.LINEAR"
+      ],
+      "id": "forecast_linear_484b837287c3"
+    },
+    {
+      "formula": "=MAXIFS(A1:A3,B1:B3,\"A\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 10
+        },
+        {
+          "cell": "A2",
+          "value": 20
+        },
+        {
+          "cell": "A3",
+          "value": 30
+        },
+        {
+          "cell": "B1",
+          "value": "A"
+        },
+        {
+          "cell": "B2",
+          "value": "B"
+        },
+        {
+          "cell": "B3",
+          "value": "A"
+        }
+      ],
+      "tags": [
+        "agg",
+        "MAXIFS"
+      ],
+      "id": "maxifs_f0ddb81e2295"
+    },
+    {
+      "formula": "=MINIFS(A1:A3,B1:B3,\"A\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 10
+        },
+        {
+          "cell": "A2",
+          "value": 20
+        },
+        {
+          "cell": "A3",
+          "value": 30
+        },
+        {
+          "cell": "B1",
+          "value": "A"
+        },
+        {
+          "cell": "B2",
+          "value": "B"
+        },
+        {
+          "cell": "B3",
+          "value": "A"
+        }
+      ],
+      "tags": [
+        "agg",
+        "MINIFS"
+      ],
+      "id": "minifs_b317e8eaff04"
+    },
+    {
       "formula": "=AND(A1,B1)",
       "outputCell": "C1",
       "inputs": [
@@ -18947,6 +20004,83 @@
         "IFERROR"
       ],
       "id": "iferror_08c140badd5e"
+    },
+    {
+      "formula": "=IFNA(A1,42)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "logical",
+        "IFNA"
+      ],
+      "id": "ifna_dabfb488d22e"
+    },
+    {
+      "formula": "=IFNA(A1,42)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=1/0"
+        }
+      ],
+      "tags": [
+        "logical",
+        "IFNA",
+        "error"
+      ],
+      "description": "IFNA only catches #N/A (other errors propagate)",
+      "id": "ifna_3c797fbc0eca"
+    },
+    {
+      "formula": "=IFNA(A1,42)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "logical",
+        "IFNA"
+      ],
+      "id": "ifna_d26e3011b85b"
+    },
+    {
+      "formula": "=IFS(FALSE,1,TRUE,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "logical",
+        "IFS"
+      ],
+      "id": "ifs_007c783c5f2d"
+    },
+    {
+      "formula": "=SWITCH(2,1,\"one\",2,\"two\",\"other\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "logical",
+        "SWITCH"
+      ],
+      "id": "switch_57f7bf60514f"
+    },
+    {
+      "formula": "=XOR(TRUE,FALSE,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "logical",
+        "XOR"
+      ],
+      "id": "xor_5a4c6b2b9658"
     },
     {
       "formula": "=LEN(A1)",
@@ -23217,6 +24351,341 @@
       "id": "substitute_3edbccf1f491"
     },
     {
+      "formula": "=CLEAN(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "a\u0000\tb\u001fcd"
+        }
+      ],
+      "tags": [
+        "text",
+        "CLEAN"
+      ],
+      "description": "CLEAN strips non-printable ASCII control codes",
+      "id": "clean_75159f5bcda6"
+    },
+    {
+      "formula": "=TRIM(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "  a   b  "
+        }
+      ],
+      "tags": [
+        "text",
+        "TRIM"
+      ],
+      "id": "trim_228d3bed7711"
+    },
+    {
+      "formula": "=TRIM(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "\ta  b"
+        }
+      ],
+      "tags": [
+        "text",
+        "TRIM"
+      ],
+      "description": "TRIM collapses spaces but preserves tabs",
+      "id": "trim_e63a72424623"
+    },
+    {
+      "formula": "=UPPER(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Abc"
+        }
+      ],
+      "tags": [
+        "text",
+        "UPPER"
+      ],
+      "id": "upper_600d139057d8"
+    },
+    {
+      "formula": "=LOWER(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "AbC"
+        }
+      ],
+      "tags": [
+        "text",
+        "LOWER"
+      ],
+      "id": "lower_9ff2646ffb17"
+    },
+    {
+      "formula": "=PROPER(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "hELLO wORLD"
+        }
+      ],
+      "tags": [
+        "text",
+        "PROPER"
+      ],
+      "id": "proper_5fc2310ce4f7"
+    },
+    {
+      "formula": "=EXACT(A1,B1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Hello"
+        },
+        {
+          "cell": "B1",
+          "value": "hello"
+        }
+      ],
+      "tags": [
+        "text",
+        "EXACT"
+      ],
+      "id": "exact_a96df11eb4ca"
+    },
+    {
+      "formula": "=EXACT(A1,B1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Hello"
+        },
+        {
+          "cell": "B1",
+          "value": "Hello"
+        }
+      ],
+      "tags": [
+        "text",
+        "EXACT"
+      ],
+      "id": "exact_39ab6ee6d397"
+    },
+    {
+      "formula": "=REPLACE(\"abcdef\",2,3,\"X\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "REPLACE"
+      ],
+      "id": "replace_d163fc64b34f"
+    },
+    {
+      "formula": "=REPLACE(\"abc\",5,1,\"X\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "REPLACE"
+      ],
+      "id": "replace_fb2cb708e6ff"
+    },
+    {
+      "formula": "=CONCAT(A1:A2,\"c\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "a"
+        },
+        {
+          "cell": "A2",
+          "value": "b"
+        }
+      ],
+      "tags": [
+        "text",
+        "CONCAT"
+      ],
+      "id": "concat_new_577bb69cae3a"
+    },
+    {
+      "formula": "=TEXTJOIN(\",\",TRUE,A1:A4)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "a"
+        },
+        {
+          "cell": "A2",
+          "value": null
+        },
+        {
+          "cell": "A3",
+          "value": ""
+        },
+        {
+          "cell": "A4",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXTJOIN"
+      ],
+      "id": "textjoin_6f63b2cb1f9b"
+    },
+    {
+      "formula": "=TEXTJOIN(\",\",FALSE,A1:A4)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "a"
+        },
+        {
+          "cell": "A2",
+          "value": null
+        },
+        {
+          "cell": "A3",
+          "value": ""
+        },
+        {
+          "cell": "A4",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXTJOIN"
+      ],
+      "id": "textjoin_e6e9683e4fb4"
+    },
+    {
+      "formula": "=TEXT(1234.567,\"#,##0.00\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "TEXT"
+      ],
+      "id": "text_fmt_ab34fd8b4dbc"
+    },
+    {
+      "formula": "=TEXT(1.23,\"0%\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "TEXT"
+      ],
+      "id": "text_pct_a4552c585ed2"
+    },
+    {
+      "formula": "=TEXT(-1,\"$0.00\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "TEXT"
+      ],
+      "id": "text_cur_99ef77d58413"
+    },
+    {
+      "formula": "=VALUE(\"1,234.5\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "VALUE"
+      ],
+      "id": "value_735ce6725faf"
+    },
+    {
+      "formula": "=VALUE(\"(1,000)\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "VALUE"
+      ],
+      "id": "value_a5ec6ad8dd6a"
+    },
+    {
+      "formula": "=VALUE(\"10%\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "VALUE"
+      ],
+      "id": "value_69772dccf8ed"
+    },
+    {
+      "formula": "=VALUE(\"nope\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "VALUE",
+        "error"
+      ],
+      "id": "value_603d4b07e78b"
+    },
+    {
+      "formula": "=NUMBERVALUE(\"1.234,5\", \",\", \".\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "NUMBERVALUE"
+      ],
+      "id": "numbervalue_d44c1685d624"
+    },
+    {
+      "formula": "=NUMBERVALUE(\"1,23\", \",\", \",\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "NUMBERVALUE",
+        "error"
+      ],
+      "id": "numbervalue_d7fcc4e37e18"
+    },
+    {
+      "formula": "=DOLLAR(1234.567,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "DOLLAR"
+      ],
+      "id": "dollar_226c0db3e4ad"
+    },
+    {
+      "formula": "=DOLLAR(-1234.567,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "DOLLAR"
+      ],
+      "id": "dollar_459328d3832b"
+    },
+    {
       "formula": "=DATE(A1,B1,C1)",
       "outputCell": "D1",
       "inputs": [
@@ -23859,6 +25328,374 @@
         "DAY"
       ],
       "id": "day_5e6979c6f9b8"
+    },
+    {
+      "formula": "=DATEVALUE(\"2020-01-01\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "DATEVALUE"
+      ],
+      "id": "datevalue_ba2ee4064b7b"
+    },
+    {
+      "formula": "=DATEVALUE(\"nope\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "DATEVALUE",
+        "error"
+      ],
+      "id": "datevalue_d01424d31ce4"
+    },
+    {
+      "formula": "=TIME(1,30,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "TIME"
+      ],
+      "id": "time_b82949533245"
+    },
+    {
+      "formula": "=TIME(24,0,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "TIME"
+      ],
+      "id": "time_2b1fbfe800a2"
+    },
+    {
+      "formula": "=TIME(-1,0,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "TIME",
+        "error"
+      ],
+      "id": "time_03179a5aba4a"
+    },
+    {
+      "formula": "=TIMEVALUE(\"1:30\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "TIMEVALUE"
+      ],
+      "id": "timevalue_6c44107f616c"
+    },
+    {
+      "formula": "=TIMEVALUE(\"1:30 PM\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "TIMEVALUE"
+      ],
+      "id": "timevalue_ada371f4f92f"
+    },
+    {
+      "formula": "=TIMEVALUE(\"nope\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "TIMEVALUE",
+        "error"
+      ],
+      "id": "timevalue_873e03f888d9"
+    },
+    {
+      "formula": "=HOUR(TIME(1,2,3))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "HOUR"
+      ],
+      "id": "hour_768376cb2019"
+    },
+    {
+      "formula": "=MINUTE(TIME(1,2,3))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "MINUTE"
+      ],
+      "id": "minute_8fbc25e08c12"
+    },
+    {
+      "formula": "=SECOND(TIME(1,2,3))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "SECOND"
+      ],
+      "id": "second_fa203780c6d1"
+    },
+    {
+      "formula": "=EDATE(DATE(2020,1,31),1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "EDATE"
+      ],
+      "id": "edate_529a1818ce2e"
+    },
+    {
+      "formula": "=EOMONTH(DATE(2020,1,15),0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "EOMONTH"
+      ],
+      "id": "eomonth_68316629af7e"
+    },
+    {
+      "formula": "=EOMONTH(DATE(2020,1,15),1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "EOMONTH"
+      ],
+      "id": "eomonth_49df51852502"
+    },
+    {
+      "formula": "=WEEKDAY(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WEEKDAY"
+      ],
+      "id": "weekday_59a75f446c61"
+    },
+    {
+      "formula": "=WEEKDAY(1,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WEEKDAY"
+      ],
+      "id": "weekday_81444b141dcb"
+    },
+    {
+      "formula": "=WEEKDAY(1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WEEKDAY",
+        "error"
+      ],
+      "id": "weekday_d55a248b25ad"
+    },
+    {
+      "formula": "=WEEKNUM(DATE(2020,1,1),1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WEEKNUM"
+      ],
+      "id": "weeknum_b0952bf19f4c"
+    },
+    {
+      "formula": "=WEEKNUM(DATE(2020,1,5),2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WEEKNUM"
+      ],
+      "id": "weeknum_19acf10f0eb5"
+    },
+    {
+      "formula": "=WEEKNUM(DATE(2021,1,1),21)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WEEKNUM"
+      ],
+      "id": "weeknum_fb100e235e28"
+    },
+    {
+      "formula": "=WEEKNUM(1,9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WEEKNUM",
+        "error"
+      ],
+      "id": "weeknum_8264e90553f7"
+    },
+    {
+      "formula": "=WORKDAY(DATE(2020,1,1),1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WORKDAY"
+      ],
+      "id": "workday_a443c770b755"
+    },
+    {
+      "formula": "=WORKDAY(DATE(2020,1,1),1,DATE(2020,1,2))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WORKDAY"
+      ],
+      "id": "workday_014c6f094cbf"
+    },
+    {
+      "formula": "=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "NETWORKDAYS"
+      ],
+      "id": "networkdays_3fc4938891bb"
+    },
+    {
+      "formula": "=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10),{DATE(2020,1,2),DATE(2020,1,3)})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "NETWORKDAYS"
+      ],
+      "id": "networkdays_38cfe339ec60"
+    },
+    {
+      "formula": "=WORKDAY.INTL(DATE(2020,1,3),1,11)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WORKDAY.INTL"
+      ],
+      "id": "workday_intl_7d2dd7fd04b2"
+    },
+    {
+      "formula": "=WORKDAY.INTL(DATE(2020,1,3),1,99)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WORKDAY.INTL",
+        "error"
+      ],
+      "id": "workday_intl_88a482e17134"
+    },
+    {
+      "formula": "=WORKDAY.INTL(DATE(2020,1,3),1,\"abc\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "WORKDAY.INTL",
+        "error"
+      ],
+      "id": "workday_intl_3ac51545e51c"
+    },
+    {
+      "formula": "=NETWORKDAYS.INTL(DATE(2020,1,1),DATE(2020,1,10),11)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "NETWORKDAYS.INTL"
+      ],
+      "id": "networkdays_intl_bb15c50c3d34"
+    },
+    {
+      "formula": "=NETWORKDAYS.INTL(DATE(2020,1,1),DATE(2020,1,10),99)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "NETWORKDAYS.INTL",
+        "error"
+      ],
+      "id": "networkdays_intl_8c963ca07fab"
+    },
+    {
+      "formula": "=DAYS(DATE(2020,1,10),DATE(2020,1,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "DAYS"
+      ],
+      "id": "days_d32cae43009a"
+    },
+    {
+      "formula": "=DAYS360(DATE(2020,1,1),DATE(2020,2,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "DAYS360"
+      ],
+      "id": "days360_4a9053fd02ea"
+    },
+    {
+      "formula": "=DATEDIF(DATE(2020,1,1),DATE(2021,2,1),\"y\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "DATEDIF"
+      ],
+      "id": "datedif_2c061f6256cf"
+    },
+    {
+      "formula": "=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "YEARFRAC"
+      ],
+      "id": "yearfrac_851ce23b004d"
+    },
+    {
+      "formula": "=ISO.WEEKNUM(DATE(2021,1,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "ISO.WEEKNUM"
+      ],
+      "id": "iso_weeknum_430750f12da8"
+    },
+    {
+      "formula": "=ISOWEEKNUM(DATE(2021,1,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "ISOWEEKNUM"
+      ],
+      "id": "isoweeknum_df98fb33ebae"
     },
     {
       "formula": "=VLOOKUP(D1,A1:B5,2,FALSE)",
@@ -25189,6 +27026,1063 @@
       "id": "index_match_d9885faecbc2"
     },
     {
+      "formula": "=HLOOKUP(F1,A1:E2,2,FALSE)",
+      "outputCell": "G1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "one"
+        },
+        {
+          "cell": "B1",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "C1",
+          "value": 3
+        },
+        {
+          "cell": "C2",
+          "value": "three"
+        },
+        {
+          "cell": "D1",
+          "value": 10
+        },
+        {
+          "cell": "D2",
+          "value": "ten"
+        },
+        {
+          "cell": "E1",
+          "value": 20
+        },
+        {
+          "cell": "E2",
+          "value": "twenty"
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "lookup",
+        "HLOOKUP"
+      ],
+      "id": "hlookup_0c04a351e7bf"
+    },
+    {
+      "formula": "=HLOOKUP(F1,A1:E2,2,FALSE)",
+      "outputCell": "G1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "one"
+        },
+        {
+          "cell": "B1",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "C1",
+          "value": 3
+        },
+        {
+          "cell": "C2",
+          "value": "three"
+        },
+        {
+          "cell": "D1",
+          "value": 10
+        },
+        {
+          "cell": "D2",
+          "value": "ten"
+        },
+        {
+          "cell": "E1",
+          "value": 20
+        },
+        {
+          "cell": "E2",
+          "value": "twenty"
+        },
+        {
+          "cell": "F1",
+          "value": 2
+        }
+      ],
+      "tags": [
+        "lookup",
+        "HLOOKUP"
+      ],
+      "id": "hlookup_d632c0d509bd"
+    },
+    {
+      "formula": "=HLOOKUP(F1,A1:E2,2,FALSE)",
+      "outputCell": "G1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "one"
+        },
+        {
+          "cell": "B1",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "C1",
+          "value": 3
+        },
+        {
+          "cell": "C2",
+          "value": "three"
+        },
+        {
+          "cell": "D1",
+          "value": 10
+        },
+        {
+          "cell": "D2",
+          "value": "ten"
+        },
+        {
+          "cell": "E1",
+          "value": 20
+        },
+        {
+          "cell": "E2",
+          "value": "twenty"
+        },
+        {
+          "cell": "F1",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "lookup",
+        "HLOOKUP"
+      ],
+      "id": "hlookup_dda3f4275b3c"
+    },
+    {
+      "formula": "=HLOOKUP(F1,A1:E2,2,FALSE)",
+      "outputCell": "G1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "one"
+        },
+        {
+          "cell": "B1",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "C1",
+          "value": 3
+        },
+        {
+          "cell": "C2",
+          "value": "three"
+        },
+        {
+          "cell": "D1",
+          "value": 10
+        },
+        {
+          "cell": "D2",
+          "value": "ten"
+        },
+        {
+          "cell": "E1",
+          "value": 20
+        },
+        {
+          "cell": "E2",
+          "value": "twenty"
+        },
+        {
+          "cell": "F1",
+          "value": 10
+        }
+      ],
+      "tags": [
+        "lookup",
+        "HLOOKUP"
+      ],
+      "id": "hlookup_e1fa2f023015"
+    },
+    {
+      "formula": "=HLOOKUP(F1,A1:E2,2,FALSE)",
+      "outputCell": "G1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "one"
+        },
+        {
+          "cell": "B1",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "C1",
+          "value": 3
+        },
+        {
+          "cell": "C2",
+          "value": "three"
+        },
+        {
+          "cell": "D1",
+          "value": 10
+        },
+        {
+          "cell": "D2",
+          "value": "ten"
+        },
+        {
+          "cell": "E1",
+          "value": 20
+        },
+        {
+          "cell": "E2",
+          "value": "twenty"
+        },
+        {
+          "cell": "F1",
+          "value": 20
+        }
+      ],
+      "tags": [
+        "lookup",
+        "HLOOKUP"
+      ],
+      "id": "hlookup_da09cadb18d9"
+    },
+    {
+      "formula": "=HLOOKUP(F1,A1:E2,2,FALSE)",
+      "outputCell": "G1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": "one"
+        },
+        {
+          "cell": "B1",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "C1",
+          "value": 3
+        },
+        {
+          "cell": "C2",
+          "value": "three"
+        },
+        {
+          "cell": "D1",
+          "value": 10
+        },
+        {
+          "cell": "D2",
+          "value": "ten"
+        },
+        {
+          "cell": "E1",
+          "value": 20
+        },
+        {
+          "cell": "E2",
+          "value": "twenty"
+        },
+        {
+          "cell": "F1",
+          "value": 4
+        }
+      ],
+      "tags": [
+        "lookup",
+        "HLOOKUP"
+      ],
+      "id": "hlookup_608e7df31873"
+    },
+    {
+      "formula": "=XLOOKUP(D1,A1:A5,B1:B5,\"NF\")",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XLOOKUP"
+      ],
+      "id": "xlookup_de3a16b0fd7c"
+    },
+    {
+      "formula": "=XMATCH(D1,A1:A5,0)",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XMATCH"
+      ],
+      "id": "xmatch_f8268d433f3e"
+    },
+    {
+      "formula": "=XLOOKUP(D1,A1:A5,B1:B5,\"NF\")",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 2
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XLOOKUP"
+      ],
+      "id": "xlookup_64c9da4bd4d5"
+    },
+    {
+      "formula": "=XMATCH(D1,A1:A5,0)",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 2
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XMATCH"
+      ],
+      "id": "xmatch_d404799c4ab4"
+    },
+    {
+      "formula": "=XLOOKUP(D1,A1:A5,B1:B5,\"NF\")",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XLOOKUP"
+      ],
+      "id": "xlookup_f91f832953b6"
+    },
+    {
+      "formula": "=XMATCH(D1,A1:A5,0)",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XMATCH"
+      ],
+      "id": "xmatch_65e15f3acce6"
+    },
+    {
+      "formula": "=XLOOKUP(D1,A1:A5,B1:B5,\"NF\")",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 10
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XLOOKUP"
+      ],
+      "id": "xlookup_ad4010746d70"
+    },
+    {
+      "formula": "=XMATCH(D1,A1:A5,0)",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 10
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XMATCH"
+      ],
+      "id": "xmatch_ff7d3be8ad40"
+    },
+    {
+      "formula": "=XLOOKUP(D1,A1:A5,B1:B5,\"NF\")",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 20
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XLOOKUP"
+      ],
+      "id": "xlookup_aa1b81805fa4"
+    },
+    {
+      "formula": "=XMATCH(D1,A1:A5,0)",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 20
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XMATCH"
+      ],
+      "id": "xmatch_1a7c603bad1b"
+    },
+    {
+      "formula": "=XLOOKUP(D1,A1:A5,B1:B5,\"NF\")",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 4
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XLOOKUP"
+      ],
+      "id": "xlookup_f6d411c52aa2"
+    },
+    {
+      "formula": "=XMATCH(D1,A1:A5,0)",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        },
+        {
+          "cell": "D1",
+          "value": 4
+        }
+      ],
+      "tags": [
+        "lookup",
+        "XMATCH"
+      ],
+      "id": "xmatch_c297f32b3597"
+    },
+    {
+      "formula": "=GETPIVOTDATA(\"Sales\",A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 0
+        }
+      ],
+      "tags": [
+        "lookup",
+        "GETPIVOTDATA",
+        "error"
+      ],
+      "description": "No pivot table present; GETPIVOTDATA should return #REF!",
+      "id": "getpivotdata_9c46dacb00ad"
+    },
+    {
+      "formula": "=ADDRESS(2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "ref",
+        "ADDRESS"
+      ],
+      "id": "address_fe96e3e3aa1e"
+    },
+    {
+      "formula": "=ROW(A10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "ref",
+        "ROW"
+      ],
+      "id": "row_4d9a1055eb4c"
+    },
+    {
+      "formula": "=COLUMN(C5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "ref",
+        "COLUMN"
+      ],
+      "id": "column_8c673369dd36"
+    },
+    {
+      "formula": "=ROWS(A1:B3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "ref",
+        "ROWS"
+      ],
+      "id": "rows_aea6669dfd95"
+    },
+    {
+      "formula": "=COLUMNS(A1:B3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "ref",
+        "COLUMNS"
+      ],
+      "id": "columns_f75298ed7dc0"
+    },
+    {
       "formula": "=PV(0, 3, -10)",
       "outputCell": "C1",
       "inputs": [],
@@ -25249,6 +28143,46 @@
       "id": "pmt_c8933d584d66"
     },
     {
+      "formula": "=IPMT(0.05, 1, 10, 1000)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "IPMT"
+      ],
+      "id": "ipmt_1c702d9785fe"
+    },
+    {
+      "formula": "=IPMT(0.05, 10, 10, 1000, 0, 1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "IPMT"
+      ],
+      "id": "ipmt_ae44a2f6567f"
+    },
+    {
+      "formula": "=PPMT(0.05, 1, 10, 1000)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PPMT"
+      ],
+      "id": "ppmt_c27fa28a35f7"
+    },
+    {
+      "formula": "=PPMT(0.05, 10, 10, 1000, 0, 1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PPMT"
+      ],
+      "id": "ppmt_6383c52512c2"
+    },
+    {
       "formula": "=NPER(0, -10, 100)",
       "outputCell": "C1",
       "inputs": [],
@@ -25287,6 +28221,36 @@
         "RATE"
       ],
       "id": "rate_d78f43c9e42a"
+    },
+    {
+      "formula": "=EFFECT(0.1,12)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "EFFECT"
+      ],
+      "id": "effect_b86978f4410f"
+    },
+    {
+      "formula": "=NOMINAL(0.1,12)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "NOMINAL"
+      ],
+      "id": "nominal_6217933336fb"
+    },
+    {
+      "formula": "=RRI(10,-100,200)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "RRI"
+      ],
+      "id": "rri_bbd801af55f6"
     },
     {
       "formula": "=SLN(30, 0, 3)",
@@ -25371,6 +28335,33 @@
         "IRR"
       ],
       "id": "irr_c4f3af3619f0"
+    },
+    {
+      "formula": "=MIRR(A1:A4,0.1,0.12)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": -100.0
+        },
+        {
+          "cell": "A2",
+          "value": 30.0
+        },
+        {
+          "cell": "A3",
+          "value": 40.0
+        },
+        {
+          "cell": "A4",
+          "value": 50.0
+        }
+      ],
+      "tags": [
+        "financial",
+        "MIRR"
+      ],
+      "id": "mirr_9db5e07bc4ae"
     },
     {
       "formula": "=IRR(A1:A3)",
@@ -25558,6 +28549,775 @@
       ],
       "description": "Dynamic array function (Excel 365+)",
       "id": "spill_sequence_fafca1fa5240"
+    },
+    {
+      "formula": "=FILTER(A1:A5,A1:A5>2)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "A4",
+          "value": 4
+        },
+        {
+          "cell": "A5",
+          "value": 5
+        }
+      ],
+      "tags": [
+        "spill",
+        "FILTER",
+        "dynarr"
+      ],
+      "id": "spill_filter_c0d49d2ecbed"
+    },
+    {
+      "formula": "=FILTER(A1:A5,A1:A5>10,\"none\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "A4",
+          "value": 4
+        },
+        {
+          "cell": "A5",
+          "value": 5
+        }
+      ],
+      "tags": [
+        "spill",
+        "FILTER",
+        "dynarr"
+      ],
+      "description": "if_empty fallback (no matches)",
+      "id": "spill_filter_c91148b43d5e"
+    },
+    {
+      "formula": "=SORT(A1:A3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 3
+        },
+        {
+          "cell": "A2",
+          "value": 1
+        },
+        {
+          "cell": "A3",
+          "value": 2
+        }
+      ],
+      "tags": [
+        "spill",
+        "SORT",
+        "dynarr"
+      ],
+      "id": "spill_sort_09c1d62518ad"
+    },
+    {
+      "formula": "=SORT(A1:A3,1,-1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 3
+        },
+        {
+          "cell": "A2",
+          "value": 1
+        },
+        {
+          "cell": "A3",
+          "value": 2
+        }
+      ],
+      "tags": [
+        "spill",
+        "SORT",
+        "dynarr"
+      ],
+      "id": "spill_sort_a8fbbfd0738a"
+    },
+    {
+      "formula": "=UNIQUE(A1:A6)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 1
+        },
+        {
+          "cell": "A3",
+          "value": 2
+        },
+        {
+          "cell": "A4",
+          "value": 3
+        },
+        {
+          "cell": "A5",
+          "value": 3
+        },
+        {
+          "cell": "A6",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "spill",
+        "UNIQUE",
+        "dynarr"
+      ],
+      "id": "spill_unique_f920266941c2"
+    },
+    {
+      "formula": "=UNIQUE(A1:A6,FALSE,TRUE)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 1
+        },
+        {
+          "cell": "A3",
+          "value": 2
+        },
+        {
+          "cell": "A4",
+          "value": 3
+        },
+        {
+          "cell": "A5",
+          "value": 3
+        },
+        {
+          "cell": "A6",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "spill",
+        "UNIQUE",
+        "dynarr"
+      ],
+      "description": "Return values that occur exactly once",
+      "id": "spill_unique_ce09f53bf6c0"
+    },
+    {
+      "formula": "=CHOOSE(2,\"one\",\"two\",\"three\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lookup",
+        "CHOOSE"
+      ],
+      "id": "choose_ac8eab623500"
+    },
+    {
+      "formula": "=CHOOSECOLS({1,2,3;4,5,6},1,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "CHOOSECOLS",
+        "dynarr"
+      ],
+      "id": "choosecols_b37257c66429"
+    },
+    {
+      "formula": "=CHOOSEROWS({1,2;3,4;5,6},1,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "CHOOSEROWS",
+        "dynarr"
+      ],
+      "id": "chooserows_1813069d8560"
+    },
+    {
+      "formula": "=HSTACK({1,2},{3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "HSTACK",
+        "dynarr"
+      ],
+      "id": "hstack_d7621477fa2b"
+    },
+    {
+      "formula": "=VSTACK({1,2},{3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "VSTACK",
+        "dynarr"
+      ],
+      "id": "vstack_441cacdcf240"
+    },
+    {
+      "formula": "=TAKE({1,2,3;4,5,6},1,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "TAKE",
+        "dynarr"
+      ],
+      "id": "take_df36028f0cc7"
+    },
+    {
+      "formula": "=DROP({1,2,3;4,5,6},1,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "DROP",
+        "dynarr"
+      ],
+      "id": "drop_20c87ed25e52"
+    },
+    {
+      "formula": "=TOCOL({1,2;3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "TOCOL",
+        "dynarr"
+      ],
+      "id": "tocol_8098a44146c2"
+    },
+    {
+      "formula": "=TOROW({1,2;3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "TOROW",
+        "dynarr"
+      ],
+      "id": "torow_2617a9a0007e"
+    },
+    {
+      "formula": "=WRAPROWS({1,2,3,4,5,6},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "WRAPROWS",
+        "dynarr"
+      ],
+      "id": "wraprows_00b824ed6b77"
+    },
+    {
+      "formula": "=WRAPCOLS({1,2,3,4,5,6},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "WRAPCOLS",
+        "dynarr"
+      ],
+      "id": "wrapcols_ec40f1350005"
+    },
+    {
+      "formula": "=EXPAND({1,2;3,4},3,3,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "EXPAND",
+        "dynarr"
+      ],
+      "id": "expand_b80dc6dfad92"
+    },
+    {
+      "formula": "=SORTBY({\"b\";\"a\";\"c\"},{2;1;3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "SORTBY",
+        "dynarr"
+      ],
+      "id": "sortby_2d4ba7d19ac1"
+    },
+    {
+      "formula": "=MAKEARRAY(2,3,LAMBDA(r,c,r*10+c))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "MAKEARRAY",
+        "LAMBDA",
+        "dynarr"
+      ],
+      "id": "makearray_7e2991e3f65a"
+    },
+    {
+      "formula": "=MAP({1,2,3},LAMBDA(x,x*2))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "MAP",
+        "LAMBDA",
+        "dynarr"
+      ],
+      "id": "map_2d069277c8e4"
+    },
+    {
+      "formula": "=REDUCE(0,{1,2,3},LAMBDA(acc,x,acc+x))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "REDUCE",
+        "LAMBDA",
+        "dynarr"
+      ],
+      "id": "reduce_03189d6cb4ee"
+    },
+    {
+      "formula": "=SCAN(0,{1,2,3},LAMBDA(acc,x,acc+x))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "SCAN",
+        "LAMBDA",
+        "dynarr"
+      ],
+      "id": "scan_692483f12d7f"
+    },
+    {
+      "formula": "=BYROW({1,2;3,4},LAMBDA(r,SUM(r)))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "BYROW",
+        "LAMBDA",
+        "dynarr"
+      ],
+      "id": "byrow_b2c8ef3fef75"
+    },
+    {
+      "formula": "=BYCOL({1,2;3,4},LAMBDA(c,SUM(c)))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "BYCOL",
+        "LAMBDA",
+        "dynarr"
+      ],
+      "id": "bycol_e17331a21bf7"
+    },
+    {
+      "formula": "=LET(a,2,b,a*3,c,b+1,c)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "LET"
+      ],
+      "id": "let_cffd655e4ed9"
+    },
+    {
+      "formula": "=LAMBDA(x,x+1)(2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "LAMBDA"
+      ],
+      "id": "lambda_6fca1447929f"
+    },
+    {
+      "formula": "=LAMBDA(x,y,ISOMITTED(y))(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "LAMBDA",
+        "ISOMITTED"
+      ],
+      "description": "Missing LAMBDA arguments bind as blank and are detectable via ISOMITTED",
+      "id": "isomitted_07cfebcf5ffa"
+    },
+    {
+      "formula": "=ISBLANK(A1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "ISBLANK"
+      ],
+      "id": "isblank_8e2c4378867b"
+    },
+    {
+      "formula": "=ISBLANK(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "info",
+        "ISBLANK"
+      ],
+      "description": "Empty string is not considered blank",
+      "id": "isblank_c984796ba327"
+    },
+    {
+      "formula": "=ISNUMBER(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "info",
+        "ISNUMBER"
+      ],
+      "id": "isnumber_6b9d53d73ece"
+    },
+    {
+      "formula": "=ISNUMBER(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "1"
+        }
+      ],
+      "tags": [
+        "info",
+        "ISNUMBER"
+      ],
+      "id": "isnumber_548a6ad3d1e3"
+    },
+    {
+      "formula": "=ISTEXT(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "x"
+        }
+      ],
+      "tags": [
+        "info",
+        "ISTEXT"
+      ],
+      "id": "istext_abf59b6c691a"
+    },
+    {
+      "formula": "=ISTEXT(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "info",
+        "ISTEXT"
+      ],
+      "id": "istext_c26fe0c20e94"
+    },
+    {
+      "formula": "=ISLOGICAL(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": true
+        }
+      ],
+      "tags": [
+        "info",
+        "ISLOGICAL"
+      ],
+      "id": "islogical_f99dae6e94a9"
+    },
+    {
+      "formula": "=ISLOGICAL(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 0
+        }
+      ],
+      "tags": [
+        "info",
+        "ISLOGICAL"
+      ],
+      "id": "islogical_1d6fce0638b8"
+    },
+    {
+      "formula": "=ISERROR(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=1/0"
+        }
+      ],
+      "tags": [
+        "info",
+        "ISERROR"
+      ],
+      "id": "iserror_62324f81dc47"
+    },
+    {
+      "formula": "=ISERROR(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "info",
+        "ISERROR"
+      ],
+      "id": "iserror_45a1c7a0044c"
+    },
+    {
+      "formula": "=ISERR(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=1/0"
+        }
+      ],
+      "tags": [
+        "info",
+        "ISERR"
+      ],
+      "id": "iserr_87ea7118674b"
+    },
+    {
+      "formula": "=ISERR(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "info",
+        "ISERR"
+      ],
+      "id": "iserr_03553df0131f"
+    },
+    {
+      "formula": "=ISNA(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "info",
+        "ISNA"
+      ],
+      "id": "isna_ad3a7d502054"
+    },
+    {
+      "formula": "=ISNA(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=1/0"
+        }
+      ],
+      "tags": [
+        "info",
+        "ISNA"
+      ],
+      "id": "isna_13cc167157eb"
+    },
+    {
+      "formula": "=ERROR.TYPE(1/0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "ERROR.TYPE"
+      ],
+      "id": "errtype_7a3803d81155"
+    },
+    {
+      "formula": "=ERROR.TYPE(NA())",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "ERROR.TYPE"
+      ],
+      "id": "errtype_1fe07176e5fa"
+    },
+    {
+      "formula": "=ERROR.TYPE(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "ERROR.TYPE",
+        "error"
+      ],
+      "id": "errtype_efa7dc3ea12e"
+    },
+    {
+      "formula": "=TYPE(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "TYPE"
+      ],
+      "id": "type_51ae27bb15b4"
+    },
+    {
+      "formula": "=TYPE(\"x\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "TYPE"
+      ],
+      "id": "type_e71bb7e5575a"
+    },
+    {
+      "formula": "=TYPE(TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "TYPE"
+      ],
+      "id": "type_ab3fd363ca86"
+    },
+    {
+      "formula": "=TYPE(NA())",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "TYPE"
+      ],
+      "id": "type_ff9d5cead17e"
+    },
+    {
+      "formula": "=N(TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "N"
+      ],
+      "id": "n_0899a2f84d1d"
+    },
+    {
+      "formula": "=N(\"x\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "N"
+      ],
+      "id": "n_ab053f956639"
+    },
+    {
+      "formula": "=N(NA())",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "N"
+      ],
+      "id": "n_7c1d65a49e05"
+    },
+    {
+      "formula": "=T(\"x\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "T"
+      ],
+      "id": "t_4cfc78bc9144"
+    },
+    {
+      "formula": "=T(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "T"
+      ],
+      "id": "t_c2063926a227"
+    },
+    {
+      "formula": "=T(NA())",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "T"
+      ],
+      "id": "t_23c15393708b"
     },
     {
       "formula": "=1/0",

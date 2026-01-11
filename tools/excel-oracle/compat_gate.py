@@ -36,6 +36,20 @@ DEFAULT_INCLUDE_TAGS = [
     "range",
     "TRANSPOSE",
     "SEQUENCE",
+    # Representative deterministic functions beyond the arithmetic baseline.
+    "COUNT",
+    "COUNTIF",
+    "TEXT",
+    "VALUE",
+    "DATEVALUE",
+    "WORKDAY",
+    "NETWORKDAYS",
+    "XLOOKUP",
+    "XMATCH",
+    "FILTER",
+    "SORT",
+    "UNIQUE",
+    "ISERROR",
 ]
 
 
