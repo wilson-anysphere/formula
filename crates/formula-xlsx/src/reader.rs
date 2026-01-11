@@ -29,14 +29,14 @@ pub fn read_workbook_from_reader<R: Read + Seek>(reader: R) -> Result<Workbook, 
     };
 
     let rels = parse_relationships(&workbook_rels)?;
-    let sheets = parse_workbook_sheets(&workbook_xml)?;
+    let sheets = crate::parse_workbook_sheets(&workbook_xml)?;
 
     let mut workbook = Workbook::new();
     for sheet in sheets {
         let rel = rels
-            .get(&sheet.r_id)
-            .ok_or_else(|| XlsxError::Invalid(format!("missing relationship for {}", sheet.r_id)))?;
-        let sheet_path = format!("xl/{}", rel.target.trim_start_matches('/'));
+            .get(&sheet.rel_id)
+            .ok_or_else(|| XlsxError::Invalid(format!("missing relationship for {}", sheet.rel_id)))?;
+        let sheet_path = workbook_part_name_for_target(&rel.target);
         let sheet_xml = read_zip_string(&mut archive, &sheet_path)?;
 
         let sheet_rels_path = sheet_path
@@ -50,10 +50,13 @@ pub fn read_workbook_from_reader<R: Read + Seek>(reader: R) -> Result<Workbook, 
             HashMap::new()
         };
 
-        let sheet_id = workbook.add_sheet(sheet.name);
+        let sheet_id = workbook.add_sheet(sheet.name.clone());
         let sheet_model = workbook
             .sheet_mut(sheet_id)
             .ok_or_else(|| XlsxError::Invalid("failed to create worksheet".into()))?;
+        sheet_model.xlsx_sheet_id = Some(sheet.sheet_id);
+        sheet_model.xlsx_rel_id = Some(sheet.rel_id.clone());
+        sheet_model.visibility = sheet.visibility;
         let table_parts = parse_sheet(&sheet_xml, &shared_strings, sheet_model)?;
 
         for part in table_parts {
@@ -76,6 +79,15 @@ pub fn read_workbook_from_reader<R: Read + Seek>(reader: R) -> Result<Workbook, 
     }
 
     Ok(workbook)
+}
+
+fn workbook_part_name_for_target(target: &str) -> String {
+    if target.starts_with('/') {
+        target.trim_start_matches('/').to_string()
+    } else {
+        // workbook.xml is under xl/, so most relationship targets are relative to that folder.
+        crate::openxml::resolve_target("xl/workbook.xml", target)
+    }
 }
 
 fn read_zip_string<R: Read + Seek>(archive: &mut ZipArchive<R>, path: &str) -> Result<String, XlsxError> {
@@ -132,43 +144,6 @@ fn parse_relationships(xml: &str) -> Result<HashMap<String, Relationship>, XlsxE
         buf.clear();
     }
     Ok(rels)
-}
-
-#[derive(Debug)]
-struct SheetInfo {
-    name: String,
-    r_id: String,
-}
-
-fn parse_workbook_sheets(xml: &str) -> Result<Vec<SheetInfo>, XlsxError> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut sheets = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"sheet" => {
-                let mut name = None;
-                let mut r_id = None;
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"name" => name = Some(attr.unescape_value()?.into_owned()),
-                        b"r:id" => r_id = Some(attr.unescape_value()?.into_owned()),
-                        _ => {}
-                    }
-                }
-                sheets.push(SheetInfo {
-                    name: name.unwrap_or_else(|| "Sheet1".into()),
-                    r_id: r_id.ok_or_else(|| XlsxError::Invalid("sheet missing r:id".into()))?,
-                });
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    Ok(sheets)
 }
 
 fn parse_shared_strings(xml: &str) -> Result<Vec<String>, XlsxError> {

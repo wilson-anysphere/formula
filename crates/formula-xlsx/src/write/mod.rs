@@ -1,8 +1,11 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Write};
 
 use formula_model::rich_text::{RichText, Underline};
-use formula_model::{CellRef, CellValue, ErrorValue, Outline, OutlineEntry, Range, Worksheet};
+use formula_model::{
+    CellRef, CellValue, ErrorValue, Outline, OutlineEntry, Range, SheetVisibility, Worksheet,
+    WorksheetId,
+};
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
 use quick_xml::Reader;
@@ -28,6 +31,142 @@ pub enum WriteError {
     Styles(#[from] crate::styles::StylesPartError),
 }
 
+const WORKSHEET_REL_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+const WORKSHEET_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+
+#[derive(Debug)]
+struct SheetStructurePlan {
+    sheets: Vec<SheetMeta>,
+}
+
+fn sheet_state_from_visibility(visibility: SheetVisibility) -> Option<String> {
+    match visibility {
+        SheetVisibility::Visible => None,
+        SheetVisibility::Hidden => Some("hidden".to_string()),
+        SheetVisibility::VeryHidden => Some("veryHidden".to_string()),
+    }
+}
+
+fn sheet_part_number(path: &str) -> Option<u32> {
+    let file = path.rsplit('/').next()?;
+    if !file.starts_with("sheet") || !file.ends_with(".xml") {
+        return None;
+    }
+    let digits = file.strip_prefix("sheet")?.strip_suffix(".xml")?;
+    digits.parse::<u32>().ok()
+}
+
+fn next_sheet_part_number<'a>(paths: impl Iterator<Item = &'a str>) -> u32 {
+    paths.filter_map(sheet_part_number).max().unwrap_or(0) + 1
+}
+
+fn plan_sheet_structure(
+    doc: &XlsxDocument,
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    is_new: bool,
+) -> Result<SheetStructurePlan, WriteError> {
+    let workbook_sheet_ids: HashSet<WorksheetId> = doc.workbook.sheets.iter().map(|s| s.id).collect();
+
+    let existing_by_id: HashMap<WorksheetId, SheetMeta> = doc
+        .meta
+        .sheets
+        .iter()
+        .cloned()
+        .map(|meta| (meta.worksheet_id, meta))
+        .collect();
+
+    let removed: Vec<SheetMeta> = doc
+        .meta
+        .sheets
+        .iter()
+        .filter(|meta| !workbook_sheet_ids.contains(&meta.worksheet_id))
+        .cloned()
+        .collect();
+
+    let mut next_sheet_id = doc
+        .meta
+        .sheets
+        .iter()
+        .filter(|meta| workbook_sheet_ids.contains(&meta.worksheet_id))
+        .map(|meta| meta.sheet_id)
+        .max()
+        .unwrap_or(0)
+        + 1;
+
+    let mut next_rel_id_num = if is_new {
+        doc.meta
+            .sheets
+            .iter()
+            .filter(|meta| workbook_sheet_ids.contains(&meta.worksheet_id))
+            .filter_map(|meta| meta.relationship_id.strip_prefix("rId")?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0)
+            + 1
+    } else {
+        parts
+            .get("xl/_rels/workbook.xml.rels")
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .map(next_relationship_id_in_xml)
+            .unwrap_or(1)
+    };
+
+    let existing_paths = doc.meta.sheets.iter().map(|meta| meta.path.as_str());
+    let part_paths = parts.keys().map(|p| p.as_str());
+    let mut next_sheet_part = next_sheet_part_number(existing_paths.chain(part_paths));
+    let mut used_paths: HashSet<String> = doc.meta.sheets.iter().map(|m| m.path.clone()).collect();
+
+    let mut sheets: Vec<SheetMeta> = Vec::with_capacity(doc.workbook.sheets.len());
+    let mut added: Vec<SheetMeta> = Vec::new();
+
+    for sheet in &doc.workbook.sheets {
+        if let Some(existing) = existing_by_id.get(&sheet.id) {
+            sheets.push(existing.clone());
+            continue;
+        }
+
+        let relationship_id = format!("rId{next_rel_id_num}");
+        next_rel_id_num += 1;
+
+        let mut path;
+        loop {
+            path = format!("xl/worksheets/sheet{next_sheet_part}.xml");
+            next_sheet_part += 1;
+            if !used_paths.contains(&path) && !parts.contains_key(&path) {
+                break;
+            }
+        }
+        used_paths.insert(path.clone());
+
+        let meta = SheetMeta {
+            worksheet_id: sheet.id,
+            sheet_id: next_sheet_id,
+            relationship_id,
+            state: sheet_state_from_visibility(sheet.visibility),
+            path,
+        };
+        next_sheet_id += 1;
+
+        added.push(meta.clone());
+        sheets.push(meta);
+    }
+
+    if !is_new && (!added.is_empty() || !removed.is_empty()) {
+        for meta in &removed {
+            parts.remove(&meta.path);
+            parts.remove(&crate::openxml::rels_part_name(&meta.path));
+        }
+
+        patch_workbook_rels_for_sheet_edits(parts, &removed, &added)?;
+        patch_content_types_for_sheet_edits(parts, &removed, &added)?;
+    }
+
+    Ok(SheetStructurePlan {
+        sheets,
+    })
+}
+
 pub fn write_to_vec(doc: &XlsxDocument) -> Result<Vec<u8>, WriteError> {
     let mut parts = build_parts(doc)?;
 
@@ -48,11 +187,13 @@ pub fn write_to_vec(doc: &XlsxDocument) -> Result<Vec<u8>, WriteError> {
 fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {
     let mut parts = doc.parts.clone();
     let is_new = parts.is_empty();
+
+    let sheet_plan = plan_sheet_structure(doc, &mut parts, is_new)?;
     if is_new {
-        parts = generate_minimal_package(doc)?;
+        parts = generate_minimal_package(&sheet_plan.sheets)?;
     }
 
-    let (shared_strings_xml, shared_string_lookup) = build_shared_strings_xml(doc)?;
+    let (shared_strings_xml, shared_string_lookup) = build_shared_strings_xml(doc, &sheet_plan.sheets)?;
     if is_new || !shared_string_lookup.is_empty() || parts.contains_key("xl/sharedStrings.xml") {
         parts.insert("xl/sharedStrings.xml".to_string(), shared_strings_xml);
     }
@@ -103,10 +244,10 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
     let workbook_orig = parts.get("xl/workbook.xml").map(|b| b.as_slice());
     parts.insert(
         "xl/workbook.xml".to_string(),
-        write_workbook_xml(doc, workbook_orig)?,
+        write_workbook_xml(doc, workbook_orig, &sheet_plan.sheets)?,
     );
 
-    for sheet_meta in &doc.meta.sheets {
+    for sheet_meta in &sheet_plan.sheets {
         let sheet = doc
             .workbook
             .sheet(sheet_meta.worksheet_id)
@@ -195,6 +336,7 @@ fn underline_key(underline: Underline) -> u8 {
 
 fn build_shared_strings_xml(
     doc: &XlsxDocument,
+    sheets: &[SheetMeta],
 ) -> Result<(Vec<u8>, HashMap<SharedStringKey, u32>), WriteError> {
     let mut table: Vec<RichText> = doc.shared_strings.clone();
     let mut lookup: HashMap<SharedStringKey, u32> = HashMap::new();
@@ -206,7 +348,7 @@ fn build_shared_strings_xml(
 
     let mut ref_count: u32 = 0;
 
-    for sheet_meta in &doc.meta.sheets {
+    for sheet_meta in sheets {
         let sheet = match doc.workbook.sheet(sheet_meta.worksheet_id) {
             Some(s) => s,
             None => continue,
@@ -390,9 +532,13 @@ fn escape_attr(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn write_workbook_xml(doc: &XlsxDocument, original: Option<&[u8]>) -> Result<Vec<u8>, WriteError> {
+fn write_workbook_xml(
+    doc: &XlsxDocument,
+    original: Option<&[u8]>,
+    sheets: &[SheetMeta],
+) -> Result<Vec<u8>, WriteError> {
     if let Some(original) = original {
-        return patch_workbook_xml(doc, original);
+        return patch_workbook_xml(doc, original, sheets);
     }
 
     let mut xml = String::new();
@@ -406,7 +552,7 @@ fn write_workbook_xml(doc: &XlsxDocument, original: Option<&[u8]>) -> Result<Vec
     }
     xml.push_str("/>");
     xml.push_str("<sheets>");
-    for sheet_meta in &doc.meta.sheets {
+    for sheet_meta in sheets {
         let name = doc
             .workbook
             .sheet(sheet_meta.worksheet_id)
@@ -429,7 +575,11 @@ fn write_workbook_xml(doc: &XlsxDocument, original: Option<&[u8]>) -> Result<Vec
     Ok(xml.into_bytes())
 }
 
-fn patch_workbook_xml(doc: &XlsxDocument, original: &[u8]) -> Result<Vec<u8>, WriteError> {
+fn patch_workbook_xml(
+    doc: &XlsxDocument,
+    original: &[u8],
+    sheets: &[SheetMeta],
+) -> Result<Vec<u8>, WriteError> {
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
@@ -489,7 +639,7 @@ fn patch_workbook_xml(doc: &XlsxDocument, original: &[u8]) -> Result<Vec<u8>, Wr
                 }
                 writer.get_mut().push(b'>');
 
-                for sheet_meta in &doc.meta.sheets {
+                for sheet_meta in sheets {
                     let name = doc
                         .workbook
                         .sheet(sheet_meta.worksheet_id)
@@ -531,7 +681,7 @@ fn patch_workbook_xml(doc: &XlsxDocument, original: &[u8]) -> Result<Vec<u8>, Wr
                     writer.get_mut().push(b'"');
                 }
                 writer.get_mut().push(b'>');
-                for sheet_meta in &doc.meta.sheets {
+                for sheet_meta in sheets {
                     let name = doc
                         .workbook
                         .sheet(sheet_meta.worksheet_id)
@@ -1094,7 +1244,7 @@ fn shared_string_index(
     }
 }
 
-fn generate_minimal_package(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {
+fn generate_minimal_package(sheets: &[SheetMeta]) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {
     let mut parts = BTreeMap::new();
 
     parts.insert(
@@ -1110,23 +1260,23 @@ fn generate_minimal_package(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u
     // Minimal workbook relationships; existing packages preserve the original bytes.
     parts.insert(
         "xl/_rels/workbook.xml.rels".to_string(),
-        minimal_workbook_rels_xml(doc).into_bytes(),
+        minimal_workbook_rels_xml(sheets).into_bytes(),
     );
 
     parts.insert(
         "[Content_Types].xml".to_string(),
-        minimal_content_types_xml(doc).into_bytes(),
+        minimal_content_types_xml(sheets).into_bytes(),
     );
 
     Ok(parts)
 }
 
-fn minimal_workbook_rels_xml(doc: &XlsxDocument) -> String {
+fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> String {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
 
-    for sheet_meta in &doc.meta.sheets {
+    for sheet_meta in sheets {
         let target = rels_target_from_part_path(&sheet_meta.path);
         xml.push_str(r#"<Relationship Id=""#);
         xml.push_str(&escape_attr(&sheet_meta.relationship_id));
@@ -1136,10 +1286,7 @@ fn minimal_workbook_rels_xml(doc: &XlsxDocument) -> String {
     }
 
     let next = next_relationship_id(
-        doc.meta
-            .sheets
-            .iter()
-            .map(|s| s.relationship_id.as_str()),
+        sheets.iter().map(|s| s.relationship_id.as_str()),
     );
     xml.push_str(&format!(r#"<Relationship Id="rId{next}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#));
     let next2 = next + 1;
@@ -1156,14 +1303,14 @@ fn rels_target_from_part_path(path: &str) -> String {
         .to_string()
 }
 
-fn minimal_content_types_xml(doc: &XlsxDocument) -> String {
+fn minimal_content_types_xml(sheets: &[SheetMeta]) -> String {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#);
     xml.push_str(r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#);
     xml.push_str(r#"<Default Extension="xml" ContentType="application/xml"/>"#);
     xml.push_str(r#"<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>"#);
-    for sheet_meta in &doc.meta.sheets {
+    for sheet_meta in sheets {
         xml.push_str(r#"<Override PartName="/"#);
         xml.push_str(&escape_attr(&sheet_meta.path));
         xml.push_str(r#"" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#);
@@ -1222,6 +1369,174 @@ fn ensure_workbook_rels_has_relationship(
         xml.insert_str(idx, &rel);
     }
     parts.insert(rels_name.to_string(), xml.into_bytes());
+    Ok(())
+}
+
+fn patch_workbook_rels_for_sheet_edits(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    removed: &[SheetMeta],
+    added: &[SheetMeta],
+) -> Result<(), WriteError> {
+    let rels_name = "xl/_rels/workbook.xml.rels";
+    let Some(existing) = parts.get(rels_name).cloned() else {
+        return Ok(());
+    };
+
+    let remove_ids: HashSet<&str> = removed.iter().map(|m| m.relationship_id.as_str()).collect();
+
+    let mut reader = Reader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(existing.len() + added.len() * 128));
+    let mut buf = Vec::new();
+
+    let mut skipping = false;
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) if e.name().as_ref() == b"Relationship" => {
+                let mut id = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"Id" {
+                        id = Some(attr.unescape_value()?.into_owned());
+                    }
+                }
+                if id.as_deref().is_some_and(|id| remove_ids.contains(id)) {
+                    skipping = true;
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                }
+            }
+            Event::Empty(ref e) if e.name().as_ref() == b"Relationship" => {
+                let mut id = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"Id" {
+                        id = Some(attr.unescape_value()?.into_owned());
+                    }
+                }
+                if !id.as_deref().is_some_and(|id| remove_ids.contains(id)) {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+            Event::End(ref e) if skipping && e.name().as_ref() == b"Relationship" => {
+                skipping = false;
+            }
+            Event::End(ref e) if e.name().as_ref() == b"Relationships" => {
+                for sheet in added {
+                    let target = rels_target_from_part_path(&sheet.path);
+                    let mut rel = quick_xml::events::BytesStart::new("Relationship");
+                    rel.push_attribute(("Id", sheet.relationship_id.as_str()));
+                    rel.push_attribute(("Type", WORKSHEET_REL_TYPE));
+                    rel.push_attribute(("Target", target.as_str()));
+                    writer.write_event(Event::Empty(rel))?;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            ev if skipping => drop(ev),
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
+    }
+
+    parts.insert(rels_name.to_string(), writer.into_inner());
+    Ok(())
+}
+
+fn patch_content_types_for_sheet_edits(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    removed: &[SheetMeta],
+    added: &[SheetMeta],
+) -> Result<(), WriteError> {
+    let ct_name = "[Content_Types].xml";
+    let Some(existing) = parts.get(ct_name).cloned() else {
+        return Ok(());
+    };
+
+    let removed_parts: HashSet<String> = removed
+        .iter()
+        .map(|m| {
+            if m.path.starts_with('/') {
+                m.path.clone()
+            } else {
+                format!("/{}", m.path)
+            }
+        })
+        .collect();
+
+    let mut reader = Reader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(existing.len() + added.len() * 128));
+    let mut buf = Vec::new();
+
+    let mut existing_overrides: HashSet<String> = HashSet::new();
+    let mut skipping = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) if e.name().as_ref() == b"Override" => {
+                let mut part_name = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"PartName" {
+                        part_name = Some(attr.unescape_value()?.into_owned());
+                    }
+                }
+                if let Some(name) = &part_name {
+                    existing_overrides.insert(name.clone());
+                    if removed_parts.contains(name) {
+                        skipping = true;
+                        continue;
+                    }
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if e.name().as_ref() == b"Override" => {
+                let mut part_name = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"PartName" {
+                        part_name = Some(attr.unescape_value()?.into_owned());
+                    }
+                }
+                if let Some(name) = &part_name {
+                    existing_overrides.insert(name.clone());
+                    if removed_parts.contains(name) {
+                        continue;
+                    }
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            Event::End(ref e) if skipping && e.name().as_ref() == b"Override" => {
+                skipping = false;
+            }
+            Event::End(ref e) if e.name().as_ref() == b"Types" => {
+                for sheet in added {
+                    let part_name = if sheet.path.starts_with('/') {
+                        sheet.path.clone()
+                    } else {
+                        format!("/{}", sheet.path)
+                    };
+                    if existing_overrides.contains(&part_name) {
+                        continue;
+                    }
+                    let mut override_el = quick_xml::events::BytesStart::new("Override");
+                    override_el.push_attribute(("PartName", part_name.as_str()));
+                    override_el.push_attribute(("ContentType", WORKSHEET_CONTENT_TYPE));
+                    writer.write_event(Event::Empty(override_el))?;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            ev if skipping => drop(ev),
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
+    }
+
+    parts.insert(ct_name.to_string(), writer.into_inner());
     Ok(())
 }
 

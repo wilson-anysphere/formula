@@ -4,7 +4,7 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use formula_model::rich_text::RichText;
-use formula_model::{Cell, CellRef, CellValue, ErrorValue, Workbook};
+use formula_model::{Cell, CellRef, CellValue, ErrorValue, SheetVisibility, Workbook};
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
 use quick_xml::Reader;
@@ -86,6 +86,13 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         let ws = workbook
             .sheet_mut(ws_id)
             .expect("sheet just inserted must exist");
+        ws.xlsx_sheet_id = Some(sheet.sheet_id);
+        ws.xlsx_rel_id = Some(sheet.relationship_id.clone());
+        ws.visibility = match sheet.state.as_deref() {
+            Some("hidden") => SheetVisibility::Hidden,
+            Some("veryHidden") => SheetVisibility::VeryHidden,
+            _ => SheetVisibility::Visible,
+        };
 
         let sheet_xml = parts
             .get(&sheet.path)
