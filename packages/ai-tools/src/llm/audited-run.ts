@@ -98,7 +98,7 @@ export async function runChatWithToolsAuditedVerified(
           recorder.recordToolCall({
             id: call.id,
             name: call.name,
-            parameters: call.arguments,
+            parameters: sanitizeAuditToolParameters(call.name, call.arguments),
             requires_approval: Boolean(meta?.requiresApproval)
           });
           params.on_tool_call?.(call, meta);
@@ -160,6 +160,89 @@ function extractToolDuration(result: any): number | undefined {
   const duration = result?.timing?.duration_ms;
   if (typeof duration === "number" && Number.isFinite(duration)) return duration;
   return undefined;
+}
+
+function sanitizeAuditToolParameters(name: string, parameters: unknown): unknown {
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return parameters;
+  if (name !== "fetch_external_data") return parameters;
+
+  const params = { ...(parameters as Record<string, unknown>) };
+  if (typeof params.url === "string") {
+    params.url = safeUrlForAudit(params.url);
+  }
+  if (params.headers && typeof params.headers === "object" && !Array.isArray(params.headers)) {
+    params.headers = redactHeaders(params.headers as Record<string, unknown>);
+  }
+  return params;
+}
+
+function safeUrlForAudit(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+
+    if (url.search) {
+      const params = new URLSearchParams(url.search);
+      const keys = Array.from(new Set(Array.from(params.keys())));
+      for (const key of keys) {
+        if (!isSensitiveQueryParam(key)) continue;
+        const count = params.getAll(key).length;
+        params.delete(key);
+        for (let i = 0; i < count; i++) params.append(key, "REDACTED");
+      }
+      const next = params.toString();
+      url.search = next ? `?${next}` : "";
+    }
+
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function isSensitiveQueryParam(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return (
+    normalized === "key" ||
+    normalized === "api_key" ||
+    normalized === "apikey" ||
+    normalized === "token" ||
+    normalized === "access_token" ||
+    normalized === "auth" ||
+    normalized === "authorization" ||
+    normalized === "signature" ||
+    normalized === "sig" ||
+    normalized === "password" ||
+    normalized === "secret"
+  );
+}
+
+function redactHeaders(headers: Record<string, unknown>): Record<string, unknown> {
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (isSensitiveHeader(key)) {
+      redacted[key] = "REDACTED";
+    } else {
+      redacted[key] = value;
+    }
+  }
+  return redacted;
+}
+
+function isSensitiveHeader(name: string): boolean {
+  const normalized = name.toLowerCase();
+  if (normalized === "authorization") return true;
+  if (normalized === "proxy-authorization") return true;
+  if (normalized === "cookie") return true;
+  if (normalized === "set-cookie") return true;
+  if (normalized.includes("token")) return true;
+  if (normalized.includes("secret")) return true;
+  if (normalized.includes("signature")) return true;
+  if (normalized.includes("api-key") || normalized.includes("apikey")) return true;
+  if (normalized.endsWith("key")) return true;
+  return false;
 }
 
 function nowMs(): number {
