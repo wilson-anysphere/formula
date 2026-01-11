@@ -49,49 +49,65 @@ fn parse_bracketed(input: &str, start: usize) -> Option<(&str, usize)> {
         return None;
     }
 
-    let mut depth = 0i32;
-    let mut end = None;
-    let mut i = start;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'[' => {
-                depth += 1;
-                i += 1;
+    // Excel escapes `]` inside structured references as `]]`. Unfortunately `]]` is also used to
+    // close nested bracket groups (e.g. `Table1[[Col]]` ends with `]]`).
+    //
+    // To disambiguate without relying on surrounding formula context, we treat `]]` as *either*
+    // an escape (depth unchanged, consume 2 chars) or a close bracket (depth - 1, consume 1 char)
+    // and then pick the longest end position that yields a syntactically valid inner spec.
+    let len = bytes.len();
+    if start + 1 > len {
+        return None;
+    }
+
+    let mut states: Vec<Vec<u32>> = vec![Vec::new(); len + 1];
+    states[start + 1].push(1);
+
+    for pos in start + 1..len {
+        let depths = states[pos].clone();
+        if depths.is_empty() {
+            continue;
+        }
+        for depth in depths {
+            if depth == 0 {
+                continue;
             }
-            b']' => {
-                // Excel escapes `]` inside structured references as `]]`.
-                //
-                // `]]` is ambiguous when nested brackets are involved because it can also represent
-                // the end of an inner bracket group immediately followed by the end of the outer
-                // structured-ref bracket (e.g. `Table1[[Col]]`).
-                //
-                // Disambiguate by treating `]]` as an escaped literal only when there is at least
-                // one more `]` later in the bracketed segment. Otherwise, interpret it as a close
-                // bracket (potentially followed by another close for an outer level).
-                if bytes.get(i + 1) == Some(&b']') {
-                    let has_closer = bytes.get(i + 2..).is_some_and(|rest| rest.contains(&b']'));
-                    if has_closer {
-                        i += 2;
-                        continue;
+            match bytes[pos] {
+                b'[' => push_depth(&mut states, pos + 1, depth + 1),
+                b']' => {
+                    // Treat as closing bracket.
+                    push_depth(&mut states, pos + 1, depth.saturating_sub(1));
+                    // Treat as escaped literal `]`.
+                    if bytes.get(pos + 1) == Some(&b']') {
+                        push_depth(&mut states, pos + 2, depth);
                     }
                 }
-                depth -= 1;
-                if depth == 0 {
-                    end = Some(i);
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-            _ => {
-                i += 1;
+                _ => push_depth(&mut states, pos + 1, depth),
             }
         }
     }
 
-    let end = end?;
-    let inner = &input[start + 1..end];
-    Some((inner, i))
+    // Choose the longest candidate end position that forms a valid structured-ref spec.
+    for end_pos in (start + 1..=len).rev() {
+        if !states[end_pos].contains(&0) {
+            continue;
+        }
+        let inner = &input[start + 1..end_pos.saturating_sub(1)];
+        if parse_inner_spec(inner.trim()).is_some() {
+            return Some((inner, end_pos));
+        }
+    }
+    None
+}
+
+fn push_depth(states: &mut [Vec<u32>], pos: usize, depth: u32) {
+    if pos >= states.len() {
+        return;
+    }
+    let entry = &mut states[pos];
+    if !entry.contains(&depth) {
+        entry.push(depth);
+    }
 }
 
 fn parse_inner_spec(inner: &str) -> Option<(Option<StructuredRefItem>, StructuredColumns)> {
@@ -367,6 +383,18 @@ mod tests {
         assert_eq!(sref.table_name.as_deref(), Some("Table1"));
         assert_eq!(sref.item, Some(StructuredRefItem::Headers));
         assert_eq!(sref.columns, StructuredColumns::Single("A]B".into()));
+    }
+
+    #[test]
+    fn parses_structured_ref_prefix_when_followed_by_another_ref() {
+        let input = "Table1[[#Headers],[Qty]]+Table1[Qty]";
+        let first = "Table1[[#Headers],[Qty]]";
+
+        let (sref, end) = parse_structured_ref(input, 0).unwrap();
+        assert_eq!(end, first.len());
+        assert_eq!(sref.table_name.as_deref(), Some("Table1"));
+        assert_eq!(sref.item, Some(StructuredRefItem::Headers));
+        assert_eq!(sref.columns, StructuredColumns::Single("Qty".into()));
     }
 
     #[test]
