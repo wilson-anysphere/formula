@@ -192,6 +192,24 @@ test("RefreshOrchestrator: shared execution session dedupes credential prompts",
   assert.equal(credentialRequests, 1);
 });
 
+test("RefreshOrchestrator: shared execution session dedupes permission prompts", async () => {
+  let permissionRequests = 0;
+  const engine = new QueryEngine({
+    fileAdapter: { readText: async (_path) => "Value\n1\n" },
+    onPermissionRequest: async () => {
+      permissionRequests += 1;
+      return true;
+    },
+  });
+
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("Q1", { type: "csv", path: "file.csv" }));
+  orchestrator.registerQuery(makeQuery("Q2", { type: "csv", path: "file.csv" }));
+
+  await orchestrator.refreshAll(["Q1", "Q2"]).promise;
+  assert.equal(permissionRequests, 1);
+});
+
 test("RefreshOrchestrator: cycle detection emits a clear error", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
