@@ -25,22 +25,33 @@ async function loadAwsSdk() {
     // sibling directory. Fall back to resolving from `process.cwd()` so services
     // can install the AWS SDK in their own package.json.
     try {
-      const { createRequire } = await import("node:module");
       const { pathToFileURL } = await import("node:url");
-      const requireFromCwd = createRequire(`${process.cwd()}/`);
-      const resolved = requireFromCwd.resolve("@aws-sdk/client-kms");
-      cachedAwsSdk = normalizeAwsSdkModule(await import(pathToFileURL(resolved).href));
+
+      // Prefer ESM resolution first (covers ESM-only SDK builds).
+      const parentUrl = pathToFileURL(`${process.cwd()}/`).href;
+      const resolved = import.meta.resolve("@aws-sdk/client-kms", parentUrl);
+      cachedAwsSdk = normalizeAwsSdkModule(await import(resolved));
       return cachedAwsSdk;
     } catch (fallbackErr) {
-      cachedAwsSdk = null;
-      const message = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-      throw new Error(
-        [
-          "AwsKmsProvider is not available in this build.",
-          "Install @aws-sdk/client-kms (as a dependency of the service/runtime image) to enable it.",
-          `Underlying error: ${message}`
-        ].join(" ")
-      );
+      try {
+        // Fallback to CJS resolution if the SDK only exposes `require` exports.
+        const { createRequire } = await import("node:module");
+        const { pathToFileURL } = await import("node:url");
+        const requireFromCwd = createRequire(`${process.cwd()}/`);
+        const resolved = requireFromCwd.resolve("@aws-sdk/client-kms");
+        cachedAwsSdk = normalizeAwsSdkModule(await import(pathToFileURL(resolved).href));
+        return cachedAwsSdk;
+      } catch (finalErr) {
+        cachedAwsSdk = null;
+        const message = finalErr instanceof Error ? finalErr.message : String(finalErr);
+        throw new Error(
+          [
+            "AwsKmsProvider is not available in this build.",
+            "Install @aws-sdk/client-kms (as a dependency of the service/runtime image) to enable it.",
+            `Underlying error: ${message}`
+          ].join(" ")
+        );
+      }
     }
   }
 }
