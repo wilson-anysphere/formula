@@ -328,6 +328,25 @@ test("RefreshOrchestrator: cycle detection includes merge dependencies", async (
   assert.equal(engine.calls.length, 0);
 });
 
+test("RefreshOrchestrator: cycle detection includes append dependencies", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(
+    makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }, [
+      { id: "append", name: "Append", operation: { type: "append", queries: ["B"] } },
+    ]),
+  );
+  orchestrator.registerQuery(
+    makeQuery("B", { type: "range", range: { values: [["Value"], [2]], hasHeaders: true } }, [
+      { id: "append", name: "Append", operation: { type: "append", queries: ["A"] } },
+    ]),
+  );
+
+  const handle = orchestrator.refreshAll(["A"]);
+  await assert.rejects(handle.promise, /cycle/i);
+  assert.equal(engine.calls.length, 0);
+});
+
 test("RefreshOrchestrator: unknown target query emits error event and rejects", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
