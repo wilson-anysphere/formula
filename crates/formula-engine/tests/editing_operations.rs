@@ -269,3 +269,43 @@ fn delete_cells_shift_left_creates_ref_errors_and_updates_shifted_references() {
     // Reference into deleted region becomes #REF!, even though another cell moved into B1.
     assert_eq!(engine.get_cell_formula("Sheet1", "A2"), Some("=#REF!"));
 }
+
+#[test]
+fn insert_cells_shift_down_rewrites_references_into_shifted_region() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 42.0).unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=A1").unwrap();
+
+    engine
+        .apply_operation(EditOp::InsertCellsShiftDown {
+            sheet: "Sheet1".to_string(),
+            range: range("A1"),
+        })
+        .unwrap();
+
+    // A1 moved down to A2; formula should follow it.
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(42.0));
+    assert_eq!(engine.get_cell_formula("Sheet1", "B1"), Some("=A2"));
+}
+
+#[test]
+fn delete_cells_shift_up_rewrites_moved_references_and_invalidates_deleted_targets() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=A3").unwrap();
+    engine.set_cell_formula("Sheet1", "B2", "=A2").unwrap();
+
+    engine
+        .apply_operation(EditOp::DeleteCellsShiftUp {
+            sheet: "Sheet1".to_string(),
+            range: range("A1:A2"),
+        })
+        .unwrap();
+
+    // A3 moved up to A1; B1 should follow that move.
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_formula("Sheet1", "B1"), Some("=A1"));
+
+    // Reference directly into deleted region becomes #REF!
+    assert_eq!(engine.get_cell_formula("Sheet1", "B2"), Some("=#REF!"));
+}
