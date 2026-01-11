@@ -484,6 +484,7 @@ export class CanvasGridRenderer {
     }
 
     if (scrollDeltaX !== 0 || scrollDeltaY !== 0) {
+      const full = { x: 0, y: 0, width: viewport.width, height: viewport.height };
       if (!this.forceFullRedraw && this.canBlitScroll(viewport, scrollDeltaX, scrollDeltaY)) {
         this.blitScroll(viewport, scrollDeltaX, scrollDeltaY);
         if (perfEnabled) perf.blitUsed = true;
@@ -491,10 +492,8 @@ export class CanvasGridRenderer {
       } else {
         if (perfEnabled) perf.blitUsed = false;
         this.markFullViewportDirty(viewport);
+        this.dirty.selection.markDirty(full);
       }
-
-      // Selection overlay moves relative to scroll.
-      this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
     } else if (perfEnabled) {
       perf.blitUsed = false;
     }
@@ -680,8 +679,8 @@ export class CanvasGridRenderer {
   }
 
   private canBlitScroll(viewport: GridViewportState, deltaX: number, deltaY: number): boolean {
-    if (!this.gridCanvas || !this.contentCanvas) return false;
-    if (!this.gridCtx || !this.contentCtx) return false;
+    if (!this.gridCanvas || !this.contentCanvas || !this.selectionCanvas) return false;
+    if (!this.gridCtx || !this.contentCtx || !this.selectionCtx) return false;
     if (!this.blitCanvas || !this.blitCtx) return false;
     if (viewport.width === 0 || viewport.height === 0) return false;
 
@@ -707,11 +706,12 @@ export class CanvasGridRenderer {
 
     this.blitLayer("background", viewport, deltaX, deltaY);
     this.blitLayer("content", viewport, deltaX, deltaY);
+    this.blitLayer("selection", viewport, deltaX, deltaY);
   }
 
-  private blitLayer(layer: "background" | "content", viewport: GridViewportState, deltaX: number, deltaY: number): void {
-    const canvas = layer === "background" ? this.gridCanvas : this.contentCanvas;
-    const ctx = layer === "background" ? this.gridCtx : this.contentCtx;
+  private blitLayer(layer: "background" | "content" | "selection", viewport: GridViewportState, deltaX: number, deltaY: number): void {
+    const canvas = layer === "background" ? this.gridCanvas : layer === "content" ? this.contentCanvas : this.selectionCanvas;
+    const ctx = layer === "background" ? this.gridCtx : layer === "content" ? this.contentCtx : this.selectionCtx;
     if (!canvas || !ctx) return;
     if (!this.blitCanvas || !this.blitCtx) return;
 
@@ -802,9 +802,9 @@ export class CanvasGridRenderer {
       if (rect.width <= 0 || rect.height <= 0) continue;
 
       if (shiftX > 0) {
-        this.markDirtyBoth({ x: rect.x, y: rect.y, width: shiftX, height: rect.height });
+        this.markDirtyAll({ x: rect.x, y: rect.y, width: shiftX, height: rect.height });
       } else if (shiftX < 0) {
-        this.markDirtyBoth({
+        this.markDirtyAll({
           x: rect.x + rect.width + shiftX,
           y: rect.y,
           width: -shiftX,
@@ -813,9 +813,9 @@ export class CanvasGridRenderer {
       }
 
       if (shiftY > 0) {
-        this.markDirtyBoth({ x: rect.x, y: rect.y, width: rect.width, height: shiftY });
+        this.markDirtyAll({ x: rect.x, y: rect.y, width: rect.width, height: shiftY });
       } else if (shiftY < 0) {
-        this.markDirtyBoth({
+        this.markDirtyAll({
           x: rect.x,
           y: rect.y + rect.height + shiftY,
           width: rect.width,
@@ -829,6 +829,13 @@ export class CanvasGridRenderer {
     const padded: Rect = { x: rect.x - 1, y: rect.y - 1, width: rect.width + 2, height: rect.height + 2 };
     this.dirty.background.markDirty(padded);
     this.dirty.content.markDirty(padded);
+  }
+
+  private markDirtyAll(rect: Rect): void {
+    const padded: Rect = { x: rect.x - 1, y: rect.y - 1, width: rect.width + 2, height: rect.height + 2 };
+    this.dirty.background.markDirty(padded);
+    this.dirty.content.markDirty(padded);
+    this.dirty.selection.markDirty(padded);
   }
 
   private onProviderUpdate(update: CellProviderUpdate): void {
