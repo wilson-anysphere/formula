@@ -33,6 +33,7 @@ pub enum SheetId {
 // registry live in dedicated modules to avoid merge conflicts.
 mod builtins_array;
 mod builtins_date_time;
+mod builtins_dynamic_array_stack;
 mod builtins_dynamic_arrays;
 mod builtins_information;
 mod builtins_lambda;
