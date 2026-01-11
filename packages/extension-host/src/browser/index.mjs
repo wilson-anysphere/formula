@@ -429,6 +429,7 @@ class BrowserExtensionHost {
     this._extensions.clear();
     this._commands.clear();
     this._panels.clear();
+    this._contextMenus.clear();
     this._customFunctions.clear();
     this._messages = [];
 
@@ -533,6 +534,11 @@ class BrowserExtensionHost {
 
     for (const [panelId, panel] of this._panels.entries()) {
       if (panel?.extensionId === extension.id) this._panels.delete(panelId);
+    }
+
+    // Remove context menus registered by this extension worker; they would otherwise leak.
+    for (const [registrationId, record] of this._contextMenus.entries()) {
+      if (record?.extensionId === extension.id) this._contextMenus.delete(registrationId);
     }
 
     for (const [reqId, pending] of extension.pendingRequests.entries()) {

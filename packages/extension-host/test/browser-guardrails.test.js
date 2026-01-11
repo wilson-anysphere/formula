@@ -113,6 +113,78 @@ test("BrowserExtensionHost: init message includes context storage fields", async
   });
 });
 
+test("BrowserExtensionHost: terminating a worker clears runtime context menus", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  /** @type {(value?: unknown) => void} */
+  let resolveApiResult;
+  const apiResult = new Promise((resolve) => {
+    resolveApiResult = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_result" && msg.id === "req1") resolveApiResult();
+      }
+    }
+  ];
+
+  const PrevWorker = globalThis.Worker;
+  globalThis.Worker = createWorkerCtor(scenarios);
+  t.after(() => {
+    globalThis.Worker = PrevWorker;
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getSelection() {
+        return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+      }
+    },
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.menus";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "menus",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["ui.menus"]
+    }
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  assert.ok(extension.worker);
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "ui",
+    method: "registerContextMenu",
+    args: ["cell/context", [{ command: "test.cmd" }]]
+  });
+
+  await apiResult;
+  assert.equal(host._contextMenus.size, 1);
+
+  host._terminateWorker(extension, { reason: "crash", cause: new Error("boom") });
+  assert.equal(host._contextMenus.size, 0);
+});
+
 test("BrowserExtensionHost: activation timeout terminates worker and allows restart", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
