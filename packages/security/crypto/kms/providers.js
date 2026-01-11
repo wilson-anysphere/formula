@@ -26,8 +26,10 @@ async function loadAwsSdk() {
     // can install the AWS SDK in their own package.json.
     try {
       const { createRequire } = await import("node:module");
+      const { pathToFileURL } = await import("node:url");
       const requireFromCwd = createRequire(`${process.cwd()}/`);
-      cachedAwsSdk = normalizeAwsSdkModule(requireFromCwd("@aws-sdk/client-kms"));
+      const resolved = requireFromCwd.resolve("@aws-sdk/client-kms");
+      cachedAwsSdk = normalizeAwsSdkModule(await import(pathToFileURL(resolved).href));
       return cachedAwsSdk;
     } catch (fallbackErr) {
       cachedAwsSdk = null;
