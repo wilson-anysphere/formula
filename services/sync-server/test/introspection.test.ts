@@ -83,6 +83,13 @@ test("sync-server rejects connections when introspection marks token inactive", 
     role: "editor",
     sessionId: "s-revoked"
   });
+  const invalidClaimsToken = signJwt({
+    sub: "u-invalid",
+    docId: docName,
+    orgId: "o1",
+    role: "editor",
+    sessionId: "s-invalid"
+  });
   const notMemberToken = signJwt({
     sub: "u-removed",
     docId: docName,
@@ -129,6 +136,9 @@ test("sync-server rejects connections when introspection marks token inactive", 
         // reason to a 401 rejection (revoked sessions are unauthorized).
         statusCode = 403;
         body = { reason: "session_revoked", error: "forbidden" };
+      } else if (parsed.token === invalidClaimsToken) {
+        statusCode = 403;
+        body = { reason: "invalid_claims", error: "forbidden" };
       } else if (parsed.token === notMemberToken) {
         body = { active: false, reason: "not_member", userId: "u-removed", orgId: "o1", role: "editor" };
       } else {
@@ -184,11 +194,17 @@ test("sync-server rejects connections when introspection marks token inactive", 
   );
 
   await expectWebSocketUpgradeStatus(
+    `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(invalidClaimsToken)}`,
+    401
+  );
+
+  await expectWebSocketUpgradeStatus(
     `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(notMemberToken)}`,
     403
   );
 
   assert.ok(calls.length >= 3);
   assert.ok(calls.some((c) => c.token === revokedToken && c.docId === docName));
+  assert.ok(calls.some((c) => c.token === invalidClaimsToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === notMemberToken && c.docId === docName));
 });

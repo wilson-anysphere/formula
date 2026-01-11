@@ -11,6 +11,7 @@ export function statusCodeForIntrospectionReason(reason: string | undefined): 40
   switch (reason) {
     case "invalid_token":
     case "token_expired":
+    case "invalid_claims":
     case "session_not_found":
     case "session_revoked":
     case "session_expired":
@@ -20,4 +21,3 @@ export function statusCodeForIntrospectionReason(reason: string | undefined): 40
       return 403;
   }
 }
-
