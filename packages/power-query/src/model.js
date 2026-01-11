@@ -201,39 +201,27 @@
  *   type: "merge";
  *   rightQuery: string;
  *   joinType: "inner" | "left" | "right" | "full";
- *   /**
- *    * Join key columns on the left-hand input.
- *    *
- *    * Must be the same length as `rightKeys` and contain at least one entry.
- *    *\/
+ *   // Join key columns on the left-hand input.
+ *   //
+ *   // Must be the same length as `rightKeys` and contain at least one entry.
  *   leftKeys?: string[];
- *   /**
- *    * Join key columns on the right-hand input.
- *    *
- *    * Must be the same length as `leftKeys` and contain at least one entry.
- *    *\/
+ *   // Join key columns on the right-hand input.
+ *   //
+ *   // Must be the same length as `leftKeys` and contain at least one entry.
  *   rightKeys?: string[];
- *   /**
- *    * Output mode:
- *    * - `"flat"`: Power Query `Table.Join` semantics (flattened join output).
- *    * - `"nested"`: Power Query `Table.NestedJoin` semantics (adds a column containing nested tables).
- *    *
- *    * Defaults to `"flat"` when omitted.
- *    *\/
+ *   // Output mode:
+ *   // - `"flat"`: Power Query `Table.Join` semantics (flattened join output).
+ *   // - `"nested"`: Power Query `Table.NestedJoin` semantics (adds a column containing nested tables).
+ *   //
+ *   // Defaults to `"flat"` when omitted.
  *   joinMode?: "flat" | "nested";
- *   /**
- *    * Name of the nested table column produced when `joinMode === "nested"`.
- *    *\/
+ *   // Name of the nested table column produced when `joinMode === "nested"`.
  *   newColumnName?: string;
- *   /**
- *    * Optional projection for the nested table schema when `joinMode === "nested"`.
- *    * When omitted, all columns from the right table are included.
- *    *\/
+ *   // Optional projection for the nested table schema when `joinMode === "nested"`.
+ *   // When omitted, all columns from the right table are included.
  *   rightColumns?: string[] | null;
- *   /**
- *    * Legacy single-key fields. These are kept for backwards compatibility with older
- *    * serialized queries.
- *    *\/
+ *   // Legacy single-key fields. These are kept for backwards compatibility with older
+ *   // serialized queries.
  *   leftKey?: string;
  *   rightKey?: string;
  * }} MergeOp
@@ -243,8 +231,8 @@
  * @typedef {{ type: "removeRowsWithErrors"; columns: string[] | null }} RemoveRowsWithErrorsOp
  * @typedef {{ column: string; formula: string; newType: DataType | null }} TransformColumnSpec
  * @typedef {{ type: "transformColumns"; transforms: TransformColumnSpec[] }} TransformColumnsOp
-  * @typedef {{ type: "fillDown"; columns: string[] }} FillDownOp
-  * @typedef {{ type: "replaceValues"; column: string; find: unknown; replace: unknown }} ReplaceValuesOp
+ * @typedef {{ type: "fillDown"; columns: string[] }} FillDownOp
+ * @typedef {{ type: "replaceValues"; column: string; find: unknown; replace: unknown }} ReplaceValuesOp
  * @typedef {{ type: "splitColumn"; column: string; delimiter: string; newColumns?: string[] | null }} SplitColumnOp
  * @typedef {{ type: "promoteHeaders" }} PromoteHeadersOp
  * @typedef {{ type: "demoteHeaders" }} DemoteHeadersOp
