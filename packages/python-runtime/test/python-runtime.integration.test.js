@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { NativePythonRuntime } from "@formula/python-runtime/native";
 import { MockWorkbook } from "@formula/python-runtime/test-utils";
 
@@ -163,4 +164,45 @@ ib.BuiltinImporter.exec_module(mod)
 `;
 
   await assert.rejects(() => runtime.execute(script, { api: workbook }), /Import of '_socket' is not permitted/);
+});
+
+test("native allowlist sandbox cannot be bypassed via _socket", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Failed to bind local test server");
+  }
+
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import _socket
+
+s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM, 0)
+s.settimeout(2)
+s.connect(("127.0.0.1", ${address.port}))
+`;
+
+  try {
+    await assert.rejects(
+      () =>
+        runtime.execute(script, {
+          api: workbook,
+          permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
+        }),
+      /Network access to '127.0.0.1' is not permitted/,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

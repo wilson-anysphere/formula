@@ -25,6 +25,8 @@ _ORIGINAL_SOCKET_CREATE_CONNECTION = None
 _ORIGINAL_SOCKET_CONNECT = None
 _ORIGINAL_SOCKET_CONNECT_EX = None
 _ORIGINAL_SOCKET_SENDTO = None
+_ORIGINAL__SOCKET_SOCKET = None
+_ORIGINAL__SOCKET_SOCKETTYPE = None
 
 try:  # pragma: no cover - environment dependent
     _IMPORT_ALLOWLIST_ROOTS = tuple(
@@ -272,6 +274,8 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     global _ORIGINAL_SOCKET_CONNECT
     global _ORIGINAL_SOCKET_CONNECT_EX
     global _ORIGINAL_SOCKET_SENDTO
+    global _ORIGINAL__SOCKET_SOCKET
+    global _ORIGINAL__SOCKET_SOCKETTYPE
 
     try:
         import sys
@@ -296,6 +300,13 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     if _ORIGINAL_SOCKET_SENDTO is None:
         _ORIGINAL_SOCKET_SENDTO = getattr(socket.socket, "sendto", None)
 
+    _socket_mod = getattr(socket, "_socket", None)
+    if _socket_mod is not None:
+        if _ORIGINAL__SOCKET_SOCKET is None:
+            _ORIGINAL__SOCKET_SOCKET = getattr(_socket_mod, "socket", None)
+        if _ORIGINAL__SOCKET_SOCKETTYPE is None:
+            _ORIGINAL__SOCKET_SOCKETTYPE = getattr(_socket_mod, "SocketType", None)
+
     # Restore first so apply_sandbox() can both tighten and loosen restrictions.
     if _ORIGINAL_SOCKET_CREATE_CONNECTION is not None:
         try:
@@ -317,6 +328,18 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
             socket.socket.sendto = _ORIGINAL_SOCKET_SENDTO  # type: ignore[assignment]
         except Exception:
             pass
+
+    if _socket_mod is not None:
+        if _ORIGINAL__SOCKET_SOCKET is not None:
+            try:
+                setattr(_socket_mod, "socket", _ORIGINAL__SOCKET_SOCKET)
+            except Exception:
+                pass
+        if _ORIGINAL__SOCKET_SOCKETTYPE is not None:
+            try:
+                setattr(_socket_mod, "SocketType", _ORIGINAL__SOCKET_SOCKETTYPE)
+            except Exception:
+                pass
 
     if network == "full":
         return
@@ -385,6 +408,48 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     if _ORIGINAL_SOCKET_SENDTO is not None:
         try:
             socket.socket.sendto = guarded_sendto  # type: ignore[assignment]
+        except Exception:
+            pass
+
+    # Prevent trivial allowlist bypasses via `import _socket; _socket.socket(...)`.
+    #
+    # We cannot monkeypatch methods on the builtin `_socket.socket` type itself
+    # (it's immutable), but we can replace the module-level constructor aliases
+    # with a guarded subclass that enforces the same allowlist policy.
+    if _socket_mod is not None and isinstance(_ORIGINAL__SOCKET_SOCKET, type):
+        BaseSocketType = _ORIGINAL__SOCKET_SOCKET
+
+        class GuardedSocketType(BaseSocketType):  # type: ignore[misc,valid-type]
+            def connect(self, address):  # type: ignore[no-untyped-def]
+                if getattr(_SOCKET_THREAD_LOCAL, "bypass_connect_check", 0):
+                    return super().connect(address)
+                enforce_hostname(_extract_hostname(address))
+                return super().connect(address)
+
+            def connect_ex(self, address):  # type: ignore[no-untyped-def]
+                if getattr(_SOCKET_THREAD_LOCAL, "bypass_connect_check", 0):
+                    return super().connect_ex(address)
+                enforce_hostname(_extract_hostname(address))
+                return super().connect_ex(address)
+
+            def sendto(self, data, *args, **kwargs):  # type: ignore[no-untyped-def]
+                address = None
+                if "address" in kwargs:
+                    address = kwargs.get("address")
+                elif len(args) == 1:
+                    address = args[0]
+                elif len(args) >= 2:
+                    address = args[1]
+
+                enforce_hostname(_extract_hostname(address))
+                return super().sendto(data, *args, **kwargs)
+
+        try:
+            setattr(_socket_mod, "socket", GuardedSocketType)
+        except Exception:
+            pass
+        try:
+            setattr(_socket_mod, "SocketType", GuardedSocketType)
         except Exception:
             pass
 

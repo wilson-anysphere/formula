@@ -358,6 +358,45 @@ sock = socket.create_connection(("127.0.0.1", ${address.port}), timeout=2)
     }
   });
 
+  it("prevents allowlist bypasses via _socket (native allowlist sandbox)", async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("ok");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("Failed to bind local test server");
+    }
+
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import _socket
+
+s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM, 0)
+s.settimeout(2)
+s.connect(("127.0.0.1", ${address.port}))
+`;
+
+    try {
+      await expect(
+        runtime.execute(script, {
+          api: workbook,
+          permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
+        }),
+      ).rejects.toThrow(/Network access to '127.0.0.1' is not permitted/);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("blocks obvious command execution escape hatches (os.system)", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({
