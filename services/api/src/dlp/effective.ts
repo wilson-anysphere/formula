@@ -1,0 +1,141 @@
+import type { Pool } from "pg";
+
+import {
+  CLASSIFICATION_LEVEL,
+  DLP_DECISION,
+  DLP_REASON_CODE,
+  evaluatePolicy,
+  maxClassification,
+  normalizeClassification,
+  validateDlpPolicy,
+  type Classification,
+  type DlpPolicy,
+  type PolicyEvaluationResult,
+} from "./dlp";
+
+type DbClient = Pick<Pool, "query">;
+
+const DEFAULT_CLASSIFICATION: Classification = {
+  level: CLASSIFICATION_LEVEL.PUBLIC,
+  labels: [],
+};
+
+type EffectivePolicyResult =
+  | { type: "unconfigured" }
+  | { type: "invalid" }
+  | { type: "configured"; policy: DlpPolicy };
+
+export async function getClassificationForSelectorKey(
+  db: DbClient,
+  docId: string,
+  selectorKey: string
+): Promise<Classification> {
+  const res = await db.query(
+    `
+      SELECT classification
+      FROM document_classifications
+      WHERE document_id = $1 AND selector_key = $2
+      LIMIT 1
+    `,
+    [docId, selectorKey]
+  );
+
+  if (res.rowCount !== 1) return DEFAULT_CLASSIFICATION;
+  return normalizeClassification(res.rows[0]!.classification);
+}
+
+export async function getEffectiveDocumentClassification(db: DbClient, docId: string): Promise<Classification> {
+  const res = await db.query(
+    `
+      SELECT classification
+      FROM document_classifications
+      WHERE document_id = $1
+    `,
+    [docId]
+  );
+
+  if (res.rowCount === 0) return DEFAULT_CLASSIFICATION;
+
+  let effective: Classification = DEFAULT_CLASSIFICATION;
+  for (const row of res.rows as Array<{ classification: unknown }>) {
+    effective = maxClassification(effective, row.classification);
+  }
+  return normalizeClassification(effective);
+}
+
+async function resolveEffectivePolicy(db: DbClient, orgId: string, docId: string): Promise<EffectivePolicyResult> {
+  const orgPolicyRes = await db.query("SELECT policy FROM org_dlp_policies WHERE org_id = $1", [orgId]);
+  if (orgPolicyRes.rowCount !== 1) {
+    // We intentionally treat missing org policy as "no DLP configured" (allow-all)
+    // so orgs can adopt the feature incrementally.
+    return { type: "unconfigured" };
+  }
+
+  const orgPolicyRaw = orgPolicyRes.rows[0]!.policy as unknown;
+  try {
+    validateDlpPolicy(orgPolicyRaw);
+  } catch {
+    return { type: "invalid" };
+  }
+
+  const orgPolicy = orgPolicyRaw as DlpPolicy;
+  if (!orgPolicy.allowDocumentOverrides) {
+    return { type: "configured", policy: orgPolicy };
+  }
+
+  const docPolicyRes = await db.query("SELECT policy FROM document_dlp_policies WHERE document_id = $1", [docId]);
+  if (docPolicyRes.rowCount !== 1) return { type: "configured", policy: orgPolicy };
+
+  const docPolicyRaw = docPolicyRes.rows[0]!.policy as unknown;
+  try {
+    validateDlpPolicy(docPolicyRaw);
+  } catch {
+    return { type: "invalid" };
+  }
+
+  return { type: "configured", policy: docPolicyRaw as DlpPolicy };
+}
+
+export async function evaluateDocumentDlpPolicy(
+  db: DbClient,
+  params: {
+    orgId: string;
+    docId: string;
+    action: string;
+    options?: { includeRestrictedContent?: boolean };
+    selectorKey?: string;
+  }
+): Promise<PolicyEvaluationResult> {
+  const classification = params.selectorKey
+    ? await getClassificationForSelectorKey(db, params.docId, params.selectorKey)
+    : await getEffectiveDocumentClassification(db, params.docId);
+
+  const policyRes = await resolveEffectivePolicy(db, params.orgId, params.docId);
+
+  if (policyRes.type === "invalid") {
+    return {
+      action: params.action,
+      decision: DLP_DECISION.BLOCK,
+      reasonCode: DLP_REASON_CODE.INVALID_POLICY,
+      classification,
+      maxAllowed: null,
+    };
+  }
+
+  if (policyRes.type === "unconfigured") {
+    return {
+      action: params.action,
+      decision: DLP_DECISION.ALLOW,
+      classification,
+      maxAllowed: CLASSIFICATION_LEVEL.RESTRICTED,
+    };
+  }
+
+  return evaluatePolicy({
+    action: params.action,
+    classification,
+    policy: policyRes.policy,
+    options: params.options,
+  });
+}
+

@@ -10,6 +10,7 @@ import { registerAuditRoutes } from "./routes/audit";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerApiKeyRoutes } from "./routes/apiKeys";
 import { registerDocRoutes } from "./routes/docs";
+import { registerDlpRoutes } from "./routes/dlp";
 import { registerInternalRoutes } from "./routes/internal";
 import { registerOrgRoutes } from "./routes/orgs";
 import { registerSiemRoutes } from "./routes/siem";
@@ -49,6 +50,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerOrgRoutes(app);
   registerApiKeyRoutes(app);
   registerDocRoutes(app);
+  registerDlpRoutes(app);
   registerAuditRoutes(app);
   registerSiemRoutes(app);
   registerInternalRoutes(app);

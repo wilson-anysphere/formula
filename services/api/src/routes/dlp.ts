@@ -1,0 +1,88 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { z } from "zod";
+import { DLP_ACTION, selectorKey } from "../dlp/dlp";
+import { evaluateDocumentDlpPolicy } from "../dlp/effective";
+import { canDocument, type DocumentRole } from "../rbac/roles";
+import { requireAuth } from "./auth";
+
+async function requireDocRead(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  docId: string
+): Promise<{ orgId: string; role: DocumentRole } | null> {
+  const membership = await request.server.db.query(
+    `
+      SELECT d.org_id, dm.role
+      FROM documents d
+      LEFT JOIN document_members dm
+        ON dm.document_id = d.id AND dm.user_id = $2
+      WHERE d.id = $1
+      LIMIT 1
+    `,
+    [docId, request.user!.id]
+  );
+
+  if (membership.rowCount !== 1) {
+    reply.code(404).send({ error: "doc_not_found" });
+    return null;
+  }
+
+  const row = membership.rows[0] as { org_id: string; role: DocumentRole | null };
+  if (!row.role || !canDocument(row.role, "read")) {
+    reply.code(403).send({ error: "forbidden" });
+    return null;
+  }
+
+  return { orgId: row.org_id, role: row.role };
+}
+
+const EvaluateDlpBody = z.object({
+  action: z.enum(Object.values(DLP_ACTION) as [string, ...string[]]),
+  options: z
+    .object({
+      includeRestrictedContent: z.boolean().optional(),
+    })
+    .strict()
+    .optional(),
+  selector: z.unknown().optional(),
+});
+
+export function registerDlpRoutes(app: FastifyInstance): void {
+  app.post("/docs/:docId/dlp/evaluate", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRead(request, reply, docId);
+    if (!membership) return;
+
+    const parsed = EvaluateDlpBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    let selectorKeyValue: string | undefined;
+    if (parsed.data.selector !== undefined) {
+      try {
+        const selector = parsed.data.selector;
+        if (typeof selector !== "object" || selector === null) throw new Error("Selector must be an object");
+        if ((selector as any).documentId !== docId) throw new Error("Selector documentId must match route docId");
+        selectorKeyValue = selectorKey(selector);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid selector";
+        return reply.code(400).send({ error: "invalid_request", message });
+      }
+    }
+
+    const evaluation = await evaluateDocumentDlpPolicy(app.db, {
+      orgId: membership.orgId,
+      docId,
+      action: parsed.data.action,
+      options: parsed.data.options,
+      selectorKey: selectorKeyValue,
+    });
+
+    return reply.send({
+      decision: evaluation.decision,
+      reasonCode: evaluation.reasonCode,
+      classification: evaluation.classification,
+      maxAllowed: evaluation.maxAllowed,
+    });
+  });
+}
+

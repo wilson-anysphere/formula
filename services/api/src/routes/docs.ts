@@ -5,7 +5,8 @@ import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { isMfaEnforcedForOrg } from "../auth/mfa";
 import { encryptEnvelope, ENVELOPE_VERSION } from "../crypto/envelope";
 import { createKeyring } from "../crypto/keyring";
-import { normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
+import { DLP_ACTION, DLP_DECISION, normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
+import { evaluateDocumentDlpPolicy } from "../dlp/effective";
 import { createDocumentVersion, getDocumentVersionData } from "../db/documentVersions";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { canDocument, type DocumentRole } from "../rbac/roles";
@@ -753,6 +754,48 @@ export function registerDocRoutes(app: FastifyInstance): void {
       return reply.code(403).send({ error: "public_links_disabled" });
     }
 
+    if (parsed.data.visibility === "public") {
+      const evaluation = await evaluateDocumentDlpPolicy(app.db, {
+        orgId: membership.orgId,
+        docId,
+        action: DLP_ACTION.SHARE_EXTERNAL_LINK,
+      });
+
+      if (evaluation.decision === DLP_DECISION.BLOCK) {
+        await writeAuditEvent(
+          app.db,
+          createAuditEvent({
+            eventType: "dlp.blocked",
+            actor: { type: "user", id: request.user!.id },
+            context: {
+              orgId: membership.orgId,
+              userId: request.user!.id,
+              userEmail: request.user!.email,
+              sessionId: request.session?.id,
+              ipAddress: getClientIp(request),
+              userAgent: getUserAgent(request),
+            },
+            resource: { type: "document", id: docId },
+            success: false,
+            error: { code: "dlp_blocked", message: evaluation.reasonCode },
+            details: {
+              action: evaluation.action,
+              docId,
+              classification: evaluation.classification,
+              maxAllowed: evaluation.maxAllowed,
+            },
+          })
+        );
+
+        return reply.code(403).send({
+          error: "dlp_blocked",
+          reasonCode: evaluation.reasonCode,
+          classification: evaluation.classification,
+          maxAllowed: evaluation.maxAllowed,
+        });
+      }
+    }
+
     const now = new Date();
     const expiresAt = parsed.data.expiresAt
       ? new Date(parsed.data.expiresAt)
@@ -869,6 +912,46 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (visibility === "private" || !allowExternalSharing) {
       if (orgMembership.rowCount !== 1) return reply.code(403).send({ error: "forbidden" });
     } else if (orgMembership.rowCount !== 1) {
+      const evaluation = await evaluateDocumentDlpPolicy(app.db, {
+        orgId,
+        docId,
+        action: DLP_ACTION.SHARE_EXTERNAL_LINK,
+      });
+
+      if (evaluation.decision === DLP_DECISION.BLOCK) {
+        await writeAuditEvent(
+          app.db,
+          createAuditEvent({
+            eventType: "dlp.blocked",
+            actor: { type: "user", id: request.user!.id },
+            context: {
+              orgId,
+              userId: request.user!.id,
+              userEmail: request.user!.email,
+              sessionId: request.session?.id,
+              ipAddress: getClientIp(request),
+              userAgent: getUserAgent(request),
+            },
+            resource: { type: "document", id: docId },
+            success: false,
+            error: { code: "dlp_blocked", message: evaluation.reasonCode },
+            details: {
+              action: evaluation.action,
+              docId,
+              classification: evaluation.classification,
+              maxAllowed: evaluation.maxAllowed,
+            },
+          })
+        );
+
+        return reply.code(403).send({
+          error: "dlp_blocked",
+          reasonCode: evaluation.reasonCode,
+          classification: evaluation.classification,
+          maxAllowed: evaluation.maxAllowed,
+        });
+      }
+
       await app.db.query(
         "INSERT INTO org_members (org_id, user_id, role) VALUES ($1,$2,'member')",
         [orgId, request.user!.id]
