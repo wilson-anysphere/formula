@@ -178,9 +178,16 @@ importers:
       '@formula/collab-presence':
         specifier: workspace:*
         version: link:../presence
+      y-websocket:
+        specifier: ^2.1.0
+        version: 2.1.0(yjs@13.6.29)
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
+    devDependencies:
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
 
   packages/data-io:
     dependencies:

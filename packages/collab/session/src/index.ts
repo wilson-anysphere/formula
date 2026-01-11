@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { WebsocketProvider } from "y-websocket";
 import { PresenceManager } from "@formula/collab-presence";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
@@ -26,13 +27,37 @@ export interface SessionPresenceOptions {
   clearTimeout?: typeof clearTimeout;
 }
 
+export interface CollabSessionConnectionOptions {
+  wsUrl: string;
+  docId: string;
+  token?: string;
+  WebSocketPolyfill?: any;
+  disableBc?: boolean;
+  params?: Record<string, string>;
+}
+
+export type CollabSessionProvider = {
+  awareness?: unknown;
+  connect?: () => void;
+  disconnect?: () => void;
+  destroy?: () => void;
+  on?: (event: string, cb: (...args: any[]) => void) => void;
+  off?: (event: string, cb: (...args: any[]) => void) => void;
+  synced?: boolean;
+};
+
 export interface CollabSessionOptions {
   doc?: Y.Doc;
+  /**
+   * Convenience option to construct a y-websocket provider for this session.
+   * When provided, `session.provider` will be a `WebsocketProvider` instance.
+   */
+  connection?: CollabSessionConnectionOptions;
   /**
    * Optional sync provider (e.g. y-websocket's WebsocketProvider). If provided,
    * we will use `provider.awareness` when constructing a PresenceManager.
    */
-  provider?: { awareness?: unknown; destroy?: () => void } | null;
+  provider?: CollabSessionProvider | null;
   /**
    * Awareness instance used for presence. Overrides `provider.awareness` when provided.
    */
@@ -100,7 +125,7 @@ export class CollabSession {
   readonly doc: Y.Doc;
   readonly cells: Y.Map<unknown>;
 
-  readonly provider: CollabSessionOptions["provider"] | null;
+  readonly provider: CollabSessionProvider | null;
   readonly awareness: unknown;
   readonly presence: PresenceManager | null;
 
@@ -111,7 +136,22 @@ export class CollabSession {
     this.doc = options.doc ?? new Y.Doc();
     this.cells = this.doc.getMap("cells");
 
-    this.provider = options.provider ?? null;
+    if (options.connection && options.provider) {
+      throw new Error("CollabSession cannot be constructed with both `connection` and `provider` options");
+    }
+
+    this.provider =
+      options.provider ??
+      (options.connection
+        ? new WebsocketProvider(options.connection.wsUrl, options.connection.docId, this.doc, {
+            WebSocketPolyfill: options.connection.WebSocketPolyfill,
+            disableBc: options.connection.disableBc,
+            params: {
+              ...(options.connection.params ?? {}),
+              ...(options.connection.token !== undefined ? { token: options.connection.token } : {}),
+            },
+          })
+        : null);
     this.awareness = options.awareness ?? this.provider?.awareness ?? null;
     this.defaultSheetId = options.defaultSheetId ?? "Sheet1";
 
@@ -128,6 +168,39 @@ export class CollabSession {
   destroy(): void {
     this.presence?.destroy();
     this.provider?.destroy?.();
+  }
+
+  connect(): void {
+    this.provider?.connect?.();
+  }
+
+  disconnect(): void {
+    this.provider?.disconnect?.();
+  }
+
+  whenSynced(timeoutMs: number = 10_000): Promise<void> {
+    const provider = this.provider;
+    if (!provider || typeof provider.on !== "function") return Promise.resolve();
+    if (provider.synced) return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (typeof provider.off === "function") provider.off("sync", handler);
+        reject(new Error("Timed out waiting for provider sync"));
+      }, timeoutMs);
+      (timeout as any).unref?.();
+
+      const handler = (isSynced: boolean) => {
+        if (!isSynced) return;
+        clearTimeout(timeout);
+        if (typeof provider.off === "function") provider.off("sync", handler);
+        resolve();
+      };
+
+      provider.on("sync", handler);
+
+      if (provider.synced) handler(true);
+    });
   }
 
   setPermissions(permissions: SessionPermissions): void {
@@ -251,4 +324,3 @@ export function createCollabSession(options: CollabSessionOptions = {}): CollabS
 
 // Backwards-compatible alias (Task 133 naming).
 export const createSession = createCollabSession;
-
