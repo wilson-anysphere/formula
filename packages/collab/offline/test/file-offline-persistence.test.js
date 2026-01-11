@@ -46,6 +46,17 @@ test("attachOfflinePersistence(file) restores Yjs state across restarts", async 
     persistence.destroy();
     doc.destroy();
   }
+
+  {
+    const doc = new Y.Doc({ guid });
+    const persistence = attachOfflinePersistence(doc, { mode: "file", filePath });
+    await persistence.whenLoaded();
+
+    assert.equal(doc.getMap("cells").has("Sheet1:0:0"), false);
+
+    persistence.destroy();
+    doc.destroy();
+  }
 });
 
 test("attachOfflinePersistence(file) truncates partial tail records on load", async (t) => {
@@ -92,4 +103,3 @@ test("attachOfflinePersistence(file) truncates partial tail records on load", as
     doc.destroy();
   }
 });
-

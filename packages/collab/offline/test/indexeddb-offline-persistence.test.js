@@ -41,5 +41,15 @@ test("attachOfflinePersistence restores Yjs state from IndexedDB across restarts
     persistence.destroy();
     doc.destroy();
   }
-});
 
+  {
+    const doc = new Y.Doc({ guid: key });
+    const persistence = attachOfflinePersistence(doc, { mode: "indexeddb", key });
+    await persistence.whenLoaded();
+
+    assert.equal(doc.getMap("cells").has("Sheet1:0:0"), false);
+
+    persistence.destroy();
+    doc.destroy();
+  }
+});
