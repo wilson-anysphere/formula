@@ -137,3 +137,81 @@ test("schemaVersion=1 commits missing metadata preserve existing metadata", asyn
   assert.equal(state.cells.Sheet1.A1.value, 2);
   assert.equal(state.metadata.scenario, "base");
 });
+
+test("schemaVersion=1 commits with metadata=null preserve existing metadata", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-null-metadata", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+    },
+    cells: { Sheet1: { A1: { value: 1 } } },
+    metadata: { scenario: "base" },
+    namedRanges: {},
+    comments: {},
+  });
+
+  await service.commit(actor, {
+    // @ts-expect-error - simulate malformed legacy client.
+    nextState: {
+      schemaVersion: 1,
+      sheets: {
+        order: ["Sheet1"],
+        metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+      },
+      cells: { Sheet1: { A1: { value: 2 } } },
+      metadata: null,
+      namedRanges: {},
+      comments: {},
+    },
+  });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.cells.Sheet1.A1.value, 2);
+  assert.equal(state.metadata.scenario, "base");
+});
+
+test("schemaVersion=1 commits with metadata=undefined preserve existing metadata", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-undefined-metadata", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+    },
+    cells: { Sheet1: { A1: { value: 1 } } },
+    metadata: { scenario: "base" },
+    namedRanges: {},
+    comments: {},
+  });
+
+  const nextState = {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+    },
+    cells: { Sheet1: { A1: { value: 2 } } },
+    // Intentionally set a key with an undefined value (will survive as a property
+    // in JS, even though JSON serialization would drop it).
+    metadata: undefined,
+    namedRanges: {},
+    comments: {},
+  };
+
+  await service.commit(actor, {
+    // @ts-expect-error - simulate malformed legacy client.
+    nextState,
+  });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.cells.Sheet1.A1.value, 2);
+  assert.equal(state.metadata.scenario, "base");
+});

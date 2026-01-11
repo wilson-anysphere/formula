@@ -75,7 +75,12 @@ function isLegacyCellsOnlyState(value) {
  * @param {any} value
  */
 function isLegacySchemaV1WithoutMetadata(value) {
-  return isRecord(value) && value.schemaVersion === 1 && !("metadata" in value);
+  if (!isRecord(value) || value.schemaVersion !== 1) return false;
+  if (!("metadata" in value)) return true;
+  // Some older/malformed callers may include the key but set it to null/undefined.
+  // Treat that as "metadata not supported" and preserve the current branch head.
+  const metadata = value.metadata;
+  return metadata === null || metadata === undefined;
 }
 
 /**
