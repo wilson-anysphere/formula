@@ -1730,7 +1730,10 @@ export class SpreadsheetApp {
     this.clampScroll();
 
     const changed = this.scrollX !== prevX || this.scrollY !== prevY;
-    if (changed) this.syncScrollbars();
+    if (changed) {
+      this.hideCommentTooltip();
+      this.syncScrollbars();
+    }
     return changed;
   }
 
