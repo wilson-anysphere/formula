@@ -134,6 +134,7 @@ describe("ai chat orchestrator", () => {
     expect(entries.length).toBe(1);
     expect(entries[0]?.mode).toBe("chat");
     expect(entries[0]?.model).toBe("mock-model");
+    expect((entries[0] as any)?.input?.context?.retrieved_ranges).toContain("Sheet1!A1:B2");
     expect(entries[0]?.tool_calls?.[0]?.name).toBe("write_cell");
     expect(entries[0]?.tool_calls?.[0]?.approved).toBe(false);
   });
@@ -194,6 +195,7 @@ describe("ai chat orchestrator", () => {
     const entries = await auditStore.listEntries({ session_id: "session_approved" });
     expect(entries.length).toBe(1);
     expect(entries[0]?.tool_calls?.[0]?.approved).toBe(true);
+    expect((entries[0] as any)?.input?.context?.retrieved_ranges).toContain("Sheet1!A1:B2");
 
     const firstRequest = mock.requests[0];
     expect(firstRequest.messages?.[0]?.content).toContain("Workbook summary");

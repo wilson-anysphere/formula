@@ -330,6 +330,7 @@ function summarizeContextForAudit(workbookContext: any) {
   const retrieved = workbookContext?.retrieved ?? [];
   return {
     retrieved_chunk_ids: retrieved.map((c: any) => c.id).filter(Boolean),
+    retrieved_ranges: extractRetrievedRanges(retrieved),
     retrieved_count: retrieved.length,
     index_stats: workbookContext?.indexStats
   };
