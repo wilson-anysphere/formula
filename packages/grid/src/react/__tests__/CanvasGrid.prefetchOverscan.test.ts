@@ -116,6 +116,7 @@ describe("CanvasGrid prefetch overscan", () => {
       startCol: Math.max(0, visibleRange.startCol - overscanCols),
       endCol: Math.min(100, visibleRange.endCol + overscanCols)
     });
+    expect(prefetch).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       root.unmount();
