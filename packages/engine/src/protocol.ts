@@ -13,9 +13,20 @@ export interface CellChange {
   value: CellScalar;
 }
 
+export interface RpcOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 export interface InitMessage {
   type: "init";
   port: MessagePort;
+  /**
+   * URL to the WASM module (typically the wasm-bindgen JS glue entrypoint).
+   *
+   * Pass an empty string to disable WASM loading; RPC requests will fail with
+   * `worker not initialized`.
+   */
   wasmModuleUrl: string;
 }
 
@@ -51,4 +62,3 @@ export interface RpcResponseErr {
 
 export type WorkerInboundMessage = RpcRequest | RpcCancel;
 export type WorkerOutboundMessage = ReadyMessage | RpcResponseOk | RpcResponseErr;
-

@@ -1,66 +1,98 @@
-export type EngineClient = {
-  init: () => Promise<void>;
-  ping: () => Promise<string>;
-  terminate: () => void;
-};
+import type { CellChange, CellData, CellScalar, RpcOptions } from "./protocol";
+import { EngineWorker } from "./worker/EngineWorker";
 
-type EngineRequest = {
-  id: number;
-  method: "init" | "ping";
-  params?: unknown;
-};
+export interface EngineClient {
+  /**
+   * Force initialization of the underlying worker/WASM engine.
+   *
+   * Note: the engine may still lazy-load WASM on first request.
+   */
+  init(): Promise<void>;
+  newWorkbook(): Promise<void>;
+  loadWorkbookFromJson(json: string): Promise<void>;
+  toJson(): Promise<string>;
+  getCell(address: string, sheet?: string, options?: RpcOptions): Promise<CellData>;
+  getRange(range: string, sheet?: string, options?: RpcOptions): Promise<CellData[][]>;
+  /**
+   * Set a single cell, batched across the current microtask to minimize RPC
+   * overhead.
+   */
+  setCell(address: string, value: CellScalar, sheet?: string): Promise<void>;
+  setRange(
+    range: string,
+    values: CellScalar[][],
+    sheet?: string,
+    options?: RpcOptions
+  ): Promise<void>;
+  recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]>;
+  terminate(): void;
+}
 
-type EngineResponse =
-  | { id: number; ok: true; result: unknown }
-  | { id: number; ok: false; error: string };
+export function createEngineClient(options?: { wasmModuleUrl?: string }): EngineClient {
+  if (typeof Worker === "undefined") {
+    throw new Error("createEngineClient() requires a Worker-capable environment");
+  }
 
-export function createEngineClient(): EngineClient {
   // Vite supports Worker construction via `new URL(..., import.meta.url)` and will
   // bundle the Worker entrypoint correctly for both dev and production builds.
   const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
-    type: "module",
+    type: "module"
   });
 
-  let nextId = 1;
-  const pending = new Map<
-    number,
-    { resolve: (value: any) => void; reject: (error: any) => void }
-  >();
+  let enginePromise: Promise<EngineWorker> | null = null;
+  let engine: EngineWorker | null = null;
+  let terminated = false;
 
-  worker.onmessage = (event) => {
-    const message = event.data as EngineResponse;
-    const handler = pending.get(message.id);
-    if (!handler) return;
-
-    pending.delete(message.id);
-
-    if (message.ok) {
-      handler.resolve(message.result);
-      return;
+  const connect = () => {
+    if (enginePromise) {
+      return enginePromise;
     }
-
-    handler.reject(new Error(message.error));
-  };
-
-  worker.onerror = (event) => {
-    const error = new Error(event.message);
-    for (const handler of pending.values()) handler.reject(error);
-    pending.clear();
-  };
-
-  function call<T>(method: EngineRequest["method"], params?: unknown) {
-    const id = nextId++;
-    const request: EngineRequest = { id, method, params };
-    worker.postMessage(request);
-
-    return new Promise<T>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+    enginePromise = EngineWorker.connect({
+      worker,
+      wasmModuleUrl: options?.wasmModuleUrl
     });
-  }
+    void enginePromise
+      .then((connected) => {
+        engine = connected;
+        if (terminated) {
+          connected.terminate();
+        }
+      })
+      .catch(() => {
+        // Callers awaiting `connect()` will observe the rejection.
+      });
+    return enginePromise;
+  };
+
+  const withEngine = async <T>(fn: (engine: EngineWorker) => Promise<T>): Promise<T> => {
+    const connected = await connect();
+    return await fn(connected);
+  };
 
   return {
-    init: () => call<void>("init"),
-    ping: () => call<string>("ping"),
-    terminate: () => worker.terminate(),
+    init: async () => {
+      await connect();
+    },
+    newWorkbook: async () => await withEngine((connected) => connected.newWorkbook()),
+    loadWorkbookFromJson: async (json) =>
+      await withEngine((connected) => connected.loadWorkbookFromJson(json)),
+    toJson: async () => await withEngine((connected) => connected.toJson()),
+    getCell: async (address, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.getCell(address, sheet, rpcOptions)),
+    getRange: async (range, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.getRange(range, sheet, rpcOptions)),
+    setCell: async (address, value, sheet) =>
+      await withEngine((connected) => connected.setCell(address, value, sheet)),
+    setRange: async (range, values, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
+    recalculate: async (sheet, rpcOptions) =>
+      await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
+    terminate: () => {
+      terminated = true;
+      engine?.terminate();
+      if (!engine) {
+        worker.terminate();
+      }
+    }
   };
 }

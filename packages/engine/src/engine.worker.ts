@@ -192,3 +192,4 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
 
   postMessageToMain({ type: "ready" });
 });
+
