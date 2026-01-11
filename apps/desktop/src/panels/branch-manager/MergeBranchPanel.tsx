@@ -87,8 +87,54 @@ function cellSummary(cell: Cell | null) {
 
 function jsonSummary(value: unknown) {
   if (value === null || value === undefined) return "∅";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+  /**
+   * @param {unknown} inner
+   * @param {number} depth
+   * @returns {unknown}
+   */
+  function preview(inner, depth) {
+    if (inner === null || inner === undefined) return null;
+    if (typeof inner === "string" || typeof inner === "number" || typeof inner === "boolean") return inner;
+    if (depth >= 2) return "[Object]";
+
+    if (Array.isArray(inner)) {
+      const sliced = inner.slice(0, 20).map((v) => preview(v, depth + 1));
+      return inner.length > 20 ? [...sliced, "…"] : sliced;
+    }
+
+    if (typeof inner !== "object") return String(inner);
+
+    const obj = inner as Record<string, unknown>;
+
+    // Special-case sheet presence conflicts: the cell map can be huge; avoid
+    // traversing it for UI summaries.
+    if (depth === 0 && typeof obj.meta === "object" && obj.meta !== null && "cells" in obj) {
+      return { meta: preview(obj.meta, depth + 1), cells: "[cells]" };
+    }
+
+    /** @type {Record<string, unknown>} */
+    const out: Record<string, unknown> = {};
+
+    let count = 0;
+    let hasMore = false;
+    for (const key in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+      if (count >= 20) {
+        hasMore = true;
+        break;
+      }
+      out[key] = preview(obj[key], depth + 1);
+      count += 1;
+    }
+    if (hasMore) out["…"] = "…";
+    return out;
+  }
+
   try {
-    const json = JSON.stringify(value);
+    const json = JSON.stringify(preview(value, 0));
     return json.length > 200 ? `${json.slice(0, 200)}…` : json;
   } catch {
     return String(value);
