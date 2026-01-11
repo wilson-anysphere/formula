@@ -36,7 +36,7 @@ export async function fetchNextAuditEvents(
 
   const limitParam = hasCursor ? "$4" : "$2";
 
-  const res = await db.query(
+  const res = await db.query<PostgresAuditLogRow>(
     `
       SELECT *
       FROM (
@@ -89,7 +89,7 @@ export async function fetchNextAuditEvents(
     const createdAt = toDate(row.created_at);
     return {
       createdAt,
-      event: auditLogRowToAuditEvent(row as PostgresAuditLogRow)
+      event: auditLogRowToAuditEvent(row)
     } satisfies ExportableAuditEvent;
   });
 }
