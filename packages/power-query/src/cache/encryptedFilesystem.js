@@ -405,6 +405,55 @@ export class EncryptedFileSystemCacheStore {
   }
 
   /**
+   * Proactively delete expired entries.
+   *
+   * CacheManager deletes expired keys on access, but long-lived caches can benefit
+   * from an occasional sweep to free disk space (including `.bin` blobs).
+   *
+   * @param {number} [nowMs]
+   */
+  async pruneExpired(nowMs = Date.now()) {
+    await this.ensureDir();
+    const { fs } = await this.deps();
+    const files = await this._listEntryFiles();
+    for (const filePath of files) {
+      const binPath = filePath.replace(/\.json$/, ".bin");
+
+      /** @type {Buffer} */
+      let bytes;
+      try {
+        bytes = await fs.readFile(filePath);
+      } catch {
+        continue;
+      }
+
+      const plaintext = await this._decryptFileBytes(bytes);
+      if (!plaintext) {
+        // Best-effort cleanup: if we can't decrypt/parse the entry, treat it as
+        // corrupted cache data and remove it.
+        await fs.rm(filePath, { force: true }).catch(() => {});
+        await fs.rm(binPath, { force: true }).catch(() => {});
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(plaintext.toString("utf8"));
+        const expiresAtMs =
+          parsed && typeof parsed === "object" && parsed.entry && typeof parsed.entry === "object" ? parsed.entry.expiresAtMs : null;
+        if (typeof expiresAtMs === "number" && expiresAtMs <= nowMs) {
+          await fs.rm(filePath, { force: true });
+          await fs.rm(binPath, { force: true });
+        }
+      } catch {
+        // Corrupted or unreadable cache entries are treated as misses; remove them
+        // so they don't linger indefinitely.
+        await fs.rm(filePath, { force: true }).catch(() => {});
+        await fs.rm(binPath, { force: true }).catch(() => {});
+      }
+    }
+  }
+
+  /**
    * List entry files in the cache directory.
    *
    * @returns {Promise<string[]>}
