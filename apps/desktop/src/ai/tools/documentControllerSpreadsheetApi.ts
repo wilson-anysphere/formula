@@ -27,7 +27,8 @@ function styleToCellFormat(style: DocumentControllerStyle | null | undefined): C
 
   const fill = style.fill;
   if (fill && typeof fill === "object") {
-    if (typeof fill.fgColor === "string") out.background_color = fill.fgColor;
+    const color = typeof fill.fgColor === "string" ? fill.fgColor : typeof fill.background === "string" ? fill.background : null;
+    if (color != null) out.background_color = color;
   }
 
   if (typeof style.numberFormat === "string") out.number_format = style.numberFormat;
@@ -192,10 +193,39 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   writeRange(range: RangeAddress, cells: CellData[][]): void {
+    const rowCount = range.endRow - range.startRow + 1;
+    const colCount = range.endCol - range.startCol + 1;
+
+    if (cells.length !== rowCount) {
+      throw new Error(
+        `writeRange expected ${rowCount} rows but got ${cells.length} rows for ${range.sheet}!R${range.startRow}C${range.startCol}:R${range.endRow}C${range.endCol}`
+      );
+    }
+
+    for (const row of cells) {
+      if (row.length !== colCount) {
+        throw new Error(
+          `writeRange expected ${colCount} columns but got ${row.length} columns for ${range.sheet}!R${range.startRow}C${range.startCol}:R${range.endRow}C${range.endCol}`
+        );
+      }
+    }
+
     const values = cells.map((row) =>
       row.map((cell) => (cell?.formula ? { formula: cell.formula } : cell?.value ?? null))
     );
     this.controller.setRangeValues(range.sheet, toControllerRange(range), values, { label: "AI set_range" });
+
+    for (let r = 0; r < rowCount; r++) {
+      const row = cells[r] ?? [];
+      for (let c = 0; c < colCount; c++) {
+        const format = row[c]?.format;
+        if (!format || Object.keys(format).length === 0) continue;
+        const patch = cellFormatToStylePatch(format);
+        if (!patch) continue;
+        const coord = { row: range.startRow - 1 + r, col: range.startCol - 1 + c };
+        this.controller.setRangeFormat(range.sheet, { start: coord, end: coord }, patch, { label: "AI apply_formatting" });
+      }
+    }
   }
 
   applyFormatting(range: RangeAddress, format: Partial<CellFormat>): number {

@@ -97,6 +97,32 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(api.listNonEmptyCells("Sheet1")).toEqual([]);
   });
 
+  it("applies per-cell formatting provided to writeRange()", () => {
+    const controller = new DocumentController();
+    const api = new DocumentControllerSpreadsheetApi(controller);
+
+    api.writeRange(
+      { sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 1, endCol: 2 },
+      [[{ value: 1, format: { bold: true } }, { value: 2 }]]
+    );
+
+    const a1 = api.getCell({ sheet: "Sheet1", row: 1, col: 1 });
+    expect(a1.format).toEqual({ bold: true });
+
+    const state = controller.getCell("Sheet1", "A1");
+    expect(controller.styleTable.get(state.styleId).font?.bold).toBe(true);
+    expect(controller.getCell("Sheet1", "B1").styleId).toBe(0);
+  });
+
+  it("validates writeRange dimensions like the ai-tools InMemoryWorkbook", () => {
+    const controller = new DocumentController();
+    const api = new DocumentControllerSpreadsheetApi(controller);
+
+    expect(() =>
+      api.writeRange({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 1, endCol: 2 }, [[{ value: 1 }]])
+    ).toThrow(/expected 2 columns/i);
+  });
+
   it("supports PreviewEngine diffing without mutating the live controller", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 10);
