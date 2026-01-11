@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const { createExtensionPackage, loadExtensionManifest, readExtensionPackage } = require("../../../shared/extension-package");
-const { signBytes } = require("../../../shared/crypto/signing");
+const { signBytes, sha256 } = require("../../../shared/crypto/signing");
 const { isValidSemver } = require("../../../shared/semver");
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -118,11 +118,13 @@ async function publishExtension({ extensionDir, marketplaceUrl, token, privateKe
   const { manifest, packageBytes, signatureBase64 } = await packageExtension(extensionDir, { privateKeyPem, formatVersion });
 
   const base = marketplaceUrl.replace(/\/$/, "");
+  const packageSha256 = sha256(packageBytes);
   let response = await fetch(`${base}/api/publish-bin`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/vnd.formula.extension-package",
+      "X-Package-Sha256": packageSha256,
       ...(formatVersion === 1 ? { "X-Package-Signature": signatureBase64 } : {}),
     },
     body: packageBytes,

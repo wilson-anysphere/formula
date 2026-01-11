@@ -19,7 +19,7 @@ const { createMarketplaceServer } = marketplaceServerPkg;
 const { publishExtension, packageExtension } = publisherPkg;
 const { ExtensionHost } = extensionHostPkg;
 const { createExtensionPackageV1 } = extensionPackagePkg;
-const { signBytes, verifyBytesSignature } = signingPkg;
+const { signBytes, verifyBytesSignature, sha256 } = signingPkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -449,12 +449,27 @@ test("publish-bin accepts v2 extension packages without X-Package-Signature", as
     assert.equal(regRes.status, 200);
 
     const packaged = await packageExtension(extSource, { privateKeyPem });
+    const pkgSha = sha256(packaged.packageBytes);
+
+    const badShaRes = await fetch(`${baseUrl}/api/publish-bin`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/vnd.formula.extension-package",
+        "X-Package-Sha256": "0".repeat(64),
+      },
+      body: packaged.packageBytes,
+    });
+    assert.equal(badShaRes.status, 400);
+    const badShaBody = await badShaRes.json();
+    assert.match(String(badShaBody?.error || ""), /x-package-sha256/i);
 
     const publishRes = await fetch(`${baseUrl}/api/publish-bin`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${publisherToken}`,
         "Content-Type": "application/vnd.formula.extension-package",
+        "X-Package-Sha256": pkgSha,
       },
       body: packaged.packageBytes,
     });
@@ -509,6 +524,21 @@ test("publish-bin accepts v1 extension packages with detached X-Package-Signatur
 
     const packageBytes = await createExtensionPackageV1(extSource);
     const signatureBase64 = signBytes(packageBytes, privateKeyPem);
+    const pkgSha = sha256(packageBytes);
+
+    const badShaRes = await fetch(`${baseUrl}/api/publish-bin`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/vnd.formula.extension-package",
+        "X-Package-Signature": signatureBase64,
+        "X-Package-Sha256": "0".repeat(64),
+      },
+      body: packageBytes,
+    });
+    assert.equal(badShaRes.status, 400);
+    const badShaBody = await badShaRes.json();
+    assert.match(String(badShaBody?.error || ""), /x-package-sha256/i);
 
     const publishRes = await fetch(`${baseUrl}/api/publish-bin`, {
       method: "POST",
@@ -516,6 +546,7 @@ test("publish-bin accepts v1 extension packages with detached X-Package-Signatur
         Authorization: `Bearer ${publisherToken}`,
         "Content-Type": "application/vnd.formula.extension-package",
         "X-Package-Signature": signatureBase64,
+        "X-Package-Sha256": pkgSha,
       },
       body: packageBytes,
     });
