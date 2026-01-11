@@ -68,8 +68,10 @@ function valueToM(value) {
     if (!hasUtcTimeComponent(value)) {
       return `#date(${value.getUTCFullYear()}, ${value.getUTCMonth() + 1}, ${value.getUTCDate()})`;
     }
-    const seconds = value.getUTCSeconds() + value.getUTCMilliseconds() / 1000;
-    return `#datetime(${value.getUTCFullYear()}, ${value.getUTCMonth() + 1}, ${value.getUTCDate()}, ${value.getUTCHours()}, ${value.getUTCMinutes()}, ${seconds})`;
+    const seconds = value.getUTCSeconds();
+    const millis = value.getUTCMilliseconds();
+    const secArg = millis === 0 ? String(seconds) : `${seconds}.${String(millis).padStart(3, "0")}`;
+    return `#datetime(${value.getUTCFullYear()}, ${value.getUTCMonth() + 1}, ${value.getUTCDate()}, ${value.getUTCHours()}, ${value.getUTCMinutes()}, ${secArg})`;
   }
   if (Array.isArray(value)) return `{${value.map(valueToM).join(", ")}}`;
   if (typeof value === "object") {

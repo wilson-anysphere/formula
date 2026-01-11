@@ -150,3 +150,21 @@ in
   const query2 = compileMToQuery(printed);
   assert.deepEqual(toJson(query2), toJson(query));
 });
+
+test("m_language round-trip: prettyPrintQueryToM (#datetime fractional seconds)", () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"When"},
+    {#datetime(2024, 1, 1, 1, 2, 3.004)}
+  })
+in
+  Source
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  assert.match(printed, /#datetime\(2024, 1, 1, 1, 2, 3\.004\)/);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});

@@ -1848,7 +1848,14 @@ function evaluateCallConstant(ctx, name, expr) {
       const nums = expr.args.map((a) => evaluateConstant(ctx, a));
       if (!nums.every((n) => typeof n === "number")) ctx.error(expr, "#datetime requires numeric arguments");
       const [y, mo, d, hh = 0, mm = 0, ss = 0] = /** @type {number[]} */ (nums);
-      return new Date(Date.UTC(y, mo - 1, d, hh, mm, ss));
+
+      // Power Query's `#datetime` allows fractional seconds (e.g. `3.004`).
+      // JS Date constructors take a separate millisecond component, so preserve
+      // the sub-second precision deterministically.
+      const totalMs = Math.round(ss * 1000);
+      const wholeSeconds = Math.trunc(totalMs / 1000);
+      const millis = totalMs - wholeSeconds * 1000;
+      return new Date(Date.UTC(y, mo - 1, d, hh, mm, wholeSeconds, millis));
     }
     default: {
       const constant = constantIdentifierValue(name);
