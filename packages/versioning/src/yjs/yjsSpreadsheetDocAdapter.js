@@ -67,11 +67,22 @@ function isEmptyPlaceholderRoot(value) {
     }
   }
 
+  // For Array/Text roots, Yjs tracks the count of non-deleted items in `_length`.
+  // Prefer it over scanning list items so we don't misclassify a non-empty root
+  // that happens to have a long chain of deleted items.
+  if (typeof value?._length === "number") {
+    return value._length === 0;
+  }
+
   let item = value?._start ?? null;
   for (let i = 0; item && i < 1000; i += 1) {
     if (!item.deleted) return false;
     item = item.right;
   }
+
+  // If we hit our scan limit while there are still list items, we can't safely
+  // conclude the root is empty. Treat it as non-empty to avoid dropping data.
+  if (item) return false;
 
   return true;
 }
