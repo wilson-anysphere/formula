@@ -4,8 +4,8 @@ use crate::macros::{
     MacroInfo, MacroInvocation,
 };
 use crate::persistence::{
-    open_memory_manager, open_storage, workbook_from_model, workbook_to_model, PersistentWorkbookState,
-    WorkbookPersistenceLocation,
+    autosave_db_path_for_workbook, open_memory_manager, open_storage, workbook_from_model,
+    workbook_to_model, PersistentWorkbookState, WorkbookPersistenceLocation,
 };
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
@@ -578,37 +578,124 @@ impl AppState {
         new_path: Option<String>,
         new_origin_xlsx_bytes: Option<Arc<[u8]>>,
     ) -> Result<(), AppStateError> {
-        let workbook = self
-            .workbook
-            .as_mut()
-            .ok_or(AppStateError::NoWorkbookLoaded)?;
-        if let Some(path) = new_path {
-            workbook.path = Some(path);
-        }
-        if let Some(bytes) = new_origin_xlsx_bytes {
-            workbook.origin_xlsx_bytes = Some(bytes);
-        }
-        // Saving establishes a new baseline for "net" changes. Clear the per-cell baseline so
-        // subsequent edits are tracked against this saved state (not the previously opened or
-        // previously saved workbook bytes).
-        workbook.cell_input_baseline.clear();
-        workbook.original_print_settings = workbook.print_settings.clone();
-        for sheet in &mut workbook.sheets {
-            sheet.clear_dirty_cells();
-        }
-
-        // If the saved file is `.xlsx`, macros are not preserved; clear any in-memory macro
-        // payloads so the UI doesn't continue to treat the workbook as macro-enabled.
-        if workbook
-            .path
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()))
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+        let requested_path = new_path.clone();
         {
-            workbook.vba_project_bin = None;
-            workbook.macro_fingerprint = None;
+            let workbook = self
+                .workbook
+                .as_mut()
+                .ok_or(AppStateError::NoWorkbookLoaded)?;
+            if let Some(path) = new_path {
+                workbook.path = Some(path);
+            }
+            if let Some(bytes) = new_origin_xlsx_bytes {
+                workbook.origin_xlsx_bytes = Some(bytes);
+            }
+            // Saving establishes a new baseline for "net" changes. Clear the per-cell baseline so
+            // subsequent edits are tracked against this saved state (not the previously opened or
+            // previously saved workbook bytes).
+            workbook.cell_input_baseline.clear();
+            workbook.original_print_settings = workbook.print_settings.clone();
+            for sheet in &mut workbook.sheets {
+                sheet.clear_dirty_cells();
+            }
+
+            // If the saved file is `.xlsx`, macros are not preserved; clear any in-memory macro
+            // payloads so the UI doesn't continue to treat the workbook as macro-enabled.
+            if workbook
+                .path
+                .as_deref()
+                .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()))
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+            {
+                workbook.vba_project_bin = None;
+                workbook.macro_fingerprint = None;
+            }
         }
         self.dirty = false;
+
+        // If the user saved under a new path (Save As), re-key the autosave database to the new file
+        // identity so crash recovery uses the correct autosave DB for subsequent opens.
+        //
+        // This is best-effort: a failure to re-key should never fail the save itself.
+        if let Some(saved_path) = requested_path.as_deref() {
+            let _ = self.rekey_autosave_db_after_save(saved_path);
+        }
+
+        Ok(())
+    }
+
+    fn rekey_autosave_db_after_save(&mut self, saved_path: &str) -> Result<(), AppStateError> {
+        let Some(persistent) = self.persistent.as_mut() else {
+            return Ok(());
+        };
+        let current_db_path = match &persistent.location {
+            WorkbookPersistenceLocation::OnDisk(path) => path.clone(),
+            WorkbookPersistenceLocation::InMemory => return Ok(()),
+        };
+
+        let Some(desired_db_path) = autosave_db_path_for_workbook(saved_path) else {
+            return Ok(());
+        };
+        if desired_db_path == current_db_path {
+            return Ok(());
+        }
+
+        if let Some(parent) = desired_db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+        }
+
+        // Ensure all pending in-memory edits are durably persisted before exporting.
+        persistent
+            .memory
+            .flush_dirty_pages()
+            .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+        let model = persistent
+            .storage
+            .export_model_workbook(persistent.workbook_id)
+            .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+        let new_storage = formula_storage::Storage::open_path(&desired_db_path)
+            .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+        let workbook_name = Path::new(saved_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("Workbook");
+
+        let new_workbook_meta = new_storage
+            .import_model_workbook(&model, ImportModelWorkbookOptions::new(workbook_name))
+            .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+        let new_sheet_metas = new_storage
+            .list_sheets(new_workbook_meta.id)
+            .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+        let new_memory = open_memory_manager(new_storage.clone());
+        let new_autosave = tokio::runtime::Handle::try_current()
+            .ok()
+            .map(|_| Arc::new(AutoSaveManager::spawn(new_memory.clone(), AutoSaveConfig::default())));
+
+        let mut sheet_map = HashMap::<String, Uuid>::new();
+        if let Some(workbook) = self.workbook.as_ref() {
+            for sheet in &workbook.sheets {
+                if let Some(meta) = new_sheet_metas
+                    .iter()
+                    .find(|m| m.name.eq_ignore_ascii_case(&sheet.name))
+                {
+                    sheet_map.insert(sheet.id.clone(), meta.id);
+                }
+            }
+        }
+
+        persistent.location = WorkbookPersistenceLocation::OnDisk(desired_db_path);
+        persistent.storage = new_storage;
+        persistent.memory = new_memory;
+        persistent.autosave = new_autosave;
+        persistent.workbook_id = new_workbook_meta.id;
+        persistent.sheet_map = sheet_map;
+
         Ok(())
     }
 
