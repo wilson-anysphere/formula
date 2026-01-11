@@ -248,6 +248,23 @@ test("OData folding: pushes skip into query options", () => {
   assert.equal(explained.plan.url, "https://example.com/odata/Products?$filter=Price%20gt%2020&$skip=10&$top=5");
 });
 
+test("OData folding: rewrites take then skip into $skip+$top", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_take_skip",
+    name: "OData take then skip",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      { id: "s1", name: "Take", operation: { type: "take", count: 10 } },
+      { id: "s2", name: "Skip", operation: { type: "skip", count: 3 } },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$skip=3&$top=7");
+});
+
 test("OData folding: does not fold filterRows after skip (preserves local semantics)", () => {
   const folding = new ODataFoldingEngine();
   const query = {

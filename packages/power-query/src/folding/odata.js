@@ -490,12 +490,26 @@ function applyODataStep(current, operation) {
     case "skip": {
       const count = operation.count;
       if (typeof count !== "number" || !Number.isFinite(count) || count < 0) return null;
-      // OData applies `$skip` before `$top`, so we can't fold a skip that occurs
-      // after a `take` step.
-      if (typeof current.top === "number" && Number.isFinite(current.top)) return null;
       const normalized = Math.max(0, Math.trunc(count));
+      if (normalized === 0) return { ...current };
       const currentSkip = typeof current.skip === "number" && Number.isFinite(current.skip) ? Math.max(0, Math.trunc(current.skip)) : 0;
-      return { ...current, skip: currentSkip + normalized };
+      const currentTop = typeof current.top === "number" && Number.isFinite(current.top) ? Math.max(0, Math.trunc(current.top)) : null;
+
+      // OData applies `$skip` before `$top`. When a skip occurs after a take in the
+      // local pipeline we can preserve semantics by rewriting:
+      //   take(T) then skip(S)  ==>  $skip=S & $top=max(0, T-S)
+      if (currentTop != null) {
+        const nextSkip = currentSkip + normalized;
+        const nextTop = Math.max(0, currentTop - normalized);
+        return {
+          ...current,
+          ...(nextSkip > 0 ? { skip: nextSkip } : {}),
+          top: nextTop,
+        };
+      }
+
+      const nextSkip = currentSkip + normalized;
+      return { ...current, ...(nextSkip > 0 ? { skip: nextSkip } : {}) };
     }
     case "take": {
       const count = operation.count;
