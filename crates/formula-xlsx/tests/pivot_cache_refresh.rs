@@ -13,6 +13,9 @@ enum CacheValue {
     Missing,
 }
 
+const REL_TYPE_SHARED_STRINGS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+
 fn parse_cache_records(xml: &str) -> Vec<Vec<CacheValue>> {
     let mut reader = Reader::from_reader(Cursor::new(xml.as_bytes()));
     reader.config_mut().trim_text(true);
@@ -162,3 +165,144 @@ fn refreshes_pivot_cache_records_from_worksheet_range() {
     );
 }
 
+#[test]
+fn refreshes_pivot_cache_records_with_custom_shared_strings_part() {
+    let fixture = include_bytes!("fixtures/pivot-cache-refresh.xlsx");
+    let mut pkg = XlsxPackage::from_bytes(fixture).expect("read fixture");
+
+    let shared_strings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="9" uniqueCount="9">
+  <si><t>Region</t></si>
+  <si><t>Product</t></si>
+  <si><t>Revenue</t></si>
+  <si><t>East</t></si>
+  <si><t>A</t></si>
+  <si><t>B</t></si>
+  <si><t>West</t></si>
+  <si><t>North</t></si>
+  <si><t>C</t></si>
+</sst>"#;
+    pkg.set_part(
+        "xl/custom/sharedStrings.xml",
+        shared_strings_xml.as_bytes().to_vec(),
+    );
+
+    let workbook_rels_part = "xl/_rels/workbook.xml.rels";
+    let mut rels_xml = std::str::from_utf8(
+        pkg.part(workbook_rels_part)
+            .expect("fixture should include workbook.xml.rels"),
+    )
+    .expect("utf-8")
+    .to_string();
+
+    let insert = format!(
+        r#"  <Relationship Id="rId9999" Type="{REL_TYPE_SHARED_STRINGS}" Target="custom/sharedStrings.xml"/>"#
+    );
+    let close = "</Relationships>";
+    let pos = rels_xml
+        .rfind(close)
+        .expect("workbook.xml.rels should include </Relationships>");
+    rels_xml.insert_str(pos, &format!("{insert}\n"));
+    pkg.set_part(workbook_rels_part, rels_xml.into_bytes());
+
+    let updated_sheet = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="s"><v>0</v></c>
+      <c r="B1" t="s"><v>1</v></c>
+      <c r="C1" t="s"><v>2</v></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="s"><v>3</v></c>
+      <c r="B2" t="s"><v>4</v></c>
+      <c r="C2"><v>100</v></c>
+    </row>
+    <row r="3">
+      <c r="A3" t="s"><v>3</v></c>
+      <c r="B3" t="s"><v>5</v></c>
+      <c r="C3"><v>150</v></c>
+    </row>
+    <row r="4">
+      <c r="A4" t="s"><v>6</v></c>
+      <c r="B4" t="s"><v>4</v></c>
+      <c r="C4"><v>200</v></c>
+    </row>
+    <row r="5">
+      <c r="A5" t="s"><v>6</v></c>
+      <c r="B5" t="s"><v>5</v></c>
+      <c r="C5"><v>250</v></c>
+    </row>
+    <row r="6">
+      <c r="A6" t="s"><v>7</v></c>
+      <c r="B6" t="s"><v>8</v></c>
+      <c r="C6"><v>300</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+    pkg.set_part("xl/worksheets/sheet1.xml", updated_sheet.as_bytes().to_vec());
+
+    pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+        .expect("refresh cache");
+
+    let cache_definition_xml = std::str::from_utf8(
+        pkg.part("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("cache definition exists"),
+    )
+    .expect("utf-8");
+    let doc = roxmltree::Document::parse(cache_definition_xml).expect("parse definition xml");
+    assert_eq!(doc.root_element().attribute("recordCount"), Some("5"));
+    let cache_fields = doc
+        .root_element()
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "cacheFields")
+        .expect("cacheFields missing");
+    assert_eq!(cache_fields.attribute("count"), Some("3"));
+    let field_names: Vec<_> = cache_fields
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "cacheField")
+        .filter_map(|n| n.attribute("name"))
+        .collect();
+    assert_eq!(field_names, vec!["Region", "Product", "Revenue"]);
+
+    let cache_records_xml = std::str::from_utf8(
+        pkg.part("xl/pivotCache/pivotCacheRecords1.xml")
+            .expect("cache records exists"),
+    )
+    .expect("utf-8");
+    let doc = roxmltree::Document::parse(cache_records_xml).expect("parse records xml");
+    assert_eq!(doc.root_element().attribute("count"), Some("5"));
+
+    let rows = parse_cache_records(cache_records_xml);
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                CacheValue::String("East".to_string()),
+                CacheValue::String("A".to_string()),
+                CacheValue::Number("100".to_string())
+            ],
+            vec![
+                CacheValue::String("East".to_string()),
+                CacheValue::String("B".to_string()),
+                CacheValue::Number("150".to_string())
+            ],
+            vec![
+                CacheValue::String("West".to_string()),
+                CacheValue::String("A".to_string()),
+                CacheValue::Number("200".to_string())
+            ],
+            vec![
+                CacheValue::String("West".to_string()),
+                CacheValue::String("B".to_string()),
+                CacheValue::Number("250".to_string())
+            ],
+            vec![
+                CacheValue::String("North".to_string()),
+                CacheValue::String("C".to_string()),
+                CacheValue::Number("300".to_string())
+            ],
+        ]
+    );
+}

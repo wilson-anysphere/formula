@@ -10,6 +10,10 @@ use crate::package::{XlsxError, XlsxPackage};
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::xml::{QName, XmlElement, XmlNode};
 
+const WORKBOOK_PART: &str = "xl/workbook.xml";
+const REL_TYPE_SHARED_STRINGS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorksheetSource {
     sheet: String,
@@ -177,20 +181,35 @@ fn resolve_cache_records_part(
 }
 
 fn load_shared_strings(package: &XlsxPackage) -> Result<Vec<String>, XlsxError> {
-    let Some(bytes) = package.part("xl/sharedStrings.xml") else {
+    let shared_strings_part = resolve_shared_strings_part_name(package)?
+        .or_else(|| package.part("xl/sharedStrings.xml").map(|_| "xl/sharedStrings.xml".to_string()));
+    let Some(shared_strings_part) = shared_strings_part else {
+        return Ok(Vec::new());
+    };
+    let Some(bytes) = package.part(&shared_strings_part) else {
         return Ok(Vec::new());
     };
 
     let xml = std::str::from_utf8(bytes).map_err(|e| {
-        XlsxError::Invalid(format!(
-            "xl/sharedStrings.xml is not valid UTF-8: {e}"
-        ))
+        XlsxError::Invalid(format!("{shared_strings_part:?} is not valid UTF-8: {e}"))
     })?;
-    let parsed = parse_shared_strings_xml(xml).map_err(|e| {
-        XlsxError::Invalid(format!("failed to parse xl/sharedStrings.xml: {e}"))
-    })?;
+    let parsed = parse_shared_strings_xml(xml)
+        .map_err(|e| XlsxError::Invalid(format!("failed to parse {shared_strings_part:?}: {e}")))?;
 
     Ok(parsed.items.into_iter().map(|rt| rt.text).collect())
+}
+
+fn resolve_shared_strings_part_name(package: &XlsxPackage) -> Result<Option<String>, XlsxError> {
+    let rels_part = rels_part_name(WORKBOOK_PART);
+    let rels_bytes = match package.part(&rels_part) {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+    let rels = parse_relationships(rels_bytes)?;
+    Ok(rels
+        .into_iter()
+        .find(|rel| rel.type_uri == REL_TYPE_SHARED_STRINGS)
+        .map(|rel| resolve_target(WORKBOOK_PART, &rel.target)))
 }
 
 fn parse_worksheet_cells_in_range(
