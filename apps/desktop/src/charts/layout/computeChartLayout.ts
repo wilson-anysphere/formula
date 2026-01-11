@@ -109,7 +109,7 @@ export function computeChartLayout(
     height: Math.max(0, contentBottom - contentTop),
   };
 
-  const legendPref = model.legend?.position ?? "none";
+  const legendPref = normalizeLegendPosition(model.legend?.position);
   const legendOverlay = model.legend?.overlay ?? false;
 
   let legendRect: Rect | null = null;
@@ -265,13 +265,33 @@ function resolvePrimaryAxes(model: ChartModel): { xAxis: ChartAxisModel; yAxis: 
   const defaultY: ChartAxisModel = { kind: "value", position: "left" };
 
   const xAxis =
-    axes.find((a) => a.position === "bottom" && (model.chartType.kind === "scatter" ? a.kind === "value" : true)) ??
+    axes.find(
+      (a) =>
+        normalizeAxisPosition(a.position) === "bottom" &&
+        (model.chartType.kind === "scatter" ? a.kind === "value" : true)
+    ) ??
     axes.find((a) => a.kind === defaultX.kind) ??
     defaultX;
 
-  const yAxis = axes.find((a) => a.position === "left" && a.kind === "value") ?? axes.find((a) => a.kind === "value") ?? defaultY;
+  const yAxis =
+    axes.find((a) => normalizeAxisPosition(a.position) === "left" && a.kind === "value") ??
+    axes.find((a) => a.kind === "value") ??
+    defaultY;
 
   return { xAxis, yAxis };
+}
+
+function normalizeLegendPosition(pos: unknown): "right" | "none" {
+  if (pos === "right" || pos === "r") return "right";
+  return "none";
+}
+
+function normalizeAxisPosition(pos: unknown): "left" | "right" | "top" | "bottom" | null {
+  if (pos === "left" || pos === "l") return "left";
+  if (pos === "right" || pos === "r") return "right";
+  if (pos === "top" || pos === "t") return "top";
+  if (pos === "bottom" || pos === "b") return "bottom";
+  return null;
 }
 
 function axisFormatCode(axis: ChartAxisModel): string | null | undefined {

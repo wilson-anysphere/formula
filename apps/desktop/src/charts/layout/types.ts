@@ -50,7 +50,12 @@ export interface ChartSeriesModel {
 }
 
 export interface ChartLegendModel {
-  position?: "right" | "none" | null;
+  /**
+   * v1 layout only supports legend on the right (or none), but we accept
+   * OOXML-style single-letter positions as input ("r") since the Rust parser
+   * may preserve them.
+   */
+  position?: "right" | "none" | "r" | "l" | "t" | "b" | null;
   overlay?: boolean | null;
 }
 
@@ -65,7 +70,11 @@ export interface ChartAxisModel {
    * User-visible axis kind (category vs numeric value axis).
    */
   kind: "category" | "value";
-  position: "left" | "right" | "top" | "bottom";
+  /**
+   * Axis position. Accept both human-friendly values and OOXML-style single
+   * letters (b/l/r/t).
+   */
+  position: "left" | "right" | "top" | "bottom" | "l" | "r" | "t" | "b";
   id?: string | null;
   scaling?: AxisScalingModel | null;
   /**
@@ -164,4 +173,3 @@ export interface ChartLayout {
   axes: Record<string, AxisLayout>;
   scales: Record<string, Scale>;
 }
-

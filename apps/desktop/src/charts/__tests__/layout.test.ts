@@ -266,4 +266,26 @@ describe("charts/layout", () => {
     expectNonOverlapping(layout.titleRect, layout.plotAreaRect);
     expectNonOverlapping(layout.legendRect, layout.plotAreaRect);
   });
+
+  test("accepts OOXML-style axis/legend position codes", () => {
+    const model: ChartModel = {
+      chartType: { kind: "bar" },
+      title: "Example Chart",
+      legend: { position: "r", overlay: false },
+      axes: [
+        { kind: "category", position: "b" },
+        { kind: "value", position: "l", majorGridlines: true },
+      ],
+      series: [
+        {
+          categories: { cache: ["A", "B", "C", "D"] },
+          values: { cache: [2, 4, 3, 5] },
+        },
+      ],
+    };
+
+    const layout = computeChartLayout(model, DEFAULT_CHART_THEME, { x: 0, y: 0, width: 480, height: 320 });
+    expect(layout.legendRect).not.toBeNull();
+    expect(layout.axes.y.ticks.length).toBeGreaterThanOrEqual(5);
+  });
 });
