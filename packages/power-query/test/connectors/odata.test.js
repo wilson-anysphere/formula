@@ -144,6 +144,25 @@ test("ODataConnector: preserves $select column order and schema (even when empty
   assert.deepEqual(result.table.toGrid(), [["Name", "Id"]]);
 });
 
+test("ODataConnector: uses $select column order for row materialization", async () => {
+  const connector = new ODataConnector({
+    fetch: async () =>
+      makeJsonResponse({
+        value: [{ Id: 1, Name: "A" }],
+      }),
+  });
+
+  const result = await connector.execute({
+    url: "https://example.com/odata/Products",
+    query: { select: ["Name", "Id"] },
+  });
+
+  assert.deepEqual(result.table.toGrid(), [
+    ["Name", "Id"],
+    ["A", 1],
+  ]);
+});
+
 test("ODataConnector: preserves $select embedded in the URL for schema inference", async () => {
   const connector = new ODataConnector({
     fetch: async () => makeJsonResponse({ value: [] }),
