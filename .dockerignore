@@ -35,6 +35,12 @@ services/sync-server/.sync-server-data
 .formula
 apps/desktop/.formula
 
+# Local secrets (don't send to the daemon as build context)
+.env
+.env.*
+**/.env
+**/.env.*
+
 # Misc
 *.log
 npm-debug.log*
