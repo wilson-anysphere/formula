@@ -17,7 +17,10 @@ mod writer;
 
 pub use opc::{OpenOptions, XlsbWorkbook};
 pub use patch::{patch_sheet_bin, CellEdit};
-pub use parser::{Cell, CellValue, Dimension, Error, Formula, SheetData, SheetMeta};
+pub use parser::{
+    CalcMode, Cell, CellValue, Dimension, Error, Formula, SheetData, SheetMeta, SheetVisibility,
+    WorkbookProperties,
+};
 pub use shared_strings::SharedString;
 
 #[cfg(feature = "write")]

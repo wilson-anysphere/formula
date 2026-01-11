@@ -15,6 +15,9 @@ use crate::rgce::{
 // Record IDs (BIFF12 / MS-XLSB). Values taken from pyxlsb (public domain-ish) and MS-XLSB.
 #[allow(dead_code)]
 pub(crate) mod biff12 {
+    pub const WB_PROP: u32 = 0x0099;
+    pub const CALC_PROP: u32 = 0x009A;
+
     pub const SHEETS_END: u32 = 0x0190;
     pub const SHEET: u32 = 0x019C;
 
@@ -73,10 +76,48 @@ pub enum Error {
     UnsupportedFormulaText(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalcMode {
+    Auto,
+    Manual,
+    AutoExceptTables,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkbookProperties {
+    pub date_system_1904: bool,
+    pub calc_mode: Option<CalcMode>,
+    pub full_calc_on_load: Option<bool>,
+}
+
+impl Default for WorkbookProperties {
+    fn default() -> Self {
+        Self {
+            date_system_1904: false,
+            calc_mode: None,
+            full_calc_on_load: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SheetVisibility {
+    Visible,
+    Hidden,
+    VeryHidden,
+}
+
+impl Default for SheetVisibility {
+    fn default() -> Self {
+        Self::Visible
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SheetMeta {
     pub name: String,
     pub part_path: String,
+    pub visibility: SheetVisibility,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -301,11 +342,12 @@ impl<'a> RecordReader<'a> {
 pub(crate) fn parse_workbook<R: Read>(
     workbook_bin: &mut R,
     rels: &HashMap<String, String>,
-) -> Result<(Vec<SheetMeta>, WorkbookContext), Error> {
+) -> Result<(Vec<SheetMeta>, WorkbookContext, WorkbookProperties), Error> {
     let mut reader = Biff12Reader::new(workbook_bin);
     let mut buf = Vec::new();
     let mut sheets = Vec::new();
     let mut ctx = WorkbookContext::default();
+    let mut props = WorkbookProperties::default();
 
     // NameX / external-name tables (used for add-ins and external defined names).
     let mut supbooks: Vec<SupBook> = Vec::new();
@@ -317,9 +359,35 @@ pub(crate) fn parse_workbook<R: Read>(
     let mut current_extern_name_idx: u16 = 0;
     while let Some(rec) = reader.read_record(&mut buf)? {
         match rec.id {
+            biff12::WB_PROP => {
+                // BrtWbProp: workbook properties flags. We only care about `date1904` for now.
+                let mut rr = RecordReader::new(rec.data);
+                let flags = rr.read_u32()?;
+                props.date_system_1904 = (flags & 0x0000_0001) != 0;
+            }
+            biff12::CALC_PROP => {
+                // BrtCalcProp: calculation settings. The exact spec has many knobs; for now we
+                // interpret the first few bits, matching `calcPr` in XLSX.
+                let mut rr = RecordReader::new(rec.data);
+                let _calc_id = rr.read_u32()?;
+                let flags = rr.read_u16()?;
+
+                props.calc_mode = match flags & 0x0003 {
+                    0 => Some(CalcMode::Manual),
+                    1 => Some(CalcMode::Auto),
+                    2 => Some(CalcMode::AutoExceptTables),
+                    _ => None,
+                };
+                props.full_calc_on_load = Some((flags & 0x0004) != 0);
+            }
             biff12::SHEET => {
                 let mut rr = RecordReader::new(rec.data);
-                rr.skip(4)?; // unknown flags / state
+                let state_flags = rr.read_u32()?; // includes visibility state
+                let visibility = match state_flags & 0x0003 {
+                    1 => SheetVisibility::Hidden,
+                    2 => SheetVisibility::VeryHidden,
+                    _ => SheetVisibility::Visible,
+                };
                 let _sheet_id = rr.read_u32()?;
                 let rel_id = rr.read_utf16_string()?;
                 let name = rr.read_utf16_string()?;
@@ -327,7 +395,11 @@ pub(crate) fn parse_workbook<R: Read>(
                     return Err(Error::MissingSheetRelationship(rel_id));
                 };
                 let part_path = normalize_sheet_target(target);
-                sheets.push(SheetMeta { name, part_path });
+                sheets.push(SheetMeta {
+                    name,
+                    part_path,
+                    visibility,
+                });
             }
             // External references.
             id if is_supbook_record(id) => {
@@ -425,7 +497,7 @@ pub(crate) fn parse_workbook<R: Read>(
     }
 
     ctx.set_namex_tables(supbooks, namex_extern_names, namex_ixti_supbooks);
-    Ok((sheets, ctx))
+    Ok((sheets, ctx, props))
 }
 
 #[cfg(test)]
@@ -497,7 +569,7 @@ mod tests {
             ("rId2".to_string(), "worksheets/sheet2.bin".to_string()),
         ]);
 
-        let (_sheets, ctx) =
+        let (_sheets, ctx, _props) =
             parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
 
         assert_eq!(ctx.extern_sheet_index("Sheet1"), Some(0));
@@ -533,6 +605,34 @@ mod tests {
         assert_eq!(si.rich_text.runs.len(), 0);
         assert_eq!(si.phonetic, Some(vec![0xDE, 0xAD, 0xBE, 0xEF]));
         assert!(si.raw_si.is_some());
+    }
+
+    #[test]
+    fn parse_workbook_reads_date1904_and_sheet_visibility() {
+        let mut workbook_bin = Vec::new();
+
+        // BrtWbProp (date1904=true).
+        let mut wb_prop = Vec::new();
+        wb_prop.extend_from_slice(&0x0000_0001u32.to_le_bytes());
+        write_record(&mut workbook_bin, biff12::WB_PROP, &wb_prop);
+
+        // Hidden Sheet1 (rId1).
+        let mut sheet = Vec::new();
+        sheet.extend_from_slice(&1u32.to_le_bytes()); // hidden state flags
+        sheet.extend_from_slice(&1u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet, "rId1");
+        write_utf16_string(&mut sheet, "Sheet1");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet);
+
+        let rels: HashMap<String, String> =
+            HashMap::from([("rId1".to_string(), "worksheets/sheet1.bin".to_string())]);
+
+        let (sheets, _ctx, props) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
+
+        assert!(props.date_system_1904);
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].visibility, SheetVisibility::Hidden);
     }
 }
 

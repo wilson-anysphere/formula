@@ -20,6 +20,7 @@ assert_cmd = "2.0"
 calamine = "0.26"
 formula-biff = { path = "../formula-biff" }
 formula-engine = { path = "../formula-engine" }
+formula-format = { path = "../formula-format" }
 pretty_assertions = "1.4"
 proptest = "1"
 tempfile = "3.10"

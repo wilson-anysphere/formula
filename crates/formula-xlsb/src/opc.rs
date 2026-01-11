@@ -1,7 +1,7 @@
 use crate::parser::Error as ParseError;
 use crate::parser::{
     parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook, Cell, CellValue, SheetData,
-    SheetMeta,
+    SheetMeta, WorkbookProperties,
 };
 use crate::patch::{patch_sheet_bin, CellEdit};
 use crate::workbook_context::WorkbookContext;
@@ -56,6 +56,7 @@ pub struct XlsbWorkbook {
     shared_strings: Vec<String>,
     shared_strings_table: Vec<SharedString>,
     workbook_context: WorkbookContext,
+    workbook_properties: WorkbookProperties,
     preserved_parts: HashMap<String, Vec<u8>>,
 }
 
@@ -98,7 +99,8 @@ impl XlsbWorkbook {
             bytes
         };
 
-        let (sheets, workbook_context) = parse_workbook(&mut Cursor::new(&workbook_bin), &workbook_rels)?;
+        let (sheets, workbook_context, workbook_properties) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &workbook_rels)?;
         if options.preserve_parsed_parts {
             preserved_parts.insert("xl/workbook.bin".to_string(), workbook_bin);
         }
@@ -163,6 +165,7 @@ impl XlsbWorkbook {
             shared_strings,
             shared_strings_table,
             workbook_context,
+            workbook_properties,
             preserved_parts,
         })
     }
@@ -178,6 +181,10 @@ impl XlsbWorkbook {
     /// Shared strings with rich text / phonetic preservation.
     pub fn shared_strings_table(&self) -> &[SharedString] {
         &self.shared_strings_table
+    }
+
+    pub fn workbook_properties(&self) -> &WorkbookProperties {
+        &self.workbook_properties
     }
 
     pub fn workbook_context(&self) -> &WorkbookContext {
