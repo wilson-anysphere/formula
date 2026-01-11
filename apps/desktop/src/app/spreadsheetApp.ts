@@ -3653,7 +3653,13 @@ export class SpreadsheetApp {
     if (this.referenceHighlights.length === 0 && !this.referencePreview) return;
     this.ensureViewportMappingCurrent();
 
-    const drawDashedRange = (startRow: number, endRow: number, startCol: number, endCol: number, color: string) => {
+    const drawRangeOutline = (
+      startRow: number,
+      endRow: number,
+      startCol: number,
+      endCol: number,
+      options: { color: string; lineWidth?: number; dash?: number[] }
+    ) => {
       // Clip preview rendering to the visible viewport so dragging a range that
       // extends offscreen doesn't crash (and still provides visual feedback).
       const visibleStartRow = this.visibleRows.find((row) => row >= startRow && row <= endRow) ?? null;
@@ -3688,27 +3694,74 @@ export class SpreadsheetApp {
       ctx.beginPath();
       ctx.rect(this.rowHeaderWidth, this.colHeaderHeight, this.viewportWidth(), this.viewportHeight());
       ctx.clip();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 3]);
-      ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+      ctx.strokeStyle = options.color;
+      ctx.lineWidth = options.lineWidth ?? 2;
+      ctx.setLineDash(options.dash ?? []);
+      const inset = ctx.lineWidth / 2;
+      if (width > ctx.lineWidth && height > ctx.lineWidth) {
+        ctx.strokeRect(x + inset, y + inset, width - ctx.lineWidth, height - ctx.lineWidth);
+      }
       ctx.restore();
     };
+
+    const normalizedPreview = this.referencePreview
+      ? {
+          startRow: Math.min(this.referencePreview.start.row, this.referencePreview.end.row),
+          endRow: Math.max(this.referencePreview.start.row, this.referencePreview.end.row),
+          startCol: Math.min(this.referencePreview.start.col, this.referencePreview.end.col),
+          endCol: Math.max(this.referencePreview.start.col, this.referencePreview.end.col)
+        }
+      : null;
+
+    const activePreviewColor = (() => {
+      if (!normalizedPreview) return null;
+      for (const highlight of this.referenceHighlights) {
+        const startRow = Math.min(highlight.start.row, highlight.end.row);
+        const endRow = Math.max(highlight.start.row, highlight.end.row);
+        const startCol = Math.min(highlight.start.col, highlight.end.col);
+        const endCol = Math.max(highlight.start.col, highlight.end.col);
+        if (
+          startRow === normalizedPreview.startRow &&
+          endRow === normalizedPreview.endRow &&
+          startCol === normalizedPreview.startCol &&
+          endCol === normalizedPreview.endCol
+        ) {
+          return highlight.color;
+        }
+      }
+      return null;
+    })();
 
     for (const highlight of this.referenceHighlights) {
       const startRow = Math.min(highlight.start.row, highlight.end.row);
       const endRow = Math.max(highlight.start.row, highlight.end.row);
       const startCol = Math.min(highlight.start.col, highlight.end.col);
       const endCol = Math.max(highlight.start.col, highlight.end.col);
-      drawDashedRange(startRow, endRow, startCol, endCol, highlight.color);
+      if (
+        activePreviewColor &&
+        normalizedPreview &&
+        startRow === normalizedPreview.startRow &&
+        endRow === normalizedPreview.endRow &&
+        startCol === normalizedPreview.startCol &&
+        endCol === normalizedPreview.endCol
+      ) {
+        continue;
+      }
+      drawRangeOutline(startRow, endRow, startCol, endCol, { color: highlight.color, dash: [4, 3] });
     }
 
-    if (this.referencePreview) {
-      const startRow = Math.min(this.referencePreview.start.row, this.referencePreview.end.row);
-      const endRow = Math.max(this.referencePreview.start.row, this.referencePreview.end.row);
-      const startCol = Math.min(this.referencePreview.start.col, this.referencePreview.end.col);
-      const endCol = Math.max(this.referencePreview.start.col, this.referencePreview.end.col);
-      drawDashedRange(startRow, endRow, startCol, endCol, resolveCssVar("--warning", { fallback: "CanvasText" }));
+    if (normalizedPreview) {
+      if (activePreviewColor) {
+        drawRangeOutline(normalizedPreview.startRow, normalizedPreview.endRow, normalizedPreview.startCol, normalizedPreview.endCol, {
+          color: activePreviewColor,
+          lineWidth: 3,
+        });
+      } else {
+        drawRangeOutline(normalizedPreview.startRow, normalizedPreview.endRow, normalizedPreview.startCol, normalizedPreview.endCol, {
+          color: resolveCssVar("--warning", { fallback: "CanvasText" }),
+          dash: [4, 3],
+        });
+      }
     }
   }
 

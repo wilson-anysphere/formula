@@ -224,7 +224,7 @@ export class CanvasGridRenderer {
   private activeSelectionIndex = 0;
   private rangeSelection: CellRange | null = null;
   private fillPreviewRange: CellRange | null = null;
-  private referenceHighlights: Array<{ range: CellRange; color: string }> = [];
+  private referenceHighlights: Array<{ range: CellRange; color: string; active: boolean }> = [];
 
   private remotePresences: GridPresence[] = [];
   private remotePresenceDirtyPadding = 1;
@@ -784,22 +784,22 @@ export class CanvasGridRenderer {
     this.requestRender();
   }
 
-  setReferenceHighlights(highlights: Array<{ range: CellRange; color: string }> | null): void {
+  setReferenceHighlights(highlights: Array<{ range: CellRange; color: string; active?: boolean }> | null): void {
     const normalized =
       highlights
         ?.map((h) => {
           const range = this.normalizeSelectionRange(h.range);
           if (!range) return null;
-          return { range, color: h.color };
+          return { range, color: h.color, active: Boolean(h.active) };
         })
-        .filter((h): h is { range: CellRange; color: string } => h !== null) ?? [];
+        .filter((h): h is { range: CellRange; color: string; active: boolean } => h !== null) ?? [];
 
     if (
       normalized.length === this.referenceHighlights.length &&
-      normalized.every((h, i) => {
-        const prev = this.referenceHighlights[i];
-        return prev && prev.color === h.color && isSameCellRange(prev.range, h.range);
-      })
+        normalized.every((h, i) => {
+          const prev = this.referenceHighlights[i];
+          return prev && prev.color === h.color && prev.active === h.active && isSameCellRange(prev.range, h.range);
+        })
     ) {
       return;
     }
@@ -2889,18 +2889,38 @@ export class CanvasGridRenderer {
     if (!ctx) return;
 
     if (this.referenceHighlights.length > 0) {
+      const strokeRects = (rects: Rect[], lineWidth: number) => {
+        const inset = lineWidth / 2;
+        for (const rect of rects) {
+          if (!intersectRect(rect, intersection)) continue;
+          if (rect.width <= lineWidth || rect.height <= lineWidth) continue;
+          ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - lineWidth, rect.height - lineWidth);
+        }
+      };
+
       ctx.save();
+
       ctx.lineWidth = 2;
       ctx.setLineDash([4, 3]);
 
       for (const highlight of this.referenceHighlights) {
+        if (highlight.active) continue;
         const rects = this.rangeToViewportRects(highlight.range, viewport);
         if (rects.length === 0) continue;
         ctx.strokeStyle = highlight.color;
-        for (const rect of rects) {
-          if (!intersectRect(rect, intersection)) continue;
-          if (rect.width <= 2 || rect.height <= 2) continue;
-          ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+        strokeRects(rects, ctx.lineWidth);
+      }
+
+      const hasActive = this.referenceHighlights.some((h) => h.active);
+      if (hasActive) {
+        ctx.lineWidth = 3;
+        ctx.setLineDash([]);
+        for (const highlight of this.referenceHighlights) {
+          if (!highlight.active) continue;
+          const rects = this.rangeToViewportRects(highlight.range, viewport);
+          if (rects.length === 0) continue;
+          ctx.strokeStyle = highlight.color;
+          strokeRects(rects, ctx.lineWidth);
         }
       }
 

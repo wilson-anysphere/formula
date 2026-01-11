@@ -297,7 +297,7 @@ function EngineDemoApp() {
     }
 
     const cursor = cursorRef.current;
-    const { references } = extractFormulaReferences(draftRef.current, cursor.start, cursor.end);
+    const { references, activeIndex } = extractFormulaReferences(draftRef.current, cursor.start, cursor.end);
     const { colored, nextByText } = assignFormulaReferenceColors(references, referenceColorByTextRef.current);
     referenceColorByTextRef.current = nextByText;
 
@@ -313,7 +313,8 @@ function EngineDemoApp() {
           startCol: ref.range.startCol + headerColOffset,
           endCol: ref.range.endCol + 1 + headerColOffset
         },
-        color: ref.color
+        color: ref.color,
+        active: activeIndex != null && ref.index === activeIndex
       }));
 
     api.setReferenceHighlights(highlights.length > 0 ? highlights : null);

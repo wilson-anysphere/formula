@@ -52,7 +52,7 @@ export interface GridApi {
    * This is intended to match Excel's UX while editing a formula: each referenced
    * range is outlined on the grid using the same color as the formula text.
    */
-  setReferenceHighlights(highlights: Array<{ range: CellRange; color: string }> | null): void;
+  setReferenceHighlights(highlights: Array<{ range: CellRange; color: string; active?: boolean }> | null): void;
   setRemotePresences(presences: GridPresence[] | null): void;
   renderImmediately(): void;
 }
