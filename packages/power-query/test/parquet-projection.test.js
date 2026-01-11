@@ -166,3 +166,57 @@ test("computeParquetRowLimit refuses to push down for distinctRows/removeRowsWit
     null,
   );
 });
+
+test("computeParquetRowLimit accounts for skip/removeRows/promoteHeaders", () => {
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_skip", name: "Skip", operation: { type: "skip", count: 5 } }], 100),
+    105,
+  );
+
+  assert.equal(
+    computeParquetRowLimit(
+      [
+        { id: "s_skip", name: "Skip", operation: { type: "skip", count: 5 } },
+        { id: "s_take", name: "Take", operation: { type: "take", count: 10 } },
+      ],
+      100,
+    ),
+    15,
+  );
+
+  assert.equal(
+    computeParquetRowLimit(
+      [
+        { id: "s_take", name: "Take", operation: { type: "take", count: 10 } },
+        { id: "s_skip", name: "Skip", operation: { type: "skip", count: 5 } },
+      ],
+      100,
+    ),
+    10,
+  );
+
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_remove", name: "Remove", operation: { type: "removeRows", offset: 50, count: 10 } }], 100),
+    110,
+  );
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_remove", name: "Remove", operation: { type: "removeRows", offset: 150, count: 10 } }], 100),
+    100,
+  );
+
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_headers", name: "Headers", operation: { type: "promoteHeaders" } }], 100),
+    101,
+  );
+});
+
+test("computeParquetRowLimit refuses to push down for merge/append", () => {
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_merge", name: "Merge", operation: { type: "merge", rightQuery: "q2", joinType: "left", leftKey: "a", rightKey: "b" } }], 100),
+    null,
+  );
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_append", name: "Append", operation: { type: "append", queries: ["q2"] } }], 100),
+    null,
+  );
+});

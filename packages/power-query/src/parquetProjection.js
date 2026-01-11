@@ -229,6 +229,8 @@ const LIMIT_UNSAFE_OPS = new Set([
   "distinctRows",
   "removeRowsWithErrors",
   "groupBy",
+  "merge",
+  "append",
   "pivot",
   "unpivot",
   "splitColumn",
@@ -246,16 +248,57 @@ const LIMIT_UNSAFE_OPS = new Set([
  */
 export function computeParquetRowLimit(steps, limit) {
   if (limit == null) return null;
-  if (!Number.isFinite(limit) || limit <= 0) return null;
+  const base = Number.isFinite(limit) ? Math.max(0, Math.trunc(limit)) : 0;
+  if (base <= 0) return null;
 
-  let effective = limit;
+  // Refuse to push down a reader limit when a step could require reading beyond the first
+  // N source rows to produce the first N output rows (e.g. filter/sort/group/pivot).
   for (const step of steps) {
     const op = step.operation;
     if (LIMIT_UNSAFE_OPS.has(op.type)) return null;
-    if (op.type === "take") {
-      effective = Math.min(effective, op.count);
+  }
+
+  // Walk backwards from the final output limit to compute how many source rows are required
+  // to produce the first N output rows.
+  //
+  // This allows safe limit pushdown through deterministic row-window operations like
+  // `take`, `skip`, `removeRows`, and `promoteHeaders`.
+  let required = base;
+  for (let i = steps.length - 1; i >= 0; i--) {
+    /** @type {QueryOperation} */
+    const op = steps[i].operation;
+    switch (op.type) {
+      case "take": {
+        if (!Number.isFinite(op.count) || op.count < 0) return null;
+        required = Math.min(required, Math.max(0, Math.trunc(op.count)));
+        break;
+      }
+      case "skip": {
+        if (!Number.isFinite(op.count) || op.count < 0) return null;
+        if (required > 0) {
+          required += Math.max(0, Math.trunc(op.count));
+        }
+        break;
+      }
+      case "removeRows": {
+        if (!Number.isFinite(op.offset) || op.offset < 0 || !Number.isFinite(op.count) || op.count < 0) return null;
+        const offset = Math.floor(op.offset);
+        const count = Math.floor(op.count);
+        // `removeRows` drops a contiguous window starting at `offset`.
+        // If the downstream limit is entirely before that window, no adjustment is needed.
+        if (required > offset) required += count;
+        break;
+      }
+      case "promoteHeaders": {
+        // `promoteHeaders` consumes the first data row as a header row (dropping it from the output).
+        // To preserve output limit semantics we need one extra source row when at least one row is requested.
+        if (required > 0) required += 1;
+        break;
+      }
+      default:
+        break;
     }
   }
 
-  return effective;
+  return required;
 }
