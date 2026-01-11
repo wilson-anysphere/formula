@@ -128,14 +128,26 @@ Authentication options:
 - `basic` (sets `Authorization: Basic …`)
 - `header` (custom header name/value; useful for Splunk HEC and vendor-specific headers)
 
-## Admin audit query + export API (Fastify)
+## Audit ingestion + query + export API (Fastify)
 
-These endpoints are for human/admin audit review and ad-hoc export (not the continuous SIEM feed).
+These endpoints are for:
 
-- `GET /orgs/:orgId/audit` – query audit events (redacted).
-- `GET /orgs/:orgId/audit/export` – export audit events (supports `format=json|cef|leef`).
+- **Ingesting** client-side events into the server audit log
+- **Admin review** and ad-hoc export
+- **Near-real-time streaming** for admin/SOC consumption
 
-Both endpoints read from `audit_log` and `audit_log_archive`. The export endpoint uses `@formula/audit-core.serializeBatch`.
+Endpoints:
+
+- `POST /orgs/:orgId/audit` – ingest an audit event (**authenticated**; any org member may write). The server derives:
+  - `actor` (from the authenticated user or API key)
+  - `context` (`orgId`, `userId`, `userEmail`, `sessionId`, `ipAddress`, `userAgent`)
+  - `id` + `timestamp` (server-assigned via `createAuditEvent`)
+  Client payload is limited to `eventType` + optional `resource`/`success`/`error`/`details`/`correlation`. Requests are rate-limited per org + IP.
+- `GET /orgs/:orgId/audit` – query audit events (admin-only; returned events are redacted).
+- `GET /orgs/:orgId/audit/export` – export audit events (admin-only; supports `format=json|cef|leef`).
+- `GET /orgs/:orgId/audit/stream` – SSE stream of audit events (admin-only; returned events are redacted). Supports resume via `?after=<base64 cursor>` or `Last-Event-ID`.
+
+All endpoints read from (or write to) Postgres audit tables: `audit_log` and `audit_log_archive`.
 
 ## Background SIEM export worker
 
@@ -180,12 +192,3 @@ This repo also includes a standalone JavaScript SIEM delivery library intended f
 - `packages/security/siem/offlineQueue.js` – `OfflineAuditQueue` (persist redacted events to Node FS or IndexedDB and flush later via `flushToExporter(exporter)`).
 
 These helpers operate on canonical `AuditEvent` objects from `@formula/audit-core` and are separate from the server-side SIEM worker in `services/api/src/siem/*`.
-
-## Not implemented (design notes)
-
-A legacy Node HTTP server previously documented endpoints for audit ingestion and SSE streaming. Those endpoints are **not** part of the current Fastify API.
-
-- `POST /orgs/:orgId/audit` ingestion is not implemented; audit events are produced internally in `services/api/src/*` via `createAuditEvent` + `writeAuditEvent`.
-- `GET /orgs/:orgId/audit/stream` SSE streaming is not implemented.
-
-If external ingestion and/or streaming is desired, add it to `services/api/src/routes/audit.ts` and ensure it writes to Postgres (`audit_log`) using `writeAuditEvent`.

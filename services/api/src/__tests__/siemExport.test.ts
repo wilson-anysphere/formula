@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import http, { type IncomingMessage } from "node:http";
 import crypto from "node:crypto";
 import { runMigrations } from "../db/migrations";
+import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { createMetrics } from "../observability/metrics";
 import { DbSiemConfigProvider, type EnabledSiemOrg, type SiemConfigProvider } from "../siem/configProvider";
 import type { SiemEndpointConfig } from "../siem/types";
@@ -449,6 +450,60 @@ describe("SIEM export worker", () => {
         [orgId]
       );
       expect(blocked.rowCount).toBe(1);
+    } finally {
+      await siem.close();
+    }
+  });
+
+  it("exports audit events inserted via writeAuditEvent (ingestion-compatible)", async () => {
+    const orgId = crypto.randomUUID();
+    await insertOrg(db, orgId);
+
+    const userId = crypto.randomUUID();
+    await db.query("INSERT INTO users (id, email, name) VALUES ($1, $2, $3)", [userId, "siem@example.com", "SIEM"]);
+
+    const event = createAuditEvent({
+      eventType: "client.audit_ingested",
+      actor: { type: "user", id: userId },
+      context: {
+        orgId,
+        userId,
+        userEmail: "siem@example.com",
+        ipAddress: "203.0.113.5",
+        userAgent: "UnitTest/siem"
+      },
+      resource: { type: "document", id: "doc_123", name: "Doc" },
+      success: true,
+      details: { token: "super-secret" }
+    });
+    await writeAuditEvent(db, event);
+
+    const siem = await startSiemServer();
+    try {
+      const config: SiemEndpointConfig = {
+        endpointUrl: siem.url,
+        dataRegion: "us",
+        format: "json",
+        idempotencyKeyHeader: "Idempotency-Key",
+        retry: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1, jitter: false }
+      };
+
+      const metrics = createMetrics();
+      const worker = new SiemExportWorker({
+        db,
+        configProvider: new StaticConfigProvider([{ orgId, config }]),
+        metrics,
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+        pollIntervalMs: 0
+      });
+
+      await worker.tick();
+
+      expect(siem.requests).toHaveLength(1);
+      const payload = JSON.parse(siem.requests[0]!.body) as any[];
+      const exported = payload.find((e) => e.eventType === "client.audit_ingested");
+      expect(exported).toBeTruthy();
+      expect(exported.details).toMatchObject({ token: "[REDACTED]" });
     } finally {
       await siem.close();
     }

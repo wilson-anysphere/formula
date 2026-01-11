@@ -1,15 +1,70 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { PassThrough } from "node:stream";
 import { z } from "zod";
 import { auditLogRowToAuditEvent, redactAuditEvent, serializeBatch } from "@formula/audit-core";
 import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
+import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { TokenBucketRateLimiter } from "../http/rateLimit";
+import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
 
-async function requireOrgAdminRole(
+const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+
+type AuditStreamCursor = {
+  lastCreatedAt: Date;
+  lastEventId: string;
+};
+
+function encodeStreamCursor(cursor: AuditStreamCursor): string {
+  const payload = JSON.stringify({ createdAt: cursor.lastCreatedAt.toISOString(), id: cursor.lastEventId });
+  return Buffer.from(payload, "utf8").toString("base64url");
+}
+
+function decodeStreamCursor(raw: string): AuditStreamCursor | null {
+  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+
+  try {
+    const normalized = raw.trim();
+    const padded = normalized
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const decoded = Buffer.from(padded, "base64").toString("utf8");
+    const parsed = JSON.parse(decoded) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const createdAtRaw = (parsed as any).createdAt;
+    const idRaw = (parsed as any).id;
+    if (typeof createdAtRaw !== "string" || typeof idRaw !== "string") return null;
+
+    const createdAt = new Date(createdAtRaw);
+    if (Number.isNaN(createdAt.getTime())) return null;
+    // Loose UUID validation; guards against SQL injection via `::uuid` casts.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idRaw)) return null;
+
+    return { lastCreatedAt: createdAt, lastEventId: idRaw };
+  } catch {
+    return null;
+  }
+}
+
+function toDate(value: unknown): Date {
+  if (value instanceof Date) return value;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid created_at: ${String(value)}`);
+  return date;
+}
+
+async function requireOrgRole(
   request: FastifyRequest,
   reply: FastifyReply,
   orgId: string
 ): Promise<OrgRole | null> {
+  if (request.authOrgId && request.authOrgId !== orgId) {
+    reply.code(404).send({ error: "org_not_found" });
+    return null;
+  }
   const membership = await request.server.db.query(
     "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2",
     [orgId, request.user!.id]
@@ -18,7 +73,16 @@ async function requireOrgAdminRole(
     reply.code(404).send({ error: "org_not_found" });
     return null;
   }
-  const role = membership.rows[0].role as OrgRole;
+  return membership.rows[0].role as OrgRole;
+}
+
+async function requireOrgAdminRole(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  orgId: string
+): Promise<OrgRole | null> {
+  const role = await requireOrgRole(request, reply, orgId);
+  if (!role) return null;
   if (!isOrgAdmin(role)) {
     reply.code(403).send({ error: "forbidden" });
     return null;
@@ -27,6 +91,8 @@ async function requireOrgAdminRole(
 }
 
 export function registerAuditRoutes(app: FastifyInstance): void {
+  const ingestRateLimiter = new TokenBucketRateLimiter({ capacity: 300, refillMs: 60_000 });
+
   const AuditQuery = z.object({
     start: z.string().datetime().optional(),
     end: z.string().datetime().optional(),
@@ -40,6 +106,208 @@ export function registerAuditRoutes(app: FastifyInstance): void {
   const AuditExportQuery = AuditQuery.extend({
     format: z.enum(["json", "cef", "leef"]).optional()
   });
+
+  const AuditIngestBody = z.object({
+    eventType: z.string().min(1),
+    resource: z
+      .object({
+        type: z.string().min(1),
+        id: z.string().nullable().optional(),
+        name: z.string().nullable().optional()
+      })
+      .optional(),
+    success: z.boolean().optional(),
+    error: z
+      .object({
+        code: z.string().nullable().optional(),
+        message: z.string().nullable().optional()
+      })
+      .optional(),
+    details: z.record(z.unknown()).optional(),
+    correlation: z
+      .object({
+        requestId: z.string().nullable().optional(),
+        traceId: z.string().nullable().optional()
+      })
+      .optional()
+  });
+
+  const tooManyRequests = (reply: FastifyReply, retryAfterMs: number) => {
+    return reply
+      .header("Retry-After", String(Math.max(1, Math.ceil(retryAfterMs / 1000))))
+      .code(429)
+      .send({ error: "too_many_requests" });
+  };
+
+  app.post(
+    "/orgs/:orgId/audit",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
+      const orgId = (request.params as { orgId: string }).orgId;
+      const role = await requireOrgRole(request, reply, orgId);
+      if (!role) return;
+
+      const ip = getClientIp(request) ?? "unknown";
+      const limited = ingestRateLimiter.take(`${orgId}:${ip}`);
+      if (!limited.ok) {
+        app.metrics.rateLimitedTotal.inc({ route: "/orgs/:orgId/audit", reason: "org_ip" });
+        return tooManyRequests(reply, limited.retryAfterMs);
+      }
+
+      const parsed = AuditIngestBody.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+      const actor = request.apiKey
+        ? { type: "api_key", id: request.apiKey.id }
+        : { type: "user", id: request.user!.id };
+
+      const event = createAuditEvent({
+        eventType: parsed.data.eventType,
+        actor,
+        context: {
+          orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: parsed.data.resource,
+        success: parsed.data.success ?? true,
+        error: parsed.data.error,
+        details: parsed.data.details,
+        correlation: parsed.data.correlation
+      });
+
+      await writeAuditEvent(app.db, event);
+      return reply.code(202).send({ id: event.id });
+    }
+  );
+
+  const AuditStreamQuery = z.object({
+    after: z.string().optional()
+  });
+
+  app.get(
+    "/orgs/:orgId/audit/stream",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
+      const orgId = (request.params as { orgId: string }).orgId;
+      const role = await requireOrgAdminRole(request, reply, orgId);
+      if (!role) return;
+
+      const query = AuditStreamQuery.safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ error: "invalid_request" });
+
+      const afterParam = query.data.after;
+      const lastEventIdHeader = request.headers["last-event-id"];
+      const afterHeader = typeof lastEventIdHeader === "string" ? lastEventIdHeader : undefined;
+
+      const cursorInput = afterParam ?? afterHeader;
+      const decodedCursor = cursorInput ? decodeStreamCursor(cursorInput) : null;
+      if (cursorInput && !decodedCursor) return reply.code(400).send({ error: "invalid_request" });
+
+      let cursor: AuditStreamCursor =
+        decodedCursor ??
+        ({
+          lastCreatedAt: new Date(),
+          lastEventId: ZERO_UUID
+        } satisfies AuditStreamCursor);
+
+      const stream = new PassThrough();
+
+      reply.header("content-type", "text/event-stream");
+      reply.header("cache-control", "no-cache");
+      reply.header("connection", "keep-alive");
+      reply.header("x-accel-buffering", "no");
+
+      // Emit an initial comment to ensure clients treat the connection as established.
+      stream.write(":ok\n\n");
+
+      let timer: NodeJS.Timeout | null = null;
+      let pollInFlight = false;
+      let closed = false;
+
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        if (timer) clearInterval(timer);
+        timer = null;
+        stream.end();
+      };
+
+      request.raw.on("close", close);
+      request.raw.on("aborted", close);
+
+      const poll = async () => {
+        if (closed || pollInFlight) return;
+        pollInFlight = true;
+        try {
+          const columns =
+            "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
+          const values: unknown[] = [orgId, cursor.lastCreatedAt, cursor.lastEventId, 100];
+
+          const result = await app.db.query(
+            `
+              SELECT ${columns}
+              FROM (
+                SELECT ${columns}
+                FROM audit_log
+                WHERE org_id = $1
+                UNION ALL
+                SELECT ${columns}
+                FROM audit_log_archive
+                WHERE org_id = $1
+              ) AS audit_events
+              WHERE (
+                audit_events.created_at > $2::timestamptz
+                OR (
+                  audit_events.created_at = $2::timestamptz
+                  AND audit_events.id > $3::uuid
+                )
+              )
+              ORDER BY audit_events.created_at ASC, audit_events.id ASC
+              LIMIT $4
+            `,
+            values
+          );
+
+          if (result.rows.length === 0) {
+            stream.write(":keep-alive\n\n");
+            return;
+          }
+
+          for (const row of result.rows) {
+            const createdAt = toDate((row as any).created_at);
+            const id = String((row as any).id);
+            cursor = { lastCreatedAt: createdAt, lastEventId: id };
+
+            const event = redactAuditEvent(auditLogRowToAuditEvent(row as any));
+            const eventCursor = encodeStreamCursor(cursor);
+            stream.write(`id: ${eventCursor}\n`);
+            stream.write("event: audit\n");
+            stream.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+        } catch (err) {
+          stream.write("event: error\n");
+          stream.write(`data: ${JSON.stringify({ error: "stream_error" })}\n\n`);
+          close();
+        } finally {
+          pollInFlight = false;
+        }
+      };
+
+      timer = setInterval(() => {
+        void poll();
+      }, 2_000);
+      timer.unref?.();
+
+      // Kick off an initial poll so events written immediately after connect are not delayed.
+      void poll();
+
+      return reply.send(stream);
+    }
+  );
 
   app.get(
     "/orgs/:orgId/audit",
