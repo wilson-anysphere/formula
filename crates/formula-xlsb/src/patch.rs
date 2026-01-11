@@ -60,8 +60,8 @@ impl CellEdit {
 ///
 /// This is a minimal bridge between the current read-only XLSB implementation and a
 /// full writer:
-/// - no row/column insertion
-/// - updates only existing cells that appear in the stream
+/// - inserts missing rows/cells inside `BrtSheetData` (row-major order)
+/// - updates existing cells that appear in the stream
 /// - rewrites only selected supported cell record types
 pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, Error> {
     if edits.is_empty() {
@@ -77,7 +77,10 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
             )));
         }
     }
+    let mut ordered_edits: Vec<usize> = (0..edits.len()).collect();
+    ordered_edits.sort_by_key(|&idx| (edits[idx].row, edits[idx].col));
     let mut applied = vec![false; edits.len()];
+    let mut insert_cursor = 0usize;
 
     let mut out = Vec::with_capacity(sheet_bin.len());
     let mut writer = Biff12Writer::new(&mut out);
@@ -85,6 +88,8 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
     let mut offset = 0usize;
     let mut in_sheet_data = false;
     let mut current_row: Option<u32> = None;
+    let mut dim_record: Option<DimensionRecordInfo> = None;
+    let mut dim_additions: Option<Bounds> = None;
 
     while offset < sheet_bin.len() {
         let record_start = offset;
@@ -98,20 +103,96 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         offset = payload_end;
 
         let record_end = payload_end;
+        let header_len = payload_start
+            .checked_sub(record_start)
+            .ok_or(Error::UnexpectedEof)?;
 
         match id {
+            biff12::DIMENSION => {
+                if len < 16 {
+                    return Err(Error::UnexpectedEof);
+                }
+                // BrtWsDim: [r1: u32][r2: u32][c1: u32][c2: u32]
+                let r1 = read_u32(payload, 0)?;
+                let r2 = read_u32(payload, 4)?;
+                let c1 = read_u32(payload, 8)?;
+                let c2 = read_u32(payload, 12)?;
+
+                // `BrtWsDim` appears before `BrtSheetData` in valid worksheet streams, and
+                // `patch_sheet_bin` only inserts records *within* `BrtSheetData`. That means the
+                // output up to this point is byte-identical, so `record_start` is also the
+                // output offset.
+                dim_record = Some(DimensionRecordInfo {
+                    out_payload_offset: record_start
+                        .checked_add(header_len)
+                        .ok_or(Error::UnexpectedEof)?,
+                    r1,
+                    r2,
+                    c1,
+                    c2,
+                });
+                writer.write_raw(&sheet_bin[record_start..record_end])?;
+            }
             biff12::SHEETDATA => {
                 in_sheet_data = true;
                 current_row = None;
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
             }
             biff12::SHEETDATA_END => {
+                if in_sheet_data {
+                    // Flush any trailing cell inserts for the final row before leaving SheetData.
+                    if let Some(row) = current_row {
+                        flush_remaining_cells_in_row(
+                            &mut writer,
+                            edits,
+                            &mut applied,
+                            &ordered_edits,
+                            &mut insert_cursor,
+                            row,
+                            &mut dim_additions,
+                        )?;
+                    }
+                    // And append any remaining missing rows/cells.
+                    flush_remaining_rows(
+                        &mut writer,
+                        edits,
+                        &mut applied,
+                        &ordered_edits,
+                        &mut insert_cursor,
+                        &mut dim_additions,
+                    )?;
+                }
                 in_sheet_data = false;
                 current_row = None;
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
             }
             biff12::ROW if in_sheet_data => {
-                current_row = Some(read_u32(payload, 0)?);
+                // Before advancing to a new row, insert any missing cells for the prior row.
+                if let Some(row) = current_row {
+                    flush_remaining_cells_in_row(
+                        &mut writer,
+                        edits,
+                        &mut applied,
+                        &ordered_edits,
+                        &mut insert_cursor,
+                        row,
+                        &mut dim_additions,
+                    )?;
+                }
+
+                let row = read_u32(payload, 0)?;
+                // Insert any missing rows before this one (row-major order).
+                flush_missing_rows_before(
+                    &mut writer,
+                    edits,
+                    &mut applied,
+                    &ordered_edits,
+                    &mut insert_cursor,
+                    row,
+                    &mut dim_additions,
+                )?;
+
+                current_row = Some(row);
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
             }
             biff12::BLANK
@@ -131,6 +212,18 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 let col = read_u32(payload, 0)?;
                 let style = read_u32(payload, 4)?;
 
+                // Insert any missing cells that should appear before this one.
+                flush_missing_cells_before(
+                    &mut writer,
+                    edits,
+                    &mut applied,
+                    &ordered_edits,
+                    &mut insert_cursor,
+                    row,
+                    col,
+                    &mut dim_additions,
+                )?;
+
                 let Some(&edit_idx) = edits_by_coord.get(&(row, col)) else {
                     writer.write_raw(&sheet_bin[record_start..record_end])?;
                     continue;
@@ -138,6 +231,12 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
 
                 applied[edit_idx] = true;
                 let edit = &edits[edit_idx];
+                advance_insert_cursor(&ordered_edits, &applied, &mut insert_cursor);
+
+                // Track used-range expansion for edits that turn an empty cell into a value.
+                if id == biff12::BLANK && !matches!(edit.new_value, CellValue::Blank) {
+                    bounds_include(&mut dim_additions, row, col);
+                }
 
                 match id {
                     biff12::FORMULA_FLOAT => {
@@ -280,6 +379,30 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         }
     }
 
+    if in_sheet_data {
+        // Worksheet streams should always close `BrtSheetData`, but if they don't, still make a
+        // best-effort attempt to apply all edits.
+        if let Some(row) = current_row {
+            flush_remaining_cells_in_row(
+                &mut writer,
+                edits,
+                &mut applied,
+                &ordered_edits,
+                &mut insert_cursor,
+                row,
+                &mut dim_additions,
+            )?;
+        }
+        flush_remaining_rows(
+            &mut writer,
+            edits,
+            &mut applied,
+            &ordered_edits,
+            &mut insert_cursor,
+            &mut dim_additions,
+        )?;
+    }
+
     if applied.iter().any(|&ok| !ok) {
         let mut missing = Vec::new();
         for (&(row, col), &idx) in edits_by_coord.iter() {
@@ -290,14 +413,380 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         missing.sort();
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!(
-                "cell edits not applied (cells not found): {}",
-                missing.join(", ")
-            ),
+            format!("cell edits not applied: {}", missing.join(", ")),
         )));
     }
 
+    drop(writer);
+    if let Some(dim_record) = dim_record {
+        if let Some(additions) = dim_additions {
+            let mut r1 = dim_record.r1;
+            let mut r2 = dim_record.r2;
+            let mut c1 = dim_record.c1;
+            let mut c2 = dim_record.c2;
+
+            r1 = r1.min(additions.min_row);
+            r2 = r2.max(additions.max_row);
+            c1 = c1.min(additions.min_col);
+            c2 = c2.max(additions.max_col);
+
+            if (r1, r2, c1, c2) != (dim_record.r1, dim_record.r2, dim_record.c1, dim_record.c2) {
+                let start = dim_record.out_payload_offset;
+                let end = start.checked_add(16).ok_or(Error::UnexpectedEof)?;
+                let payload = out.get_mut(start..end).ok_or(Error::UnexpectedEof)?;
+                payload[0..4].copy_from_slice(&r1.to_le_bytes());
+                payload[4..8].copy_from_slice(&r2.to_le_bytes());
+                payload[8..12].copy_from_slice(&c1.to_le_bytes());
+                payload[12..16].copy_from_slice(&c2.to_le_bytes());
+            }
+        }
+    }
+
     Ok(out)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DimensionRecordInfo {
+    out_payload_offset: usize,
+    r1: u32,
+    r2: u32,
+    c1: u32,
+    c2: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Bounds {
+    min_row: u32,
+    max_row: u32,
+    min_col: u32,
+    max_col: u32,
+}
+
+fn bounds_include(bounds: &mut Option<Bounds>, row: u32, col: u32) {
+    match bounds {
+        Some(existing) => {
+            existing.min_row = existing.min_row.min(row);
+            existing.max_row = existing.max_row.max(row);
+            existing.min_col = existing.min_col.min(col);
+            existing.max_col = existing.max_col.max(col);
+        }
+        None => {
+            *bounds = Some(Bounds {
+                min_row: row,
+                max_row: row,
+                min_col: col,
+                max_col: col,
+            });
+        }
+    }
+}
+
+fn advance_insert_cursor(ordered: &[usize], applied: &[bool], cursor: &mut usize) {
+    while *cursor < ordered.len() && applied[ordered[*cursor]] {
+        *cursor += 1;
+    }
+}
+
+fn flush_missing_rows_before<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    edits: &[CellEdit],
+    applied: &mut [bool],
+    ordered: &[usize],
+    cursor: &mut usize,
+    before_row: u32,
+    dim_additions: &mut Option<Bounds>,
+) -> Result<(), Error> {
+    advance_insert_cursor(ordered, applied, cursor);
+
+    while *cursor < ordered.len() {
+        let idx = ordered[*cursor];
+        if applied[idx] {
+            *cursor += 1;
+            continue;
+        }
+
+        let edit = &edits[idx];
+        if edit.row >= before_row {
+            break;
+        }
+
+        let row = edit.row;
+        writer.write_record(biff12::ROW, &row.to_le_bytes())?;
+
+        while *cursor < ordered.len() {
+            let idx = ordered[*cursor];
+            if applied[idx] {
+                *cursor += 1;
+                continue;
+            }
+            let edit = &edits[idx];
+            if edit.row != row {
+                break;
+            }
+
+            write_new_cell_record(writer, edit.col, edit)?;
+            applied[idx] = true;
+            if !matches!(edit.new_value, CellValue::Blank) {
+                bounds_include(dim_additions, edit.row, edit.col);
+            }
+            *cursor += 1;
+        }
+
+        advance_insert_cursor(ordered, applied, cursor);
+    }
+
+    Ok(())
+}
+
+fn flush_missing_cells_before<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    edits: &[CellEdit],
+    applied: &mut [bool],
+    ordered: &[usize],
+    cursor: &mut usize,
+    row: u32,
+    before_col: u32,
+    dim_additions: &mut Option<Bounds>,
+) -> Result<(), Error> {
+    advance_insert_cursor(ordered, applied, cursor);
+
+    while *cursor < ordered.len() {
+        let idx = ordered[*cursor];
+        if applied[idx] {
+            *cursor += 1;
+            continue;
+        }
+
+        let edit = &edits[idx];
+        if edit.row != row || edit.col >= before_col {
+            break;
+        }
+
+        write_new_cell_record(writer, edit.col, edit)?;
+        applied[idx] = true;
+        if !matches!(edit.new_value, CellValue::Blank) {
+            bounds_include(dim_additions, edit.row, edit.col);
+        }
+        *cursor += 1;
+        advance_insert_cursor(ordered, applied, cursor);
+    }
+
+    Ok(())
+}
+
+fn flush_remaining_cells_in_row<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    edits: &[CellEdit],
+    applied: &mut [bool],
+    ordered: &[usize],
+    cursor: &mut usize,
+    row: u32,
+    dim_additions: &mut Option<Bounds>,
+) -> Result<(), Error> {
+    advance_insert_cursor(ordered, applied, cursor);
+
+    while *cursor < ordered.len() {
+        let idx = ordered[*cursor];
+        if applied[idx] {
+            *cursor += 1;
+            continue;
+        }
+
+        let edit = &edits[idx];
+        if edit.row != row {
+            break;
+        }
+
+        write_new_cell_record(writer, edit.col, edit)?;
+        applied[idx] = true;
+        if !matches!(edit.new_value, CellValue::Blank) {
+            bounds_include(dim_additions, edit.row, edit.col);
+        }
+        *cursor += 1;
+        advance_insert_cursor(ordered, applied, cursor);
+    }
+
+    Ok(())
+}
+
+fn flush_remaining_rows<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    edits: &[CellEdit],
+    applied: &mut [bool],
+    ordered: &[usize],
+    cursor: &mut usize,
+    dim_additions: &mut Option<Bounds>,
+) -> Result<(), Error> {
+    advance_insert_cursor(ordered, applied, cursor);
+
+    while *cursor < ordered.len() {
+        let idx = ordered[*cursor];
+        if applied[idx] {
+            *cursor += 1;
+            continue;
+        }
+
+        let row = edits[idx].row;
+        writer.write_record(biff12::ROW, &row.to_le_bytes())?;
+
+        while *cursor < ordered.len() {
+            let idx = ordered[*cursor];
+            if applied[idx] {
+                *cursor += 1;
+                continue;
+            }
+
+            let edit = &edits[idx];
+            if edit.row != row {
+                break;
+            }
+
+            write_new_cell_record(writer, edit.col, edit)?;
+            applied[idx] = true;
+            if !matches!(edit.new_value, CellValue::Blank) {
+                bounds_include(dim_additions, edit.row, edit.col);
+            }
+            *cursor += 1;
+        }
+
+        advance_insert_cursor(ordered, applied, cursor);
+    }
+
+    Ok(())
+}
+
+fn write_new_cell_record<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    col: u32,
+    edit: &CellEdit,
+) -> Result<(), Error> {
+    let style = 0u32;
+    match (&edit.new_formula, &edit.new_value) {
+        (Some(rgce), CellValue::Number(v)) => write_new_fmla_num(writer, col, style, *v, rgce),
+        (Some(rgce), CellValue::Bool(v)) => write_new_fmla_bool(writer, col, style, *v, rgce),
+        (Some(rgce), CellValue::Error(v)) => write_new_fmla_error(writer, col, style, *v, rgce),
+        (Some(rgce), CellValue::Text(s)) => write_new_fmla_string(writer, col, style, s, rgce),
+        (Some(_), CellValue::Blank) => Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot write formula cell with blank cached value at ({}, {})",
+                edit.row, edit.col
+            ),
+        ))),
+        (None, _) => patch_value_cell(writer, col, style, edit),
+    }
+}
+
+fn write_new_fmla_num<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    col: u32,
+    style: u32,
+    cached: f64,
+    rgce: &[u8],
+) -> Result<(), Error> {
+    let rgce_len = u32::try_from(rgce.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula token stream is too large",
+        ))
+    })?;
+    let payload_len = 22u32.checked_add(rgce_len).ok_or(Error::UnexpectedEof)?;
+    writer.write_record_header(biff12::FORMULA_FLOAT, payload_len)?;
+    writer.write_u32(col)?;
+    writer.write_u32(style)?;
+    writer.write_f64(cached)?;
+    writer.write_u16(0)?; // flags
+    writer.write_u32(rgce_len)?;
+    writer.write_raw(rgce)?;
+    Ok(())
+}
+
+fn write_new_fmla_bool<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    col: u32,
+    style: u32,
+    cached: bool,
+    rgce: &[u8],
+) -> Result<(), Error> {
+    let rgce_len = u32::try_from(rgce.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula token stream is too large",
+        ))
+    })?;
+    let payload_len = 15u32.checked_add(rgce_len).ok_or(Error::UnexpectedEof)?;
+    writer.write_record_header(biff12::FORMULA_BOOL, payload_len)?;
+    writer.write_u32(col)?;
+    writer.write_u32(style)?;
+    writer.write_raw(&[u8::from(cached)])?;
+    writer.write_u16(0)?; // flags
+    writer.write_u32(rgce_len)?;
+    writer.write_raw(rgce)?;
+    Ok(())
+}
+
+fn write_new_fmla_error<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    col: u32,
+    style: u32,
+    cached: u8,
+    rgce: &[u8],
+) -> Result<(), Error> {
+    let rgce_len = u32::try_from(rgce.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula token stream is too large",
+        ))
+    })?;
+    let payload_len = 15u32.checked_add(rgce_len).ok_or(Error::UnexpectedEof)?;
+    writer.write_record_header(biff12::FORMULA_BOOLERR, payload_len)?;
+    writer.write_u32(col)?;
+    writer.write_u32(style)?;
+    writer.write_raw(&[cached])?;
+    writer.write_u16(0)?; // flags
+    writer.write_u32(rgce_len)?;
+    writer.write_raw(rgce)?;
+    Ok(())
+}
+
+fn write_new_fmla_string<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    col: u32,
+    style: u32,
+    cached: &str,
+    rgce: &[u8],
+) -> Result<(), Error> {
+    let rgce_len = u32::try_from(rgce.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula token stream is too large",
+        ))
+    })?;
+
+    let cch = cached.encode_utf16().count();
+    let cch = u32::try_from(cch).map_err(|_| {
+        Error::Io(io::Error::new(io::ErrorKind::InvalidInput, "string is too large"))
+    })?;
+    let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+    // [cch:u32][flags:u16][utf16 chars...]
+    let cached_len = 6u32.checked_add(utf16_len).ok_or(Error::UnexpectedEof)?;
+    let payload_len = 8u32
+        .checked_add(cached_len)
+        .and_then(|v| v.checked_add(4)) // cce
+        .and_then(|v| v.checked_add(rgce_len))
+        .ok_or(Error::UnexpectedEof)?;
+
+    writer.write_record_header(biff12::FORMULA_STRING, payload_len)?;
+    writer.write_u32(col)?;
+    writer.write_u32(style)?;
+    writer.write_u32(cch)?;
+    writer.write_u16(0)?; // flags
+    for unit in cached.encode_utf16() {
+        writer.write_raw(&unit.to_le_bytes())?;
+    }
+    writer.write_u32(rgce_len)?;
+    writer.write_raw(rgce)?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
