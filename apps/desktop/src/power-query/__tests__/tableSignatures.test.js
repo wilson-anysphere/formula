@@ -4,6 +4,7 @@ import test from "node:test";
 import { CacheManager } from "../../../../../packages/power-query/src/cache/cache.js";
 import { MemoryCacheStore } from "../../../../../packages/power-query/src/cache/memory.js";
 import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
+import { DataTable } from "../../../../../packages/power-query/src/table.js";
 
 import { DocumentController } from "../../document/documentController.js";
 
@@ -89,6 +90,39 @@ test("QueryEngine cache keys incorporate table signatures", async () => {
   assert.ok(key2, "expected cache key to be computed after table edit");
 
   assert.notEqual(key2, key1);
+});
+
+test("table-source queries only cache when a signature is available", async () => {
+  let getTableCalls = 0;
+  const table = DataTable.fromGrid(
+    [
+      ["A"],
+      [1],
+    ],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const engine = new QueryEngine({
+    cache: new CacheManager({ store: new MemoryCacheStore() }),
+    tableAdapter: {
+      getTable: async () => {
+        getTableCalls += 1;
+        return table;
+      },
+    },
+  });
+
+  const query = { id: "q_table_cache", name: "Table Cache", source: { type: "table", table: "Table1" }, steps: [] };
+
+  await engine.executeQuery(query, {}, {});
+  await engine.executeQuery(query, {}, {});
+  assert.equal(getTableCalls, 2, "expected table adapter to run twice when signatures are missing");
+
+  getTableCalls = 0;
+  const ctx = { getTableSignature: () => "sig" };
+  await engine.executeQuery(query, ctx, {});
+  await engine.executeQuery(query, ctx, {});
+  assert.equal(getTableCalls, 1, "expected second execution to reuse cached result when signature is present");
 });
 
 test("table signature definition hash changes (and version bumps) when the backend table definition changes", () => {
