@@ -47,6 +47,23 @@ function writeSharedRpcResponse(sharedBuffer, { result, error }) {
   Atomics.notify(header, 0);
 }
 
+// Main-thread Pyodide can be a singleton/cached instance (depending on the host
+// `loadPyodide` implementation). Ensure we never run two Python executions at
+// once across *any* PyodideRuntime instance so stdout/stderr capture, sandboxing
+// and bridge swapping remain deterministic.
+let mainThreadExecuteQueue = Promise.resolve();
+
+function enqueueMainThreadExecution(task) {
+  const scheduled = mainThreadExecuteQueue.then(task, task);
+  // Keep the queue in a resolved state so errors are always "handled" even if
+  // callers fire-and-forget the returned promise.
+  mainThreadExecuteQueue = scheduled.then(
+    () => undefined,
+    () => undefined,
+  );
+  return scheduled;
+}
+
 export class PyodideRuntime {
   constructor(options = {}) {
     this.workerUrl = options.workerUrl ?? new URL("./pyodide-worker.js", import.meta.url);
@@ -394,20 +411,24 @@ export class PyodideRuntime {
       throw new Error("PyodideRuntime mainThread backend not initialized; call initialize() first");
     }
 
+    const pyodide = this.pyodide;
+    const api = this.api;
+    const interruptView = this._interruptView;
+
     const run = async () => {
       let stdout = "";
       let stderr = "";
-      setFormulaBridgeApi(this.pyodide, this.api);
-      const beforeMem = getWasmMemoryBytes(this.pyodide);
+      setFormulaBridgeApi(pyodide, api);
+      const beforeMem = getWasmMemoryBytes(pyodide);
       const restoreNetworkSandbox = applyMainThreadNetworkSandbox(effectivePermissions);
 
       try {
-        await applyPythonSandbox(this.pyodide, effectivePermissions);
+        await applyPythonSandbox(pyodide, effectivePermissions);
 
         const startedAt = Date.now();
         const { value: result, stdout: capturedStdout, stderr: capturedStderr } = await withCapturedOutput(
-          this.pyodide,
-          () => runWithTimeout(this.pyodide, code, effectiveTimeout, this._interruptView),
+          pyodide,
+          () => runWithTimeout(pyodide, code, effectiveTimeout, interruptView),
         );
 
         stdout = capturedStdout;
@@ -418,7 +439,7 @@ export class PyodideRuntime {
         // longer than the requested timeout, treat it as a timeout and reset the
         // runtime so the UI can recover.
         const durationMs = Date.now() - startedAt;
-        if (!this._interruptView && Number.isFinite(effectiveTimeout) && effectiveTimeout > 0 && durationMs > effectiveTimeout) {
+        if (!interruptView && Number.isFinite(effectiveTimeout) && effectiveTimeout > 0 && durationMs > effectiveTimeout) {
           const err = new Error(
             `Pyodide script exceeded timeout (${durationMs}ms > ${effectiveTimeout}ms). SharedArrayBuffer is unavailable so execution cannot be interrupted; the UI may have been unresponsive and the runtime was reset.`,
           );
@@ -428,7 +449,7 @@ export class PyodideRuntime {
           throw err;
         }
 
-        const afterMem = getWasmMemoryBytes(this.pyodide);
+        const afterMem = getWasmMemoryBytes(pyodide);
         if (Number.isFinite(effectiveMaxMemory) && effectiveMaxMemory > 0 && afterMem != null && afterMem > effectiveMaxMemory) {
           throw new Error(`Pyodide memory limit exceeded: ${afterMem} bytes > ${effectiveMaxMemory} bytes`);
         }
@@ -464,9 +485,11 @@ export class PyodideRuntime {
       }
     };
 
-    // Ensure main-thread executions don't overlap (stdout/stderr, sandbox state).
-    this._executeQueue = this._executeQueue.then(run, run);
-    return await this._executeQueue;
+    // Ensure main-thread executions don't overlap (stdout/stderr, sandbox state),
+    // even across multiple runtime instances.
+    const scheduled = enqueueMainThreadExecution(run);
+    this._executeQueue = scheduled;
+    return await scheduled;
   }
 }
 
