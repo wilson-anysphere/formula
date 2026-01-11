@@ -1222,6 +1222,58 @@ test("extension metadata ETag changes when publisher public key changes", async 
   }
 });
 
+test("publisher signing key ids are globally unique across publishers", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-key-unique-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+ 
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+ 
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+ 
+  try {
+    const { publicKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+ 
+    const regA = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: "pub-a",
+        token: "publisher-token-a",
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regA.status, 200);
+ 
+    const regB = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: "pub-b",
+        token: "publisher-token-b",
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regB.status, 400);
+    const bodyB = await regB.json();
+    assert.match(String(bodyB?.error || ""), /already registered/i);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("publisher key rotation preserves verification + installs across historical versions", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-key-rotation-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");
