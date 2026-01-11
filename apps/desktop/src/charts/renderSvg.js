@@ -120,6 +120,24 @@ function renderBarLineSvg({ width, height, title, kind, series }) {
         svg.push(`<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(barW)}" height="${fmt(h)}" fill="${colors[si % colors.length]}"/>`);
       }
     }
+  } else if (kind === "area") {
+    for (let si = 0; si < seriesCount; si += 1) {
+      const points = [];
+      for (let ci = 0; ci < catCount; ci += 1) {
+        const v = numericValues[si]?.[ci];
+        const x = originX + (ci + 0.5) * groupW;
+        const y = originY - (Number.isFinite(v) && maxVal !== 0 ? (v / maxVal) * plotH : 0);
+        points.push(`${fmt(x)},${fmt(y)}`);
+      }
+
+      const firstX = originX + 0.5 * groupW;
+      const lastX = originX + (catCount - 0.5) * groupW;
+      const areaPoints = [`${fmt(firstX)},${fmt(originY)}`, ...points, `${fmt(lastX)},${fmt(originY)}`];
+      svg.push(
+        `<polygon points="${areaPoints.join(" ")}" fill="${colors[si % colors.length]}" fill-opacity="0.25" stroke="none"/>`
+      );
+      svg.push(`<polyline fill="none" stroke="${colors[si % colors.length]}" stroke-width="2" points="${points.join(" ")}"/>`);
+    }
   } else {
     for (let si = 0; si < seriesCount; si += 1) {
       const points = [];
@@ -266,6 +284,8 @@ export function renderChartSvg(chart, provider, opts) {
       return renderBarLineSvg({ width, height, title: chart.title, kind: "bar", series });
     case "line":
       return renderBarLineSvg({ width, height, title: chart.title, kind: "line", series });
+    case "area":
+      return renderBarLineSvg({ width, height, title: chart.title, kind: "area", series });
     case "pie":
       return renderPieSvg({ width, height, title: chart.title, series });
     case "scatter":

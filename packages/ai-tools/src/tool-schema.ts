@@ -372,7 +372,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
   },
   create_chart: {
     name: "create_chart",
-    description: "Create a chart from a data range (stub).",
+    description: "Create a chart from a data range.",
     paramsSchema: CreateChartParamsSchema,
     jsonSchema: {
       type: "object",

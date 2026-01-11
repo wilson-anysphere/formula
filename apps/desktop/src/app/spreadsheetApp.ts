@@ -5,6 +5,7 @@ import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js"
 import { parseA1Range } from "../charts/a1.js";
 import { anchorToRectPx } from "../charts/overlay.js";
 import { renderChartSvg } from "../charts/renderSvg.js";
+import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
@@ -30,39 +31,11 @@ import { drawCommentIndicator } from "../comments/CommentIndicator";
 import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
 import { parseGoTo } from "../../../../packages/search/index.js";
+import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
-
-type ChartSeriesDef = {
-  name?: string | null;
-  categories?: string | null;
-  values?: string | null;
-  xValues?: string | null;
-  yValues?: string | null;
-};
-
-type ChartDef = {
-  chartType: { kind: string; name?: string };
-  title?: string;
-  series: ChartSeriesDef[];
-  anchor: {
-    kind: string;
-    fromCol?: number;
-    fromRow?: number;
-    fromColOffEmu?: number;
-    fromRowOffEmu?: number;
-    toCol?: number;
-    toRow?: number;
-    toColOffEmu?: number;
-    toRowOffEmu?: number;
-    xEmu?: number;
-    yEmu?: number;
-    cxEmu?: number;
-    cyEmu?: number;
-  };
-};
 
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
@@ -123,7 +96,7 @@ export class SpreadsheetApp {
   private commentsPanelVisible = false;
   private stopCommentPersistence: (() => void) | null = null;
 
-  private charts: ChartDef[] = [];
+  private readonly chartStore: ChartStore;
 
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
@@ -189,6 +162,18 @@ export class SpreadsheetApp {
     this.root.appendChild(this.chartLayer);
     this.root.appendChild(this.referenceCanvas);
     this.root.appendChild(this.selectionCanvas);
+
+    this.chartStore = new ChartStore({
+      defaultSheet: this.sheetId,
+      getCellValue: (sheetId, row, col) => {
+        const state = this.document.getCell(sheetId, { row, col }) as {
+          value: unknown;
+          formula: string | null;
+        };
+        return state?.value ?? null;
+      },
+      onChange: () => this.renderCharts()
+    });
 
     this.outlineLayer = document.createElement("div");
     this.outlineLayer.className = "outline-layer";
@@ -287,30 +272,13 @@ export class SpreadsheetApp {
       });
     }
 
-    this.charts = [
-      {
-        chartType: { kind: "bar" },
-        title: "Example Chart",
-        series: [
-          {
-            categories: "Sheet1!$A$2:$A$5",
-            values: "Sheet1!$B$2:$B$5"
-          }
-        ],
-        // Anchor roughly over columns E..I and rows 2..12.
-        anchor: {
-          kind: "twoCell",
-          fromCol: 4,
-          fromRow: 1,
-          fromColOffEmu: 0,
-          fromRowOffEmu: 0,
-          toCol: 9,
-          toRow: 12,
-          toColOffEmu: 0,
-          toRowOffEmu: 0
-        }
-      }
-    ];
+    // Seed a demo chart using the chart store helpers so it matches the logic
+    // used by AI chart creation.
+    this.chartStore.createChart({
+      chart_type: "bar",
+      data_range: "Sheet1!A2:B5",
+      title: "Example Chart"
+    });
 
     // Initial layout + render.
     this.onResize();
@@ -365,6 +333,14 @@ export class SpreadsheetApp {
     return this.sheetId;
   }
 
+  addChart(spec: CreateChartSpec): CreateChartResult {
+    return this.chartStore.createChart(spec);
+  }
+
+  listCharts(): readonly ChartRecord[] {
+    return this.chartStore.listCharts();
+  }
+
   /**
    * Switch the active sheet id and re-render.
    */
@@ -372,6 +348,7 @@ export class SpreadsheetApp {
     if (!sheetId) return;
     if (sheetId === this.sheetId) return;
     this.sheetId = sheetId;
+    this.chartStore.setDefaultSheet(sheetId);
     this.renderGrid();
     this.renderSelection();
     this.updateStatus();
@@ -874,7 +851,8 @@ export class SpreadsheetApp {
 
   private renderCharts(): void {
     this.chartLayer.replaceChildren();
-    if (this.charts.length === 0) return;
+    const charts = this.chartStore.listCharts();
+    if (charts.length === 0) return;
 
     const provider = {
       getRange: (rangeRef: string) => {
@@ -897,7 +875,7 @@ export class SpreadsheetApp {
       }
     };
 
-    for (const chart of this.charts) {
+    for (const chart of charts) {
       const rect = anchorToRectPx(chart.anchor, {
         defaultColWidthPx: this.cellWidth,
         defaultRowHeightPx: this.cellHeight

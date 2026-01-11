@@ -6,6 +6,19 @@ export interface CellEntry {
   cell: CellData;
 }
 
+export type ChartType = "bar" | "line" | "pie" | "scatter" | "area";
+
+export interface CreateChartSpec {
+  chart_type: ChartType;
+  data_range: string;
+  title?: string;
+  position?: string;
+}
+
+export interface CreateChartResult {
+  chart_id: string;
+}
+
 export interface SpreadsheetApi {
   listSheets(): string[];
   listNonEmptyCells(sheet?: string): CellEntry[];
@@ -17,6 +30,12 @@ export interface SpreadsheetApi {
   writeRange(range: RangeAddress, cells: CellData[][]): void;
 
   applyFormatting(range: RangeAddress, format: Partial<CellFormat>): number;
+
+  /**
+   * Optional chart support. If not provided, `create_chart` tool calls should
+   * return a `not_implemented` error.
+   */
+  createChart?(spec: CreateChartSpec): CreateChartResult;
 
   getLastUsedRow(sheet: string): number;
   clone(): SpreadsheetApi;

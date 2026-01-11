@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolExecutor } from "../src/executor/tool-executor.js";
 import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 import { parseA1Cell, parseA1Range } from "../src/spreadsheet/a1.js";
+import type { CreateChartSpec, SpreadsheetApi } from "../src/spreadsheet/api.js";
 
 describe("ToolExecutor", () => {
   afterEach(() => {
@@ -256,6 +257,58 @@ describe("ToolExecutor", () => {
     expect(out[3]?.[0]).toBe("Grand Total");
     expect(out[3]?.[1]).toBeCloseTo(3125, 10);
     expect(out[3]?.[2]).toBeCloseTo(Math.sqrt(3125), 10);
+  });
+
+  it("create_chart delegates to SpreadsheetApi.createChart", async () => {
+    class ChartWorkbook extends InMemoryWorkbook {
+      readonly createdCharts: Array<{ chart_id: string; spec: CreateChartSpec }> = [];
+
+      createChart(spec: CreateChartSpec): { chart_id: string } {
+        const chart_id = `chart_${this.createdCharts.length + 1}`;
+        this.createdCharts.push({ chart_id, spec });
+        return { chart_id };
+      }
+    }
+
+    const workbook = new ChartWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "create_chart",
+      parameters: {
+        chart_type: "bar",
+        data_range: "A1:B3",
+        title: "Sales"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("create_chart");
+    if (!result.ok || result.tool !== "create_chart") throw new Error("Unexpected tool result");
+    expect(result.data?.status).toBe("ok");
+    expect(result.data?.chart_id).toBe("chart_1");
+    expect(workbook.createdCharts).toHaveLength(1);
+    expect(workbook.createdCharts[0]?.spec).toMatchObject({
+      chart_type: "bar",
+      data_range: "Sheet1!A1:B3",
+      title: "Sales"
+    });
+  });
+
+  it("create_chart returns not_implemented when SpreadsheetApi lacks chart support", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook as SpreadsheetApi, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "create_chart",
+      parameters: {
+        chart_type: "bar",
+        data_range: "A1:B3"
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("not_implemented");
   });
 
   it("fetch_external_data json_to_table writes headers + rows and returns provenance metadata", async () => {

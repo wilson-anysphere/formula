@@ -1,6 +1,6 @@
 import { ZodError } from "zod";
 import { columnLabelToIndex, formatA1Cell, formatA1Range, parseA1Cell, parseA1Range } from "../spreadsheet/a1.js";
-import type { SpreadsheetApi } from "../spreadsheet/api.js";
+import type { ChartType, CreateChartResult, CreateChartSpec, SpreadsheetApi } from "../spreadsheet/api.js";
 import type { CellData, CellScalar } from "../spreadsheet/types.js";
 import type { ToolCall, ToolName, UnknownToolCall } from "../tool-schema.js";
 import { TOOL_REGISTRY, validateToolCall } from "../tool-schema.js";
@@ -45,8 +45,12 @@ export type ToolResultDataByName = {
     shape: { rows: number; cols: number };
   };
   create_chart: {
-    status: "stub";
-    message: string;
+    status: "ok";
+    chart_id: string;
+    chart_type: ChartType;
+    data_range: string;
+    position?: string;
+    title?: string;
   };
   sort_range: {
     range: string;
@@ -170,7 +174,7 @@ export class ToolExecutor {
       case "create_pivot_table":
         return this.createPivotTable(call.parameters);
       case "create_chart":
-        return { status: "stub", message: "Chart creation is not implemented yet." };
+        return this.createChart(call.parameters);
       case "sort_range":
         return this.sortRange(call.parameters);
       case "filter_range":
@@ -357,6 +361,52 @@ export class ToolExecutor {
       destination_range: formatA1Range(outRange),
       written_cells: rowCount * colCount,
       shape: { rows: rowCount, cols: colCount }
+    };
+  }
+
+  private createChart(params: any): ToolResultDataByName["create_chart"] {
+    if (!this.spreadsheet.createChart) {
+      throw toolError("not_implemented", "create_chart requires chart support in SpreadsheetApi");
+    }
+
+    const chartType = params.chart_type as ChartType;
+    const dataRangeParsed = parseA1Range(params.data_range, this.options.default_sheet);
+    const dataRange = formatA1Range(dataRangeParsed);
+
+    let position: string | undefined;
+    if (params.position != null && String(params.position).trim() !== "") {
+      try {
+        position = formatA1Range(parseA1Range(String(params.position), dataRangeParsed.sheet));
+      } catch (error) {
+        throw toolError(
+          "validation_error",
+          `create_chart position must be an A1 cell or range reference (got "${params.position}")`,
+          error instanceof Error ? { message: error.message } : undefined
+        );
+      }
+    }
+
+    const title = params.title != null && String(params.title).trim() !== "" ? String(params.title) : undefined;
+
+    const spec: CreateChartSpec = {
+      chart_type: chartType,
+      data_range: dataRange,
+      ...(title ? { title } : {}),
+      ...(position ? { position } : {})
+    };
+
+    const result = this.spreadsheet.createChart(spec) as CreateChartResult;
+    if (!result || typeof result.chart_id !== "string" || result.chart_id.trim() === "") {
+      throw toolError("runtime_error", "create_chart host returned an invalid chart_id", result);
+    }
+
+    return {
+      status: "ok",
+      chart_id: result.chart_id,
+      chart_type: chartType,
+      data_range: dataRange,
+      ...(title ? { title } : {}),
+      ...(position ? { position } : {})
     };
   }
 

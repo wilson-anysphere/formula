@@ -122,9 +122,11 @@ function parseRowColKey(key: string): { row: number; col: number } {
  */
 export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   readonly controller: DocumentController;
+  readonly createChart?: SpreadsheetApi["createChart"];
 
-  constructor(controller: DocumentController) {
+  constructor(controller: DocumentController, options: { createChart?: SpreadsheetApi["createChart"] } = {}) {
     this.controller = controller;
+    this.createChart = options.createChart;
   }
 
   listSheets(): string[] {
@@ -254,6 +256,8 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const snapshot = this.controller.encodeState();
     const cloned = new DocumentController();
     cloned.applyState(snapshot);
+    // Do not forward optional side-effectful capabilities (like chart creation)
+    // into clones used by preview/diff engines.
     return new DocumentControllerSpreadsheetApi(cloned);
   }
 }
