@@ -18,7 +18,7 @@ function makeRng(seed) {
   };
 }
 
-test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU available)", async (t) => {
+test("webgpu: f32 + f64 correctness for common kernels (if WebGPU available)", async (t) => {
   const gpu = await WebGpuBackend.createIfSupported();
   if (!gpu) return t.skip("WebGPU unavailable");
 
