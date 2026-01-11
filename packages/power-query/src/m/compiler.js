@@ -156,8 +156,10 @@ function compileExpression(ctx, expr, preferredStepName = null) {
     case "Identifier": {
       const name = identifierPartsToName(expr.parts);
       const value = ctx.env.get(name);
-      if (!value) ctx.error(expr, `Unknown identifier '${name}'`);
-      return value;
+      if (value) return value;
+      const constant = constantIdentifierValue(name);
+      if (constant !== undefined) return { kind: "value", value: constant };
+      ctx.error(expr, `Unknown identifier '${name}'`);
     }
     case "CallExpression":
       return compileCall(ctx, expr, preferredStepName);

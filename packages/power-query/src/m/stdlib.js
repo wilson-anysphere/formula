@@ -121,6 +121,24 @@ export function identifierToDataType(name) {
  */
 export function constantIdentifierValue(name) {
   switch (name) {
+    case "JoinKind.Inner":
+      return "inner";
+    case "JoinKind.LeftOuter":
+      return "left";
+    case "JoinKind.RightOuter":
+      return "right";
+    case "JoinKind.FullOuter":
+      return "full";
+    case "JoinAlgorithm.Dynamic":
+      return "dynamic";
+    case "JoinAlgorithm.SortMerge":
+      return "sortMerge";
+    case "JoinAlgorithm.LeftHash":
+      return "leftHash";
+    case "JoinAlgorithm.RightHash":
+      return "rightHash";
+    case "JoinAlgorithm.PairwiseHash":
+      return "pairwiseHash";
     case "Order.Ascending":
       return "ascending";
     case "Order.Descending":

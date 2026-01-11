@@ -595,6 +595,66 @@ in
   ]);
 });
 
+test("m_language execution: JoinKind/Comparer constants can be bound in let expressions", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Name"},
+    {1, "Alice"},
+    {2, "Bob"}
+  })
+in
+  Source
+`,
+    { id: "q_left_const_binding", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Name", "Score"},
+    {"alice", 10},
+    {"BOB", 20}
+  })
+in
+  Source
+`,
+    { id: "q_right_const_binding", name: "Right" },
+  );
+
+  const joinQuery = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_const_binding"),
+  Right = Query.Reference("q_right_const_binding"),
+  Kind = JoinKind.Inner,
+  Comp = Comparer.OrdinalIgnoreCase,
+  #"Merged Queries" = Table.Join(Left, {"Name"}, Right, {"Name"}, Kind, null, Comp)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_const_binding", name: "Join constants" },
+  );
+
+  assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+  assert.equal(joinQuery.steps[0]?.operation.joinType, "inner");
+  assert.equal(joinQuery.steps[0]?.operation.comparer?.caseSensitive, false);
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(
+    joinQuery,
+    { queries: { q_left_const_binding: left, q_right_const_binding: right } },
+    {},
+  );
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Name", "Score"],
+    [1, "Alice", 10],
+    [2, "Bob", 20],
+  ]);
+});
+
 test("m_language execution: Table.Join supports Comparer.OrdinalIgnoreCase", async () => {
   const left = compileMToQuery(
     `
