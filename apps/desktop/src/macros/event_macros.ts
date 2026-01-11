@@ -313,6 +313,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let changeQueuedAfterMacro = false;
   let changeFlushPromise: Promise<void> | null = null;
   let changeFlushQueued = false;
+  let changeFlushDeferredUntilIdle = false;
 
   let selectionTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSelectionRect: Rect | null = null;
@@ -322,6 +323,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let sawInitialSelection = false;
   let selectionFlushPromise: Promise<void> | null = null;
   let selectionFlushQueued = false;
+  let selectionFlushDeferredUntilIdle = false;
 
   const statusPromise = (async () => {
     try {
@@ -421,6 +423,21 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       await applyMacroUpdatesToDocument(args.app, updates, options);
     } finally {
       applyingMacroUpdates = previous;
+      if (!disposed && !eventsDisabled && !previous) {
+        if (changeFlushDeferredUntilIdle && pendingChangesBySheet.size > 0) {
+          changeFlushDeferredUntilIdle = false;
+          scheduleFlushWorksheetChanges();
+        } else {
+          changeFlushDeferredUntilIdle = false;
+        }
+
+        if (selectionFlushDeferredUntilIdle && pendingSelectionRect && !selectionTimer) {
+          selectionFlushDeferredUntilIdle = false;
+          startFlushSelectionChange();
+        } else {
+          selectionFlushDeferredUntilIdle = false;
+        }
+      }
     }
   }
 
@@ -475,12 +492,18 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   async function doFlushWorksheetChanges(): Promise<void> {
     await statusPromise;
     if (disposed) return;
-    if (eventsDisabled) return;
+    if (eventsDisabled) {
+      pendingChangesBySheet.clear();
+      return;
+    }
     if (!eventsAllowed) {
       pendingChangesBySheet.clear();
       return;
     }
-    if (applyingMacroUpdates) return;
+    if (applyingMacroUpdates) {
+      changeFlushDeferredUntilIdle = true;
+      return;
+    }
 
     if (runningEventMacro) {
       changeQueuedAfterMacro = true;
@@ -531,24 +554,48 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       .finally(() => {
         changeFlushPromise = null;
         if (disposed) return;
-        if (pendingChangesBySheet.size > 0 || changeFlushQueued) {
+        if (eventsDisabled) {
+          pendingChangesBySheet.clear();
           changeFlushQueued = false;
-          scheduleFlushWorksheetChanges();
+          return;
         }
+
+        const shouldRerun = pendingChangesBySheet.size > 0 || changeFlushQueued;
+        changeFlushQueued = false;
+        if (!shouldRerun) return;
+
+        if (runningEventMacro || changeQueuedAfterMacro) {
+          // Defer until the current macro finishes; `runEventMacro` will re-schedule.
+          return;
+        }
+
+        if (applyingMacroUpdates) {
+          changeFlushDeferredUntilIdle = true;
+          return;
+        }
+
+        scheduleFlushWorksheetChanges();
       });
   }
 
   async function doFlushSelectionChange(): Promise<void> {
     await statusPromise;
     if (disposed) return;
-    if (eventsDisabled) return;
+    if (eventsDisabled) {
+      pendingSelectionRect = null;
+      pendingSelectionKey = "";
+      return;
+    }
     if (!eventsAllowed) {
       pendingSelectionRect = null;
       pendingSelectionKey = "";
       return;
     }
     if (!pendingSelectionRect) return;
-    if (applyingMacroUpdates) return;
+    if (applyingMacroUpdates) {
+      selectionFlushDeferredUntilIdle = true;
+      return;
+    }
 
     if (runningEventMacro) {
       selectionQueuedAfterMacro = true;
@@ -589,10 +636,29 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       .finally(() => {
         selectionFlushPromise = null;
         if (disposed) return;
-        if (pendingSelectionRect || selectionFlushQueued) {
+
+        if (eventsDisabled) {
+          pendingSelectionRect = null;
+          pendingSelectionKey = "";
           selectionFlushQueued = false;
-          startFlushSelectionChange();
+          return;
         }
+
+        const shouldRerun = Boolean(pendingSelectionRect) || selectionFlushQueued;
+        selectionFlushQueued = false;
+        if (!shouldRerun) return;
+
+        if (runningEventMacro || selectionQueuedAfterMacro) {
+          // Defer until the current macro finishes; `runEventMacro` will re-schedule.
+          return;
+        }
+
+        if (applyingMacroUpdates) {
+          selectionFlushDeferredUntilIdle = true;
+          return;
+        }
+
+        queueMicrotask(() => startFlushSelectionChange());
       });
   }
 
