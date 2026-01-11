@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // DocumentController is authored in JS. We keep a minimal `.d.ts` next to it so this
 // TS test can import the runtime implementation under `strict` typechecking.
 import { DocumentController } from "../../../apps/desktop/src/document/documentController.js";
-import { exportDocumentToEngineWorkbookJson } from "./documentControllerSync";
+import { engineApplyDeltas, engineHydrateFromDocument, exportDocumentToEngineWorkbookJson } from "./documentControllerSync";
 
 describe("DocumentController → engine workbook JSON exporter", () => {
   it("exports scalar values, rich text as plain text, and normalizes formulas", () => {
@@ -29,5 +29,58 @@ describe("DocumentController → engine workbook JSON exporter", () => {
         },
       },
     });
+  });
+
+  it("hydrates an engine from exported JSON in a single load+recalc step", async () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", 1);
+    doc.setCellFormula("Sheet1", "A2", "A1*2");
+
+    const engine = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+    };
+
+    await engineHydrateFromDocument(engine, doc);
+
+    expect(engine.loadWorkbookFromJson).toHaveBeenCalledTimes(1);
+    const [serialized] = engine.loadWorkbookFromJson.mock.calls[0] ?? [];
+    expect(JSON.parse(String(serialized))).toEqual(exportDocumentToEngineWorkbookJson(doc));
+
+    expect(engine.recalculate).toHaveBeenCalledTimes(1);
+    expect(engine.loadWorkbookFromJson.mock.invocationCallOrder[0]).toBeLessThan(
+      engine.recalculate.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("applies incremental deltas without emitting format-only updates", async () => {
+    const engine = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+    };
+
+    await engineApplyDeltas(engine, [
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        before: { value: null, formula: null, styleId: 0 },
+        after: { value: 1, formula: null, styleId: 0 },
+      },
+      // Formatting-only delta: should be ignored.
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 1,
+        before: { value: null, formula: null, styleId: 0 },
+        after: { value: null, formula: null, styleId: 42 },
+      },
+    ]);
+
+    expect(engine.setCell).toHaveBeenCalledTimes(1);
+    expect(engine.setCell).toHaveBeenCalledWith("A1", 1, "Sheet1");
+    expect(engine.recalculate).toHaveBeenCalledTimes(1);
   });
 });
