@@ -710,11 +710,11 @@ impl Storage {
         let (styles, storage_style_to_model) = build_model_style_table(&conn, workbook_id)?;
 
         let mut model_workbook = formula_model::Workbook::new();
-        if let Some(schema_version) = model_schema_version {
-            model_workbook.schema_version = schema_version as u32;
+        if let Some(schema_version) = model_schema_version.and_then(|v| u32::try_from(v).ok()) {
+            model_workbook.schema_version = schema_version;
         }
-        if let Some(id) = model_workbook_id {
-            model_workbook.id = id as u32;
+        if let Some(id) = model_workbook_id.and_then(|v| u32::try_from(v).ok()) {
+            model_workbook.id = id;
         }
         if let Some(date_system) = date_system {
             model_workbook.date_system = parse_date_system(&date_system)?;
