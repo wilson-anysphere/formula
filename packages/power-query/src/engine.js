@@ -6,6 +6,7 @@ import { deserializeTable, serializeTable } from "./cache/serialize.js";
 import { FileConnector } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { SqlConnector } from "./connectors/sql.js";
+import { QueryFoldingEngine } from "./folding/sql.js";
 
 /**
  * @typedef {import("./model.js").Query} Query
@@ -91,6 +92,10 @@ import { SqlConnector } from "./connectors/sql.js";
  * @property {Partial<{ file: FileConnector; http: HttpConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
  * @property {import("./cache/cache.js").CacheManager | undefined} [cache]
  * @property {number | undefined} [defaultCacheTtlMs]
+ * @property {{ enabled?: boolean; dialect?: import("./folding/dialect.js").SqlDialectName | import("./folding/dialect.js").SqlDialect } | undefined} [sqlFolding]
+ *   When enabled and a dialect is known (either via `source.dialect` or this
+ *   default dialect), the engine will execute a foldable prefix of operations
+ *   in the source database via `QueryFoldingEngine`.
  * @property {QueryEngineHooks["onPermissionRequest"] | undefined} [onPermissionRequest]
  * @property {QueryEngineHooks["onCredentialRequest"] | undefined} [onCredentialRequest]
  */
@@ -201,6 +206,10 @@ export class QueryEngine {
 
     this.cache = options.cache ?? null;
     this.defaultCacheTtlMs = options.defaultCacheTtlMs ?? null;
+
+    this.sqlFoldingEnabled = options.sqlFolding?.enabled ?? true;
+    this.sqlFoldingDialect = options.sqlFolding?.dialect ?? null;
+    this.foldingEngine = new QueryFoldingEngine();
   }
 
   /**
@@ -313,13 +322,45 @@ export class QueryEngine {
     /** @type {ConnectorMeta[]} */
     const sources = [];
 
-    const sourceResult = await this.loadSourceWithMeta(query.source, context, callStack, options, state);
-    sources.push(...sourceResult.sources);
-    let table = sourceResult.table;
-
     const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
     const steps = query.steps.slice(0, maxStepIndex + 1);
-    table = await this.executeSteps(table, steps, context, options, state, callStack, sources);
+
+    /** @type {import("./folding/sql.js").CompiledQueryPlan | null} */
+    let foldedPlan = null;
+    if (this.sqlFoldingEnabled && query.source.type === "database") {
+      const dialect = query.source.dialect ?? this.sqlFoldingDialect;
+      if (dialect) {
+        foldedPlan = this.foldingEngine.compile({ ...query, steps }, { dialect, queries: context.queries ?? undefined });
+      }
+    }
+
+    /** @type {DataTable} */
+    let table;
+
+    if (foldedPlan && (foldedPlan.type === "sql" || foldedPlan.type === "hybrid") && query.source.type === "database") {
+      const sourceResult = await this.loadDatabaseQueryWithMeta(query.source, foldedPlan.sql, foldedPlan.params, callStack, options, state);
+      sources.push(...sourceResult.sources);
+      table = sourceResult.table;
+
+      if (foldedPlan.type === "hybrid" && foldedPlan.localSteps.length > 0) {
+        const offset = steps.indexOf(foldedPlan.localSteps[0]);
+        table = await this.executeSteps(
+          table,
+          foldedPlan.localSteps,
+          context,
+          options,
+          state,
+          callStack,
+          sources,
+          offset >= 0 ? offset : 0,
+        );
+      }
+    } else {
+      const sourceResult = await this.loadSourceWithMeta(query.source, context, callStack, options, state);
+      sources.push(...sourceResult.sources);
+      table = sourceResult.table;
+      table = await this.executeSteps(table, steps, context, options, state, callStack, sources);
+    }
 
     if (options.limit != null) {
       table = table.head(options.limit);
@@ -484,7 +525,12 @@ export class QueryEngine {
       const request = { connection: source.connection, sql: source.query };
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("sql", request, state);
-      return { type: "database", request: connector.getCacheKey(request), credentialsHash: hashValue(credentials ?? null) };
+      return {
+        type: "database",
+        dialect: source.dialect ?? null,
+        request: connector.getCacheKey(request),
+        credentialsHash: hashValue(credentials ?? null),
+      };
     }
 
     /** @type {never} */
@@ -501,17 +547,30 @@ export class QueryEngine {
    * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} [state]
    * @param {Set<string>} [callStack]
    * @param {ConnectorMeta[]} [sources]
+   * @param {number} [stepIndexOffset]
    * @returns {Promise<DataTable>}
    */
-  async executeSteps(table, steps, context, options = {}, state, callStack, sources) {
+  async executeSteps(table, steps, context, options = {}, state, callStack, sources, stepIndexOffset = 0) {
     let current = table;
     const queryId = callStack ? Array.from(callStack).at(-1) ?? "<unknown>" : "<unknown>";
     for (let i = 0; i < steps.length; i++) {
       throwIfAborted(options.signal);
       const step = steps[i];
-      options.onProgress?.({ type: "step:start", queryId, stepIndex: i, stepId: step.id, operation: step.operation.type });
+      options.onProgress?.({
+        type: "step:start",
+        queryId,
+        stepIndex: i + stepIndexOffset,
+        stepId: step.id,
+        operation: step.operation.type,
+      });
       current = await this.applyStep(current, step.operation, context, options, state, callStack, sources);
-      options.onProgress?.({ type: "step:complete", queryId, stepIndex: i, stepId: step.id, operation: step.operation.type });
+      options.onProgress?.({
+        type: "step:complete",
+        queryId,
+        stepIndex: i + stepIndexOffset,
+        stepId: step.id,
+        operation: step.operation.type,
+      });
     }
     return current;
   }
@@ -671,6 +730,38 @@ export class QueryEngine {
     /** @type {never} */
     const exhausted = source;
     throw new Error(`Unsupported source type '${exhausted.type}'`);
+  }
+
+  /**
+   * Execute a database query through the SQL connector while preserving the
+   * normal source metadata/progress reporting.
+   *
+   * This is used by SQL folding execution to run a folded SQL statement with
+   * parameters.
+   *
+   * @private
+   * @param {import("./model.js").DatabaseQuerySource} source
+   * @param {string} sql
+   * @param {unknown[]} params
+   * @param {Set<string>} callStack
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @returns {Promise<{ table: DataTable, meta: ConnectorMeta, sources: ConnectorMeta[] }>}
+   */
+  async loadDatabaseQueryWithMeta(source, sql, params, callStack, options, state) {
+    throwIfAborted(options.signal);
+    options.onProgress?.({ type: "source:start", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: "database" });
+
+    const connector = this.connectors.get("sql");
+    if (!connector) throw new Error("Database source requires a SqlConnector");
+
+    const request = { connection: source.connection, sql, params };
+    await this.assertPermission(connector.permissionKind, { source, request }, state);
+    const credentials = await this.getCredentials("sql", request, state);
+    const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+
+    options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: "database" });
+    return { ...result, sources: [result.meta] };
   }
 
   /**
