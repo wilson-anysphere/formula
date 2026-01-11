@@ -13,7 +13,7 @@ const signingPkg: any = requireFromHere("../../../../shared/crypto/signing.js");
 const extensionPackagePkg: any = requireFromHere("../../../../shared/extension-package/index.js");
 
 const { generateEd25519KeyPair } = signingPkg;
-const { createExtensionPackageV2 } = extensionPackagePkg;
+const { createExtensionPackageV2, readExtensionPackageV2 } = extensionPackagePkg;
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -22,6 +22,11 @@ test("install + run marketplace extension in browser (no CSP violations)", async
   const extensionDir = path.join(repoRoot, "extensions", "sample-hello");
   const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
   const pkgSha256 = crypto.createHash("sha256").update(pkgBytes).digest("hex");
+  const pkgSignatureBase64 = readExtensionPackageV2(pkgBytes)?.signature?.signatureBase64 || "";
+  expect(pkgSignatureBase64).toMatch(/\S/);
+
+  const keyDer = crypto.createPublicKey(keys.publicKeyPem).export({ type: "spki", format: "der" });
+  const publisherKeyId = crypto.createHash("sha256").update(keyDer).digest("hex");
 
   const cspViolations: string[] = [];
   const consoleErrors: string[] = [];
@@ -70,9 +75,10 @@ test("install + run marketplace extension in browser (no CSP violations)", async
         malicious: false,
         downloadCount: 0,
         latestVersion: "1.0.0",
-        versions: [{ version: "1.0.0", sha256: "", uploadedAt: new Date().toISOString(), yanked: false }],
+        versions: [{ version: "1.0.0", sha256: pkgSha256, uploadedAt: new Date().toISOString(), yanked: false }],
         readme: "",
         publisherPublicKeyPem: keys.publicKeyPem,
+        publisherKeys: [{ id: publisherKeyId, publicKeyPem: keys.publicKeyPem, revoked: false }],
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString()
       })
@@ -85,8 +91,10 @@ test("install + run marketplace extension in browser (no CSP violations)", async
       headers: {
         "Content-Type": "application/vnd.formula.extension-package",
         "X-Package-Sha256": pkgSha256,
+        "X-Package-Signature": pkgSignatureBase64,
         "X-Package-Format-Version": "2",
-        "X-Publisher": "formula"
+        "X-Publisher": "formula",
+        "X-Publisher-Key-Id": publisherKeyId
       },
       body: pkgBytes
     });
