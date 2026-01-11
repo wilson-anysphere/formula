@@ -9,7 +9,18 @@ export { createYjsSpreadsheetDocAdapter } from "./yjs/yjsSpreadsheetDocAdapter.j
 export { sheetStateFromYjsDoc, sheetStateFromYjsSnapshot } from "./yjs/sheetState.js";
 export { diffYjsSnapshots } from "./yjs/diffSnapshots.js";
 export { diffYjsWorkbookSnapshots } from "./yjs/diffWorkbookSnapshots.js";
-export { diffYjsVersionAgainstCurrent, diffYjsVersions } from "./yjs/versionHistory.js";
+export {
+  diffYjsVersionAgainstCurrent,
+  diffYjsVersions,
+  diffYjsWorkbookVersionAgainstCurrent,
+  diffYjsWorkbookVersions,
+} from "./yjs/versionHistory.js";
 export { sheetStateFromDocumentSnapshot } from "./document/sheetState.js";
 export { diffDocumentSnapshots } from "./document/diffSnapshots.js";
-export { diffDocumentVersionAgainstCurrent, diffDocumentVersions } from "./document/versionHistory.js";
+export { diffDocumentWorkbookSnapshots } from "./document/diffWorkbookSnapshots.js";
+export {
+  diffDocumentVersionAgainstCurrent,
+  diffDocumentVersions,
+  diffDocumentWorkbookVersionAgainstCurrent,
+  diffDocumentWorkbookVersions,
+} from "./document/versionHistory.js";

@@ -1,5 +1,6 @@
 import { semanticDiff } from "../diff/semanticDiff.js";
 import { sheetStateFromDocumentSnapshot } from "./sheetState.js";
+import { diffDocumentWorkbookSnapshots } from "./diffWorkbookSnapshots.js";
 
 /**
  * Compute a semantic diff between a stored version snapshot and the current
@@ -31,6 +32,24 @@ export async function diffDocumentVersionAgainstCurrent(opts) {
 }
 
 /**
+ * Compute a workbook-level diff between a stored version snapshot and the
+ * current in-memory DocumentController state.
+ *
+ * @param {{
+ *   versionManager: { doc: { encodeState(): Uint8Array }, getVersion(versionId: string): Promise<{ snapshot: Uint8Array } | null> };
+ *   versionId: string;
+ * }} opts
+ */
+export async function diffDocumentWorkbookVersionAgainstCurrent(opts) {
+  const version = await opts.versionManager.getVersion(opts.versionId);
+  if (!version) throw new Error(`Version not found: ${opts.versionId}`);
+  return diffDocumentWorkbookSnapshots({
+    beforeSnapshot: version.snapshot,
+    afterSnapshot: opts.versionManager.doc.encodeState(),
+  });
+}
+
+/**
  * Compute a semantic diff between two stored versions.
  *
  * @param {{
@@ -49,4 +68,21 @@ export async function diffDocumentVersions(opts) {
   const beforeState = sheetStateFromDocumentSnapshot(before.snapshot, { sheetId: opts.sheetId });
   const afterState = sheetStateFromDocumentSnapshot(after.snapshot, { sheetId: opts.sheetId });
   return semanticDiff(beforeState, afterState);
+}
+
+/**
+ * Compute a workbook-level diff between two stored versions.
+ *
+ * @param {{
+ *   getVersion: (versionId: string) => Promise<{ snapshot: Uint8Array } | null>;
+ *   beforeVersionId: string;
+ *   afterVersionId: string;
+ * }} opts
+ */
+export async function diffDocumentWorkbookVersions(opts) {
+  const before = await opts.getVersion(opts.beforeVersionId);
+  if (!before) throw new Error(`Version not found: ${opts.beforeVersionId}`);
+  const after = await opts.getVersion(opts.afterVersionId);
+  if (!after) throw new Error(`Version not found: ${opts.afterVersionId}`);
+  return diffDocumentWorkbookSnapshots({ beforeSnapshot: before.snapshot, afterSnapshot: after.snapshot });
 }
