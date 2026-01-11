@@ -217,3 +217,65 @@ fn edited_save_removes_calc_chain_and_references() {
         "workbook.bin.rels should not reference calcChain after edit"
     );
 }
+
+#[test]
+fn noop_worksheet_override_preserves_calc_chain() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let base_bytes = std::fs::read(fixture_path).expect("read fixture");
+    let with_calc_chain = build_fixture_with_calc_chain(&base_bytes);
+
+    let dir = tempdir().expect("tempdir");
+    let input_path = dir.path().join("with_calc_chain.xlsb");
+    let output_path = dir.path().join("noop_override.xlsb");
+    std::fs::write(&input_path, with_calc_chain).expect("write input");
+
+    let wb = XlsbWorkbook::open_with_options(&input_path, OpenOptions::default()).expect("open");
+
+    // Provide an override for the worksheet part that is byte-identical to the original.
+    let mut zip_in =
+        ZipArchive::new(File::open(&input_path).expect("open input zip")).expect("read input zip");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let mut sheet_bytes = Vec::new();
+    zip_in
+        .by_name(&sheet_part)
+        .expect("read sheet part")
+        .read_to_end(&mut sheet_bytes)
+        .expect("read sheet bytes");
+
+    let mut overrides = HashMap::new();
+    overrides.insert(sheet_part, sheet_bytes);
+
+    wb.save_with_part_overrides(&output_path, &overrides)
+        .expect("save with part overrides");
+
+    let mut zip_out = ZipArchive::new(File::open(&output_path).expect("open output zip"))
+        .expect("read output zip");
+
+    zip_out
+        .by_name("xl/calcChain.bin")
+        .expect("calcChain.bin should be preserved");
+
+    let mut ct_bytes = Vec::new();
+    zip_out
+        .by_name("[Content_Types].xml")
+        .expect("read content types")
+        .read_to_end(&mut ct_bytes)
+        .expect("read ct bytes");
+    let ct = String::from_utf8(ct_bytes).expect("utf8 ct");
+    assert!(
+        ct.contains("calcChain"),
+        "[Content_Types].xml should still reference calcChain when worksheet override is a no-op"
+    );
+
+    let mut rels_bytes = Vec::new();
+    zip_out
+        .by_name("xl/_rels/workbook.bin.rels")
+        .expect("read workbook rels")
+        .read_to_end(&mut rels_bytes)
+        .expect("read rels bytes");
+    let rels = String::from_utf8(rels_bytes).expect("utf8 rels");
+    assert!(
+        rels.contains("calcChain"),
+        "workbook.bin.rels should still reference calcChain when worksheet override is a no-op"
+    );
+}
