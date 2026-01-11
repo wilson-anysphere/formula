@@ -65,9 +65,9 @@ describe("EngineGridProvider", () => {
     await provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
     await flushMicrotasks();
 
-    expect(cache.getValue(0, 0)).toBe("TRUE");
+    expect(cache.getValue(0, 0)).toBe(true);
     expect(cache.getValue(0, 1)).toBe(42);
-    expect(provider.getCell(0, 0)?.value).toBe("TRUE");
+    expect(provider.getCell(0, 0)?.value).toBe(true);
     expect(provider.getCell(0, 1)?.value).toBe(42);
 
     expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 } }]);

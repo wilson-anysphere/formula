@@ -9,10 +9,9 @@ function cacheKey(sheet: string, row0: number, col0: number): string {
   return `${sheet}\n${row0}\n${col0}`;
 }
 
-function normalizeCellValue(value: CellScalar): string | number | null {
+function normalizeCellValue(value: CellScalar): string | number | boolean | null {
   if (value === null) return null;
-  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-  if (typeof value === "number" || typeof value === "string") return value;
+  if (typeof value === "boolean" || typeof value === "number" || typeof value === "string") return value;
   // Future-proof in case the engine widens its scalar type.
   return String(value);
 }
@@ -31,7 +30,7 @@ export interface EngineCellCacheOptions {
 export class EngineCellCache {
   readonly engine: EngineClient;
 
-  private readonly values = new Map<string, string | number | null>();
+  private readonly values = new Map<string, string | number | boolean | null>();
   private readonly inflight = new Map<string, Promise<void>>();
   private readonly maxEntries: number;
   private generation = 0;
@@ -51,7 +50,7 @@ export class EngineCellCache {
     this.inflight.clear();
   }
 
-  getValue(row0: number, col0: number, sheet?: string): string | number | null {
+  getValue(row0: number, col0: number, sheet?: string): string | number | boolean | null {
     const sheetName = defaultSheetName(sheet);
     return this.values.get(cacheKey(sheetName, row0, col0)) ?? null;
   }
@@ -132,7 +131,7 @@ export class EngineCellCache {
     return changes;
   }
 
-  private setValue(key: string, value: string | number | null): void {
+  private setValue(key: string, value: string | number | boolean | null): void {
     // Refresh insertion order when updating an existing key so eviction behaves
     // like an LRU-by-prefetch cache.
     if (this.values.has(key)) {
