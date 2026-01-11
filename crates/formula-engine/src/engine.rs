@@ -3154,6 +3154,19 @@ impl crate::eval::ValueResolver for Snapshot {
         Value::Blank
     }
 
+    fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
+        if !self.sheet_exists(sheet_id) {
+            return None;
+        }
+        Some(Box::new(self.values.keys().filter_map(move |k| {
+            if k.sheet == sheet_id {
+                Some(k.addr)
+            } else {
+                None
+            }
+        })))
+    }
+
     fn resolve_structured_ref(
         &self,
         ctx: crate::eval::EvalContext,

@@ -32,6 +32,13 @@ impl RecalcContext {
 pub trait ValueResolver {
     fn sheet_exists(&self, sheet_id: usize) -> bool;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
+    /// Iterates stored cells in `sheet_id`.
+    ///
+    /// For sparse backends, this should enumerate only populated addresses. Evaluators use this
+    /// to implement sparse-aware aggregation over large ranges (e.g. `A:A`).
+    fn iter_sheet_cells(&self, _sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
+        None
+    }
     fn resolve_structured_ref(
         &self,
         ctx: EvalContext,
@@ -592,6 +599,14 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {
         self.resolver.get_cell_value(sheet_id, addr)
+    }
+
+    fn iter_reference_cells(&self, reference: FnReference) -> Box<dyn Iterator<Item = CellAddr> + '_> {
+        if let Some(iter) = self.resolver.iter_sheet_cells(reference.sheet_id) {
+            Box::new(iter.filter(move |addr| reference.contains(*addr)))
+        } else {
+            Box::new(reference.iter_cells())
+        }
     }
 
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {

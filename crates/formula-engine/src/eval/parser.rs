@@ -1,10 +1,19 @@
-use crate::eval::address::{parse_a1, AddressParseError, CellAddr};
+use std::str::FromStr;
+
+use crate::eval::address::{AddressParseError, CellAddr};
 use crate::eval::ast::{
-    BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, RangeRef, SheetReference, UnaryOp,
+    BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, PostfixOp, RangeRef, SheetReference,
+    UnaryOp,
 };
 use crate::value::ErrorKind;
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use thiserror::Error;
+
+/// Excel limits (0-indexed).
+///
+/// These match the bounds enforced by [`crate::eval::parse_a1`].
+const MAX_ROW_IDX: u32 = EXCEL_MAX_ROWS - 1;
+const MAX_COL_IDX: u32 = EXCEL_MAX_COLS - 1;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum FormulaParseError {
@@ -18,778 +27,314 @@ pub enum FormulaParseError {
     Expected { expected: String, got: String },
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum Token {
-    Number(f64),
-    String(String),
-    Ident(String),
-    StructuredRef(String),
-    SheetName(String),
-    Error(ErrorKind),
-    LParen,
-    RParen,
-    Comma,
-    Colon,
-    Bang,
-    At,
-    Hash,
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    Caret,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    End,
-}
-
 pub struct Parser;
 
 impl Parser {
     pub fn parse(formula: &str) -> Result<ParsedExpr, FormulaParseError> {
-        let mut lexer = Lexer::new(formula);
-        let tokens = lexer.tokenize()?;
-        let mut p = ParserImpl::new(tokens);
-        let expr = p.parse_formula()?;
-        p.expect(Token::End)?;
-        Ok(expr)
+        let ast = crate::parse_formula(formula, crate::ParseOptions::default())
+            .map_err(|e| FormulaParseError::UnexpectedToken(e.message))?;
+        Ok(lower_expr(&ast.expr))
     }
 }
 
-struct ParserImpl {
-    tokens: Vec<Token>,
-    pos: usize,
+fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
+    match expr {
+        crate::Expr::Number(raw) => match f64::from_str(raw) {
+            Ok(n) => Expr::Number(n),
+            Err(_) => Expr::Error(ErrorKind::Value),
+        },
+        crate::Expr::String(s) => Expr::Text(s.clone()),
+        crate::Expr::Boolean(b) => Expr::Bool(*b),
+        crate::Expr::Error(code) => Expr::Error(parse_error_kind(code)),
+        crate::Expr::Missing => Expr::Blank,
+
+        crate::Expr::NameRef(r) => Expr::NameRef(NameRef {
+            sheet: lower_sheet_reference(&r.workbook, &r.sheet),
+            name: r.name.clone(),
+        }),
+
+        crate::Expr::CellRef(r) => lower_cell_ref(r)
+            .map(Expr::CellRef)
+            .unwrap_or_else(|| Expr::Error(ErrorKind::Ref)),
+
+        // Standalone row/col refs are uncommon in A1 formulas (Excel normally uses `A:A` / `1:1`),
+        // but lower them to their full-row/full-column ranges for completeness.
+        crate::Expr::ColRef(r) => rect_from_col_ref(r)
+            .map(|rect| Expr::RangeRef(RangeRef {
+                sheet: rect.sheet,
+                start: rect.start,
+                end: rect.end,
+            }))
+            .unwrap_or_else(|| Expr::Error(ErrorKind::Ref)),
+        crate::Expr::RowRef(r) => rect_from_row_ref(r)
+            .map(|rect| Expr::RangeRef(RangeRef {
+                sheet: rect.sheet,
+                start: rect.start,
+                end: rect.end,
+            }))
+            .unwrap_or_else(|| Expr::Error(ErrorKind::Ref)),
+
+        crate::Expr::StructuredRef(r) => lower_structured_ref(r),
+
+        // Array literals are supported by the canonical parser, but are not yet represented in the
+        // eval AST. Lower to an error instead of failing to parse so tooling like the oracle test
+        // can still traverse the remaining expression tree.
+        crate::Expr::Array(_) => Expr::Error(ErrorKind::Value),
+
+        crate::Expr::FunctionCall(call) => Expr::FunctionCall {
+            name: call.name.name_upper.clone(),
+            original_name: call.name.original.clone(),
+            args: call.args.iter().map(lower_expr).collect(),
+        },
+
+        crate::Expr::Unary(u) => match u.op {
+            crate::UnaryOp::Plus => Expr::Unary {
+                op: UnaryOp::Plus,
+                expr: Box::new(lower_expr(&u.expr)),
+            },
+            crate::UnaryOp::Minus => Expr::Unary {
+                op: UnaryOp::Minus,
+                expr: Box::new(lower_expr(&u.expr)),
+            },
+            crate::UnaryOp::ImplicitIntersection => {
+                Expr::ImplicitIntersection(Box::new(lower_expr(&u.expr)))
+            }
+        },
+
+        crate::Expr::Postfix(p) => match p.op {
+            crate::PostfixOp::Percent => Expr::Postfix {
+                op: PostfixOp::Percent,
+                expr: Box::new(lower_expr(&p.expr)),
+            },
+            crate::PostfixOp::SpillRange => Expr::SpillRange(Box::new(lower_expr(&p.expr))),
+        },
+
+        crate::Expr::Binary(b) => lower_binary(b),
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RefStart {
-    Cell(CellAddr),
-    Col(u32),
-    Row(u32),
+fn lower_binary(expr: &crate::BinaryExpr) -> ParsedExpr {
+    use crate::BinaryOp as Op;
+
+    match expr.op {
+        Op::Range => lower_range_ref(&expr.left, &expr.right),
+        Op::Union => Expr::Binary {
+            op: BinaryOp::Union,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Intersect => Expr::Binary {
+            op: BinaryOp::Intersect,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+
+        Op::Pow => Expr::Binary {
+            op: BinaryOp::Pow,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Add => Expr::Binary {
+            op: BinaryOp::Add,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Sub => Expr::Binary {
+            op: BinaryOp::Sub,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Mul => Expr::Binary {
+            op: BinaryOp::Mul,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Div => Expr::Binary {
+            op: BinaryOp::Div,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Concat => Expr::Binary {
+            op: BinaryOp::Concat,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+
+        Op::Eq => Expr::Compare {
+            op: CompareOp::Eq,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Ne => Expr::Compare {
+            op: CompareOp::Ne,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Lt => Expr::Compare {
+            op: CompareOp::Lt,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Le => Expr::Compare {
+            op: CompareOp::Le,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Gt => Expr::Compare {
+            op: CompareOp::Gt,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+        Op::Ge => Expr::Compare {
+            op: CompareOp::Ge,
+            left: Box::new(lower_expr(&expr.left)),
+            right: Box::new(lower_expr(&expr.right)),
+        },
+    }
 }
 
-impl ParserImpl {
-    fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
-    }
+#[derive(Debug, Clone)]
+struct RectRef {
+    sheet: SheetReference<String>,
+    start: CellAddr,
+    end: CellAddr,
+}
 
-    fn parse_formula(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        self.parse_compare()
-    }
+fn lower_range_ref(left: &crate::Expr, right: &crate::Expr) -> ParsedExpr {
+    let (Some(l), Some(r)) = (rect_ref(left), rect_ref(right)) else {
+        return Expr::Error(ErrorKind::Value);
+    };
 
-    fn parse_compare(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        let mut left = self.parse_add_sub()?;
-        loop {
-            let op = match self.peek() {
-                Token::Eq => CompareOp::Eq,
-                Token::Ne => CompareOp::Ne,
-                Token::Lt => CompareOp::Lt,
-                Token::Le => CompareOp::Le,
-                Token::Gt => CompareOp::Gt,
-                Token::Ge => CompareOp::Ge,
-                _ => break,
-            };
-            self.next();
-            let right = self.parse_add_sub()?;
-            left = Expr::Compare {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-        Ok(left)
-    }
+    let Ok(sheet) = merge_range_sheets(&l.sheet, &r.sheet) else {
+        return Expr::Error(ErrorKind::Ref);
+    };
 
-    fn parse_add_sub(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        let mut left = self.parse_mul_div()?;
-        loop {
-            let op = match self.peek() {
-                Token::Plus => BinaryOp::Add,
-                Token::Minus => BinaryOp::Sub,
-                _ => break,
-            };
-            self.next();
-            let right = self.parse_mul_div()?;
-            left = Expr::Binary {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-        Ok(left)
-    }
+    let start = CellAddr {
+        row: l.start.row.min(r.start.row),
+        col: l.start.col.min(r.start.col),
+    };
+    let end = CellAddr {
+        row: l.end.row.max(r.end.row),
+        col: l.end.col.max(r.end.col),
+    };
 
-    fn parse_mul_div(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        let mut left = self.parse_unary()?;
-        loop {
-            let op = match self.peek() {
-                Token::Star => BinaryOp::Mul,
-                Token::Slash => BinaryOp::Div,
-                _ => break,
-            };
-            self.next();
-            let right = self.parse_unary()?;
-            left = Expr::Binary {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-        Ok(left)
-    }
+    Expr::RangeRef(RangeRef { sheet, start, end })
+}
 
-    fn parse_power(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        let left = self.parse_primary()?;
-        if *self.peek() == Token::Caret {
-            self.next();
-            // Excel's exponentiation is right-associative and binds tighter than unary
-            // operators (e.g. `-2^2` == `-(2^2)`).
-            let right = self.parse_unary()?;
-            return Ok(Expr::Binary {
-                op: BinaryOp::Pow,
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-        }
-        Ok(left)
-    }
-
-    fn parse_unary(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        match self.peek() {
-            Token::Plus => {
-                self.next();
-                Ok(Expr::Unary {
-                    op: UnaryOp::Plus,
-                    expr: Box::new(self.parse_unary()?),
-                })
-            }
-            Token::Minus => {
-                self.next();
-                Ok(Expr::Unary {
-                    op: UnaryOp::Minus,
-                    expr: Box::new(self.parse_unary()?),
-                })
-            }
-            Token::At => {
-                self.next();
-                Ok(Expr::ImplicitIntersection(Box::new(self.parse_unary()?)))
-            }
-            _ => self.parse_power(),
-        }
-    }
-
-    fn parse_primary(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        let mut expr = match self.peek().clone() {
-            Token::Number(n) => {
-                self.next();
-                if *self.peek() == Token::Colon {
-                    let row = row_index_from_number(n)?;
-                    self.parse_cell_or_range(SheetReference::Current, RefStart::Row(row))
-                } else {
-                    Ok(Expr::Number(n))
-                }
-            }
-            Token::String(s) => {
-                self.next();
-                Ok(Expr::Text(s))
-            }
-            Token::Error(e) => {
-                self.next();
-                Ok(Expr::Error(e))
-            }
-            Token::StructuredRef(text) => {
-                self.next();
-                let (sref, end) = crate::structured_refs::parse_structured_ref(&text, 0)
-                    .ok_or_else(|| {
-                        FormulaParseError::UnexpectedToken(format!(
-                            "invalid structured reference: {text}"
-                        ))
-                    })?;
-                if end != text.len() {
-                    return Err(FormulaParseError::UnexpectedToken(format!(
-                        "invalid structured reference: {text}"
-                    )));
-                }
-                Ok(Expr::StructuredRef(sref))
-            }
-            Token::Ident(id) => {
-                // Function call or reference/name.
-                if self.peek_n(1) == Token::LParen {
-                    self.parse_function_call()
-                } else if self.peek_n(1) == Token::Bang {
-                    self.parse_sheet_ref()
-                } else {
-                    self.next();
-                    match id.to_ascii_uppercase().as_str() {
-                        "TRUE" => Ok(Expr::Bool(true)),
-                        "FALSE" => Ok(Expr::Bool(false)),
-                        _ => {
-                            if *self.peek() == Token::Colon {
-                                // Range start: allow column references like `A:A`.
-                                if let Ok(addr) = try_parse_cell_addr(&id) {
-                                    self.parse_cell_or_range(
-                                        SheetReference::Current,
-                                        RefStart::Cell(addr),
-                                    )
-                                } else if let Some(col) = try_parse_col_ref(&id) {
-                                    self.parse_cell_or_range(
-                                        SheetReference::Current,
-                                        RefStart::Col(col),
-                                    )
-                                } else {
-                                    Err(FormulaParseError::InvalidAddress(
-                                        AddressParseError::InvalidA1(id),
-                                    ))
-                                }
-                            } else {
-                                match try_parse_cell_addr(&id) {
-                                    Ok(addr) => self.parse_cell_or_range(
-                                        SheetReference::Current,
-                                        RefStart::Cell(addr),
-                                    ),
-                                    Err(_) => Ok(Expr::NameRef(NameRef {
-                                        sheet: SheetReference::Current,
-                                        name: id,
-                                    })),
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Token::SheetName(_name) => {
-                if self.peek_n(1) == Token::Bang {
-                    self.parse_sheet_ref()
-                } else {
-                    self.next();
-                    Ok(Expr::Error(ErrorKind::Name))
-                }
-            }
-            Token::LParen => {
-                self.next();
-                let expr = self.parse_compare()?;
-                self.expect(Token::RParen)?;
-                Ok(expr)
-            }
-            other => Err(FormulaParseError::UnexpectedToken(format!("{other:?}"))),
-        }?;
-
-        // Postfix spill-range operator (`#`).
-        while *self.peek() == Token::Hash {
-            self.next();
-            expr = Expr::SpillRange(Box::new(expr));
-        }
-
-        Ok(expr)
-    }
-
-    fn parse_function_call(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        let (name, original_name) = match self.next() {
-            Token::Ident(s) => {
-                let upper = s.to_ascii_uppercase();
-                let base = upper.strip_prefix("_XLFN.").unwrap_or(&upper).to_string();
-                (base, s)
-            }
-            other => {
-                return Err(FormulaParseError::Expected {
-                    expected: "identifier".to_string(),
-                    got: format!("{other:?}"),
-                })
-            }
-        };
-        self.expect(Token::LParen)?;
-        let mut args = Vec::new();
-        if *self.peek() != Token::RParen {
-            loop {
-                args.push(self.parse_compare()?);
-                if *self.peek() == Token::Comma {
-                    self.next();
-                    continue;
-                }
-                break;
-            }
-        }
-        self.expect(Token::RParen)?;
-        Ok(Expr::FunctionCall {
-            name,
-            original_name,
-            args,
-        })
-    }
-
-    fn parse_sheet_ref(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        let sheet = match self.next() {
-            Token::Ident(s) | Token::SheetName(s) => SheetReference::Sheet(s),
-            other => {
-                return Err(FormulaParseError::Expected {
-                    expected: "sheet name".to_string(),
-                    got: format!("{other:?}"),
-                })
-            }
-        };
-        self.expect(Token::Bang)?;
-
-        // External workbook references are not supported yet, but we accept the syntax
-        // and let evaluation return `#REF!`.
-        if matches!(self.peek(), Token::Ident(id) if id.starts_with('[')) {
-            self.next();
-            return Ok(Expr::Error(ErrorKind::Ref));
-        }
-
-        let start = match self.next() {
-            Token::Ident(s) => {
-                if let Ok(addr) = parse_a1(&s) {
-                    RefStart::Cell(addr)
-                } else if *self.peek() == Token::Colon {
-                    let col = try_parse_col_ref(&s).ok_or_else(|| {
-                        FormulaParseError::InvalidAddress(AddressParseError::InvalidA1(s))
-                    })?;
-                    RefStart::Col(col)
-                } else {
-                    return Ok(Expr::NameRef(NameRef { sheet, name: s }));
-                }
-            }
-            Token::Number(n) => {
-                if *self.peek() != Token::Colon {
-                    return Err(FormulaParseError::Expected {
-                        expected: "cell address".to_string(),
-                        got: format!("{n}"),
-                    });
-                }
-                RefStart::Row(row_index_from_number(n)?)
-            }
-            other => {
-                return Err(FormulaParseError::Expected {
-                    expected: "cell address".to_string(),
-                    got: format!("{other:?}"),
-                })
-            }
-        };
-        self.parse_cell_or_range(sheet, start)
-    }
-
-    fn parse_cell_or_range(
-        &mut self,
-        sheet: SheetReference<String>,
-        start: RefStart,
-    ) -> Result<ParsedExpr, FormulaParseError> {
-        if *self.peek() == Token::Colon {
-            self.next();
-            let end_token = self.next();
-            let end = match (start, end_token) {
-                (RefStart::Cell(_), Token::Ident(s)) => RefStart::Cell(parse_a1(&s)?),
-                (RefStart::Col(_), Token::Ident(s)) => {
-                    RefStart::Col(try_parse_col_ref(&s).ok_or_else(|| {
-                        FormulaParseError::Expected {
-                            expected: "column reference".to_string(),
-                            got: format!("{s:?}"),
-                        }
-                    })?)
-                }
-                (RefStart::Row(_), Token::Number(n)) => RefStart::Row(row_index_from_number(n)?),
-                (RefStart::Cell(_), other) => {
-                    return Err(FormulaParseError::Expected {
-                        expected: "cell address".to_string(),
-                        got: format!("{other:?}"),
-                    })
-                }
-                (RefStart::Col(_), other) => {
-                    return Err(FormulaParseError::Expected {
-                        expected: "column reference".to_string(),
-                        got: format!("{other:?}"),
-                    })
-                }
-                (RefStart::Row(_), other) => {
-                    return Err(FormulaParseError::Expected {
-                        expected: "row reference".to_string(),
-                        got: format!("{other:?}"),
-                    })
-                }
-            };
-
-            let (start, end) = match (start, end) {
-                (RefStart::Cell(a), RefStart::Cell(b)) => (a, b),
-                (RefStart::Col(a), RefStart::Col(b)) => {
-                    let max_row = EXCEL_MAX_ROWS.saturating_sub(1);
-                    (
-                        CellAddr { row: 0, col: a },
-                        CellAddr {
-                            row: max_row,
-                            col: b,
-                        },
-                    )
-                }
-                (RefStart::Row(a), RefStart::Row(b)) => {
-                    let max_col = EXCEL_MAX_COLS.saturating_sub(1);
-                    (
-                        CellAddr { row: a, col: 0 },
-                        CellAddr {
-                            row: b,
-                            col: max_col,
-                        },
-                    )
-                }
-                _ => {
-                    return Err(FormulaParseError::UnexpectedToken(
-                        "mixed row/col/cell range".to_string(),
-                    ))
-                }
-            };
-
-            Ok(Expr::RangeRef(RangeRef { sheet, start, end }))
-        } else {
-            match start {
-                RefStart::Cell(addr) => Ok(Expr::CellRef(CellRef { sheet, addr })),
-                RefStart::Col(_) | RefStart::Row(_) => Err(FormulaParseError::UnexpectedToken(
-                    "expected cell address".to_string(),
-                )),
-            }
-        }
-    }
-
-    fn peek(&self) -> &Token {
-        self.tokens.get(self.pos).unwrap_or(&Token::End)
-    }
-
-    fn peek_n(&self, n: usize) -> Token {
-        self.tokens.get(self.pos + n).cloned().unwrap_or(Token::End)
-    }
-
-    fn next(&mut self) -> Token {
-        let tok = self.peek().clone();
-        self.pos += 1;
-        tok
-    }
-
-    fn expect(&mut self, expected: Token) -> Result<(), FormulaParseError> {
-        let got = self.next();
-        if got == expected {
-            Ok(())
-        } else {
-            Err(FormulaParseError::Expected {
-                expected: format!("{expected:?}"),
-                got: format!("{got:?}"),
+fn rect_ref(expr: &crate::Expr) -> Option<RectRef> {
+    match expr {
+        crate::Expr::CellRef(r) => {
+            let cell = lower_cell_ref(r)?;
+            Some(RectRef {
+                sheet: cell.sheet,
+                start: cell.addr,
+                end: cell.addr,
             })
         }
+        crate::Expr::ColRef(r) => rect_from_col_ref(r),
+        crate::Expr::RowRef(r) => rect_from_row_ref(r),
+        _ => None,
     }
 }
 
-fn try_parse_cell_addr(id: &str) -> Result<CellAddr, AddressParseError> {
-    parse_a1(id)
-}
-
-fn try_parse_col_ref(id: &str) -> Option<u32> {
-    let filtered: String = id.chars().filter(|&ch| ch != '$').collect();
-    if filtered.is_empty() || !filtered.chars().all(|ch| ch.is_ascii_alphabetic()) {
-        return None;
-    }
-
-    let mut col: u32 = 0;
-    for ch in filtered.chars() {
-        let up = ch.to_ascii_uppercase();
-        let digit = (up as u8).wrapping_sub(b'A').wrapping_add(1) as u32;
-        col = col.checked_mul(26)?.checked_add(digit)?;
-    }
-    if col == 0 || col > EXCEL_MAX_COLS {
-        return None;
-    }
-    Some(col - 1)
-}
-
-fn row_index_from_number(n: f64) -> Result<u32, FormulaParseError> {
-    if !n.is_finite() || n.fract() != 0.0 {
-        return Err(FormulaParseError::UnexpectedToken(format!(
-            "invalid row reference: {n}"
-        )));
-    }
-    let row_1_based = n as i64;
-    if row_1_based <= 0 || row_1_based > i64::from(EXCEL_MAX_ROWS) {
-        return Err(FormulaParseError::UnexpectedToken(format!(
-            "row out of range: {n}"
-        )));
-    }
-    Ok((row_1_based as u32) - 1)
-}
-
-struct Lexer<'a> {
-    input: &'a str,
-    pos: usize,
-    prev: Option<Token>,
-}
-
-impl<'a> Lexer<'a> {
-    fn new(input: &'a str) -> Self {
-        // Permit formulas with or without leading '='.
-        let input = input.trim_start();
-        let input = input.strip_prefix('=').unwrap_or(input);
-        Self {
-            input,
-            pos: 0,
-            prev: None,
-        }
-    }
-
-    fn tokenize(&mut self) -> Result<Vec<Token>, FormulaParseError> {
-        let mut tokens = Vec::new();
-        while let Some(ch) = self.peek_char() {
-            if ch.is_whitespace() {
-                self.pos += ch.len_utf8();
-                continue;
-            }
-
-            let tok = match ch {
-                '(' => {
-                    self.pos += 1;
-                    Token::LParen
-                }
-                ')' => {
-                    self.pos += 1;
-                    Token::RParen
-                }
-                ',' => {
-                    self.pos += 1;
-                    Token::Comma
-                }
-                ':' => {
-                    self.pos += 1;
-                    Token::Colon
-                }
-                '!' => {
-                    self.pos += 1;
-                    Token::Bang
-                }
-                '@' => {
-                    self.pos += 1;
-                    Token::At
-                }
-                '#' => self.lex_hash_or_error()?,
-                '[' => self.lex_structured_ref()?,
-                '+' => {
-                    self.pos += 1;
-                    Token::Plus
-                }
-                '-' => {
-                    self.pos += 1;
-                    Token::Minus
-                }
-                '*' => {
-                    self.pos += 1;
-                    Token::Star
-                }
-                '/' => {
-                    self.pos += 1;
-                    Token::Slash
-                }
-                '^' => {
-                    self.pos += 1;
-                    Token::Caret
-                }
-                '=' => {
-                    self.pos += 1;
-                    Token::Eq
-                }
-                '<' => {
-                    if self.peek_str("<=") {
-                        self.pos += 2;
-                        Token::Le
-                    } else if self.peek_str("<>") {
-                        self.pos += 2;
-                        Token::Ne
-                    } else {
-                        self.pos += 1;
-                        Token::Lt
-                    }
-                }
-                '>' => {
-                    if self.peek_str(">=") {
-                        self.pos += 2;
-                        Token::Ge
-                    } else {
-                        self.pos += 1;
-                        Token::Gt
-                    }
-                }
-                '"' => self.lex_string()?,
-                '\'' => self.lex_sheet_name()?,
-                '.' | '0'..='9' => self.lex_number()?,
-                _ if is_ident_start(ch) => self.lex_ident()?,
-                _ => {
-                    return Err(FormulaParseError::UnexpectedToken(format!(
-                        "unexpected character '{ch}'"
-                    )))
-                }
-            };
-            tokens.push(tok);
-            self.prev = tokens.last().cloned();
-        }
-        tokens.push(Token::End);
-        Ok(tokens)
-    }
-
-    fn peek_char(&self) -> Option<char> {
-        self.input[self.pos..].chars().next()
-    }
-
-    fn peek_str(&self, s: &str) -> bool {
-        self.input[self.pos..].starts_with(s)
-    }
-
-    fn lex_ident(&mut self) -> Result<Token, FormulaParseError> {
-        let start = self.pos;
-        while let Some(ch) = self.peek_char() {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '$' {
-                self.pos += ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-        if self.peek_char() == Some('[') {
-            self.lex_structured_ref_from(start)
-        } else {
-            Ok(Token::Ident(self.input[start..self.pos].to_string()))
-        }
-    }
-
-    fn lex_structured_ref(&mut self) -> Result<Token, FormulaParseError> {
-        let start = self.pos;
-        self.lex_structured_ref_from(start)
-    }
-
-    fn lex_structured_ref_from(&mut self, start: usize) -> Result<Token, FormulaParseError> {
-        let mut depth: i32 = 0;
-        while let Some(ch) = self.peek_char() {
-            self.pos += ch.len_utf8();
-            match ch {
-                '[' => depth += 1,
-                ']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Ok(Token::StructuredRef(
-                            self.input[start..self.pos].to_string(),
-                        ));
-                    }
-                }
-                _ => {}
-            }
-        }
-        Err(FormulaParseError::UnexpectedEof)
-    }
-
-    fn lex_number(&mut self) -> Result<Token, FormulaParseError> {
-        let start = self.pos;
-        let mut saw_dot = false;
-        while let Some(ch) = self.peek_char() {
-            match ch {
-                '0'..='9' => self.pos += 1,
-                '.' if !saw_dot => {
-                    saw_dot = true;
-                    self.pos += 1;
-                }
-                'E' | 'e' => {
-                    self.pos += 1;
-                    if matches!(self.peek_char(), Some('+') | Some('-')) {
-                        self.pos += 1;
-                    }
-                }
-                _ => break,
-            }
-        }
-        let s = &self.input[start..self.pos];
-        let n: f64 = s.parse().map_err(|_| {
-            FormulaParseError::UnexpectedToken(format!("invalid number literal: {s}"))
-        })?;
-        Ok(Token::Number(n))
-    }
-
-    fn lex_string(&mut self) -> Result<Token, FormulaParseError> {
-        // Consume opening quote.
-        self.pos += 1;
-        let mut out = String::new();
-        loop {
-            match self.peek_char() {
-                Some('"') => {
-                    if self.peek_str("\"\"") {
-                        out.push('"');
-                        self.pos += 2;
-                        continue;
-                    }
-                    self.pos += 1;
-                    break;
-                }
-                Some(ch) => {
-                    out.push(ch);
-                    self.pos += ch.len_utf8();
-                }
-                None => return Err(FormulaParseError::UnexpectedEof),
-            }
-        }
-        Ok(Token::String(out))
-    }
-
-    fn lex_sheet_name(&mut self) -> Result<Token, FormulaParseError> {
-        // Consume opening quote.
-        self.pos += 1;
-        let mut out = String::new();
-        loop {
-            match self.peek_char() {
-                Some('\'') => {
-                    if self.peek_str("''") {
-                        out.push('\'');
-                        self.pos += 2;
-                        continue;
-                    }
-                    self.pos += 1;
-                    break;
-                }
-                Some(ch) => {
-                    out.push(ch);
-                    self.pos += ch.len_utf8();
-                }
-                None => return Err(FormulaParseError::UnexpectedEof),
-            }
-        }
-        Ok(Token::SheetName(out))
-    }
-
-    fn lex_error(&mut self) -> Result<Token, FormulaParseError> {
-        let start = self.pos;
-        while let Some(ch) = self.peek_char() {
-            if ch.is_ascii_alphanumeric() || ch == '#' || ch == '/' || ch == '!' || ch == '?' {
-                self.pos += ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-        let s = &self.input[start..self.pos];
-        let kind = match s.to_ascii_uppercase().as_str() {
-            "#DIV/0!" => ErrorKind::Div0,
-            "#VALUE!" => ErrorKind::Value,
-            "#REF!" => ErrorKind::Ref,
-            "#NAME?" => ErrorKind::Name,
-            "#N/A" => ErrorKind::NA,
-            "#NULL!" => ErrorKind::Null,
-            "#SPILL!" => ErrorKind::Spill,
-            "#CALC!" => ErrorKind::Calc,
-            _ => ErrorKind::Value,
-        };
-        Ok(Token::Error(kind))
-    }
-
-    fn lex_hash_or_error(&mut self) -> Result<Token, FormulaParseError> {
-        // Spill-range operator is postfix (`A1#`), while error literals start with `#` (`#REF!`).
-        let is_postfix = self.prev.as_ref().is_some_and(|t| matches!(t, Token::Ident(_) | Token::StructuredRef(_) | Token::RParen));
-        if is_postfix {
-            self.pos += 1;
-            return Ok(Token::Hash);
-        }
-        self.lex_error()
+fn merge_range_sheets(
+    left: &SheetReference<String>,
+    right: &SheetReference<String>,
+) -> Result<SheetReference<String>, ()> {
+    match (left, right) {
+        (SheetReference::Current, SheetReference::Current) => Ok(SheetReference::Current),
+        (SheetReference::Current, other) => Ok(other.clone()),
+        (other, SheetReference::Current) => Ok(other.clone()),
+        (a, b) if a == b => Ok(a.clone()),
+        _ => Err(()),
     }
 }
 
-fn is_ident_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '_' || ch == '$'
+fn lower_cell_ref(r: &crate::CellRef) -> Option<CellRef<String>> {
+    let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
+    let row = coord_index(&r.row)?;
+    let col = coord_index(&r.col)?;
+    Some(CellRef {
+        sheet,
+        addr: CellAddr { row, col },
+    })
+}
+
+fn rect_from_col_ref(r: &crate::ColRef) -> Option<RectRef> {
+    let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
+    let col = coord_index(&r.col)?;
+    Some(RectRef {
+        sheet,
+        start: CellAddr { row: 0, col },
+        end: CellAddr {
+            row: MAX_ROW_IDX,
+            col,
+        },
+    })
+}
+
+fn rect_from_row_ref(r: &crate::RowRef) -> Option<RectRef> {
+    let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
+    let row = coord_index(&r.row)?;
+    Some(RectRef {
+        sheet,
+        start: CellAddr { row, col: 0 },
+        end: CellAddr {
+            row,
+            col: MAX_COL_IDX,
+        },
+    })
+}
+
+fn lower_sheet_reference(
+    workbook: &Option<String>,
+    sheet: &Option<String>,
+) -> SheetReference<String> {
+    match (workbook.as_ref(), sheet.as_ref()) {
+        (None, None) => SheetReference::Current,
+        (None, Some(s)) => SheetReference::Sheet(s.clone()),
+        (Some(book), Some(sheet)) => SheetReference::External(format!("[{book}]{sheet}")),
+        (Some(book), None) => SheetReference::External(format!("[{book}]")),
+    }
+}
+
+fn coord_index(coord: &crate::Coord) -> Option<u32> {
+    match coord {
+        crate::Coord::A1 { index, .. } => Some(*index),
+        crate::Coord::Offset(_) => None,
+    }
+}
+
+fn lower_structured_ref(r: &crate::StructuredRef) -> ParsedExpr {
+    if r.workbook.is_some() || r.sheet.is_some() {
+        return Expr::Error(ErrorKind::Ref);
+    }
+
+    let mut text = String::new();
+    if let Some(table) = &r.table {
+        text.push_str(table);
+    }
+    text.push('[');
+    text.push_str(&r.spec);
+    text.push(']');
+
+    match crate::structured_refs::parse_structured_ref(&text, 0) {
+        Some((sref, end)) if end == text.len() => Expr::StructuredRef(sref),
+        _ => Expr::Error(ErrorKind::Name),
+    }
+}
+
+fn parse_error_kind(code: &str) -> ErrorKind {
+    match code.to_ascii_uppercase().as_str() {
+        "#NULL!" => ErrorKind::Null,
+        "#DIV/0!" => ErrorKind::Div0,
+        "#VALUE!" => ErrorKind::Value,
+        "#REF!" => ErrorKind::Ref,
+        "#NAME?" => ErrorKind::Name,
+        "#NUM!" => ErrorKind::Num,
+        "#N/A" => ErrorKind::NA,
+        "#SPILL!" => ErrorKind::Spill,
+        "#CALC!" => ErrorKind::Calc,
+        _ => ErrorKind::Value,
+    }
 }

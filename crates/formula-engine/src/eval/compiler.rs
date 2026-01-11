@@ -204,18 +204,14 @@ fn compile_binary(
             }
         }
         crate::BinaryOp::Range => {
-            if let (Some(left), Some(right)) = (
-                try_compile_static_range_operand(&b.left, current_sheet, current_cell, resolve_sheet),
-                try_compile_static_range_operand(&b.right, current_sheet, current_cell, resolve_sheet),
+            if let Some(range) = try_compile_static_range_ref(
+                &b.left,
+                &b.right,
+                current_sheet,
+                current_cell,
+                resolve_sheet,
             ) {
-                if left.sheet == right.sheet {
-                    let (start, end) = bounding_rect(left.start, left.end, right.start, right.end);
-                    return Expr::RangeRef(RangeRef {
-                        sheet: left.sheet,
-                        start,
-                        end,
-                    });
-                }
+                return Expr::RangeRef(range);
             }
 
             Expr::Binary {
@@ -406,6 +402,50 @@ struct StaticRangeOperand {
     end: CellAddr,
 }
 
+fn try_compile_static_range_ref(
+    left: &crate::Expr,
+    right: &crate::Expr,
+    current_sheet: usize,
+    current_cell: CellAddr,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> Option<RangeRef<usize>> {
+    let left_op = try_compile_static_range_operand(left, current_sheet, current_cell, resolve_sheet)?;
+    let right_op = try_compile_static_range_operand(right, current_sheet, current_cell, resolve_sheet)?;
+    if left_op.sheet == right_op.sheet {
+        let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
+        return Some(RangeRef {
+            sheet: left_op.sheet,
+            start,
+            end,
+        });
+    }
+
+    // The canonical parser represents `Sheet1!A1:B2` as a range whose left operand has a sheet
+    // prefix and whose right operand is unprefixed. Excel treats the prefix as applying to both
+    // endpoints, so attempt to recompile using the explicit endpoint's sheet as the "current"
+    // sheet for the unprefixed endpoint.
+    let merged_sheet = if is_unprefixed_static_ref(left) {
+        explicit_internal_sheet_id(right, resolve_sheet)
+    } else if is_unprefixed_static_ref(right) {
+        explicit_internal_sheet_id(left, resolve_sheet)
+    } else {
+        None
+    }?;
+
+    let left_op = try_compile_static_range_operand(left, merged_sheet, current_cell, resolve_sheet)?;
+    let right_op = try_compile_static_range_operand(right, merged_sheet, current_cell, resolve_sheet)?;
+    if left_op.sheet != right_op.sheet {
+        return None;
+    }
+
+    let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
+    Some(RangeRef {
+        sheet: left_op.sheet,
+        start,
+        end,
+    })
+}
+
 fn try_compile_static_range_operand(
     expr: &crate::Expr,
     current_sheet: usize,
@@ -447,6 +487,32 @@ fn try_compile_static_range_operand(
         }
         _ => None,
     }
+}
+
+fn is_unprefixed_static_ref(expr: &crate::Expr) -> bool {
+    match expr {
+        crate::Expr::CellRef(r) => r.workbook.is_none() && r.sheet.is_none(),
+        crate::Expr::ColRef(r) => r.workbook.is_none() && r.sheet.is_none(),
+        crate::Expr::RowRef(r) => r.workbook.is_none() && r.sheet.is_none(),
+        _ => false,
+    }
+}
+
+fn explicit_internal_sheet_id(
+    expr: &crate::Expr,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> Option<usize> {
+    let (workbook, sheet) = match expr {
+        crate::Expr::CellRef(r) => (&r.workbook, &r.sheet),
+        crate::Expr::ColRef(r) => (&r.workbook, &r.sheet),
+        crate::Expr::RowRef(r) => (&r.workbook, &r.sheet),
+        _ => return None,
+    };
+    if workbook.is_some() {
+        return None;
+    }
+    let sheet = sheet.as_deref()?;
+    resolve_sheet(sheet)
 }
 
 fn bounding_rect(a_start: CellAddr, a_end: CellAddr, b_start: CellAddr, b_end: CellAddr) -> (CellAddr, CellAddr) {

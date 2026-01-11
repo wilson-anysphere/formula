@@ -117,8 +117,9 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
-                for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                let sheet_id = r.sheet_id;
+                for addr in ctx.iter_reference_cells(r) {
+                    let v = ctx.get_cell_value(sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => acc += n,
@@ -128,9 +129,14 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             }
             ArgValue::ReferenceUnion(ranges) => {
+                let mut seen = std::collections::HashSet::new();
                 for r in ranges {
-                    for addr in r.iter_cells() {
-                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let sheet_id = r.sheet_id;
+                    for addr in ctx.iter_reference_cells(r) {
+                        if !seen.insert((sheet_id, addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => acc += n,
@@ -199,8 +205,9 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
-                for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                let sheet_id = r.sheet_id;
+                for addr in ctx.iter_reference_cells(r) {
+                    let v = ctx.get_cell_value(sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => {
@@ -213,9 +220,14 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             }
             ArgValue::ReferenceUnion(ranges) => {
+                let mut seen = std::collections::HashSet::new();
                 for r in ranges {
-                    for addr in r.iter_cells() {
-                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let sheet_id = r.sheet_id;
+                    for addr in ctx.iter_reference_cells(r) {
+                        if !seen.insert((sheet_id, addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => {
@@ -275,8 +287,9 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             },
             ArgValue::Reference(r) => {
-                for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                let sheet_id = r.sheet_id;
+                for addr in ctx.iter_reference_cells(r) {
+                    let v = ctx.get_cell_value(sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
@@ -289,9 +302,14 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             }
             ArgValue::ReferenceUnion(ranges) => {
+                let mut seen = std::collections::HashSet::new();
                 for r in ranges {
-                    for addr in r.iter_cells() {
-                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let sheet_id = r.sheet_id;
+                    for addr in ctx.iter_reference_cells(r) {
+                        if !seen.insert((sheet_id, addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
@@ -344,8 +362,9 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             },
             ArgValue::Reference(r) => {
-                for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                let sheet_id = r.sheet_id;
+                for addr in ctx.iter_reference_cells(r) {
+                    let v = ctx.get_cell_value(sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
@@ -358,9 +377,14 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             }
             ArgValue::ReferenceUnion(ranges) => {
+                let mut seen = std::collections::HashSet::new();
                 for r in ranges {
-                    for addr in r.iter_cells() {
-                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let sheet_id = r.sheet_id;
+                    for addr in ctx.iter_reference_cells(r) {
+                        if !seen.insert((sheet_id, addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
@@ -408,17 +432,23 @@ fn count_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             },
             ArgValue::Reference(r) => {
-                for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                let sheet_id = r.sheet_id;
+                for addr in ctx.iter_reference_cells(r) {
+                    let v = ctx.get_cell_value(sheet_id, addr);
                     if matches!(v, Value::Number(_)) {
                         total += 1;
                     }
                 }
             }
             ArgValue::ReferenceUnion(ranges) => {
+                let mut seen = std::collections::HashSet::new();
                 for r in ranges {
-                    for addr in r.iter_cells() {
-                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let sheet_id = r.sheet_id;
+                    for addr in ctx.iter_reference_cells(r) {
+                        if !seen.insert((sheet_id, addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(sheet_id, addr);
                         if matches!(v, Value::Number(_)) {
                             total += 1;
                         }
@@ -619,17 +649,23 @@ fn counta_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             },
             ArgValue::Reference(r) => {
-                for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
+                let sheet_id = r.sheet_id;
+                for addr in ctx.iter_reference_cells(r) {
+                    let v = ctx.get_cell_value(sheet_id, addr);
                     if !matches!(v, Value::Blank) {
                         total += 1;
                     }
                 }
             }
             ArgValue::ReferenceUnion(ranges) => {
+                let mut seen = std::collections::HashSet::new();
                 for r in ranges {
-                    for addr in r.iter_cells() {
-                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                    let sheet_id = r.sheet_id;
+                    for addr in ctx.iter_reference_cells(r) {
+                        if !seen.insert((sheet_id, addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(sheet_id, addr);
                         if !matches!(v, Value::Blank) {
                             total += 1;
                         }
@@ -678,29 +714,99 @@ fn countblank_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             },
             ArgValue::Reference(r) => {
-                for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
-                    if matches!(v, Value::Blank) || matches!(v, Value::Text(ref s) if s.is_empty())
+                let size = r.size();
+                let sheet_id = r.sheet_id;
+                let mut non_blank = 0u64;
+                for addr in ctx.iter_reference_cells(r) {
+                    let v = ctx.get_cell_value(sheet_id, addr);
+                    if !matches!(v, Value::Blank)
+                        && !matches!(v, Value::Text(ref s) if s.is_empty())
                     {
-                        total += 1;
+                        non_blank += 1;
                     }
                 }
+                total += size.saturating_sub(non_blank);
             }
             ArgValue::ReferenceUnion(ranges) => {
+                let size = reference_union_size(&ranges);
+                let mut seen = std::collections::HashSet::new();
+                let mut non_blank = 0u64;
                 for r in ranges {
-                    for addr in r.iter_cells() {
-                        let v = ctx.get_cell_value(r.sheet_id, addr);
-                        if matches!(v, Value::Blank)
-                            || matches!(v, Value::Text(ref s) if s.is_empty())
+                    let sheet_id = r.sheet_id;
+                    for addr in ctx.iter_reference_cells(r) {
+                        if !seen.insert((sheet_id, addr)) {
+                            continue;
+                        }
+                        let v = ctx.get_cell_value(sheet_id, addr);
+                        if !matches!(v, Value::Blank)
+                            && !matches!(v, Value::Text(ref s) if s.is_empty())
                         {
-                            total += 1;
+                            non_blank += 1;
                         }
                     }
                 }
+                total += size.saturating_sub(non_blank);
             }
         }
     }
     Value::Number(total as f64)
+}
+
+fn reference_union_size(ranges: &[crate::functions::Reference]) -> u64 {
+    let rects: Vec<crate::functions::Reference> = ranges.iter().copied().map(|r| r.normalized()).collect();
+    if rects.is_empty() {
+        return 0;
+    }
+
+    // Convert to half-open row slabs: [start, end+1)
+    let mut row_bounds: Vec<u32> = Vec::with_capacity(rects.len() * 2);
+    for r in &rects {
+        row_bounds.push(r.start.row);
+        row_bounds.push(r.end.row.saturating_add(1));
+    }
+    row_bounds.sort_unstable();
+    row_bounds.dedup();
+
+    let mut total: u64 = 0;
+    for rows in row_bounds.windows(2) {
+        let y0 = rows[0];
+        let y1 = rows[1];
+        if y1 <= y0 {
+            continue;
+        }
+
+        let mut intervals: Vec<(u32, u32)> = Vec::new();
+        for r in &rects {
+            let r_end = r.end.row.saturating_add(1);
+            if r.start.row <= y0 && r_end >= y1 {
+                intervals.push((r.start.col, r.end.col.saturating_add(1)));
+            }
+        }
+
+        if intervals.is_empty() {
+            continue;
+        }
+
+        intervals.sort_by_key(|(s, _e)| *s);
+
+        let mut cur_s = intervals[0].0;
+        let mut cur_e = intervals[0].1;
+        let mut len: u64 = 0;
+        for (s, e) in intervals.into_iter().skip(1) {
+            if s > cur_e {
+                len += (cur_e - cur_s) as u64;
+                cur_s = s;
+                cur_e = e;
+            } else {
+                cur_e = cur_e.max(e);
+            }
+        }
+        len += (cur_e - cur_s) as u64;
+
+        total += (y1 - y0) as u64 * len;
+    }
+
+    total
 }
 
 inventory::submit! {

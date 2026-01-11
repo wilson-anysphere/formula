@@ -77,6 +77,21 @@ impl Reference {
         self.start == self.end
     }
 
+    pub fn size(self) -> u64 {
+        let norm = self.normalized();
+        let rows = norm.end.row as u64 - norm.start.row as u64 + 1;
+        let cols = norm.end.col as u64 - norm.start.col as u64 + 1;
+        rows.saturating_mul(cols)
+    }
+
+    pub fn contains(self, addr: CellAddr) -> bool {
+        let norm = self.normalized();
+        addr.row >= norm.start.row
+            && addr.row <= norm.end.row
+            && addr.col >= norm.start.col
+            && addr.col <= norm.end.col
+    }
+
     pub fn iter_cells(self) -> impl Iterator<Item = CellAddr> {
         let norm = self.normalized();
         let rows = norm.start.row..=norm.end.row;
@@ -98,6 +113,7 @@ pub trait FunctionContext {
     fn eval_scalar(&self, expr: &CompiledExpr) -> Value;
     fn apply_implicit_intersection(&self, reference: Reference) -> Value;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
+    fn iter_reference_cells(&self, reference: Reference) -> Box<dyn Iterator<Item = CellAddr> + '_>;
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc>;
     fn date_system(&self) -> ExcelDateSystem;
 
