@@ -181,6 +181,12 @@ export function createSyncServer(
   let tombstoneSweepTimer: NodeJS.Timeout | null = null;
   let tombstoneSweepInFlight: Promise<TombstoneSweepResult> | null = null;
   let tombstoneSweepCursor = 0;
+  let leveldbTombstoneSweep:
+    | {
+        getAllDocNames: () => Promise<string[]>;
+        clearDocument: (docName: string) => Promise<void>;
+      }
+    | null = null;
 
   let dataDirLock: DataDirLockHandle | null = null;
   let persistenceInitialized = false;
@@ -242,6 +248,7 @@ export function createSyncServer(
       persistenceInitialized = true;
       persistenceCleanup = null;
       retentionManager = null;
+      leveldbTombstoneSweep = null;
       persistenceBackend = "file";
       const persistence = new FilePersistence(
         config.dataDir,
@@ -295,6 +302,12 @@ export function createSyncServer(
           if (queues.get(docName) === nextForQueue) queues.delete(docName);
         });
         return next;
+      };
+
+      leveldbTombstoneSweep = {
+        getAllDocNames: () => ldb.getAllDocNames(),
+        clearDocument: (docName: string) =>
+          enqueue(docName, () => ldb.clearDocument(docName)),
       };
 
       const retentionProvider: LeveldbPersistenceLike = {
@@ -461,6 +474,7 @@ export function createSyncServer(
         persistenceInitialized = true;
         persistenceCleanup = null;
         retentionManager = null;
+        leveldbTombstoneSweep = null;
         persistenceBackend = "file";
         const persistence = new FilePersistence(
           config.dataDir,
@@ -529,6 +543,12 @@ export function createSyncServer(
             if (queues.get(docName) === nextForQueue) queues.delete(docName);
           });
           return next;
+        };
+
+        leveldbTombstoneSweep = {
+          getAllDocNames: () => ldb.getAllDocNames(),
+          clearDocument: (docName: string) =>
+            enqueue(docName, () => ldb.clearDocument(docName)),
         };
 
         const retentionProvider: LeveldbPersistenceLike = {
@@ -681,46 +701,101 @@ export function createSyncServer(
 
     const errors: Array<{ docKey: string; error: string }> = [];
 
-    if (persistenceBackend !== "file") {
-      tombstoneSweepCursor = 0;
+    const SWEEP_DOC_LIMIT = 100;
+
+    if (persistenceBackend === "file") {
+      const docKeys = tombstones
+        .entries()
+        .map(([docKey]) => docKey)
+        .sort((a, b) => a.localeCompare(b));
+
+      const limit = Math.min(SWEEP_DOC_LIMIT, docKeys.length);
+
+      let processed = 0;
+      let deleted = 0;
+
+      if (limit > 0) {
+        const start = tombstoneSweepCursor % docKeys.length;
+        for (let i = 0; i < limit; i += 1) {
+          const docKey = docKeys[(start + i) % docKeys.length]!;
+          processed += 1;
+          try {
+            await fs.rm(path.join(config.dataDir, `${docKey}.yjs`), { force: true });
+            deleted += 1;
+          } catch (err) {
+            errors.push({ docKey, error: toErrorMessage(err) });
+          }
+        }
+        tombstoneSweepCursor = (start + processed) % docKeys.length;
+      }
+
       return {
         expiredTombstonesRemoved: expiredDocKeys.length,
-        tombstonesProcessed: 0,
-        docBlobsDeleted: 0,
+        tombstonesProcessed: processed,
+        docBlobsDeleted: deleted,
         errors,
       };
     }
 
-    const docKeys = tombstones
-      .entries()
-      .map(([docKey]) => docKey)
-      .sort((a, b) => a.localeCompare(b));
-
-    const SWEEP_DOC_LIMIT = 100;
-    const limit = Math.min(SWEEP_DOC_LIMIT, docKeys.length);
-
-    let processed = 0;
-    let deleted = 0;
-
-    if (limit > 0) {
-      const start = tombstoneSweepCursor % docKeys.length;
-      for (let i = 0; i < limit; i += 1) {
-        const docKey = docKeys[(start + i) % docKeys.length]!;
-        processed += 1;
-        try {
-          await fs.rm(path.join(config.dataDir, `${docKey}.yjs`), { force: true });
-          deleted += 1;
-        } catch (err) {
-          errors.push({ docKey, error: toErrorMessage(err) });
-        }
+    if (persistenceBackend === "leveldb") {
+      const leveldb = leveldbTombstoneSweep;
+      if (!leveldb) {
+        tombstoneSweepCursor = 0;
+        return {
+          expiredTombstonesRemoved: expiredDocKeys.length,
+          tombstonesProcessed: 0,
+          docBlobsDeleted: 0,
+          errors,
+        };
       }
-      tombstoneSweepCursor = (start + processed) % docKeys.length;
+
+      const docNames = (await leveldb.getAllDocNames()).sort((a, b) =>
+        a.localeCompare(b)
+      );
+
+      const limit = Math.min(SWEEP_DOC_LIMIT, docNames.length);
+
+      let processed = 0;
+      let deleted = 0;
+
+      if (limit > 0) {
+        const start = tombstoneSweepCursor % docNames.length;
+        for (let i = 0; i < limit; i += 1) {
+          const persistedName = docNames[(start + i) % docNames.length]!;
+          processed += 1;
+
+          const docKey = tombstones.has(persistedName)
+            ? persistedName
+            : docKeyFromDocName(persistedName);
+
+          if (!tombstones.has(docKey)) continue;
+
+          try {
+            await leveldb.clearDocument(persistedName);
+            deleted += 1;
+          } catch (err) {
+            errors.push({ docKey, error: toErrorMessage(err) });
+          }
+        }
+
+        tombstoneSweepCursor = (start + processed) % docNames.length;
+      } else {
+        tombstoneSweepCursor = 0;
+      }
+
+      return {
+        expiredTombstonesRemoved: expiredDocKeys.length,
+        tombstonesProcessed: processed,
+        docBlobsDeleted: deleted,
+        errors,
+      };
     }
 
+    tombstoneSweepCursor = 0;
     return {
       expiredTombstonesRemoved: expiredDocKeys.length,
-      tombstonesProcessed: processed,
-      docBlobsDeleted: deleted,
+      tombstonesProcessed: 0,
+      docBlobsDeleted: 0,
       errors,
     };
   };
@@ -828,6 +903,12 @@ export function createSyncServer(
         }
 
         if (req.method === "POST" && url.pathname === "/internal/retention/sweep") {
+          // Always run the tombstone sweep. For file persistence this prunes
+          // tombstones + deletes any `.yjs` blobs that should never be served
+          // again. For LevelDB it is best-effort (we only delete docs whose
+          // persisted name can be matched against a tombstone).
+          const tombstoneResult = await triggerTombstoneSweep();
+
           if (retentionManager) {
             if (config.retention.ttlMs <= 0) {
               sendJson(res, 400, {
@@ -843,23 +924,13 @@ export function createSyncServer(
             return;
           }
 
-          const result = await triggerTombstoneSweep();
-          sendJson(res, 200, { ok: true, ...result });
+          sendJson(res, 200, { ok: true, ...tombstoneResult });
           return;
         }
 
         if (req.method === "DELETE" && url.pathname.startsWith("/internal/docs/")) {
           const ip = pickIp(req, config.trustProxy);
-          let docName: string;
-          try {
-            docName = decodeURIComponent(
-              url.pathname.slice("/internal/docs/".length)
-            );
-          } catch {
-            logger.warn({ ip, reason: "invalid_doc_name" }, "internal_doc_purge_rejected");
-            sendJson(res, 400, { error: "bad_request" });
-            return;
-          }
+          const docName = url.pathname.slice("/internal/docs/".length);
 
           if (!docName) {
             sendJson(res, 400, { error: "missing_doc_id" });
@@ -1124,9 +1195,18 @@ export function createSyncServer(
 
       if (config.retention.sweepIntervalMs > 0) {
         tombstoneSweepTimer = setInterval(() => {
-          void triggerTombstoneSweep().catch((err) =>
-            logger.error({ err }, "tombstone_sweep_failed")
-          );
+          void triggerTombstoneSweep()
+            .then((result) => {
+              if (result.errors.length > 0) {
+                logger.warn({ result }, "tombstone_sweep_completed_with_errors");
+              } else if (
+                result.expiredTombstonesRemoved > 0 ||
+                result.tombstonesProcessed > 0
+              ) {
+                logger.info({ result }, "tombstone_sweep_completed");
+              }
+            })
+            .catch((err) => logger.error({ err }, "tombstone_sweep_failed"));
         }, config.retention.sweepIntervalMs);
         tombstoneSweepTimer.unref();
       }
