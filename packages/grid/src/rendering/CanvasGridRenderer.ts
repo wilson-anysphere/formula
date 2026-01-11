@@ -112,6 +112,7 @@ export class CanvasGridRenderer {
   private remotePresences: GridPresence[] = [];
 
   private readonly formattedCache = new LruCache<string, string>(50_000);
+  private readonly textWidthCache = new LruCache<string, number>(10_000);
   private textLayoutEngine?: TextLayoutEngine;
 
   private readonly presenceFont = "12px system-ui, sans-serif";
