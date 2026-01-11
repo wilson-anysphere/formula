@@ -391,8 +391,10 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             //
                             // NOTE: This converts `BrtCellIsst` (shared string reference) cells
                             // into `BrtCellSt` (inline string) when writing a text value. Use the
-                            // shared-strings-aware workbook API (`XlsbWorkbook::save_with_cell_edits_shared_strings`)
-                            // to keep shared-string semantics.
+                            // shared-strings-aware workbook APIs
+                            // (`XlsbWorkbook::save_with_cell_edits_shared_strings` or
+                            // `XlsbWorkbook::save_with_cell_edits_streaming_shared_strings`) to
+                            // keep shared-string semantics.
                             reject_formula_payload_edit(edit, row, col)?;
                             patch_value_cell(&mut writer, col, style, edit)?;
                         }

@@ -309,6 +309,14 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                         } else {
                             // No shared-string index provided: fall back to the generic writer
                             // (FLOAT / inline string).
+                            //
+                            // NOTE: When writing a text value, this converts `BrtCellIsst` (shared
+                            // string reference) cells into `BrtCellSt` (inline string) because the
+                            // streaming patcher cannot update `xl/sharedStrings.bin`. Use the
+                            // shared-strings-aware workbook APIs
+                            // (`XlsbWorkbook::save_with_cell_edits_shared_strings` or
+                            // `XlsbWorkbook::save_with_cell_edits_streaming_shared_strings`) to
+                            // keep shared-string semantics.
                             super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_value_cell(&mut writer, col, style, edit)?;
