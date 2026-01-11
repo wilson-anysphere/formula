@@ -2,6 +2,7 @@ import type { KeyRing } from "../../../packages/security/crypto/keyring.js";
 
 const AES_GCM_IV_BYTES = 12;
 const AES_GCM_TAG_BYTES = 16;
+const AES_256_GCM_ALGORITHM = "aes-256-gcm";
 
 const DEFAULT_MAGIC = Buffer.from("FMLLDB01", "ascii");
 
@@ -135,6 +136,11 @@ function wrapValueEncoding(params: {
       const plaintext = asBuffer(encoded, "valueEncoding.encode()");
 
       const encrypted = keyRing.encryptBytes(plaintext, { aadContext: LEVELDB_AAD_CONTEXT });
+      if (encrypted.algorithm !== AES_256_GCM_ALGORITHM) {
+        throw new Error(
+          `Unsupported encryption algorithm for sync-server LevelDB values: ${encrypted.algorithm}`
+        );
+      }
       return encodeEncryptedBytes(encrypted, magic);
     },
     decode(value: unknown): unknown {
@@ -158,7 +164,10 @@ function wrapValueEncoding(params: {
       }
 
       const payload = decodeEncryptedBytes(bytes, magic);
-      const plaintext = keyRing.decryptBytes(payload, { aadContext: LEVELDB_AAD_CONTEXT });
+      const plaintext = keyRing.decryptBytes(
+        { ...payload, algorithm: AES_256_GCM_ALGORITHM },
+        { aadContext: LEVELDB_AAD_CONTEXT }
+      );
       return upstreamDecode(plaintext);
     },
   };
