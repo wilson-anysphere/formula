@@ -325,6 +325,22 @@ describe("API e2e: DLP policy + classification endpoints", () => {
       source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` }
     });
 
+    const evaluateCellOverride = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/dlp/evaluate`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        action: "clipboard.copy",
+        selector: cellSelector
+      }
+    });
+    expect(evaluateCellOverride.statusCode).toBe(200);
+    expect(evaluateCellOverride.json()).toMatchObject({
+      decision: "allow",
+      classification: { level: "Internal", labels: ["Mask"] },
+      maxAllowed: "Confidential"
+    });
+
     const evaluateCopy = await app.inject({
       method: "POST",
       url: `/docs/${docId}/dlp/evaluate`,
