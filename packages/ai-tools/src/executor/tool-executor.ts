@@ -898,6 +898,8 @@ export class ToolExecutor {
       ensureExternalUrlAllowed(currentUrl, this.options.allowed_external_hosts);
       response = await fetch(currentUrl.toString(), {
         headers: params.headers ?? undefined,
+        credentials: "omit",
+        cache: "no-store",
         redirect: "manual"
       });
 
@@ -907,6 +909,8 @@ export class ToolExecutor {
       if (response.type === "opaqueredirect") {
         response = await fetch(currentUrl.toString(), {
           headers: params.headers ?? undefined,
+          credentials: "omit",
+          cache: "no-store",
           redirect: "follow"
         });
         const resolved = response.url ? new URL(response.url) : currentUrl;
