@@ -56,10 +56,14 @@ impl StepResult {
     }
 
     fn failed(start: Instant, err: impl ToString) -> Self {
+        // Triage reports are uploaded as artifacts for both public and private corpora. Avoid
+        // leaking workbook content (sheet names, defined names, etc.) through error strings by
+        // hashing the message and emitting only the digest.
+        let sha = sha256_text(&err.to_string());
         StepResult {
             status: "failed".to_string(),
             duration_ms: Some(start.elapsed().as_millis()),
-            error: Some(err.to_string()),
+            error: Some(format!("sha256={sha}")),
             details: None,
         }
     }
