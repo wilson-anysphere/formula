@@ -51,10 +51,24 @@ export class SqlConnector {
     }
 
     const now = options.now ?? (() => Date.now());
+    let credentials = options.credentials;
+    if (
+      credentials &&
+      typeof credentials === "object" &&
+      !Array.isArray(credentials) &&
+      // @ts-ignore - runtime access
+      typeof credentials.getSecret === "function"
+    ) {
+      // Credential handle convention: hosts can return an object with a stable
+      // credentialId plus a `getSecret()` method. This keeps secret retrieval
+      // inside the connector execution path (and out of cache key hashing).
+      // @ts-ignore - runtime call
+      credentials = await credentials.getSecret();
+    }
     const table = await this.querySql(request.connection, request.sql, {
       params: request.params,
       signal: options.signal,
-      credentials: options.credentials,
+      credentials,
     });
 
     return {

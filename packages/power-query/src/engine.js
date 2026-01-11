@@ -230,6 +230,24 @@ function deserializeQueryMeta(data, startedAt, completedAt, cache) {
   };
 }
 
+/**
+ * Extract a stable credential identifier from a credentials object.
+ *
+ * Host applications should return credential handles that include a stable
+ * `credentialId` (or `id`) so cache keys can vary by credential without
+ * embedding secret material.
+ *
+ * @param {unknown} credentials
+ * @returns {string | null}
+ */
+function extractCredentialId(credentials) {
+  if (!credentials) return null;
+  if (typeof credentials !== "object" || Array.isArray(credentials)) return null;
+  // @ts-ignore - runtime access
+  const id = credentials.credentialId ?? credentials.id ?? null;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
 export class QueryEngine {
   /**
    * @param {QueryEngineOptions} [options]
@@ -567,6 +585,9 @@ export class QueryEngine {
     if (!this.cache) return null;
 
     const signature = await this.buildQuerySignature(query, context, options, state, callStack);
+    if (signature && typeof signature === "object" && signature.$cacheable === false) {
+      return null;
+    }
     return `pq:v1:${hashValue(signature)}`;
   }
 
@@ -583,9 +604,15 @@ export class QueryEngine {
     const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
     const steps = query.steps.slice(0, maxStepIndex + 1);
 
+    let cacheable = true;
+    const sourceSignature = await this.buildSourceSignature(query.source, context, state, callStack);
+    if (sourceSignature && typeof sourceSignature === "object" && sourceSignature.$cacheable === false) {
+      cacheable = false;
+    }
+
     /** @type {Record<string, unknown>} */
     const signature = {
-      source: await this.buildSourceSignature(query.source, context, state, callStack),
+      source: sourceSignature,
       steps: steps.map((s) => s.operation),
       options: { limit: options.limit ?? null, maxStepIndex: options.maxStepIndex ?? null },
     };
@@ -601,7 +628,11 @@ export class QueryEngine {
           }
           const nextStack = new Set(callStack);
           nextStack.add(dep.id);
-          signature[`merge:${step.operation.rightQuery}`] = await this.buildQuerySignature(dep, context, {}, state, nextStack);
+          const depSignature = await this.buildQuerySignature(dep, context, {}, state, nextStack);
+          if (depSignature && typeof depSignature === "object" && depSignature.$cacheable === false) {
+            cacheable = false;
+          }
+          signature[`merge:${step.operation.rightQuery}`] = depSignature;
         }
       } else if (step.operation.type === "append") {
         for (const id of step.operation.queries) {
@@ -613,12 +644,17 @@ export class QueryEngine {
             }
             const nextStack = new Set(callStack);
             nextStack.add(dep.id);
-            signature[`append:${id}`] = await this.buildQuerySignature(dep, context, {}, state, nextStack);
+            const depSignature = await this.buildQuerySignature(dep, context, {}, state, nextStack);
+            if (depSignature && typeof depSignature === "object" && depSignature.$cacheable === false) {
+              cacheable = false;
+            }
+            signature[`append:${id}`] = depSignature;
           }
         }
       }
     }
 
+    signature.$cacheable = cacheable;
     return signature;
   }
 
@@ -639,14 +675,20 @@ export class QueryEngine {
       }
       const nextStack = new Set(callStack);
       nextStack.add(target.id);
-      return { type: "query", queryId: source.queryId, query: await this.buildQuerySignature(target, context, {}, state, nextStack) };
+      const query = await this.buildQuerySignature(target, context, {}, state, nextStack);
+      return {
+        type: "query",
+        queryId: source.queryId,
+        query,
+        $cacheable: query && typeof query === "object" ? query.$cacheable !== false : true,
+      };
     }
 
     if (source.type === "range") {
-      return { type: "range", hasHeaders: source.range.hasHeaders ?? true, values: source.range.values };
+      return { type: "range", hasHeaders: source.range.hasHeaders ?? true, values: source.range.values, $cacheable: true };
     }
     if (source.type === "table") {
-      return { type: "table", table: source.table };
+      return { type: "table", table: source.table, $cacheable: true };
     }
 
     if (source.type === "csv" || source.type === "json" || source.type === "parquet") {
@@ -661,7 +703,14 @@ export class QueryEngine {
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("file", request, state);
-      return { type: source.type, request: connector.getCacheKey(request), credentialsHash: hashValue(credentials ?? null) };
+      const credentialId = extractCredentialId(credentials);
+      const cacheable = credentials == null || credentialId != null;
+      return {
+        type: source.type,
+        request: connector.getCacheKey(request),
+        credentialsHash: credentialId ? hashValue(credentialId) : null,
+        $cacheable: cacheable,
+      };
     }
 
     if (source.type === "api") {
@@ -675,7 +724,14 @@ export class QueryEngine {
       };
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("http", request, state);
-      return { type: "api", request: connector.getCacheKey(request), credentialsHash: hashValue(credentials ?? null) };
+      const credentialId = extractCredentialId(credentials);
+      const cacheable = credentials == null || credentialId != null;
+      return {
+        type: "api",
+        request: connector.getCacheKey(request),
+        credentialsHash: credentialId ? hashValue(credentialId) : null,
+        $cacheable: cacheable,
+      };
     }
 
     if (source.type === "database") {
@@ -684,11 +740,14 @@ export class QueryEngine {
       const request = { connection: source.connection, sql: source.query };
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("sql", request, state);
+      const credentialId = extractCredentialId(credentials);
+      const cacheable = credentials == null || credentialId != null;
       return {
         type: "database",
         dialect: source.dialect ?? null,
         request: connector.getCacheKey(request),
-        credentialsHash: hashValue(credentials ?? null),
+        credentialsHash: credentialId ? hashValue(credentialId) : null,
+        $cacheable: cacheable,
       };
     }
 

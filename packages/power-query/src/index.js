@@ -16,3 +16,5 @@ export { IndexedDBCacheStore } from "./cache/indexeddb.js";
 export { parseM } from "./m/parser.js";
 export { compileMToQuery } from "./m/compiler.js";
 export { prettyPrintQueryToM } from "./m/pretty.js";
+
+export * from "./credentials/index.js";

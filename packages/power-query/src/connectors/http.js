@@ -130,7 +130,21 @@ export class HttpConnector {
     /** @type {Record<string, string>} */
     const headers = { ...(request.headers ?? {}) };
 
-    const credentials = options.credentials;
+    let credentials = options.credentials;
+    if (
+      credentials &&
+      typeof credentials === "object" &&
+      !Array.isArray(credentials) &&
+      // @ts-ignore - runtime access
+      typeof credentials.getSecret === "function"
+    ) {
+      // Credential handle convention: hosts can return an object with a stable
+      // credentialId plus a `getSecret()` method. This keeps secret retrieval
+      // inside the connector execution path (and out of cache key hashing).
+      // @ts-ignore - runtime call
+      credentials = await credentials.getSecret();
+    }
+
     if (credentials && typeof credentials === "object" && !Array.isArray(credentials)) {
       // Generic convention: host apps can return `{ headers }` as credentials for HTTP APIs.
       // @ts-ignore - runtime merge

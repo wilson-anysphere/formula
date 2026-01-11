@@ -10,6 +10,7 @@ import { CacheManager } from "../../src/cache/cache.js";
 import { MemoryCacheStore } from "../../src/cache/memory.js";
 import { ArrowTableAdapter } from "../../src/arrowTable.js";
 import { QueryEngine } from "../../src/engine.js";
+import { stableStringify } from "../../src/cache/key.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +31,7 @@ test("CacheManager: hit/miss, TTL, manual invalidation", async () => {
   assert.equal(await cache.get("k1"), null);
 });
 
-test("QueryEngine: caches by source + query + credentials hash and still checks permissions", async () => {
+test("QueryEngine: caches by source + query + credentialId and still checks permissions", async () => {
   let now = 0;
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store, now: () => now });
@@ -54,7 +55,7 @@ test("QueryEngine: caches by source + query + credentials hash and still checks 
     },
     onCredentialRequest: async () => {
       credentialCount += 1;
-      return { token: "secret" };
+      return { credentialId: "cred-1", getSecret: async () => ({ token: "secret" }) };
     },
   });
 
@@ -88,6 +89,43 @@ test("QueryEngine: caches by source + query + credentials hash and still checks 
   assert.equal(readCount, 3, "manual invalidation should force a refresh");
 });
 
+test("QueryEngine: cache key varies by credentialId and does not embed raw secrets", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  const secret = "super-secret-token";
+  let currentId = "cred-a";
+
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readText: async () => ["Region,Sales", "East,100"].join("\n"),
+    },
+    onPermissionRequest: async () => true,
+    onCredentialRequest: async () => {
+      return { credentialId: currentId, getSecret: async () => ({ token: secret }) };
+    },
+  });
+
+  const query = {
+    id: "q_sales",
+    name: "Sales",
+    source: { type: "csv", path: "/tmp/sales.csv", options: { hasHeaders: true } },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  };
+
+  const keyA = await engine.getCacheKey(query, {}, {});
+  currentId = "cred-b";
+  const keyB = await engine.getCacheKey(query, {}, {});
+  assert.notEqual(keyA, keyB);
+
+  const state = { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
+  const signature = await engine.buildQuerySignature(query, {}, {}, state, new Set([query.id]));
+  assert.equal(typeof signature, "object");
+  assert.equal(stableStringify(signature).includes(secret), false);
+});
+
 test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the source", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });
@@ -105,7 +143,12 @@ test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the
     },
   });
 
-  const query = { id: "q_parquet_cache", name: "Parquet cache", source: { type: "parquet", path: parquetPath }, steps: [] };
+  const query = {
+    id: "q_parquet_cache",
+    name: "Parquet cache",
+    source: { type: "parquet", path: parquetPath },
+    steps: [],
+  };
 
   const first = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(first.meta.cache?.hit, false);
@@ -162,3 +205,4 @@ test("QueryEngine: Arrow cache roundtrip preserves date columns", async () => {
   assert.ok(second.table instanceof ArrowTableAdapter);
   assert.deepEqual(second.table.toGrid(), firstGrid);
 });
+
