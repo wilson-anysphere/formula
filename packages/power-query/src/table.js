@@ -169,9 +169,13 @@ export class DataTable {
 
     const headerRow = hasHeaders ? grid[0] : null;
     const dataRows = hasHeaders ? grid.slice(1) : grid;
-    const width = Math.max(
-      ...(grid.map((row) => (Array.isArray(row) ? row.length : 0)).concat([0])),
-    );
+    // Avoid `Math.max(...rows.map(...))` because spreading large arrays can exceed the
+    // VM argument limit / call stack on big datasets.
+    let width = 0;
+    for (const row of grid) {
+      if (!Array.isArray(row)) continue;
+      if (row.length > width) width = row.length;
+    }
 
     const rawNames = headerRow ?? Array.from({ length: width }, (_, i) => `Column${i + 1}`);
     const names = makeUniqueColumnNames(rawNames);
