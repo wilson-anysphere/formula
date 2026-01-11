@@ -149,9 +149,14 @@ export class ExtensionHostManager {
     }
 
     const extensionPath = path.join(this.extensionsDir, extensionId);
-    const result = await verifyExtractedExtensionDir(extensionPath, record.files, {
-      ignoreExtraPaths: [".DS_Store", "Thumbs.db", "desktop.ini"],
-    });
+    let result;
+    try {
+      result = await verifyExtractedExtensionDir(extensionPath, record.files, {
+        ignoreExtraPaths: [".DS_Store", "Thumbs.db", "desktop.ini"],
+      });
+    } catch (error) {
+      result = { ok: false, reason: error?.message ?? String(error) };
+    }
     if (!result.ok) {
       await this._markCorrupted(state, extensionId, result.reason || "Extension integrity check failed");
     }
