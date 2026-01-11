@@ -13,8 +13,8 @@ SAML providers are stored in `org_saml_providers` and managed through org-admin 
 
 - `providerId` (path param): A short identifier for the IdP configuration (e.g. `okta`, `azuread`).
 - `entryPoint`: IdP SSO URL (must be a valid URL; **HTTPS required in production**).
-- `issuer`: Service Provider issuer / Entity ID. This is also used as the SAML **audience** when validating assertions.
-- `idpIssuer` (optional): Expected IdP EntityID / Issuer. When set, Formula rejects assertions whose `<saml:Issuer>` does not match.
+- `issuer`: Service Provider issuer / Entity ID. This is also used as the SAML **audience** when validating assertions. (Can be a URL or URN; if it’s a URL, HTTPS is required in production.)
+- `idpIssuer` (optional): Expected IdP EntityID / Issuer. When set, Formula rejects assertions whose `<saml:Issuer>` does not match. (Can be a URL or URN; if it’s a URL, HTTPS is required in production.)
 - `idpCertPem`: IdP signing certificate in PEM format (the public cert used to validate XML signatures).
 - `wantAssertionsSigned`: Require `<Assertion>` signatures (default `true`).
 - `wantResponseSigned`: Require `<Response>` signatures (default `true`).

@@ -126,16 +126,18 @@ function validateIssuer(value: string, requireHttps: boolean): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) throw new Error("invalid_issuer");
 
-  // Issuers may be URNs; only enforce scheme rules when it parses as a URL.
+  // Issuers are often URLs, but may also be URNs / other non-HTTP URI schemes.
+  // Only enforce scheme rules when it is an HTTP(S) URL.
   try {
     const url = new URL(trimmed);
     const proto = url.protocol.toLowerCase();
-    if (proto !== "https:" && proto !== "http:") throw new Error("invalid_issuer");
-    if (requireHttps && proto !== "https:") throw new Error("https_required");
-    return trimmed;
+    if (proto === "https:" || proto === "http:") {
+      if (requireHttps && proto !== "https:") throw new Error("https_required");
+    }
   } catch {
-    return trimmed;
+    // Not a URL; allow (e.g. URN).
   }
+  return trimmed;
 }
 
 async function requireOrgAdmin(

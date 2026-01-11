@@ -338,6 +338,57 @@ describe("SAML provider admin APIs", () => {
       await db.end();
     }
   });
+
+  it("accepts URN entity IDs for issuer fields", async () => {
+    const { db, app } = await createTestApp();
+    try {
+      const registerRes = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: { email: "saml-urn-admin@example.com", password: "password1234", name: "Admin", orgName: "SAML URN Org" }
+      });
+      expect(registerRes.statusCode).toBe(200);
+      const orgId = (registerRes.json() as any).organization.id as string;
+      const cookie = extractCookie(registerRes.headers["set-cookie"], "formula_session");
+
+      const putRes = await app.inject({
+        method: "PUT",
+        url: `/orgs/${orgId}/saml/providers/urn`,
+        headers: { cookie },
+        payload: {
+          entryPoint: "http://idp.example.test/sso",
+          issuer: "urn:formula:test:sp",
+          idpIssuer: "urn:formula:test:idp",
+          idpCertPem: TEST_CERT_PEM,
+          wantAssertionsSigned: true,
+          wantResponseSigned: false,
+          attributeMapping: { email: "email", name: "name" },
+          enabled: true
+        }
+      });
+      expect(putRes.statusCode).toBe(200);
+      expect((putRes.json() as any).provider).toMatchObject({
+        providerId: "urn",
+        issuer: "urn:formula:test:sp",
+        idpIssuer: "urn:formula:test:idp"
+      });
+
+      const getProvider = await app.inject({
+        method: "GET",
+        url: `/orgs/${orgId}/saml/providers/urn`,
+        headers: { cookie }
+      });
+      expect(getProvider.statusCode).toBe(200);
+      expect((getProvider.json() as any).provider).toMatchObject({
+        providerId: "urn",
+        issuer: "urn:formula:test:sp",
+        idpIssuer: "urn:formula:test:idp"
+      });
+    } finally {
+      await app.close();
+      await db.end();
+    }
+  });
 });
 
 describe("SAML SSO", () => {
