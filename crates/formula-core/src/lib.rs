@@ -1502,22 +1502,37 @@ mod tests {
     #[test]
     fn average_over_values_evaluates() {
         let mut wb = Workbook::new();
-        wb.set_cell("A1", json!("=AVERAGE(1,2)"), None).unwrap();
+        wb.set_cell("A1", json!("=AVERAGE(1,2,3)"), None).unwrap();
 
         wb.recalculate(None).unwrap();
         let cell = wb.get_cell("A1", None).unwrap();
-        assert_eq!(cell.value, json!(1.5));
+        assert_eq!(cell.value, json!(2.0));
+    }
+
+    #[test]
+    fn average_over_range_parses_numeric_strings() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("1"), None).unwrap();
+        wb.set_cell("A2", json!("2"), None).unwrap();
+        wb.set_cell("A3", json!("3"), None).unwrap();
+        wb.set_cell("B1", json!("=AVERAGE(A1:A3)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        let cell = wb.get_cell("B1", None).unwrap();
+        assert_eq!(cell.value, json!(2.0));
     }
 
     #[test]
     fn if_function_selects_branches() {
         let mut wb = Workbook::new();
-        wb.set_cell("A1", json!("=IF(1,2,3)"), None).unwrap();
-        wb.set_cell("A2", json!("=IF(0,2,3)"), None).unwrap();
+        wb.set_cell("A1", json!("=IF(1,\"yes\",\"no\")"), None)
+            .unwrap();
+        wb.set_cell("A2", json!("=IF(0,\"yes\",\"no\")"), None)
+            .unwrap();
 
         wb.recalculate(None).unwrap();
-        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(2.0));
-        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(3.0));
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!("yes"));
+        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!("no"));
     }
 
     #[test]
