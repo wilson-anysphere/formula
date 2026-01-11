@@ -11,6 +11,7 @@ use crate::{
     A1ParseError, Cell, CellKey, CellRef, CellValue, CfRule, Comment, CommentError, CommentPatch,
     DataValidation, DataValidationAssignment, DataValidationId, Hyperlink, MergeError, MergedRegions,
     Outline, OutlineEntry, Range, Reply, SheetProtection, SheetProtectionAction, StyleTable, Table,
+    SheetSelection, SheetView,
 };
 
 /// Identifier for a worksheet within a workbook.
@@ -54,11 +55,11 @@ fn default_col_count() -> u32 {
 }
 
 fn default_zoom() -> f32 {
-    1.0
+    crate::view::default_zoom()
 }
 
 fn is_default_zoom(z: &f32) -> bool {
-    (*z - 1.0).abs() < f32::EPSILON
+    crate::view::is_default_zoom(z)
 }
 
 fn is_visible(v: &SheetVisibility) -> bool {
@@ -204,6 +205,10 @@ pub struct Worksheet {
     #[serde(default = "default_zoom", skip_serializing_if = "is_default_zoom")]
     pub zoom: f32,
 
+    /// Sheet view state (selection, pane splits, gridlines/headings visibility, zoom, etc).
+    #[serde(default, skip_serializing_if = "SheetView::is_default")]
+    pub view: SheetView,
+
     /// Excel tables (structured ranges) hosted on this worksheet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tables: Vec<Table>,
@@ -241,6 +246,13 @@ pub struct Worksheet {
 impl Worksheet {
     /// Create a new empty worksheet.
     pub fn new(id: WorksheetId, name: impl Into<String>) -> Self {
+        let frozen_rows = 0;
+        let frozen_cols = 0;
+        let zoom = default_zoom();
+        let mut view = SheetView::default();
+        view.pane.frozen_rows = frozen_rows;
+        view.pane.frozen_cols = frozen_cols;
+        view.zoom = zoom;
         Self {
             id,
             name: name.into(),
@@ -257,9 +269,10 @@ impl Worksheet {
             row_properties: BTreeMap::new(),
             col_properties: BTreeMap::new(),
             outline: Outline::default(),
-            frozen_rows: 0,
-            frozen_cols: 0,
-            zoom: default_zoom(),
+            frozen_rows,
+            frozen_cols,
+            zoom,
+            view,
             tables: Vec::new(),
             conditional_formatting: Vec::new(),
             columnar: None,
@@ -375,6 +388,16 @@ impl Worksheet {
                 })
             })
             .collect()
+    }
+
+    /// Set the active cell and selection ranges.
+    pub fn set_selection(&mut self, selection: SheetSelection) {
+        self.view.selection = Some(selection);
+    }
+
+    /// Return the current selection state, if explicitly set.
+    pub fn selection(&self) -> Option<&SheetSelection> {
+        self.view.selection.as_ref()
     }
 
     /// Find the first table containing `cell`.
@@ -1425,6 +1448,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             #[serde(default = "default_zoom")]
             zoom: f32,
             #[serde(default)]
+            view: Option<SheetView>,
+            #[serde(default)]
             hyperlinks: Vec<Hyperlink>,
             #[serde(default)]
             data_validations: Vec<DataValidationAssignment>,
@@ -1485,23 +1510,34 @@ impl<'de> Deserialize<'de> for Worksheet {
             )));
         }
 
-        if helper.frozen_rows > row_count {
+        let view_provided = helper.view.is_some();
+        let mut view = helper.view.unwrap_or_default();
+        let (frozen_rows, frozen_cols, zoom) = if view_provided {
+            (view.pane.frozen_rows, view.pane.frozen_cols, view.zoom)
+        } else {
+            view.pane.frozen_rows = helper.frozen_rows;
+            view.pane.frozen_cols = helper.frozen_cols;
+            view.zoom = helper.zoom;
+            (helper.frozen_rows, helper.frozen_cols, helper.zoom)
+        };
+
+        if frozen_rows > row_count {
             return Err(D::Error::custom(format!(
                 "frozen_rows exceeds row_count: {} > {row_count}",
-                helper.frozen_rows
+                frozen_rows
             )));
         }
-        if helper.frozen_cols > col_count {
+        if frozen_cols > col_count {
             return Err(D::Error::custom(format!(
                 "frozen_cols exceeds col_count: {} > {col_count}",
-                helper.frozen_cols
+                frozen_cols
             )));
         }
 
-        if helper.zoom <= 0.0 {
+        if zoom <= 0.0 {
             return Err(D::Error::custom(format!(
                 "zoom must be > 0 (got {})",
-                helper.zoom
+                zoom
             )));
         }
 
@@ -1533,9 +1569,10 @@ impl<'de> Deserialize<'de> for Worksheet {
             row_properties: helper.row_properties,
             col_properties: helper.col_properties,
             outline,
-            frozen_rows: helper.frozen_rows,
-            frozen_cols: helper.frozen_cols,
-            zoom: helper.zoom,
+            frozen_rows,
+            frozen_cols,
+            zoom,
+            view,
             tables: helper.tables,
             conditional_formatting: helper.conditional_formatting,
             columnar: None,

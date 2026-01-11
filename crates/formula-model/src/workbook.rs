@@ -11,7 +11,7 @@ use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::{
     rewrite_sheet_names_in_formula, CalcSettings, DateSystem, ManualPageBreaks, PageSetup,
     PrintTitles, Range, SheetPrintSettings, SheetVisibility, Style, StyleTable, TabColor, Table,
-    ThemePalette, WorkbookPrintSettings, WorkbookProtection, Worksheet, WorksheetId,
+    ThemePalette, WorkbookPrintSettings, WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
 };
 
 /// Identifier for a workbook.
@@ -67,6 +67,10 @@ pub struct Workbook {
     #[serde(default, skip_serializing_if = "WorkbookPrintSettings::is_empty")]
     pub print_settings: WorkbookPrintSettings,
 
+    /// Workbook view state (active sheet tab, window state, etc).
+    #[serde(default, skip_serializing_if = "WorkbookView::is_default")]
+    pub view: WorkbookView,
+
     /// Next worksheet id to allocate (runtime-only).
     #[serde(skip)]
     next_sheet_id: WorksheetId,
@@ -121,6 +125,7 @@ impl Workbook {
             workbook_protection: WorkbookProtection::default(),
             defined_names: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
+            view: WorkbookView::default(),
             next_sheet_id: 1,
             next_defined_name_id: 1,
         }
@@ -158,6 +163,9 @@ impl Workbook {
         let id = self.next_sheet_id;
         self.next_sheet_id = self.next_sheet_id.wrapping_add(1);
         self.sheets.push(Worksheet::new(id, name));
+        if self.view.active_sheet_id.is_none() {
+            self.view.active_sheet_id = Some(id);
+        }
         Ok(id)
     }
 
@@ -187,6 +195,32 @@ impl Workbook {
                     .rewrite_sheet_references(old_name, new_name);
             }
         }
+    }
+
+    /// Returns the active sheet id (Excel `activeTab`), if any.
+    pub fn active_sheet_id(&self) -> Option<WorksheetId> {
+        let active = self.view.active_sheet_id;
+        if let Some(id) = active {
+            if self.sheet(id).is_some() {
+                return Some(id);
+            }
+        }
+        self.sheets.first().map(|s| s.id)
+    }
+
+    /// Returns the active sheet, if any.
+    pub fn active_sheet(&self) -> Option<&Worksheet> {
+        let id = self.active_sheet_id()?;
+        self.sheet(id)
+    }
+
+    /// Set the active sheet (Excel `activeTab`).
+    pub fn set_active_sheet(&mut self, id: WorksheetId) -> bool {
+        if self.sheet(id).is_none() {
+            return false;
+        }
+        self.view.active_sheet_id = Some(id);
+        true
     }
 
     /// Rename a worksheet and rewrite formulas that reference it.
@@ -612,6 +646,8 @@ impl<'de> Deserialize<'de> for Workbook {
             defined_names: Vec<DefinedName>,
             #[serde(default)]
             print_settings: WorkbookPrintSettings,
+            #[serde(default)]
+            view: Option<WorkbookView>,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -650,6 +686,13 @@ impl<'de> Deserialize<'de> for Workbook {
             }
         }
 
+        let mut view = helper.view.unwrap_or_default();
+        if let Some(active) = view.active_sheet_id {
+            if sheets.iter().all(|s| s.id != active) {
+                view.active_sheet_id = None;
+            }
+        }
+
         let mut workbook = Workbook {
             schema_version: helper.schema_version,
             id: helper.id,
@@ -662,6 +705,7 @@ impl<'de> Deserialize<'de> for Workbook {
             workbook_protection: helper.workbook_protection,
             defined_names,
             print_settings,
+            view,
             next_sheet_id,
             next_defined_name_id,
         };

@@ -33,6 +33,7 @@ mod style;
 mod theme;
 pub mod table;
 mod value;
+mod view;
 mod workbook;
 mod worksheet;
 
@@ -80,6 +81,10 @@ pub use table::{
     TableStyleInfo,
 };
 pub use value::{ArrayValue, CellValue, RichText, SpillValue};
+pub use view::{
+    a1_to_cell, cell_to_a1, format_sqref, parse_sqref, SheetPane, SheetSelection, SheetView,
+    SqrefParseError, WorkbookView, WorkbookWindow, WorkbookWindowState,
+};
 pub use workbook::{RenameSheetError, Workbook, WorkbookId};
 pub use worksheet::{
     ColProperties, RangeBatch, RowProperties, SheetVisibility, TabColor, Worksheet, WorksheetId,
