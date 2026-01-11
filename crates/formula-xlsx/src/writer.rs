@@ -1,4 +1,5 @@
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
+use crate::styles::StylesPart;
 use formula_model::{normalize_formula_text, Cell, CellRef, CellValue, Workbook, Worksheet};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -28,6 +29,18 @@ pub fn write_workbook_to_writer<W: Write + Seek>(workbook: &Workbook, writer: W)
         .compression_method(zip::CompressionMethod::Deflated);
 
     let shared_strings = build_shared_strings(workbook);
+    let mut style_table = workbook.styles.clone();
+    let mut styles_part =
+        StylesPart::parse_or_default(None, &mut style_table).map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+    let style_ids = workbook
+        .sheets
+        .iter()
+        .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
+        .filter(|style_id| *style_id != 0 && workbook.styles.get(*style_id).is_some());
+    let style_to_xf = styles_part
+        .xf_indices_for_style_ids(style_ids, &style_table)
+        .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+    let styles_xml = styles_part.to_xml_bytes();
 
     // Root relationships
     zip.start_file("_rels/.rels", options)?;
@@ -45,9 +58,9 @@ pub fn write_workbook_to_writer<W: Write + Seek>(workbook: &Workbook, writer: W)
     zip.start_file("xl/_rels/workbook.xml.rels", options)?;
     zip.write_all(workbook_rels_xml(workbook, !shared_strings.values.is_empty()).as_bytes())?;
 
-    // Styles (minimal placeholder)
+    // Styles
     zip.start_file("xl/styles.xml", options)?;
-    zip.write_all(minimal_styles_xml().as_bytes())?;
+    zip.write_all(&styles_xml)?;
 
     // Shared strings
     if !shared_strings.values.is_empty() {
@@ -84,7 +97,15 @@ pub fn write_workbook_to_writer<W: Write + Seek>(workbook: &Workbook, writer: W)
         let sheet_number = idx + 1;
         let sheet_path = format!("xl/worksheets/sheet{sheet_number}.xml");
         zip.start_file(&sheet_path, options)?;
-        zip.write_all(sheet_xml(sheet, &shared_strings, &table_parts_by_sheet[idx]).as_bytes())?;
+        zip.write_all(
+            sheet_xml(
+                sheet,
+                &shared_strings,
+                &table_parts_by_sheet[idx],
+                &style_to_xf,
+            )
+            .as_bytes(),
+        )?;
 
         let rels_path = format!("xl/worksheets/_rels/sheet{sheet_number}.xml.rels");
         zip.start_file(&rels_path, options)?;
@@ -182,6 +203,7 @@ fn sheet_xml(
     sheet: &Worksheet,
     shared_strings: &SharedStrings,
     table_parts: &[(String, String)],
+    style_to_xf: &HashMap<u32, u32>,
 ) -> String {
     // Excel expects rows in ascending order.
     let mut rows: BTreeMap<u32, Vec<(u32, CellRef, &Cell)>> = BTreeMap::new();
@@ -199,7 +221,7 @@ fn sheet_xml(
         let row_number = row_idx + 1;
         sheet_data.push_str(&format!(r#"<row r="{}">"#, row_number));
         for (_col, cell_ref, cell) in cells {
-            sheet_data.push_str(&cell_xml(&cell_ref, cell, shared_strings));
+            sheet_data.push_str(&cell_xml(&cell_ref, cell, shared_strings, style_to_xf));
         }
         sheet_data.push_str("</row>");
     }
@@ -230,10 +252,21 @@ fn sheet_xml(
     )
 }
 
-fn cell_xml(cell_ref: &CellRef, cell: &Cell, shared_strings: &SharedStrings) -> String {
+fn cell_xml(
+    cell_ref: &CellRef,
+    cell: &Cell,
+    shared_strings: &SharedStrings,
+    style_to_xf: &HashMap<u32, u32>,
+) -> String {
     let a1 = cell_ref.to_a1();
     let mut attrs = format!(r#" r="{}""#, a1);
     let mut value_xml = String::new();
+
+    if cell.style_id != 0 {
+        if let Some(xf_index) = style_to_xf.get(&cell.style_id).copied().filter(|xf| *xf != 0) {
+            attrs.push_str(&format!(r#" s="{}""#, xf_index));
+        }
+    }
 
     if let Some(formula) = &cell.formula {
         let formula = normalize_formula_text(formula);
@@ -326,18 +359,6 @@ fn shared_strings_xml(shared: &SharedStrings) -> String {
   {si}
 </sst>"#
     )
-}
-
-fn minimal_styles_xml() -> String {
-    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="1"><font/></fonts>
-  <fills count="1"><fill/></fills>
-  <borders count="1"><border/></borders>
-  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
-</styleSheet>"#
-        .to_string()
 }
 
 fn content_types_xml(workbook: &Workbook, shared_strings: &SharedStrings) -> String {
