@@ -1122,7 +1122,9 @@ function truncateText(text: string, maxChars: number): string {
   const s = String(text);
   if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
   if (s.length <= maxChars) return s;
-  const marker = "…[TRUNCATED]";
+  // Keep the truncation marker within `maxChars` while still ending with an
+  // ellipsis so callers can reliably detect truncation with `endsWith("…")`.
+  const marker = "[TRUNCATED]…";
   if (maxChars <= marker.length) return marker.slice(0, Math.max(0, maxChars));
   return `${s.slice(0, Math.max(0, maxChars - marker.length))}${marker}`;
 }
