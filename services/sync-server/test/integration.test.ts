@@ -280,6 +280,123 @@ test("syncs between two clients and persists encrypted state across restart", as
   assert.equal(doc3.getText("t").toString(), secretText);
 });
 
+test(
+  "syncs and persists encrypted state across restart with SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64",
+  async (t) => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+    t.after(async () => {
+      await rm(dataDir, { recursive: true, force: true });
+    });
+
+    const port = await getAvailablePort();
+    const wsUrl = `ws://127.0.0.1:${port}`;
+
+    const keyBase64 = Buffer.alloc(32, 5).toString("base64");
+
+    let server = await startSyncServer({
+      port,
+      dataDir,
+      auth: { mode: "opaque", token: "test-token" },
+      env: {
+        // Ensure key_b64 implies keyring mode even when SYNC_SERVER_PERSISTENCE_ENCRYPTION is off.
+        SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+        SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64: keyBase64,
+        // Ensure no external keyring env vars leak into this test.
+        SYNC_SERVER_ENCRYPTION_KEYRING_JSON: "",
+        SYNC_SERVER_ENCRYPTION_KEYRING_PATH: "",
+      },
+    });
+    t.after(async () => {
+      await server.stop();
+    });
+
+    const docName = "test-doc-key-b64";
+    const secretText =
+      "encryption-at-rest-secret(key_b64): hello world 0123456789 abcdef";
+
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+
+    const provider1 = new WebsocketProvider(wsUrl, docName, doc1, {
+      WebSocketPolyfill: WebSocket,
+      disableBc: true,
+      params: { token: "test-token" },
+    });
+    const provider2 = new WebsocketProvider(wsUrl, docName, doc2, {
+      WebSocketPolyfill: WebSocket,
+      disableBc: true,
+      params: { token: "test-token" },
+    });
+
+    t.after(() => {
+      provider1.destroy();
+      provider2.destroy();
+      doc1.destroy();
+      doc2.destroy();
+    });
+
+    await waitForProviderSync(provider1);
+    await waitForProviderSync(provider2);
+
+    doc1.getText("t").insert(0, secretText);
+
+    await waitForCondition(
+      () => doc2.getText("t").toString() === secretText,
+      10_000
+    );
+
+    provider1.destroy();
+    provider2.destroy();
+    doc1.destroy();
+    doc2.destroy();
+
+    // Give the server a moment to persist state after the last client disconnects.
+    await new Promise((r) => setTimeout(r, 250));
+
+    const persistedPath = yjsFilePathForDoc(dataDir, docName);
+    const persistedBytes = await readFile(persistedPath);
+    assert.equal(persistedBytes.subarray(0, 8).toString("ascii"), "FMLYJS01");
+    assert.equal(persistedBytes.readUInt8(8) & 0b1, 0b1);
+    assert.equal(
+      persistedBytes.includes(Buffer.from(secretText, "utf8")),
+      false,
+      "encrypted persistence should not contain plaintext UTF-8"
+    );
+
+    await server.stop();
+    server = await startSyncServer({
+      port,
+      dataDir,
+      auth: { mode: "opaque", token: "test-token" },
+      env: {
+        SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+        SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64: keyBase64,
+        SYNC_SERVER_ENCRYPTION_KEYRING_JSON: "",
+        SYNC_SERVER_ENCRYPTION_KEYRING_PATH: "",
+      },
+    });
+
+    const doc3 = new Y.Doc();
+    const provider3 = new WebsocketProvider(wsUrl, docName, doc3, {
+      WebSocketPolyfill: WebSocket,
+      disableBc: true,
+      params: { token: "test-token" },
+    });
+
+    t.after(() => {
+      provider3.destroy();
+      doc3.destroy();
+    });
+
+    await waitForProviderSync(provider3);
+    await waitForCondition(
+      () => doc3.getText("t").toString() === secretText,
+      10_000
+    );
+    assert.equal(doc3.getText("t").toString(), secretText);
+  }
+);
+
 test("purges persisted documents via internal admin API", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
   t.after(async () => {
