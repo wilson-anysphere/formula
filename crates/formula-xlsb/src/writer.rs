@@ -18,7 +18,13 @@ impl<W: Write> Biff12Writer<W> {
     }
 
     pub(crate) fn write_record(&mut self, id: u32, payload: &[u8]) -> io::Result<()> {
-        self.write_record_header(id, payload.len() as u32)?;
+        let len = u32::try_from(payload.len()).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "record payload length does not fit in u32",
+            )
+        })?;
+        self.write_record_header(id, len)?;
         self.inner.write_all(payload)
     }
 
@@ -46,7 +52,9 @@ impl<W: Write> Biff12Writer<W> {
 
     pub(crate) fn write_utf16_string(&mut self, s: &str) -> io::Result<()> {
         let len = s.encode_utf16().count();
-        self.write_u32(len as u32)?;
+        let len = u32::try_from(len)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "string is too large"))?;
+        self.write_u32(len)?;
         for unit in s.encode_utf16() {
             self.inner.write_all(&unit.to_le_bytes())?;
         }

@@ -154,11 +154,14 @@ fn patch_value_cell<W: io::Write>(
         }
         CellValue::Text(s) => {
             let char_len = s.encode_utf16().count();
-            let payload_len = 4u32
-                .checked_add(4)
-                .and_then(|v| v.checked_add(4))
-                .and_then(|v| v.checked_add((char_len * 2) as u32))
-                .ok_or(Error::UnexpectedEof)?;
+            let char_len = u32::try_from(char_len).map_err(|_| {
+                Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "string is too large",
+                ))
+            })?;
+            let bytes_len = char_len.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+            let payload_len = 12u32.checked_add(bytes_len).ok_or(Error::UnexpectedEof)?;
 
             writer.write_record_header(biff12::CELL_ST, payload_len)?;
             writer.write_u32(col)?;
@@ -218,9 +221,21 @@ fn patch_fmla_num<W: io::Write>(
         }
     };
 
+    let new_rgce_len = u32::try_from(new_rgce.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula token stream is too large",
+        ))
+    })?;
+    let extra_len = u32::try_from(extra.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula trailing payload is too large",
+        ))
+    })?;
     let payload_len = 22u32
-        .checked_add(new_rgce.len() as u32)
-        .and_then(|v| v.checked_add(extra.len() as u32))
+        .checked_add(new_rgce_len)
+        .and_then(|v| v.checked_add(extra_len))
         .ok_or(Error::UnexpectedEof)?;
 
     writer.write_record_header(biff12::FORMULA_FLOAT, payload_len)?;
@@ -228,7 +243,7 @@ fn patch_fmla_num<W: io::Write>(
     writer.write_u32(style)?;
     writer.write_f64(cached)?;
     writer.write_u16(flags)?;
-    writer.write_u32(new_rgce.len() as u32)?;
+    writer.write_u32(new_rgce_len)?;
     writer.write_raw(new_rgce)?;
     writer.write_raw(extra)?;
     Ok(())
