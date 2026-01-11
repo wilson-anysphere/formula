@@ -10,10 +10,16 @@ import { fileURLToPath } from "node:url";
 export async function waitForCondition(
   condition: () => boolean | Promise<boolean>,
   timeoutMs: number,
-  intervalMs: number = 25
+  intervalMs: number = 25,
+  signal?: AbortSignal
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start <= timeoutMs) {
+    if (signal?.aborted) {
+      const reason = (signal as any).reason;
+      if (reason instanceof Error) throw reason;
+      throw new Error(reason ? String(reason) : "Aborted");
+    }
     if (await condition()) return;
     await new Promise((r) => setTimeout(r, intervalMs));
   }
@@ -33,7 +39,10 @@ export async function getAvailablePort(): Promise<number> {
   });
 }
 
-export async function waitForServerReady(baseUrl: string): Promise<void> {
+export async function waitForServerReady(
+  baseUrl: string,
+  opts: { signal?: AbortSignal } = {}
+): Promise<void> {
   await waitForCondition(async () => {
     const url = new URL("/healthz", baseUrl);
     try {
@@ -73,7 +82,7 @@ export async function waitForServerReady(baseUrl: string): Promise<void> {
     } catch {
       return false;
     }
-  }, 30_000);
+  }, 30_000, 25, opts.signal);
 }
 
 export function waitForProviderSync(provider: {
@@ -146,17 +155,45 @@ export async function startSyncServer(opts: {
     const proc = child;
     if (!proc) return;
     child = null;
-    proc.kill("SIGTERM");
+    if (proc.exitCode !== null || proc.signalCode !== null) return;
     await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        proc.kill("SIGKILL");
+      let timeout: NodeJS.Timeout | null = null;
+      const finish = () => {
+        if (timeout) clearTimeout(timeout);
+        timeout = null;
         resolve();
+      };
+
+      const onExit = () => {
+        finish();
+      };
+
+      proc.once("exit", onExit);
+
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        proc.off("exit", onExit);
+        finish();
+        return;
+      }
+
+      try {
+        proc.kill("SIGTERM");
+      } catch {
+        proc.off("exit", onExit);
+        finish();
+        return;
+      }
+
+      timeout = setTimeout(() => {
+        proc.off("exit", onExit);
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+        finish();
       }, 10_000);
       timeout.unref();
-      proc.once("exit", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
     });
   };
 
@@ -204,13 +241,34 @@ export async function startSyncServer(opts: {
     stderr = stderr.slice(-10_000);
   });
 
+  const proc = child;
+  if (!proc) {
+    throw new Error("Failed to spawn sync-server process");
+  }
+
+  const readyAbortController = new AbortController();
+  const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+    readyAbortController.abort(
+      new Error(
+        `sync-server exited before becoming ready (code=${code ?? 0}, signal=${signal ?? "none"})`
+      )
+    );
+  };
+
+  proc.once("exit", onExit);
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    onExit(proc.exitCode, proc.signalCode);
+  }
+
   try {
-    await waitForServerReady(httpUrl);
+    await waitForServerReady(httpUrl, { signal: readyAbortController.signal });
   } catch (err) {
     await killChild();
     throw new Error(
       `Server failed to start: ${String(err)}\nstdout:\n${stdout}\nstderr:\n${stderr}`
     );
+  } finally {
+    proc.off("exit", onExit);
   }
 
   return {
