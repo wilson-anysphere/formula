@@ -2994,6 +2994,8 @@ export class QueryEngine {
         if (result.done) break;
       }
 
+      const flushed = pipeline.transformBatch([]);
+      enqueue(flushed.rows);
       await emitAvailable(true);
     } finally {
       options.onProgress?.({ type: "source:complete", queryId: query.id, sourceType: streamingSource.type });
@@ -3414,6 +3416,8 @@ export class QueryEngine {
         if (result.done) break;
       }
 
+      const flushed = pipeline.transformBatch([]);
+      enqueue(flushed.rows);
       for await (const chunk of yieldAvailable(true)) {
         yield chunk;
       }

@@ -1917,7 +1917,6 @@ export function compileStreamingPipeline(operations, inputColumns) {
       const result = fn(current);
       current = result.rows;
       if (result.done) stop = true;
-      if (current.length === 0) break;
     }
     if (stop) done = true;
     return { rows: current, done };

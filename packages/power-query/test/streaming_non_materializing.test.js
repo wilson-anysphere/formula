@@ -511,3 +511,62 @@ test("executeQueryStreaming(..., materialize:false) streams demoteHeaders", asyn
   const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
   assert.deepEqual(streamed, expected);
 });
+
+test("executeQueryStreaming(..., materialize:false) streams demoteHeaders even when the source has zero data rows", async () => {
+  const engine = new QueryEngine();
+
+  const query = {
+    id: "q_stream_demote_headers_empty",
+    name: "Demote headers (empty)",
+    source: {
+      type: "range",
+      range: {
+        values: [["A", "B"]],
+        hasHeaders: true,
+      },
+    },
+    steps: [{ id: "s_demote", name: "Demote headers", operation: { type: "demoteHeaders" } }],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, {}, { batchSize: 10, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
+
+test("executeQueryStreaming(..., materialize:false) streams demoteHeaders even when earlier steps output zero rows", async () => {
+  const engine = new QueryEngine();
+
+  const query = {
+    id: "q_stream_demote_headers_after_filter",
+    name: "Demote headers after filter",
+    source: {
+      type: "range",
+      range: {
+        values: [
+          ["A"],
+          [1],
+          [2],
+        ],
+        hasHeaders: true,
+      },
+    },
+    steps: [
+      {
+        id: "s_filter",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "A", operator: "equals", value: 999 } },
+      },
+      { id: "s_demote", name: "Demote headers", operation: { type: "demoteHeaders" } },
+    ],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, {}, { batchSize: 1, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
