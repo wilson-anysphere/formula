@@ -321,6 +321,11 @@ export class SpreadsheetApp {
   private formulaEditCell: CellCoord | null = null;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
   private referenceHighlights: Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> = [];
+  private referenceHighlightsSource: Array<{
+    range: { startRow: number; startCol: number; endRow: number; endCol: number; sheet?: string };
+    color: string;
+    active?: boolean;
+  }> = [];
   private fillPreviewRange: Range | null = null;
   private showFormulas = false;
 
@@ -659,26 +664,8 @@ export class SpreadsheetApp {
          this.renderReferencePreview();
         },
         onReferenceHighlights: (highlights) => {
-          const sheetIds = this.document.getSheetIds();
-          const resolveSheetId = (name: string): string | null => {
-            const trimmed = name.trim();
-            if (!trimmed) return null;
-            return sheetIds.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
-          };
-
-          this.referenceHighlights = highlights
-            .filter((h) => {
-              if (!h.range.sheet) return true;
-              const resolved = resolveSheetId(h.range.sheet);
-              if (!resolved) return false;
-              return resolved.toLowerCase() === this.sheetId.toLowerCase();
-            })
-            .map((h) => ({
-              start: { row: h.range.startRow, col: h.range.startCol },
-              end: { row: h.range.endRow, col: h.range.endCol },
-              color: h.color,
-              active: Boolean(h.active),
-            }));
+          this.referenceHighlightsSource = highlights;
+          this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
           this.renderReferencePreview();
         }
       });
@@ -900,6 +887,8 @@ export class SpreadsheetApp {
         this.sheetId = sheetIds[0];
         this.chartStore.setDefaultSheet(this.sheetId);
       }
+      this.referencePreview = null;
+      this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
       if (this.wasmEngine) {
         await this.enqueueWasmSync(async (engine) => {
           const changes = await engineHydrateFromDocument(engine, this.document);
@@ -977,8 +966,11 @@ export class SpreadsheetApp {
     if (sheetId === this.sheetId) return;
     this.sheetId = sheetId;
     this.chartStore.setDefaultSheet(sheetId);
+    this.referencePreview = null;
+    this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
     this.renderGrid();
     this.renderCharts(true);
+    this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
   }
@@ -991,6 +983,8 @@ export class SpreadsheetApp {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
       this.chartStore.setDefaultSheet(target.sheetId);
+      this.referencePreview = null;
+      this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
       this.renderGrid();
       this.renderCharts(true);
       sheetChanged = true;
@@ -1018,6 +1012,8 @@ export class SpreadsheetApp {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
       this.chartStore.setDefaultSheet(target.sheetId);
+      this.referencePreview = null;
+      this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
       this.renderGrid();
       this.renderCharts(true);
       sheetChanged = true;
@@ -3623,6 +3619,7 @@ export class SpreadsheetApp {
     this.formulaEditCell = null;
     this.referencePreview = null;
     this.referenceHighlights = [];
+    this.referenceHighlightsSource = [];
     this.refresh();
     this.focus();
   }
@@ -3634,6 +3631,7 @@ export class SpreadsheetApp {
     this.formulaEditCell = null;
     this.referencePreview = null;
     this.referenceHighlights = [];
+    this.referenceHighlightsSource = [];
     this.ensureActiveCellVisible();
     const didScroll = this.scrollCellIntoView(this.selection.active);
     if (didScroll) this.ensureViewportMappingCurrent();
@@ -3642,6 +3640,35 @@ export class SpreadsheetApp {
     this.updateStatus();
     if (didScroll) this.refresh("scroll");
     this.focus();
+  }
+
+  private computeReferenceHighlightsForSheet(
+    sheetId: string,
+    highlights: typeof this.referenceHighlightsSource
+  ): Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> {
+    if (!highlights || highlights.length === 0) return [];
+
+    const sheetIds = this.document.getSheetIds();
+    const resolveSheetId = (name: string): string | null => {
+      const trimmed = name.trim();
+      if (!trimmed) return null;
+      return sheetIds.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+    };
+
+    return highlights
+      .filter((h) => {
+        const sheet = h.range.sheet;
+        if (!sheet) return true;
+        const resolved = resolveSheetId(sheet);
+        if (!resolved) return false;
+        return resolved.toLowerCase() === sheetId.toLowerCase();
+      })
+      .map((h) => ({
+        start: { row: h.range.startRow, col: h.range.startCol },
+        end: { row: h.range.endRow, col: h.range.endCol },
+        color: h.color,
+        active: Boolean(h.active),
+      }));
   }
 
   private renderReferencePreview(): void {
