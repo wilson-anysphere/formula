@@ -176,6 +176,48 @@ test("sqlserver: addColumn comparisons return BIT values (not predicates)", () =
   });
 });
 
+test("sqlserver: folds nested join + expand into a flattened join", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = {};
+
+  const right = {
+    id: "q_right_nested_expand",
+    name: "Targets",
+    source: { type: "database", connection, query: "SELECT * FROM targets" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left_nested_expand",
+    name: "Sales",
+    source: { type: "database", connection, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target", "Sales"] } },
+      {
+        id: "l2",
+        name: "Nested Join",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_nested_expand",
+          joinType: "left",
+          leftKeys: ["Id"],
+          rightKeys: ["Id"],
+          joinMode: "nested",
+          newColumnName: "Matches",
+        },
+      },
+      { id: "l3", name: "Expand", operation: { type: "expandTableColumn", column: "Matches", columns: ["Target"], newColumnNames: null } },
+    ],
+  };
+
+  const plan = folding.compile(left, { dialect: "sqlserver", queries: { q_right_nested_expand: right } });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT l.[Id] AS [Id], l.[Target] AS [Target], l.[Sales] AS [Sales], r.[Target] AS [Target.1] FROM (SELECT t.[Id], t.[Target], t.[Sales] FROM (SELECT * FROM sales) AS t) AS l LEFT JOIN (SELECT t.[Id], t.[Target] FROM (SELECT * FROM targets) AS t) AS r ON (l.[Id] = r.[Id] OR (l.[Id] IS NULL AND r.[Id] IS NULL))',
+    params: [],
+  });
+});
+
 test("sqlserver: folding explain + QueryEngine execution normalize placeholders + preserve explain steps", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined } | null} */
   let observed = null;
