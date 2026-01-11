@@ -30,7 +30,8 @@ test("CredentialManager + HttpConnector OAuth2: stored credential handle can pro
 
   const url = "https://api.example/data";
   const scope = httpScope({ url });
-  await credentialStore.set(scope, { oauth2: { providerId: "example", scopes: ["read"] } });
+  // Store scopes as a string to cover persisted-JSON edge cases.
+  await credentialStore.set(scope, { oauth2: { providerId: "example", scopes: "read" } });
 
   const tokenStore = new InMemoryOAuthTokenStore();
   const { scopesHash, scopes } = normalizeScopes(["read"]);
@@ -86,4 +87,3 @@ test("CredentialManager + HttpConnector OAuth2: stored credential handle can pro
   assert.equal(tokenCalls, 1);
   assert.equal(apiCalls, 1);
 });
-
