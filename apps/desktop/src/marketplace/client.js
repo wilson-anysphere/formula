@@ -195,9 +195,47 @@ export class MarketplaceClient {
               ? String(headerPublisherKeyId).trim()
               : cached.publisherKeyId || null;
 
-          if (this.cacheDir && cacheBase && indexPath && resolvedPublisherKeyId && resolvedPublisherKeyId !== cached.publisherKeyId) {
+          // 304 responses still include metadata headers; refresh our on-disk cache index
+          // opportunistically so older caches can learn about newly-added headers.
+          const refreshed = { ...cached };
+          const headerSignature = response.headers.get("x-package-signature");
+          const headerFormatVersion = response.headers.get("x-package-format-version");
+          const headerPublisher = response.headers.get("x-publisher");
+          const headerEtag = response.headers.get("etag");
+
+          if (headerShaNorm && isSha256Hex(headerShaNorm)) {
+            refreshed.sha256 = headerShaNorm;
+          }
+          if (headerEtag && headerEtag.trim().length > 0) {
+            refreshed.etag = String(headerEtag).trim();
+          }
+          if (headerSignature && headerSignature.trim().length > 0) {
+            refreshed.signatureBase64 = String(headerSignature).trim();
+          }
+          if (headerPublisher && headerPublisher.trim().length > 0) {
+            refreshed.publisher = String(headerPublisher).trim();
+          }
+          if (headerFormatVersion && headerFormatVersion.trim().length > 0) {
+            const parsed = Number(headerFormatVersion);
+            if (Number.isFinite(parsed) && parsed > 0) {
+              refreshed.formatVersion = parsed;
+            }
+          }
+          if (resolvedPublisherKeyId) {
+            refreshed.publisherKeyId = resolvedPublisherKeyId;
+          }
+
+          const cacheIndexChanged =
+            refreshed.sha256 !== cached.sha256 ||
+            refreshed.etag !== cached.etag ||
+            refreshed.signatureBase64 !== cached.signatureBase64 ||
+            refreshed.publisher !== cached.publisher ||
+            refreshed.formatVersion !== cached.formatVersion ||
+            refreshed.publisherKeyId !== cached.publisherKeyId;
+
+          if (this.cacheDir && cacheBase && indexPath && cacheIndexChanged) {
             try {
-              await atomicWriteJson(indexPath, { ...cached, publisherKeyId: resolvedPublisherKeyId });
+              await atomicWriteJson(indexPath, refreshed);
             } catch {
               // ignore cache update failures
             }
@@ -205,10 +243,10 @@ export class MarketplaceClient {
 
           return {
             bytes: Buffer.from(cachedBytes),
-            signatureBase64: cached.signatureBase64 || null,
-            sha256: cached.sha256,
-            formatVersion: Number(cached.formatVersion || 1),
-            publisher: cached.publisher || null,
+            signatureBase64: refreshed.signatureBase64 || null,
+            sha256: String(refreshed.sha256 || cached.sha256),
+            formatVersion: Number(refreshed.formatVersion || 1),
+            publisher: refreshed.publisher || null,
             publisherKeyId: resolvedPublisherKeyId,
           };
         }
