@@ -384,34 +384,32 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         }
 
         if let Some(range) = value_range.as_ref() {
-                let range_start = range.start().unwrap_or((0, 0));
+            let range_start = range.start().unwrap_or((0, 0));
 
-                for (row, col, value) in range.used_cells() {
-                    let Some(cell_ref) = to_cell_ref(range_start, row, col) else {
-                        warnings.push(ImportWarning::new(format!(
-                            "skipping out-of-bounds cell in sheet `{sheet_name}` at ({row},{col})"
-                        )));
-                        continue;
-                    };
+            for (row, col, value) in range.used_cells() {
+                let Some(cell_ref) = to_cell_ref(range_start, row, col) else {
+                    warnings.push(ImportWarning::new(format!(
+                        "skipping out-of-bounds cell in sheet `{sheet_name}` at ({row},{col})"
+                    )));
+                    continue;
+                };
 
-                    let anchor = sheet.merged_regions.resolve_cell(cell_ref);
-                    let Some((value, mut style_id)) =
-                        convert_value(value, sheet_date_time_styles)
-                    else {
-                        continue;
-                    };
+                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                let Some((value, mut style_id)) = convert_value(value, sheet_date_time_styles) else {
+                    continue;
+                };
 
-                    if let Some(resolved) =
-                        style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, anchor)
-                    {
-                        style_id = Some(resolved);
-                    }
-
-                    sheet.set_value(anchor, value);
-                    if let Some(style_id) = style_id {
-                        sheet.set_style_id(anchor, style_id);
-                    }
+                if let Some(resolved) =
+                    style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, anchor)
+                {
+                    style_id = Some(resolved);
                 }
+
+                sheet.set_value(anchor, value);
+                if let Some(style_id) = style_id {
+                    sheet.set_style_id(anchor, style_id);
+                }
+            }
         }
 
         match workbook.worksheet_formula(&sheet_name) {
