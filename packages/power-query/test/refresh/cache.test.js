@@ -330,6 +330,56 @@ test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the
   assert.deepEqual(second.table.toGrid(), firstGrid);
 });
 
+test("QueryEngine: parquet source options are part of the cache key", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  const inputTable = arrowTableFromColumns({
+    id: new Int32Array([1, 2, 3]),
+    name: ["Alice", "Bob", "Carla"],
+  });
+  const parquetBytes = await arrowTableToParquet(inputTable);
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readBinary: async () => {
+        readCount += 1;
+        return parquetBytes;
+      },
+    },
+  });
+
+  const query = {
+    id: "q_parquet_options_cache",
+    name: "Parquet options cache",
+    source: { type: "parquet", path: "/tmp/options.parquet", options: { limit: 1 } },
+    steps: [],
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(readCount, 1);
+  assert.ok(first.table instanceof ArrowTableAdapter);
+  assert.equal(first.table.rowCount, 1);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(readCount, 1);
+
+  query.source.options = { limit: 2 };
+  const third = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(third.meta.cache?.hit, false, "changing Parquet reader options should change the cache key");
+  assert.equal(readCount, 2);
+  assert.ok(third.table instanceof ArrowTableAdapter);
+  assert.equal(third.table.rowCount, 2);
+
+  const fourth = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(fourth.meta.cache?.hit, true);
+  assert.equal(readCount, 2);
+});
+
 test("QueryEngine: Arrow cache preserves renamed columns", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });

@@ -1336,7 +1336,8 @@ export class QueryEngine {
       const credentials = await this.getCredentials("file", request, state);
       const credentialId = extractCredentialId(credentials);
       const cacheable = credentials == null || credentialId != null;
-      return {
+      /** @type {Record<string, unknown>} */
+      const signature = {
         type: source.type,
         sourceId,
         privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
@@ -1344,6 +1345,20 @@ export class QueryEngine {
         credentialsHash: credentialId ? hashValue(credentialId) : null,
         $cacheable: cacheable,
       };
+
+      if (source.type === "parquet") {
+        const parquetOptions = source.options;
+        if (
+          parquetOptions &&
+          typeof parquetOptions === "object" &&
+          !Array.isArray(parquetOptions) &&
+          Object.keys(parquetOptions).length > 0
+        ) {
+          signature.parquetOptions = parquetOptions;
+        }
+      }
+
+      return signature;
     }
 
     if (source.type === "api") {
