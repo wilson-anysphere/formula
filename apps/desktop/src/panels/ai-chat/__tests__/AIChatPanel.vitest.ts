@@ -259,4 +259,77 @@ describe("AIChatPanel tool-calling history", () => {
       root.unmount();
     });
   });
+
+  it("can cancel an in-flight streaming response", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const client: LLMClient = {
+      chat: vi.fn(async () => {
+        throw new Error("chat() should not be called when streamChat is available");
+      }),
+      streamChat: (async function* (request: any) {
+        yield { type: "text", delta: "Hello" };
+        await new Promise<void>((resolve) => {
+          request.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        const err = new Error("Aborted");
+        (err as any).name = "AbortError";
+        throw err;
+      }) as any,
+    };
+
+    const toolExecutor: ToolExecutor = {
+      tools: [],
+      execute: vi.fn(async () => ({})),
+    };
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(AIChatPanel, { client, toolExecutor, systemPrompt: "system" }));
+    });
+
+    const input = container.querySelector("input");
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send");
+    const cancelButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Cancel");
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+    expect(cancelButton).toBeInstanceOf(HTMLButtonElement);
+
+    const inputEl = input as HTMLInputElement;
+    const sendEl = sendButton as HTMLButtonElement;
+    const cancelEl = cancelButton as HTMLButtonElement;
+
+    await act(async () => {
+      setNativeInputValue(inputEl, "Hi");
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendEl.click();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("Hello") ?? false);
+    });
+
+    // Cancel while the stream is still pending.
+    await act(async () => {
+      cancelEl.click();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("Cancelled.") ?? false);
+    });
+
+    expect(container.textContent).not.toContain("thinking");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });
