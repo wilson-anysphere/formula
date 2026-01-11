@@ -1,4 +1,4 @@
-import { ScriptRuntime } from "@formula/scripting/web";
+import { ScriptRuntime, type PermissionSnapshot as ScriptPermissionSnapshot } from "@formula/scripting/web";
 import { PyodideRuntime } from "@formula/python-runtime/pyodide";
 import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
 
@@ -6,11 +6,6 @@ import { DocumentControllerWorkbookAdapter } from "../scripting/documentControll
 
 import type { DocumentController } from "../document/documentController.js";
 import type { MacroBackend, MacroInfo, MacroLanguage, MacroPermission, MacroRunRequest, MacroRunResult } from "./types";
-
-type ScriptPermissions = {
-  network?: "none" | "allowlist" | "full";
-  networkAllowlist?: string[];
-};
 
 type PythonPermissions = {
   filesystem?: "none" | "read" | "readwrite";
@@ -98,8 +93,8 @@ function prefixLines(prefix: string, text: unknown): string[] {
   return splitLines(text).map((line) => `${prefix}${line}`);
 }
 
-function defaultScriptPermissions(): ScriptPermissions {
-  return { network: "none" };
+function defaultScriptPermissions(): ScriptPermissionSnapshot {
+  return { network: { mode: "none", allowlist: [] } };
 }
 
 function defaultPythonPermissions(): PythonPermissions {
@@ -111,10 +106,10 @@ function effectiveNetworkAllowlist(): string[] {
   return hostname ? [hostname] : ["localhost"];
 }
 
-function scriptPermissionsFromMacroPermissions(perms: MacroPermission[] | undefined): ScriptPermissions {
+function scriptPermissionsFromMacroPermissions(perms: MacroPermission[] | undefined): ScriptPermissionSnapshot {
   const requested = new Set(perms ?? []);
   if (!requested.has("network")) return defaultScriptPermissions();
-  return { network: "allowlist", networkAllowlist: effectiveNetworkAllowlist() };
+  return { network: { mode: "allowlist", allowlist: effectiveNetworkAllowlist() } };
 }
 
 function pythonPermissionsFromMacroPermissions(perms: MacroPermission[] | undefined): PythonPermissions {
@@ -336,4 +331,3 @@ export class WebMacroBackend implements MacroBackend {
     return this.pyodide;
   }
 }
-
