@@ -62,3 +62,20 @@ test("FileSystemCacheStore.pruneExpired cleans up stale temp files", async () =>
     await rm(cacheDir, { recursive: true, force: true });
   }
 });
+
+test("FileSystemCacheStore.pruneExpired cleans up orphaned bin blobs", async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-prune-fs-orphan-"));
+  try {
+    const store = new FileSystemCacheStore({ directory: cacheDir });
+    await store.ensureDir();
+
+    const { binPath } = await store.pathsForKey("orphan");
+    await writeFile(binPath, new Uint8Array([1, 2, 3]));
+    await utimes(binPath, 0, 0);
+
+    await store.pruneExpired(10 * 60 * 1000);
+    await assert.rejects(stat(binPath));
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});

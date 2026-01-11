@@ -416,6 +416,7 @@ export class EncryptedFileSystemCacheStore {
     await this.ensureDir();
     const { fs, path } = await this.deps();
     const tmpGraceMs = 5 * 60 * 1000;
+    const orphanGraceMs = tmpGraceMs;
 
     /** @type {import("node:fs").Dirent[]} */
     let entries = [];
@@ -424,6 +425,9 @@ export class EncryptedFileSystemCacheStore {
     } catch {
       return;
     }
+
+    /** @type {Set<string>} */
+    const liveJsonBases = new Set();
 
     for (const entry of entries) {
       if (!entry.isFile()) continue;
@@ -444,8 +448,9 @@ export class EncryptedFileSystemCacheStore {
       }
 
       if (!entry.name.endsWith(".json")) continue;
+      const baseName = entry.name.slice(0, -".json".length);
       const filePath = path.join(this.directory, entry.name);
-      const binPath = path.join(this.directory, `${entry.name.slice(0, -".json".length)}.bin`);
+      const binPath = path.join(this.directory, `${baseName}.bin`);
 
       /** @type {Buffer} */
       let bytes;
@@ -471,12 +476,34 @@ export class EncryptedFileSystemCacheStore {
         if (typeof expiresAtMs === "number" && expiresAtMs <= nowMs) {
           await fs.rm(filePath, { force: true });
           await fs.rm(binPath, { force: true });
+        } else {
+          liveJsonBases.add(baseName);
         }
       } catch {
         // Corrupted or unreadable cache entries are treated as misses; remove them
         // so they don't linger indefinitely.
         await fs.rm(filePath, { force: true }).catch(() => {});
         await fs.rm(binPath, { force: true }).catch(() => {});
+      }
+    }
+
+    // Best-effort cleanup of orphaned `.bin` blobs left behind by interrupted writes.
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".bin")) continue;
+      const base = entry.name.slice(0, -".bin".length);
+      if (!/^[0-9a-f]{16}$/.test(base)) continue;
+      if (liveJsonBases.has(base)) continue;
+
+      const binPath = path.join(this.directory, entry.name);
+      try {
+        const stats = await fs.stat(binPath);
+        const ageMs = nowMs - stats.mtimeMs;
+        if (Number.isFinite(stats.mtimeMs) && ageMs > orphanGraceMs) {
+          await fs.rm(binPath, { force: true });
+        }
+      } catch {
+        // ignore
       }
     }
   }

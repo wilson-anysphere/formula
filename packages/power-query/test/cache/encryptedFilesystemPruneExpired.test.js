@@ -52,3 +52,20 @@ test("EncryptedFileSystemCacheStore.pruneExpired cleans up stale temp files", as
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("EncryptedFileSystemCacheStore.pruneExpired cleans up orphaned bin blobs", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-prune-efs-orphan-"));
+  try {
+    const keychainProvider = new InMemoryKeychainProvider();
+    const store = new EncryptedFileSystemCacheStore({ directory: dir, encryption: { enabled: true, keychainProvider } });
+
+    const { binPath } = await store.pathsForKey("orphan");
+    await writeFile(binPath, new Uint8Array([1, 2, 3]));
+    await utimes(binPath, 0, 0);
+
+    await store.pruneExpired(10 * 60 * 1000);
+    await assert.rejects(stat(binPath));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

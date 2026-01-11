@@ -303,6 +303,7 @@ export class FileSystemCacheStore {
     await this.ensureDir();
     const { fs, path } = await this.deps();
     const tmpGraceMs = 5 * 60 * 1000;
+    const orphanGraceMs = tmpGraceMs;
 
     /** @type {import("node:fs").Dirent[]} */
     let entries = [];
@@ -311,6 +312,9 @@ export class FileSystemCacheStore {
     } catch {
       return;
     }
+
+    /** @type {Set<string>} */
+    const liveJsonBases = new Set();
 
     for (const entry of entries) {
       if (!entry.isFile()) continue;
@@ -333,8 +337,9 @@ export class FileSystemCacheStore {
       }
 
       if (!entry.name.endsWith(".json")) continue;
+      const baseName = entry.name.slice(0, -".json".length);
       const jsonPath = path.join(this.directory, entry.name);
-      const binPath = path.join(this.directory, `${entry.name.slice(0, -".json".length)}.bin`);
+      const binPath = path.join(this.directory, `${baseName}.bin`);
 
       try {
         const text = await fs.readFile(jsonPath, "utf8");
@@ -344,12 +349,36 @@ export class FileSystemCacheStore {
         if (typeof expiresAtMs === "number" && expiresAtMs <= nowMs) {
           await fs.rm(jsonPath, { force: true });
           await fs.rm(binPath, { force: true });
+        } else {
+          liveJsonBases.add(baseName);
         }
       } catch {
         // Corrupted or unreadable cache entries are treated as misses; remove them
         // so they don't linger indefinitely.
         await fs.rm(jsonPath, { force: true }).catch(() => {});
         await fs.rm(binPath, { force: true }).catch(() => {});
+      }
+    }
+
+    // Best-effort cleanup of orphaned `.bin` blobs. These can be left behind if a
+    // process crashes after writing the blob but before writing the `.json` envelope.
+    // To avoid racing concurrent writers, only remove blobs older than a grace period.
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".bin")) continue;
+      const base = entry.name.slice(0, -".bin".length);
+      if (!/^[0-9a-f]{16}$/.test(base)) continue;
+      if (liveJsonBases.has(base)) continue;
+
+      const binPath = path.join(this.directory, entry.name);
+      try {
+        const stats = await fs.stat(binPath);
+        const ageMs = nowMs - stats.mtimeMs;
+        if (Number.isFinite(stats.mtimeMs) && ageMs > orphanGraceMs) {
+          await fs.rm(binPath, { force: true });
+        }
+      } catch {
+        // ignore
       }
     }
   }
