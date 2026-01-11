@@ -137,7 +137,9 @@ test("webgpu: f32 + f64 correctness for common kernels (if WebGPU available)", a
     assert.deepEqual(Array.from(gpuSorted), Array.from(cpuSorted));
   }
 
-  {
+  await t.test("webgpu: groupBySum matches CPU (if supported)", async (t2) => {
+    if (!diag.supportedKernels.groupBySum) return t2.skip("groupBySum unsupported by this WebGPU backend");
+
     const rng = makeRng(4242);
     const n = 50_000;
     const keys = new Uint32Array(n);
@@ -151,9 +153,11 @@ test("webgpu: f32 + f64 correctness for common kernels (if WebGPU available)", a
     assert.deepEqual(Array.from(gpuOut.uniqueKeys), Array.from(cpuOut.uniqueKeys));
     assert.deepEqual(Array.from(gpuOut.counts), Array.from(cpuOut.counts));
     assert.deepEqual(Array.from(gpuOut.sums), Array.from(cpuOut.sums));
-  }
+  });
 
-  {
+  await t.test("webgpu: hashJoin matches CPU (if supported)", async (t2) => {
+    if (!diag.supportedKernels.hashJoin) return t2.skip("hashJoin unsupported by this WebGPU backend");
+
     const rng = makeRng(9999);
     const leftLen = 4096;
     const rightLen = 4096;
@@ -167,7 +171,7 @@ test("webgpu: f32 + f64 correctness for common kernels (if WebGPU available)", a
     const gpuOut = await gpu.hashJoin(leftKeys, rightKeys);
     assert.deepEqual(Array.from(gpuOut.leftIndex), Array.from(cpuOut.leftIndex));
     assert.deepEqual(Array.from(gpuOut.rightIndex), Array.from(cpuOut.rightIndex));
-  }
+  });
 
   // -------- f64 paths (when supported) --------
   if (diag.supportsF64) {
