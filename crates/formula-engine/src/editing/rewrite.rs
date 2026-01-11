@@ -1,9 +1,9 @@
 use std::cmp::{max, min};
 
 use crate::{
-    parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellAddr, CellRef as AstCellRef,
-    ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr, RowRef as AstRowRef,
-    SerializeOptions, SheetRef, UnaryExpr,
+    parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CallExpr, CellAddr,
+    CellRef as AstCellRef, ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions,
+    PostfixExpr, RowRef as AstRowRef, SerializeOptions, SheetRef, UnaryExpr,
 };
 
 const REF_ERROR: &str = "#REF!";
@@ -282,6 +282,33 @@ where
             (
                 Expr::FunctionCall(FunctionCall {
                     name: name.clone(),
+                    args,
+                }),
+                true,
+            )
+        }
+        Expr::Call(CallExpr { callee, args }) => {
+            let mut changed = false;
+
+            let (callee, callee_changed) = f(callee);
+            changed |= callee_changed;
+
+            let args: Vec<Expr> = args
+                .iter()
+                .map(|arg| {
+                    let (expr, c) = f(arg);
+                    changed |= c;
+                    expr
+                })
+                .collect();
+
+            if !changed {
+                return (expr.clone(), false);
+            }
+
+            (
+                Expr::Call(CallExpr {
+                    callee: Box::new(callee),
                     args,
                 }),
                 true,

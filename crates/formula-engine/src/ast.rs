@@ -231,6 +231,7 @@ pub enum Expr {
     StructuredRef(StructuredRef),
     Array(ArrayLiteral),
     FunctionCall(FunctionCall),
+    Call(CallExpr),
     Unary(UnaryExpr),
     Postfix(PostfixExpr),
     Binary(BinaryExpr),
@@ -259,6 +260,14 @@ impl Expr {
                     .map(|e| e.normalize_relative(origin))
                     .collect(),
             }),
+            Expr::Call(call) => Expr::Call(CallExpr {
+                callee: Box::new(call.callee.normalize_relative(origin)),
+                args: call
+                    .args
+                    .iter()
+                    .map(|e| e.normalize_relative(origin))
+                    .collect(),
+            }),
             Expr::Unary(u) => Expr::Unary(UnaryExpr {
                 op: u.op,
                 expr: Box::new(u.expr.normalize_relative(origin)),
@@ -281,6 +290,7 @@ impl Expr {
             Expr::Binary(b) => b.op.precedence(),
             Expr::Unary(_) => 70,
             Expr::Postfix(_) => 60,
+            Expr::Call(_) => 90,
             _ => 100,
         }
     }
@@ -319,6 +329,25 @@ impl Expr {
             Expr::StructuredRef(r) => r.fmt(out, opts)?,
             Expr::Array(arr) => arr.fmt(out, opts)?,
             Expr::FunctionCall(call) => call.fmt(out, opts)?,
+            Expr::Call(call) => {
+                call.callee.fmt(out, opts, Some(my_prec))?;
+                out.push('(');
+                for (i, arg) in call.args.iter().enumerate() {
+                    if i > 0 {
+                        out.push(opts.locale.arg_separator);
+                    }
+                    // See `FunctionCall::fmt` for rationale: union uses the locale list separator,
+                    // which must be disambiguated from argument separators with parentheses.
+                    if arg.contains_union() {
+                        out.push('(');
+                        arg.fmt(out, opts, None)?;
+                        out.push(')');
+                    } else {
+                        arg.fmt(out, opts, None)?;
+                    }
+                }
+                out.push(')');
+            }
             Expr::Unary(u) => {
                 out.push_str(u.op.as_str());
                 u.expr.fmt(out, opts, Some(my_prec))?;
@@ -348,6 +377,9 @@ impl Expr {
             Expr::Unary(u) => u.expr.contains_union(),
             Expr::Postfix(p) => p.expr.contains_union(),
             Expr::FunctionCall(call) => call.args.iter().any(Expr::contains_union),
+            Expr::Call(call) => {
+                call.callee.contains_union() || call.args.iter().any(Expr::contains_union)
+            }
             Expr::Array(arr) => arr.rows.iter().flatten().any(Expr::contains_union),
             _ => false,
         }
@@ -528,6 +560,12 @@ impl FunctionCall {
         out.push(')');
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallExpr {
+    pub callee: Box<Expr>,
+    pub args: Vec<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

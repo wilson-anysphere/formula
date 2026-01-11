@@ -1,7 +1,7 @@
 //! Formula lexer and parser.
 
 use crate::{
-    ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellRef, ColRef, Coord, Expr, FunctionCall,
+    ArrayLiteral, Ast, BinaryExpr, BinaryOp, CallExpr, CellRef, ColRef, Coord, Expr, FunctionCall,
     FunctionName, LocaleConfig, NameRef, ParseError, ParseOptions, PostfixExpr, PostfixOp,
     ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr, UnaryOp,
 };
@@ -560,7 +560,26 @@ impl<'a> Lexer<'a> {
                 }
                 '(' => {
                     self.bump();
-                    let is_func = matches!(self.prev_sig, Some(TokenKind::Ident(_)));
+                    let is_func = matches!(
+                        self.prev_sig,
+                        Some(
+                            TokenKind::Number(_)
+                                | TokenKind::String(_)
+                                | TokenKind::Boolean(_)
+                                | TokenKind::Error(_)
+                                | TokenKind::Cell(_)
+                                | TokenKind::R1C1Cell(_)
+                                | TokenKind::R1C1Row(_)
+                                | TokenKind::R1C1Col(_)
+                                | TokenKind::Ident(_)
+                                | TokenKind::QuotedIdent(_)
+                                | TokenKind::RParen
+                                | TokenKind::RBrace
+                                | TokenKind::RBracket
+                                | TokenKind::Hash
+                                | TokenKind::Percent
+                        )
+                    );
                     self.paren_stack.push(if is_func {
                         ParenContext::FunctionCall {
                             brace_depth: self.brace_depth,
@@ -1330,6 +1349,13 @@ impl<'a> Parser<'a> {
 
         loop {
             self.skip_trivia();
+            // Postfix call expressions: `expr(arg1, arg2, ...)`.
+            let call_bp = 90;
+            if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
+                lhs = self.parse_call(lhs)?;
+                continue;
+            }
+
             // Postfix operators (`%` and spill-range `#`).
             let postfix_bp = 60;
             if matches!(self.peek_kind(), TokenKind::Percent) && postfix_bp >= min_bp {
@@ -1413,6 +1439,13 @@ impl<'a> Parser<'a> {
 
         loop {
             self.skip_trivia();
+            // Postfix call expressions: `expr(arg1, arg2, ...)`.
+            let call_bp = 90;
+            if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
+                lhs = self.parse_call_best_effort(lhs);
+                continue;
+            }
+
             // Postfix operators (`%` and spill-range `#`).
             let postfix_bp = 60;
             if matches!(self.peek_kind(), TokenKind::Percent) && postfix_bp >= min_bp {
@@ -1791,6 +1824,68 @@ impl<'a> Parser<'a> {
 
         Expr::FunctionCall(FunctionCall {
             name: FunctionName::new(name),
+            args,
+        })
+    }
+
+    fn parse_call_best_effort(&mut self, callee: Expr) -> Expr {
+        if let Err(e) = self.expect(TokenKind::LParen) {
+            self.record_error(e);
+            return Expr::Missing;
+        }
+
+        let mut args = Vec::new();
+
+        loop {
+            self.skip_trivia();
+            match self.peek_kind() {
+                TokenKind::RParen => {
+                    self.next();
+                    break;
+                }
+                TokenKind::Eof => {
+                    self.record_error(ParseError::new("Unterminated call", self.current_span()));
+                    break;
+                }
+                _ => {}
+            }
+
+            if matches!(self.peek_kind(), TokenKind::ArgSep) {
+                args.push(Expr::Missing);
+            } else {
+                let arg = self.parse_expression_best_effort(0);
+                args.push(arg);
+            }
+
+            self.skip_trivia();
+            match self.peek_kind() {
+                TokenKind::ArgSep => {
+                    self.next();
+                    continue;
+                }
+                TokenKind::RParen => {
+                    self.next();
+                    break;
+                }
+                TokenKind::Eof => {
+                    self.record_error(ParseError::new("Unterminated call", self.current_span()));
+                    break;
+                }
+                _ => {
+                    self.record_error(ParseError::new(
+                        "Expected argument separator or `)`",
+                        self.current_span(),
+                    ));
+                    // Attempt to resync by consuming one token.
+                    if !matches!(self.peek_kind(), TokenKind::Eof) {
+                        self.next();
+                    }
+                }
+            }
+        }
+
+        Expr::Call(CallExpr {
+            callee: Box::new(callee),
             args,
         })
     }
@@ -2219,6 +2314,47 @@ impl<'a> Parser<'a> {
         self.func_stack.pop();
         Ok(Expr::FunctionCall(FunctionCall {
             name: FunctionName::new(name),
+            args,
+        }))
+    }
+
+    fn parse_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
+        self.expect(TokenKind::LParen)?;
+        let mut args = Vec::new();
+        self.skip_trivia();
+        if matches!(self.peek_kind(), TokenKind::RParen) {
+            self.next();
+        } else {
+            loop {
+                self.skip_trivia();
+                if matches!(self.peek_kind(), TokenKind::ArgSep) {
+                    // Missing argument.
+                    args.push(Expr::Missing);
+                } else {
+                    let arg = self.parse_expression(0)?;
+                    args.push(arg);
+                }
+                self.skip_trivia();
+                match self.peek_kind() {
+                    TokenKind::ArgSep => {
+                        self.next();
+                        continue;
+                    }
+                    TokenKind::RParen => {
+                        self.next();
+                        break;
+                    }
+                    _ => {
+                        return Err(ParseError::new(
+                            "Expected argument separator or `)`",
+                            self.current_span(),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(Expr::Call(CallExpr {
+            callee: Box::new(callee),
             args,
         }))
     }

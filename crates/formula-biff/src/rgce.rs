@@ -734,6 +734,7 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 out.extend_from_slice(&func.id.to_le_bytes());
             }
         }
+        Expr::Call(_) => return Err(EncodeRgceError::Unsupported("call expressions")),
         Expr::Missing => {
             out.push(0x16); // PtgMissArg
         }

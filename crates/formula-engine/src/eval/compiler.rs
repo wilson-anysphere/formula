@@ -85,6 +85,7 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             original_name: call.name.original.clone(),
             args: call.args.iter().map(|a| lower_expr(a, origin)).collect(),
         },
+        crate::Expr::Call(_) => Expr::Error(ErrorKind::Value),
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Expr::Unary {
                 op: UnaryOp::Plus,
@@ -464,6 +465,7 @@ fn compile_expr_inner(
                 args,
             }
         }
+        crate::Expr::Call(_) => Expr::Error(ErrorKind::Value),
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Expr::Unary {
                 op: UnaryOp::Plus,
