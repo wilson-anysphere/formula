@@ -1813,9 +1813,7 @@ mod tests {
     #[test]
     fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Region")],
             column_fields: vec![],
             value_fields: vec![],
             filter_fields: vec![],
@@ -2029,6 +2027,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2077,6 +2077,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2128,6 +2130,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2176,6 +2180,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2227,6 +2233,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2325,6 +2333,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2373,6 +2383,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::Top,
             grand_totals: GrandTotals {
@@ -2426,6 +2438,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::Bottom,
             grand_totals: GrandTotals {
@@ -2480,6 +2494,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2523,6 +2539,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2566,6 +2584,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2614,6 +2634,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2661,6 +2683,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2704,6 +2728,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2747,6 +2773,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2802,6 +2830,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {

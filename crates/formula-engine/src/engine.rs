@@ -1,7 +1,7 @@
 use crate::bytecode;
 use crate::eval::{
     compile_canonical_expr, lower_ast, parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError,
-    RangeRef, SheetReference,
+    RangeRef, SheetReference, ValueResolver,
 };
 use crate::editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
@@ -19,7 +19,7 @@ use crate::iterative;
 use formula_model::{CellId, CellRef, Range, Table};
 use rayon::prelude::*;
 use std::cmp::max;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -41,6 +41,13 @@ pub enum EngineError {
 pub enum RecalcMode {
     SingleThreaded,
     MultiThreaded,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecalcValueChange {
+    pub sheet: String,
+    pub addr: CellAddr,
+    pub value: Value,
 }
 
 /// Scope for a defined name / named range.
@@ -243,6 +250,46 @@ pub struct Engine {
     circular_references: HashSet<CellKey>,
     spills: SpillState,
     next_recalc_id: u64,
+}
+
+#[derive(Default)]
+struct RecalcValueChangeCollector {
+    before: HashMap<CellKey, Value>,
+    after: BTreeMap<CellKey, Value>,
+}
+
+impl RecalcValueChangeCollector {
+    fn record(&mut self, key: CellKey, before: Value, after: Value) {
+        if before == after {
+            return;
+        }
+        self.before.entry(key).or_insert(before);
+        self.after.insert(key, after);
+    }
+
+    fn into_sorted_changes(self, workbook: &Workbook) -> Vec<RecalcValueChange> {
+        let mut out = Vec::new();
+        for (key, after) in self.after {
+            let before = self
+                .before
+                .get(&key)
+                .expect("recalc change must record before value");
+            if *before == after {
+                continue;
+            }
+            let sheet = workbook
+                .sheet_names
+                .get(key.sheet)
+                .cloned()
+                .unwrap_or_default();
+            out.push(RecalcValueChange {
+                sheet,
+                addr: key.addr,
+                value: after,
+            });
+        }
+        out
+    }
 }
 
 impl Default for Engine {
@@ -1108,6 +1155,28 @@ impl Engine {
     }
 
     fn recalculate_with_mode(&mut self, mode: RecalcMode) {
+        self.recalculate_with_mode_and_value_changes(mode, None);
+    }
+
+    pub fn recalculate_with_value_changes(&mut self, mode: RecalcMode) -> Vec<RecalcValueChange> {
+        let mut changes = RecalcValueChangeCollector::default();
+        self.recalculate_with_mode_and_value_changes(mode, Some(&mut changes));
+        changes.into_sorted_changes(&self.workbook)
+    }
+
+    pub fn recalculate_with_value_changes_single_threaded(&mut self) -> Vec<RecalcValueChange> {
+        self.recalculate_with_value_changes(RecalcMode::SingleThreaded)
+    }
+
+    pub fn recalculate_with_value_changes_multi_threaded(&mut self) -> Vec<RecalcValueChange> {
+        self.recalculate_with_value_changes(RecalcMode::MultiThreaded)
+    }
+
+    fn recalculate_with_mode_and_value_changes(
+        &mut self,
+        mode: RecalcMode,
+        mut value_changes: Option<&mut RecalcValueChangeCollector>,
+    ) {
         let date_system = self.date_system;
         // Spill recalculation can introduce new dirty cells (spill outputs becoming
         // computed/cleared). These should be resolved as part of the same recalc "tick",
@@ -1117,7 +1186,7 @@ impl Engine {
             let levels = match self.calc_graph.calc_levels_for_dirty() {
                 Ok(levels) => levels,
                 Err(_) => {
-                    self.recalculate_with_cycles(mode);
+                    self.recalculate_with_cycles(mode, value_changes);
                     return;
                 }
             };
@@ -1128,7 +1197,13 @@ impl Engine {
 
             let recalc_ctx = recalc_ctx.get_or_insert_with(|| self.begin_recalc_context());
 
-            let spill_dirty_roots = self.recalculate_levels(levels, mode, recalc_ctx, date_system);
+            let spill_dirty_roots = self.recalculate_levels(
+                levels,
+                mode,
+                recalc_ctx,
+                date_system,
+                value_changes.as_deref_mut(),
+            );
             if spill_dirty_roots.is_empty() {
                 return;
             }
@@ -1148,6 +1223,7 @@ impl Engine {
         mode: RecalcMode,
         recalc_ctx: &crate::eval::RecalcContext,
         date_system: ExcelDateSystem,
+        mut value_changes: Option<&mut RecalcValueChangeCollector>,
     ) -> Vec<CellId> {
         self.circular_references.clear();
 
@@ -1315,7 +1391,13 @@ impl Engine {
             results.sort_by_key(|(k, _)| (k.sheet, k.addr.row, k.addr.col));
 
             for (k, v) in results {
-                self.apply_eval_result(k, v, &mut snapshot, &mut spill_dirty_roots);
+                self.apply_eval_result(
+                    k,
+                    v,
+                    &mut snapshot,
+                    &mut spill_dirty_roots,
+                    value_changes.as_deref_mut(),
+                );
             }
         }
 
@@ -1326,7 +1408,11 @@ impl Engine {
         spill_dirty_roots
     }
 
-    fn recalculate_with_cycles(&mut self, _mode: RecalcMode) {
+    fn recalculate_with_cycles(
+        &mut self,
+        _mode: RecalcMode,
+        mut value_changes: Option<&mut RecalcValueChangeCollector>,
+    ) {
         let mut impacted_ids: HashSet<CellId> = self.calc_graph.dirty_cells().into_iter().collect();
         impacted_ids.extend(self.calc_graph.volatile_cells());
 
@@ -1403,7 +1489,13 @@ impl Engine {
                     date_system,
                 );
                 let v = evaluator.eval_formula(&expr);
-                self.apply_eval_result(k, v, &mut snapshot, &mut spill_dirty_roots);
+                self.apply_eval_result(
+                    k,
+                    v,
+                    &mut snapshot,
+                    &mut spill_dirty_roots,
+                    value_changes.as_deref_mut(),
+                );
                 continue;
             }
 
@@ -1411,13 +1503,19 @@ impl Engine {
                 self.circular_references.insert(k);
             }
 
-            if !self.calc_settings.iterative.enabled {
-                for &k in &scc {
-                    let v = Value::Number(0.0);
-                    self.apply_eval_result(k, v, &mut snapshot, &mut spill_dirty_roots);
+                if !self.calc_settings.iterative.enabled {
+                    for &k in &scc {
+                        let v = Value::Number(0.0);
+                        self.apply_eval_result(
+                            k,
+                            v,
+                            &mut snapshot,
+                            &mut spill_dirty_roots,
+                            value_changes.as_deref_mut(),
+                        );
+                    }
+                    continue;
                 }
-                continue;
-            }
 
             let max_iters = max(1, self.calc_settings.iterative.max_iterations) as usize;
             let tol = self.calc_settings.iterative.max_change.max(0.0);
@@ -1445,7 +1543,13 @@ impl Engine {
                     );
                     let new_val = evaluator.eval_formula(&expr);
                     max_delta = max_delta.max(value_delta(&old, &new_val));
-                    self.apply_eval_result(k, new_val, &mut snapshot, &mut spill_dirty_roots);
+                    self.apply_eval_result(
+                        k,
+                        new_val,
+                        &mut snapshot,
+                        &mut spill_dirty_roots,
+                        value_changes.as_deref_mut(),
+                    );
                 }
 
                 if max_delta <= tol {
@@ -1465,6 +1569,7 @@ impl Engine {
         value: Value,
         snapshot: &mut Snapshot,
         spill_dirty_roots: &mut Vec<CellId>,
+        mut value_changes: Option<&mut RecalcValueChangeCollector>,
     ) {
         // Clear any previously tracked spill blockage for this origin before applying the new
         // evaluation result.
@@ -1473,7 +1578,13 @@ impl Engine {
         match value {
             Value::Array(array) => {
                 if array.rows == 0 || array.cols == 0 {
-                    self.apply_eval_result(key, Value::Error(ErrorKind::Calc), snapshot, spill_dirty_roots);
+                    self.apply_eval_result(
+                        key,
+                        Value::Error(ErrorKind::Calc),
+                        snapshot,
+                        spill_dirty_roots,
+                        value_changes,
+                    );
                     return;
                 }
 
@@ -1481,15 +1592,28 @@ impl Engine {
                     let cleared = self.clear_spill_for_origin(key);
                     snapshot.spill_end_by_origin.remove(&key);
                     for cleared_key in cleared {
-                        snapshot.values.remove(&cleared_key);
+                        if let Some(changes) = value_changes.as_deref_mut() {
+                            let before =
+                                snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
+                            snapshot.values.remove(&cleared_key);
+                            let after = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
+                            changes.record(cleared_key, before, after);
+                        } else {
+                            snapshot.values.remove(&cleared_key);
+                        }
                         snapshot.spill_origin_by_cell.remove(&cleared_key);
                         spill_dirty_roots.push(cell_id_from_key(cleared_key));
                         self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
                     }
 
+                    let after = Value::Error(ErrorKind::Spill);
+                    if let Some(changes) = value_changes.as_deref_mut() {
+                        let before = snapshot.get_cell_value(key.sheet, key.addr);
+                        changes.record(key, before, after.clone());
+                    }
                     let cell = self.workbook.get_or_create_cell_mut(key);
-                    cell.value = Value::Error(ErrorKind::Spill);
-                    snapshot.values.insert(key, Value::Error(ErrorKind::Spill));
+                    cell.value = after.clone();
+                    snapshot.values.insert(key, after);
                 };
 
                 let row_delta = match u32::try_from(array.rows.saturating_sub(1)) {
@@ -1528,6 +1652,10 @@ impl Engine {
                         existing.array = array.clone();
 
                         let top_left = array.top_left();
+                        if let Some(changes) = value_changes.as_deref_mut() {
+                            let before = snapshot.get_cell_value(key.sheet, key.addr);
+                            changes.record(key, before, top_left.clone());
+                        }
                         let cell = self.workbook.get_or_create_cell_mut(key);
                         cell.value = top_left.clone();
                         snapshot.values.insert(key, top_left);
@@ -1543,6 +1671,11 @@ impl Engine {
                                 };
                                 let spill_key = CellKey { sheet: key.sheet, addr };
                                 if let Some(v) = array.get(r, c).cloned() {
+                                    if let Some(changes) = value_changes.as_deref_mut() {
+                                        let before =
+                                            snapshot.get_cell_value(spill_key.sheet, spill_key.addr);
+                                        changes.record(spill_key, before, v.clone());
+                                    }
                                     snapshot.values.insert(spill_key, v);
                                 }
                             }
@@ -1556,7 +1689,14 @@ impl Engine {
                 let cleared = self.clear_spill_for_origin(key);
                 snapshot.spill_end_by_origin.remove(&key);
                 for cleared_key in cleared {
-                    snapshot.values.remove(&cleared_key);
+                    if let Some(changes) = value_changes.as_deref_mut() {
+                        let before = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
+                        snapshot.values.remove(&cleared_key);
+                        let after = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
+                        changes.record(cleared_key, before, after);
+                    } else {
+                        snapshot.values.remove(&cleared_key);
+                    }
                     snapshot.spill_origin_by_cell.remove(&cleared_key);
                     spill_dirty_roots.push(cell_id_from_key(cleared_key));
                     self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
@@ -1564,24 +1704,47 @@ impl Engine {
 
                 if let Some(blocker) = self.spill_blocker(key, &array) {
                     self.record_blocked_spill(key, blocker);
+                    let after = Value::Error(ErrorKind::Spill);
+                    if let Some(changes) = value_changes.as_deref_mut() {
+                        let before = snapshot.get_cell_value(key.sheet, key.addr);
+                        changes.record(key, before, after.clone());
+                    }
                     let cell = self.workbook.get_or_create_cell_mut(key);
-                    cell.value = Value::Error(ErrorKind::Spill);
-                    snapshot.values.insert(key, Value::Error(ErrorKind::Spill));
+                    cell.value = after.clone();
+                    snapshot.values.insert(key, after);
                     return;
                 }
 
-                self.apply_new_spill(key, end, array, snapshot, spill_dirty_roots);
+                self.apply_new_spill(
+                    key,
+                    end,
+                    array,
+                    snapshot,
+                    spill_dirty_roots,
+                    value_changes,
+                );
             }
             other => {
                 let cleared = self.clear_spill_for_origin(key);
                 snapshot.spill_end_by_origin.remove(&key);
                 for cleared_key in cleared {
-                    snapshot.values.remove(&cleared_key);
+                    if let Some(changes) = value_changes.as_deref_mut() {
+                        let before = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
+                        snapshot.values.remove(&cleared_key);
+                        let after = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
+                        changes.record(cleared_key, before, after);
+                    } else {
+                        snapshot.values.remove(&cleared_key);
+                    }
                     snapshot.spill_origin_by_cell.remove(&cleared_key);
                     spill_dirty_roots.push(cell_id_from_key(cleared_key));
                     self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
                 }
 
+                if let Some(changes) = value_changes.as_deref_mut() {
+                    let before = snapshot.get_cell_value(key.sheet, key.addr);
+                    changes.record(key, before, other.clone());
+                }
                 let cell = self.workbook.get_or_create_cell_mut(key);
                 cell.value = other.clone();
                 snapshot.values.insert(key, other);
@@ -1753,8 +1916,14 @@ impl Engine {
         array: Array,
         snapshot: &mut Snapshot,
         spill_dirty_roots: &mut Vec<CellId>,
+        mut value_changes: Option<&mut RecalcValueChangeCollector>,
     ) {
         let top_left = array.top_left();
+
+        if let Some(changes) = value_changes.as_deref_mut() {
+            let before = snapshot.get_cell_value(origin.sheet, origin.addr);
+            changes.record(origin, before, top_left.clone());
+        }
 
         let cell = self.workbook.get_or_create_cell_mut(origin);
         cell.value = top_left.clone();
@@ -1781,6 +1950,10 @@ impl Engine {
                 snapshot.spill_origin_by_cell.insert(key, origin);
 
                 if let Some(v) = array.get(r, c).cloned() {
+                    if let Some(changes) = value_changes.as_deref_mut() {
+                        let before = snapshot.get_cell_value(key.sheet, key.addr);
+                        changes.record(key, before, v.clone());
+                    }
                     snapshot.values.insert(key, v);
                 }
 
@@ -4151,6 +4324,7 @@ mod tests {
             RecalcMode::SingleThreaded,
             &recalc_ctx,
             single.date_system,
+            None,
         );
 
         let levels_multi = multi.calc_graph.calc_levels_for_dirty().expect("calc levels");
@@ -4159,6 +4333,7 @@ mod tests {
             RecalcMode::MultiThreaded,
             &recalc_ctx,
             multi.date_system,
+            None,
         );
 
         for addr in ["A1", "A2", "A3", "B1"] {
@@ -4168,6 +4343,61 @@ mod tests {
                 "mismatch at {addr}"
             );
         }
+    }
+
+    #[test]
+    fn recalculate_with_value_changes_includes_spill_outputs() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=SEQUENCE(1,2)")
+            .unwrap();
+
+        let changes = engine.recalculate_with_value_changes(RecalcMode::SingleThreaded);
+        assert_eq!(
+            changes,
+            vec![
+                RecalcValueChange {
+                    sheet: "Sheet1".to_string(),
+                    addr: parse_a1("A1").unwrap(),
+                    value: Value::Number(1.0),
+                },
+                RecalcValueChange {
+                    sheet: "Sheet1".to_string(),
+                    addr: parse_a1("B1").unwrap(),
+                    value: Value::Number(2.0),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn recalculate_with_value_changes_tracks_scalar_formula_updates() {
+        let mut engine = Engine::new();
+        engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=A2*2")
+            .unwrap();
+
+        let changes = engine.recalculate_with_value_changes(RecalcMode::SingleThreaded);
+        assert_eq!(
+            changes,
+            vec![RecalcValueChange {
+                sheet: "Sheet1".to_string(),
+                addr: parse_a1("A1").unwrap(),
+                value: Value::Number(6.0),
+            }]
+        );
+
+        engine.set_cell_value("Sheet1", "A2", 4.0).unwrap();
+        let changes = engine.recalculate_with_value_changes(RecalcMode::SingleThreaded);
+        assert_eq!(
+            changes,
+            vec![RecalcValueChange {
+                sheet: "Sheet1".to_string(),
+                addr: parse_a1("A1").unwrap(),
+                value: Value::Number(8.0),
+            }]
+        );
     }
 
     #[test]
