@@ -1920,22 +1920,22 @@ impl AppState {
                     user_id: None,
                 };
 
-                 if let Some(autosave) = persistent.autosave.as_ref() {
-                     autosave
-                         .record_change(change)
-                         .map_err(|e| AppStateError::Persistence(e.to_string()))?;
-                 } else {
-                     persistent
-                         .memory
-                         .record_change(change.clone())
-                         .map_err(|e| AppStateError::Persistence(e.to_string()))?;
-                     persistent
-                         .storage
-                         .apply_cell_changes(&[change])
-                         .map_err(|e| AppStateError::Persistence(e.to_string()))?;
-                 }
-             }
-         }
+                  if let Some(autosave) = persistent.autosave.as_ref() {
+                      autosave
+                          .record_change(change)
+                          .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+                  } else {
+                      persistent
+                          .memory
+                          .record_change(change)
+                          .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+                      persistent
+                          .memory
+                          .flush_dirty_pages()
+                          .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+                  }
+              }
+          }
 
         Ok(())
     }
