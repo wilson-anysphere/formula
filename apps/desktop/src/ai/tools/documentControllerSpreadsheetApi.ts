@@ -49,8 +49,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
   listSheets(): string[] {
     const sheets = (this.controller as any).model?.sheets;
-    if (!sheets || typeof sheets.keys !== "function") return [];
-    return Array.from(sheets.keys());
+    if (!sheets || typeof sheets.keys !== "function") return ["Sheet1"];
+    const ids = Array.from(sheets.keys());
+    // DocumentController creates sheets lazily; expose the default sheet name so
+    // downstream consumers (RAG context, etc) can still reason about "Sheet1"
+    // even before any edits.
+    return ids.length > 0 ? ids : ["Sheet1"];
   }
 
   listNonEmptyCells(sheet?: string): CellEntry[] {
@@ -138,4 +142,3 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     return new DocumentControllerSpreadsheetApi(cloned);
   }
 }
-
