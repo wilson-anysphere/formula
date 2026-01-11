@@ -10,7 +10,7 @@ export const enUS = {
   "chat.role.tool": "Tool",
   "chat.meta.thinking": " (thinking…)",
   "chat.meta.requiresApproval": " (requires approval)",
-  "chat.meta.unverifiedAnswer": "Unverified answer (no data tools used).",
+  "chat.meta.unverifiedAnswer": "Unverified answer.",
   "chat.attachmentsLabel": "Attachments:",
   "chat.pendingAttachments": "Pending attachments:",
   "chat.input.placeholder": "Ask a question about your data…",

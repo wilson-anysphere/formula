@@ -1,7 +1,7 @@
 export interface VerificationResult {
   /**
-   * Heuristic signal that the user's query likely needs spreadsheet data tools
-   * (read/compute/filter) to avoid guessing.
+   * Heuristic signal that the user's query likely needs spreadsheet tools to
+   * avoid guessing (e.g. read/compute for questions, or write/apply for actions).
    */
   needs_tools: boolean;
   /**
@@ -9,8 +9,11 @@ export interface VerificationResult {
    */
   used_tools: boolean;
   /**
-   * Whether the run is considered verified (at least one read-only data tool
-   * executed successfully, or tools were not needed).
+   * Whether the run is considered verified.
+   *
+   * A run is considered verified when:
+   * - tools were not needed, OR
+   * - at least one tool call succeeded (`ok: true`).
    */
   verified: boolean;
   /**
@@ -85,6 +88,7 @@ export function verifyToolUsage(params: VerifyToolUsageParams): VerificationResu
   const toolCalls = Array.isArray(params.toolCalls) ? params.toolCalls : [];
   const used_tools = toolCalls.length > 0;
 
+  const successfulTool = toolCalls.some((call) => call.ok === true);
   const successfulVerifiedTool = toolCalls.some((call) => isVerifiedToolName(call.name) && call.ok === true);
 
   // If tools aren't required, we treat the response as verified.
@@ -98,12 +102,12 @@ export function verifyToolUsage(params: VerifyToolUsageParams): VerificationResu
     };
   }
 
-  if (successfulVerifiedTool) {
+  if (successfulTool) {
     return {
       needs_tools,
       used_tools,
       verified: true,
-      confidence: 0.9,
+      confidence: successfulVerifiedTool ? 0.9 : 0.85,
       warnings: []
     };
   }
@@ -112,10 +116,10 @@ export function verifyToolUsage(params: VerifyToolUsageParams): VerificationResu
   let confidence = 0.4;
 
   if (!used_tools) {
-    warnings.push("No data tools were used; answer may be a guess.");
+    warnings.push("No tools were used; answer may be a guess.");
     confidence = 0.2;
   } else {
-    warnings.push("No read/compute tools succeeded; answer may be unverified.");
+    warnings.push("No tools succeeded; answer may be unverified.");
     confidence = 0.35;
   }
 
