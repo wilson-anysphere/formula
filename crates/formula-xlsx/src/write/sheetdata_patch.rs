@@ -19,6 +19,12 @@ pub(super) fn patch_worksheet_xml(
     style_to_xf: &HashMap<u32, u32>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
 ) -> Result<Vec<u8>, WriteError> {
+    let meta_sheet_id = cell_meta_sheet_ids
+        .get(&sheet_meta.worksheet_id)
+        .copied()
+        .unwrap_or(sheet_meta.worksheet_id);
+    let shared_formulas = super::shared_formula_groups(doc, meta_sheet_id);
+
     // Desired cells in row-major order.
     let mut desired_cells: Vec<(CellRef, &formula_model::Cell)> = sheet.iter_cells().collect();
     desired_cells.sort_by_key(|(r, _)| (r.row, r.col));
@@ -39,6 +45,7 @@ pub(super) fn patch_worksheet_xml(
                     sheet,
                     shared_lookup,
                     style_to_xf,
+                    &shared_formulas,
                     cell_meta_sheet_ids,
                     &mut desired_cells,
                     &mut desired_idx,
@@ -59,6 +66,7 @@ pub(super) fn patch_worksheet_xml(
                         sheet,
                         shared_lookup,
                         style_to_xf,
+                        &shared_formulas,
                         cell_meta_sheet_ids,
                         &mut desired_cells,
                         &mut desired_idx,
@@ -82,6 +90,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
     sheet: &Worksheet,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
@@ -103,6 +112,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     sheet,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -117,6 +127,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -142,6 +153,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     sheet,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -166,6 +178,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                         sheet_meta,
                         shared_lookup,
                         style_to_xf,
+                        shared_formulas,
                         cell_meta_sheet_ids,
                         desired_cells,
                         desired_idx,
@@ -183,6 +196,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     sheet,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -205,6 +219,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
     sheet_meta: &SheetMeta,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
@@ -234,6 +249,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -247,6 +263,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -276,6 +293,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -289,6 +307,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -310,6 +329,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -331,6 +351,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -348,6 +369,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     desired_cells,
                     desired_idx,
@@ -388,6 +410,7 @@ fn patch_or_copy_cell<W: Write>(
     sheet_meta: &SheetMeta,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
@@ -406,7 +429,30 @@ fn patch_or_copy_cell<W: Write>(
     match desired {
         Some((_, desired_cell)) => {
             // This cell is present in the model; decide whether it changed.
-            let desired_semantics = CellSemantics::from_model(desired_cell, style_to_xf);
+            let mut desired_semantics = CellSemantics::from_model(desired_cell, style_to_xf);
+            if original.formula.is_none() {
+                if let Some(model_formula) = desired_semantics.formula.as_deref() {
+                    let meta =
+                        super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
+                    if let Some(meta_formula) = meta.and_then(|m| m.formula.as_ref()) {
+                        let is_shared_follower = meta_formula.t.as_deref() == Some("shared")
+                            && meta_formula.reference.is_none()
+                            && meta_formula.shared_index.is_some()
+                            && meta_formula.file_text.is_empty();
+                        if is_shared_follower {
+                            if let Some(shared_index) = meta_formula.shared_index {
+                                if let Some(expected) =
+                                    super::shared_formula_expected(shared_formulas, shared_index, cell_ref)
+                                {
+                                    if expected == model_formula {
+                                        desired_semantics.formula = None;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             *desired_idx += 1;
 
             if desired_semantics == original {
@@ -417,6 +463,7 @@ fn patch_or_copy_cell<W: Write>(
                     sheet_meta,
                     shared_lookup,
                     style_to_xf,
+                    shared_formulas,
                     cell_meta_sheet_ids,
                     writer,
                     cell_ref,
@@ -454,6 +501,7 @@ fn write_missing_rows_before<W: Write>(
     sheet: &Worksheet,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
@@ -470,6 +518,7 @@ fn write_missing_rows_before<W: Write>(
             sheet,
             shared_lookup,
             style_to_xf,
+            shared_formulas,
             cell_meta_sheet_ids,
             desired_cells,
             desired_idx,
@@ -486,6 +535,7 @@ fn write_remaining_rows<W: Write>(
     sheet: &Worksheet,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
@@ -498,6 +548,7 @@ fn write_remaining_rows<W: Write>(
             sheet,
             shared_lookup,
             style_to_xf,
+            shared_formulas,
             cell_meta_sheet_ids,
             desired_cells,
             desired_idx,
@@ -514,6 +565,7 @@ fn write_new_row<W: Write>(
     sheet: &Worksheet,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
@@ -542,6 +594,7 @@ fn write_new_row<W: Write>(
         sheet_meta,
         shared_lookup,
         style_to_xf,
+        shared_formulas,
         cell_meta_sheet_ids,
         desired_cells,
         desired_idx,
@@ -557,6 +610,7 @@ fn write_missing_cells_before_col<W: Write>(
     sheet_meta: &SheetMeta,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
@@ -577,6 +631,7 @@ fn write_missing_cells_before_col<W: Write>(
             sheet_meta,
             shared_lookup,
             style_to_xf,
+            shared_formulas,
             cell_meta_sheet_ids,
             writer,
             cell_ref,
@@ -594,6 +649,7 @@ fn write_remaining_cells_in_row<W: Write>(
     sheet_meta: &SheetMeta,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
@@ -609,6 +665,7 @@ fn write_remaining_cells_in_row<W: Write>(
             sheet_meta,
             shared_lookup,
             style_to_xf,
+            shared_formulas,
             cell_meta_sheet_ids,
             writer,
             cell_ref,
@@ -626,6 +683,7 @@ fn write_updated_cell<W: Write>(
     sheet_meta: &SheetMeta,
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
+    shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     writer: &mut Writer<W>,
     cell_ref: CellRef,
@@ -658,7 +716,40 @@ fn write_updated_cell<W: Write>(
     let meta = super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
     let value_kind = super::effective_value_kind(meta, cell);
 
-    let formula_meta = formula_meta_for_cell(meta, cell);
+    let model_formula = cell.formula.as_deref();
+    let mut preserve_textless_shared = false;
+    let mut formula_meta = formula_meta_for_cell(meta, cell);
+    if let (Some(display), Some(meta)) = (model_formula, formula_meta.as_mut()) {
+        if meta.t.as_deref() == Some("shared") && meta.file_text.is_empty() {
+            if let Some(shared_index) = meta.shared_index {
+                if let Some(expected) = super::shared_formula_expected(shared_formulas, shared_index, cell_ref) {
+                    if expected == super::strip_leading_equals(display) {
+                        preserve_textless_shared = true;
+                    } else {
+                        meta.t = None;
+                        meta.reference = None;
+                        meta.shared_index = None;
+                        meta.file_text = crate::formula_text::add_xlfn_prefixes(
+                            super::strip_leading_equals(display),
+                        );
+                    }
+                } else {
+                    meta.t = None;
+                    meta.reference = None;
+                    meta.shared_index = None;
+                    meta.file_text = crate::formula_text::add_xlfn_prefixes(
+                        super::strip_leading_equals(display),
+                    );
+                }
+            } else {
+                meta.t = None;
+                meta.reference = None;
+                meta.shared_index = None;
+                meta.file_text =
+                    crate::formula_text::add_xlfn_prefixes(super::strip_leading_equals(display));
+            }
+        }
+    }
 
     let has_value = !matches!(cell.value, CellValue::Empty);
     let has_children = formula_meta.is_some() || has_value || !preserved_children.is_empty();
@@ -711,7 +802,11 @@ fn write_updated_cell<W: Write>(
             f_start.push_attribute(("aca", if aca { "1" } else { "0" }));
         }
 
-        let file_text = super::formula_file_text(&formula_meta, cell.formula.as_deref());
+        let file_text = if preserve_textless_shared {
+            String::new()
+        } else {
+            super::formula_file_text(&formula_meta, model_formula)
+        };
         if file_text.is_empty() {
             writer.write_event(Event::Empty(f_start))?;
         } else {
