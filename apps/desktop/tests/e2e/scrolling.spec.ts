@@ -66,6 +66,27 @@ test.describe("grid scrolling + virtualization", () => {
     expect(scroll).toBeGreaterThan(0);
   });
 
+  test("name box Go To range scrolls and selects the full range", async ({ page }) => {
+    await page.goto("/");
+
+    const address = page.getByTestId("formula-address");
+    await address.click();
+    await address.fill("A500:C505");
+    await address.press("Enter");
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A500");
+    await expect(page.getByTestId("selection-range")).toHaveText("A500:C505");
+
+    const scroll = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(scroll).toBeGreaterThan(0);
+
+    const drawn = await page.evaluate(() => (window as any).__formulaApp.getLastSelectionDrawn());
+    expect(drawn).toBeTruthy();
+    expect(drawn.ranges.length).toBeGreaterThan(0);
+    expect(drawn.ranges[0].rect.width).toBeGreaterThan(0);
+    expect(drawn.ranges[0].rect.height).toBeGreaterThan(0);
+  });
+
   test("wheel scroll right reaches far columns and clicking selects correct cell", async ({ page }) => {
     await page.goto("/");
 
