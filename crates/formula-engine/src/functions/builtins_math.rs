@@ -597,7 +597,6 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
             }
-
             if let Some(union_size) = union_size {
                 count += union_size.saturating_sub(seen_count);
             }
