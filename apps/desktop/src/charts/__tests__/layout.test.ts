@@ -288,4 +288,27 @@ describe("charts/layout", () => {
     expect(layout.legendRect).not.toBeNull();
     expect(layout.axes.y.ticks.length).toBeGreaterThanOrEqual(5);
   });
+
+  test("treats scaling.orientation=maxMin as reverse order", () => {
+    const model: ChartModel = {
+      chartType: { kind: "bar" },
+      title: "Example Chart",
+      axes: [
+        { kind: "catAx", position: "b", scaling: { orientation: "maxMin" } },
+        { kind: "valAx", position: "l" },
+      ],
+      series: [
+        {
+          categories: { cache: ["A", "B", "C"] },
+          values: { cache: [1, 2, 3] },
+        },
+      ],
+    };
+
+    const layout = computeChartLayout(model, DEFAULT_CHART_THEME, { x: 0, y: 0, width: 480, height: 320 });
+    expect(layout.scales.x.type).toBe("band");
+    if (layout.scales.x.type === "band") {
+      expect(layout.scales.x.domain).toEqual(["C", "B", "A"]);
+    }
+  });
 });
