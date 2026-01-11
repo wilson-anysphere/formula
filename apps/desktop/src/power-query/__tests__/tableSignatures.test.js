@@ -87,6 +87,54 @@ test("QueryEngine cache keys incorporate table signatures", async () => {
   assert.notEqual(key2, key1);
 });
 
+test("table signature definition hash changes (and version bumps) when the backend table definition changes", () => {
+  const doc = new DocumentController();
+
+  refreshTableSignaturesFromBackend(
+    doc,
+    [
+      {
+        name: "Table1",
+        sheet_id: "Sheet1",
+        start_row: 0,
+        start_col: 0,
+        end_row: 1,
+        end_col: 0,
+        columns: ["A"],
+      },
+    ],
+    { workbookSignature: "workbook:test" },
+  );
+
+  const context = getContextForDocument(doc);
+  const sig1 = context.getTableSignature?.("Table1");
+  const parsed1 = parseSignature(sig1);
+  assert.equal(parsed1.version, 0);
+
+  // Simulate a resize / header change coming from the backend (e.g. after reload).
+  refreshTableSignaturesFromBackend(
+    doc,
+    [
+      {
+        name: "Table1",
+        sheet_id: "Sheet1",
+        start_row: 0,
+        start_col: 0,
+        end_row: 2,
+        end_col: 1,
+        columns: ["A", "B"],
+      },
+    ],
+    { workbookSignature: "workbook:test" },
+  );
+
+  const sig2 = context.getTableSignature?.("Table1");
+  const parsed2 = parseSignature(sig2);
+  assert.equal(parsed2.workbookHash, parsed1.workbookHash);
+  assert.notEqual(parsed2.definitionHash, parsed1.definitionHash);
+  assert.equal(parsed2.version, parsed1.version + 1);
+});
+
 test("table signatures are scoped by workbook signature to avoid cross-workbook cache collisions", async () => {
   const engine = new QueryEngine({ cache: new CacheManager({ store: new MemoryCacheStore() }) });
   const query = { id: "q_table", name: "Table", source: { type: "table", table: "Table1" }, steps: [] };
