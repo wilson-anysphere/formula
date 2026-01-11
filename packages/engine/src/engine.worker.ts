@@ -155,12 +155,14 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
     const mod = await getWasmModule(wasmModuleUrl);
 
     if (consumeCancellation(id)) {
+      markRequestCompleted(id);
       return;
     }
 
     const wb = await ensureWorkbook(wasmModuleUrl);
 
     if (consumeCancellation(id)) {
+      markRequestCompleted(id);
       return;
     }
 
