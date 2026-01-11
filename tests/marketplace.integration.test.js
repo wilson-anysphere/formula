@@ -43,6 +43,13 @@ async function writeManifestVersion(extensionDir, version) {
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 }
 
+async function patchManifest(extensionDir, patch) {
+  const manifestPath = path.join(extensionDir, "package.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  Object.assign(manifest, patch);
+  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
 test("marketplace publish → discover → install → verify signature → run command → update", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");
@@ -417,6 +424,163 @@ test("moderation: deprecated + yanked extensions are hidden from search", async 
 
     const afterYank = await client.search({ q: "sample" });
     assert.ok(!afterYank.results.some((r) => r.id === extensionId));
+
+    const downloadRes = await fetch(
+      `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/download/${encodeURIComponent("1.0.0")}`
+    );
+    assert.equal(downloadRes.status, 404);
+
+    const auditRes = await fetch(`${baseUrl}/api/admin/audit?limit=100`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(auditRes.status, 200);
+    const audit = await auditRes.json();
+    assert.ok(audit.entries.some((e) => e.action === "extension.flags"));
+    assert.ok(audit.entries.some((e) => e.action === "extension.version.flags"));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("publish rejects duplicate version under concurrent publish attempts", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-dup-publish-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSourceV1 = path.join(tmpRoot, "ext-v1");
+    await copyDir(sampleExtensionSrc, extSourceV1);
+    const manifest = JSON.parse(await fs.readFile(path.join(extSourceV1, "package.json"), "utf8"));
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    const results = await Promise.allSettled([
+      publishExtension({
+        extensionDir: extSourceV1,
+        marketplaceUrl: baseUrl,
+        token: publisherToken,
+        privateKeyPemOrPath: privateKeyPath,
+      }),
+      publishExtension({
+        extensionDir: extSourceV1,
+        marketplaceUrl: baseUrl,
+        token: publisherToken,
+        privateKeyPemOrPath: privateKeyPath,
+      }),
+    ]);
+
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+    assert.equal(results.filter((r) => r.status === "rejected").length, 1);
+    const rejection = results.find((r) => r.status === "rejected");
+    assert.ok(rejection && rejection.status === "rejected");
+    assert.match(String(rejection.reason?.message || rejection.reason), /409|already published/i);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("moderation: blocked extensions are hidden from getExtension/search/download", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-blocked-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken, rateLimits: { downloadPerIpPerMinute: 0 } });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSourceV1 = path.join(tmpRoot, "ext-v1");
+    await copyDir(sampleExtensionSrc, extSourceV1);
+    const manifest = JSON.parse(await fs.readFile(path.join(extSourceV1, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({
+      extensionDir: extSourceV1,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const client = new MarketplaceClient({ baseUrl });
+    const initial = await client.search({ q: "sample" });
+    assert.ok(initial.results.some((r) => r.id === extensionId));
+    assert.ok(await client.getExtension(extensionId));
+
+    const blockRes = await fetch(`${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/flags`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ blocked: true }),
+    });
+    assert.equal(blockRes.status, 200);
+
+    const after = await client.search({ q: "sample" });
+    assert.ok(!after.results.some((r) => r.id === extensionId));
+    assert.equal(await client.getExtension(extensionId), null);
+
+    const downloadRes = await fetch(
+      `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/download/${encodeURIComponent("1.0.0")}`,
+      { headers: { "X-Forwarded-For": "203.0.113.11" } }
+    );
+    assert.equal(downloadRes.status, 404);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });
@@ -450,6 +614,74 @@ test("rate limiting: /api/search enforces per-IP limits", async () => {
       headers: { "X-Forwarded-For": "203.0.113.10" },
     });
     assert.equal(limited.status, 429);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("search cursor pagination returns stable pages", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-cursor-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extA = path.join(tmpRoot, "ext-a");
+    const extB = path.join(tmpRoot, "ext-b");
+    const extC = path.join(tmpRoot, "ext-c");
+    await copyDir(sampleExtensionSrc, extA);
+    await copyDir(sampleExtensionSrc, extB);
+    await copyDir(sampleExtensionSrc, extC);
+    await patchManifest(extA, { name: "sample-hello-a" });
+    await patchManifest(extB, { name: "sample-hello-b" });
+    await patchManifest(extC, { name: "sample-hello-c" });
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: "formula",
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({ extensionDir: extA, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath });
+    await new Promise((r) => setTimeout(r, 5));
+    await publishExtension({ extensionDir: extB, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath });
+    await new Promise((r) => setTimeout(r, 5));
+    await publishExtension({ extensionDir: extC, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath });
+
+    const client = new MarketplaceClient({ baseUrl });
+    const page1 = await client.search({ q: "", sort: "updated", limit: 2 });
+    assert.equal(page1.results.length, 2);
+    assert.ok(page1.nextCursor);
+
+    const page2 = await client.search({ q: "", sort: "updated", limit: 2, cursor: page1.nextCursor });
+    assert.equal(page2.results.length, 1);
+
+    const ids = [...page1.results, ...page2.results].map((r) => r.id);
+    assert.equal(new Set(ids).size, 3);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });
