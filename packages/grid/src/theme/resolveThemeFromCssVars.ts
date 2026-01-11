@@ -32,6 +32,78 @@ export function readGridThemeFromCssVars(style: { getPropertyValue: (name: strin
   return partial;
 }
 
+function splitCssVarArguments(inner: string): { name: string; fallback: string | null } | null {
+  const trimmed = inner.trim();
+  if (!trimmed.startsWith("--")) return null;
+
+  let depth = 0;
+  let commaIndex = -1;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      commaIndex = i;
+      break;
+    }
+  }
+
+  if (commaIndex === -1) return { name: trimmed, fallback: null };
+
+  return {
+    name: trimmed.slice(0, commaIndex).trim(),
+    fallback: trimmed.slice(commaIndex + 1).trim() || null
+  };
+}
+
+function parseCssVarFunction(value: string): { name: string; fallback: string | null } | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("var(") || !trimmed.endsWith(")")) return null;
+  const inner = trimmed.slice(4, -1);
+  return splitCssVarArguments(inner);
+}
+
+/**
+ * Best-effort resolver for `var(--token)` values from computed custom properties.
+ *
+ * This intentionally handles the common case where a theme token references a
+ * single other custom property (optionally with a fallback), e.g.
+ * `--formula-grid-bg: var(--app-bg, #fff)`.
+ *
+ * It does *not* attempt to fully evaluate arbitrary CSS expressions.
+ */
+export function resolveCssVarValue(
+  value: string,
+  style: { getPropertyValue: (name: string) => string },
+  options?: { maxDepth?: number }
+): string {
+  const maxDepth = options?.maxDepth ?? 10;
+  let current = value.trim();
+  const seen = new Set<string>();
+
+  for (let depth = 0; depth < maxDepth; depth++) {
+    const parsed = parseCssVarFunction(current);
+    if (!parsed) break;
+
+    const { name, fallback } = parsed;
+    if (seen.has(name)) {
+      current = fallback ?? "";
+      continue;
+    }
+    seen.add(name);
+
+    const next = style.getPropertyValue(name).trim();
+    if (next) {
+      current = next;
+      continue;
+    }
+
+    current = fallback ?? "";
+  }
+
+  return current;
+}
+
 /**
  * Resolve theme tokens from CSS variables on a live DOM element.
  *
@@ -47,7 +119,8 @@ export function resolveGridThemeFromCssVars(element: HTMLElement): Partial<GridT
   const view = element.ownerDocument?.defaultView;
   if (!view || typeof view.getComputedStyle !== "function") return {};
 
-  const raw = readGridThemeFromCssVars(view.getComputedStyle(element));
+  const computedStyle = view.getComputedStyle(element);
+  const raw = readGridThemeFromCssVars(computedStyle);
   if (Object.keys(raw).length === 0) return raw;
 
   const probe = element.ownerDocument.createElement("div");
@@ -65,10 +138,11 @@ export function resolveGridThemeFromCssVars(element: HTMLElement): Partial<GridT
   const resolved: Partial<GridTheme> = {};
   try {
     for (const [key, value] of Object.entries(raw) as Array<[keyof GridTheme, string]>) {
-      probe.style.backgroundColor = value;
+      const resolvedValue = value.includes("var(") ? resolveCssVarValue(value, computedStyle) : value;
+      probe.style.backgroundColor = resolvedValue;
       const computed = view.getComputedStyle(probe).backgroundColor;
       const normalized = computed?.trim();
-      resolved[key] = normalized ? normalized : value;
+      resolved[key] = normalized ? normalized : resolvedValue;
     }
   } finally {
     probe.remove();

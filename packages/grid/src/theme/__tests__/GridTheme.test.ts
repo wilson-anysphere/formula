@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GRID_THEME, resolveGridTheme } from "../GridTheme";
-import { readGridThemeFromCssVars } from "../resolveThemeFromCssVars";
+import { readGridThemeFromCssVars, resolveCssVarValue } from "../resolveThemeFromCssVars";
 
 describe("grid theme resolution", () => {
   it("returns defaults when no overrides are provided", () => {
@@ -29,6 +29,19 @@ describe("grid theme resolution", () => {
     });
   });
 
+  it("resolves simple var() indirection between custom properties", () => {
+    const style = {
+      getPropertyValue: (name: string) => {
+        if (name === "--formula-grid-bg") return "var(--app-bg)";
+        if (name === "--app-bg") return "rgb(10, 20, 30)";
+        return "";
+      }
+    };
+
+    expect(resolveCssVarValue("var(--app-bg)", style)).toBe("rgb(10, 20, 30)");
+    expect(resolveCssVarValue("var(--missing, #fff)", style)).toBe("#fff");
+  });
+
   it("applies later sources last (prop overrides css)", () => {
     const style = {
       getPropertyValue: (name: string) => {
@@ -42,4 +55,3 @@ describe("grid theme resolution", () => {
     expect(resolved.gridBg).toBe("#222222");
   });
 });
-
