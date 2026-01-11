@@ -1,5 +1,6 @@
 {
   "name": "@formula/sync",
+  "description": "DEPRECATED: legacy placeholder sync gateway. Use @formula/sync-server (y-websocket) instead.",
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
