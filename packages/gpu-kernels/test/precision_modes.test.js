@@ -172,6 +172,30 @@ test("excel mode: falls back to CPU on GPU error and records diagnostics", async
   assert.equal(diag.validation.lastGpuError.kernel, "sum");
 });
 
+test("excel mode: validation treats +0 vs -0 mismatches as mismatches", async () => {
+  class ZeroMinGpuBackend extends FakeGpuBackend {
+    async min() {
+      this.calls.min += 1;
+      return 0;
+    }
+  }
+
+  const fakeGpu = new ZeroMinGpuBackend(true);
+  const engine = new KernelEngine({
+    precision: "excel",
+    gpuBackend: fakeGpu,
+    thresholds: { min: 0 }
+  });
+
+  const values = new Float64Array([0, -0]);
+  const result = await engine.min(values);
+  assert.ok(Object.is(result, -0), `expected -0, got ${result}`);
+
+  const diag = engine.diagnostics();
+  assert.equal(diag.validation.mismatches, 1);
+  assert.equal(diag.validation.lastMismatch.kernel, "min");
+});
+
 test("precision=fast: uses f32 on GPU and does not validate by default", async () => {
   class WrongGpuBackend extends FakeGpuBackend {
     async sum() {
