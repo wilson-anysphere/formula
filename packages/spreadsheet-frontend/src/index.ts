@@ -79,7 +79,7 @@ export class EngineCellCache {
   readonly engine: EngineClient;
 
   private readonly values = new Map<string, string | number | null>();
-  private readonly inflight = new Map<string, Promise<void>>();
+  private readonly inflight = new Map<string, Promise<boolean>>();
 
   constructor(engine: EngineClient) {
     this.engine = engine;
@@ -90,22 +90,38 @@ export class EngineCellCache {
     return this.values.get(cacheKey(sheetName, row0, col0)) ?? null;
   }
 
-  async prefetch(range: Range0, sheet?: string): Promise<void> {
+  async prefetch(range: Range0, sheet?: string): Promise<boolean> {
     const sheetName = defaultSheetName(sheet);
+    if (this.isRangeCached(range, sheetName)) {
+      return false;
+    }
+
     const rangeA1 = range0ToA1(range);
     const key = `${sheetName}\n${rangeA1}`;
     const existing = this.inflight.get(key);
     if (existing) return existing;
 
     const task = (async () => {
+      let changed = false;
       const rows = (await this.engine.getRange(rangeA1, sheetName)) as EngineCellData[][];
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r] ?? [];
         for (let c = 0; c < row.length; c++) {
           const cell = row[c];
-          this.values.set(cacheKey(sheetName, range.startRow0 + r, range.startCol0 + c), normalizeCellValue(cell.value));
+          const value = normalizeCellValue(cell.value);
+          const cellRow0 = range.startRow0 + r;
+          const cellCol0 = range.startCol0 + c;
+          const k = cacheKey(sheetName, cellRow0, cellCol0);
+
+          const has = this.values.has(k);
+          const previous = this.values.get(k);
+          if (!has || !Object.is(previous, value)) {
+            changed = true;
+            this.values.set(k, value);
+          }
         }
       }
+      return changed;
     })();
 
     this.inflight.set(key, task);
@@ -114,6 +130,8 @@ export class EngineCellCache {
     } finally {
       this.inflight.delete(key);
     }
+
+    return task;
   }
 
   applyRecalcChanges(changes: CellChange[]): void {
@@ -122,6 +140,22 @@ export class EngineCellCache {
       const { row0, col0 } = fromA1(change.address);
       this.values.set(cacheKey(sheet, row0, col0), normalizeCellValue(change.value));
     }
+  }
+
+  private isRangeCached(range: Range0, sheetName: string): boolean {
+    const rowCount = range.endRow0Exclusive - range.startRow0;
+    const colCount = range.endCol0Exclusive - range.startCol0;
+    if (rowCount <= 0 || colCount <= 0) return true;
+
+    const cellCount = rowCount * colCount;
+    if (this.values.size < cellCount) return false;
+
+    for (let row0 = range.startRow0; row0 < range.endRow0Exclusive; row0++) {
+      for (let col0 = range.startCol0; col0 < range.endCol0Exclusive; col0++) {
+        if (!this.values.has(cacheKey(sheetName, row0, col0))) return false;
+      }
+    }
+    return true;
   }
 }
 
@@ -260,19 +294,22 @@ export class EngineGridProvider implements CellProvider {
 
         const merged = mergeRange0(ranges);
 
+        let changed = false;
         try {
-          await this.cache.prefetch(merged, this.sheet);
+          changed = await this.cache.prefetch(merged, this.sheet);
         } catch {
           // Engine fetch failures should not crash the grid; the next scroll/prefetch will retry.
         }
 
-        const offset = this.headers ? 1 : 0;
-        this.queueInvalidation({
-          startRow: merged.startRow0 + offset,
-          endRow: merged.endRow0Exclusive + offset,
-          startCol: merged.startCol0 + offset,
-          endCol: merged.endCol0Exclusive + offset
-        });
+        if (changed) {
+          const offset = this.headers ? 1 : 0;
+          this.queueInvalidation({
+            startRow: merged.startRow0 + offset,
+            endRow: merged.endRow0Exclusive + offset,
+            startCol: merged.startCol0 + offset,
+            endCol: merged.endCol0Exclusive + offset
+          });
+        }
 
         for (const resolve of resolvers) resolve();
       }

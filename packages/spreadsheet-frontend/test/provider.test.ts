@@ -66,6 +66,30 @@ describe("EngineGridProvider", () => {
     expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 } }]);
   });
 
+  it("does not re-fetch or emit updates for cached ranges", async () => {
+    const values = new Map<string, CellScalar>();
+    values.set("Sheet1!A1", 1);
+    values.set("Sheet1!B1", 2);
+
+    const engine = new FakeEngine(values) as any;
+    const cache = new EngineCellCache(engine);
+    const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
+
+    const updates: CellProviderUpdate[] = [];
+    provider.subscribe((update) => updates.push(update));
+
+    await provider.prefetch({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
+    await flushMicrotasks();
+    expect(engine.calls).toHaveLength(1);
+    expect(updates).toHaveLength(1);
+
+    updates.length = 0;
+    await provider.prefetch({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
+    await flushMicrotasks();
+    expect(engine.calls).toHaveLength(1);
+    expect(updates).toEqual([]);
+  });
+
   it("batches prefetch calls in the same microtask", async () => {
     const values = new Map<string, CellScalar>();
     values.set("Sheet1!A1", 1);
