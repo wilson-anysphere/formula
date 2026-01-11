@@ -63,6 +63,11 @@ export function normalizeCell(cell) {
   /** @type {import("./types.js").Cell} */
   const normalized = {};
 
+  const enc = /** @type {any} */ (cell).enc;
+  if (enc !== null && enc !== undefined) {
+    normalized.enc = enc;
+  }
+
   const formula = /** @type {any} */ (cell).formula;
   if (typeof formula === "string" && formula.trim().length > 0) {
     normalized.formula = formula;
@@ -82,13 +87,17 @@ export function normalizeCell(cell) {
   if (
     normalized.formula === undefined &&
     normalized.value === undefined &&
-    normalized.format === undefined
+    normalized.format === undefined &&
+    normalized.enc === undefined
   ) {
     return null;
   }
 
   // Enforce mutual exclusion for formula/value when possible.
-  if (normalized.formula !== undefined) {
+  if (normalized.enc !== undefined) {
+    delete normalized.value;
+    delete normalized.formula;
+  } else if (normalized.formula !== undefined) {
     delete normalized.value;
   }
 
@@ -121,19 +130,23 @@ export function cellContentEqual(a, b) {
   const contentA =
     ca === null
       ? null
-      : ca.formula !== undefined
-        ? { formula: ca.formula }
-        : ca.value !== undefined
-          ? { value: ca.value }
-          : null;
+      : ca.enc !== undefined
+        ? { enc: ca.enc }
+        : ca.formula !== undefined
+          ? { formula: ca.formula }
+          : ca.value !== undefined
+            ? { value: ca.value }
+            : null;
   const contentB =
     cb === null
       ? null
-      : cb.formula !== undefined
-        ? { formula: cb.formula }
-        : cb.value !== undefined
-          ? { value: cb.value }
-          : null;
+      : cb.enc !== undefined
+        ? { enc: cb.enc }
+        : cb.formula !== undefined
+          ? { formula: cb.formula }
+          : cb.value !== undefined
+            ? { value: cb.value }
+            : null;
   return deepEqual(contentA, contentB);
 }
 
@@ -152,6 +165,8 @@ export function cellContentEquivalent(a, b) {
   const contentA =
     ca === null
       ? null
+      : ca.enc !== undefined
+        ? { kind: "enc", enc: ca.enc }
       : ca.formula !== undefined
         ? { kind: "formula", formula: ca.formula }
         : ca.value !== undefined
@@ -160,6 +175,8 @@ export function cellContentEquivalent(a, b) {
   const contentB =
     cb === null
       ? null
+      : cb.enc !== undefined
+        ? { kind: "enc", enc: cb.enc }
       : cb.formula !== undefined
         ? { kind: "formula", formula: cb.formula }
         : cb.value !== undefined
@@ -172,6 +189,10 @@ export function cellContentEquivalent(a, b) {
 
   if (contentA.kind === "formula") {
     return normalizeFormula(contentA.formula) === normalizeFormula(contentB.formula);
+  }
+
+  if (contentA.kind === "enc") {
+    return deepEqual(contentA.enc, contentB.enc);
   }
 
   return deepEqual(contentA.value, contentB.value);
@@ -193,6 +214,13 @@ export function cellFormat(cell) {
 export function cellContent(cell) {
   const c = normalizeCell(cell);
   if (c === null) return null;
+  if (c.enc !== undefined) {
+    return {
+      enc: c.enc,
+      formula: undefined,
+      value: undefined,
+    };
+  }
   return {
     value: c.value,
     formula: c.formula

@@ -254,21 +254,33 @@ function cellFromYjsValue(cellData) {
   const cell = {};
   const cellMap = getYMap(cellData);
   if (cellMap) {
+    const enc = cellMap.get("enc");
     const formula = normalizeFormula(cellMap.get("formula"));
     const value = cellMap.get("value");
     const format = cellMap.get("format") ?? cellMap.get("style");
-    if (formula) cell.formula = formula;
-    else if (value !== null && value !== undefined) cell.value = value;
+    if (enc !== null && enc !== undefined) {
+      cell.enc = yjsValueToJson(enc);
+    } else if (formula) {
+      cell.formula = formula;
+    } else if (value !== null && value !== undefined) {
+      cell.value = value;
+    }
     if (format !== null && format !== undefined) cell.format = yjsValueToJson(format);
     return normalizeCell(cell);
   }
 
   if (isRecord(cellData)) {
+    const enc = cellData.enc;
     const formula = normalizeFormula(cellData.formula);
     const value = cellData.value;
     const format = cellData.format ?? cellData.style;
-    if (formula) cell.formula = formula;
-    else if (value !== null && value !== undefined) cell.value = value;
+    if (enc !== null && enc !== undefined) {
+      cell.enc = yjsValueToJson(enc);
+    } else if (formula) {
+      cell.formula = formula;
+    } else if (value !== null && value !== undefined) {
+      cell.value = value;
+    }
     if (format !== null && format !== undefined) cell.format = yjsValueToJson(format);
     return normalizeCell(cell);
   }
@@ -550,20 +562,26 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           cellsMap.set(key, yCell);
         }
 
-        // Branching doesn't currently model encrypted cells; ensure plaintext
-        // snapshots override any prior encryption payloads.
-        yCell.delete("enc");
-
-        const formula = normalizeFormula(normalizedCell.formula);
-        if (formula) {
-          yCell.set("formula", formula);
-          yCell.set("value", null);
-        } else if (normalizedCell.value !== undefined) {
-          yCell.set("value", normalizedCell.value);
-          yCell.delete("formula");
-        } else {
+        if (normalizedCell.enc !== undefined && normalizedCell.enc !== null) {
+          // Preserve ciphertext exactly; branch snapshots treat it as opaque.
+          yCell.set("enc", structuredClone(normalizedCell.enc));
           yCell.delete("value");
           yCell.delete("formula");
+        } else {
+          yCell.delete("enc");
+
+          const formula = normalizeFormula(normalizedCell.formula);
+          if (formula) {
+            yCell.set("formula", formula);
+            // CollabSession clears values for formulas; follow the same convention.
+            yCell.set("value", null);
+          } else if (normalizedCell.value !== undefined) {
+            yCell.set("value", normalizedCell.value);
+            yCell.delete("formula");
+          } else {
+            yCell.delete("value");
+            yCell.delete("formula");
+          }
         }
 
         if (normalizedCell.format != null) {

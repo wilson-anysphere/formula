@@ -8,10 +8,16 @@
  * `value` and `formula` are mutually exclusive; both are optional because an
  * empty cell is represented as `null`/`undefined`.
  *
+ * `enc` optionally stores an encrypted cell payload as written by
+ * `@formula/collab-session` (under the Yjs `enc` field). This is treated as an
+ * opaque blob by BranchService so encrypted workbooks can be branched/merged
+ * without losing ciphertext or leaking plaintext.
+ *
  * @typedef {{
  *   value?: unknown,
  *   formula?: string,
- *   format?: JsonObject
+ *   format?: JsonObject,
+ *   enc?: unknown
  * }} Cell
  */
 

@@ -109,3 +109,40 @@ test("applyBranchStateToYjsDoc: ensures at least one sheet when applying an empt
   assert.equal(sheets.length, 1);
   assert.equal(sheets.get(0)?.get("id"), "Sheet1");
 });
+
+test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: preserves encrypted cell payloads", () => {
+  const enc = {
+    v: 1,
+    alg: "AES-256-GCM",
+    keyId: "k1",
+    ivBase64: "iv",
+    tagBase64: "tag",
+    ciphertextBase64: "ct",
+  };
+
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+
+    const cells = doc.getMap("cells");
+    const cell = new Y.Map();
+    cell.set("enc", enc);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.cells.Sheet1.A1, { enc });
+
+  const doc2 = new Y.Doc();
+  applyBranchStateToYjsDoc(doc2, state);
+
+  const cell2 = doc2.getMap("cells").get("Sheet1:0:0");
+  assert.ok(cell2 instanceof Y.Map);
+  assert.deepEqual(cell2.get("enc"), enc);
+  assert.equal(cell2.get("value"), undefined);
+  assert.equal(cell2.get("formula"), undefined);
+});

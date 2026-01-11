@@ -136,3 +136,16 @@ test("merge: non-overlapping sheet reorders merge automatically", () => {
   assert.equal(result.conflicts.length, 0);
   assert.deepEqual(result.merged.sheets.order, ["B", "A", "D", "C"]);
 });
+
+test("merge: encrypted cell payload conflicts when both sides change it differently", () => {
+  const baseEnc = { v: 1, alg: "AES-256-GCM", keyId: "k", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct0" };
+  const oursEnc = { ...baseEnc, ciphertextBase64: "ct1" };
+  const theirsEnc = { ...baseEnc, ciphertextBase64: "ct2" };
+
+  const base = { sheets: { Sheet1: { A1: { enc: baseEnc } } } };
+  const ours = { sheets: { Sheet1: { A1: { enc: oursEnc } } } };
+  const theirs = { sheets: { Sheet1: { A1: { enc: theirsEnc } } } };
+
+  const result = mergeDocumentStates({ base, ours, theirs });
+  assert.ok(result.conflicts.some((c) => c.type === "cell" && c.cell === "A1" && c.reason === "content"));
+});
