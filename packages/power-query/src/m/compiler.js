@@ -850,7 +850,9 @@ function compileTableOperation(ctx, fnName, expr, schema) {
       return { operations: [{ type: "replaceErrorValues", replacements }], schema };
     }
     case "Table.Join":
-    case "Table.NestedJoin": {
+    case "Table.NestedJoin":
+    case "Table.AddJoinColumn": {
+      const isNested = fnName !== "Table.Join";
       const leftKeys = expectJoinKeys(ctx, expr.args[1], fnName);
       validateColumnsExist(ctx, expr, schema, leftKeys);
       const rightTableExpr = expr.args[2];
@@ -859,15 +861,15 @@ function compileTableOperation(ctx, fnName, expr, schema) {
       if (leftKeys.length !== rightKeys.length) {
         ctx.error(expr, `${fnName} requires left and right join key lists to have the same length`);
       }
-      const newColumnName = fnName === "Table.NestedJoin" ? expectText(ctx, expr.args[4]) : null;
-      const joinKindExpr = fnName === "Table.Join" ? expr.args[4] ?? null : expr.args[5] ?? null;
+      const newColumnName = isNested ? expectText(ctx, expr.args[4]) : null;
+      const joinKindExpr = isNested ? (expr.args[5] ?? null) : (expr.args[4] ?? null);
       const joinType = compileJoinKind(ctx, joinKindExpr);
 
       // Power Query's full signature supports optional join algorithm + comparer
       // arguments. The algorithm does not affect results, so we ignore it. When a
       // comparer is provided we apply it to the join key equality semantics.
-      const algorithmOrComparerExpr = fnName === "Table.Join" ? expr.args[5] ?? null : expr.args[6] ?? null;
-      const explicitComparerExpr = fnName === "Table.Join" ? expr.args[6] ?? null : expr.args[7] ?? null;
+      const algorithmOrComparerExpr = isNested ? (expr.args[6] ?? null) : (expr.args[5] ?? null);
+      const explicitComparerExpr = isNested ? (expr.args[7] ?? null) : (expr.args[6] ?? null);
 
       let comparerExpr = explicitComparerExpr;
       if (!comparerExpr && algorithmOrComparerExpr && isComparerExpr(ctx, algorithmOrComparerExpr)) {
@@ -884,7 +886,7 @@ function compileTableOperation(ctx, fnName, expr, schema) {
             joinType,
             leftKeys,
             rightKeys,
-            joinMode: fnName === "Table.NestedJoin" ? "nested" : "flat",
+            joinMode: isNested ? "nested" : "flat",
             ...(newColumnName != null ? { newColumnName } : null),
             ...(comparerSpec?.comparer != null ? { comparer: comparerSpec.comparer } : null),
             ...(comparerSpec?.comparers != null ? { comparers: comparerSpec.comparers } : null),

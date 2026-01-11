@@ -29,6 +29,7 @@ export const TABLE_FUNCTION_STEP_NAMES = {
   "Table.Unpivot": "Unpivoted Columns",
   "Table.Join": "Merged Queries",
   "Table.NestedJoin": "Merged Queries",
+  "Table.AddJoinColumn": "Merged Queries",
   "Table.ExpandTableColumn": "Expanded Table Column",
   "Table.Combine": "Appended Queries",
   "Table.RemoveRowsWithErrors": "Removed Errors",

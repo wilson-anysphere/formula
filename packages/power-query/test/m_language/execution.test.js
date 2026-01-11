@@ -944,6 +944,70 @@ in
   ]);
 });
 
+test("m_language execution: Table.AddJoinColumn is an alias for Table.NestedJoin", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Sales"},
+    {1, 100},
+    {2, 200},
+    {3, 300}
+  })
+in
+  Source
+`,
+    { id: "q_left_add_join", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target"},
+    {2, "B"},
+    {2, "C"}
+  })
+in
+  Source
+`,
+    { id: "q_right_add_join", name: "Right" },
+  );
+
+  const nestedJoin = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_add_join"),
+  Right = Query.Reference("q_right_add_join"),
+  #"Merged Queries" = Table.AddJoinColumn(Left, {"Id"}, Right, {"Id"}, "Matches", JoinKind.LeftOuter)
+in
+  #"Merged Queries"
+`,
+    { id: "q_add_join", name: "AddJoinColumn" },
+  );
+
+  assert.equal(nestedJoin.steps[0]?.operation.type, "merge");
+  assert.equal(nestedJoin.steps[0]?.operation.joinMode, "nested");
+  assert.equal(nestedJoin.steps[0]?.operation.newColumnName, "Matches");
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(nestedJoin, { queries: { q_left_add_join: left, q_right_add_join: right } }, {});
+
+  const matchesIdx = result.getColumnIndex("Matches");
+
+  const row0 = result.getCell(0, matchesIdx);
+  assert.ok(row0 instanceof DataTable);
+  assert.deepEqual(row0.toGrid(), [["Id", "Target"]]);
+
+  const row1 = result.getCell(1, matchesIdx);
+  assert.ok(row1 instanceof DataTable);
+  assert.deepEqual(row1.toGrid(), [
+    ["Id", "Target"],
+    [2, "B"],
+    [2, "C"],
+  ]);
+});
+
 test("m_language execution: Table.NestedJoin supports comparer lists (per-key)", async () => {
   const left = compileMToQuery(
     `
