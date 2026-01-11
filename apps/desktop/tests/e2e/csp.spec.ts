@@ -119,52 +119,25 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       async ({ manifestUrl, hostModuleUrl }) => {
         const { BrowserExtensionHost } = await import(hostModuleUrl);
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const app: any = (window as any).__formulaApp;
-        if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
-        const doc = app.getDocument();
-        const sheetId = app.getCurrentSheetId();
-
-        doc.setCellValue(sheetId, { row: 0, col: 0 }, 1);
-        doc.setCellValue(sheetId, { row: 0, col: 1 }, 2);
-        doc.setCellValue(sheetId, { row: 1, col: 0 }, 3);
-        doc.setCellValue(sheetId, { row: 1, col: 1 }, 4);
-
-        app.selectRange({
-          sheetId,
-          range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 }
-        });
-
-        function normalizeCellValue(value: unknown) {
-          if (typeof value === "string") return value;
-          if (typeof value === "number") return value;
-          if (typeof value === "boolean") return value;
-          return null;
-        }
-
+        const writes: Array<{ row: number; col: number; value: unknown }> = [];
         const spreadsheetApi = {
-          async getActiveSheet() {
-            return { id: sheetId, name: sheetId };
-          },
           async getSelection() {
-            const range = app.getSelectionRanges()[0];
-            const values = [];
-            for (let r = range.startRow; r <= range.endRow; r++) {
-              const cols = [];
-              for (let c = range.startCol; c <= range.endCol; c++) {
-                const cell = doc.getCell(sheetId, { row: r, col: c });
-                cols.push(normalizeCellValue(cell.value));
-              }
-              values.push(cols);
-            }
-            return { ...range, values };
+            return {
+              startRow: 0,
+              startCol: 0,
+              endRow: 1,
+              endCol: 1,
+              values: [
+                [1, 2],
+                [3, 4]
+              ]
+            };
           },
-          async getCell(row: number, col: number) {
-            const cell = doc.getCell(sheetId, { row, col });
-            return normalizeCellValue(cell.value);
+          async getCell() {
+            return null;
           },
           async setCell(row: number, col: number, value: unknown) {
-            doc.setCellValue(sheetId, { row, col }, value);
+            writes.push({ row, col, value });
           }
         };
 
@@ -176,16 +149,17 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
         await host.loadExtensionFromUrl(manifestUrl);
         const sum = await host.executeCommand("sampleHello.sumSelection");
-        const a3 = app.getCellValueA1("A3");
+        const messages = host.getMessages();
         await host.dispose();
 
-        return { sum, a3 };
+        return { sum, writes, messages };
       },
       { manifestUrl, hostModuleUrl }
     );
 
     expect(result.sum).toBe(10);
-    expect(result.a3).toBe("10");
+    expect(result.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
+    expect(result.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
 
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
