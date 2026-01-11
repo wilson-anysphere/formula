@@ -1422,8 +1422,8 @@ impl AppState {
         let mut pivot_updates_in_last_pass = Vec::new();
 
         for pass in 0..MAX_PIVOT_REFRESH_PASSES {
-            self.engine.recalculate();
-            let formula_updates = self.refresh_computed_values()?;
+            let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+            let formula_updates = self.refresh_computed_values_from_recalc_changes(&recalc_changes)?;
 
             let mut changed_for_pivots = pending_changes.clone();
             changed_for_pivots.extend(
@@ -1454,8 +1454,8 @@ impl AppState {
         // If we hit the refresh limit, ensure we still run one final formula pass
         // so dependents of the last pivot output update.
         if !pivot_updates_in_last_pass.is_empty() {
-            self.engine.recalculate();
-            updates.extend(self.refresh_computed_values()?);
+            let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+            updates.extend(self.refresh_computed_values_from_recalc_changes(&recalc_changes)?);
         }
 
         Ok(dedupe_updates(updates))
@@ -1540,9 +1540,24 @@ impl AppState {
                 .cells
                 .get(&(snap.row, snap.col))
                 .and_then(|c| c.number_format.clone());
+            let existing_computed_value = sheet
+                .cells
+                .get(&(snap.row, snap.col))
+                .map(|c| c.computed_value.clone())
+                .unwrap_or(CellScalar::Empty);
 
             let mut new_cell = match (&snap.formula, &snap.value) {
-                (Some(formula), _) => Cell::from_formula(formula.clone()),
+                (Some(formula), _) => {
+                    let mut cell = Cell::from_formula(formula.clone());
+                    // Preserve the previous computed value so caches remain stable until the
+                    // next recalc pass updates the formula result.
+                    //
+                    // This keeps the workbook-side computed-value cache aligned with the
+                    // engine's pre-recalc values, which is required for delta-based recalc
+                    // updates.
+                    cell.computed_value = existing_computed_value;
+                    cell
+                }
                 (None, Some(value)) => Cell::from_literal(Some(value.clone())),
                 (None, None) => Cell::empty(),
             };
@@ -1562,6 +1577,57 @@ impl AppState {
         }
 
         Ok(())
+    }
+
+    fn refresh_computed_values_from_recalc_changes(
+        &mut self,
+        changes: &[formula_engine::RecalcValueChange],
+    ) -> Result<Vec<CellUpdateData>, AppStateError> {
+        let workbook = self
+            .workbook
+            .as_mut()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let mut updates = Vec::new();
+
+        // Small number of sheets; keep this lookup simple and case-insensitive.
+        for change in changes {
+            let Some(sheet) = workbook
+                .sheets
+                .iter_mut()
+                .find(|s| s.name.eq_ignore_ascii_case(&change.sheet))
+            else {
+                continue;
+            };
+
+            let row = change.addr.row as usize;
+            let col = change.addr.col as usize;
+
+            let Some(cell) = sheet.cells.get_mut(&(row, col)) else {
+                continue;
+            };
+
+            // Workbook-side computed caches only track stored formula cells.
+            if cell.formula.is_none() {
+                continue;
+            }
+
+            let new_value = engine_value_to_scalar(change.value.clone());
+            if new_value == cell.computed_value {
+                continue;
+            }
+
+            cell.computed_value = new_value.clone();
+            let display_value = format_scalar_for_display(new_value, cell.number_format.as_deref());
+            updates.push(CellUpdateData {
+                sheet_id: sheet.id.clone(),
+                row,
+                col,
+                value: display_value,
+                formula: cell.formula.clone(),
+            });
+        }
+
+        Ok(updates)
     }
 
     fn rebuild_engine_from_workbook(&mut self) -> Result<(), AppStateError> {
