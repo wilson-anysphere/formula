@@ -22,7 +22,7 @@ function makeRng(seed) {
  * @param {number} maxLen
  */
 function randomIdentifier(rng, maxLen) {
-  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-"`;/\\\n\t';
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-"`[];/\\\n\t';
   const len = Math.floor(rng() * maxLen);
   let out = "";
   for (let i = 0; i < len; i++) {
@@ -45,14 +45,15 @@ function assertNoUnescaped(inner, quoteChar) {
 
 test("security: dialect quoteIdentifier escapes embedded quotes/backticks (property test)", () => {
   const rng = makeRng(0xdecafbad);
-  const dialects = ["postgres", "sqlite", "mysql"];
+  const dialects = ["postgres", "sqlite", "mysql", "sqlserver"];
   for (const name of dialects) {
     const dialect = getSqlDialect(/** @type {any} */ (name));
-    const quoteChar = name === "mysql" ? "`" : '"';
+    const quoteChar = name === "mysql" ? "`" : name === "sqlserver" ? "]" : '"';
+    const openChar = name === "sqlserver" ? "[" : quoteChar;
     for (let i = 0; i < 500; i++) {
       const ident = randomIdentifier(rng, 40);
       const quoted = dialect.quoteIdentifier(ident);
-      assert.ok(quoted.startsWith(quoteChar) && quoted.endsWith(quoteChar), `bad quotes for ${name}: ${quoted}`);
+      assert.ok(quoted.startsWith(openChar) && quoted.endsWith(quoteChar), `bad quotes for ${name}: ${quoted}`);
 
       const inner = quoted.slice(1, -1);
       assertNoUnescaped(inner, quoteChar);
