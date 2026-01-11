@@ -8,6 +8,22 @@ import { REMOTE_ORIGIN } from "@formula/collab-undo";
 import { createCollabSession } from "../src/index.ts";
  
 /**
+ * Duck-type Y.Map detection to avoid `instanceof` pitfalls when multiple Yjs
+ * module instances are present (pnpm workspaces can produce this in Node).
+ *
+ * @param {any} value
+ */
+function isYMap(value) {
+  if (value instanceof Y.Map) return true;
+  if (!value || typeof value !== "object") return false;
+  if (value.constructor?.name !== "YMap") return false;
+  if (typeof value.get !== "function") return false;
+  if (typeof value.set !== "function") return false;
+  if (typeof value.delete !== "function") return false;
+  return true;
+}
+ 
+/**
  * @param {Y.Doc} docA
  * @param {Y.Doc} docB
  */
@@ -44,7 +60,7 @@ function connectDocs(docA, docB) {
 function cutPaste(session, fromKey, toKey) {
   session.doc.transact(() => {
     const from = session.cells.get(fromKey);
-    const fromMap = from instanceof Y.Map ? from : null;
+    const fromMap = isYMap(from) ? from : null;
     const value = fromMap?.get("value") ?? null;
     const formula = fromMap?.get("formula") ?? null;
     const enc = fromMap?.get("enc") ?? null;
@@ -232,6 +248,90 @@ test("CellStructuralConflictMonitor auto-merges move vs edit by rewriting the ed
   assert.equal((await sessionA.getCell("Sheet1:0:1"))?.value, "world");
   assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value, "world");
  
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CellStructuralConflictMonitor move conflict resolution applies the chosen side's moved cell content", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+  /** @type {Array<any>} */
+  const conflictsB = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    cellConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    cellConflicts: {
+      localUserId: "user-b",
+      onConflict: (c) => conflictsB.push(c),
+    },
+  });
+
+  // Base cell at A1.
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  disconnect();
+
+  // A: edit A1 then move A1 -> B1 (single transaction).
+  sessionA.doc.transact(() => {
+    const a1 = sessionA.cells.get("Sheet1:0:0");
+    assert.ok(isYMap(a1));
+    a1.set("value", "from-a");
+    const b1 = new Y.Map();
+    b1.set("value", "from-a");
+    sessionA.cells.set("Sheet1:0:1", b1);
+    sessionA.cells.delete("Sheet1:0:0");
+  }, sessionA.origin);
+
+  // B: edit A1 then move A1 -> C1 (single transaction).
+  sessionB.doc.transact(() => {
+    const a1 = sessionB.cells.get("Sheet1:0:0");
+    assert.ok(isYMap(a1));
+    a1.set("value", "from-b");
+    const c1 = new Y.Map();
+    c1.set("value", "from-b");
+    sessionB.cells.set("Sheet1:0:2", c1);
+    sessionB.cells.delete("Sheet1:0:0");
+  }, sessionB.origin);
+
+  disconnect = connectDocs(docA, docB);
+
+  const allConflicts = [...conflictsA, ...conflictsB];
+  assert.ok(allConflicts.length >= 1, "expected at least one conflict to be detected");
+
+  const conflictSide = conflictsA.length > 0 ? sessionA : sessionB;
+  const conflict = conflictsA.length > 0 ? conflictsA[0] : conflictsB[0];
+
+  assert.equal(conflict.type, "move");
+  assert.equal(conflict.reason, "move-destination");
+
+  const expectedKey = conflict.remote.toCellKey;
+  const expectedValue = conflict.remote.cell?.value ?? null;
+  assert.ok(typeof expectedKey === "string" && expectedKey.length > 0);
+
+  // Resolve by choosing "theirs" (remote side) and ensure that side's moved
+  // content is the one that lands at the chosen destination.
+  assert.ok(conflictSide.cellConflictMonitor?.resolveConflict(conflict.id, { choice: "theirs" }));
+
+  assert.equal(await sessionA.getCell("Sheet1:0:0"), null);
+  assert.equal(await sessionB.getCell("Sheet1:0:0"), null);
+  assert.equal((await sessionA.getCell(expectedKey))?.value ?? null, expectedValue);
+  assert.equal((await sessionB.getCell(expectedKey))?.value ?? null, expectedValue);
+
   sessionA.destroy();
   sessionB.destroy();
   disconnect();
