@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 use std::path::Path;
 
+use formula_model::SheetVisibility;
 use formula_xlsx::load_from_bytes;
 use pretty_assertions::assert_eq;
 use quick_xml::events::Event;
@@ -51,6 +52,35 @@ fn workbook_sheet_entries(xml: &[u8]) -> Vec<(String, u32, String)> {
                     sheet_id.expect("sheetId"),
                     rid.expect("r:id"),
                 ));
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+fn workbook_sheet_states(xml: &[u8]) -> BTreeMap<String, Option<String>> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = BTreeMap::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("read xml") {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"sheet" => {
+                let mut name = None;
+                let mut state = None;
+                for attr in e.attributes().flatten() {
+                    let key = attr.key.as_ref();
+                    let val = attr.unescape_value().expect("attr").into_owned();
+                    match key {
+                        b"name" => name = Some(val),
+                        b"state" => state = Some(val),
+                        _ => {}
+                    }
+                }
+                out.insert(name.expect("name"), state);
             }
             Event::Eof => break,
             _ => {}
@@ -274,4 +304,28 @@ fn add_sheet_preserves_macro_relationships_and_content_types() {
         content_types.contains("macroEnabled.main+xml"),
         "[Content_Types].xml must retain macro-enabled workbook content type"
     );
+}
+
+#[test]
+fn sheet_visibility_roundtrips_to_workbook_xml_state() {
+    let fixture = fixture_bytes();
+    let fixture_path = fixture_path();
+
+    let mut doc = load_from_bytes(&fixture).expect("load fixture");
+    let sheet2_id = doc.workbook.sheets[1].id;
+    assert!(doc
+        .workbook
+        .set_sheet_visibility(sheet2_id, SheetVisibility::Hidden));
+
+    let saved = doc.save_to_vec().expect("save");
+
+    let states = workbook_sheet_states(&zip_part(&saved, "xl/workbook.xml"));
+    assert_eq!(states.get("Sheet1").and_then(|s| s.as_deref()), None);
+    assert_eq!(
+        states.get("Sheet2").and_then(|s| s.as_deref()),
+        Some("hidden")
+    );
+
+    let parts = diff_parts(&fixture_path, &saved);
+    assert_eq!(parts, BTreeSet::from(["xl/workbook.xml".to_string()]));
 }

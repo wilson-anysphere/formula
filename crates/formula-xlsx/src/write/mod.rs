@@ -130,7 +130,9 @@ fn plan_sheet_structure(
 
     for sheet in &doc.workbook.sheets {
         if let Some(existing) = existing_by_id.get(&sheet.id) {
-            sheets.push(existing.clone());
+            let mut meta = existing.clone();
+            meta.state = sheet_state_from_visibility(sheet.visibility);
+            sheets.push(meta);
             continue;
         }
 
