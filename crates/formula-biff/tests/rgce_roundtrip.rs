@@ -1,3 +1,5 @@
+#![cfg(feature = "encode")]
+
 use formula_biff::{decode_rgce, encode_rgce};
 use pretty_assertions::assert_eq;
 
