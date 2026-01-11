@@ -1392,6 +1392,12 @@ export class QueryEngine {
       const existing = context.queryResults?.[source.queryId];
       if (existing) {
         const { table, meta: queryMeta } = existing;
+        // When query results are provided by the host (e.g. refresh orchestration),
+        // the table may not have been produced by this engine instance. Ensure it
+        // still carries a correct source set for privacy firewall enforcement.
+        if (queryMeta?.sources) {
+          this.setTableSourceIds(table, this.collectSourceIdsFromMetas(queryMeta.sources));
+        }
         const meta = {
           refreshedAt: queryMeta.refreshedAt,
           schema: queryMeta.outputSchema,
@@ -1684,6 +1690,9 @@ export class QueryEngine {
     if (existing) {
       right = existing.table;
       rightMeta = existing.meta;
+      if (rightMeta?.sources) {
+        this.setTableSourceIds(right, this.collectSourceIdsFromMetas(rightMeta.sources));
+      }
     } else {
       const query = context.queries?.[op.rightQuery];
       if (!query) throw new Error(`Unknown query '${op.rightQuery}'`);
@@ -1840,6 +1849,9 @@ export class QueryEngine {
       const existing = context.queryResults?.[id];
       if (existing) {
         sources.push(...existing.meta.sources);
+        if (existing.meta?.sources) {
+          this.setTableSourceIds(existing.table, this.collectSourceIdsFromMetas(existing.meta.sources));
+        }
         for (const sourceId of this.getTableSourceIds(existing.table)) combinedSourceIds.add(sourceId);
         tables.push(existing.table);
         continue;

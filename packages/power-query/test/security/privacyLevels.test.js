@@ -256,6 +256,81 @@ test("privacy levels: strict mode blocks execution when combining Private + Publ
   assert.ok(blocks.length > 0, "expected a blocking firewall diagnostic event");
 });
 
+test("privacy levels: strict mode blocks when combining Private + Public via precomputed queryResults", async () => {
+  /** @type {any[]} */
+  const events = [];
+
+  const csvPath = "/tmp/private.csv";
+  const apiUrl = "https://public.example.com/data";
+
+  const csvSourceId = getFileSourceId(csvPath);
+  const apiSourceId = getHttpSourceId(apiUrl);
+
+  const engine = new QueryEngine({
+    privacyMode: "enforce",
+    fileAdapter: {
+      readText: async () => ["Id,Region", "1,East"].join("\n"),
+    },
+  });
+
+  const publicTable = DataTable.fromGrid(
+    [
+      ["Id", "Target"],
+      [1, 10],
+    ],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const now = new Date(0);
+  const publicMeta = {
+    queryId: "q_public",
+    startedAt: now,
+    completedAt: now,
+    refreshedAt: now,
+    sources: [
+      {
+        refreshedAt: now,
+        schema: { columns: publicTable.columns, inferred: true },
+        rowCount: publicTable.rowCount,
+        rowCountEstimate: publicTable.rowCount,
+        provenance: { kind: "http", url: apiUrl, method: "GET" },
+      },
+    ],
+    outputSchema: { columns: publicTable.columns, inferred: true },
+    outputRowCount: publicTable.rowCount,
+  };
+
+  const privateQuery = {
+    id: "q_private",
+    name: "Private CSV",
+    source: { type: "csv", path: csvPath },
+    steps: [
+      {
+        id: "s_merge",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_public", joinType: "left", leftKey: "Id", rightKey: "Id" },
+      },
+    ],
+  };
+
+  await assert.rejects(
+    () =>
+      engine.executeQuery(
+        privateQuery,
+        {
+          queries: {},
+          queryResults: { q_public: { table: publicTable, meta: /** @type {any} */ (publicMeta) } },
+          privacy: { levelsBySourceId: { [csvSourceId]: "private", [apiSourceId]: "public" } },
+        },
+        { onProgress: (e) => events.push(e) },
+      ),
+    /Formula\.Firewall/,
+  );
+
+  const blocks = events.filter((e) => e.type === "privacy:firewall" && e.action === "block");
+  assert.ok(blocks.length > 0, "expected a blocking firewall diagnostic event");
+});
+
 test("privacy levels: warn mode allows execution but emits diagnostic", async () => {
   /** @type {any[]} */
   const events = [];
