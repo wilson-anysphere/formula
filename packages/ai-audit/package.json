@@ -3,9 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "browser": "./src/index.ts",
+      "node": "./src/index.node.ts",
+      "default": "./src/index.ts"
+    },
+    "./browser": "./src/index.ts",
+    "./node": "./src/index.node.ts"
+  },
   "dependencies": {
     "sql.js": "^1.13.0"
   }
 }
-

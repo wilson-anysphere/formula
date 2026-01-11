@@ -1,5 +1,3 @@
-import { promises as fs } from "node:fs";
-
 export interface SqliteBinaryStorage {
   load(): Promise<Uint8Array | null>;
   save(data: Uint8Array): Promise<void>;
@@ -17,28 +15,6 @@ export class InMemoryBinaryStorage implements SqliteBinaryStorage {
   }
 }
 
-export class NodeFileBinaryStorage implements SqliteBinaryStorage {
-  readonly filePath: string;
-
-  constructor(filePath: string) {
-    this.filePath = filePath;
-  }
-
-  async load(): Promise<Uint8Array | null> {
-    try {
-      const buffer = await fs.readFile(this.filePath);
-      return new Uint8Array(buffer);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
-  }
-
-  async save(data: Uint8Array): Promise<void> {
-    await fs.writeFile(this.filePath, data);
-  }
-}
-
 export class LocalStorageBinaryStorage implements SqliteBinaryStorage {
   readonly key: string;
 
@@ -47,15 +23,30 @@ export class LocalStorageBinaryStorage implements SqliteBinaryStorage {
   }
 
   async load(): Promise<Uint8Array | null> {
-    if (typeof localStorage === "undefined") return null;
-    const encoded = localStorage.getItem(this.key);
+    const storage = safeLocalStorage();
+    if (!storage) return null;
+    const encoded = storage.getItem(this.key);
     if (!encoded) return null;
     return fromBase64(encoded);
   }
 
   async save(data: Uint8Array): Promise<void> {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(this.key, toBase64(data));
+    const storage = safeLocalStorage();
+    if (!storage) return;
+    storage.setItem(this.key, toBase64(data));
+  }
+}
+
+function safeLocalStorage(): Storage | undefined {
+  try {
+    const storage = globalThis.localStorage;
+    if (storage) return storage;
+  } catch {}
+
+  try {
+    return (globalThis as any).window?.localStorage;
+  } catch {
+    return undefined;
   }
 }
 
@@ -80,4 +71,3 @@ function fromBase64(encoded: string): Uint8Array {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
-

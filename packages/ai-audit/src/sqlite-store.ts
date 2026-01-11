@@ -1,5 +1,4 @@
 import initSqlJs from "sql.js";
-import { createRequire } from "node:module";
 import type { AIAuditEntry, AuditListFilters, TokenUsage, ToolCallLog, UserFeedback } from "./types.js";
 import type { AIAuditStore } from "./store.js";
 import type { SqliteBinaryStorage } from "./storage.js";
@@ -9,6 +8,7 @@ type SqlJsDatabase = any;
 
 export interface SqliteAIAuditStoreOptions {
   storage?: SqliteBinaryStorage;
+  locateFile?: (file: string) => string;
 }
 
 export class SqliteAIAuditStore implements AIAuditStore {
@@ -23,7 +23,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
 
   static async create(options: SqliteAIAuditStoreOptions = {}): Promise<SqliteAIAuditStore> {
     const storage = options.storage ?? new InMemoryBinaryStorage();
-    const SQL = await initSqlJs({ locateFile: locateSqlJsFile });
+    const SQL = await initSqlJs(options.locateFile ? { locateFile: options.locateFile } : undefined);
     const existing = await storage.load();
     const db = existing ? new SQL.Database(existing) : new SQL.Database();
     return new SqliteAIAuditStore(db, storage);
@@ -123,15 +123,6 @@ export class SqliteAIAuditStore implements AIAuditStore {
   }
 }
 
-function locateSqlJsFile(file: string): string {
-  try {
-    const require = createRequire(import.meta.url);
-    return require.resolve(`sql.js/dist/${file}`);
-  } catch {
-    return file;
-  }
-}
-
 function normalizeTokenUsage(usage: TokenUsage | undefined): TokenUsage | undefined {
   if (!usage) return undefined;
   const total = usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens;
@@ -177,4 +168,3 @@ function safeJsonParse(value: string): unknown {
     return null;
   }
 }
-

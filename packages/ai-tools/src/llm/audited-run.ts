@@ -1,6 +1,5 @@
-import { AIAuditRecorder } from "@formula/ai-audit/src/recorder.js";
-import type { AIAuditStore } from "@formula/ai-audit/src/store.js";
-import type { AIMode, TokenUsage } from "@formula/ai-audit/src/types.js";
+import { AIAuditRecorder } from "@formula/ai-audit";
+import type { AIAuditStore, AIMode, TokenUsage } from "@formula/ai-audit";
 
 import { runChatWithTools } from "../../../llm/src/toolCalling.js";
 
@@ -69,7 +68,6 @@ export async function runChatWithToolsAudited(params: AuditedRunParams): Promise
       client: auditedClient as any,
       toolExecutor: params.tool_executor as any,
       messages: params.messages as any,
-      model: params.audit.model,
       maxIterations: params.max_iterations,
       model: params.model ?? params.audit.model,
       temperature: params.temperature,
