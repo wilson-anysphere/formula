@@ -257,10 +257,19 @@ export class EngineWorker {
         options.signal.addEventListener("abort", pending.abortListener, { once: true });
       }
 
-      if (transfer && transfer.length > 0) {
-        this.port.postMessage(request, transfer);
-      } else {
-        this.port.postMessage(request);
+      try {
+        if (transfer && transfer.length > 0) {
+          this.port.postMessage(request, transfer);
+        } else {
+          this.port.postMessage(request);
+        }
+      } catch (err) {
+        this.pending.delete(id);
+        pending.timeoutId && clearTimeout(pending.timeoutId);
+        if (pending.signal && pending.abortListener) {
+          pending.signal.removeEventListener("abort", pending.abortListener);
+        }
+        reject(err);
       }
     });
   }
@@ -278,7 +287,11 @@ export class EngineWorker {
     }
 
     const cancelMessage: RpcCancel = { type: "cancel", id };
-    this.port.postMessage(cancelMessage);
+    try {
+      this.port.postMessage(cancelMessage);
+    } catch {
+      // Ignore; cancellation is best-effort and may race with worker teardown.
+    }
     pending.reject(error);
   }
 
