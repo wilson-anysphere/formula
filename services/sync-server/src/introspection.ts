@@ -86,6 +86,9 @@ export function createSyncTokenIntrospectionClient(config: {
   >();
 
   const cacheTtlMs = Math.max(0, Math.floor(config.cacheTtlMs));
+  const cacheSweepIntervalMs = Math.max(cacheTtlMs, 30_000);
+  const maxEntriesBeforeSweep = 10_000;
+  let lastCacheSweepAtMs = Date.now();
 
   const cacheKey = (params: { token: string; docId: string; clientIp?: string }) =>
     // Hash the key so we don't retain raw JWTs/opaque tokens (which could be large
@@ -95,6 +98,22 @@ export function createSyncTokenIntrospectionClient(config: {
   const introspect: SyncTokenIntrospectionClient["introspect"] = async (params) => {
     const key = cacheKey(params);
     const now = Date.now();
+
+    // Opportunistically sweep expired entries to prevent unbounded growth when
+    // tokens are mostly one-off (e.g. short-lived JWTs).
+    if (cacheTtlMs > 0 && cache.size > 0) {
+      const shouldSweep =
+        cache.size > maxEntriesBeforeSweep || now - lastCacheSweepAtMs > cacheSweepIntervalMs;
+      if (shouldSweep) {
+        for (const [cachedKey, entry] of cache) {
+          if (entry.expiresAtMs <= now && !entry.inFlight) {
+            cache.delete(cachedKey);
+          }
+        }
+        lastCacheSweepAtMs = now;
+      }
+    }
+
     const cached = cache.get(key);
 
     if (cacheTtlMs > 0 && cached && cached.value && cached.expiresAtMs > now) {

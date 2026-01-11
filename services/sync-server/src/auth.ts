@@ -52,6 +52,25 @@ export type IntrospectCache = Map<
   }
 >;
 
+const introspectCacheLastSweepAtMs = new WeakMap<IntrospectCache, number>();
+
+function maybeSweepIntrospectCache(cache: IntrospectCache, now: number, cacheMs: number): void {
+  const sweepIntervalMs = Math.max(cacheMs, 30_000);
+  const maxEntriesBeforeSweep = 10_000;
+  const lastSweepAtMs = introspectCacheLastSweepAtMs.get(cache) ?? 0;
+
+  if (cache.size <= maxEntriesBeforeSweep && now - lastSweepAtMs < sweepIntervalMs) {
+    return;
+  }
+
+  for (const [key, entry] of cache) {
+    if (entry.expiresAtMs <= now) {
+      cache.delete(key);
+    }
+  }
+  introspectCacheLastSweepAtMs.set(cache, now);
+}
+
 function isStringArray(value: unknown): value is string[] {
   return (
     Array.isArray(value) &&
@@ -324,10 +343,12 @@ export async function authenticateRequest(
   if (auth.mode === "introspect") {
     const cache = options.introspectCache ?? null;
     const tokenHash = cache ? sha256Hex(token) : null;
+    const now = Date.now();
     if (cache && tokenHash) {
+      maybeSweepIntrospectCache(cache, now, auth.cacheMs);
       const cached = cache.get(tokenHash);
       if (cached) {
-        if (cached.expiresAtMs > Date.now()) {
+        if (cached.expiresAtMs > now) {
           if (cached.ctx.docId !== docName) {
             throw new AuthError("Token is not authorized for this document", 403);
           }
@@ -353,7 +374,6 @@ export async function authenticateRequest(
 
       if (cache && tokenHash) {
         const expMs = parseJwtExpMs(token);
-        const now = Date.now();
         const cacheUntil = now + auth.cacheMs;
         const expiresAtMs =
           typeof expMs === "number" && Number.isFinite(expMs)
