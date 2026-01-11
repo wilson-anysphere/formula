@@ -225,6 +225,40 @@ test("manifest validation: module/browser entrypoints must be strings when prese
   );
 });
 
+test("manifest validation: module/browser entrypoints must be non-empty strings when present", () => {
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.js",
+          module: "   ",
+          engines: { formula: "^1.0.0" }
+        },
+        { engineVersion: "1.0.0", enforceEngine: true }
+      ),
+    /module must be a non-empty string/
+  );
+
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.js",
+          browser: "",
+          engines: { formula: "^1.0.0" }
+        },
+        { engineVersion: "1.0.0", enforceEngine: true }
+      ),
+    /browser must be a non-empty string/
+  );
+});
+
 test("manifest validation: main entrypoint must be CommonJS (.js/.cjs)", () => {
   assert.throws(
     () =>

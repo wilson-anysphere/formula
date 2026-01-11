@@ -300,15 +300,21 @@ function validateExtensionManifest(manifest, options = {}) {
   assertString(obj.version, "version");
   assertString(obj.publisher, "publisher");
   assertString(obj.main, "main");
-  assertOptionalString(obj.module, "module");
-  assertOptionalString(obj.browser, "browser");
+  const moduleEntry = assertOptionalString(obj.module, "module");
+  const browserEntry = assertOptionalString(obj.browser, "browser");
 
   assertEntrypointExtension(obj.main, "main", MAIN_ENTRYPOINT_EXTS);
-  if (typeof obj.module === "string" && obj.module.trim().length > 0) {
-    assertEntrypointExtension(obj.module, "module", ESM_ENTRYPOINT_EXTS);
+  if (moduleEntry !== undefined) {
+    if (moduleEntry.trim().length === 0) {
+      throw new ManifestError("module must be a non-empty string");
+    }
+    assertEntrypointExtension(moduleEntry, "module", ESM_ENTRYPOINT_EXTS);
   }
-  if (typeof obj.browser === "string" && obj.browser.trim().length > 0) {
-    assertEntrypointExtension(obj.browser, "browser", ESM_ENTRYPOINT_EXTS);
+  if (browserEntry !== undefined) {
+    if (browserEntry.trim().length === 0) {
+      throw new ManifestError("browser must be a non-empty string");
+    }
+    assertEntrypointExtension(browserEntry, "browser", ESM_ENTRYPOINT_EXTS);
   }
 
   if (!isValidSemver(obj.version.trim())) {
