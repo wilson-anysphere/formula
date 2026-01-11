@@ -59,8 +59,11 @@ export class FunctionRegistry {
     // carries richer metadata. Curated entries override catalog name-only
     // entries.
     for (const fn of CURATED_FUNCTIONS) {
-      this.register(fn);
-      const xlfnAlias = toXlfnAlias(fn);
+      const key = fn.name.toUpperCase();
+      const existing = this.functionsByName.get(key);
+      const merged = existing ? { ...existing, ...fn } : fn;
+      this.register(merged);
+      const xlfnAlias = toXlfnAlias(merged);
       if (xlfnAlias) this.register(xlfnAlias);
     }
   }
