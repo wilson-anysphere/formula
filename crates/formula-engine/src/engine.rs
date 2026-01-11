@@ -202,10 +202,19 @@ struct Spill {
     array: Array,
 }
 
+#[derive(Debug, Clone)]
+struct BlockedSpill {
+    blocker: CellKey,
+}
+
 #[derive(Debug, Default, Clone)]
 struct SpillState {
     by_origin: HashMap<CellKey, Spill>,
     origin_by_cell: HashMap<CellKey, CellKey>,
+    /// Spill origins currently evaluating to `#SPILL!` due to a blocked spill range.
+    blocked_by_origin: HashMap<CellKey, BlockedSpill>,
+    /// Reverse index: blocker cell -> spill origins that should be re-evaluated when the blocker changes.
+    blocked_origins_by_cell: HashMap<CellKey, HashSet<CellKey>>,
 }
 
 pub struct Engine {
@@ -293,6 +302,7 @@ impl Engine {
         let cell_id = cell_id_from_key(key);
 
         self.clear_spill_for_cell(key);
+        self.clear_blocked_spill_for_origin(key);
 
         // Replace any existing formula and dependencies.
         self.graph.clear_cell(key);
@@ -311,6 +321,7 @@ impl Engine {
         // Mark downstream dependents dirty.
         self.mark_dirty_dependents_with_reasons(key);
         self.calc_graph.mark_dirty(cell_id);
+        self.mark_dirty_blocked_spill_origins_for_cell(key);
         self.sync_dirty_from_calc_graph();
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
@@ -464,6 +475,7 @@ impl Engine {
         let key = CellKey { sheet: sheet_id, addr };
         let cell_id = cell_id_from_key(key);
         self.clear_spill_for_cell(key);
+        self.clear_blocked_spill_for_origin(key);
 
         let parsed = crate::parse_formula(formula, crate::ParseOptions::default())?;
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
@@ -502,6 +514,7 @@ impl Engine {
         // Recalculate this cell and anything depending on it.
         self.mark_dirty_including_self_with_reasons(key);
         self.calc_graph.mark_dirty(cell_id);
+        self.mark_dirty_blocked_spill_origins_for_cell(key);
         self.sync_dirty_from_calc_graph();
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
@@ -1153,6 +1166,10 @@ impl Engine {
         snapshot: &mut Snapshot,
         spill_dirty_roots: &mut Vec<CellId>,
     ) {
+        // Clear any previously tracked spill blockage for this origin before applying the new
+        // evaluation result.
+        self.clear_blocked_spill_for_origin(key);
+
         match value {
             Value::Array(array) => {
                 if array.rows == 0 || array.cols == 0 {
@@ -1160,9 +1177,46 @@ impl Engine {
                     return;
                 }
 
+                let mut spill_too_big = || {
+                    let cleared = self.clear_spill_for_origin(key);
+                    for cleared_key in cleared {
+                        snapshot.values.remove(&cleared_key);
+                        spill_dirty_roots.push(cell_id_from_key(cleared_key));
+                        self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
+                    }
+
+                    let cell = self.workbook.get_or_create_cell_mut(key);
+                    cell.value = Value::Error(ErrorKind::Spill);
+                    snapshot.values.insert(key, Value::Error(ErrorKind::Spill));
+                };
+
+                let row_delta = match u32::try_from(array.rows.saturating_sub(1)) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        spill_too_big();
+                        return;
+                    }
+                };
+                let col_delta = match u32::try_from(array.cols.saturating_sub(1)) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        spill_too_big();
+                        return;
+                    }
+                };
+
+                let Some(end_row) = key.addr.row.checked_add(row_delta) else {
+                    spill_too_big();
+                    return;
+                };
+                let Some(end_col) = key.addr.col.checked_add(col_delta) else {
+                    spill_too_big();
+                    return;
+                };
+
                 let end = CellAddr {
-                    row: key.addr.row + array.rows.saturating_sub(1) as u32,
-                    col: key.addr.col + array.cols.saturating_sub(1) as u32,
+                    row: end_row,
+                    col: end_col,
                 };
 
                 // Fast path: if the spill shape is unchanged, update the stored array and
@@ -1201,9 +1255,11 @@ impl Engine {
                 for cleared_key in cleared {
                     snapshot.values.remove(&cleared_key);
                     spill_dirty_roots.push(cell_id_from_key(cleared_key));
+                    self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
                 }
 
-                if self.spill_is_blocked(key, &array) {
+                if let Some(blocker) = self.spill_blocker(key, &array) {
+                    self.record_blocked_spill(key, blocker);
                     let cell = self.workbook.get_or_create_cell_mut(key);
                     cell.value = Value::Error(ErrorKind::Spill);
                     snapshot.values.insert(key, Value::Error(ErrorKind::Spill));
@@ -1217,6 +1273,7 @@ impl Engine {
                 for cleared_key in cleared {
                     snapshot.values.remove(&cleared_key);
                     spill_dirty_roots.push(cell_id_from_key(cleared_key));
+                    self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
                 }
 
                 let cell = self.workbook.get_or_create_cell_mut(key);
@@ -1241,6 +1298,57 @@ impl Engine {
         spill.array.get(row_off, col_off).cloned()
     }
 
+    fn clear_blocked_spill_for_origin(&mut self, origin: CellKey) {
+        let Some(blocked) = self.spills.blocked_by_origin.remove(&origin) else {
+            return;
+        };
+
+        if let Some(origins) = self.spills.blocked_origins_by_cell.get_mut(&blocked.blocker) {
+            origins.remove(&origin);
+            if origins.is_empty() {
+                self.spills.blocked_origins_by_cell.remove(&blocked.blocker);
+            }
+        }
+    }
+
+    fn record_blocked_spill(&mut self, origin: CellKey, blocker: CellKey) {
+        self.spills
+            .blocked_by_origin
+            .insert(origin, BlockedSpill { blocker });
+        self.spills
+            .blocked_origins_by_cell
+            .entry(blocker)
+            .or_default()
+            .insert(origin);
+    }
+
+    fn mark_dirty_blocked_spill_origins_for_cell(&mut self, cell: CellKey) {
+        let Some(origins) = self.spills.blocked_origins_by_cell.get(&cell) else {
+            return;
+        };
+
+        // Clone so we can freely mutate dirty bookkeeping while iterating.
+        let origins: Vec<CellKey> = origins.iter().copied().collect();
+        for origin in origins {
+            let origin_id = cell_id_from_key(origin);
+            self.calc_graph.mark_dirty(origin_id);
+
+            if self.dirty.insert(origin) {
+                self.dirty_reasons.insert(origin, cell);
+            }
+            self.mark_dirty_dependents_with_reasons(origin);
+        }
+    }
+
+    fn append_blocked_spill_dirty_roots(&self, cell: CellKey, out: &mut Vec<CellId>) {
+        let Some(origins) = self.spills.blocked_origins_by_cell.get(&cell) else {
+            return;
+        };
+        for &origin in origins {
+            out.push(cell_id_from_key(origin));
+        }
+    }
+
     fn clear_spill_for_cell(&mut self, key: CellKey) {
         let origin = match self.spill_origin_key(key) {
             Some(origin) => origin,
@@ -1250,6 +1358,7 @@ impl Engine {
         let cleared = self.clear_spill_for_origin(origin);
         for cleared_key in cleared {
             self.calc_graph.mark_dirty(cell_id_from_key(cleared_key));
+            self.mark_dirty_blocked_spill_origins_for_cell(cleared_key);
         }
 
         // If a user edits any cell in a spill range, the origin needs to be re-evaluated
@@ -1286,7 +1395,7 @@ impl Engine {
         cleared
     }
 
-    fn spill_is_blocked(&self, origin: CellKey, array: &Array) -> bool {
+    fn spill_blocker(&self, origin: CellKey, array: &Array) -> Option<CellKey> {
         for r in 0..array.rows {
             for c in 0..array.cols {
                 if r == 0 && c == 0 {
@@ -1304,22 +1413,22 @@ impl Engine {
                 // Blocked by non-empty user cell (literal or formula).
                 if let Some(cell) = self.workbook.get_cell(key) {
                     if cell.formula.is_some() {
-                        return true;
+                        return Some(key);
                     }
                     if cell.value != Value::Blank {
-                        return true;
+                        return Some(key);
                     }
                 }
 
                 // Blocked by another spill.
                 if let Some(other_origin) = self.spills.origin_by_cell.get(&key) {
                     if *other_origin != origin {
-                        return true;
+                        return Some(key);
                     }
                 }
             }
         }
-        false
+        None
     }
 
     fn apply_new_spill(

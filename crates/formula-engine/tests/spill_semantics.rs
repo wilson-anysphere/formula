@@ -43,6 +43,70 @@ fn spill_blocking_produces_spill_error() {
 }
 
 #[test]
+fn spill_resolves_after_blocker_cleared() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=A1:A3").unwrap();
+    engine.recalculate_single_threaded();
+
+    // Block the spill, producing #SPILL! at the origin.
+    engine.set_cell_value("Sheet1", "C2", 99.0).unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Spill));
+    assert!(engine.spill_range("Sheet1", "C1").is_none());
+
+    // Clearing the blocker should allow the origin to spill again.
+    engine
+        .set_cell_value("Sheet1", "C2", Value::Blank)
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("C3").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C3"), Value::Number(3.0));
+}
+
+#[test]
+fn spill_resolves_after_overlapping_spill_shrinks() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 3.0).unwrap();
+
+    // This spill range (D1:E3) overlaps the spill range we want at C2:D4 without covering its origin.
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SEQUENCE(A1,2,1,1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=SEQUENCE(3,2,1,1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // The lower spill is blocked by the upper spill's occupied cells.
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Error(ErrorKind::Spill));
+    assert!(engine.spill_range("Sheet1", "C2").is_none());
+
+    // Shrink the upper spill so the overlap is cleared; the blocked spill should now succeed.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C2").expect("spill range");
+    assert_eq!(start, parse_a1("C2").unwrap());
+    assert_eq!(end, parse_a1("D4").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C3"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C4"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D4"), Value::Number(6.0));
+}
+
+#[test]
 fn transpose_spills_down() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
@@ -96,4 +160,3 @@ fn dependents_of_spill_cells_recalculate() {
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(5.0));
     assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(50.0));
 }
-
