@@ -75,7 +75,11 @@ test.describe("BrowserExtensionHost", () => {
         const host = new BrowserExtensionHost({
           engineVersion: "1.0.0",
           spreadsheetApi,
-          permissionPrompt: async () => true
+          permissionPrompt: async () => true,
+          // Vite rewrites `@formula/extension-api` into `/@fs/...` URLs, which fail the
+          // strict import preflight. The import sandbox is exercised in unit tests; for
+          // this e2e suite we disable preflight so we can validate host behavior.
+          sandbox: { strictImports: false },
         });
 
         await host.loadExtensionFromUrl(manifestUrl);
@@ -104,6 +108,11 @@ test.describe("BrowserExtensionHost", () => {
       async ({ hostModuleUrl, extensionApiUrl }) => {
         const { BrowserExtensionHost } = await import(hostModuleUrl);
 
+        // The extension entrypoint is loaded via `blob:` URL, so its module resolution base
+        // is non-hierarchical. Convert Vite's `/@fs/...` path into an absolute http(s) URL so
+        // `import` inside the blob-backed worker can resolve it.
+        const extensionApiAbsoluteUrl = new URL(extensionApiUrl, location.href).href;
+
         const commandId = "ctxExt.read";
         const manifest = {
           name: "ctx-ext",
@@ -117,7 +126,7 @@ test.describe("BrowserExtensionHost", () => {
         };
 
         const code = `
-          import * as formula from ${JSON.stringify(extensionApiUrl)};
+          import * as formula from ${JSON.stringify(extensionApiAbsoluteUrl)};
           export async function activate(context) {
             const snapshot = {
               ctx: {
@@ -150,6 +159,7 @@ test.describe("BrowserExtensionHost", () => {
           engineVersion: "1.0.0",
           spreadsheetApi: {},
           permissionPrompt: async () => true,
+          sandbox: { strictImports: false },
         });
 
         await host.loadExtension({
@@ -218,6 +228,7 @@ test.describe("BrowserExtensionHost", () => {
               },
             },
             permissionPrompt: async () => true,
+            sandbox: { strictImports: false },
           });
 
           await host.loadExtensionFromUrl(manifestUrl);
@@ -264,6 +275,7 @@ test.describe("BrowserExtensionHost", () => {
             if (permissions.includes("network")) return false;
             return true;
           },
+          sandbox: { strictImports: false },
         });
 
         await host.loadExtensionFromUrl(manifestUrl);
@@ -347,7 +359,7 @@ test.describe("BrowserExtensionHost", () => {
             },
             async setCell() {
               // noop
-            }
+            },
           },
           permissionPrompt: async ({ permissions }: { permissions: string[] }) => {
             if (permissions.includes("network")) {
@@ -355,7 +367,8 @@ test.describe("BrowserExtensionHost", () => {
               return false;
             }
             return true;
-          }
+          },
+          sandbox: { strictImports: false },
         });
 
         await host.loadExtension({

@@ -21,8 +21,8 @@ test.describe("macros panel", () => {
                   has_macros: true,
                   origin_path: null,
                   workbook_fingerprint: null,
-                  signature: null,
                   trust: "trusted_always",
+                  signature: { status: "unsigned" },
                 };
 
               case "set_macro_trust":
@@ -30,8 +30,8 @@ test.describe("macros panel", () => {
                   has_macros: true,
                   origin_path: null,
                   workbook_fingerprint: null,
-                  signature: null,
                   trust: args?.decision ?? "trusted_always",
+                  signature: { status: "unsigned" },
                 };
 
               case "set_macro_ui_context":
@@ -137,7 +137,7 @@ test.describe("macros panel", () => {
   });
 
   test("runs TypeScript + Python macros in the web demo", async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
 
     await page.addInitScript(() => localStorage.clear());
     page.on("dialog", (dialog) => dialog.accept());
@@ -159,7 +159,7 @@ test.describe("macros panel", () => {
     const runButton = body.getByRole("button", { name: "Run" });
     await runButton.click();
     await expect(runButton).toBeDisabled();
-    await expect(runButton).toBeEnabled();
+    await expect(runButton).toBeEnabled({ timeout: 30_000 });
 
     await expect
       .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E1")), {
@@ -171,7 +171,7 @@ test.describe("macros panel", () => {
     await select.selectOption({ label: "Python: Write E2" });
     await runButton.click();
     await expect(runButton).toBeDisabled();
-    await expect(runButton).toBeEnabled();
+    await expect(runButton).toBeEnabled({ timeout: 90_000 });
 
     await expect
       .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E2")), {

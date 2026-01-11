@@ -100,7 +100,11 @@ export async function renderMacroRunner(
     runButton.disabled = true;
     try {
       const macroId = select.value;
-      const result = await runner.run({ workbookId, macroId, timeoutMs: 5_000 });
+      const selected = macros.find((m) => m.id === macroId);
+      // Script macros can pay a cold-start cost (worker startup, TS transpilation, Pyodide init),
+      // so use a more forgiving timeout than the macro runner defaults.
+      const timeoutMs = selected?.language === "python" ? 60_000 : 20_000;
+      const result = await runner.run({ workbookId, macroId, timeoutMs });
       if (result.output.length) {
         output.textContent += result.output.join("\n") + "\n";
       }
