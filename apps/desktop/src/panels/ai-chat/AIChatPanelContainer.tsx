@@ -3,7 +3,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { LLMMessage } from "../../../../../packages/llm/src/types.js";
 import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
 
+import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/local-storage-store.js";
+
 import { createAiChatOrchestrator } from "../../ai/chat/orchestrator.js";
+import { runAgentTask, type AgentProgressEvent, type AgentTaskResult } from "../../ai/agent/agentOrchestrator.js";
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
 import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integration.js";
@@ -45,6 +48,7 @@ export interface AIChatPanelContainerProps {
 }
 
 export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
+  const [tab, setTab] = useState<"chat" | "agent">("chat");
   const [apiKey, setApiKey] = useState<string | null>(() => loadApiKeyFromRuntime());
   const [draftKey, setDraftKey] = useState("");
 
@@ -138,6 +142,7 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
   const client = useMemo(() => new OpenAIClient({ apiKey }), [apiKey]);
 
   const workbookId = props.workbookId ?? "local-workbook";
+  const auditStore = useMemo(() => new LocalStorageAIAuditStore(), []);
 
   const contextManager = useMemo(() => {
     // Keep this lightweight + dependency-free for now (deterministic hash embeddings).
@@ -180,13 +185,165 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
     };
   }, [orchestrator]);
 
+  const [agentGoal, setAgentGoal] = useState("");
+  const [agentConstraints, setAgentConstraints] = useState("");
+  const [agentEvents, setAgentEvents] = useState<AgentProgressEvent[]>([]);
+  const [agentResult, setAgentResult] = useState<AgentTaskResult | null>(null);
+  const [agentRunning, setAgentRunning] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const cancelAgent = useCallback(() => {
+    abortControllerRef.current?.abort();
+    // Also resolve any pending approval prompt to avoid a stuck UI.
+    resolveApproval(false);
+  }, [resolveApproval]);
+
+  useEffect(() => {
+    return () => cancelAgent();
+  }, [cancelAgent]);
+
+  const runAgent = useCallback(async () => {
+    if (agentRunning) return;
+
+    const goal = agentGoal.trim();
+    if (!goal) return;
+
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setAgentRunning(true);
+    setAgentEvents([]);
+    setAgentResult(null);
+
+    const constraints = agentConstraints
+      .split("\n")
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+    try {
+      const result = await runAgentTask({
+        goal,
+        constraints: constraints.length ? constraints : undefined,
+        workbookId,
+        documentController: props.getDocumentController() as any,
+        llmClient: client as any,
+        auditStore,
+        onProgress: (event) => setAgentEvents((prev) => [...prev, event]),
+        onApprovalRequired: onApprovalRequired as any,
+        maxIterations: 20,
+        maxDurationMs: 5 * 60 * 1000,
+        signal: controller.signal,
+        model: (client as any).model ?? "gpt-4o-mini"
+      });
+      setAgentResult(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setAgentResult({ status: "error", session_id: "unknown", error: message });
+    } finally {
+      abortControllerRef.current = null;
+      setAgentRunning(false);
+    }
+  }, [
+    agentConstraints,
+    agentGoal,
+    agentRunning,
+    auditStore,
+    client,
+    onApprovalRequired,
+    props,
+    workbookId
+  ]);
+
   return (
-    <div style={{ position: "relative", height: "100%" }}>
-      <AIChatPanel
-        client={client as any}
-        toolExecutor={{ tools: [], execute: async () => ({ ok: false, error: { message: "Tool executor not initialized" } }) } as any}
-        sendMessage={sendMessage}
-      />
+    <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          padding: 8,
+          borderBottom: "1px solid var(--border)",
+          background: "var(--bg-secondary)"
+        }}
+      >
+        <TabButton active={tab === "chat"} onClick={() => setTab("chat")}>
+          Chat
+        </TabButton>
+        <TabButton active={tab === "agent"} onClick={() => setTab("agent")}>
+          Agent
+        </TabButton>
+      </div>
+      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+        {tab === "chat" ? (
+          <AIChatPanel
+            client={client as any}
+            toolExecutor={{ tools: [], execute: async () => ({ ok: false, error: { message: "Tool executor not initialized" } }) } as any}
+            sendMessage={sendMessage}
+          />
+        ) : (
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 12, fontWeight: 600 }}>Goal</label>
+              <textarea
+                value={agentGoal}
+                onChange={(e) => setAgentGoal(e.target.value)}
+                placeholder="e.g. Summarize the data in Sheet1 and add a chart."
+                rows={3}
+                style={{ padding: 8, resize: "vertical" }}
+                data-testid="agent-goal"
+                disabled={agentRunning}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 12, fontWeight: 600 }}>Constraints (one per line, optional)</label>
+              <textarea
+                value={agentConstraints}
+                onChange={(e) => setAgentConstraints(e.target.value)}
+                placeholder="e.g. Don’t overwrite existing data."
+                rows={2}
+                style={{ padding: 8, resize: "vertical" }}
+                data-testid="agent-constraints"
+                disabled={agentRunning}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={() => void runAgent()} disabled={agentRunning || !agentGoal.trim()} data-testid="agent-run">
+                {agentRunning ? "Running…" : "Run"}
+              </button>
+              <button type="button" onClick={cancelAgent} disabled={!agentRunning} data-testid="agent-cancel">
+                Cancel
+              </button>
+            </div>
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, minHeight: 0, flex: 1, overflow: "auto" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Steps</div>
+              {agentEvents.length === 0 ? (
+                <div style={{ fontSize: 12, opacity: 0.8 }}>No steps yet.</div>
+              ) : (
+                <ol style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 18, margin: 0 }}>
+                  {agentEvents.map((event, idx) => (
+                    <li key={idx} style={{ fontSize: 12 }}>
+                      <AgentEventRow event={event} />
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {agentResult ? (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }} data-testid="agent-result">
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Result</div>
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>
+                    Status: <code>{agentResult.status}</code> • session_id: <code>{agentResult.session_id}</code>
+                  </div>
+                  {agentResult.final ? (
+                    <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, marginTop: 8 }}>{agentResult.final}</pre>
+                  ) : agentResult.error ? (
+                    <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, marginTop: 8 }}>{agentResult.error}</pre>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
+      </div>
       {approvalRequest ? (
         <ApprovalModal
           request={approvalRequest}
@@ -201,4 +358,60 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
 function stripSystemPrompt(messages: LLMMessage[]): LLMMessage[] {
   if (messages[0]?.role === "system") return messages.slice(1);
   return messages;
+}
+
+function TabButton(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={props.onClick}
+      style={{
+        padding: "6px 10px",
+        borderRadius: 8,
+        border: "1px solid var(--border)",
+        background: props.active ? "var(--bg-tertiary)" : "transparent",
+        color: "var(--text-primary)",
+        fontWeight: props.active ? 600 : 500
+      }}
+    >
+      {props.children}
+    </button>
+  );
+}
+
+function AgentEventRow({ event }: { event: AgentProgressEvent }) {
+  switch (event.type) {
+    case "planning":
+      return <span>Planning (iteration {event.iteration})</span>;
+    case "tool_call":
+      return (
+        <span>
+          Tool: <code>{event.call.name}</code>
+          {event.requiresApproval ? " (approval gated)" : null}
+        </span>
+      );
+    case "tool_result":
+      return (
+        <span>
+          Result: <code>{event.call.name}</code> •{" "}
+          {event.ok === undefined ? "done" : event.ok ? "ok" : "error"}
+          {event.error ? ` (${event.error})` : null}
+        </span>
+      );
+    case "assistant_message":
+      return <span>Assistant: {event.content}</span>;
+    case "complete":
+      return <span>Complete</span>;
+    case "cancelled":
+      return (
+        <span>
+          Cancelled ({event.reason})
+          {event.message ? `: ${event.message}` : null}
+        </span>
+      );
+    case "error":
+      return <span>Error: {event.message}</span>;
+    default:
+      return <span>Unknown event</span>;
+  }
 }
