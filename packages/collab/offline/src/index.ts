@@ -43,9 +43,7 @@ export function attachOfflinePersistence(doc: Y.Doc, opts: OfflinePersistenceOpt
       start().destroy();
     },
     clear: async () => {
-      await whenLoaded();
       await start().clear();
     },
   };
 }
-

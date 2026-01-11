@@ -20,12 +20,14 @@ function deleteDatabase(name: string): Promise<void> {
 export function attachIndexeddbPersistence(doc: Y.Doc, opts: { key: string }): OfflinePersistenceHandle {
   const persistence = new IndexeddbPersistence(opts.key, doc) as any;
 
+  let destroyed = false;
+
   // y-indexeddb uses `whenSynced` for "load complete".
   const whenLoaded = async () => {
+    if (destroyed) return;
     await Promise.resolve(persistence.whenSynced);
   };
 
-  let destroyed = false;
   const destroy = () => {
     if (destroyed) return;
     destroyed = true;
