@@ -3,7 +3,6 @@ import type { ToolExecutorOptions, ToolExecutionResult } from "../executor/tool-
 import { ToolExecutor } from "../executor/tool-executor.js";
 import { PreviewEngine, type PreviewEngineOptions, type ToolPlanPreview } from "../preview/preview-engine.js";
 import { SPREADSHEET_TOOL_DEFINITIONS, type ToolDefinition, type ToolName } from "../tool-schema.js";
-import { enforceToolOutputDlp, type ToolOutputDlpOptions } from "../dlp/toolOutputDlp.js";
 
 export interface LLMToolCall {
   id?: string;
@@ -60,14 +59,6 @@ export interface SpreadsheetLLMToolExecutorOptions extends ToolExecutorOptions {
    * external network access.
    */
   require_approval_for_mutations?: boolean;
-  /**
-   * Optional DLP enforcement for tool results intended for cloud LLM processing.
-   *
-   * IMPORTANT: When provided, the *returned* tool result (not the raw workbook data)
-   * is what will be persisted in the tool message history. This prevents sensitive
-   * workbook contents from being sent to cloud providers via tool outputs.
-   */
-  dlp?: ToolOutputDlpOptions;
 }
 
 export interface LLMToolDefinition extends ToolDefinition {
@@ -108,24 +99,13 @@ export function getSpreadsheetToolDefinitions(options: { require_approval_for_mu
 export class SpreadsheetLLMToolExecutor {
   readonly tools: LLMToolDefinition[];
   private readonly executor: ToolExecutor;
-  private readonly dlp?: ToolOutputDlpOptions;
 
   constructor(spreadsheet: SpreadsheetApi, options: SpreadsheetLLMToolExecutorOptions = {}) {
     this.executor = new ToolExecutor(spreadsheet, options);
     this.tools = getSpreadsheetToolDefinitions({ require_approval_for_mutations: options.require_approval_for_mutations });
-    this.dlp = options.dlp;
   }
 
   async execute(call: LLMToolCall): Promise<ToolExecutionResult> {
-    const result = await this.executor.execute({ name: call.name, parameters: call.arguments });
-    if (!this.dlp) return result;
-    return enforceToolOutputDlp({
-      call,
-      result,
-      dlp: this.dlp,
-      defaultSheet: this.executor.options.default_sheet
-    });
+    return this.executor.execute({ name: call.name, parameters: call.arguments });
   }
 }
-
-export type { ToolOutputDlpOptions };

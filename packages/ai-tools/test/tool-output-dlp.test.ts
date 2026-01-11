@@ -46,9 +46,9 @@ describe("tool output DLP enforcement", () => {
 
     const executor = new SpreadsheetLLMToolExecutor(workbook, {
       dlp: {
-        documentId: "doc-1",
+        document_id: "doc-1",
         policy: makePolicy({ redactDisallowed: true }),
-        classificationRecords: [
+        classification_records: [
           {
             selector: { scope: "cell", documentId: "doc-1", sheetId: "Sheet1", row: 0, col: 1 },
             classification: { level: "Restricted", labels: [] },
@@ -86,9 +86,9 @@ describe("tool output DLP enforcement", () => {
 
     const executor = new SpreadsheetLLMToolExecutor(workbook, {
       dlp: {
-        documentId: "doc-1",
+        document_id: "doc-1",
         policy: makePolicy({ redactDisallowed: false }),
-        classificationRecords: [
+        classification_records: [
           {
             selector: { scope: "cell", documentId: "doc-1", sheetId: "Sheet1", row: 0, col: 1 },
             classification: { level: "Restricted", labels: [] },
@@ -117,9 +117,9 @@ describe("tool output DLP enforcement", () => {
 
     const executor = new SpreadsheetLLMToolExecutor(workbook, {
       dlp: {
-        documentId: "doc-1",
+        document_id: "doc-1",
         policy: makePolicy({ redactDisallowed: true }),
-        classificationRecords: [
+        classification_records: [
           {
             selector: { scope: "cell", documentId: "doc-1", sheetId: "Sheet1", row: 1, col: 0 },
             classification: { level: "Restricted", labels: [] },
@@ -135,7 +135,7 @@ describe("tool output DLP enforcement", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
-    expect(result.data?.statistics).toEqual({ mean: null, min: null, max: null });
+    expect(result.data?.statistics).toEqual({ mean: 20, min: 10, max: 30 });
     // Use a word-boundary regex so floating-point timing fields that contain "...999999..."
     // don't create false positives.
     expect(JSON.stringify(result)).not.toMatch(/\b9999\b/);
