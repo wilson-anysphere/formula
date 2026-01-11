@@ -29,16 +29,12 @@ function extensionIdFromManifest(manifest) {
 }
 
 function tokenize(query) {
-  return String(query || "")
+  const tokens = String(query || "")
     .toLowerCase()
     .split(/\s+/)
     .map((t) => t.trim())
     .filter(Boolean);
-}
-
-function textIncludesAllTokens(text, tokens) {
-  const haystack = String(text || "").toLowerCase();
-  return tokens.every((t) => haystack.includes(t));
+  return Array.from(new Set(tokens));
 }
 
 function calculateSearchScore(ext, tokens) {
@@ -55,8 +51,29 @@ function calculateSearchScore(ext, tokens) {
     { text: (ext.categories || []).join(" "), weight: 2 },
   ];
 
-  for (const field of fields) {
-    if (textIncludesAllTokens(field.text, tokens)) score += field.weight;
+  for (const token of tokens) {
+    let bestWeight = 0;
+    let matchCount = 0;
+    for (const field of fields) {
+      if (String(field.text || "").toLowerCase().includes(token)) {
+        matchCount += 1;
+        if (field.weight > bestWeight) bestWeight = field.weight;
+      }
+    }
+    // All tokens must match somewhere (across any fields).
+    if (bestWeight === 0) return 0;
+
+    score += bestWeight;
+    // Small bonus for tokens that match across multiple fields.
+    score += Math.min(2, Math.max(0, matchCount - 1));
+  }
+
+  const phrase = tokens.join(" ");
+  if (
+    phrase &&
+    (String(ext.id || "").toLowerCase().includes(phrase) || String(ext.displayName || "").toLowerCase().includes(phrase))
+  ) {
+    score += 5;
   }
 
   if (ext.featured) score += 8;
