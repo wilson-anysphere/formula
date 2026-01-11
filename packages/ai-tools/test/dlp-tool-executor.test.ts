@@ -479,7 +479,7 @@ describe("ToolExecutor DLP enforcement", () => {
     expect(event.decision?.decision).toBe("block");
   });
 
-  it("detect_anomalies redacts restricted anomaly values under REDACT policy", async () => {
+  it("detect_anomalies does not let restricted values influence anomaly scores under REDACT policy", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const audit_logger = { log: vi.fn() };
     const executor = new ToolExecutor(workbook, {
@@ -512,28 +512,30 @@ describe("ToolExecutor DLP enforcement", () => {
       }
     });
 
+    // A5 is restricted. If its value (200) influenced z-score computation, A4 (100)
+    // would no longer be considered an anomaly at this threshold.
     await executor.execute({
       name: "set_range",
       parameters: {
         range: "Sheet1!A1:A5",
-        values: [[1], [1], [2], [2], [100]]
+        values: [[1], [1], [1], [100], [200]]
       }
     });
 
     const result = await executor.execute({
       name: "detect_anomalies",
-      parameters: { range: "Sheet1!A1:A5", method: "isolation_forest" }
+      parameters: { range: "Sheet1!A1:A5", method: "zscore", threshold: 1.4 }
     });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("detect_anomalies");
     if (!result.ok || result.tool !== "detect_anomalies") throw new Error("Unexpected tool result");
-    if (!result.data || result.data.method !== "isolation_forest") throw new Error("Unexpected anomaly result");
+    if (!result.data || result.data.method !== "zscore") throw new Error("Unexpected anomaly result");
 
-    const outlier = result.data.anomalies.find((anomaly) => anomaly.cell === "Sheet1!A5");
-    expect(outlier).toBeDefined();
-    expect(outlier?.value).toBeNull();
-    expect(outlier?.score).toBeNull();
+    const flagged = result.data.anomalies.map((a) => a.cell).sort();
+    expect(flagged).toEqual(["Sheet1!A4"]);
+    expect(result.data.anomalies[0]?.value).toBe(100);
+    expect(result.data.anomalies[0]?.score).toBeGreaterThanOrEqual(1.4);
 
     expect(audit_logger.log).toHaveBeenCalledTimes(1);
     const event = audit_logger.log.mock.calls[0]?.[0];

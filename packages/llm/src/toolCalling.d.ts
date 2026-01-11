@@ -44,7 +44,8 @@ export function runChatWithTools(params: {
   requireApproval?: (call: ToolCall) => Promise<boolean>;
   /**
    * When true, approval denials are returned to the model as a tool result
-   * (ok:false) and the loop continues, allowing the model to re-plan.
+   * (`ok:false`) and the loop continues, allowing the model to re-plan.
+   * Subsequent tool calls in the same assistant message are skipped.
    *
    * Default is false (throw on denial).
    */

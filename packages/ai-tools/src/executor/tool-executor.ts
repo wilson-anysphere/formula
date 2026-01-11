@@ -641,20 +641,35 @@ export class ToolExecutor {
       );
     }
     const cells = this.spreadsheet.readRange(range);
-    const entries: Array<{ cell: string; value: number; allowed: boolean }> = [];
+    const entries: Array<{ cell: string; value: number }> = [];
+    const cellAllowedCache = new Map<string, boolean>();
+    const isAllowedCell = (row: number, col: number) => {
+      if (!dlp || dlp.decision.decision !== DLP_DECISION.REDACT) return true;
+      const key = `${row},${col}`;
+      const cached = cellAllowedCache.get(key);
+      if (cached !== undefined) return cached;
+      const allowed = this.isDlpCellAllowed(dlp, row, col);
+      cellAllowedCache.set(key, allowed);
+      return allowed;
+    };
+    let redactedCellCount = 0;
     for (let r = 0; r < cells.length; r++) {
       for (let c = 0; c < cells[r]!.length; c++) {
         const rowIndex = range.startRow + r;
         const colIndex = range.startCol + c;
-        const allowed =
-          !dlp || dlp.decision.decision !== DLP_DECISION.REDACT ? true : this.isDlpCellAllowed(dlp, rowIndex, colIndex);
+        // Under DLP REDACT we exclude disallowed cells from anomaly computations entirely.
+        // Otherwise, even "safe" outputs (e.g. z-score) can become an inference channel for
+        // restricted values via the returned scores.
+        if (!isAllowedCell(rowIndex, colIndex)) {
+          redactedCellCount++;
+          continue;
+        }
         const cell = cells[r]![c]!;
         const numeric = toNumber(cell);
         if (numeric === null) continue;
         entries.push({
           cell: formatA1Cell({ sheet: range.sheet, row: range.startRow + r, col: range.startCol + c }),
-          value: numeric,
-          allowed
+          value: numeric
         });
       }
     }
@@ -664,7 +679,7 @@ export class ToolExecutor {
         case "zscore":
         case "iqr":
         case "isolation_forest":
-          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount: 0 });
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
           return { range: formattedRange, method, anomalies: [] };
         default: {
           const exhaustive: never = method;
@@ -683,20 +698,13 @@ export class ToolExecutor {
             : 0;
         const stdev = Math.sqrt(variance);
         if (stdev === 0) {
-          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount: 0 });
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
           return { range: formattedRange, method, anomalies: [] };
         }
-        let redactedCellCount = 0;
         const anomalies = entries
           .map((e) => ({ ...e, score: (e.value - mean) / stdev }))
           .filter((e) => Math.abs(e.score) >= threshold)
-          .map((e) => {
-            if (!e.allowed) {
-              redactedCellCount++;
-              return { cell: e.cell, value: null, score: null };
-            }
-            return { cell: e.cell, value: e.value, score: e.score };
-          });
+          .map((e) => ({ cell: e.cell, value: e.value, score: e.score }));
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }
@@ -708,16 +716,9 @@ export class ToolExecutor {
         const iqr = q3 - q1;
         const low = q1 - multiplier * iqr;
         const high = q3 + multiplier * iqr;
-        let redactedCellCount = 0;
         const anomalies = entries
           .filter((e) => e.value < low || e.value > high)
-          .map((e) => {
-            if (!e.allowed) {
-              redactedCellCount++;
-              return { cell: e.cell, value: null };
-            }
-            return { cell: e.cell, value: e.value };
-          });
+          .map((e) => ({ cell: e.cell, value: e.value }));
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }
@@ -738,31 +739,17 @@ export class ToolExecutor {
         const threshold = params.threshold as number | undefined;
         if (threshold === undefined || threshold <= 1) {
           const cutoff = threshold ?? 0.65;
-          let redactedCellCount = 0;
           const anomalies = scored
             .filter((entry) => entry.score >= cutoff)
-            .map((entry) => {
-              if (!entry.allowed) {
-                redactedCellCount++;
-                return { cell: entry.cell, value: null, score: null };
-              }
-              return { cell: entry.cell, value: entry.value, score: entry.score };
-            });
+            .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
           if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
           return { range: formattedRange, method, anomalies };
         }
 
         const topN = Math.min(scored.length, Math.max(0, Math.round(threshold)));
-        let redactedCellCount = 0;
         const anomalies = scored
           .slice(0, topN)
-          .map((entry) => {
-            if (!entry.allowed) {
-              redactedCellCount++;
-              return { cell: entry.cell, value: null, score: null };
-            }
-            return { cell: entry.cell, value: entry.value, score: entry.score };
-          });
+          .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }
