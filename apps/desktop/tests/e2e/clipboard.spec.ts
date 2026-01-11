@@ -122,4 +122,46 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     const b2Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B2"));
     expect(b2Value).toBe("11");
   });
+
+  test("copy/paste preserves internal styleId for DocumentController formats", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    await page.waitForFunction(() => (window as any).__formulaApp);
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.beginBatch({ label: "Seed clipboard styles" });
+      doc.setCellValue(sheetId, "A1", "Styled");
+      doc.setRangeFormat(sheetId, "A1", { font: { bold: true } }, { label: "Bold" });
+      doc.endBatch();
+      app.refresh();
+    });
+    await waitForIdle(page);
+
+    // Copy A1 and paste to B1.
+    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+
+    await page.click("#grid", { position: { x: 160, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await page.keyboard.press(`${modifier}+V`);
+    await waitForIdle(page);
+
+    const { a1StyleId, b1StyleId } = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      const a1 = doc.getCell(sheetId, "A1");
+      const b1 = doc.getCell(sheetId, "B1");
+      return { a1StyleId: a1.styleId, b1StyleId: b1.styleId };
+    });
+
+    expect(b1StyleId).toBe(a1StyleId);
+  });
 });

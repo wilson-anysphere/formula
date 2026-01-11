@@ -355,7 +355,13 @@ export class SpreadsheetApp {
   private pendingRenderMode: "full" | "scroll" = "full";
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
-  private clipboardCopyContext: { range: Range; payload: { text?: string; html?: string } } | null = null;
+  private clipboardCopyContext:
+    | {
+        range: Range;
+        payload: { text?: string; html?: string };
+        cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>>;
+      }
+    | null = null;
   private dlpContext: ReturnType<typeof createDesktopDlpContext> | null = null;
 
   private readonly chartElements = new Map<string, HTMLDivElement>();
@@ -3210,6 +3216,19 @@ export class SpreadsheetApp {
   private async copySelectionToClipboard(): Promise<void> {
     try {
       const range = this.getClipboardCopyRange();
+      const cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>> = [];
+      for (let row = range.startRow; row <= range.endRow; row += 1) {
+        const outRow: Array<{ value: unknown; formula: string | null; styleId: number }> = [];
+        for (let col = range.startCol; col <= range.endCol; col += 1) {
+          const cell = this.document.getCell(this.sheetId, { row, col }) as {
+            value: unknown;
+            formula: string | null;
+            styleId: number;
+          };
+          outRow.push({ value: cell.value ?? null, formula: cell.formula ?? null, styleId: cell.styleId ?? 0 });
+        }
+        cells.push(outRow);
+      }
       const dlp = this.dlpContext;
       const payload = copyRangeToClipboardPayload(
         this.document,
@@ -3230,7 +3249,7 @@ export class SpreadsheetApp {
       );
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
-      this.clipboardCopyContext = { range, payload };
+      this.clipboardCopyContext = { range, payload, cells };
     } catch {
       // Ignore clipboard failures (permissions, platform restrictions).
     }
@@ -3240,13 +3259,6 @@ export class SpreadsheetApp {
     try {
       const provider = await this.getClipboardProvider();
       const content = await provider.read();
-      const grid = parseClipboardContentToCellGrid(content);
-      if (!grid) return;
-
-      const rowCount = grid.length;
-      const colCount = Math.max(...grid.map((row) => row.length));
-      if (rowCount === 0 || colCount === 0) return;
-
       const start = { ...this.selection.active };
       const ctx = this.clipboardCopyContext;
       let deltaRow = 0;
@@ -3260,35 +3272,62 @@ export class SpreadsheetApp {
           // detecting "internal" pastes for formula shifting.
           .replace(/\n+$/g, "");
 
-      if (
+      const isInternalPaste =
         ctx &&
         ((typeof content.text === "string" &&
           typeof ctx.payload.text === "string" &&
           normalizeClipboardText(content.text) === normalizeClipboardText(ctx.payload.text)) ||
           (typeof content.html === "string" &&
             typeof ctx.payload.html === "string" &&
-            content.html === ctx.payload.html))
+            content.html === ctx.payload.html));
+
+      const externalGrid = isInternalPaste ? null : parseClipboardContentToCellGrid(content);
+      const internalCells = isInternalPaste ? ctx.cells : null;
+      const rowCount = internalCells ? internalCells.length : externalGrid?.length ?? 0;
+      const colCount = Math.max(
+        0,
+        ...(internalCells ? internalCells.map((row) => row.length) : []),
+        ...(externalGrid ? externalGrid.map((row) => row.length) : [])
+      );
+      if (rowCount === 0 || colCount === 0) return;
+
+      if (
+        isInternalPaste
       ) {
         deltaRow = start.row - ctx.range.startRow;
         deltaCol = start.col - ctx.range.startCol;
       }
 
-      const values = grid.map((row) =>
-        row.map((cell) => {
-          const format = cell.format ?? null;
-          const rawFormula = cell.formula;
-          const formula =
-            rawFormula != null && (deltaRow !== 0 || deltaCol !== 0)
-              ? shiftA1References(rawFormula, deltaRow, deltaCol)
-              : rawFormula;
+      const values = isInternalPaste
+        ? internalCells!.map((row) =>
+            row.map((cell) => {
+              const rawFormula = cell.formula;
+              const formula =
+                rawFormula != null && (deltaRow !== 0 || deltaCol !== 0)
+                  ? shiftA1References(rawFormula, deltaRow, deltaCol)
+                  : rawFormula;
+              if (formula != null) {
+                return { formula, styleId: cell.styleId };
+              }
+              return { value: cell.value ?? null, styleId: cell.styleId };
+            })
+          )
+        : externalGrid!.map((row) =>
+            row.map((cell) => {
+              const format = cell.format ?? null;
+              const rawFormula = cell.formula;
+              const formula =
+                rawFormula != null && (deltaRow !== 0 || deltaCol !== 0)
+                  ? shiftA1References(rawFormula, deltaRow, deltaCol)
+                  : rawFormula;
 
-          if (formula != null) {
-            return { formula, format };
-          }
+              if (formula != null) {
+                return { formula, format };
+              }
 
-          return { value: cell.value ?? null, format };
-        })
-      );
+              return { value: cell.value ?? null, format };
+            })
+          );
 
       this.document.setRangeValues(this.sheetId, start, values, { label: t("clipboard.paste") });
 
@@ -3311,6 +3350,19 @@ export class SpreadsheetApp {
   private async cutSelectionToClipboard(): Promise<void> {
     try {
       const range = this.getClipboardCopyRange();
+      const cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>> = [];
+      for (let row = range.startRow; row <= range.endRow; row += 1) {
+        const outRow: Array<{ value: unknown; formula: string | null; styleId: number }> = [];
+        for (let col = range.startCol; col <= range.endCol; col += 1) {
+          const cell = this.document.getCell(this.sheetId, { row, col }) as {
+            value: unknown;
+            formula: string | null;
+            styleId: number;
+          };
+          outRow.push({ value: cell.value ?? null, formula: cell.formula ?? null, styleId: cell.styleId ?? 0 });
+        }
+        cells.push(outRow);
+      }
       const dlp = this.dlpContext;
       const payload = copyRangeToClipboardPayload(
         this.document,
@@ -3332,7 +3384,7 @@ export class SpreadsheetApp {
 
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
-      this.clipboardCopyContext = { range, payload };
+      this.clipboardCopyContext = { range, payload, cells };
 
       const label = (() => {
         const translated = t("clipboard.cut");
