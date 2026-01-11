@@ -263,3 +263,68 @@ test("sandbox: blocks Error.prepareStackTrace CallSite escape", async (t) => {
   assert.equal(result.escaped, false);
   assert.match(String(result.error ?? ""), /Error.prepareStackTrace is not allowed in extensions/);
 });
+
+test("sandbox: blocks arguments.callee.caller escape", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sandbox-caller-escape-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "formula-test.callerEscape.attempt";
+  const manifest = {
+    name: "caller-escape",
+    displayName: "Caller Escape Attempt",
+    version: "1.0.0",
+    publisher: "formula-test",
+    main: "./extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: [`onCommand:${commandId}`],
+    contributes: { commands: [{ command: commandId, title: "Caller Escape Attempt" }] },
+    permissions: ["ui.commands"]
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2), "utf8");
+  await fs.writeFile(
+    path.join(extDir, "extension.js"),
+    `
+      const formula = require("@formula/extension-api");
+
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
+          try {
+            const caller = (function () {
+              // If modules run in sloppy mode, this returns a host function (full escape).
+              return arguments.callee.caller;
+            })();
+
+            if (typeof caller === "function") {
+              const proc = caller.constructor("return process")();
+              return { escaped: true, pid: proc?.pid ?? null };
+            }
+
+            return { escaped: false, error: String(caller) };
+          } catch (error) {
+            return { escaped: false, error: String(error?.message ?? error) };
+          }
+        }));
+      };
+    `,
+    "utf8"
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.equal(result.escaped, false);
+  assert.match(String(result.error ?? ""), /caller|callee|strict/i);
+});

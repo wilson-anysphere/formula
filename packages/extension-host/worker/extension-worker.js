@@ -648,7 +648,7 @@ function loadModuleFromFile(filename) {
 
   checkForDynamicImport(code, realFilename);
 
-  const wrapped = `(function (exports, require, module, __filename, __dirname) {\n${code}\n});`;
+  const wrapped = `(function (exports, require, module, __filename, __dirname) {\n'use strict';\n${code}\n});`;
 
   let wrapperFn;
   try {
@@ -683,7 +683,7 @@ function loadModuleFromFile(filename) {
 // are created within the VM realm (preventing constructor-based escapes).
 const apiCode = fs.readFileSync(workerData.apiModulePath, "utf8");
 checkForDynamicImport(apiCode, workerData.apiModulePath);
-const apiWrapper = `(function (exports, require, module, __filename, __dirname) {\n${apiCode}\n});`;
+const apiWrapper = `(function (exports, require, module, __filename, __dirname) {\n'use strict';\n${apiCode}\n});`;
 
 const apiModule = new SandboxObject();
 apiModule.id = workerData.apiModulePath;
