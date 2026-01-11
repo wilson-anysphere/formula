@@ -169,16 +169,87 @@ pub fn row_col_to_a1(row: u32, col: u32) -> Result<String, VbaError> {
 }
 
 fn parse_range_a1(a1: &str) -> Result<(u32, u32, u32, u32), VbaError> {
+    const MAX_ROW: u32 = 1_048_576;
+    const MAX_COL: u32 = 16_384;
+
+    #[derive(Clone, Copy)]
+    enum A1Ref {
+        Cell { row: u32, col: u32 },
+        Row { row: u32 },
+        Col { col: u32 },
+    }
+
+    fn parse_ref(token: &str) -> Result<A1Ref, VbaError> {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err(VbaError::Runtime("Invalid A1 reference: empty".to_string()));
+        }
+
+        let mut letters = String::new();
+        let mut digits = String::new();
+        for ch in token.chars() {
+            if ch == '$' {
+                continue;
+            }
+            if ch.is_ascii_alphabetic() {
+                letters.push(ch);
+            } else if ch.is_ascii_digit() {
+                digits.push(ch);
+            } else {
+                return Err(VbaError::Runtime(format!("Invalid A1 reference: {token}")));
+            }
+        }
+
+        match (!letters.is_empty(), !digits.is_empty()) {
+            (true, true) => {
+                let (row, col) = a1_to_row_col(&format!("{letters}{digits}"))?;
+                Ok(A1Ref::Cell { row, col })
+            }
+            (true, false) => {
+                // Entire column reference like `A` or `AA`.
+                let mut col: u32 = 0;
+                for ch in letters.chars() {
+                    col = col
+                        .checked_mul(26)
+                        .and_then(|v| v.checked_add((ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32))
+                        .ok_or_else(|| VbaError::Runtime(format!("Invalid A1 reference: {token}")))?;
+                }
+                if col == 0 {
+                    return Err(VbaError::Runtime(format!("Invalid A1 reference: {token}")));
+                }
+                Ok(A1Ref::Col { col })
+            }
+            (false, true) => {
+                // Entire row reference like `1`.
+                let row: u32 = digits
+                    .parse()
+                    .map_err(|_| VbaError::Runtime(format!("Invalid A1 reference: {token}")))?;
+                if row == 0 {
+                    return Err(VbaError::Runtime(format!("Invalid A1 reference: {token}")));
+                }
+                Ok(A1Ref::Row { row })
+            }
+            (false, false) => Err(VbaError::Runtime(format!("Invalid A1 reference: {token}"))),
+        }
+    }
+
     let parts: Vec<&str> = a1.split(':').collect();
-    if parts.len() == 1 {
-        let (r, c) = a1_to_row_col(parts[0])?;
-        Ok((r, c, r, c))
-    } else if parts.len() == 2 {
-        let (r1, c1) = a1_to_row_col(parts[0])?;
-        let (r2, c2) = a1_to_row_col(parts[1])?;
-        Ok((r1.min(r2), c1.min(c2), r1.max(r2), c1.max(c2)))
-    } else {
-        Err(VbaError::Runtime(format!("Invalid A1 range: {a1}")))
+    let (start, end) = match parts.as_slice() {
+        [single] => {
+            let r = parse_ref(single)?;
+            (r, r)
+        }
+        [a, b] => (parse_ref(a)?, parse_ref(b)?),
+        _ => return Err(VbaError::Runtime(format!("Invalid A1 range: {a1}"))),
+    };
+
+    match (start, end) {
+        (A1Ref::Cell { row: r1, col: c1 }, A1Ref::Cell { row: r2, col: c2 }) => {
+            Ok((r1.min(r2), c1.min(c2), r1.max(r2), c1.max(c2)))
+        }
+        (A1Ref::Col { col: c1 }, A1Ref::Col { col: c2 }) => Ok((1, c1.min(c2), MAX_ROW, c1.max(c2))),
+        (A1Ref::Row { row: r1 }, A1Ref::Row { row: r2 }) => Ok((r1.min(r2), 1, r1.max(r2), MAX_COL)),
+        _ => Err(VbaError::Runtime(format!("Invalid A1 range: {a1}"))),
     }
 }
 

@@ -1532,6 +1532,46 @@ impl<'a> Executor<'a> {
                     },
                 ))))
             }
+            "rows" => {
+                if args.is_empty() {
+                    return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
+                        range: sheet_entire_range(self.sheet.active_sheet()),
+                    })));
+                }
+                let sheet = self.sheet.active_sheet();
+                let v = self.eval_expr(frame, &args[0].expr)?;
+                let range = match v {
+                    VbaValue::String(s) => self.sheet_range(sheet, &s)?,
+                    other => {
+                        let row = self.coerce_cells_index(frame, other, true)?;
+                        let mut range = sheet_entire_range(sheet);
+                        range.start_row = row;
+                        range.end_row = row;
+                        range
+                    }
+                };
+                Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
+            }
+            "columns" => {
+                if args.is_empty() {
+                    return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
+                        range: sheet_entire_range(self.sheet.active_sheet()),
+                    })));
+                }
+                let sheet = self.sheet.active_sheet();
+                let v = self.eval_expr(frame, &args[0].expr)?;
+                let range = match v {
+                    VbaValue::String(s) => self.sheet_range(sheet, &s)?,
+                    other => {
+                        let col = self.coerce_cells_index(frame, other, false)?;
+                        let mut range = sheet_entire_range(sheet);
+                        range.start_col = col;
+                        range.end_col = col;
+                        range
+                    }
+                };
+                Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
+            }
             "msgbox" => {
                 let msg = self
                     .eval_expr(
@@ -1847,6 +1887,44 @@ impl<'a> Executor<'a> {
                             end_col: col,
                         },
                     ))))
+                }
+                "rows" => {
+                    if args.is_empty() {
+                        return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
+                            range: sheet_entire_range(sheet),
+                        })));
+                    }
+                    let v = self.eval_required_arg(frame, args, 0, "Rows")?;
+                    let range = match v {
+                        VbaValue::String(s) => self.sheet_range(sheet, &s)?,
+                        other => {
+                            let row = self.coerce_cells_index(frame, other, true)?;
+                            let mut range = sheet_entire_range(sheet);
+                            range.start_row = row;
+                            range.end_row = row;
+                            range
+                        }
+                    };
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
+                }
+                "columns" => {
+                    if args.is_empty() {
+                        return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
+                            range: sheet_entire_range(sheet),
+                        })));
+                    }
+                    let v = self.eval_required_arg(frame, args, 0, "Columns")?;
+                    let range = match v {
+                        VbaValue::String(s) => self.sheet_range(sheet, &s)?,
+                        other => {
+                            let col = self.coerce_cells_index(frame, other, false)?;
+                            let mut range = sheet_entire_range(sheet);
+                            range.start_col = col;
+                            range.end_col = col;
+                            range
+                        }
+                    };
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
                 }
                 "activate" | "select" => {
                     self.sheet.set_active_sheet(sheet)?;

@@ -270,6 +270,34 @@ End Sub
 }
 
 #[test]
+fn range_supports_row_and_column_only_a1_refs_and_rows_columns_selection() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Columns("B:B").Select
+    Range("A1") = Selection.Column
+
+    Rows("2:2").Select
+    Range("A2") = Selection.Row
+
+    Range("A3") = Range("A:A").Columns.Count
+    Range("A4") = Range("1:1").Rows.Count
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(wb.get_value_a1("Sheet1", "A1").unwrap(), VbaValue::Double(2.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "A2").unwrap(), VbaValue::Double(2.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "A3").unwrap(), VbaValue::Double(1.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "A4").unwrap(), VbaValue::Double(1.0));
+}
+
+#[test]
 fn rows_and_columns_count_match_excel_limits() {
     let code = r#"
 Option Explicit
