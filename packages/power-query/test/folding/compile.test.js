@@ -175,7 +175,7 @@ test("compile: folds addColumn for a safe subset of formula expressions", () => 
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT t.*, (t."Sales" * ?) AS "Double" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
+    sql: 'SELECT t.*, (t."Sales" * CAST(? AS DOUBLE PRECISION)) AS "Double" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
     params: [2],
   });
 });
@@ -195,7 +195,7 @@ test("compile: folds addColumn with exponent number literals", () => {
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT t.*, (t."Sales" * ?) AS "Scaled" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
+    sql: 'SELECT t.*, (t."Sales" * CAST(? AS DOUBLE PRECISION)) AS "Scaled" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
     params: [1000],
   });
 });
@@ -215,7 +215,7 @@ test("compile: folds addColumn ternary expressions", () => {
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT t.*, (CASE WHEN (t."Sales" > ?) THEN ? ELSE ? END) AS "Bucket" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
+    sql: 'SELECT t.*, (CASE WHEN (t."Sales" > CAST(? AS DOUBLE PRECISION)) THEN CAST(? AS TEXT) ELSE CAST(? AS TEXT) END) AS "Bucket" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
     params: [100, "big", "small"],
   });
 });
@@ -235,7 +235,7 @@ test("compile: folds addColumn null equality to IS NULL (SQL semantics match loc
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT t.*, (CASE WHEN (t."Sales" IS NULL) THEN ? ELSE ? END) AS "IsNull" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
+    sql: 'SELECT t.*, (CASE WHEN (t."Sales" IS NULL) THEN CAST(? AS DOUBLE PRECISION) ELSE CAST(? AS DOUBLE PRECISION) END) AS "IsNull" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
     params: [1, 0],
   });
 });
@@ -268,7 +268,7 @@ test("compile: folds addColumn with date() literal", () => {
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT t.*, ? AS "Day" FROM (SELECT * FROM sales) AS t',
+    sql: 'SELECT t.*, CAST(? AS TIMESTAMPTZ) AS "Day" FROM (SELECT * FROM sales) AS t',
     params: ["2020-01-01T00:00:00.000Z"],
   });
 });
@@ -315,7 +315,7 @@ test("compile: addColumn params come before nested query params (placeholder ord
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT t.*, ? AS "Injected" FROM (SELECT * FROM (SELECT * FROM sales) AS t WHERE (t."Region" = ?)) AS t',
+    sql: 'SELECT t.*, CAST(? AS TEXT) AS "Injected" FROM (SELECT * FROM (SELECT * FROM sales) AS t WHERE (t."Region" = ?)) AS t',
     params: ["x", "East"],
   });
 });

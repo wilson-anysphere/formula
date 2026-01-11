@@ -44,6 +44,26 @@ function binaryOpToSql(op) {
 }
 
 /**
+ * @param {SqlDialect["name"]} dialect
+ * @returns {{ boolean: string, number: string, date: string }}
+ */
+function sqlTypesForDialect(dialect) {
+  switch (dialect) {
+    case "postgres":
+      return { boolean: "BOOLEAN", number: "DOUBLE PRECISION", date: "TIMESTAMPTZ" };
+    case "mysql":
+      return { boolean: "BOOLEAN", number: "DOUBLE", date: "DATETIME" };
+    case "sqlite":
+      return { boolean: "INTEGER", number: "REAL", date: "TEXT" };
+    default: {
+      /** @type {never} */
+      const exhausted = dialect;
+      throw new Error(`Unsupported dialect '${exhausted}'`);
+    }
+  }
+}
+
+/**
  * Compile an expression AST to a SQL fragment.
  *
  * All non-null literals are parameterized (`?`) and returned via `params` to
@@ -61,6 +81,7 @@ function binaryOpToSql(op) {
 export function compileExprToSql(expr, ctx) {
   /** @type {unknown[]} */
   const params = [];
+  const types = sqlTypesForDialect(ctx.dialect.name);
 
   /** @param {unknown} value */
   const param = (value) => {
@@ -70,6 +91,15 @@ export function compileExprToSql(expr, ctx) {
     }
     params.push(value === undefined ? null : value);
     return "?";
+  };
+
+  /**
+   * @param {string} placeholder
+   * @param {string} sqlType
+   * @returns {string}
+   */
+  const castParam = (placeholder, sqlType) => {
+    return `CAST(${placeholder} AS ${sqlType})`;
   };
 
   /**
@@ -88,7 +118,18 @@ export function compileExprToSql(expr, ctx) {
       }
       case "literal":
         if (node.value == null) return "NULL";
-        return param(node.value);
+        if (typeof node.value === "string") {
+          // Avoid "could not determine data type of parameter $n" for Postgres
+          // when the literal appears without a type context (e.g. SELECT ?).
+          return ctx.dialect.castText(param(node.value));
+        }
+        if (typeof node.value === "number") {
+          return castParam(param(node.value), types.number);
+        }
+        if (typeof node.value === "boolean") {
+          return castParam(param(node.value), types.boolean);
+        }
+        throw new Error(`Unsupported literal type '${typeof node.value}'`);
       case "unary": {
         const rhs = toSql(node.arg);
         switch (node.op) {
@@ -139,7 +180,7 @@ export function compileExprToSql(expr, ctx) {
           if (arg0.type !== "literal" || typeof arg0.value !== "string") {
             throw new Error('date() expects a string literal like date("2020-01-01")');
           }
-          return param(parseDateLiteral(arg0.value));
+          return castParam(param(parseDateLiteral(arg0.value)), types.date);
         }
         throw new Error(`Unsupported function '${node.callee}'`);
       default: {
