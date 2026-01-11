@@ -10,6 +10,8 @@ import "./ast.js";
  */
 function visit(expr, out) {
   switch (expr.type) {
+    case "value":
+      return;
     case "column":
       out.add(expr.name);
       return;
@@ -49,4 +51,3 @@ export function collectExprColumnRefs(expr) {
   visit(expr, out);
   return out;
 }
-

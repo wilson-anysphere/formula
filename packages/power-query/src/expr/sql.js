@@ -76,6 +76,8 @@ export function compileExprToSql(expr, ctx) {
    */
   function toSql(node) {
     switch (node.type) {
+      case "value":
+        throw new Error("Value placeholder '_' is not supported in SQL folding");
       case "column": {
         if (ctx.knownColumns && !ctx.knownColumns.includes(node.name)) {
           throw new Error(`Unknown column '${node.name}'`);
@@ -122,4 +124,3 @@ export function compileExprToSql(expr, ctx) {
 
   return { sql: toSql(expr), params };
 }
-

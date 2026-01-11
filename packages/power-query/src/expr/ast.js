@@ -38,6 +38,15 @@
  */
 
 /**
+ * Special placeholder used by `transformColumns` formulas to refer to the
+ * current cell value.
+ *
+ * @typedef {{
+ *   type: "value";
+ * }} ValueExpr
+ */
+
+/**
  * @typedef {{
  *   type: "column";
  *   name: string;
@@ -81,8 +90,7 @@
  */
 
 /**
- * @typedef {LiteralExpr | ColumnExpr | UnaryExpr | BinaryExpr | TernaryExpr | CallExpr} ExprNode
+ * @typedef {LiteralExpr | ValueExpr | ColumnExpr | UnaryExpr | BinaryExpr | TernaryExpr | CallExpr} ExprNode
  */
 
 export {};
-

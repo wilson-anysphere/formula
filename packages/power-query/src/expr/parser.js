@@ -185,6 +185,7 @@ class Parser {
       case "identifier": {
         this.next();
         const raw = String(tok.value);
+        if (raw === "_") return { type: "value" };
         const ident = raw.toLowerCase();
         if (ident === "true") return { type: "literal", value: true };
         if (ident === "false") return { type: "literal", value: false };
@@ -233,4 +234,3 @@ export function parseExpr(input) {
   const parser = new Parser(tokens, input);
   return parser.parse();
 }
-

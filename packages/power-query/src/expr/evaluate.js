@@ -13,6 +13,7 @@ export function bindExprColumns(expr, getColumnIndex) {
   switch (expr.type) {
     case "column":
       return { ...expr, index: getColumnIndex(expr.name) };
+    case "value":
     case "literal":
       return expr;
     case "unary":
@@ -48,12 +49,18 @@ export function bindExprColumns(expr, getColumnIndex) {
  * @param {ExprNode} expr
  * @param {unknown[]} values
  * @param {Map<string, number> | null} [columnIndex]
+ * @param {unknown} [value]
  * @returns {unknown}
  */
-export function evaluateExpr(expr, values, columnIndex = null) {
+export function evaluateExpr(expr, values, columnIndex = null, value = undefined) {
   switch (expr.type) {
     case "literal":
       return expr.value;
+    case "value":
+      if (value === undefined) {
+        throw new Error("Formula references '_' but no value was provided");
+      }
+      return value;
     case "column": {
       const idx =
         expr.index != null ? expr.index : columnIndex?.get(expr.name) ?? (() => {
@@ -62,7 +69,7 @@ export function evaluateExpr(expr, values, columnIndex = null) {
       return values[idx];
     }
     case "unary": {
-      const arg = evaluateExpr(expr.arg, values, columnIndex);
+      const arg = evaluateExpr(expr.arg, values, columnIndex, value);
       switch (expr.op) {
         case "!":
           return !arg;
@@ -82,19 +89,19 @@ export function evaluateExpr(expr, values, columnIndex = null) {
     case "binary": {
       switch (expr.op) {
         case "&&": {
-          const left = evaluateExpr(expr.left, values, columnIndex);
-          return left ? evaluateExpr(expr.right, values, columnIndex) : left;
+          const left = evaluateExpr(expr.left, values, columnIndex, value);
+          return left ? evaluateExpr(expr.right, values, columnIndex, value) : left;
         }
         case "||": {
-          const left = evaluateExpr(expr.left, values, columnIndex);
-          return left ? left : evaluateExpr(expr.right, values, columnIndex);
+          const left = evaluateExpr(expr.left, values, columnIndex, value);
+          return left ? left : evaluateExpr(expr.right, values, columnIndex, value);
         }
         default:
           break;
       }
 
-      const left = evaluateExpr(expr.left, values, columnIndex);
-      const right = evaluateExpr(expr.right, values, columnIndex);
+      const left = evaluateExpr(expr.left, values, columnIndex, value);
+      const right = evaluateExpr(expr.right, values, columnIndex, value);
       switch (expr.op) {
         case "+":
           // eslint-disable-next-line no-implicit-coercion
@@ -134,8 +141,10 @@ export function evaluateExpr(expr, values, columnIndex = null) {
       }
     }
     case "ternary": {
-      const test = evaluateExpr(expr.test, values, columnIndex);
-      return test ? evaluateExpr(expr.consequent, values, columnIndex) : evaluateExpr(expr.alternate, values, columnIndex);
+      const test = evaluateExpr(expr.test, values, columnIndex, value);
+      return test
+        ? evaluateExpr(expr.consequent, values, columnIndex, value)
+        : evaluateExpr(expr.alternate, values, columnIndex, value);
     }
     case "call": {
       // No functions are currently supported in the formula surface area.
@@ -150,4 +159,3 @@ export function evaluateExpr(expr, values, columnIndex = null) {
     }
   }
 }
-
