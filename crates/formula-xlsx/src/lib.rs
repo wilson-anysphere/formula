@@ -207,6 +207,11 @@ pub struct XlsxDocument {
 
 impl XlsxDocument {
     pub fn new(workbook: Workbook) -> Self {
+        let date_system = match workbook.date_system {
+            formula_model::DateSystem::Excel1900 => DateSystem::V1900,
+            formula_model::DateSystem::Excel1904 => DateSystem::V1904,
+        };
+
         let sheets = workbook
             .sheets
             .iter()
@@ -225,6 +230,7 @@ impl XlsxDocument {
             parts: BTreeMap::new(),
             shared_strings: Vec::new(),
             meta: XlsxMeta {
+                date_system,
                 sheets,
                 ..XlsxMeta::default()
             },
