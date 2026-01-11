@@ -9,8 +9,14 @@ import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
 
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 
+import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
+import { formatDlpDecisionMessage } from "../../../../../packages/security/dlp/src/errors.js";
+import { DLP_DECISION, evaluatePolicy } from "../../../../../packages/security/dlp/src/policyEngine.js";
+import { effectiveRangeClassification } from "../../../../../packages/security/dlp/src/selectors.js";
+
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
+import { getAiCloudDlpOptions } from "../dlp/aiDlp.js";
 import { InlineEditOverlay } from "./inlineEditOverlay";
 
 const OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
@@ -92,9 +98,44 @@ export class InlineEditController {
     const signal = abortController.signal;
     let batchStarted = false;
     try {
+      const workbookId = this.options.workbookId ?? "local-workbook";
+      const dlp = getAiCloudDlpOptions({ documentId: workbookId, sheetId: params.sheetId });
+
+      // If the selection itself is blocked for cloud processing, stop before reading any
+      // sample data or calling the LLM.
+      const selectionRangeRef = {
+        documentId: workbookId,
+        sheetId: params.sheetId,
+        range: {
+          start: { row: params.range.startRow, col: params.range.startCol },
+          end: { row: params.range.endRow, col: params.range.endCol }
+        }
+      };
+      const selectionClassification = effectiveRangeClassification(selectionRangeRef as any, dlp.classificationRecords);
+      const selectionDecision = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: selectionClassification,
+        policy: dlp.policy,
+        options: { includeRestrictedContent: false }
+      });
+      if (selectionDecision.decision === DLP_DECISION.BLOCK) {
+        dlp.auditLogger?.log({
+          type: "ai.inline_edit",
+          documentId: workbookId,
+          sheetId: params.sheetId,
+          range: selectionRangeRef.range,
+          action: DLP_ACTION.AI_CLOUD_PROCESSING,
+          decision: selectionDecision,
+          selectionClassification,
+          redactedCellCount: 0
+        });
+        this.overlay.showError(formatDlpDecisionMessage(selectionDecision));
+        return;
+      }
+
       const baseApi = new DocumentControllerSpreadsheetApi(this.options.document);
       const api = createAbortableSpreadsheetApi(baseApi, signal);
-      const executor = new ToolExecutor(api, { default_sheet: params.sheetId });
+      const executor = new ToolExecutor(api, { default_sheet: params.sheetId, dlp });
 
       const selectionRef = `${params.sheetId}!${rangeToA1(params.range)}`;
       const sampleRef = buildSampleRange(params.sheetId, params.range, { maxRows: 10, maxCols: 10 });
@@ -120,7 +161,8 @@ export class InlineEditController {
 
       const toolExecutor = new SpreadsheetLLMToolExecutor(api, {
         default_sheet: params.sheetId,
-        require_approval_for_mutations: true
+        require_approval_for_mutations: true,
+        dlp
       });
       const abortableToolExecutor = {
         tools: toolExecutor.tools,
@@ -134,7 +176,6 @@ export class InlineEditController {
 
       const auditStore = this.options.auditStore ?? getDesktopAIAuditStore();
       const sessionId = createSessionId();
-      const workbookId = this.options.workbookId ?? "local-workbook";
 
       try {
         this.overlay.setRunning("Running AI tools…");

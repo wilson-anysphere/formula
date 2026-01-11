@@ -18,11 +18,14 @@ import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/ll
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 
+import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
+
 import type { DocumentController } from "../../document/documentController.js";
 
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
+import { getAiCloudDlpOptions } from "../dlp/aiDlp.js";
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -159,12 +162,25 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const activeSheetId = options.getActiveSheetId?.() ?? "Sheet1";
     const attachments = params.attachments ?? [];
 
-    const workbookContext = await contextProvider.buildWorkbookContextFromSpreadsheetApi({
-      spreadsheet,
-      workbookId: options.workbookId,
-      query: text,
-      attachments
-    });
+    const dlp = getAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId });
+
+    let workbookContext: any;
+    try {
+      workbookContext = await contextProvider.buildWorkbookContextFromSpreadsheetApi({
+        spreadsheet,
+        workbookId: options.workbookId,
+        query: text,
+        attachments,
+        dlp
+      });
+    } catch (error) {
+      // Hard stop: DLP says we cannot send any workbook content to a cloud model.
+      // IMPORTANT: do not call the LLM in this case.
+      if (error instanceof DlpViolationError) {
+        throw new AiChatOrchestratorError(error.message, { sessionId, cause: error });
+      }
+      throw error;
+    }
 
     const promptContext = formatPromptContext(workbookContext.promptContext);
 
@@ -184,7 +200,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       ...(options.toolExecutorOptions ?? {}),
       default_sheet: activeSheetId,
-      require_approval_for_mutations: true
+      require_approval_for_mutations: true,
+      dlp
     });
 
     const requireApproval = createPreviewApprovalHandler({

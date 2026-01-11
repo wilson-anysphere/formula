@@ -9,6 +9,9 @@ import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/ll
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/types.js";
+import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
+
+import { getAiCloudDlpOptions } from "../dlp/aiDlp.js";
 
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
@@ -231,9 +234,13 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
 
     const defaultSheetId = params.defaultSheetId ?? "Sheet1";
     const spreadsheet = new DocumentControllerSpreadsheetApi(params.documentController, { createChart: params.createChart });
+
+    const dlp = getAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId });
+
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       default_sheet: defaultSheetId,
-      require_approval_for_mutations: true
+      require_approval_for_mutations: true,
+      dlp
     });
     const previewEngine = new PreviewEngine({ approval_cell_threshold: 0, ...(params.previewOptions ?? {}) });
 
@@ -271,7 +278,8 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
         ragService.buildWorkbookContextFromSpreadsheetApi({
           spreadsheet,
           workbookId: params.workbookId,
-          query: goal
+          query: goal,
+          dlp
         })
       );
       if (!targetMessages.length || targetMessages[0]?.role !== "system") {
@@ -362,6 +370,12 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     emit({ type: "complete", iteration, result: finalResult });
     return finalResult;
   } catch (error) {
+    if (error instanceof DlpViolationError) {
+      const message = error.message || "Operation blocked by data loss prevention policy.";
+      emit({ type: "error", iteration, message, error });
+      return { status: "error", session_id: sessionId, error: message };
+    }
+
     const reason = isTimeoutError(error)
       ? ("timeout" as const)
       : deniedCall || isApprovalDeniedError(error)

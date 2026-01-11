@@ -5,7 +5,97 @@ import { MemoryAIAuditStore } from "@formula/ai-audit";
 import { DocumentController } from "../../../document/documentController.js";
 import { runAgentTask } from "../agentOrchestrator.js";
 
+import { DLP_ACTION } from "../../../../../../packages/security/dlp/src/actions.js";
+import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/src/classification.js";
+import { LocalClassificationStore } from "../../../../../../packages/security/dlp/src/classificationStore.js";
+import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
+
+import { getAiDlpAuditLogger, resetAiDlpAuditLoggerForTests } from "../../dlp/aiDlp.js";
+
+function createInMemoryLocalStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(String(key), String(value));
+    },
+    removeItem: (key: string) => {
+      store.delete(String(key));
+    },
+    clear: () => {
+      store.clear();
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size;
+    }
+  } as Storage;
+}
+
 describe("runAgentTask (agent mode orchestrator)", () => {
+  it("blocks before calling the LLM when DLP policy forbids cloud AI processing", async () => {
+    resetAiDlpAuditLoggerForTests();
+
+    const storage = createInMemoryLocalStorage();
+    const original = (globalThis as any).localStorage;
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    try {
+      storage.clear();
+      const workbookId = "wb_agent_dlp_block";
+
+      const policyStore = new LocalPolicyStore({ storage: storage as any });
+      policyStore.setDocumentPolicy(workbookId, {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Confidential",
+            allowRestrictedContent: false,
+            redactDisallowed: false
+          }
+        }
+      });
+
+      const classificationStore = new LocalClassificationStore({ storage: storage as any });
+      classificationStore.upsert(
+        workbookId,
+        { scope: "cell", documentId: workbookId, sheetId: "Sheet1", row: 0, col: 0 },
+        { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] }
+      );
+
+      const documentController = new DocumentController();
+      documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "TOP SECRET");
+
+      const llmClient = { chat: vi.fn(async () => ({ message: { role: "assistant", content: "should not be called" } })) };
+      const auditStore = new MemoryAIAuditStore();
+
+      const result = await runAgentTask({
+        goal: "Read the secret cell",
+        workbookId,
+        documentController,
+        llmClient: llmClient as any,
+        auditStore,
+        maxIterations: 2,
+        maxDurationMs: 10_000,
+        model: "unit-test-model"
+      });
+
+      expect(result.status).toBe("error");
+      expect(result.error).toMatch(/Sending data to cloud AI is restricted/i);
+      expect(llmClient.chat).not.toHaveBeenCalled();
+
+      const events = getAiDlpAuditLogger().list();
+      expect(events.some((e: any) => e.details?.type === "ai.workbook_context")).toBe(true);
+    } finally {
+      if (original === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", { configurable: true, value: original });
+      }
+    }
+  });
+
   it("emits progress events in order across multiple tool iterations and records audit", async () => {
     const documentController = new DocumentController();
     documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "seed");

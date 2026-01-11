@@ -6,6 +6,10 @@ import { SpreadsheetApp } from "../../../app/spreadsheetApp";
 import { LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
 import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
 import { createRequire } from "node:module";
+import { DLP_ACTION } from "../../../../../../packages/security/dlp/src/actions.js";
+import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/src/classification.js";
+import { LocalClassificationStore } from "../../../../../../packages/security/dlp/src/classificationStore.js";
+import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
 
 const OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
 
@@ -207,6 +211,78 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     expect((entries[0] as any)?.input?.workbookId).toBe("local-workbook");
     expect(entries[0]?.tool_calls?.[0]?.name).toBe("set_range");
     expect(entries[0]?.tool_calls?.[0]?.approved).toBe(true);
+  });
+
+  it("blocks inline edit before calling the LLM when DLP forbids cloud AI processing for the selection", async () => {
+    const workbookId = "local-workbook";
+
+    const policyStore = new LocalPolicyStore({ storage: window.localStorage as any });
+    policyStore.setDocumentPolicy(workbookId, {
+      version: 1,
+      allowDocumentOverrides: true,
+      rules: {
+        [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+          maxAllowed: "Confidential",
+          allowRestrictedContent: false,
+          redactDisallowed: false
+        }
+      }
+    });
+
+    const classificationStore = new LocalClassificationStore({ storage: window.localStorage as any });
+    // Mark C1 as Restricted (selection is C1:C3 in the test).
+    classificationStore.upsert(
+      workbookId,
+      { scope: "cell", documentId: workbookId, sheetId: "Sheet1", row: 0, col: 2 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] }
+    );
+
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = () =>
+      ({
+        width: 800,
+        height: 600,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {}
+      }) as any;
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div")
+    };
+
+    const llmClient = {
+      chat: vi.fn(async () => {
+        throw new Error("LLM should not be called when DLP blocks inline edit");
+      })
+    };
+
+    const app = new SpreadsheetApp(root, status, { inlineEdit: { llmClient, model: "unit-test-model" } });
+    app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 2, endCol: 2 } }); // C1:C3
+
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+
+    const overlay = await waitFor(() => document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]'));
+    const input = overlay.querySelector<HTMLInputElement>('[data-testid="inline-edit-prompt"]')!;
+    input.value = "Fill with values";
+
+    overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-run"]')!.click();
+
+    const errorLabel = await waitFor(() => {
+      const el = overlay.querySelector<HTMLElement>('[data-testid="inline-edit-error"]');
+      return el && el.style.display !== "none" && el.textContent ? el : null;
+    });
+
+    expect(errorLabel.textContent).toMatch(/Sending data to cloud AI is restricted/i);
+    expect(llmClient.chat).not.toHaveBeenCalled();
   });
 
   it("uses the OpenAIClient fallback when no inlineEdit llmClient is injected (localStorage key)", async () => {
