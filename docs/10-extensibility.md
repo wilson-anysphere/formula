@@ -162,116 +162,25 @@ A vibrant extension ecosystem is critical for long-term success. We follow VS Co
 ```typescript
 // @formula/extension-api
 
-declare namespace formula {
-  // Workbook operations
-  export namespace workbook {
-    export function getActiveWorkbook(): Workbook;
-    export function openWorkbook(path: string): Promise<Workbook>;
-    export function createWorkbook(): Workbook;
-  }
-  
-  // Sheet operations
-  export namespace sheets {
-    export function getActiveSheet(): Sheet;
-    export function getSheet(name: string): Sheet | undefined;
-    export function createSheet(name: string): Sheet;
-    export function deleteSheet(name: string): void;
-  }
-  
-  // Cell operations
-  export namespace cells {
-    export function getCell(row: number, col: number): Cell;
-    export function getRange(ref: string): Range;
-    export function getSelection(): Range;
-    
-    export function setCell(row: number, col: number, value: CellValue): void;
-    export function setRange(ref: string, values: CellValue[][]): void;
-  }
-  
-  // Events
-  export namespace events {
-    export function onCellChanged(callback: (e: CellChangeEvent) => void): Disposable;
-    export function onSelectionChanged(callback: (e: SelectionChangeEvent) => void): Disposable;
-    export function onSheetActivated(callback: (e: SheetEvent) => void): Disposable;
-    export function onWorkbookOpened(callback: (e: WorkbookEvent) => void): Disposable;
-    export function onBeforeSave(callback: (e: SaveEvent) => void): Disposable;
-  }
-  
-  // Commands
-  export namespace commands {
-    export function registerCommand(id: string, handler: (...args: any[]) => any): Disposable;
-    export function executeCommand(id: string, ...args: any[]): Promise<any>;
-  }
-  
-  // UI
-  export namespace ui {
-    export function showMessage(message: string, type?: "info" | "warning" | "error"): void;
-    export function showInputBox(options: InputBoxOptions): Promise<string | undefined>;
-    export function showQuickPick<T>(items: QuickPickItem<T>[], options?: QuickPickOptions): Promise<T | undefined>;
-    export function createPanel(id: string, options: PanelOptions): Panel;
-    export function registerContextMenu(menuId: string, items: MenuItem[]): Disposable;
-  }
-  
-  // Storage
-  export namespace storage {
-    export function get<T>(key: string): T | undefined;
-    export function set<T>(key: string, value: T): void;
-    export function delete(key: string): void;
-  }
-  
-  // Configuration
-  export namespace config {
-    export function get<T>(key: string): T | undefined;
-    export function update(key: string, value: any): Promise<void>;
-    export function onDidChange(callback: (e: ConfigChangeEvent) => void): Disposable;
-  }
-  
-  // Context
-  export namespace context {
-    export const extensionPath: string;
-    export const extensionUri: Uri;
-    export const globalStoragePath: string;
-    export const workspaceStoragePath: string;
-  }
+// Source of truth: `packages/extension-api/index.d.ts`
+//
+// The current API is intentionally small and async-first: calls go through the host
+// (worker_threads in Node, WebWorker in the desktop/webview runtime).
+
+type CellValue = string | number | boolean | null;
+
+interface Disposable {
+  dispose(): void;
 }
 
-// Interfaces
 interface Workbook {
   readonly name: string;
-  readonly path: string | undefined;
-  readonly sheets: Sheet[];
-  readonly activeSheet: Sheet;
-  
-  save(): Promise<void>;
-  saveAs(path: string): Promise<void>;
-  close(): void;
+  readonly path?: string | null;
 }
 
 interface Sheet {
-  readonly name: string;
   readonly id: string;
-  readonly usedRange: Range;
-  
-  getCell(row: number, col: number): Cell;
-  getRange(ref: string): Range;
-  
-  activate(): void;
-  rename(name: string): void;
-}
-
-interface Cell {
-  readonly row: number;
-  readonly col: number;
-  readonly address: string;
-  
-  value: CellValue;
-  formula: string | null;
-  readonly displayValue: string;
-  
-  readonly style: CellStyle;
-  readonly comment: Comment | null;
-  
-  clear(): void;
+  readonly name: string;
 }
 
 interface Range {
@@ -279,18 +188,136 @@ interface Range {
   readonly startCol: number;
   readonly endRow: number;
   readonly endCol: number;
-  readonly address: string;
-  
-  values: CellValue[][];
-  formulas: (string | null)[][];
-  
-  getCells(): Cell[];
-  clear(): void;
-  applyStyle(style: Partial<CellStyle>): void;
+  readonly values: CellValue[][];
 }
 
-interface Disposable {
-  dispose(): void;
+interface PanelWebview {
+  html: string;
+  setHtml(html: string): Promise<void>;
+  postMessage(message: any): Promise<void>;
+  onDidReceiveMessage(handler: (message: any) => void): Disposable;
+}
+
+interface Panel extends Disposable {
+  readonly id: string;
+  readonly webview: PanelWebview;
+}
+
+declare namespace formula {
+  export namespace workbook {
+    function getActiveWorkbook(): Promise<Workbook>;
+    function openWorkbook(path: string): Promise<Workbook>;
+    function createWorkbook(): Promise<Workbook>;
+    function save(): Promise<void>;
+    function saveAs(path: string): Promise<void>;
+    function close(): Promise<void>;
+  }
+
+  export namespace sheets {
+    function getActiveSheet(): Promise<Sheet>;
+    function getSheet(name: string): Promise<Sheet | undefined>;
+    function activateSheet(name: string): Promise<Sheet>;
+    function createSheet(name: string): Promise<Sheet>;
+    function renameSheet(oldName: string, newName: string): Promise<void>;
+    function deleteSheet(name: string): Promise<void>;
+  }
+
+  export namespace cells {
+    function getSelection(): Promise<Range>;
+    function getRange(ref: string): Promise<Range>;
+    function getCell(row: number, col: number): Promise<CellValue>;
+    function setCell(row: number, col: number, value: CellValue): Promise<void>;
+    function setRange(ref: string, values: CellValue[][]): Promise<void>;
+  }
+
+  export namespace commands {
+    function registerCommand(
+      id: string,
+      handler: (...args: any[]) => any | Promise<any>
+    ): Promise<Disposable>;
+    function executeCommand(id: string, ...args: any[]): Promise<any>;
+  }
+
+  export namespace functions {
+    function register(
+      name: string,
+      def: {
+        description?: string;
+        parameters?: Array<{ name: string; type: string; description?: string }>;
+        result?: { type: string };
+        isAsync?: boolean;
+        returnsArray?: boolean;
+        handler: (...args: any[]) => any | Promise<any>;
+      }
+    ): Promise<Disposable>;
+  }
+
+  export namespace network {
+    function fetch(url: string, init?: any): Promise<{
+      readonly ok: boolean;
+      readonly status: number;
+      readonly statusText: string;
+      readonly url: string;
+      readonly headers: { get(name: string): string | undefined };
+      text(): Promise<string>;
+      json<T = any>(): Promise<T>;
+    }>;
+  }
+
+  export namespace clipboard {
+    function readText(): Promise<string>;
+    function writeText(text: string): Promise<void>;
+  }
+
+  export namespace ui {
+    type MessageType = "info" | "warning" | "error";
+
+    function showMessage(message: string, type?: MessageType): Promise<void>;
+    function showInputBox(options: { prompt?: string; value?: string; placeHolder?: string }): Promise<
+      string | undefined
+    >;
+    function showQuickPick<T>(
+      items: Array<{ label: string; value: T; description?: string; detail?: string }>,
+      options?: { placeHolder?: string }
+    ): Promise<T | undefined>;
+    function createPanel(
+      id: string,
+      options: { title: string; icon?: string; position?: "left" | "right" | "bottom" }
+    ): Promise<Panel>;
+    function registerContextMenu(
+      menuId: string,
+      items: Array<{ command: string; when?: string; group?: string }>
+    ): Promise<Disposable>;
+  }
+
+  export const storage: {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    set<T = unknown>(key: string, value: T): Promise<void>;
+    delete(key: string): Promise<void>;
+  };
+
+  export namespace config {
+    function get<T = unknown>(key: string): Promise<T | undefined>;
+    function update(key: string, value: any): Promise<void>;
+    function onDidChange(callback: (e: { key: string; value: any }) => void): Disposable;
+  }
+
+  export namespace events {
+    function onSelectionChanged(callback: (e: { selection: Range }) => void): Disposable;
+    function onCellChanged(callback: (e: { row: number; col: number; value: CellValue }) => void): Disposable;
+    function onSheetActivated(callback: (e: { sheet: Sheet }) => void): Disposable;
+    function onWorkbookOpened(callback: (e: { workbook: Workbook }) => void): Disposable;
+    function onBeforeSave(callback: (e: { workbook: Workbook }) => void): Disposable;
+    function onViewActivated(callback: (e: { viewId: string }) => void): Disposable;
+  }
+
+  export namespace context {
+    const extensionId: string;
+    const extensionPath: string;
+    const extensionUri: string;
+    const globalStoragePath: string;
+    const workspaceStoragePath: string;
+  }
 }
 ```
 
