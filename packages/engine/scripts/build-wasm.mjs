@@ -65,7 +65,10 @@ async function latestMtime(entryPath) {
     return 0;
   }
 
-  let latest = info.mtimeMs;
+  // Directory mtimes update when entries are added/removed, and also when ignored
+  // build artifacts change. Use the maximum of child entry mtimes instead so
+  // generated outputs like `pkg-node/` don't force rebuilds of the web bundle.
+  let latest = 0;
   const entries = await readdir(entryPath, { withFileTypes: true });
   for (const entry of entries) {
     const childPath = path.join(entryPath, entry.name);
