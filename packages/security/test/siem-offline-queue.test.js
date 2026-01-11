@@ -186,6 +186,42 @@ test("NodeFsOfflineAuditQueue does not lose events when flushing an open segment
   assert.deepEqual(await queue.readAll(), []);
 });
 
+test("NodeFsOfflineAuditQueue finalizes orphaned open segments after export", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-orphan-open-"));
+  const queue = new NodeFsOfflineAuditQueue({ dirPath: dir, flushBatchSize: 10 });
+  await queue.ensureDir();
+
+  const segmentsDir = path.join(dir, "segments");
+  const baseName = `segment-${Date.now()}-orphaned`;
+  const openPath = path.join(segmentsDir, `${baseName}.open.jsonl`);
+  const lockPath = path.join(segmentsDir, `${baseName}.open.lock`);
+
+  const event = {
+    id: randomUUID(),
+    timestamp: "2025-01-01T00:00:00.000Z",
+    orgId: "org_1",
+    eventType: "document.opened",
+    details: { token: "[REDACTED]" },
+  };
+
+  await writeFile(openPath, `${JSON.stringify(event)}\n`, "utf8");
+  await writeFile(lockPath, JSON.stringify({ pid: 999999, createdAt: Date.now() }), "utf8");
+
+  const sentIds = [];
+  const exporter = {
+    async sendBatch(batch) {
+      sentIds.push(...batch.map((evt) => evt.id));
+    },
+  };
+
+  const result = await queue.flushToExporter(exporter);
+  assert.equal(result.sent, 1);
+  assert.deepEqual(sentIds, [event.id]);
+
+  const remainingFiles = await listFiles(segmentsDir);
+  assert.equal(remainingFiles.length, 0);
+});
+
 test("IndexedDbOfflineAuditQueue redacts before persistence and flushes batches", async () => {
   globalThis.indexedDB = indexedDB;
   globalThis.IDBKeyRange = IDBKeyRange;

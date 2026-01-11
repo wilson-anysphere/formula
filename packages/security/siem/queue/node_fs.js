@@ -16,6 +16,7 @@ import {
   SEGMENT_STATES,
   createSegmentBaseName,
   cursorFileName,
+  lockFileName,
   parseSegmentFileName,
   segmentFileName,
 } from "./segment.js";
@@ -39,6 +40,28 @@ async function safeUnlink(filePath) {
   } catch (error) {
     if (error?.code === "ENOENT") return;
     throw error;
+  }
+}
+
+async function safeReadJson(filePath) {
+  try {
+    const raw = await readFile(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    return null;
+  }
+}
+
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    if (error?.code === "EPERM") return true;
+    return false;
   }
 }
 
@@ -198,15 +221,31 @@ export class NodeFsOfflineAuditQueue {
   }
 
   async _createSegment() {
-    const baseName = createSegmentBaseName();
-    const openName = segmentFileName(baseName, SEGMENT_STATES.OPEN);
-    const openPath = path.join(this.segmentsDir, openName);
-    return {
-      baseName,
-      createdAtMs: Date.now(),
-      bytes: 0,
-      openPath,
-    };
+    await this.ensureDir();
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const baseName = createSegmentBaseName();
+      const openName = segmentFileName(baseName, SEGMENT_STATES.OPEN);
+      const openPath = path.join(this.segmentsDir, openName);
+      const lockPath = path.join(this.segmentsDir, lockFileName(baseName));
+
+      try {
+        await writeFile(lockPath, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), { encoding: "utf8", flag: "wx" });
+      } catch (error) {
+        if (error?.code === "EEXIST") continue;
+        throw error;
+      }
+
+      return {
+        baseName,
+        createdAtMs: Date.now(),
+        bytes: 0,
+        openPath,
+        lockPath,
+      };
+    }
+
+    throw new Error("failed to create offline audit segment lock");
   }
 
   async _sealCurrentSegment() {
@@ -223,6 +262,7 @@ export class NodeFsOfflineAuditQueue {
         throw error;
       }
     } finally {
+      if (this.currentSegment.lockPath) await safeUnlink(this.currentSegment.lockPath);
       this.currentSegment = null;
     }
   }
@@ -288,6 +328,7 @@ export class NodeFsOfflineAuditQueue {
         fileName: entry.name,
         path: path.join(this.segmentsDir, entry.name),
         cursorPath: path.join(this.segmentsDir, cursorFileName(parsed.baseName)),
+        lockPath: path.join(this.segmentsDir, lockFileName(parsed.baseName)),
       });
     }
 
@@ -329,6 +370,7 @@ export class NodeFsOfflineAuditQueue {
       if (segment.state !== SEGMENT_STATES.ACKED) continue;
       await safeUnlink(segment.path);
       await safeUnlink(segment.cursorPath);
+      await safeUnlink(segment.lockPath);
     }
   }
 
@@ -375,7 +417,22 @@ export class NodeFsOfflineAuditQueue {
           if (acked > lineCount) acked = lineCount;
 
           if (acked >= lineCount) {
-            if (segment.state === SEGMENT_STATES.OPEN) continue;
+            if (segment.state === SEGMENT_STATES.OPEN) {
+              const lock = await safeReadJson(segment.lockPath);
+              const lockedPid = Number(lock?.pid);
+              const orphan = Number.isFinite(lockedPid) && lockedPid > 0 ? !isPidAlive(lockedPid) : false;
+              if (!orphan) continue;
+
+              const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
+              try {
+                await rename(segment.path, ackedPath);
+              } catch (error) {
+                if (error?.code !== "ENOENT") throw error;
+              }
+              await safeUnlink(segment.cursorPath);
+              await safeUnlink(segment.lockPath);
+              continue;
+            }
             const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
             try {
               await rename(segment.path, ackedPath);
@@ -397,7 +454,22 @@ export class NodeFsOfflineAuditQueue {
           }
 
           if (acked >= lineCount) {
-            if (segment.state === SEGMENT_STATES.OPEN) continue;
+            if (segment.state === SEGMENT_STATES.OPEN) {
+              const lock = await safeReadJson(segment.lockPath);
+              const lockedPid = Number(lock?.pid);
+              const orphan = Number.isFinite(lockedPid) && lockedPid > 0 ? !isPidAlive(lockedPid) : false;
+              if (!orphan) continue;
+
+              const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
+              try {
+                await rename(segment.path, ackedPath);
+              } catch (error) {
+                if (error?.code !== "ENOENT") throw error;
+              }
+              await safeUnlink(segment.cursorPath);
+              await safeUnlink(segment.lockPath);
+              continue;
+            }
             const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
             await rename(segment.path, ackedPath);
             await safeUnlink(segment.cursorPath);

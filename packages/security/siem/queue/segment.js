@@ -32,6 +32,11 @@ export function cursorFileName(baseName) {
   return `${baseName}.cursor.json`;
 }
 
+export function lockFileName(baseName) {
+  if (!baseName) throw new Error("lockFileName requires baseName");
+  return `${baseName}.open.lock`;
+}
+
 export function parseSegmentFileName(fileName) {
   const match = String(fileName).match(
     /^segment-(?<createdAtMs>\d+)-(?<token>[A-Za-z0-9]+)(?:\.(?<state>open|inflight|acked))?\.jsonl$/
@@ -46,4 +51,3 @@ export function parseSegmentFileName(fileName) {
 
   return { baseName, createdAtMs, state };
 }
-
