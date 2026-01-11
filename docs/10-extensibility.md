@@ -41,6 +41,7 @@ The desktop app wires marketplace installs into the Node extension host runtime:
 3. **Runtime loading** via `ExtensionHostManager` (`apps/desktop/src/extensions/ExtensionHostManager.js`)
    - Reads `statePath` and calls `ExtensionHost.loadExtension(...)` for each installed extension
    - Exposes `executeCommand`, `invokeCustomFunction`, and `listContributions` for the app to route UI actions
+   - Verifies extracted extension integrity using the file manifest stored in `statePath`; corrupted installs are quarantined and require reinstall
 4. **Execution + contributions** via `ExtensionHost` (`packages/extension-host`)
    - Spawns an isolated worker per extension
    - Registers contributions (commands, panels, menus, keybindings, custom functions, data connectors)

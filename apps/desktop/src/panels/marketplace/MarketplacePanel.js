@@ -35,11 +35,19 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         el("button", {
           onClick: async () => {
             actions.textContent = "Installing…";
-            await extensionManager.install(item.id);
-            if (extensionHostManager) {
-              await extensionHostManager.reloadExtension(item.id);
+            try {
+              await extensionManager.install(item.id);
+              if (extensionHostManager?.syncInstalledExtensions) {
+                await extensionHostManager.syncInstalledExtensions();
+              } else if (extensionHostManager) {
+                await extensionHostManager.reloadExtension(item.id);
+              }
+              actions.textContent = "Installed";
+            } catch (error) {
+              // eslint-disable-next-line no-console
+              console.error(error);
+              actions.textContent = `Error: ${String(error?.message ?? error)}`;
             }
-            actions.textContent = "Installed";
           },
         }, [document.createTextNode("Install")]),
       );
@@ -48,11 +56,20 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         el("button", {
           onClick: async () => {
             actions.textContent = "Uninstalling…";
-            if (extensionHostManager) {
-              await extensionHostManager.unloadExtension(item.id);
+            try {
+              if (extensionHostManager) {
+                await extensionHostManager.unloadExtension(item.id);
+              }
+              await extensionManager.uninstall(item.id);
+              if (extensionHostManager?.syncInstalledExtensions) {
+                await extensionHostManager.syncInstalledExtensions();
+              }
+              actions.textContent = "Uninstalled";
+            } catch (error) {
+              // eslint-disable-next-line no-console
+              console.error(error);
+              actions.textContent = `Error: ${String(error?.message ?? error)}`;
             }
-            await extensionManager.uninstall(item.id);
-            actions.textContent = "Uninstalled";
           },
         }, [document.createTextNode("Uninstall")]),
       );
@@ -61,23 +78,31 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         el("button", {
           onClick: async () => {
             actions.textContent = "Checking…";
-            const updates = await extensionManager.checkForUpdates();
-            const update = updates.find((u) => u.id === item.id);
-            if (!update) {
-              actions.textContent = "Up to date";
-              return;
+            try {
+              const updates = await extensionManager.checkForUpdates();
+              const update = updates.find((u) => u.id === item.id);
+              if (!update) {
+                actions.textContent = "Up to date";
+                return;
+              }
+              actions.textContent = `Updating to ${update.latestVersion}…`;
+              // Terminate the running extension before mutating its install directory.
+              // This avoids worker threads reading partially-updated files.
+              if (extensionHostManager) {
+                await extensionHostManager.unloadExtension(item.id);
+              }
+              await extensionManager.update(item.id);
+              if (extensionHostManager?.syncInstalledExtensions) {
+                await extensionHostManager.syncInstalledExtensions();
+              } else if (extensionHostManager) {
+                await extensionHostManager.reloadExtension(item.id);
+              }
+              actions.textContent = "Updated";
+            } catch (error) {
+              // eslint-disable-next-line no-console
+              console.error(error);
+              actions.textContent = `Error: ${String(error?.message ?? error)}`;
             }
-            actions.textContent = `Updating to ${update.latestVersion}…`;
-            // Terminate the running extension before mutating its install directory.
-            // This avoids worker threads reading partially-updated files.
-            if (extensionHostManager) {
-              await extensionHostManager.unloadExtension(item.id);
-            }
-            await extensionManager.update(item.id);
-            if (extensionHostManager) {
-              await extensionHostManager.reloadExtension(item.id);
-            }
-            actions.textContent = "Updated";
           },
         }, [document.createTextNode("Update")]),
       );
