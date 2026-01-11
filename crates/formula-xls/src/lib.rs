@@ -254,7 +254,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             row_col_props = Some(props_by_sheet);
 
             if let Some(mask) = xf_has_number_format.as_deref() {
-                if mask.iter().any(|v| *v) {
+                // Even if the workbook contains no non-General number formats, scan for
+                // out-of-range XF indices so corrupt files still surface a warning.
+                if !mask.is_empty() {
                     let mut cell_xfs_by_sheet = Vec::with_capacity(sheets.len());
                     let mut parse_failed_by_sheet = Vec::with_capacity(sheets.len());
                     for sheet in sheets {
