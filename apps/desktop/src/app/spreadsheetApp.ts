@@ -306,6 +306,8 @@ export class SpreadsheetApp {
 
   private resizeObserver: ResizeObserver;
   private disposed = false;
+  private readonly domAbort = new AbortController();
+  private commentsDocUpdateListener: (() => void) | null = null;
 
   private readonly inlineEditController: InlineEditController;
 
@@ -528,25 +530,29 @@ export class SpreadsheetApp {
       auditStore: opts.inlineEdit?.auditStore
     });
 
-    this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e));
-    this.root.addEventListener("pointermove", (e) => this.onPointerMove(e));
-    this.root.addEventListener("pointerup", (e) => this.onPointerUp(e));
-    this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e));
-    this.root.addEventListener("pointerleave", () => this.hideCommentTooltip());
-    this.root.addEventListener("keydown", (e) => this.onKeyDown(e));
-    this.root.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
+    this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e), { signal: this.domAbort.signal });
+    this.root.addEventListener("pointermove", (e) => this.onPointerMove(e), { signal: this.domAbort.signal });
+    this.root.addEventListener("pointerup", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
+    this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
+    this.root.addEventListener("pointerleave", () => this.hideCommentTooltip(), { signal: this.domAbort.signal });
+    this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
+    this.root.addEventListener("wheel", (e) => this.onWheel(e), { passive: false, signal: this.domAbort.signal });
 
     this.vScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "y"), {
-      passive: false
+      passive: false,
+      signal: this.domAbort.signal
     });
     this.hScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "x"), {
-      passive: false
+      passive: false,
+      signal: this.domAbort.signal
     });
     this.vScrollbarTrack.addEventListener("pointerdown", (e) => this.onScrollbarTrackPointerDown(e, "y"), {
-      passive: false
+      passive: false,
+      signal: this.domAbort.signal
     });
     this.hScrollbarTrack.addEventListener("pointerdown", (e) => this.onScrollbarTrackPointerDown(e, "x"), {
-      passive: false
+      passive: false,
+      signal: this.domAbort.signal
     });
 
     if (typeof window !== "undefined") {
@@ -557,10 +563,12 @@ export class SpreadsheetApp {
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.root);
 
-    this.commentsDoc.on("update", () => {
+    // Save so we can detach cleanly in `destroy()`.
+    this.commentsDocUpdateListener = () => {
       this.reindexCommentCells();
       this.refresh();
-    });
+    };
+    this.commentsDoc.on("update", this.commentsDocUpdateListener);
 
     if (typeof window !== "undefined") {
       try {
@@ -653,6 +661,11 @@ export class SpreadsheetApp {
 
   destroy(): void {
     this.disposed = true;
+    this.domAbort.abort();
+    if (this.commentsDocUpdateListener) {
+      this.commentsDoc.off("update", this.commentsDocUpdateListener);
+      this.commentsDocUpdateListener = null;
+    }
     this.formulaBarCompletion?.destroy();
     this.wasmUnsubscribe?.();
     this.wasmUnsubscribe = null;
