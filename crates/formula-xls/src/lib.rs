@@ -483,6 +483,12 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         continue;
                     };
 
+                    if sheet
+                        .cell(cell_ref)
+                        .is_some_and(|cell| cell.style_id == style_id)
+                    {
+                        continue;
+                    }
                     sheet.set_style_id(cell_ref, style_id);
                 }
             } else {
@@ -511,6 +517,12 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         continue;
                     };
                     if maybe_anchor.is_none() {
+                        if sheet
+                            .cell(anchor)
+                            .is_some_and(|cell| cell.style_id == style_id)
+                        {
+                            continue;
+                        }
                         sheet.set_style_id(anchor, style_id);
                         continue;
                     }
@@ -540,6 +552,12 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 }
 
                 for (anchor, (style_id, _, _)) in best_style_for_anchor {
+                    if sheet
+                        .cell(anchor)
+                        .is_some_and(|cell| cell.style_id == style_id)
+                    {
+                        continue;
+                    }
                     sheet.set_style_id(anchor, style_id);
                 }
             }
