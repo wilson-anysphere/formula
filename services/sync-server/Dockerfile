@@ -50,6 +50,13 @@ FROM node:20-slim
 
 WORKDIR /app/services/sync-server
 
+# Runtime should include CA certificates so outbound TLS (e.g. future KMS providers)
+# works reliably even in slim images.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 ENV SYNC_SERVER_HOST=0.0.0.0
 ENV SYNC_SERVER_PORT=1234
