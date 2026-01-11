@@ -1,5 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 const extensionApiEntry = fileURLToPath(new URL("../../packages/extension-api/index.mjs", import.meta.url));
 
@@ -12,11 +15,15 @@ export default defineConfig({
   },
   server: {
     port: 4174,
-    strictPort: true
+    strictPort: true,
+    fs: {
+      // Allow serving workspace packages during dev (`packages/*`).
+      allow: [repoRoot],
+    },
   },
   test: {
     environment: "node",
     include: ["src/**/*.vitest.ts"],
-    exclude: ["tests/**", "node_modules/**"]
-  }
+    exclude: ["tests/**", "node_modules/**"],
+  },
 });
