@@ -9,7 +9,7 @@
  */
 
 import { parseFormula } from "../expr/index.js";
-import { hasUtcTimeComponent } from "../values.js";
+import { MS_PER_DAY, PqDateTimeZone, PqDuration, PqTime, hasUtcTimeComponent } from "../values.js";
 
 /**
  * @param {string} name
@@ -64,6 +64,42 @@ function valueToM(value) {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
   if (typeof value === "string") return escapeMString(value);
+  if (value instanceof PqDateTimeZone) {
+    const local = new Date(value.date.getTime() + value.offsetMinutes * 60 * 1000);
+    const seconds = local.getUTCSeconds();
+    const millis = local.getUTCMilliseconds();
+    const secArg = millis === 0 ? String(seconds) : `${seconds}.${String(millis).padStart(3, "0")}`;
+
+    const sign = value.offsetMinutes < 0 ? -1 : 1;
+    const abs = Math.abs(value.offsetMinutes);
+    const offH = sign * Math.floor(abs / 60);
+    const offM = sign * (abs % 60);
+
+    return `#datetimezone(${local.getUTCFullYear()}, ${local.getUTCMonth() + 1}, ${local.getUTCDate()}, ${local.getUTCHours()}, ${local.getUTCMinutes()}, ${secArg}, ${offH}, ${offM})`;
+  }
+  if (value instanceof PqTime) {
+    const ms = value.milliseconds;
+    const hours = Math.floor(ms / 3_600_000);
+    const minutes = Math.floor((ms % 3_600_000) / 60_000);
+    const seconds = Math.floor((ms % 60_000) / 1000);
+    const millis = Math.floor(ms % 1000);
+    const secArg = millis === 0 ? String(seconds) : `${seconds}.${String(millis).padStart(3, "0")}`;
+    return `#time(${hours}, ${minutes}, ${secArg})`;
+  }
+  if (value instanceof PqDuration) {
+    const sign = value.milliseconds < 0 ? -1 : 1;
+    let remaining = Math.abs(value.milliseconds);
+    const days = Math.floor(remaining / MS_PER_DAY);
+    remaining -= days * MS_PER_DAY;
+    const hours = Math.floor(remaining / 3_600_000);
+    remaining -= hours * 3_600_000;
+    const minutes = Math.floor(remaining / 60_000);
+    remaining -= minutes * 60_000;
+    const seconds = Math.floor(remaining / 1000);
+    const millis = Math.floor(remaining - seconds * 1000);
+    const secArg = millis === 0 ? String(sign * seconds) : `${sign < 0 ? "-" : ""}${seconds}.${String(millis).padStart(3, "0")}`;
+    return `#duration(${sign * days}, ${sign * hours}, ${sign * minutes}, ${secArg})`;
+  }
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     if (!hasUtcTimeComponent(value)) {
       return `#date(${value.getUTCFullYear()}, ${value.getUTCMonth() + 1}, ${value.getUTCDate()})`;

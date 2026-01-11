@@ -168,3 +168,23 @@ in
   const query2 = compileMToQuery(printed);
   assert.deepEqual(toJson(query2), toJson(query));
 });
+
+test("m_language round-trip: prettyPrintQueryToM (#time/#duration/#datetimezone constants)", () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Zone", "Time", "Dur"},
+    {#datetimezone(2024, 1, 1, 1, 2, 3.004, 2, 0), #time(6, 30, 0), #duration(1, 12, 0, 0)}
+  })
+in
+  Source
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  assert.match(printed, /#datetimezone\(2024, 1, 1, 1, 2, 3\.004, 2, 0\)/);
+  assert.match(printed, /#time\(6, 30, 0\)/);
+  assert.match(printed, /#duration\(1, 12, 0, 0\)/);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});

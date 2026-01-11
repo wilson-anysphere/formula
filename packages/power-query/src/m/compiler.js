@@ -1,6 +1,7 @@
 import { parseM } from "./parser.js";
 import { MLanguageCompileError } from "./errors.js";
 import { valueKey } from "../valueKey.js";
+import { MS_PER_DAY, PqDateTimeZone, PqDuration, PqTime } from "../values.js";
 import {
   SOURCE_FUNCTIONS,
   TABLE_FUNCTIONS,
@@ -1856,6 +1857,32 @@ function evaluateCallConstant(ctx, name, expr) {
       const wholeSeconds = Math.trunc(totalMs / 1000);
       const millis = totalMs - wholeSeconds * 1000;
       return new Date(Date.UTC(y, mo - 1, d, hh, mm, wholeSeconds, millis));
+    }
+    case "#time": {
+      const nums = expr.args.map((a) => evaluateConstant(ctx, a));
+      if (!nums.every((n) => typeof n === "number")) ctx.error(expr, "#time requires numeric arguments");
+      const [hh = 0, mm = 0, ss = 0] = /** @type {number[]} */ (nums);
+      const totalMs = Math.round(hh * 3_600_000 + mm * 60_000 + ss * 1000);
+      return new PqTime(totalMs);
+    }
+    case "#duration": {
+      const nums = expr.args.map((a) => evaluateConstant(ctx, a));
+      if (!nums.every((n) => typeof n === "number")) ctx.error(expr, "#duration requires numeric arguments");
+      const [days = 0, hh = 0, mm = 0, ss = 0] = /** @type {number[]} */ (nums);
+      const totalMs = Math.round(days * MS_PER_DAY + hh * 3_600_000 + mm * 60_000 + ss * 1000);
+      return new PqDuration(totalMs);
+    }
+    case "#datetimezone": {
+      const nums = expr.args.map((a) => evaluateConstant(ctx, a));
+      if (!nums.every((n) => typeof n === "number")) ctx.error(expr, "#datetimezone requires numeric arguments");
+      const [y, mo, d, hh = 0, mm = 0, ss = 0, offH = 0, offM = 0] = /** @type {number[]} */ (nums);
+
+      const offsetMinutes = Math.round(offH * 60 + offM);
+      const secMs = Math.round(ss * 1000);
+      const wholeSeconds = Math.trunc(secMs / 1000);
+      const millis = secMs - wholeSeconds * 1000;
+      const utcMs = Date.UTC(y, mo - 1, d, hh, mm, wholeSeconds, millis) - offsetMinutes * 60 * 1000;
+      return new PqDateTimeZone(new Date(utcMs), offsetMinutes);
     }
     default: {
       const constant = constantIdentifierValue(name);
