@@ -147,11 +147,14 @@ export class OpenAIClient {
 
       const json = await response.json();
       const message = json.choices?.[0]?.message;
-      const toolCalls = (message?.tool_calls ?? []).map((c) => ({
-        id: c.id,
-        name: c.function?.name,
-        arguments: tryParseJson(c.function?.arguments ?? "{}"),
-      }));
+      const rawToolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+      const toolCalls = rawToolCalls
+        .map((c, index) => ({
+          id: typeof c?.id === "string" ? c.id : `toolcall-${index}`,
+          name: c?.function?.name,
+          arguments: tryParseJson(c?.function?.arguments ?? "{}"),
+        }))
+        .filter((c) => typeof c.name === "string" && c.name.length > 0);
 
       return {
         message: {

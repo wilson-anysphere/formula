@@ -19,6 +19,43 @@ function readableStreamFromChunks(chunks: string[]): ReadableStream<Uint8Array> 
 }
 
 describe("OpenAIClient.streamChat", () => {
+  it("synthesizes missing tool call ids in non-streaming chat responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    {
+                      type: "function",
+                      function: { name: "getData", arguments: '{"range":"A1"}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as any,
+    );
+
+    const client = new OpenAIClient({
+      apiKey: "test",
+      baseUrl: "https://example.com",
+      timeoutMs: 1_000,
+      model: "gpt-test",
+    });
+
+    const response = await client.chat({ messages: [{ role: "user", content: "hi" }] as any });
+    expect(response.message.toolCalls).toEqual([{ id: "toolcall-0", name: "getData", arguments: { range: "A1" } }]);
+  });
+
   it("emits text + tool call deltas from SSE chunks", async () => {
     const chunks = [
       // Split the first SSE frame across chunks to ensure buffering works.
