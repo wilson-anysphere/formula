@@ -136,11 +136,21 @@ export function sqlLiteral(value) {
 
 /**
  * @param {FilterPredicate} predicate
- * @param {{ alias?: string }} [options]
+ * @param {{
+ *   alias?: string;
+ *   quoteIdentifier?: (identifier: string) => string;
+ *   // Optional parameterizer used by the SQL folding engine.
+ *   // When provided, this function should append `value` to a params array and
+ *   // return a placeholder (e.g. `?`). When omitted, literals are inlined via
+ *   // `sqlLiteral`.
+ *   param?: (value: unknown) => string;
+ * }} [options]
  * @returns {string}
  */
 export function predicateToSql(predicate, options = {}) {
   const alias = options.alias ?? "t";
+  const quote = options.quoteIdentifier ?? quoteIdentifier;
+  const param = options.param ?? sqlLiteral;
   /**
    * @param {FilterPredicate} node
    * @returns {string}
@@ -154,7 +164,7 @@ export function predicateToSql(predicate, options = {}) {
       case "not":
         return `(NOT ${toSql(node.predicate)})`;
       case "comparison": {
-        const colRef = `${alias}.${quoteIdentifier(node.column)}`;
+        const colRef = `${alias}.${quote(node.column)}`;
         const caseSensitive = node.caseSensitive ?? false;
 
         switch (node.operator) {
@@ -163,31 +173,33 @@ export function predicateToSql(predicate, options = {}) {
           case "isNotNull":
             return `(${colRef} IS NOT NULL)`;
           case "equals":
-            return `(${colRef} = ${sqlLiteral(node.value)})`;
+            if (node.value == null) return `(${colRef} IS NULL)`;
+            return `(${colRef} = ${param(node.value)})`;
           case "notEquals":
-            return `(${colRef} != ${sqlLiteral(node.value)})`;
+            if (node.value == null) return `(${colRef} IS NOT NULL)`;
+            return `(${colRef} != ${param(node.value)})`;
           case "greaterThan":
-            return `(${colRef} > ${sqlLiteral(node.value)})`;
+            return `(${colRef} > ${param(node.value ?? null)})`;
           case "greaterThanOrEqual":
-            return `(${colRef} >= ${sqlLiteral(node.value)})`;
+            return `(${colRef} >= ${param(node.value ?? null)})`;
           case "lessThan":
-            return `(${colRef} < ${sqlLiteral(node.value)})`;
+            return `(${colRef} < ${param(node.value ?? null)})`;
           case "lessThanOrEqual":
-            return `(${colRef} <= ${sqlLiteral(node.value)})`;
+            return `(${colRef} <= ${param(node.value ?? null)})`;
           case "contains": {
             const pattern = `%${valueToString(node.value).replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-            if (caseSensitive) return `(${colRef} LIKE ${sqlLiteral(pattern)})`;
-            return `(LOWER(${colRef}) LIKE LOWER(${sqlLiteral(pattern)}))`;
+            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)})`;
+            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}))`;
           }
           case "startsWith": {
             const pattern = `${valueToString(node.value).replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-            if (caseSensitive) return `(${colRef} LIKE ${sqlLiteral(pattern)})`;
-            return `(LOWER(${colRef}) LIKE LOWER(${sqlLiteral(pattern)}))`;
+            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)})`;
+            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}))`;
           }
           case "endsWith": {
             const pattern = `%${valueToString(node.value).replaceAll("%", "\\%").replaceAll("_", "\\_")}`;
-            if (caseSensitive) return `(${colRef} LIKE ${sqlLiteral(pattern)})`;
-            return `(LOWER(${colRef}) LIKE LOWER(${sqlLiteral(pattern)}))`;
+            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)})`;
+            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}))`;
           }
           default: {
             /** @type {never} */
@@ -206,4 +218,3 @@ export function predicateToSql(predicate, options = {}) {
 
   return toSql(predicate);
 }
-

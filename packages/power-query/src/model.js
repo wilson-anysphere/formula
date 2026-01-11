@@ -45,6 +45,14 @@
  *   type: "database";
  *   connection: unknown;
  *   query: string;
+ *   /**
+ *    * Optional column names for the query result.
+ *    *
+ *    * Some folding operations (e.g. `renameColumn`, `changeType`) require an
+ *    * explicit projection list to avoid duplicate output columns. When this
+ *    * metadata is available, the folding engine can push those operations down.
+ *    */
+ *   columns?: string[];
  }} DatabaseQuerySource
  */
 
@@ -130,6 +138,7 @@
  * @typedef {{ type: "addColumn"; name: string; formula: string }} AddColumnOp
  * @typedef {{ type: "renameColumn"; oldName: string; newName: string }} RenameColumnOp
  * @typedef {{ type: "changeType"; column: string; newType: DataType }} ChangeTypeOp
+ * @typedef {{ type: "take"; count: number }} TakeOp
  * @typedef {{ type: "pivot"; rowColumn: string; valueColumn: string; aggregation: Aggregation["op"] }} PivotOp
  * @typedef {{ type: "unpivot"; columns: string[]; nameColumn: string; valueColumn: string }} UnpivotOp
  * @typedef {{ type: "merge"; rightQuery: string; joinType: "inner" | "left" | "right" | "full"; leftKey: string; rightKey: string }} MergeOp
@@ -138,7 +147,7 @@
  * @typedef {{ type: "replaceValues"; column: string; find: unknown; replace: unknown }} ReplaceValuesOp
  * @typedef {{ type: "splitColumn"; column: string; delimiter: string }} SplitColumnOp
  *
- * @typedef {SelectColumnsOp | RemoveColumnsOp | FilterRowsOp | SortRowsOp | GroupByOp | AddColumnOp | RenameColumnOp | ChangeTypeOp | PivotOp | UnpivotOp | MergeOp | AppendOp | FillDownOp | ReplaceValuesOp | SplitColumnOp} QueryOperation
+ * @typedef {SelectColumnsOp | RemoveColumnsOp | FilterRowsOp | SortRowsOp | GroupByOp | AddColumnOp | RenameColumnOp | ChangeTypeOp | TakeOp | PivotOp | UnpivotOp | MergeOp | AppendOp | FillDownOp | ReplaceValuesOp | SplitColumnOp} QueryOperation
  */
 
 /**
@@ -174,4 +183,3 @@
  */
 
 export {};
-

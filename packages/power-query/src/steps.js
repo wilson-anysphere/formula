@@ -702,6 +702,18 @@ function splitColumn(table, op) {
 }
 
 /**
+ * @param {DataTable} table
+ * @param {number} count
+ * @returns {DataTable}
+ */
+function take(table, count) {
+  if (!Number.isFinite(count) || count < 0) {
+    throw new Error(`Invalid take count '${count}'`);
+  }
+  return table.head(count);
+}
+
+/**
  * Apply a query operation locally.
  *
  * Operations that require external state (`merge`, `append`) are handled by the
@@ -729,6 +741,8 @@ export function applyOperation(table, operation) {
       return renameColumn(table, operation.oldName, operation.newName);
     case "changeType":
       return changeType(table, operation.column, operation.newType);
+    case "take":
+      return take(table, operation.count);
     case "pivot":
       return pivot(table, operation);
     case "unpivot":
