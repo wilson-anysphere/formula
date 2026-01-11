@@ -165,8 +165,8 @@ function showBanner(key: string, message: string, actions: BannerAction[] = [], 
   const existing = findBanner(container, key);
   const banner = existing ?? document.createElement("div");
   banner.dataset.macroBannerKey = key;
-  banner.style.background = "rgba(20, 20, 20, 0.9)";
-  banner.style.color = "white";
+  banner.style.background = "var(--tooltip-bg)";
+  banner.style.color = "var(--tooltip-text)";
   banner.style.padding = "10px 12px";
   banner.style.borderRadius = "8px";
   banner.style.fontSize = "12px";
@@ -174,7 +174,7 @@ function showBanner(key: string, message: string, actions: BannerAction[] = [], 
   banner.style.alignItems = "center";
   banner.style.gap = "10px";
   banner.style.maxWidth = "420px";
-  banner.style.boxShadow = "0 4px 14px rgba(0, 0, 0, 0.3)";
+  banner.style.boxShadow = "var(--dialog-shadow)";
 
   const text = document.createElement("div");
   text.textContent = message;
@@ -192,9 +192,9 @@ function showBanner(key: string, message: string, actions: BannerAction[] = [], 
     btn.style.fontSize = "12px";
     btn.style.padding = "4px 8px";
     btn.style.borderRadius = "6px";
-    btn.style.border = "1px solid rgba(255,255,255,0.2)";
-    btn.style.background = "rgba(255,255,255,0.08)";
-    btn.style.color = "white";
+    btn.style.border = "1px solid var(--border)";
+    btn.style.background = "var(--bg-tertiary)";
+    btn.style.color = "var(--text-primary)";
     btn.addEventListener("click", action.onClick);
     buttons.appendChild(btn);
   }
