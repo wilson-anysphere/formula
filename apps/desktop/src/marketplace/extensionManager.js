@@ -18,15 +18,25 @@ async function readJsonIfExists(filePath, fallback) {
     return JSON.parse(raw);
   } catch (error) {
     if (error && (error.code === "ENOENT" || error.code === "ENOTDIR")) return fallback;
+    if (error instanceof SyntaxError) return fallback;
     throw error;
   }
 }
 
 async function atomicWriteJson(filePath, data) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.tmp`;
+  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(data, null, 2));
-  await fs.rename(tmp, filePath);
+  try {
+    await fs.rename(tmp, filePath);
+  } catch (error) {
+    if (error?.code === "EEXIST" || error?.code === "EPERM") {
+      await fs.rm(filePath, { force: true });
+      await fs.rename(tmp, filePath);
+      return;
+    }
+    throw error;
+  }
 }
 
 function ensureSignaturePresent(signatureBase64) {

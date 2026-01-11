@@ -27,16 +27,34 @@ async function readJsonIfExists(filePath) {
 
 async function atomicWriteJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.tmp`;
+  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(value, null, 2));
-  await fs.rename(tmp, filePath);
+  try {
+    await fs.rename(tmp, filePath);
+  } catch (error) {
+    if (error?.code === "EEXIST" || error?.code === "EPERM") {
+      await fs.rm(filePath, { force: true });
+      await fs.rename(tmp, filePath);
+      return;
+    }
+    throw error;
+  }
 }
 
 async function atomicWriteFile(filePath, bytes) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.tmp`;
+  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(tmp, bytes);
-  await fs.rename(tmp, filePath);
+  try {
+    await fs.rename(tmp, filePath);
+  } catch (error) {
+    if (error?.code === "EEXIST" || error?.code === "EPERM") {
+      await fs.rm(filePath, { force: true });
+      await fs.rename(tmp, filePath);
+      return;
+    }
+    throw error;
+  }
 }
 
 export class MarketplaceClient {
