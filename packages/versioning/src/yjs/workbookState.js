@@ -185,6 +185,32 @@ function legacyListCommentsFromMapRoot(mapType) {
 }
 
 /**
+ * Iterate map entries stored on an Array root (i.e. `parentSub !== null` items
+ * reachable via `_map`).
+ *
+ * This can happen in mixed-schema situations where some clients treat a root as
+ * an Array while others treat it as a Map. Map entries are not visible via
+ * `array.toArray()` but still exist in the CRDT.
+ *
+ * @param {any} arrayType
+ * @returns {Array<[string, any]>}
+ */
+function mapEntriesFromArrayRoot(arrayType) {
+  /** @type {Array<[string, any]>} */
+  const out = [];
+  const map = arrayType?._map;
+  if (!(map instanceof Map)) return out;
+  for (const [key, item] of map.entries()) {
+    if (!item || item.deleted) continue;
+    const content = item.content?.getContent?.() ?? [];
+    if (content.length === 0) continue;
+    out.push([key, content[content.length - 1]]);
+  }
+  out.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return out;
+}
+
+/**
  * Extract a deterministic workbook state from a Yjs doc snapshot.
  *
  * @param {Y.Doc} doc
@@ -275,16 +301,20 @@ export function workbookStateFromYjsDoc(doc) {
         comments.set(id, byId.get(id));
       }
     } else if (isYArray(existing)) {
-      /** @type {[string, CommentSummary][]} */
-      const entries = [];
+      /** @type {Map<string, CommentSummary>} */
+      const byId = new Map();
+      // Recovery: map entries stored on an Array root (mixed schema).
+      for (const [key, value] of mapEntriesFromArrayRoot(existing)) {
+        byId.set(key, commentSummaryFromValue(value, key));
+      }
       for (const item of existing.toArray()) {
         const id = coerceString(readYMapOrObject(item, "id"));
         if (!id) continue;
-        entries.push([id, commentSummaryFromValue(item, id)]);
+        if (byId.has(id)) continue;
+        byId.set(id, commentSummaryFromValue(item, id));
       }
-      entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-      for (const [id, summary] of entries) {
-        comments.set(id, summary);
+      for (const id of Array.from(byId.keys()).sort()) {
+        comments.set(id, byId.get(id));
       }
     } else {
       const placeholder = existing;

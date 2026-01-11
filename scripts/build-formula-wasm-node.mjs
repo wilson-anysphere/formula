@@ -117,11 +117,21 @@ function assertCommand(cmd, args, message) {
 function buildWithWasmPack() {
   // Equivalent to: `wasm-pack build crates/formula-wasm --target nodejs --out-dir pkg-node`
   // but avoids any ambiguity around relative output paths by running from the crate dir.
+  //
+  // Note: some environments configure Cargo to use `sccache` via `build.rustc-wrapper`.
+  // When `sccache` is unavailable/misconfigured, wasm-pack builds can fail even for
+  // `cargo metadata`/`rustc -vV`. Explicitly setting `RUSTC_WRAPPER=""` disables
+  // any configured wrapper unless the user overrides it in the environment.
   const res = spawnSync(
     "wasm-pack",
     ["build", "--target", "nodejs", "--out-dir", "pkg-node", "--dev"],
     {
       cwd: crateDir,
+      env: {
+        ...process.env,
+        RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
+        RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+      },
       stdio: "inherit",
     }
   );

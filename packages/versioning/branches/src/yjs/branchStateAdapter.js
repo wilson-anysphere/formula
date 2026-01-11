@@ -201,6 +201,32 @@ function deleteMapEntriesFromArrayRoot(transaction, arrayType) {
 }
 
 /**
+ * Iterate map entries stored on an Array root (i.e. `parentSub !== null` items
+ * reachable via `_map`).
+ *
+ * This can happen in mixed-schema situations where some clients treat a root as
+ * an Array while others treat it as a Map. Map entries are not visible via
+ * `array.toArray()` but still exist in the CRDT.
+ *
+ * @param {any} arrayType
+ * @returns {Array<[string, any]>}
+ */
+function mapEntriesFromArrayRoot(arrayType) {
+  /** @type {Array<[string, any]>} */
+  const out = [];
+  const map = arrayType?._map;
+  if (!(map instanceof Map)) return out;
+  for (const [key, item] of map.entries()) {
+    if (!item || item.deleted) continue;
+    const content = item.content?.getContent?.() ?? [];
+    if (content.length === 0) continue;
+    out.push([key, content[content.length - 1]]);
+  }
+  out.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return out;
+}
+
+/**
  * Parse a spreadsheet cell key. Supports:
  * - `${sheetId}:${row}:${col}`
  * - `${sheetId}:${row},${col}`
@@ -393,29 +419,13 @@ export function branchStateFromYjsDoc(doc) {
     } else {
       const existingArray = getYArray(existing);
       if (existingArray) {
-      /** @type {Array<{ id: string, value: any }>} */
-      const entries = [];
-      for (const item of existingArray.toArray()) {
-        const id = coerceString(readYMapOrObject(item, "id"));
-        if (!id) continue;
-        entries.push({ id, value: yjsValueToJson(item) });
-      }
-      entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      for (const entry of entries) comments[entry.id] = entry.value;
-      } else {
-      const placeholder = existing;
-      const hasStart = placeholder?._start != null;
-      const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-      const kind = hasStart && mapSize === 0 ? "array" : "map";
-
-      if (kind === "map") {
-        const commentsMap = doc.getMap("comments");
         /** @type {Map<string, any>} */
         const byId = new Map();
-        for (const id of Array.from(commentsMap.keys()).sort()) {
-          byId.set(id, yjsValueToJson(commentsMap.get(id)));
+        // Recovery: map entries stored on an Array root (mixed schema).
+        for (const [id, value] of mapEntriesFromArrayRoot(existingArray)) {
+          byId.set(id, yjsValueToJson(value));
         }
-        for (const item of legacyListCommentsFromMapRoot(commentsMap)) {
+        for (const item of existingArray.toArray()) {
           const id = coerceString(readYMapOrObject(item, "id"));
           if (!id) continue;
           if (byId.has(id)) continue;
@@ -425,17 +435,44 @@ export function branchStateFromYjsDoc(doc) {
           comments[id] = byId.get(id);
         }
       } else {
-        const commentsArray = doc.getArray("comments");
-        /** @type {Array<{ id: string, value: any }>} */
-        const entries = [];
-        for (const item of commentsArray.toArray()) {
-          const id = coerceString(readYMapOrObject(item, "id"));
-          if (!id) continue;
-          entries.push({ id, value: yjsValueToJson(item) });
+        const placeholder = existing;
+        const hasStart = placeholder?._start != null;
+        const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+        const kind = hasStart && mapSize === 0 ? "array" : "map";
+
+        if (kind === "map") {
+          const commentsMap = doc.getMap("comments");
+          /** @type {Map<string, any>} */
+          const byId = new Map();
+          for (const id of Array.from(commentsMap.keys()).sort()) {
+            byId.set(id, yjsValueToJson(commentsMap.get(id)));
+          }
+          for (const item of legacyListCommentsFromMapRoot(commentsMap)) {
+            const id = coerceString(readYMapOrObject(item, "id"));
+            if (!id) continue;
+            if (byId.has(id)) continue;
+            byId.set(id, yjsValueToJson(item));
+          }
+          for (const id of Array.from(byId.keys()).sort()) {
+            comments[id] = byId.get(id);
+          }
+        } else {
+          const commentsArray = doc.getArray("comments");
+          /** @type {Map<string, any>} */
+          const byId = new Map();
+          for (const [id, value] of mapEntriesFromArrayRoot(commentsArray)) {
+            byId.set(id, yjsValueToJson(value));
+          }
+          for (const item of commentsArray.toArray()) {
+            const id = coerceString(readYMapOrObject(item, "id"));
+            if (!id) continue;
+            if (byId.has(id)) continue;
+            byId.set(id, yjsValueToJson(item));
+          }
+          for (const id of Array.from(byId.keys()).sort()) {
+            comments[id] = byId.get(id);
+          }
         }
-        entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-        for (const entry of entries) comments[entry.id] = entry.value;
-      }
       }
     }
   }
@@ -491,6 +528,41 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
     return map;
   }
 
+  /**
+   * Deep clone a Yjs value so it can be re-inserted into the document without
+   * re-integrating an already-attached type (which can throw inside Yjs).
+   *
+   * Used to preserve unknown metadata when applying a snapshot.
+   *
+   * @param {any} value
+   * @returns {any}
+   */
+  function cloneYjsValue(value) {
+    if (isYText(value)) {
+      const out = new Y.Text();
+      out.applyDelta(structuredClone(value.toDelta()));
+      return out;
+    }
+    const array = getYArray(value);
+    if (array) {
+      const out = new Y.Array();
+      for (const item of array.toArray()) out.push([cloneYjsValue(item)]);
+      return out;
+    }
+    const map = getYMap(value);
+    if (map) {
+      const out = new Y.Map();
+      for (const key of Array.from(map.keys()).sort()) {
+        out.set(key, cloneYjsValue(map.get(key)));
+      }
+      return out;
+    }
+    if (Array.isArray(value)) return value.map((v) => cloneYjsValue(v));
+    if (isRecord(value)) return structuredClone(value);
+    if (value && typeof value === "object") return structuredClone(value);
+    return value;
+  }
+
   doc.transact(
     (transaction) => {
       // --- Sheets ---
@@ -509,8 +581,14 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
         const desiredEntries = [];
         for (const sheetId of normalized.sheets.order) {
           const meta = normalized.sheets.metaById[sheetId];
-          let entry = existingById.get(sheetId);
-          if (!entry) entry = new Y.Map();
+          const existing = existingById.get(sheetId);
+          const entry = new Y.Map();
+          if (existing) {
+            for (const key of Array.from(existing.keys()).sort()) {
+              if (key === "id" || key === "name") continue;
+              entry.set(key, cloneYjsValue(existing.get(key)));
+            }
+          }
           entry.set("id", sheetId);
           entry.set("name", meta?.name ?? null);
           desiredEntries.push(entry);

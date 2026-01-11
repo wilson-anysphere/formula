@@ -31,6 +31,27 @@ test("branchStateFromYjsDoc: reads clobbered legacy comments array stored on a M
   assert.equal(state.comments.c1?.content, "hello");
 });
 
+test("branchStateFromYjsDoc: reads map entries stored on an Array root (mixed schema)", () => {
+  const source = new Y.Doc();
+  const commentsMap = source.getMap("comments");
+  const comment = new Y.Map();
+  comment.set("id", "c1");
+  comment.set("cellRef", "A1");
+  comment.set("content", "hello");
+  comment.set("resolved", false);
+  comment.set("mentions", []);
+  comment.set("replies", new Y.Array());
+  commentsMap.set("c1", comment);
+  const update = Y.encodeStateAsUpdate(source);
+
+  const doc = new Y.Doc();
+  doc.getArray("comments");
+  Y.applyUpdate(doc, update);
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.equal(state.comments.c1?.content, "hello");
+});
+
 test("applyBranchStateToYjsDoc: writes comments as Y.Maps for CommentManager compatibility", () => {
   const doc = new Y.Doc();
 

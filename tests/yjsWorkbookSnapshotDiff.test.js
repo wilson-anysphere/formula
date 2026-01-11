@@ -213,3 +213,24 @@ test("workbookStateFromYjsDoc supports legacy list comments stored inside a Y.Ma
     repliesLength: 0,
   });
 });
+
+test("workbookStateFromYjsDoc supports map entries stored inside a Y.Array root (mixed schema)", () => {
+  const source = new Y.Doc();
+  const commentsMap = source.getMap("comments");
+  const comment = new Y.Map();
+  comment.set("id", "c1");
+  comment.set("cellRef", "A1");
+  comment.set("content", "From map peer");
+  comment.set("resolved", false);
+  comment.set("replies", new Y.Array());
+  commentsMap.set("c1", comment);
+  const update = Y.encodeStateAsUpdate(source);
+
+  const doc = new Y.Doc();
+  doc.getArray("comments"); // force array constructor
+  Y.applyUpdate(doc, update);
+
+  const state = workbookStateFromYjsDoc(doc);
+  assert.equal(state.comments.size, 1);
+  assert.equal(state.comments.get("c1")?.content, "From map peer");
+});

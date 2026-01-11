@@ -149,6 +149,41 @@ describe("collab comments legacy array schema", () => {
     expect(map.has("c2")).toBe(true);
   });
 
+  it("supports map entries stored on an array root (mixed-schema docs)", () => {
+    const mapDoc = new Y.Doc();
+    const map = mapDoc.getMap<Y.Map<unknown>>("comments");
+    map.set(
+      "c1",
+      createYComment({
+        id: "c1",
+        cellRef: "A1",
+        kind: "threaded",
+        author: { id: "u1", name: "Alice" },
+        now: 1,
+        content: "From map peer",
+      }),
+    );
+
+    const update = Y.encodeStateAsUpdate(mapDoc);
+
+    const arrayDoc = new Y.Doc();
+    arrayDoc.getArray("comments"); // force legacy array constructor
+    Y.applyUpdate(arrayDoc, update);
+
+    // The root is still an Array, but it now contains a map entry (parentSub != null).
+    expect(arrayDoc.share.get("comments")).toBeInstanceOf(Y.Array);
+
+    const mgr = new CommentManager(arrayDoc);
+    expect(mgr.listAll().map((c) => c.id)).toEqual(["c1"]);
+
+    mgr.setResolved({ commentId: "c1", resolved: true, now: 2 });
+    expect(mgr.listAll()[0]?.resolved).toBe(true);
+
+    expect(migrateCommentsArrayToMap(arrayDoc)).toBe(true);
+    const migrated = getCommentsMap(arrayDoc);
+    expect(migrated.has("c1")).toBe(true);
+  });
+
   it("converges when resolving and replying concurrently (legacy array root)", () => {
     const doc1 = new Y.Doc();
     const doc2 = new Y.Doc();

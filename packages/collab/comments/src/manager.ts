@@ -207,6 +207,9 @@ export class CommentManager {
       return yComment;
     }
 
+    const mapEntry = findMapEntryCommentByKey(root.array, commentId);
+    if (mapEntry) return mapEntry;
+
     for (const item of root.array.toArray()) {
       if (String(item.get("id") ?? "") === commentId) {
         return item;
@@ -218,7 +221,17 @@ export class CommentManager {
 
   private getAllYComments(root: CommentsRoot): Array<{ yComment: Y.Map<unknown>; mapKey?: string }> {
     if (root.kind === "array") {
-      return root.array.toArray().map((yComment) => ({ yComment }));
+      const byId = new Map<string, { yComment: Y.Map<unknown>; mapKey?: string }>();
+      for (const { key, value } of iterMapEntryComments(root.array)) {
+        byId.set(key, { yComment: value, mapKey: key });
+      }
+      for (const yComment of root.array.toArray()) {
+        const id = String(yComment.get("id") ?? "");
+        if (!id) continue;
+        if (byId.has(id)) continue;
+        byId.set(id, { yComment });
+      }
+      return Array.from(byId.values());
     }
 
     // Canonical Map entries (keyed by id).
@@ -314,6 +327,31 @@ function findLegacyListCommentById(type: any, commentId: string): Y.Map<unknown>
   return null;
 }
 
+function iterMapEntryComments(type: any): Array<{ key: string; value: Y.Map<unknown> }> {
+  /** @type {Array<{ key: string; value: Y.Map<unknown> }>} */
+  const out = [];
+  const map = type?._map;
+  if (!(map instanceof Map)) return out;
+  for (const [key, item] of map.entries()) {
+    if (!item || item.deleted) continue;
+    const content = item.content?.getContent?.() ?? [];
+    const value = content[content.length - 1];
+    if (value instanceof Y.Map) out.push({ key, value });
+  }
+  out.sort((a, b) => a.key.localeCompare(b.key));
+  return out;
+}
+
+function findMapEntryCommentByKey(type: any, key: string): Y.Map<unknown> | null {
+  const map = type?._map;
+  if (!(map instanceof Map)) return null;
+  const item = map.get(key);
+  if (!item || item.deleted) return null;
+  const content = item.content?.getContent?.() ?? [];
+  const value = content[content.length - 1];
+  return value instanceof Y.Map ? value : null;
+}
+
 export function yReplyToReply(yReply: Y.Map<unknown>): Reply {
   return {
     id: String(yReply.get("id") ?? ""),
@@ -406,6 +444,14 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
           if (!(value instanceof Y.Map)) return;
           entries.set(key, cloneYjsValue(value) as Y.Map<unknown>);
         });
+      }
+
+      // Map entries stored on an Array root (mixed-schema docs).
+      if (root.kind === "array") {
+        for (const { key, value } of iterMapEntryComments(root.array)) {
+          if (entries.has(key)) continue;
+          entries.set(key, cloneYjsValue(value) as Y.Map<unknown>);
+        }
       }
 
       // Legacy list entries (array schema, or clobbered Map schema).
