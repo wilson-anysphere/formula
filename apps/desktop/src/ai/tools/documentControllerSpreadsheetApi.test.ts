@@ -137,6 +137,18 @@ describe("DocumentControllerSpreadsheetApi", () => {
     ]);
   });
 
+  it("supports legacy flat CellFormat keys stored in DocumentController styles", () => {
+    const controller = new DocumentController();
+    // Simulate the pre-fix adapter behavior that wrote ai-tools CellFormat objects directly
+    // into the DocumentController style table (flat keys like `bold`).
+    controller.setRangeFormat("Sheet1", "A1", { bold: true, background_color: "#FFFFFF00" }, { label: "Legacy bold" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    expect(api.listNonEmptyCells("Sheet1")).toEqual([
+      { address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: null, format: { bold: true, background_color: "#FFFFFF00" } } }
+    ]);
+  });
+
   it("does not leak mutable references to DocumentController cell values from listNonEmptyCells()", () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", {

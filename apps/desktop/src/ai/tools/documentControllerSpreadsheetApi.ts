@@ -47,6 +47,40 @@ function styleToCellFormat(style: DocumentControllerStyle | null | undefined): C
     }
   }
 
+  // Back-compat: older adapters/snapshots may store ai-tools `CellFormat` fields
+  // directly on the style object (flat snake_case or camelCase keys).
+  const styleAny = style as any;
+
+  if (out.bold === undefined && typeof styleAny.bold === "boolean") out.bold = styleAny.bold;
+  if (out.italic === undefined && typeof styleAny.italic === "boolean") out.italic = styleAny.italic;
+
+  if (out.font_size === undefined) {
+    if (typeof styleAny.font_size === "number") out.font_size = styleAny.font_size;
+    else if (typeof styleAny.fontSize === "number") out.font_size = styleAny.fontSize;
+  }
+
+  if (out.font_color === undefined) {
+    if (typeof styleAny.font_color === "string") out.font_color = styleAny.font_color;
+    else if (typeof styleAny.fontColor === "string") out.font_color = styleAny.fontColor;
+  }
+
+  if (out.background_color === undefined) {
+    if (typeof styleAny.background_color === "string") out.background_color = styleAny.background_color;
+    else if (typeof styleAny.backgroundColor === "string") out.background_color = styleAny.backgroundColor;
+  }
+
+  if (out.number_format === undefined) {
+    if (typeof styleAny.number_format === "string") out.number_format = styleAny.number_format;
+    else if (typeof styleAny.numberFormat === "string") out.number_format = styleAny.numberFormat;
+  }
+
+  if (out.horizontal_align === undefined) {
+    const align = styleAny.horizontal_align ?? styleAny.horizontalAlign;
+    if (align === "left" || align === "center" || align === "right") {
+      out.horizontal_align = align;
+    }
+  }
+
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
