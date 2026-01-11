@@ -176,5 +176,62 @@ describe("MacroRunner", () => {
     expect(result.ok).toBe(false);
     expect(result.error?.message).toBe("User declined to grant requested permissions.");
   });
-});
 
+  it("does not prompt for trust when trusted_signed_only and signature is verified", async () => {
+    const status: MacroSecurityStatus = {
+      hasMacros: true,
+      trust: "trusted_signed_only",
+      originPath: "/tmp/test.xlsm",
+      workbookFingerprint: "fp",
+      signature: { status: "signed_verified" },
+    };
+
+    const runMacro = vi.fn<MacroBackend["runMacro"]>(async () => ({ ok: true, output: ["ok"] }));
+
+    const backend: MacroBackend = {
+      listMacros: vi.fn(async () => []),
+      getMacroSecurityStatus: vi.fn(async () => status),
+      setMacroTrust: vi.fn(async () => status),
+      runMacro,
+    };
+
+    const security = makeSecurityController();
+
+    const runner = new MacroRunner(backend, security);
+    const result = await runner.run({ workbookId: "wb1", macroId: "Macro1" });
+
+    expect(result.ok).toBe(true);
+    expect(security.requestTrustDecision).not.toHaveBeenCalled();
+    expect(runMacro).toHaveBeenCalledTimes(1);
+  });
+
+  it("prompts for trust when trusted_signed_only but signature is unverified", async () => {
+    const status: MacroSecurityStatus = {
+      hasMacros: true,
+      trust: "trusted_signed_only",
+      originPath: "/tmp/test.xlsm",
+      workbookFingerprint: "fp",
+      signature: { status: "signed_unverified" },
+    };
+
+    const runMacro = vi.fn<MacroBackend["runMacro"]>(async () => ({ ok: true, output: ["ok"] }));
+
+    const backend: MacroBackend = {
+      listMacros: vi.fn(async () => []),
+      getMacroSecurityStatus: vi.fn(async () => status),
+      setMacroTrust: vi.fn(async (_workbookId, decision) => ({ ...status, trust: decision })),
+      runMacro,
+    };
+
+    const security = makeSecurityController({
+      requestTrustDecision: vi.fn(async () => "trusted_once"),
+    });
+
+    const runner = new MacroRunner(backend, security);
+    const result = await runner.run({ workbookId: "wb1", macroId: "Macro1" });
+
+    expect(result.ok).toBe(true);
+    expect(security.requestTrustDecision).toHaveBeenCalledTimes(1);
+    expect(runMacro).toHaveBeenCalledTimes(1);
+  });
+});

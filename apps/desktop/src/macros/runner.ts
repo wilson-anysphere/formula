@@ -115,9 +115,11 @@ export class MacroRunner {
   }
 }
 
-function isSigned(status: MacroSignatureStatus | undefined): boolean {
+function isCryptographicallyVerifiedSignature(status: MacroSignatureStatus | undefined): boolean {
   if (!status) return false;
-  return status === "signed_unverified" || status === "signed_verified";
+  // `signed_untrusted` is reserved for a future "valid signature but untrusted chain" state.
+  // It should still satisfy the "signed only" policy because the signature verifies.
+  return status === "signed_verified" || status === "signed_untrusted";
 }
 
 function macroTrustAllowsRun(status: MacroSecurityStatus): boolean {
@@ -126,7 +128,7 @@ function macroTrustAllowsRun(status: MacroSecurityStatus): boolean {
     case "trusted_once":
       return true;
     case "trusted_signed_only":
-      return isSigned(status.signature?.status);
+      return isCryptographicallyVerifiedSignature(status.signature?.status);
     case "blocked":
     default:
       return false;

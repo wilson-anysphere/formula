@@ -70,7 +70,7 @@ export async function renderMacroRunner(
 
     securityBanner.textContent = `Security: Trust Center = ${status.trust}\nSignature: ${signature}${signer}${origin}`;
 
-    const signatureOk = signature === "signed_unverified" || signature === "signed_verified";
+    const signatureOk = signature === "signed_verified" || signature === "signed_untrusted";
     const blocked = status.trust === "blocked" || (status.trust === "trusted_signed_only" && !signatureOk);
     trustButton.disabled = false;
     if (blocked) {

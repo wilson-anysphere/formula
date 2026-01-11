@@ -26,6 +26,7 @@ export type MacroTrustDecision =
 export type MacroSignatureStatus =
   | "unsigned"
   | "signed_unverified"
+  | "signed_parse_error"
   | "signed_verified"
   | "signed_invalid"
   | "signed_untrusted";
