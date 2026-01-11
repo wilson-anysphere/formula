@@ -67,6 +67,39 @@ export class FileSystemCacheStore {
   }
 
   /**
+   * Write a file to disk in a best-effort atomic fashion (write to a temporary
+   * file then rename).
+   *
+   * This helps avoid partially-written cache files if the process crashes or is
+   * interrupted mid-write.
+   *
+   * @param {string} finalPath
+   * @param {string | Uint8Array} data
+   * @param {BufferEncoding | undefined} encoding
+   */
+  async writeFileAtomic(finalPath, data, encoding) {
+    const { fs, path } = await this.deps();
+    const tmpPath = path.join(
+      path.dirname(finalPath),
+      `${path.basename(finalPath)}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+
+    await fs.writeFile(tmpPath, data, encoding);
+
+    try {
+      await fs.rename(tmpPath, finalPath);
+    } catch (err) {
+      // On Windows, rename does not reliably overwrite existing files.
+      if (err && typeof err === "object" && "code" in err && (err.code === "EEXIST" || err.code === "EPERM")) {
+        await fs.rm(finalPath, { force: true });
+        await fs.rename(tmpPath, finalPath);
+        return;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * @param {string} key
    * @returns {Promise<CacheEntry | null>}
    */
@@ -118,7 +151,7 @@ export class FileSystemCacheStore {
         : null;
 
     if (arrowBytes) {
-      await fs.writeFile(binPath, arrowBytes);
+      await this.writeFileAtomic(binPath, arrowBytes);
       const patchedValue = {
         ...value,
         table: {
@@ -126,13 +159,17 @@ export class FileSystemCacheStore {
           bytes: { [BINARY_MARKER_KEY]: binFileName },
         },
       };
-      await fs.writeFile(jsonPath, JSON.stringify({ key, entry: { ...entry, value: patchedValue } }), "utf8");
+      await this.writeFileAtomic(
+        jsonPath,
+        JSON.stringify({ key, entry: { ...entry, value: patchedValue } }),
+        "utf8",
+      );
       return;
     }
 
     // If we are writing a JSON-only entry, clean up any previous binary blob.
     await fs.rm(binPath, { force: true });
-    await fs.writeFile(jsonPath, JSON.stringify({ key, entry }), "utf8");
+    await this.writeFileAtomic(jsonPath, JSON.stringify({ key, entry }), "utf8");
   }
 
   /**
