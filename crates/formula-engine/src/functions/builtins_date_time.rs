@@ -23,15 +23,23 @@ inventory::submit! {
 }
 
 fn date_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let year = match eval_scalar_arg(ctx, &args[0]).coerce_to_i64() {
+    let year = eval_scalar_arg(ctx, &args[0]);
+    let month = eval_scalar_arg(ctx, &args[1]);
+    let day = eval_scalar_arg(ctx, &args[2]);
+    let system = ctx.date_system();
+    broadcast_map3(year, month, day, |y, m, d| date_from_parts(&y, &m, &d, system))
+}
+
+fn date_from_parts(year: &Value, month: &Value, day: &Value, system: ExcelDateSystem) -> Value {
+    let year = match coerce_to_i64_trunc(year) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let month = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let month = match coerce_to_i64_trunc(month) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let day = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
+    let day = match coerce_to_i64_trunc(day) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -46,12 +54,18 @@ fn date_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         _ => return Value::Error(ErrorKind::Num),
     };
 
-    let system = ctx.date_system();
     let first_serial = match ymd_to_serial(ExcelDate::new(year_i32, month_u8, 1), system) {
-        Ok(s) => s as i64,
+        Ok(s) => i64::from(s),
         Err(_) => return Value::Error(ErrorKind::Num),
     };
-    let serial = first_serial + (day - 1);
+    let day_offset = match day.checked_sub(1) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Num),
+    };
+    let serial = match first_serial.checked_add(day_offset) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Num),
+    };
     if serial < i64::from(i32::MIN) || serial > i64::from(i32::MAX) {
         return Value::Error(ErrorKind::Num);
     }
@@ -907,6 +921,15 @@ fn coerce_number_to_i32_trunc(n: f64) -> Result<i32, ErrorKind> {
 fn coerce_to_i32_trunc(v: &Value) -> Result<i32, ErrorKind> {
     let n = coerce_to_finite_number(v)?;
     coerce_number_to_i32_trunc(n)
+}
+
+fn coerce_to_i64_trunc(v: &Value) -> Result<i64, ErrorKind> {
+    let n = coerce_to_finite_number(v)?;
+    let t = n.trunc();
+    if t < (i64::MIN as f64) || t > (i64::MAX as f64) {
+        return Err(ErrorKind::Num);
+    }
+    Ok(t as i64)
 }
 
 fn coerce_to_serial_floor(v: &Value) -> Result<i32, ErrorKind> {

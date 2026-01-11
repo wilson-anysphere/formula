@@ -124,6 +124,24 @@ fn date_time_1x1_arrays_coerce_back_to_scalars() {
 }
 
 #[test]
+fn date_spills_over_array_inputs() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=DATE({2020;2021},1,1)");
+    sheet.recalc();
+    let expected_2020 = sheet.eval("=DATE(2020,1,1)");
+    let expected_2021 = sheet.eval("=DATE(2021,1,1)");
+    assert_eq!(sheet.get("A1"), expected_2020);
+    assert_eq!(sheet.get("A2"), expected_2021);
+}
+
+#[test]
+fn date_errors_on_non_finite_numbers() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Number(f64::INFINITY));
+    assert_eq!(sheet.eval("=DATE(A1,1,1)"), Value::Error(ErrorKind::Num));
+}
+
+#[test]
 fn date_time_mismatched_array_shapes_return_value_error() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=TIME({1,2},{3;4},0)"), Value::Error(ErrorKind::Value));
