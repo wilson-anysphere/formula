@@ -340,6 +340,7 @@ export class NodeFsOfflineAuditQueue {
         }
 
         const segment = await this._getOrCreateOpenSegment();
+        const createdNewFile = segment.bytes === 0;
 
         const handle = await openFile(segment.openPath, "a");
         try {
@@ -348,7 +349,7 @@ export class NodeFsOfflineAuditQueue {
         } finally {
           await handle.close();
         }
-        await syncDir(this.segmentsDir);
+        if (createdNewFile) await syncDir(this.segmentsDir);
 
         segment.bytes += lineBytes;
 
