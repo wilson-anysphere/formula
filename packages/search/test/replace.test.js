@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { InMemoryWorkbook, replaceAll, replaceNext } from "../index.js";
+import { InMemoryWorkbook, replaceAll, replaceNext, SearchSession, WorkbookSearchIndex } from "../index.js";
 
 test("replace all: values mode overwrites formulas (Excel semantics)", async () => {
   const wb = new InMemoryWorkbook();
@@ -71,4 +71,32 @@ test("replace next replaces one occurrence; replace all replaces all occurrences
 
   await replaceAll(wb, "foo", "x", { scope: "sheet", currentSheetName: "Sheet1" });
   assert.equal(sheet.getCell(0, 0).value, "xx");
+});
+
+test("replaceAll updates an attached WorkbookSearchIndex", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+  sheet.setValue(0, 0, "foo");
+
+  const index = new WorkbookSearchIndex(wb, { autoThresholdCells: 0 });
+
+  const builder = new SearchSession(wb, "foo", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    index,
+    indexStrategy: "always",
+  });
+  await builder.findNext();
+
+  await replaceAll(wb, "foo", "bar", { scope: "sheet", currentSheetName: "Sheet1", index });
+
+  const session = new SearchSession(wb, "bar", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    index,
+    indexStrategy: "always",
+  });
+  const match = await session.findNext();
+  assert.equal(match.address, "Sheet1!A1");
+  assert.equal(session.stats.indexCellsVisited, 0);
 });

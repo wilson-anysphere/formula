@@ -15,10 +15,13 @@ export async function replaceAll(workbook, query, replacement, options = {}) {
 
   for await (const match of iterateMatches(workbook, query, options)) {
     const sheet = getSheetByName(workbook, match.sheetName);
-    const cell = sheet.getCell(match.row, match.col);
-    const res = applyReplaceToCell(cell, query, replacement, options, { replaceAll: true });
+    const oldCell = sheet.getCell(match.row, match.col);
+    const res = applyReplaceToCell(oldCell, query, replacement, options, { replaceAll: true });
     if (res.replaced) {
       sheet.setCell(match.row, match.col, res.cell);
+      if (options.index && typeof options.index.updateCell === "function") {
+        options.index.updateCell(match.sheetName, match.row, match.col, { oldCell, newCell: res.cell });
+      }
       replacedCells++;
       replacedOccurrences += res.replacements;
     }
@@ -32,10 +35,13 @@ export async function replaceNext(workbook, query, replacement, options = {}, fr
   if (!next) return null;
 
   const sheet = getSheetByName(workbook, next.sheetName);
-  const cell = sheet.getCell(next.row, next.col);
-  const res = applyReplaceToCell(cell, query, replacement, options, { replaceAll: false });
+  const oldCell = sheet.getCell(next.row, next.col);
+  const res = applyReplaceToCell(oldCell, query, replacement, options, { replaceAll: false });
   if (res.replaced) {
     sheet.setCell(next.row, next.col, res.cell);
+    if (options.index && typeof options.index.updateCell === "function") {
+      options.index.updateCell(next.sheetName, next.row, next.col, { oldCell, newCell: res.cell });
+    }
   }
 
   return { match: next, replaced: res.replaced, replacements: res.replacements };
