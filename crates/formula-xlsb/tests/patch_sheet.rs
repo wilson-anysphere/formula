@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use formula_xlsb::{patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
+use tempfile::tempdir;
 
 fn read_zip_part(path: &str, part_path: &str) -> Vec<u8> {
     let file = File::open(path).expect("open xlsb fixture");
@@ -36,6 +36,12 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
         &sheet_bin,
         &[CellEdit {
             row: 0,
+            col: 0,
+            new_value: CellValue::Text("World".to_string()),
+            new_formula: None,
+        },
+        CellEdit {
+            row: 0,
             col: 1,
             new_value: CellValue::Number(100.0),
             new_formula: None,
@@ -43,15 +49,10 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
     )
     .expect("patch sheet bin");
 
-    let out_path = std::env::temp_dir().join(format!(
-        "formula-xlsb-patch-{}.xlsb",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ));
+    let tmpdir = tempdir().expect("create temp dir");
+    let out_path = tmpdir.path().join("patched.xlsb");
 
-    wb.save_with_part_overrides(
+    wb.save_with_edits(
         &out_path,
         &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
     )
@@ -67,6 +68,10 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
         .collect::<HashMap<_, _>>();
 
     assert_eq!(
+        cells.remove(&(0, 0)).expect("patched A1").value,
+        CellValue::Text("World".to_string())
+    );
+    assert_eq!(
         cells.remove(&(0, 1)).expect("patched B1").value,
         CellValue::Number(100.0)
     );
@@ -76,6 +81,56 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
     let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*2"));
     assert_eq!(formula.rgce.as_slice(), original_formula_rgce.as_slice());
+}
 
-    let _ = std::fs::remove_file(&out_path);
+#[test]
+fn patch_sheet_bin_can_update_formula_cached_result() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let wb = XlsbWorkbook::open(fixture).expect("open xlsb");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+
+    let original_sheet = wb.read_sheet(0).expect("read original sheet");
+    let original_formula_rgce = original_sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 2))
+        .and_then(|c| c.formula.as_ref())
+        .expect("original formula present")
+        .rgce
+        .clone();
+
+    let sheet_bin = read_zip_part(fixture, &sheet_part);
+    let patched_sheet_bin = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 2,
+            new_value: CellValue::Number(200.0),
+            new_formula: None,
+        }],
+    )
+    .expect("patch sheet bin");
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let out_path = tmpdir.path().join("patched-formula.xlsb");
+
+    wb.save_with_edits(
+        &out_path,
+        &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
+    )
+    .expect("write patched workbook");
+
+    let patched = XlsbWorkbook::open(&out_path).expect("open patched workbook");
+    let patched_sheet = patched.read_sheet(0).expect("read patched sheet");
+
+    let formula_cell = patched_sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 2))
+        .expect("formula cell still present");
+
+    assert_eq!(formula_cell.value, CellValue::Number(200.0));
+    let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
+    assert_eq!(formula.text.as_deref(), Some("B1*2"));
+    assert_eq!(formula.rgce.as_slice(), original_formula_rgce.as_slice());
 }

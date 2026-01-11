@@ -241,6 +241,18 @@ impl XlsbWorkbook {
 
     /// Save the workbook while overriding specific part payloads.
     ///
+    /// This is an alias for [`XlsbWorkbook::save_with_part_overrides`], provided as a more
+    /// user-facing name for the "patch some parts, preserve the rest" round-trip flow.
+    pub fn save_with_edits(
+        &self,
+        dest: impl AsRef<Path>,
+        overrides: &HashMap<String, Vec<u8>>,
+    ) -> Result<(), ParseError> {
+        self.save_with_part_overrides(dest, overrides)
+    }
+
+    /// Save the workbook while overriding specific part payloads.
+    ///
     /// `overrides` maps ZIP entry paths (e.g. `xl/worksheets/sheet1.bin`) to replacement bytes.
     /// All other parts are copied from the source workbook, except for any entry already present
     /// in [`XlsbWorkbook::preserved_parts`], which is emitted from that buffer.
