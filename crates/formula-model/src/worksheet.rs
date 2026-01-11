@@ -1263,7 +1263,7 @@ impl Worksheet {
 
             for mut comment in comments {
                 if comment.id.is_empty() {
-                    comment.id = uuid::Uuid::new_v4().to_string();
+                    comment.id = crate::new_uuid().to_string();
                 }
                 if !comment_ids.insert(comment.id.clone()) {
                     return Err(CommentError::DuplicateCommentId(comment.id));
@@ -1274,7 +1274,7 @@ impl Worksheet {
                 let mut local_reply_ids: HashSet<String> = HashSet::new();
                 for reply in &mut comment.replies {
                     if reply.id.is_empty() {
-                        reply.id = uuid::Uuid::new_v4().to_string();
+                        reply.id = crate::new_uuid().to_string();
                     }
                     if !local_reply_ids.insert(reply.id.clone()) || !reply_ids.insert(reply.id.clone()) {
                         return Err(CommentError::DuplicateReplyId(reply.id.clone()));
@@ -1302,7 +1302,7 @@ impl Worksheet {
         let key = CellKey::from(anchor);
 
         if comment.id.is_empty() {
-            comment.id = uuid::Uuid::new_v4().to_string();
+            comment.id = crate::new_uuid().to_string();
         }
         if self.comment_id_exists(&comment.id) {
             return Err(CommentError::DuplicateCommentId(comment.id));
@@ -1314,7 +1314,7 @@ impl Worksheet {
         let mut reply_ids = HashSet::new();
         for reply in &mut comment.replies {
             if reply.id.is_empty() {
-                reply.id = uuid::Uuid::new_v4().to_string();
+                reply.id = crate::new_uuid().to_string();
             }
             if !reply_ids.insert(reply.id.clone()) || self.reply_id_exists(&reply.id) {
                 return Err(CommentError::DuplicateReplyId(reply.id.clone()));
@@ -1398,7 +1398,7 @@ impl Worksheet {
         mut reply: Reply,
     ) -> Result<String, CommentError> {
         if reply.id.is_empty() {
-            reply.id = uuid::Uuid::new_v4().to_string();
+            reply.id = crate::new_uuid().to_string();
         }
         if self.reply_id_exists(&reply.id) {
             return Err(CommentError::DuplicateReplyId(reply.id));

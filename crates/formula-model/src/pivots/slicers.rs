@@ -65,7 +65,7 @@ pub struct Slicer {
 impl Slicer {
     pub fn new(name: impl Into<String>, field: impl Into<String>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: crate::new_uuid(),
             name: name.into(),
             field: field.into(),
             selection: SlicerSelection::All,
@@ -101,7 +101,7 @@ pub struct Timeline {
 impl Timeline {
     pub fn new(name: impl Into<String>, field: impl Into<String>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: crate::new_uuid(),
             name: name.into(),
             field: field.into(),
             selection: TimelineSelection::default(),
@@ -176,4 +176,3 @@ pub fn distinct_items(table: &DataTable, field: &str) -> Result<Vec<ScalarValue>
 
     Ok(ordered.into_iter().collect())
 }
-

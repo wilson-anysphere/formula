@@ -1,4 +1,6 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use formula_model::{Cell, CellRef, CellValue, SheetVisibility, Workbook, Worksheet, WorksheetId};
@@ -75,10 +77,13 @@ pub struct WorkbookPackage {
 }
 
 impl WorkbookPackage {
-    pub fn load(path: &Path) -> Result<Self, WorkbookPackageError> {
-        let bytes = fs::read(path)?;
-        let package = XlsxPackage::from_bytes(&bytes)?;
+    /// Load a workbook package from in-memory `.xlsx` bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, WorkbookPackageError> {
+        let package = XlsxPackage::from_bytes(bytes)?;
+        Self::from_package(package)
+    }
 
+    fn from_package(package: XlsxPackage) -> Result<Self, WorkbookPackageError> {
         let workbook_part = "xl/workbook.xml";
         let workbook_xml = package
             .part(workbook_part)
@@ -105,7 +110,8 @@ impl WorkbookPackage {
             .unwrap_or_else(|| "xl/styles.xml".to_string());
 
         let mut workbook = Workbook::new();
-        let styles = StylesPart::parse_or_default(package.part(&styles_part_name), &mut workbook.styles)?;
+        let styles =
+            StylesPart::parse_or_default(package.part(&styles_part_name), &mut workbook.styles)?;
 
         let Some(sheets_el) = workbook_root.child("sheets") else {
             return Err(WorkbookPackageError::MissingSheets);
@@ -171,7 +177,15 @@ impl WorkbookPackage {
         })
     }
 
-    pub fn save(&mut self, out_path: &Path) -> Result<(), WorkbookPackageError> {
+    /// Load a workbook package from a file on disk.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load(path: &Path) -> Result<Self, WorkbookPackageError> {
+        let bytes = fs::read(path)?;
+        Self::from_bytes(&bytes)
+    }
+
+    /// Serialize the workbook package to `.xlsx` bytes.
+    pub fn write_to_bytes(&mut self) -> Result<Vec<u8>, WorkbookPackageError> {
         // Ensure we have xf indices for any styles referenced by stored cells.
         let style_ids = self
             .workbook
@@ -201,7 +215,13 @@ impl WorkbookPackage {
             );
         }
 
-        let bytes = self.package.write_to_bytes()?;
+        Ok(self.package.write_to_bytes()?)
+    }
+
+    /// Save the workbook package to a file on disk.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn save(&mut self, out_path: &Path) -> Result<(), WorkbookPackageError> {
+        let bytes = self.write_to_bytes()?;
         fs::write(out_path, bytes)?;
         Ok(())
     }

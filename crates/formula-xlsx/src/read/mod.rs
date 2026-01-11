@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
 use std::io::{Cursor, Read};
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
@@ -58,6 +60,7 @@ pub enum ReadError {
     InvalidRangeRef(String),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_from_path(path: impl AsRef<Path>) -> Result<XlsxDocument, ReadError> {
     let mut file = File::open(path)?;
     let mut bytes = Vec::new();

@@ -227,7 +227,7 @@ impl PivotTable {
         }
 
         Ok(Self {
-            id: Uuid::new_v4(),
+            id: crate::new_uuid(),
             name,
             source,
             row_fields,
@@ -316,7 +316,7 @@ pub struct PivotChart {
 impl PivotChart {
     pub fn new(name: impl Into<String>, pivot_table_id: PivotTableId) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: crate::new_uuid(),
             name: name.into(),
             pivot_table_id,
             data: PivotChartData {

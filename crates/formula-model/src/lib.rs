@@ -104,3 +104,18 @@ pub use worksheet::{
 ///
 /// This is embedded into [`Workbook`] to enable forward-compatible IPC payloads.
 pub const SCHEMA_VERSION: u32 = 3;
+
+fn new_uuid() -> uuid::Uuid {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        uuid::Uuid::new_v4()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        uuid::Uuid::from_u128(COUNTER.fetch_add(1, Ordering::Relaxed) as u128)
+    }
+}

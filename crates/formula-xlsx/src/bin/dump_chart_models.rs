@@ -1,4 +1,5 @@
 use std::error::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -39,6 +40,10 @@ Defaults:\n\
 "
 }
 
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn Error>> {
     let mut xlsx_path: Option<PathBuf> = None;
     let mut out_dir: PathBuf = PathBuf::from("fixtures/charts/models");
@@ -86,6 +91,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dump_one(xlsx_path: &Path, out_dir: &Path, print_parts: bool) -> Result<(), Box<dyn Error>> {
     let workbook_stem = xlsx_path
         .file_stem()
@@ -139,6 +145,7 @@ fn dump_one(xlsx_path: &Path, out_dir: &Path, print_parts: bool) -> Result<(), B
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn recreate_dir(path: &Path) -> std::io::Result<()> {
     match fs::remove_dir_all(path) {
         Ok(()) => {}
@@ -148,6 +155,7 @@ fn recreate_dir(path: &Path) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn collect_xlsx_files(dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut out: Vec<PathBuf> = fs::read_dir(dir)?
         .filter_map(|entry| entry.ok())

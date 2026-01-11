@@ -45,6 +45,7 @@ pub mod pivots;
 pub mod print;
 mod recalc_policy;
 mod read;
+#[cfg(not(target_arch = "wasm32"))]
 mod reader;
 mod relationships;
 pub mod shared_strings;
@@ -55,6 +56,7 @@ pub mod tables;
 pub mod vba;
 mod workbook;
 pub mod write;
+#[cfg(not(target_arch = "wasm32"))]
 mod writer;
 
 use std::collections::{BTreeMap, HashMap};
@@ -83,7 +85,10 @@ pub use pivots::{
     PivotTableStyleInfo, PreservedPivotParts, RelationshipStub, XlsxPivots,
 };
 pub use recalc_policy::RecalcPolicy;
-pub use read::{load_from_bytes, load_from_path, read_workbook_model_from_bytes};
+pub use read::{load_from_bytes, read_workbook_model_from_bytes};
+#[cfg(not(target_arch = "wasm32"))]
+pub use read::load_from_path;
+#[cfg(not(target_arch = "wasm32"))]
 pub use reader::{read_workbook, read_workbook_from_reader};
 pub use sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
@@ -96,6 +101,7 @@ pub use streaming::{
 };
 pub use styles::*;
 pub use workbook::ChartExtractionError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use writer::{write_workbook, write_workbook_to_writer, XlsxWriteError};
 pub use xml::XmlDomError;
 

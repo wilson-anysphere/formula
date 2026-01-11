@@ -1,6 +1,7 @@
 mod parse;
 pub(crate) mod preserve;
 mod write;
+#[cfg(not(target_arch = "wasm32"))]
 mod xlsx;
 
 use formula_model::rich_text::RichText;
@@ -9,7 +10,9 @@ pub use parse::parse_shared_strings_xml;
 pub use parse::SharedStringsError;
 pub use write::write_shared_strings_xml;
 pub use write::WriteSharedStringsError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use xlsx::SharedStringsXlsxError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use xlsx::{read_shared_strings_from_xlsx, write_shared_strings_to_xlsx};
 
 /// Shared strings table (`xl/sharedStrings.xml`).
