@@ -186,6 +186,8 @@ function maxRank(level: string): number {
   return classificationRank(level as any);
 }
 
+type ExactCandidateRow = { scope: string; selector_key: string; classification: unknown };
+
 function resolveFromExactRows(rows: Array<{ selector_key: string; classification: unknown; scope: string }>): ClassificationResolutionResult | null {
   if (rows.length === 0) return null;
 
@@ -259,66 +261,84 @@ async function queryDocument(db: DbClient, docId: string): Promise<Classificatio
   return resolveFromExactRows(rows);
 }
 
-async function querySheet(db: DbClient, docId: string, sheetId: string): Promise<ClassificationResolutionResult | null> {
+async function queryCandidatesForSheet(db: DbClient, docId: string, sheetId: string): Promise<ExactCandidateRow[]> {
   const res = await db.query(
     `
-      SELECT selector_key, classification
+      SELECT scope, selector_key, classification
       FROM document_classifications
       WHERE document_id = $1 AND scope = 'sheet' AND sheet_id = $2
+      UNION ALL
+      SELECT scope, selector_key, classification
+      FROM document_classifications
+      WHERE document_id = $1 AND scope = 'document'
     `,
     [docId, sheetId]
   );
-  const rows = res.rows.map((row) => ({ selector_key: row.selector_key as string, classification: row.classification, scope: "sheet" }));
-  return resolveFromExactRows(rows);
+  return res.rows as ExactCandidateRow[];
 }
 
-async function queryColumn(params: {
+async function queryCandidatesForColumn(params: {
   db: DbClient;
   docId: string;
   sheetId: string;
   columnIndex?: number;
   columnId?: string;
   tableId?: string | null;
-  allowTableColumns: boolean;
-}): Promise<ClassificationResolutionResult | null> {
-  const { db, docId, sheetId, columnIndex, columnId, tableId, allowTableColumns } = params;
-  const tableClause = allowTableColumns
-    ? tableId
-      ? { sql: "AND table_id = $4", args: [tableId] }
-      : { sql: "AND table_id IS NULL", args: [] }
-    : { sql: "AND table_id IS NULL", args: [] };
+}): Promise<ExactCandidateRow[]> {
+  const { db, docId, sheetId, columnIndex, columnId, tableId } = params;
+  const tableClause = tableId ? "AND table_id = $4" : "AND table_id IS NULL";
 
   if (typeof columnIndex === "number") {
-    const args = [docId, sheetId, columnIndex];
     const res = await db.query(
       `
-        SELECT selector_key, classification
+        SELECT scope, selector_key, classification
         FROM document_classifications
-        WHERE document_id = $1 AND scope = 'column' AND sheet_id = $2 AND column_index = $3
-        ${tableClause.sql}
+        WHERE
+          document_id = $1
+          AND scope = 'column'
+          AND sheet_id = $2
+          AND column_index = $3
+          ${tableClause}
+        UNION ALL
+        SELECT scope, selector_key, classification
+        FROM document_classifications
+        WHERE document_id = $1 AND scope = 'sheet' AND sheet_id = $2
+        UNION ALL
+        SELECT scope, selector_key, classification
+        FROM document_classifications
+        WHERE document_id = $1 AND scope = 'document'
       `,
-      tableClause.args.length ? [...args, ...tableClause.args] : args
+      tableId ? [docId, sheetId, columnIndex, tableId] : [docId, sheetId, columnIndex]
     );
-    const rows = res.rows.map((row) => ({ selector_key: row.selector_key as string, classification: row.classification, scope: "column" }));
-    return resolveFromExactRows(rows);
+    return res.rows as ExactCandidateRow[];
   }
 
   if (columnId) {
-    const args = [docId, sheetId, columnId];
     const res = await db.query(
       `
-        SELECT selector_key, classification
+        SELECT scope, selector_key, classification
         FROM document_classifications
-        WHERE document_id = $1 AND scope = 'column' AND sheet_id = $2 AND column_id = $3
-        ${tableClause.sql}
+        WHERE
+          document_id = $1
+          AND scope = 'column'
+          AND sheet_id = $2
+          AND column_id = $3
+          ${tableClause}
+        UNION ALL
+        SELECT scope, selector_key, classification
+        FROM document_classifications
+        WHERE document_id = $1 AND scope = 'sheet' AND sheet_id = $2
+        UNION ALL
+        SELECT scope, selector_key, classification
+        FROM document_classifications
+        WHERE document_id = $1 AND scope = 'document'
       `,
-      tableClause.args.length ? [...args, ...tableClause.args] : args
+      tableId ? [docId, sheetId, columnId, tableId] : [docId, sheetId, columnId]
     );
-    const rows = res.rows.map((row) => ({ selector_key: row.selector_key as string, classification: row.classification, scope: "column" }));
-    return resolveFromExactRows(rows);
+    return res.rows as ExactCandidateRow[];
   }
 
-  return null;
+  return [];
 }
 
 type CellResolutionCandidateRow = {
@@ -455,26 +475,46 @@ export async function getEffectiveClassificationForSelector(
       return (await queryDocument(db, docId)) ?? DEFAULT_RESOLUTION;
     }
     case "sheet": {
-      return (
-        (await querySheet(db, docId, normalized.sheetId!)) ??
-        (await queryDocument(db, docId)) ??
-        DEFAULT_RESOLUTION
-      );
+      const candidates = await queryCandidatesForSheet(db, docId, normalized.sheetId!);
+      const sheetRows = candidates
+        .filter((row) => row.scope === "sheet")
+        .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "sheet" }));
+      const sheetResolved = resolveFromExactRows(sheetRows);
+      if (sheetResolved) return sheetResolved;
+
+      const docRows = candidates
+        .filter((row) => row.scope === "document")
+        .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "document" }));
+      const docResolved = resolveFromExactRows(docRows);
+      return docResolved ?? DEFAULT_RESOLUTION;
     }
     case "column": {
-      const result =
-        (await queryColumn({
-          db,
-          docId,
-          sheetId: normalized.sheetId!,
-          columnIndex: normalized.columnIndex ?? undefined,
-          columnId: normalized.columnId ?? undefined,
-          tableId: normalized.tableId,
-          allowTableColumns: true
-        })) ??
-        (await querySheet(db, docId, normalized.sheetId!)) ??
-        (await queryDocument(db, docId));
-      return result ?? DEFAULT_RESOLUTION;
+      const candidates = await queryCandidatesForColumn({
+        db,
+        docId,
+        sheetId: normalized.sheetId!,
+        columnIndex: normalized.columnIndex ?? undefined,
+        columnId: normalized.columnId ?? undefined,
+        tableId: normalized.tableId,
+      });
+
+      const columnRows = candidates
+        .filter((row) => row.scope === "column")
+        .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "column" }));
+      const columnResolved = resolveFromExactRows(columnRows);
+      if (columnResolved) return columnResolved;
+
+      const sheetRows = candidates
+        .filter((row) => row.scope === "sheet")
+        .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "sheet" }));
+      const sheetResolved = resolveFromExactRows(sheetRows);
+      if (sheetResolved) return sheetResolved;
+
+      const docRows = candidates
+        .filter((row) => row.scope === "document")
+        .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "document" }));
+      const docResolved = resolveFromExactRows(docRows);
+      return docResolved ?? DEFAULT_RESOLUTION;
     }
     case "cell": {
       const candidateRows = await queryCandidatesForCell(
