@@ -34,6 +34,7 @@ function createMock2dContext(canvas: HTMLCanvasElement): CanvasRenderingContext2
     translate: noop,
     rotate: noop,
     fillText: noop,
+    setLineDash: noop,
     measureText: (text: string) =>
       ({
         width: text.length * 6,
@@ -94,5 +95,101 @@ describe("CanvasGridRenderer zoom", () => {
     expect(after!.width).toBe(40);
     expect(after!.height).toBe(20);
   });
-});
 
+  it("renders the selection fill handle scaled with zoom", () => {
+    const provider: CellProvider = { getCell: () => null };
+
+    const fillRects: Array<{ fillStyle: string; x: number; y: number; width: number; height: number }> = [];
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createMock2dContext(gridCanvas));
+    contexts.set(contentCanvas, createMock2dContext(contentCanvas));
+
+    const selectionCtx = createMock2dContext(selectionCanvas) as unknown as CanvasRenderingContext2D & {
+      _fillStyle?: unknown;
+    };
+    let fillStyle: unknown = "#000";
+    Object.defineProperty(selectionCtx, "fillStyle", {
+      get: () => fillStyle,
+      set: (value: unknown) => {
+        fillStyle = value;
+      }
+    });
+    selectionCtx.fillRect = (x: number, y: number, width: number, height: number) => {
+      if (typeof fillStyle === "string") fillRects.push({ fillStyle, x, y, width, height });
+    };
+    contexts.set(selectionCanvas, selectionCtx);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createMock2dContext(this);
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 50, colCount: 50, defaultRowHeight: 10, defaultColWidth: 10 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 200, 1);
+
+    renderer.setSelection({ row: 1, col: 1 });
+    fillRects.length = 0;
+
+    renderer.setZoom(2);
+
+    const handleStyle = renderer.getTheme().selectionHandle;
+    const handleRects = fillRects.filter((rect) => rect.fillStyle === handleStyle);
+    expect(handleRects).toHaveLength(1);
+    expect(handleRects[0]!.width).toBeCloseTo(16, 5);
+    expect(handleRects[0]!.height).toBeCloseTo(16, 5);
+  });
+
+  it("scales remote presence badge geometry with zoom", () => {
+    const provider: CellProvider = { getCell: () => null };
+
+    const fillRects: Array<{ fillStyle: string; x: number; y: number; width: number; height: number }> = [];
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createMock2dContext(gridCanvas));
+    contexts.set(contentCanvas, createMock2dContext(contentCanvas));
+
+    const selectionCtx = createMock2dContext(selectionCanvas) as unknown as CanvasRenderingContext2D;
+    let fillStyle: unknown = "#000";
+    Object.defineProperty(selectionCtx, "fillStyle", {
+      get: () => fillStyle,
+      set: (value: unknown) => {
+        fillStyle = value;
+      }
+    });
+    selectionCtx.fillRect = (x: number, y: number, width: number, height: number) => {
+      if (typeof fillStyle === "string") fillRects.push({ fillStyle, x, y, width, height });
+    };
+    contexts.set(selectionCanvas, selectionCtx);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createMock2dContext(this);
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 50, colCount: 50, defaultRowHeight: 10, defaultColWidth: 10 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 200, 1);
+
+    const color = "#ff0000";
+    renderer.setRemotePresences([
+      { id: "ada", name: "Ada", color, cursor: { row: 1, col: 1 }, selections: [] }
+    ]);
+    fillRects.length = 0;
+
+    renderer.setZoom(2);
+
+    const badgeRects = fillRects.filter((rect) => rect.fillStyle === color);
+    expect(badgeRects).toHaveLength(1);
+    expect(badgeRects[0]!.height).toBeCloseTo(40, 5);
+    expect(badgeRects[0]!.width).toBeCloseTo(42, 5);
+    expect(badgeRects[0]!.y).toBeCloseTo(-16, 5);
+  });
+});

@@ -1567,17 +1567,18 @@ export class CanvasGridRenderer {
     if (this.remotePresences.length === 0) return 1;
 
     // Keep in sync with `renderRemotePresenceOverlays`.
-    const badgePaddingX = 6;
-    const badgePaddingY = 3;
-    const badgeOffsetX = 8;
-    const badgeOffsetY = -18;
-    const badgeTextHeight = 14;
-    const cursorStrokeWidth = 2;
+    const zoom = this.zoom;
+    const badgePaddingX = 6 * zoom;
+    const badgePaddingY = 3 * zoom;
+    const badgeOffsetX = 8 * zoom;
+    const badgeOffsetY = -18 * zoom;
+    const badgeTextHeight = 14 * zoom;
+    const cursorStrokeWidth = 2 * zoom;
 
     const previousFont = ctx.font;
     ctx.font = this.presenceFont;
 
-    let padding = cursorStrokeWidth + 4;
+    let padding = cursorStrokeWidth + 4 * zoom;
     for (const presence of this.remotePresences) {
       const name = presence.name ?? "Anonymous";
       const metricsKey = `${this.presenceFont}::${name}`;
@@ -3020,7 +3021,7 @@ export class CanvasGridRenderer {
 
     drawRange(activeRange, { fillAlpha: 1, strokeAlpha: 1, strokeWidth: 2 });
 
-    const handleSize = 8;
+    const handleSize = 8 * this.zoom;
     const handleRow = activeRange.endRow - 1;
     const handleCol = activeRange.endCol - 1;
     const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);
@@ -3078,12 +3079,14 @@ export class CanvasGridRenderer {
 
     const selectionFillAlpha = 0.12;
     const selectionStrokeAlpha = 0.9;
-    const cursorStrokeWidth = 2;
-    const badgePaddingX = 6;
-    const badgePaddingY = 3;
-    const badgeOffsetX = 8;
-    const badgeOffsetY = -18;
-    const badgeTextHeight = 14;
+    const zoom = this.zoom;
+    const cursorStrokeWidth = 2 * zoom;
+    const badgePaddingX = 6 * zoom;
+    const badgePaddingY = 3 * zoom;
+    const badgeOffsetX = 8 * zoom;
+    const badgeOffsetY = -18 * zoom;
+    const badgeTextHeight = 14 * zoom;
+    const cursorInset = cursorStrokeWidth / 2;
 
     for (const presence of this.remotePresences) {
       const color = presence.color ?? this.theme.remotePresenceDefault;
@@ -3126,7 +3129,13 @@ export class CanvasGridRenderer {
 
           ctx.globalAlpha = selectionStrokeAlpha;
           for (const rect of rects) {
-            ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+            if (rect.width <= cursorStrokeWidth || rect.height <= cursorStrokeWidth) continue;
+            ctx.strokeRect(
+              rect.x + cursorInset,
+              rect.y + cursorInset,
+              rect.width - cursorStrokeWidth,
+              rect.height - cursorStrokeWidth
+            );
           }
 
           ctx.globalAlpha = 1;
@@ -3150,7 +3159,13 @@ export class CanvasGridRenderer {
         ctx.strokeStyle = color;
         ctx.lineWidth = cursorStrokeWidth;
         for (const rect of cursorRects) {
-          ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+          if (rect.width <= cursorStrokeWidth || rect.height <= cursorStrokeWidth) continue;
+          ctx.strokeRect(
+            rect.x + cursorInset,
+            rect.y + cursorInset,
+            rect.width - cursorStrokeWidth,
+            rect.height - cursorStrokeWidth
+          );
         }
 
         const name = presence.name ?? "Anonymous";
