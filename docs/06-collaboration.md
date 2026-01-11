@@ -729,6 +729,18 @@ class ConflictHandler {
 
 When formulas conflict (multiple users edit same cell's formula):
 
+In Formula, conflict detection is **causal** (Yjs-based), not based on wall-clock
+timestamps. This means we can reliably detect true offline/concurrent edits even
+after long disconnect periods.
+
+Implementation notes (see `packages/collab/conflicts/src/formula-conflict-monitor.js`):
+- Sequential overwrites are identified using Yjs map entry `Item.origin` ids.
+- Map deletes do not create new items; to detect delete-vs-overwrite conflicts
+  deterministically, local formula clears are represented as `formula = null`
+  (instead of deleting the key) so overwrites can reference the deletion via
+  `Item.origin`.
+- Value conflicts are optionally supported via `mode: "formula+value"`.
+
 ```typescript
 class FormulaConflictResolver {
   async handleFormulaConflict(
