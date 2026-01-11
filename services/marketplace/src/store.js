@@ -1630,6 +1630,41 @@ class MarketplaceStore {
     });
   }
 
+  async rescanPendingScans({ limit = 50, actor = "admin", ip = null } = {}) {
+    const boundedLimit = Math.max(1, Math.min(200, Number(limit) || 50));
+
+    const targets = await this.db.withRead((db) => {
+      const stmt = db.prepare(
+        `SELECT extension_id, version
+         FROM package_scans
+         WHERE status = ?
+         ORDER BY extension_id ASC, version ASC
+         LIMIT ?`
+      );
+      stmt.bind([PACKAGE_SCAN_STATUS.PENDING, boundedLimit]);
+      const out = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        out.push({ extensionId: String(row.extension_id), version: String(row.version) });
+      }
+      stmt.free();
+      return out;
+    });
+
+    const results = [];
+    for (const target of targets) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const scan = await this.rescanExtensionVersion(target.extensionId, target.version, { actor, ip });
+        results.push({ ...target, ok: true, status: scan?.status || null });
+      } catch (error) {
+        results.push({ ...target, ok: false, error: String(error?.message || error) });
+      }
+    }
+
+    return { scanned: results };
+  }
+
   async rescanExtensionVersion(extensionId, version, { actor = "admin", ip = null } = {}) {
     const now = nowIso();
     await this.db.withTransaction((db) => {

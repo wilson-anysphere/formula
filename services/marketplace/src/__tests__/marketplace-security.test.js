@@ -358,6 +358,18 @@ test("requireScanPassedForDownload blocks pending scans from metadata/search/dow
     const search = await store.search({ q: published.id });
     assert.equal(search.results.length, 0);
     assert.equal(await store.getPackage(published.id, published.version), null);
+
+    const bulk = await store.rescanPendingScans({ limit: 10, actor: "admin" });
+    assert.ok(Array.isArray(bulk.scanned));
+    assert.ok(bulk.scanned.some((r) => r.extensionId === published.id && r.version === published.version && r.ok));
+
+    const ext = await store.getExtension(published.id);
+    assert.ok(ext);
+    assert.equal(ext.latestVersion, published.version);
+    const searchAfter = await store.search({ q: published.id });
+    assert.ok(searchAfter.results.some((r) => r.id === published.id));
+    const downloaded = await store.getPackage(published.id, published.version);
+    assert.ok(downloaded);
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });
     await fs.rm(dir, { recursive: true, force: true });

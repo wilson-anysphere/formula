@@ -86,6 +86,7 @@ Admin endpoints require `adminToken` to be configured when starting the server.
 - `POST /api/admin/extensions/:id/versions/:version/scan` (force rescan)
 - `GET /api/admin/scans` (list scans; filters: `status`, `publisher`, `extensionId`, pagination via
   `limit`/`offset`)
+- `POST /api/admin/scans/rescan-pending` (bulk rescan; body: `{ "limit": 50 }`)
 
 ### Extension visibility for admins
 
