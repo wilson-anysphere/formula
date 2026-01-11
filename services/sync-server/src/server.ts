@@ -1161,10 +1161,17 @@ export function createSyncServer(
 
     let messagesInWindow = 0;
     let oversizeMessageCounted = false;
-    const messageWindow = setInterval(() => {
-      messagesInWindow = 0;
-    }, config.limits.messageWindowMs);
-    messageWindow.unref();
+    const messageWindowMs = config.limits.messageWindowMs;
+    const messageWindow =
+      messageWindowMs > 0
+        ? (() => {
+            const timer = setInterval(() => {
+              messagesInWindow = 0;
+            }, messageWindowMs);
+            timer.unref();
+            return timer;
+          })()
+        : null;
 
     ws.on("message", (data) => {
       const messageBytes = rawDataByteLength(data);
@@ -1223,7 +1230,7 @@ export function createSyncServer(
           metrics.wsMessagesTooLargeTotal.inc();
         }
       }
-      clearInterval(messageWindow);
+      if (messageWindow) clearInterval(messageWindow);
       connectionTracker.unregister(ip);
       docConnectionTracker.unregister(persistedName);
       if (leveldbDocNameHashingEnabled) {

@@ -8,6 +8,8 @@ export class TokenBucketRateLimiter {
   ) {}
 
   consume(key: string, nowMs: number = Date.now()): boolean {
+    if (this.capacity <= 0 || this.refillMs <= 0) return false;
+
     // Opportunistically sweep stale entries so a large number of one-off keys
     // (e.g. connection attempts from many unique IPs) doesn't grow this map
     // without bound.
