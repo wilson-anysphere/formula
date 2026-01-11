@@ -404,6 +404,9 @@ export interface CollabSessionOptions {
    * In `"formula+value"` mode, the monitor also detects concurrent value edits and
    * formula-vs-value "content" conflicts (e.g. one user writes a formula while
    * another concurrently writes a literal value).
+   *
+   * Note: `"formula+value"` overlaps with `cellValueConflicts` (both can surface
+   * value conflicts). Prefer one or the other to avoid duplicated/confusing UX.
    */
   formulaConflicts?: {
     localUserId: string;
@@ -436,6 +439,10 @@ export interface CollabSessionOptions {
   /**
    * When enabled, the session monitors cell value updates for true conflicts
    * (offline/concurrent same-cell edits) and surfaces them via `onConflict`.
+   *
+   * Note: if you enable `formulaConflicts` with `mode: "formula+value"`, value
+   * conflicts are already covered there (and it can also surface formula-vs-value
+   * "content" conflicts). Prefer one monitor to avoid redundant conflict UX.
    */
   cellValueConflicts?: {
     localUserId: string;
