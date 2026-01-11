@@ -3,6 +3,7 @@ use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, CompiledExpr, Expr, NameRef, PostfixOp, RangeRef, SheetReference,
     UnaryOp,
 };
+use crate::SheetRef;
 use crate::value::ErrorKind;
 
 /// Excel limits (0-indexed).
@@ -187,12 +188,20 @@ fn lower_binary(b: &crate::BinaryExpr, origin: Option<crate::CellAddr>) -> Expr<
 
 fn lower_sheet_reference(
     workbook: &Option<String>,
-    sheet: &Option<String>,
+    sheet: &Option<SheetRef>,
 ) -> SheetReference<String> {
     match (workbook.as_ref(), sheet.as_ref()) {
-        (Some(book), Some(sheet)) => SheetReference::External(format!("[{book}]{sheet}")),
+        (Some(book), Some(sheet_ref)) => match sheet_ref {
+            SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
+            SheetRef::SheetRange { start, end } => {
+                SheetReference::External(format!("[{book}]{start}:{end}"))
+            }
+        },
         (Some(book), None) => SheetReference::External(format!("[{book}]")),
-        (None, Some(sheet)) => SheetReference::Sheet(sheet.clone()),
+        (None, Some(sheet_ref)) => match sheet_ref {
+            SheetRef::Sheet(sheet) => SheetReference::Sheet(sheet.clone()),
+            SheetRef::SheetRange { start, end } => SheetReference::SheetRange(start.clone(), end.clone()),
+        },
         (None, None) => SheetReference::Current,
     }
 }
@@ -259,7 +268,7 @@ fn lower_array_literal(arr: &crate::ArrayLiteral, origin: Option<crate::CellAddr
 #[derive(Debug, Clone)]
 struct StaticRangeOperandUnresolved {
     workbook: Option<String>,
-    sheet: Option<String>,
+    sheet: Option<SheetRef>,
     start: CellAddr,
     end: CellAddr,
 }
@@ -735,16 +744,31 @@ fn coord_to_index(coord: &crate::Coord, origin: u32, max: u32) -> Option<u32> {
 
 fn compile_sheet_reference(
     workbook: &Option<String>,
-    sheet: &Option<String>,
+    sheet: &Option<SheetRef>,
     current_sheet: usize,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
 ) -> SheetReference<usize> {
     match (workbook.as_ref(), sheet.as_ref()) {
-        (Some(book), Some(sheet)) => SheetReference::External(format!("[{book}]{sheet}")),
+        (Some(book), Some(sheet_ref)) => match sheet_ref {
+            SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
+            SheetRef::SheetRange { start, end } => {
+                SheetReference::External(format!("[{book}]{start}:{end}"))
+            }
+        },
         (Some(book), None) => SheetReference::External(format!("[{book}]")),
-        (None, Some(sheet)) => resolve_sheet(sheet)
-            .map(SheetReference::Sheet)
-            .unwrap_or_else(|| SheetReference::External(sheet.clone())),
+        (None, Some(sheet_ref)) => match sheet_ref {
+            SheetRef::Sheet(sheet) => resolve_sheet(sheet)
+                .map(SheetReference::Sheet)
+                .unwrap_or_else(|| SheetReference::External(sheet.clone())),
+            SheetRef::SheetRange { start, end } => {
+                let start_id = resolve_sheet(start);
+                let end_id = resolve_sheet(end);
+                match (start_id, end_id) {
+                    (Some(a), Some(b)) => SheetReference::SheetRange(a, b),
+                    _ => SheetReference::External(format!("{start}:{end}")),
+                }
+            }
+        },
         (None, None) => SheetReference::Sheet(current_sheet),
     }
 }
@@ -793,30 +817,59 @@ fn try_compile_static_range_ref(
 
     // The canonical parser represents `Sheet1!A1:B2` as a range whose left operand has a sheet
     // prefix and whose right operand is unprefixed. Excel treats the prefix as applying to both
-    // endpoints, so attempt to recompile using the explicit endpoint's sheet as the "current"
-    // sheet for the unprefixed endpoint.
-    let merged_sheet = if is_unprefixed_static_ref(left) {
-        explicit_internal_sheet_id(right, resolve_sheet)
+    // endpoints, so treat the prefix as applying to both endpoints.
+    //
+    // For single-sheet prefixes, we recompile using the explicit endpoint's sheet as the "current"
+    // sheet so the unprefixed endpoint compiles to the same sheet.
+    //
+    // For 3D sheet spans (e.g. `Sheet1:Sheet3!A1:B2`), the range naturally spans multiple sheets;
+    // in that case we keep the explicit sheet range and reuse the already-resolved cell addresses.
+    let explicit_sheet = if is_unprefixed_static_ref(left) {
+        explicit_sheet_reference(right, current_sheet, resolve_sheet)
     } else if is_unprefixed_static_ref(right) {
-        explicit_internal_sheet_id(left, resolve_sheet)
+        explicit_sheet_reference(left, current_sheet, resolve_sheet)
     } else {
         None
     }?;
 
-    let left_op =
-        try_compile_static_range_operand(left, merged_sheet, current_cell, resolve_sheet)?;
-    let right_op =
-        try_compile_static_range_operand(right, merged_sheet, current_cell, resolve_sheet)?;
-    if left_op.sheet != right_op.sheet {
-        return None;
-    }
+    match explicit_sheet {
+        SheetReference::Sheet(merged_sheet) => {
+            let left_op = try_compile_static_range_operand(
+                left,
+                merged_sheet,
+                current_cell,
+                resolve_sheet,
+            )?;
+            let right_op = try_compile_static_range_operand(
+                right,
+                merged_sheet,
+                current_cell,
+                resolve_sheet,
+            )?;
+            if left_op.sheet != right_op.sheet {
+                return None;
+            }
 
-    let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
-    Some(RangeRef {
-        sheet: left_op.sheet,
-        start,
-        end,
-    })
+            let (start, end) =
+                bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
+            Some(RangeRef {
+                sheet: left_op.sheet,
+                start,
+                end,
+            })
+        }
+        SheetReference::SheetRange(start_sheet, end_sheet) => {
+            let (start, end) =
+                bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
+            Some(RangeRef {
+                sheet: SheetReference::SheetRange(start_sheet, end_sheet),
+                start,
+                end,
+            })
+        }
+        SheetReference::Current => None,
+        SheetReference::External(_) => None,
+    }
 }
 
 fn try_compile_static_range_operand(
@@ -871,21 +924,26 @@ fn is_unprefixed_static_ref(expr: &crate::Expr) -> bool {
     }
 }
 
-fn explicit_internal_sheet_id(
+fn explicit_sheet_reference(
     expr: &crate::Expr,
+    current_sheet: usize,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
-) -> Option<usize> {
+) -> Option<SheetReference<usize>> {
     let (workbook, sheet) = match expr {
         crate::Expr::CellRef(r) => (&r.workbook, &r.sheet),
         crate::Expr::ColRef(r) => (&r.workbook, &r.sheet),
         crate::Expr::RowRef(r) => (&r.workbook, &r.sheet),
         _ => return None,
     };
-    if workbook.is_some() {
+    if workbook.is_none() && sheet.is_none() {
         return None;
     }
-    let sheet = sheet.as_deref()?;
-    resolve_sheet(sheet)
+    Some(compile_sheet_reference(
+        workbook,
+        sheet,
+        current_sheet,
+        resolve_sheet,
+    ))
 }
 
 fn bounding_rect(

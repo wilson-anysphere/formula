@@ -3,7 +3,7 @@
 use crate::{
     ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellRef, ColRef, Coord, Expr, FunctionCall,
     FunctionName, LocaleConfig, NameRef, ParseError, ParseOptions, PostfixExpr, PostfixOp,
-    ReferenceStyle, RowRef, Span, StructuredRef, UnaryExpr, UnaryOp,
+    ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr, UnaryOp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1328,11 +1328,13 @@ impl<'a> Parser<'a> {
         // This is similar to `parse_reference_or_name_or_func`, but uses best-effort
         // function call parsing so editor states like `=SUM(A1,` still yield a useful AST.
 
-        // Optional sheet prefix: Sheet1!A1 / 'My Sheet'!A1
+        // Optional sheet prefix:
+        // - Sheet1!A1 / 'My Sheet'!A1
+        // - Sheet1:Sheet3!A1 / 'Sheet 1':'Sheet 3'!A1
         let save_pos = self.pos;
         let sheet_prefix = match self.peek_kind() {
             TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => {
-                let name = match self.take_name_token() {
+                let start_raw = match self.take_name_token() {
                     Ok(s) => s,
                     Err(e) => {
                         self.record_error(e);
@@ -1340,9 +1342,38 @@ impl<'a> Parser<'a> {
                     }
                 };
                 self.skip_trivia();
-                if matches!(self.peek_kind(), TokenKind::Bang) {
+                if matches!(self.peek_kind(), TokenKind::Colon) {
+                    // Sheet span.
                     self.next();
-                    Some(split_external_sheet_name(&name))
+                    self.skip_trivia();
+                    let end_raw = match self.take_name_token() {
+                        Ok(s) => s,
+                        Err(e) => {
+                            self.record_error(e);
+                            self.pos = save_pos;
+                            return Expr::Missing;
+                        }
+                    };
+                    self.skip_trivia();
+                    if matches!(self.peek_kind(), TokenKind::Bang) {
+                        self.next();
+                        let (workbook, start) = split_external_sheet_name(&start_raw);
+                        let (_wb2, end) = split_external_sheet_name(&end_raw);
+                        Some((
+                            workbook,
+                            SheetRef::SheetRange {
+                                start,
+                                end,
+                            },
+                        ))
+                    } else {
+                        self.pos = save_pos;
+                        None
+                    }
+                } else if matches!(self.peek_kind(), TokenKind::Bang) {
+                    self.next();
+                    let (workbook, sheet) = split_external_sheet_name(&start_raw);
+                    Some((workbook, SheetRef::Sheet(sheet)))
                 } else {
                     self.pos = save_pos;
                     None
@@ -1695,12 +1726,36 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => unreachable!("handled elsewhere"),
             TokenKind::QuotedIdent(_) | TokenKind::Ident(_) => {
                 // Could be sheet prefix (if followed by Bang), or function/name.
-                let name = self.take_name_token()?;
+                let start_raw = self.take_name_token()?;
                 self.skip_trivia();
-                if matches!(self.peek_kind(), TokenKind::Bang) {
+
+                // Sheet span (3D ref) like `Sheet1:Sheet3!A1`.
+                if matches!(self.peek_kind(), TokenKind::Colon) {
                     self.next();
-                    let (workbook, sheet) = split_external_sheet_name(&name);
-                    (workbook, Some(sheet))
+                    self.skip_trivia();
+                    if !matches!(self.peek_kind(), TokenKind::Ident(_) | TokenKind::QuotedIdent(_)) {
+                        self.pos = save_pos;
+                        (None, None)
+                    } else {
+                        let end_raw = self.take_name_token()?;
+                        self.skip_trivia();
+                        if !matches!(self.peek_kind(), TokenKind::Bang) {
+                            self.pos = save_pos;
+                            (None, None)
+                        } else {
+                            self.next();
+                            let (workbook, start) = split_external_sheet_name(&start_raw);
+                            let (_wb2, end) = split_external_sheet_name(&end_raw);
+                            (
+                                workbook,
+                                Some(SheetRef::SheetRange { start, end }),
+                            )
+                        }
+                    }
+                } else if matches!(self.peek_kind(), TokenKind::Bang) {
+                    self.next();
+                    let (workbook, sheet) = split_external_sheet_name(&start_raw);
+                    (workbook, Some(SheetRef::Sheet(sheet)))
                 } else {
                     self.pos = save_pos;
                     (None, None)
@@ -1795,7 +1850,7 @@ impl<'a> Parser<'a> {
     fn parse_ref_after_prefix(
         &mut self,
         workbook: Option<String>,
-        sheet: Option<String>,
+        sheet: Option<SheetRef>,
     ) -> Result<Expr, ParseError> {
         self.skip_trivia();
         match self.peek_kind() {
@@ -2011,7 +2066,7 @@ impl<'a> Parser<'a> {
             .trim_matches(&['[', ']'][..])
             .to_string();
         self.skip_trivia();
-        let sheet = match self.peek_kind() {
+        let start_sheet = match self.peek_kind() {
             TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => self.take_name_token()?,
             _ => {
                 // Not an external ref; rewind and parse as structured.
@@ -2020,18 +2075,41 @@ impl<'a> Parser<'a> {
             }
         };
         self.skip_trivia();
-        if !matches!(self.peek_kind(), TokenKind::Bang) {
-            self.pos = save;
-            return self.parse_structured_ref(None, None, None);
-        }
+        let sheet_ref = if matches!(self.peek_kind(), TokenKind::Colon) {
+            // 3D sheet span with external workbook prefix: `[Book]Sheet1:Sheet3!A1`.
+            self.next();
+            self.skip_trivia();
+            let end_sheet = match self.peek_kind() {
+                TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => self.take_name_token()?,
+                _ => {
+                    self.pos = save;
+                    return self.parse_structured_ref(None, None, None);
+                }
+            };
+            self.skip_trivia();
+            if !matches!(self.peek_kind(), TokenKind::Bang) {
+                self.pos = save;
+                return self.parse_structured_ref(None, None, None);
+            }
+            SheetRef::SheetRange {
+                start: start_sheet,
+                end: end_sheet,
+            }
+        } else {
+            if !matches!(self.peek_kind(), TokenKind::Bang) {
+                self.pos = save;
+                return self.parse_structured_ref(None, None, None);
+            }
+            SheetRef::Sheet(start_sheet)
+        };
         self.next(); // bang
-        self.parse_ref_after_prefix(Some(workbook), Some(sheet))
+        self.parse_ref_after_prefix(Some(workbook), Some(sheet_ref))
     }
 
     fn parse_structured_ref(
         &mut self,
         workbook: Option<String>,
-        sheet: Option<String>,
+        sheet: Option<SheetRef>,
         table: Option<String>,
     ) -> Result<Expr, ParseError> {
         self.skip_trivia();

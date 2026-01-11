@@ -2252,6 +2252,14 @@ impl Engine {
                 .sheet_id(name)
                 .map(SheetReference::Sheet)
                 .unwrap_or_else(|| SheetReference::External(name.clone())),
+            SheetReference::SheetRange(start, end) => {
+                let start_id = self.workbook.sheet_id(start);
+                let end_id = self.workbook.sheet_id(end);
+                match (start_id, end_id) {
+                    (Some(a), Some(b)) => SheetReference::SheetRange(a, b),
+                    _ => SheetReference::External(format!("{start}:{end}")),
+                }
+            }
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
         expr.map_sheets(&mut map)
@@ -2638,6 +2646,14 @@ impl Engine {
                 .sheet_id(name)
                 .map(SheetReference::Sheet)
                 .unwrap_or_else(|| SheetReference::External(name.clone())),
+            SheetReference::SheetRange(start, end) => {
+                let start_id = self.workbook.sheet_id(start);
+                let end_id = self.workbook.sheet_id(end);
+                match (start_id, end_id) {
+                    (Some(a), Some(b)) => SheetReference::SheetRange(a, b),
+                    _ => SheetReference::External(format!("{start}:{end}")),
+                }
+            }
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
         let compiled = parsed.map_sheets(&mut map);
@@ -4219,7 +4235,7 @@ fn walk_expr_flags(
 
     match expr {
         Expr::NameRef(nref) => {
-            let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
+            let Some(sheet) = resolve_single_sheet(&nref.sheet, current_cell.sheet) else {
                 return;
             };
             let name_key = normalize_defined_name(&nref.name);
@@ -4499,7 +4515,7 @@ fn analyze_calc_precedents(
 
 fn spill_range_target_cell(expr: &CompiledExpr, current_cell: CellKey) -> Option<CellKey> {
     match expr {
-        Expr::CellRef(r) => resolve_sheet(&r.sheet, current_cell.sheet).map(|sheet| CellKey {
+        Expr::CellRef(r) => resolve_single_sheet(&r.sheet, current_cell.sheet).map(|sheet| CellKey {
             sheet,
             addr: r.addr,
         }),
@@ -4549,24 +4565,28 @@ fn walk_calc_expr(
 
     match expr {
         Expr::CellRef(r) => {
-            if let Some(sheet) = resolve_sheet(&r.sheet, current_cell.sheet) {
-                precedents.insert(Precedent::Cell(CellId::new(
-                    sheet_id_for_graph(sheet),
-                    r.addr.row,
-                    r.addr.col,
-                )));
+            if let Some(sheets) = resolve_sheet_span(&r.sheet, current_cell.sheet, workbook) {
+                for sheet in sheets {
+                    precedents.insert(Precedent::Cell(CellId::new(
+                        sheet_id_for_graph(sheet),
+                        r.addr.row,
+                        r.addr.col,
+                    )));
+                }
             }
         }
         Expr::RangeRef(RangeRef { sheet, start, end }) => {
-            if let Some(sheet) = resolve_sheet(sheet, current_cell.sheet) {
+            if let Some(sheets) = resolve_sheet_span(sheet, current_cell.sheet, workbook) {
                 let range = Range::new(
                     CellRef::new(start.row, start.col),
                     CellRef::new(end.row, end.col),
                 );
-                precedents.insert(Precedent::Range(SheetRange::new(
-                    sheet_id_for_graph(sheet),
-                    range,
-                )));
+                for sheet_id in sheets {
+                    precedents.insert(Precedent::Range(SheetRange::new(
+                        sheet_id_for_graph(sheet_id),
+                        range,
+                    )));
+                }
             }
         }
         Expr::StructuredRef(sref) => {
@@ -4589,7 +4609,7 @@ fn walk_calc_expr(
             }
         }
         Expr::NameRef(nref) => {
-            let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
+            let Some(sheet) = resolve_single_sheet(&nref.sheet, current_cell.sheet) else {
                 return;
             };
             let name_key = normalize_defined_name(&nref.name);
@@ -4833,6 +4853,36 @@ fn resolve_sheet(sheet: &SheetReference<usize>, current_sheet: SheetId) -> Optio
     match sheet {
         SheetReference::Current => Some(current_sheet),
         SheetReference::Sheet(id) => Some(*id),
+        SheetReference::SheetRange(a, b) => {
+            if a == b {
+                Some(*a)
+            } else {
+                None
+            }
+        }
+        SheetReference::External(_) => None,
+    }
+}
+
+fn resolve_single_sheet(sheet: &SheetReference<usize>, current_sheet: SheetId) -> Option<SheetId> {
+    resolve_sheet(sheet, current_sheet)
+}
+
+fn resolve_sheet_span(
+    sheet: &SheetReference<usize>,
+    current_sheet: SheetId,
+    workbook: &Workbook,
+) -> Option<std::ops::RangeInclusive<SheetId>> {
+    match sheet {
+        SheetReference::Current => Some(current_sheet..=current_sheet),
+        SheetReference::Sheet(id) => Some(*id..=*id),
+        SheetReference::SheetRange(a, b) => {
+            let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
+            if end >= workbook.sheets.len() {
+                return None;
+            }
+            Some(start..=end)
+        }
         SheetReference::External(_) => None,
     }
 }

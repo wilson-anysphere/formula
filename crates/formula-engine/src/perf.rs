@@ -98,6 +98,7 @@ fn compile_for_benchmark(parsed: &crate::eval::ParsedExpr) -> CompiledExpr {
         SheetReference::Current => SheetReference::Current,
         // Benchmarks operate on a single sheet; map any explicit sheet refs to 0.
         SheetReference::Sheet(_name) => SheetReference::Sheet(0),
+        SheetReference::SheetRange(_start, _end) => SheetReference::SheetRange(0, 0),
         SheetReference::External(wb) => SheetReference::External(wb.clone()),
     };
     parsed.map_sheets(&mut map)

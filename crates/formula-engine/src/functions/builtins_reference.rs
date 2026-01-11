@@ -150,6 +150,11 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         match sheet {
             SheetReference::Current => Some(ctx.current_sheet_id()),
             SheetReference::Sheet(name) => ctx.resolve_sheet_name(name),
+            SheetReference::SheetRange(start, end) => {
+                let start_id = ctx.resolve_sheet_name(start)?;
+                let end_id = ctx.resolve_sheet_name(end)?;
+                if start_id == end_id { Some(start_id) } else { None }
+            }
             SheetReference::External(_) => None,
         }
     }

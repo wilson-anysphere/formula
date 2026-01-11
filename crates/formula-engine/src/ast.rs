@@ -600,9 +600,25 @@ impl Coord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SheetRef {
+    Sheet(String),
+    /// 3D sheet span reference like `Sheet1:Sheet3!A1`.
+    SheetRange { start: String, end: String },
+}
+
+impl SheetRef {
+    pub fn as_single_sheet(&self) -> Option<&str> {
+        match self {
+            SheetRef::Sheet(name) => Some(name),
+            SheetRef::SheetRange { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellRef {
     pub workbook: Option<String>,
-    pub sheet: Option<String>,
+    pub sheet: Option<SheetRef>,
     pub col: Coord,
     pub row: Coord,
 }
@@ -656,7 +672,7 @@ impl CellRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NameRef {
     pub workbook: Option<String>,
-    pub sheet: Option<String>,
+    pub sheet: Option<SheetRef>,
     pub name: String,
 }
 
@@ -670,7 +686,7 @@ impl NameRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColRef {
     pub workbook: Option<String>,
-    pub sheet: Option<String>,
+    pub sheet: Option<SheetRef>,
     pub col: Coord,
 }
 
@@ -708,7 +724,7 @@ impl ColRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RowRef {
     pub workbook: Option<String>,
-    pub sheet: Option<String>,
+    pub sheet: Option<SheetRef>,
     pub row: Coord,
 }
 
@@ -746,7 +762,7 @@ impl RowRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructuredRef {
     pub workbook: Option<String>,
-    pub sheet: Option<String>,
+    pub sheet: Option<SheetRef>,
     pub table: Option<String>,
     /// The raw specifier inside `[...]` (without the brackets).
     pub spec: String,
@@ -814,29 +830,46 @@ fn fmt_sheet_name(out: &mut String, sheet: &str, reference_style: ReferenceStyle
 fn fmt_ref_prefix(
     out: &mut String,
     workbook: &Option<String>,
-    sheet: &Option<String>,
+    sheet: &Option<SheetRef>,
     reference_style: ReferenceStyle,
 ) {
     match (workbook.as_ref(), sheet.as_ref()) {
-        (Some(book), Some(sheet)) => {
+        (Some(book), Some(sheet_ref)) => {
             // External references are written as `[Book.xlsx]Sheet1!A1`.
             // Excel uses a single quoted string for the combined `[book]sheet` prefix when it
             // contains spaces/special characters.
-            let combined = format!("[{book}]{sheet}");
-            fmt_sheet_name(out, &combined, reference_style);
-            out.push('!');
+            match sheet_ref {
+                SheetRef::Sheet(sheet) => {
+                    let combined = format!("[{book}]{sheet}");
+                    fmt_sheet_name(out, &combined, reference_style);
+                    out.push('!');
+                }
+                SheetRef::SheetRange { start, end } => {
+                    let combined = format!("[{book}]{start}:{end}");
+                    fmt_sheet_name(out, &combined, reference_style);
+                    out.push('!');
+                }
+            }
         }
-        (None, Some(sheet)) => {
-            fmt_sheet_name(out, sheet, reference_style);
-            out.push('!');
-        }
+        (None, Some(sheet_ref)) => match sheet_ref {
+            SheetRef::Sheet(sheet) => {
+                fmt_sheet_name(out, sheet, reference_style);
+                out.push('!');
+            }
+            SheetRef::SheetRange { start, end } => {
+                fmt_sheet_name(out, start, reference_style);
+                out.push(':');
+                fmt_sheet_name(out, end, reference_style);
+                out.push('!');
+            }
+        },
         (Some(book), None) => {
             out.push('[');
             out.push_str(book);
             out.push(']');
         }
         (None, None) => {}
-    }
+    };
 }
 
 fn sheet_name_needs_quotes(sheet: &str, reference_style: ReferenceStyle) -> bool {

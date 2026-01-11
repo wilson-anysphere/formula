@@ -9,6 +9,10 @@ pub type CompiledExpr = Expr<usize>;
 pub enum SheetReference<S> {
     Current,
     Sheet(S),
+    /// 3D sheet span reference like `Sheet1:Sheet3!A1`.
+    ///
+    /// Resolution is based on workbook sheet order.
+    SheetRange(S, S),
     /// External workbook reference like `[Book.xlsx]Sheet1!A1`.
     /// Not implemented yet; evaluating it yields `#REF!`.
     External(String),

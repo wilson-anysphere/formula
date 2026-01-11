@@ -5,6 +5,7 @@ use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, PostfixOp, RangeRef, SheetReference,
     UnaryOp,
 };
+use crate::SheetRef;
 use crate::value::ErrorKind;
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use thiserror::Error;
@@ -314,12 +315,20 @@ fn rect_from_row_ref(r: &crate::RowRef) -> Option<RectRef> {
 
 fn lower_sheet_reference(
     workbook: &Option<String>,
-    sheet: &Option<String>,
+    sheet: &Option<SheetRef>,
 ) -> SheetReference<String> {
     match (workbook.as_ref(), sheet.as_ref()) {
         (None, None) => SheetReference::Current,
-        (None, Some(s)) => SheetReference::Sheet(s.clone()),
-        (Some(book), Some(sheet)) => SheetReference::External(format!("[{book}]{sheet}")),
+        (None, Some(sheet_ref)) => match sheet_ref {
+            SheetRef::Sheet(s) => SheetReference::Sheet(s.clone()),
+            SheetRef::SheetRange { start, end } => SheetReference::SheetRange(start.clone(), end.clone()),
+        },
+        (Some(book), Some(sheet_ref)) => match sheet_ref {
+            SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
+            SheetRef::SheetRange { start, end } => {
+                SheetReference::External(format!("[{book}]{start}:{end}"))
+            }
+        },
         (Some(book), None) => SheetReference::External(format!("[{book}]")),
     }
 }

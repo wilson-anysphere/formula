@@ -1603,6 +1603,13 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         match sheet {
             SheetReference::Current => Some(self.ctx.current_sheet),
             SheetReference::Sheet(id) => Some(*id),
+            SheetReference::SheetRange(a, b) => {
+                if a == b {
+                    Some(*a)
+                } else {
+                    None
+                }
+            }
             SheetReference::External(_) => None,
         }
     }

@@ -2,11 +2,22 @@ use std::cmp::{max, min};
 
 use crate::{
     parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellAddr, CellRef as AstCellRef,
-    ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr, RowRef as AstRowRef,
-    SerializeOptions, UnaryExpr,
+    ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr, SheetRef,
+    RowRef as AstRowRef, SerializeOptions, UnaryExpr,
 };
 
 const REF_ERROR: &str = "#REF!";
+
+fn sheet_name(sheet: &Option<SheetRef>) -> Option<&str> {
+    match sheet.as_ref()? {
+        SheetRef::Sheet(name) => Some(name),
+        SheetRef::SheetRange { .. } => None,
+    }
+}
+
+fn has_sheet_range(sheet: &Option<SheetRef>) -> bool {
+    matches!(sheet.as_ref(), Some(SheetRef::SheetRange { .. }))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GridRange {
@@ -301,8 +312,11 @@ fn rewrite_cell_ref_for_structural_edit(
     if r.workbook.is_some() {
         return (expr_ref(r.clone()), false);
     }
+    if has_sheet_range(&r.sheet) {
+        return (expr_ref(r.clone()), false);
+    }
 
-    let target_sheet = r.sheet.as_deref().unwrap_or(ctx_sheet);
+    let target_sheet = sheet_name(&r.sheet).unwrap_or(ctx_sheet);
     let applies = match edit {
         StructuralEdit::InsertRows { sheet, .. }
         | StructuralEdit::DeleteRows { sheet, .. }
@@ -371,8 +385,11 @@ fn rewrite_row_ref_for_structural_edit(
     if r.workbook.is_some() {
         return (Expr::RowRef(r.clone()), false);
     }
+    if has_sheet_range(&r.sheet) {
+        return (Expr::RowRef(r.clone()), false);
+    }
 
-    let target_sheet = r.sheet.as_deref().unwrap_or(ctx_sheet);
+    let target_sheet = sheet_name(&r.sheet).unwrap_or(ctx_sheet);
     let applies = match edit {
         StructuralEdit::InsertRows { sheet, .. } | StructuralEdit::DeleteRows { sheet, .. } => {
             target_sheet.eq_ignore_ascii_case(sheet)
@@ -422,8 +439,11 @@ fn rewrite_col_ref_for_structural_edit(
     if r.workbook.is_some() {
         return (Expr::ColRef(r.clone()), false);
     }
+    if has_sheet_range(&r.sheet) {
+        return (Expr::ColRef(r.clone()), false);
+    }
 
-    let target_sheet = r.sheet.as_deref().unwrap_or(ctx_sheet);
+    let target_sheet = sheet_name(&r.sheet).unwrap_or(ctx_sheet);
     let applies = match edit {
         StructuralEdit::InsertCols { sheet, .. } | StructuralEdit::DeleteCols { sheet, .. } => {
             target_sheet.eq_ignore_ascii_case(sheet)
@@ -495,11 +515,12 @@ fn rewrite_cell_range_for_structural_edit(
     if start.workbook.is_some() || end.workbook.is_some() {
         return (original.clone(), false);
     }
+    if has_sheet_range(&start.sheet) || has_sheet_range(&end.sheet) {
+        return (original.clone(), false);
+    }
 
-    let target_sheet = start
-        .sheet
-        .as_deref()
-        .or(end.sheet.as_deref())
+    let target_sheet = sheet_name(&start.sheet)
+        .or_else(|| sheet_name(&end.sheet))
         .unwrap_or(ctx_sheet);
     let applies = match edit {
         StructuralEdit::InsertRows { sheet, .. }
@@ -608,11 +629,12 @@ fn rewrite_row_range_for_structural_edit(
     if start.workbook.is_some() || end.workbook.is_some() {
         return (original.clone(), false);
     }
+    if has_sheet_range(&start.sheet) || has_sheet_range(&end.sheet) {
+        return (original.clone(), false);
+    }
 
-    let target_sheet = start
-        .sheet
-        .as_deref()
-        .or(end.sheet.as_deref())
+    let target_sheet = sheet_name(&start.sheet)
+        .or_else(|| sheet_name(&end.sheet))
         .unwrap_or(ctx_sheet);
 
     let applies = match edit {
@@ -685,11 +707,12 @@ fn rewrite_col_range_for_structural_edit(
     if start.workbook.is_some() || end.workbook.is_some() {
         return (original.clone(), false);
     }
+    if has_sheet_range(&start.sheet) || has_sheet_range(&end.sheet) {
+        return (original.clone(), false);
+    }
 
-    let target_sheet = start
-        .sheet
-        .as_deref()
-        .or(end.sheet.as_deref())
+    let target_sheet = sheet_name(&start.sheet)
+        .or_else(|| sheet_name(&end.sheet))
         .unwrap_or(ctx_sheet);
 
     let applies = match edit {
@@ -1064,8 +1087,11 @@ fn rewrite_cell_ref_for_range_map(
     if r.workbook.is_some() {
         return (expr_ref(r.clone()), false);
     }
+    if has_sheet_range(&r.sheet) {
+        return (expr_ref(r.clone()), false);
+    }
 
-    let target_sheet = r.sheet.as_deref().unwrap_or(ctx_sheet);
+    let target_sheet = sheet_name(&r.sheet).unwrap_or(ctx_sheet);
     if !target_sheet.eq_ignore_ascii_case(&edit.sheet) {
         return (expr_ref(r.clone()), false);
     }
@@ -1126,11 +1152,12 @@ fn rewrite_cell_range_for_range_map(
     if start.workbook.is_some() || end.workbook.is_some() {
         return Some((original.clone(), false));
     }
+    if has_sheet_range(&start.sheet) || has_sheet_range(&end.sheet) {
+        return Some((original.clone(), false));
+    }
 
-    let target_sheet = start
-        .sheet
-        .as_deref()
-        .or(end.sheet.as_deref())
+    let target_sheet = sheet_name(&start.sheet)
+        .or_else(|| sheet_name(&end.sheet))
         .unwrap_or(ctx_sheet);
     if !target_sheet.eq_ignore_ascii_case(&edit.sheet) {
         return Some((original.clone(), false));

@@ -79,6 +79,7 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
         let mut map = |sref: &SheetReference<String>| match sref {
             SheetReference::Current => SheetReference::Current,
             SheetReference::Sheet(_name) => SheetReference::Sheet(0),
+            SheetReference::SheetRange(_start, _end) => SheetReference::SheetRange(0, 0),
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
         parsed_sum.map_sheets(&mut map)
@@ -96,6 +97,7 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
         let mut map = |sref: &SheetReference<String>| match sref {
             SheetReference::Current => SheetReference::Current,
             SheetReference::Sheet(_name) => SheetReference::Sheet(0),
+            SheetReference::SheetRange(_start, _end) => SheetReference::SheetRange(0, 0),
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
         parsed_countif.map_sheets(&mut map)

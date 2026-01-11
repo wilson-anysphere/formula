@@ -293,25 +293,39 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
                 EvalValue::Scalar(Value::Array(Array::new(*rows, *cols, out)))
             }
-            Expr::CellRef(r) => match self.resolve_sheet_id(&r.sheet) {
-                Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
-                    EvalValue::Reference(vec![ResolvedRange {
-                        sheet_id,
-                        start: r.addr,
-                        end: r.addr,
-                    }])
+            Expr::CellRef(r) => match self.resolve_sheet_ids(&r.sheet) {
+                Some(sheet_ids) => {
+                    let mut ranges = Vec::with_capacity(sheet_ids.len());
+                    for sheet_id in sheet_ids {
+                        if !self.resolver.sheet_exists(sheet_id) {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                        }
+                        ranges.push(ResolvedRange {
+                            sheet_id,
+                            start: r.addr,
+                            end: r.addr,
+                        });
+                    }
+                    EvalValue::Reference(ranges)
                 }
-                _ => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                None => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
-            Expr::RangeRef(r) => match self.resolve_sheet_id(&r.sheet) {
-                Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
-                    EvalValue::Reference(vec![ResolvedRange {
-                        sheet_id,
-                        start: r.start,
-                        end: r.end,
-                    }])
+            Expr::RangeRef(r) => match self.resolve_sheet_ids(&r.sheet) {
+                Some(sheet_ids) => {
+                    let mut ranges = Vec::with_capacity(sheet_ids.len());
+                    for sheet_id in sheet_ids {
+                        if !self.resolver.sheet_exists(sheet_id) {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                        }
+                        ranges.push(ResolvedRange {
+                            sheet_id,
+                            start: r.start,
+                            end: r.end,
+                        });
+                    }
+                    EvalValue::Reference(ranges)
                 }
-                _ => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                None => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
             Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref) {
                 Some(ranges)
@@ -613,6 +627,25 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         match sheet {
             SheetReference::Current => Some(self.ctx.current_sheet),
             SheetReference::Sheet(id) => Some(*id),
+            SheetReference::SheetRange(a, b) => {
+                if a == b {
+                    Some(*a)
+                } else {
+                    None
+                }
+            }
+            SheetReference::External(_) => None,
+        }
+    }
+
+    fn resolve_sheet_ids(&self, sheet: &SheetReference<usize>) -> Option<Vec<usize>> {
+        match sheet {
+            SheetReference::Current => Some(vec![self.ctx.current_sheet]),
+            SheetReference::Sheet(id) => Some(vec![*id]),
+            SheetReference::SheetRange(a, b) => {
+                let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
+                Some((start..=end).collect())
+            }
             SheetReference::External(_) => None,
         }
     }
@@ -623,10 +656,11 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 self.trace_cell(only.sheet_id, only.start);
                 self.resolver.get_cell_value(only.sheet_id, only.start)
             }
-            _ => {
+            [_only] => {
                 // Multi-cell references used as scalars behave like a spill attempt.
                 Value::Error(ErrorKind::Spill)
             }
+            _ => Value::Error(ErrorKind::Value),
         }
     }
 
