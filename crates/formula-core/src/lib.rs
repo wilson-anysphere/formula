@@ -1326,4 +1326,24 @@ mod tests {
         assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(1.0));
         assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(1.0));
     }
+
+    #[test]
+    fn load_from_json_then_recalculate_updates_formula_cells() {
+        let json_str = r#"{
+            "sheets": {
+                "Sheet1": {
+                    "cells": {
+                        "A1": 1,
+                        "A2": "=A1*2"
+                    }
+                }
+            }
+        }"#;
+
+        let mut wb = Workbook::from_json_str(json_str).unwrap();
+        wb.recalculate(None).unwrap();
+
+        let cell = wb.get_cell("A2", None).unwrap();
+        assert_eq!(cell.value, json!(2.0));
+    }
 }

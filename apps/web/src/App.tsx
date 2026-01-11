@@ -3,6 +3,8 @@ import { CanvasGrid, GridPlaceholder } from "@formula/grid";
 import { EngineCellCache, EngineGridProvider } from "@formula/spreadsheet-frontend";
 import { useEffect, useMemo, useState } from "react";
 
+import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
+
 export function App() {
   const engine = useMemo(() => createEngineClient(), []);
   const [engineStatus, setEngineStatus] = useState("starting…");
@@ -18,16 +20,8 @@ export function App() {
     async function start() {
       try {
         await engine.init();
-
-        // Keep the preview deterministic by seeding a tiny workbook.
-        await engine.newWorkbook();
-        await engine.setCell("A1", 1);
-        await engine.setCell("A2", 2);
-        await engine.setCell("B1", "=A1+A2");
-        await engine.setCell("B2", "=B1*2");
-        await engine.setCell("C1", "hello");
+        await engine.loadWorkbookFromJson(DEMO_WORKBOOK_JSON);
         await engine.recalculate();
-
         const b1 = await engine.getCell("B1");
         if (!cancelled) {
           setEngineStatus(`ready (B1=${b1.value === null ? "" : String(b1.value)})`);

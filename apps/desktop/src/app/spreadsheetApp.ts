@@ -28,6 +28,12 @@ import {
 import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
+import {
+  createEngineClient,
+  engineApplyDeltas,
+  engineHydrateFromDocument,
+  type EngineClient
+} from "@formula/engine";
 import { drawCommentIndicator } from "../comments/CommentIndicator";
 import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
@@ -207,6 +213,10 @@ export class SpreadsheetApp {
   private readonly searchWorkbook = new DocumentWorkbookAdapter({ document: this.document });
   private limits: GridLimits;
 
+  private wasmEngine: EngineClient | null = null;
+  private wasmSyncSuspended = false;
+  private wasmUnsubscribe: (() => void) | null = null;
+
   private gridCanvas: HTMLCanvasElement;
   private chartLayer: HTMLDivElement;
   private referenceCanvas: HTMLCanvasElement;
@@ -299,6 +309,11 @@ export class SpreadsheetApp {
     this.document.setCellValue(this.sheetId, { row: 3, col: 1 }, 3);
     this.document.setCellValue(this.sheetId, { row: 4, col: 0 }, "D");
     this.document.setCellValue(this.sheetId, { row: 4, col: 1 }, 5);
+
+    // Best-effort: keep the WASM engine worker hydrated from the DocumentController.
+    // When the WASM module isn't available (e.g. local dev without building it),
+    // the app continues to operate using the in-process mock engine.
+    void this.initWasmEngine();
 
     this.gridCanvas = document.createElement("canvas");
     this.gridCanvas.className = "grid-canvas";
@@ -441,6 +456,10 @@ export class SpreadsheetApp {
 
   destroy(): void {
     this.formulaBarCompletion?.destroy();
+    this.wasmUnsubscribe?.();
+    this.wasmUnsubscribe = null;
+    this.wasmEngine?.terminate();
+    this.wasmEngine = null;
     this.stopCommentPersistence?.();
     this.resizeObserver.disconnect();
     this.root.replaceChildren();
@@ -506,6 +525,55 @@ export class SpreadsheetApp {
 
   listCharts(): readonly ChartRecord[] {
     return this.chartStore.listCharts();
+  }
+
+  /**
+   * Replace the DocumentController state from a snapshot, then hydrate the WASM engine in one step.
+   *
+   * This avoids N-per-cell RPC roundtrips during version restore by using the engine JSON load path.
+   */
+  async restoreDocumentState(snapshot: Uint8Array): Promise<void> {
+    this.wasmSyncSuspended = true;
+    try {
+      this.document.applyState(snapshot);
+      if (this.wasmEngine) {
+        await engineHydrateFromDocument(this.wasmEngine, this.document);
+      }
+    } finally {
+      this.wasmSyncSuspended = false;
+    }
+  }
+
+  private async initWasmEngine(): Promise<void> {
+    if (this.wasmEngine) return;
+    if (typeof Worker === "undefined") return;
+
+    const env = (import.meta as any)?.env as Record<string, unknown> | undefined;
+    const wasmModuleUrl =
+      typeof env?.VITE_FORMULA_WASM_MODULE_URL === "string" ? env.VITE_FORMULA_WASM_MODULE_URL : undefined;
+    const wasmBinaryUrl =
+      typeof env?.VITE_FORMULA_WASM_BINARY_URL === "string" ? env.VITE_FORMULA_WASM_BINARY_URL : undefined;
+
+    let engine: EngineClient | null = null;
+    try {
+      engine = createEngineClient({ wasmModuleUrl, wasmBinaryUrl });
+      await engine.init();
+      await engineHydrateFromDocument(engine, this.document);
+
+      this.wasmEngine = engine;
+      this.wasmUnsubscribe = this.document.on("change", ({ deltas }: { deltas: any[] }) => {
+        if (!this.wasmEngine || this.wasmSyncSuspended) return;
+        void engineApplyDeltas(this.wasmEngine, deltas).catch(() => {
+          // Ignore WASM sync failures; the DocumentController remains the source of truth.
+        });
+      });
+    } catch {
+      // Ignore initialization failures (e.g. missing WASM bundle).
+      engine?.terminate();
+      this.wasmEngine = null;
+      this.wasmUnsubscribe?.();
+      this.wasmUnsubscribe = null;
+    }
   }
 
   /**

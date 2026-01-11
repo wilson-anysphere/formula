@@ -679,7 +679,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   }
 
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
-  doc.applyState(snapshot);
+  await app.restoreDocumentState(snapshot);
 
   // Ensure sheets exist even if they were empty (DocumentController lazily creates models).
   for (const sheet of sheets) {
