@@ -626,4 +626,84 @@ describe("ai chat orchestrator", () => {
       estimator.estimateMessagesTokens(firstRequest.messages) + estimateToolDefinitionTokens(firstRequest.tools, estimator);
     expect(promptTokens).toBeLessThanOrEqual(contextWindowTokens - reserveForOutputTokens);
   });
+
+  it("exposes only read tools in chat mode by default for non-edit prompts", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const embedder = new HashEmbedder({ dimension: 32 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 }
+    });
+
+    const requests: any[] = [];
+    const llmClient = {
+      async chat(request: any) {
+        requests.push(request);
+        return { message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } };
+      }
+    };
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_tool_policy_default",
+      llmClient: llmClient as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      contextManager,
+      sessionId: "session_tool_policy_default",
+      onApprovalRequired: async () => true
+    });
+
+    await orchestrator.sendMessage({ text: "What is the average of A1:B2?", history: [] });
+
+    expect(requests).toHaveLength(1);
+    const toolNames = (requests[0]?.tools ?? []).map((t: any) => t.name).sort();
+    expect(toolNames).toEqual(["compute_statistics", "detect_anomalies", "filter_range", "read_range"]);
+  });
+
+  it("upgrades chat tool policy to include mutation tools when prompt implies edits (still approval-gated)", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const embedder = new HashEmbedder({ dimension: 32 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 }
+    });
+
+    const requests: any[] = [];
+    const llmClient = {
+      async chat(request: any) {
+        requests.push(request);
+        return { message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } };
+      }
+    };
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_tool_policy_upgrade",
+      llmClient: llmClient as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      contextManager,
+      sessionId: "session_tool_policy_upgrade",
+      onApprovalRequired: async () => true
+    });
+
+    await orchestrator.sendMessage({ text: "Update cells A1:A2 to 123", history: [] });
+
+    expect(requests).toHaveLength(1);
+    const toolDefs = requests[0]?.tools ?? [];
+    const toolNames = toolDefs.map((t: any) => t.name);
+    expect(toolNames).toContain("write_cell");
+    expect(toolNames).toContain("set_range");
+    expect(toolNames).not.toContain("fetch_external_data");
+
+    const writeCell = toolDefs.find((t: any) => t.name === "write_cell");
+    expect(writeCell?.requiresApproval).toBe(true);
+  });
 });

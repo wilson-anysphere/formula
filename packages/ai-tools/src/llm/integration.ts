@@ -2,7 +2,15 @@ import type { SpreadsheetApi } from "../spreadsheet/api.js";
 import type { ToolExecutorOptions, ToolExecutionResult } from "../executor/tool-executor.js";
 import { ToolExecutor } from "../executor/tool-executor.js";
 import { PreviewEngine, type PreviewEngineOptions, type ToolPlanPreview } from "../preview/preview-engine.js";
-import { SPREADSHEET_TOOL_DEFINITIONS, TOOL_CAPABILITIES, ToolNameSchema, type ToolDefinition, type ToolName } from "../tool-schema.js";
+import {
+  SPREADSHEET_TOOL_DEFINITIONS,
+  TOOL_CAPABILITIES,
+  ToolNameSchema,
+  isToolAllowedByPolicy,
+  type ToolDefinition,
+  type ToolName,
+  type ToolPolicy
+} from "../tool-schema.js";
 
 export interface LLMToolCall {
   id?: string;
@@ -61,6 +69,13 @@ export interface SpreadsheetLLMToolExecutorOptions extends ToolExecutorOptions {
   require_approval_for_mutations?: boolean;
 
   /**
+   * Least-privilege tool policy applied to both:
+   * - tool exposure (`SpreadsheetLLMToolExecutor.tools`)
+   * - runtime enforcement (`SpreadsheetLLMToolExecutor.execute`)
+   */
+  toolPolicy?: ToolPolicy;
+
+  /**
    * Optional allowlist for tools exposed to the model.
    *
    * This is enforced at two levels:
@@ -78,15 +93,19 @@ export function isSpreadsheetMutationTool(name: ToolName): boolean {
   return TOOL_CAPABILITIES[name].mutates_workbook;
 }
 
-export function getSpreadsheetToolDefinitions(options: { require_approval_for_mutations?: boolean } = {}): LLMToolDefinition[] {
+export function getSpreadsheetToolDefinitions(
+  options: { require_approval_for_mutations?: boolean; toolPolicy?: ToolPolicy } = {}
+): LLMToolDefinition[] {
   const requireApprovalForMutations = options.require_approval_for_mutations ?? false;
-  return SPREADSHEET_TOOL_DEFINITIONS.map((tool) => {
-    const requiresApproval =
-      tool.name === "fetch_external_data"
-        ? true
-        : requireApprovalForMutations
-          ? isSpreadsheetMutationTool(tool.name)
-          : undefined;
+  const policy = options.toolPolicy;
+
+  return SPREADSHEET_TOOL_DEFINITIONS.filter((tool) => isToolAllowedByPolicy(tool.name, policy)).map((tool) => {
+    const defaultRequiresApproval = TOOL_CAPABILITIES[tool.name].requires_approval_by_default ?? false;
+    const requiresApproval = defaultRequiresApproval
+      ? true
+      : requireApprovalForMutations
+        ? isSpreadsheetMutationTool(tool.name)
+        : undefined;
     return {
       ...tool,
       ...(requiresApproval !== undefined ? { requiresApproval } : {})
@@ -100,13 +119,18 @@ export function getSpreadsheetToolDefinitions(options: { require_approval_for_mu
 export class SpreadsheetLLMToolExecutor {
   readonly tools: LLMToolDefinition[];
   private readonly executor: ToolExecutor;
+  private readonly toolPolicy?: ToolPolicy;
   private readonly isAllowedTool: (name: ToolName) => boolean;
 
   constructor(spreadsheet: SpreadsheetApi, options: SpreadsheetLLMToolExecutorOptions = {}) {
     this.executor = new ToolExecutor(spreadsheet, options);
+    this.toolPolicy = options.toolPolicy;
     this.isAllowedTool = createAllowedToolPredicate(options.allowed_tools);
 
-    const allTools = getSpreadsheetToolDefinitions({ require_approval_for_mutations: options.require_approval_for_mutations });
+    const allTools = getSpreadsheetToolDefinitions({
+      require_approval_for_mutations: options.require_approval_for_mutations,
+      toolPolicy: options.toolPolicy
+    });
     this.tools = options.allowed_tools ? allTools.filter((tool) => this.isAllowedTool(tool.name)) : allTools;
   }
 
@@ -124,6 +148,15 @@ export class SpreadsheetLLMToolExecutor {
     }
 
     const name = nameParse.data;
+    if (!isToolAllowedByPolicy(name, this.toolPolicy)) {
+      return {
+        tool: name,
+        ok: false,
+        timing: { started_at_ms: startedAt, duration_ms: nowMs() - startedAt },
+        error: { code: "permission_denied", message: `Tool "${name}" is not allowed by the current policy.` }
+      } as ToolExecutionResult;
+    }
+
     if (!this.isAllowedTool(name)) {
       return {
         tool: name,
@@ -152,3 +185,4 @@ function nowMs(): number {
   if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
   return Date.now();
 }
+

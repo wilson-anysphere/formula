@@ -16,7 +16,7 @@ export type ToolName =
   | "compute_statistics"
   | "fetch_external_data";
 
-export type ToolCategory = "read" | "compute" | "mutate" | "format" | "network";
+export type ToolCategory = "read" | "compute" | "mutate" | "format" | "external_network";
 
 export interface ToolCapabilityMetadata {
   category: ToolCategory;
@@ -29,6 +29,15 @@ export interface ToolCapabilityMetadata {
    * authoritative safety mechanism.
    */
   high_risk: boolean;
+  /**
+   * Static default for whether a tool should be flagged as requiring approval when
+   * surfaced as an LLM tool definition.
+   *
+   * Mutating tools are typically approval-gated via `require_approval_for_mutations`
+   * at the integration layer; this flag is intended for tools that should always
+   * be approval-gated regardless of mode (e.g. external network access).
+   */
+  requires_approval_by_default?: boolean;
 }
 
 /**
@@ -49,7 +58,12 @@ export const TOOL_CAPABILITIES: Record<ToolName, ToolCapabilityMetadata> = {
   apply_formatting: { category: "format", mutates_workbook: true, high_risk: false },
   detect_anomalies: { category: "compute", mutates_workbook: false, high_risk: false },
   compute_statistics: { category: "compute", mutates_workbook: false, high_risk: false },
-  fetch_external_data: { category: "network", mutates_workbook: true, high_risk: true }
+  fetch_external_data: {
+    category: "external_network",
+    mutates_workbook: true,
+    high_risk: true,
+    requires_approval_by_default: true
+  }
 };
 
 export const ToolNameSchema = z.enum([
@@ -66,6 +80,44 @@ export const ToolNameSchema = z.enum([
   "compute_statistics",
   "fetch_external_data"
 ]);
+
+export interface ToolPolicy {
+  allowTools?: ToolName[];
+  denyTools?: ToolName[];
+  allowCategories?: ToolCategory[];
+  denyCategories?: ToolCategory[];
+  /**
+   * Convenience constraint: when `false`, all tools that mutate the workbook are denied.
+   */
+  mutationsAllowed?: boolean;
+  /**
+   * Convenience constraint: when `false`, tools tagged with `external_network` are denied.
+   */
+  externalNetworkAllowed?: boolean;
+}
+
+export function isToolAllowedByPolicy(name: ToolName, policy?: ToolPolicy): boolean {
+  if (!policy) return true;
+
+  const capability = TOOL_CAPABILITIES[name];
+  const category = capability.category;
+
+  if (policy.mutationsAllowed === false && capability.mutates_workbook) return false;
+  if (policy.externalNetworkAllowed === false && category === "external_network") return false;
+
+  if (policy.denyTools?.includes(name)) return false;
+  if (policy.denyCategories?.includes(category)) return false;
+
+  const allowTools = policy.allowTools;
+  const allowCategories = policy.allowCategories;
+  const hasAllowList = Boolean((allowTools && allowTools.length) || (allowCategories && allowCategories.length));
+  if (hasAllowList) {
+    const allowed = Boolean(allowTools?.includes(name)) || Boolean(allowCategories?.includes(category));
+    if (!allowed) return false;
+  }
+
+  return true;
+}
 
 const CellScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 

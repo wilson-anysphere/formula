@@ -22,6 +22,15 @@ describe("llm integration helpers", () => {
     expect(isSpreadsheetMutationTool("compute_statistics")).toBe(false);
   });
 
+  it("filters tool definitions based on ToolPolicy", () => {
+    const defs = getSpreadsheetToolDefinitions({ toolPolicy: { allowCategories: ["read", "compute"] } });
+    const names = defs.map((t) => t.name);
+    expect(names).toContain("read_range");
+    expect(names).toContain("compute_statistics");
+    expect(names).not.toContain("write_cell");
+    expect(names).not.toContain("fetch_external_data");
+  });
+
   it("always requires approval for fetch_external_data", () => {
     const defs = getSpreadsheetToolDefinitions();
     const fetchExternal = defs.find((t) => t.name === "fetch_external_data");
@@ -62,6 +71,23 @@ describe("llm integration helpers", () => {
 
     expect(result.ok).toBe(true);
     expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBe(42);
+  });
+
+  it("denies disallowed tool calls without executing them", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const setCellSpy = vi.spyOn(workbook, "setCell");
+    const executor = new SpreadsheetLLMToolExecutor(workbook, { toolPolicy: { allowCategories: ["read"] } });
+
+    const result = await executor.execute({
+      id: "call-1",
+      name: "write_cell",
+      arguments: { cell: "Sheet1!A1", value: 42 }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(setCellSpy).not.toHaveBeenCalled();
+    expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBeNull();
   });
 
   it("SpreadsheetLLMToolExecutor enforces allowed_tools (disallowed tools cannot execute)", async () => {

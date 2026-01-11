@@ -18,7 +18,6 @@ import type {
 } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import { SpreadsheetLLMToolExecutor, createPreviewApprovalHandler } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import { runChatWithToolsAuditedVerified } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
-import { decideAllowedTools } from "../../../../../packages/ai-tools/src/llm/toolPolicy.js";
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 
@@ -31,6 +30,7 @@ import { createDesktopRagService, type DesktopRagService, type DesktopRagService
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
+import { getDesktopToolPolicy } from "../toolPolicy.js";
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -285,19 +285,15 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     ];
 
     const toolResults: ToolExecutionResult[] = [];
-    const toolPolicy = decideAllowedTools({
-      mode: "chat",
-      user_text: text,
-      has_attachments: attachments.length > 0,
-      allow_external_data: Boolean(options.toolExecutorOptions?.allow_external_data)
-    });
+    const toolPolicy = options.toolExecutorOptions?.toolPolicy ?? getDesktopToolPolicy({ mode: "chat", prompt: text });
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       ...(options.toolExecutorOptions ?? {}),
+      toolPolicy,
       default_sheet: activeSheetId,
       require_approval_for_mutations: true,
-      dlp,
-      allowed_tools: toolPolicy.allowed_tools
+      dlp
     });
+    const offeredTools = toolExecutor.tools.map((t) => t.name);
 
     const toolTokens = estimateToolDefinitionTokens(toolExecutor.tools as any, estimator);
     const maxMessageTokens = Math.max(0, contextWindowTokens - toolTokens);
@@ -406,7 +402,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
             workbookId: options.workbookId,
             sheetId: activeSheetId,
             context: summarizeContextForAudit(workbookContext),
-            offered_tools: toolPolicy.allowed_tools
+            offered_tools: offeredTools
           }
         }
       });

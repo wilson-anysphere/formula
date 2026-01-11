@@ -7,7 +7,6 @@ import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packa
 import { PreviewEngine } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
-import { decideAllowedTools } from "../../../../../packages/ai-tools/src/llm/toolPolicy.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
@@ -16,6 +15,7 @@ import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/types.
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
+import { getDesktopToolPolicy } from "../toolPolicy.js";
 
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
@@ -254,7 +254,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
 
     const defaultSheetId = params.defaultSheetId ?? "Sheet1";
     const spreadsheet = new DocumentControllerSpreadsheetApi(params.documentController, { createChart: params.createChart });
-    const toolPolicy = decideAllowedTools({ mode: "agent", user_text: goal, has_attachments: false, allow_external_data: false });
+    const toolPolicy = getDesktopToolPolicy({ mode: "agent" });
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId }) ?? undefined;
 
@@ -262,8 +262,9 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       default_sheet: defaultSheetId,
       require_approval_for_mutations: true,
       dlp,
-      allowed_tools: toolPolicy.allowed_tools
+      toolPolicy
     });
+    const offeredTools = toolExecutor.tools.map((t) => t.name);
     const previewEngine = new PreviewEngine({ approval_cell_threshold: 0, ...(params.previewOptions ?? {}) });
 
     const userMessage = [
@@ -413,7 +414,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
           session_id: sessionId,
           workbook_id: params.workbookId,
           mode: "agent",
-          input: { goal, constraints: params.constraints ?? [], workbookId: params.workbookId, offered_tools: toolPolicy.allowed_tools },
+          input: { goal, constraints: params.constraints ?? [], workbookId: params.workbookId, offered_tools: offeredTools },
           model: params.model ?? "unknown"
         },
         max_iterations: maxIterations,

@@ -57,7 +57,7 @@ function toolsByCategory(category: (typeof TOOL_CAPABILITIES)[ToolName]["categor
 const READ_TOOLS = toolsByCategory("read");
 const COMPUTE_TOOLS = toolsByCategory("compute");
 const FORMAT_TOOLS = toolsByCategory("format");
-const NETWORK_TOOLS = toolsByCategory("network");
+const EXTERNAL_NETWORK_TOOLS = toolsByCategory("external_network");
 
 const INLINE_EDIT_BASE_TOOLS: ToolName[] = ["read_range", "write_cell", "set_range"];
 
@@ -208,7 +208,7 @@ export function decideAllowedTools(input: ToolPolicyInput): ToolPolicyDecision {
 
   if (includeNetwork) {
     reasons.push("external data explicitly requested and allowed -> fetch_external_data");
-    tools.push(...NETWORK_TOOLS);
+    tools.push(...EXTERNAL_NETWORK_TOOLS);
   }
 
   return { allowed_tools: uniqueInToolOrder(tools), reasons };

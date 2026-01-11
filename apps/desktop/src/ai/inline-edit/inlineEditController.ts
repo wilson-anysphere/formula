@@ -4,7 +4,6 @@ import type { Range } from "../../selection/types";
 
 import { ToolExecutor, PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
-import { decideAllowedTools } from "../../../../../packages/ai-tools/src/llm/toolPolicy.js";
 
 import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient.js";
 import { loadDesktopLLMConfig } from "../llm/settings.js";
@@ -19,6 +18,7 @@ import { effectiveRangeClassification } from "../../../../../packages/security/d
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
+import { getDesktopToolPolicy } from "../toolPolicy.js";
 import { InlineEditOverlay } from "./inlineEditOverlay";
 import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
@@ -180,17 +180,12 @@ export class InlineEditController {
         prompt: params.prompt
       });
 
-      const toolPolicy = decideAllowedTools({
-        mode: "inline_edit",
-        user_text: params.prompt,
-        has_attachments: true,
-        allow_external_data: false
-      });
+      const toolPolicy = getDesktopToolPolicy({ mode: "inline_edit" });
       const toolExecutor = new SpreadsheetLLMToolExecutor(api, {
         default_sheet: params.sheetId,
         require_approval_for_mutations: true,
-        dlp,
-        allowed_tools: toolPolicy.allowed_tools
+        toolPolicy,
+        dlp
       });
       const abortableToolExecutor = {
         tools: toolExecutor.tools,
