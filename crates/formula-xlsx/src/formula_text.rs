@@ -5,6 +5,16 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "UNIQUE",
     "SORT",
     "SORTBY",
+    "TAKE",
+    "DROP",
+    "CHOOSECOLS",
+    "CHOOSEROWS",
+    "HSTACK",
+    "VSTACK",
+    "TOCOL",
+    "TOROW",
+    "WRAPROWS",
+    "WRAPCOLS",
     "SEQUENCE",
     "XLOOKUP",
     "XMATCH",
@@ -167,13 +177,23 @@ mod tests {
     #[test]
     fn strip_xlfn_prefixes_ignores_string_literals() {
         let input = r#"CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
-        assert_eq!(strip_xlfn_prefixes(input), r#"CONCAT("_xlfn.",SEQUENCE(1))"#);
+        assert_eq!(
+            strip_xlfn_prefixes(input),
+            r#"CONCAT("_xlfn.",SEQUENCE(1))"#
+        );
     }
 
     #[test]
     fn add_xlfn_prefixes_roundtrips_known_functions() {
         let input = r#"CONCAT("_xlfn.",SEQUENCE(1))"#;
         let expected = r#"CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_handles_dynamic_array_helpers() {
+        let input = "TAKE(SEQUENCE(1),1)";
+        let expected = "_xlfn.TAKE(_xlfn.SEQUENCE(1),1)";
         assert_eq!(add_xlfn_prefixes(input), expected);
     }
 

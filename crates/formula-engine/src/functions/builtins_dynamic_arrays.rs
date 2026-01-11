@@ -226,24 +226,40 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut key_arrays = Vec::new();
     let mut descending_flags = Vec::new();
 
-    let mut idx = 1usize;
-    while idx < args.len() {
-        let by_array = match eval_array_arg(ctx, &args[idx]) {
+    // `SORTBY` arguments are `(array, by_array1, [sort_order1], [by_array2, [sort_order2]], ...)`.
+    //
+    // Excel disambiguates the optional `sort_orderN` arguments based on shape:
+    // - If the next argument is a range/array, it is treated as the next `by_array`.
+    // - Otherwise it is treated as `sort_order` for the current key.
+    //
+    // We must only evaluate each argument once to preserve volatility semantics.
+    let evaluated: Vec<ArgValue> = args[1..].iter().map(|expr| ctx.eval_arg(expr)).collect();
+
+    let mut idx = 0usize;
+    while idx < evaluated.len() {
+        let by_value = evaluated[idx].clone();
+        idx += 1;
+
+        let by_array = match arg_value_to_array(ctx, by_value) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        idx += 1;
 
-        let desc = match args.get(idx) {
-            Some(order_expr) => {
-                idx += 1;
-                match eval_optional_sort_descending(ctx, Some(order_expr), false) {
-                    Ok(v) => v,
-                    Err(e) => return Value::Error(e),
+        let mut desc = false;
+        if idx < evaluated.len() && !arg_value_is_array_like(&evaluated[idx]) {
+            let order_value = match evaluated[idx].clone() {
+                ArgValue::Scalar(v) => v,
+                // References are always treated as `by_array` candidates above.
+                ArgValue::Reference(_) | ArgValue::ReferenceUnion(_) => {
+                    Value::Error(ErrorKind::Value)
                 }
-            }
-            None => false,
-        };
+            };
+            desc = match sort_descending_from_value(&order_value, false) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            idx += 1;
+        }
 
         key_arrays.push(by_array);
         descending_flags.push(desc);
@@ -467,7 +483,9 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         Value::Text(s) if s.is_empty() => UniqueKeyCell::Blank,
         Value::Text(s) => UniqueKeyCell::Text(s.to_lowercase()),
         Value::Error(e) => UniqueKeyCell::Error(*e),
-        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => UniqueKeyCell::Error(ErrorKind::Value),
+        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => {
+            UniqueKeyCell::Error(ErrorKind::Value)
+        }
     }
 }
 
@@ -985,9 +1003,14 @@ fn eval_optional_sort_descending(
         return Ok(default_descending);
     };
     let v = eval_scalar_arg(ctx, expr);
-    match v {
+    sort_descending_from_value(&v, default_descending)
+}
+
+fn sort_descending_from_value(value: &Value, default_descending: bool) -> Result<bool, ErrorKind> {
+    match value {
         Value::Blank => Ok(default_descending),
-        Value::Error(e) => Err(e),
+        Value::Error(e) => Err(*e),
+        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         other => match other.coerce_to_i64() {
             Ok(1) => Ok(false),
             Ok(-1) => Ok(true),
@@ -995,6 +1018,11 @@ fn eval_optional_sort_descending(
             Err(e) => Err(e),
         },
     }
+}
+
+fn arg_value_is_array_like(value: &ArgValue) -> bool {
+    matches!(value, ArgValue::Reference(_) | ArgValue::ReferenceUnion(_))
+        || matches!(value, ArgValue::Scalar(Value::Array(_)))
 }
 
 fn take_span(len: usize, n: i64) -> (usize, usize) {

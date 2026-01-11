@@ -312,6 +312,32 @@ fn sortby_sorts_rows_and_columns() {
 }
 
 #[test]
+fn sortby_disambiguates_optional_sort_order_args() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 200.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 300.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 2.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "C1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 0.0).unwrap();
+
+    // Excel treats the 3rd argument (C1:C3) as the second by_array (not sort_order1) because it is a range.
+    engine
+        .set_cell_formula("Sheet1", "E1", "=SORTBY(A1:A3,B1:B3,C1:C3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(200.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(100.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(300.0));
+}
+
+#[test]
 fn take_and_drop_slice_arrays() {
     let mut engine = Engine::new();
     engine
