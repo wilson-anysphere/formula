@@ -38,6 +38,23 @@ fn recalculate_reports_changed_cells() {
 }
 
 #[wasm_bindgen_test]
+fn recalculate_returns_empty_when_no_cells_changed() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
+        .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
+        .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(changes.len(), 1);
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert!(changes.is_empty());
+}
+
+#[wasm_bindgen_test]
 fn recalculate_reports_dynamic_array_spills() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell(
