@@ -176,6 +176,36 @@ describe("security hardening", () => {
     ).toThrow(/COOKIE_SECURE/i);
   });
 
+  it("validates SECRET_STORE_KEYS_JSON schema", () => {
+    const keyB64 = deriveSecretStoreKey("test-key").toString("base64");
+
+    expect(() => loadConfig({ SECRET_STORE_KEYS_JSON: "not-json" })).toThrow(/valid JSON/i);
+
+    expect(() =>
+      loadConfig({
+        SECRET_STORE_KEYS_JSON: JSON.stringify({ currentKeyId: "k1", keys: {} })
+      })
+    ).toThrow(/missing from keys/i);
+
+    expect(() =>
+      loadConfig({
+        SECRET_STORE_KEYS_JSON: JSON.stringify({
+          currentKeyId: "bad:key",
+          keys: { "bad:key": keyB64 }
+        })
+      })
+    ).toThrow(/must not contain/i);
+
+    expect(() =>
+      loadConfig({
+        SECRET_STORE_KEYS_JSON: JSON.stringify({
+          currentKeyId: "k1",
+          keys: { "": keyB64, k1: keyB64 }
+        })
+      })
+    ).toThrow(/must not contain empty key ids/i);
+  });
+
   it("enforces org ip_allowlist for session auth on /orgs/:orgId/* and /docs/:docId/*", async () => {
     const register = await app.inject({
       method: "POST",
