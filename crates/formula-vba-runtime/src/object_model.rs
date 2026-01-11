@@ -56,6 +56,27 @@ pub trait Spreadsheet {
     fn clear_cell_contents(&mut self, sheet: usize, row: u32, col: u32) -> Result<(), VbaError>;
 
     fn log(&mut self, message: String);
+
+    /// Best-effort "used cell" queries for optimizing operations like `Range.End` without
+    /// scanning the full Excel sheet extents.
+    ///
+    /// Implementations should consider a cell "used" if it has a non-empty value or a formula.
+    /// The runtime will fall back to cell-by-cell scanning when these return `None`.
+    fn last_used_row_in_column(&self, _sheet: usize, _col: u32, _start_row: u32) -> Option<u32> {
+        None
+    }
+
+    fn next_used_row_in_column(&self, _sheet: usize, _col: u32, _start_row: u32) -> Option<u32> {
+        None
+    }
+
+    fn last_used_col_in_row(&self, _sheet: usize, _row: u32, _start_col: u32) -> Option<u32> {
+        None
+    }
+
+    fn next_used_col_in_row(&self, _sheet: usize, _row: u32, _start_col: u32) -> Option<u32> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -364,6 +385,74 @@ impl Spreadsheet for InMemoryWorkbook {
 
     fn log(&mut self, message: String) {
         self.output.push(message);
+    }
+
+    fn last_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
+        let sh = self.sheets.get(sheet)?;
+        sh.cells
+            .iter()
+            .filter_map(|(&(row, c), cell)| {
+                if c != col || row > start_row {
+                    return None;
+                }
+                if !matches!(cell.value, VbaValue::Empty) || cell.formula.is_some() {
+                    Some(row)
+                } else {
+                    None
+                }
+            })
+            .max()
+    }
+
+    fn next_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
+        let sh = self.sheets.get(sheet)?;
+        sh.cells
+            .iter()
+            .filter_map(|(&(row, c), cell)| {
+                if c != col || row < start_row {
+                    return None;
+                }
+                if !matches!(cell.value, VbaValue::Empty) || cell.formula.is_some() {
+                    Some(row)
+                } else {
+                    None
+                }
+            })
+            .min()
+    }
+
+    fn last_used_col_in_row(&self, sheet: usize, row: u32, start_col: u32) -> Option<u32> {
+        let sh = self.sheets.get(sheet)?;
+        sh.cells
+            .iter()
+            .filter_map(|(&(r, col), cell)| {
+                if r != row || col > start_col {
+                    return None;
+                }
+                if !matches!(cell.value, VbaValue::Empty) || cell.formula.is_some() {
+                    Some(col)
+                } else {
+                    None
+                }
+            })
+            .max()
+    }
+
+    fn next_used_col_in_row(&self, sheet: usize, row: u32, start_col: u32) -> Option<u32> {
+        let sh = self.sheets.get(sheet)?;
+        sh.cells
+            .iter()
+            .filter_map(|(&(r, col), cell)| {
+                if r != row || col < start_col {
+                    return None;
+                }
+                if !matches!(cell.value, VbaValue::Empty) || cell.formula.is_some() {
+                    Some(col)
+                } else {
+                    None
+                }
+            })
+            .min()
     }
 }
 

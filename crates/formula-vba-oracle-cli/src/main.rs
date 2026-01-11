@@ -377,6 +377,74 @@ impl Spreadsheet for ExecutionWorkbook {
     fn log(&mut self, message: String) {
         self.logs.push(message);
     }
+
+    fn last_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
+        let sh = self.sheets.get(sheet)?;
+        sh.cells
+            .iter()
+            .filter_map(|(&(row, c), cell)| {
+                if c != col || row > start_row {
+                    return None;
+                }
+                if !matches!(cell.value, VbaValue::Empty) || cell.formula.is_some() {
+                    Some(row)
+                } else {
+                    None
+                }
+            })
+            .max()
+    }
+
+    fn next_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
+        let sh = self.sheets.get(sheet)?;
+        sh.cells
+            .iter()
+            .filter_map(|(&(row, c), cell)| {
+                if c != col || row < start_row {
+                    return None;
+                }
+                if !matches!(cell.value, VbaValue::Empty) || cell.formula.is_some() {
+                    Some(row)
+                } else {
+                    None
+                }
+            })
+            .min()
+    }
+
+    fn last_used_col_in_row(&self, sheet: usize, row: u32, start_col: u32) -> Option<u32> {
+        let sh = self.sheets.get(sheet)?;
+        sh.cells
+            .iter()
+            .filter_map(|(&(r, col), cell)| {
+                if r != row || col > start_col {
+                    return None;
+                }
+                if !matches!(cell.value, VbaValue::Empty) || cell.formula.is_some() {
+                    Some(col)
+                } else {
+                    None
+                }
+            })
+            .max()
+    }
+
+    fn next_used_col_in_row(&self, sheet: usize, row: u32, start_col: u32) -> Option<u32> {
+        let sh = self.sheets.get(sheet)?;
+        sh.cells
+            .iter()
+            .filter_map(|(&(r, col), cell)| {
+                if r != row || col < start_col {
+                    return None;
+                }
+                if !matches!(cell.value, VbaValue::Empty) || cell.formula.is_some() {
+                    Some(col)
+                } else {
+                    None
+                }
+            })
+            .min()
+    }
 }
 
 fn json_value_to_vba(value: Option<&serde_json::Value>) -> VbaValue {

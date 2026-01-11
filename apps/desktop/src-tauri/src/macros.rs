@@ -732,4 +732,160 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
     fn log(&mut self, message: String) {
         self.output.push(message);
     }
+
+    fn last_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
+        if col == 0 || start_row == 0 {
+            return None;
+        }
+        let workbook = self.state.get_workbook().ok()?;
+        let sheet = workbook.sheets.get(sheet)?;
+        let col0 = (col - 1) as usize;
+
+        let mut best: Option<u32> = None;
+
+        if let Some(table) = &sheet.columnar {
+            if col0 < table.column_count() && table.row_count() > 0 {
+                let candidate = (table.row_count() as u32).min(start_row);
+                if candidate > 0 {
+                    best = Some(candidate);
+                }
+            }
+        }
+
+        for (&(row0, col_idx), cell) in sheet.cells.iter() {
+            if col_idx != col0 {
+                continue;
+            }
+            let row1 = (row0 + 1) as u32;
+            if row1 > start_row {
+                continue;
+            }
+            let has_content = cell.formula.is_some()
+                || cell.input_value.is_some()
+                || !matches!(cell.computed_value, CellScalar::Empty);
+            if !has_content {
+                continue;
+            }
+            best = Some(best.map(|b| b.max(row1)).unwrap_or(row1));
+        }
+
+        best
+    }
+
+    fn next_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
+        if col == 0 || start_row == 0 {
+            return None;
+        }
+        let workbook = self.state.get_workbook().ok()?;
+        let sheet = workbook.sheets.get(sheet)?;
+        let col0 = (col - 1) as usize;
+
+        let mut best: Option<u32> = None;
+
+        if let Some(table) = &sheet.columnar {
+            if col0 < table.column_count() && table.row_count() > 0 {
+                let row_count = table.row_count() as u32;
+                if start_row <= row_count {
+                    best = Some(start_row);
+                }
+            }
+        }
+
+        for (&(row0, col_idx), cell) in sheet.cells.iter() {
+            if col_idx != col0 {
+                continue;
+            }
+            let row1 = (row0 + 1) as u32;
+            if row1 < start_row {
+                continue;
+            }
+            let has_content = cell.formula.is_some()
+                || cell.input_value.is_some()
+                || !matches!(cell.computed_value, CellScalar::Empty);
+            if !has_content {
+                continue;
+            }
+            best = Some(best.map(|b| b.min(row1)).unwrap_or(row1));
+        }
+
+        best
+    }
+
+    fn last_used_col_in_row(&self, sheet: usize, row: u32, start_col: u32) -> Option<u32> {
+        if row == 0 || start_col == 0 {
+            return None;
+        }
+        let workbook = self.state.get_workbook().ok()?;
+        let sheet = workbook.sheets.get(sheet)?;
+        let row0 = (row - 1) as usize;
+
+        let mut best: Option<u32> = None;
+
+        if let Some(table) = &sheet.columnar {
+            if row0 < table.row_count() && table.column_count() > 0 {
+                let candidate = (table.column_count() as u32).min(start_col);
+                if candidate > 0 {
+                    best = Some(candidate);
+                }
+            }
+        }
+
+        for (&(row_idx, col0), cell) in sheet.cells.iter() {
+            if row_idx != row0 {
+                continue;
+            }
+            let col1 = (col0 + 1) as u32;
+            if col1 > start_col {
+                continue;
+            }
+            let has_content = cell.formula.is_some()
+                || cell.input_value.is_some()
+                || !matches!(cell.computed_value, CellScalar::Empty);
+            if !has_content {
+                continue;
+            }
+            best = Some(best.map(|b| b.max(col1)).unwrap_or(col1));
+        }
+
+        best
+    }
+
+    fn next_used_col_in_row(&self, sheet: usize, row: u32, start_col: u32) -> Option<u32> {
+        if row == 0 || start_col == 0 {
+            return None;
+        }
+        let workbook = self.state.get_workbook().ok()?;
+        let sheet = workbook.sheets.get(sheet)?;
+        let row0 = (row - 1) as usize;
+
+        let mut best: Option<u32> = None;
+
+        if let Some(table) = &sheet.columnar {
+            if row0 < table.row_count() && table.column_count() > 0 {
+                let col_count = table.column_count() as u32;
+                if start_col <= col_count {
+                    best = Some(start_col);
+                }
+            }
+        }
+
+        for (&(row_idx, col0), cell) in sheet.cells.iter() {
+            if row_idx != row0 {
+                continue;
+            }
+            let col1 = (col0 + 1) as u32;
+            if col1 < start_col {
+                continue;
+            }
+            let has_content = cell.formula.is_some()
+                || cell.input_value.is_some()
+                || !matches!(cell.computed_value, CellScalar::Empty);
+            if !has_content {
+                continue;
+            }
+            best = Some(best.map(|b| b.min(col1)).unwrap_or(col1));
+        }
+
+        best
+    }
 }

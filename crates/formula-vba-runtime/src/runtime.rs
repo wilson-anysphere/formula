@@ -2321,9 +2321,49 @@ impl<'a> Executor<'a> {
             Some((nr, nc))
         };
 
-        let mut has_content = self.cell_has_content(sheet, row, col)?;
-        if !has_content {
-            // From an empty cell, scan forward until we find content (best-effort).
+        let start_has_content = self.cell_has_content(sheet, row, col)?;
+
+        if !start_has_content {
+            // Excel semantics: from an empty cell, move to the *first* non-empty cell in that
+            // direction (do not continue through a contiguous block).
+            //
+            // This is a critical compatibility point for patterns like:
+            //   Cells(Rows.Count, 1).End(xlUp).Row
+            // which would otherwise scan the entire worksheet and/or land on the wrong edge of
+            // the data block.
+            let fast = match dir {
+                XL_UP => self
+                    .sheet
+                    .last_used_row_in_column(sheet, col, row)
+                    .map(|r| (r, col)),
+                XL_DOWN => self
+                    .sheet
+                    .next_used_row_in_column(sheet, col, row)
+                    .map(|r| (r, col)),
+                XL_TO_LEFT => self
+                    .sheet
+                    .last_used_col_in_row(sheet, row, col)
+                    .map(|c| (row, c)),
+                XL_TO_RIGHT => self
+                    .sheet
+                    .next_used_col_in_row(sheet, row, col)
+                    .map(|c| (row, c)),
+                _ => None,
+            };
+
+            if let Some((r, c)) = fast {
+                if self.cell_has_content(sheet, r, c)? {
+                    return Ok(VbaRangeRef {
+                        sheet,
+                        start_row: r,
+                        start_col: c,
+                        end_row: r,
+                        end_col: c,
+                    });
+                }
+            }
+
+            // Fallback: scan forward until we find content (best-effort).
             let mut cursor = (row, col);
             loop {
                 let Some(next) = next_cell(cursor.0, cursor.1) else {
@@ -2333,14 +2373,12 @@ impl<'a> Executor<'a> {
                 if self.cell_has_content(sheet, cursor.0, cursor.1)? {
                     row = cursor.0;
                     col = cursor.1;
-                    has_content = true;
                     break;
                 }
             }
-        }
-
-        if has_content {
-            // Move until the next cell is empty.
+        } else {
+            // From a non-empty cell, move until the next cell is empty (end of the contiguous
+            // block).
             loop {
                 let Some((nr, nc)) = next_cell(row, col) else {
                     break;

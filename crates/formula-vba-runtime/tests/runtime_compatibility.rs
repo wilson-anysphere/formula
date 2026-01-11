@@ -187,6 +187,45 @@ End Sub
 }
 
 #[test]
+fn range_end_from_empty_cell_stops_at_first_content_and_avoids_full_sheet_scan() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    ' Column A has a contiguous block starting at A3.
+    Range("A3") = 1
+    Range("A4") = 2
+    Range("A5") = 3
+
+    ' Row 1 has a contiguous block starting at C1.
+    Range("C1") = "x"
+    Range("D1") = "y"
+    Range("E1") = "z"
+
+    ' Store results away from row 1 so the outputs don't affect subsequent End(...) queries.
+    Range("B10") = Range("A1").End(xlDown).Row        ' empty -> first non-empty
+    Range("B11") = Range("A1").End(xlToRight).Column   ' empty -> first non-empty
+    Range("B12") = Cells(Rows.Count, 1).End(xlUp).Row  ' empty -> last used row
+    Range("B13") = Cells(1, Columns.Count).End(xlToLeft).Column ' empty -> last used col
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program).with_sandbox_policy(VbaSandboxPolicy {
+        // This would trip if `Range.End` scanned 1M rows/16k cols cell-by-cell.
+        max_steps: 2_000,
+        ..VbaSandboxPolicy::default()
+    });
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(wb.get_value_a1("Sheet1", "B10").unwrap(), VbaValue::Double(3.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "B11").unwrap(), VbaValue::Double(3.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "B12").unwrap(), VbaValue::Double(5.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "B13").unwrap(), VbaValue::Double(5.0));
+}
+
+#[test]
 fn rows_and_columns_count_match_excel_limits() {
     let code = r#"
 Option Explicit
