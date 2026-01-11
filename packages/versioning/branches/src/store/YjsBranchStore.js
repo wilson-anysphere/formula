@@ -288,7 +288,18 @@ export class YjsBranchStore {
     if (branch && String(branch.get("docId") ?? "") === docId) return name;
 
     const main = getYMap(this.#branches.get("main"));
-    if (main && String(main.get("docId") ?? "") === docId) return "main";
+    if (main && String(main.get("docId") ?? "") === docId) {
+      // Self-heal invalid pointers so other collaborators don't keep reading a
+      // dangling branch name.
+      if (raw !== "main") {
+        this.#ydoc.transact(() => {
+          const current = this.#meta.get("currentBranchName");
+          if (current === "main") return;
+          this.#meta.set("currentBranchName", "main");
+        });
+      }
+      return "main";
+    }
 
     return "main";
   }
