@@ -611,7 +611,7 @@ export class SpreadsheetApp {
         schemaProvider: {
           getNamedRanges: () => {
             const formatSheetPrefix = (id: string): string => {
-              const needsQuotes = /[^A-Za-z0-9_]/.test(id);
+              const needsQuotes = !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(id);
               if (!needsQuotes) return `${id}!`;
               return `'${id.replaceAll("'", "''")}'!`;
             };
