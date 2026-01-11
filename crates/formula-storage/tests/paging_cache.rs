@@ -146,3 +146,90 @@ fn dirty_edits_survive_eviction_and_are_persisted() {
     assert_eq!(persisted[0].1.value, CellValue::Number(999.0));
 }
 
+#[test]
+fn load_viewport_returns_data_even_when_viewport_exceeds_page_budget() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet", 0, None)
+        .expect("create sheet");
+
+    let rows_per_page = 10;
+    let cols_per_page = 10;
+
+    storage
+        .apply_cell_changes(&[
+            CellChange {
+                sheet_id: sheet.id,
+                row: 0,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Number(1.0),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+            CellChange {
+                sheet_id: sheet.id,
+                row: rows_per_page as i64,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Number(2.0),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+            CellChange {
+                sheet_id: sheet.id,
+                row: (2 * rows_per_page) as i64,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Number(3.0),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+        ])
+        .expect("seed cells");
+
+    // Only allow 2 pages in cache, but request a viewport that spans 3 pages.
+    let memory = MemoryManager::new(
+        storage.clone(),
+        MemoryManagerConfig {
+            max_memory_bytes: 1024 * 1024,
+            max_pages: 2,
+            eviction_watermark: 1.0,
+            rows_per_page,
+            cols_per_page,
+        },
+    );
+
+    let viewport = CellRange::new(0, (2 * rows_per_page) as i64, 0, 0);
+    let data = memory.load_viewport(sheet.id, viewport).expect("load viewport");
+    assert_eq!(
+        data.get(0, 0).expect("cell 0,0").value,
+        CellValue::Number(1.0)
+    );
+    assert_eq!(
+        data.get(rows_per_page as i64, 0)
+            .expect("cell 10,0")
+            .value,
+        CellValue::Number(2.0)
+    );
+    assert_eq!(
+        data.get((2 * rows_per_page) as i64, 0)
+            .expect("cell 20,0")
+            .value,
+        CellValue::Number(3.0)
+    );
+
+    assert!(
+        memory.cached_page_count() <= 2,
+        "cache should respect max_pages"
+    );
+}

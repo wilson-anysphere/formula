@@ -210,62 +210,64 @@ impl MemoryManager {
 
         let page_keys = self.page_keys_for_range(sheet_id, viewport);
 
+        let mut cells = HashMap::new();
         let mut missing = Vec::new();
+
+        let add_cells_in_viewport =
+            |page_cells: &HashMap<(i64, i64), CellSnapshot>, cells: &mut HashMap<(i64, i64), CellSnapshot>| {
+                for (&(row, col), snapshot) in page_cells {
+                    if row >= viewport.row_start
+                        && row <= viewport.row_end
+                        && col >= viewport.col_start
+                        && col <= viewport.col_end
+                    {
+                        cells.insert((row, col), snapshot.clone());
+                    }
+                }
+            };
+
         {
             let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            let mut hit_pages = 0u64;
+            let mut missed_pages = 0u64;
             for key in &page_keys {
-                if inner.pages.contains(key) {
-                    inner.pages.get(key);
-                    inner.stats.page_hits = inner.stats.page_hits.saturating_add(1);
+                if let Some(page) = inner.pages.get(key) {
+                    hit_pages = hit_pages.saturating_add(1);
+                    add_cells_in_viewport(&page.cells, &mut cells);
                 } else {
-                    inner.stats.page_misses = inner.stats.page_misses.saturating_add(1);
+                    missed_pages = missed_pages.saturating_add(1);
                     missing.push(*key);
                 }
             }
+            inner.stats.page_hits = inner.stats.page_hits.saturating_add(hit_pages);
+            inner.stats.page_misses = inner.stats.page_misses.saturating_add(missed_pages);
         }
 
         for key in missing {
             let range = self.page_range(key);
             let loaded = self.storage.load_cells_in_range(sheet_id, range)?;
-            let mut cells = HashMap::new();
+            let mut page_cells = HashMap::new();
             for (coord, snapshot) in loaded {
-                cells.insert(coord, snapshot);
+                page_cells.insert(coord, snapshot);
             }
-
-            let page = PageData::new_loaded(cells);
+            let page = PageData::new_loaded(page_cells);
 
             let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-            if inner.pages.contains(&key) {
-                continue;
-            }
             inner.stats.pages_loaded = inner.stats.pages_loaded.saturating_add(1);
             self.insert_page_locked(&mut inner, key, page)?;
+
+            if let Some(page) = inner.pages.get(&key) {
+                add_cells_in_viewport(&page.cells, &mut cells);
+            }
         }
 
-        let viewport_data = {
+        {
             let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-            let mut cells = HashMap::new();
-            for key in &page_keys {
-                if let Some(page) = inner.pages.get(key) {
-                    for (&(row, col), snapshot) in &page.cells {
-                        if row >= viewport.row_start
-                            && row <= viewport.row_end
-                            && col >= viewport.col_start
-                            && col <= viewport.col_end
-                        {
-                            cells.insert((row, col), snapshot.clone());
-                        }
-                    }
-                }
-            }
-
             // Keep memory bounded after new page inserts.
             self.evict_if_needed_locked(&mut inner)?;
+        }
 
-            ViewportData { range: viewport, cells }
-        };
-
-        Ok(viewport_data)
+        Ok(ViewportData { range: viewport, cells })
     }
 
     /// Load a visible cell range and return the sparse list of cells.
