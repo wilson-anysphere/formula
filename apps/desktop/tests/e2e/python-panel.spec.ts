@@ -1,0 +1,50 @@
+import { expect, test } from "@playwright/test";
+
+test.describe("python panel", () => {
+  test("runs a script that writes to the workbook", async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const script = `import formula
+
+sheet = formula.active_sheet
+sheet["A1"] = 777
+sheet["A2"] = "=A1*2"
+`;
+
+    // Vite may trigger a one-time full reload after dependency optimization (e.g. when Pyodide
+    // dependencies are first loaded). If that happens, retry the whole interaction once after
+    // the navigation completes.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await page.goto("/");
+      try {
+        await page.getByTestId("open-python-panel").click();
+        const panel = page.getByTestId("dock-bottom").getByTestId("panel-python");
+        await expect(panel).toBeVisible();
+
+        const editor = panel.getByTestId("python-panel-code");
+        await expect(editor).toBeVisible();
+        await editor.fill(script);
+
+        await panel.getByTestId("python-panel-run").click();
+
+        await expect
+          .poll(async () => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1")))
+          .toBe("777");
+        await expect
+          .poll(async () => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2")))
+          .toBe("1554");
+        break;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (
+          attempt === 0 &&
+          (message.includes("Execution context was destroyed") || message.includes("element(s) not found"))
+        ) {
+          await page.waitForLoadState("load");
+          continue;
+        }
+        throw err;
+      }
+    }
+  });
+});
