@@ -394,7 +394,11 @@ export function installFormulaFiles(runtime, formulaFiles) {
 export async function bootstrapFormulaBridge(runtime, rootDir) {
   await runtime.runPythonAsync(`
 import sys
-sys.path.insert(0, ${JSON.stringify(rootDir)})
+# Keep the formula API path at the front of sys.path without accumulating duplicates
+_formula_root = ${JSON.stringify(rootDir)}
+while _formula_root in sys.path:
+    sys.path.remove(_formula_root)
+sys.path.insert(0, _formula_root)
 import formula
 from formula._js_bridge import JsBridge
 formula.set_bridge(JsBridge())
