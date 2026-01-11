@@ -10,6 +10,8 @@ import { getCellPermissions, maskCellValue as defaultMaskCellValue } from "../pe
 
 const MASKED_CELL_VALUE = "###";
 
+const MASKED_CELL_VALUE = defaultMaskCellValue(null);
+
 function stableStringify(value) {
   if (value === undefined) return "undefined";
   if (value == null || typeof value !== "object") return JSON.stringify(value);
