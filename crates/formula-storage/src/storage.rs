@@ -1072,9 +1072,12 @@ impl Storage {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
         let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        let tab_color_json = tab_color
+            .map(|c| serde_json::to_value(formula_model::TabColor::rgb(c)))
+            .transpose()?;
         tx.execute(
-            "UPDATE sheets SET tab_color = ?1 WHERE id = ?2",
-            params![tab_color, sheet_id.to_string()],
+            "UPDATE sheets SET tab_color = ?1, tab_color_json = ?2 WHERE id = ?3",
+            params![tab_color, tab_color_json, sheet_id.to_string()],
         )?;
         touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
         tx.commit()?;

@@ -275,6 +275,18 @@ fn model_workbook_import_export_round_trips() {
         .import_model_workbook(&workbook, ImportModelWorkbookOptions::new("ModelBook"))
         .expect("import workbook");
 
+    // Ensure legacy tab-color API overrides the richer tab_color_json persisted during import.
+    let sheet_a_storage_id = storage
+        .list_sheets(meta.id)
+        .expect("list sheets")
+        .into_iter()
+        .find(|s| s.name == "Äbc")
+        .expect("sheet a")
+        .id;
+    storage
+        .set_sheet_tab_color(sheet_a_storage_id, Some("FF112233"))
+        .expect("set tab color");
+
     // Sparse invariant: only stored (non-truly-empty) cells should be persisted.
     let total_model_cells: u64 = workbook
         .sheets
@@ -309,7 +321,11 @@ fn model_workbook_import_export_round_trips() {
         assert_eq!(actual.id, expected.id);
         assert_eq!(actual.name, expected.name);
         assert_eq!(actual.visibility, expected.visibility);
-        assert_eq!(actual.tab_color, expected.tab_color);
+        if actual.name == "Äbc" {
+            assert_eq!(actual.tab_color, Some(TabColor::rgb("FF112233")));
+        } else {
+            assert_eq!(actual.tab_color, expected.tab_color);
+        }
         assert_eq!(actual.xlsx_sheet_id, expected.xlsx_sheet_id);
         assert_eq!(actual.xlsx_rel_id, expected.xlsx_rel_id);
         assert_eq!(actual.frozen_rows, expected.frozen_rows);
