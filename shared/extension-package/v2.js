@@ -489,6 +489,7 @@ function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
   /** @type {{path: string, sha256: string, size: number}[]} */
   const fileRecords = [];
   let unpackedSize = 0;
+  let readme = "";
 
   const packageJsonBytes = files.get("package.json");
   if (!packageJsonBytes) {
@@ -524,6 +525,9 @@ function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
     }
 
     unpackedSize += data.length;
+    if (!readme && relPath.toLowerCase() === "readme.md") {
+      readme = data.toString("utf8");
+    }
     expectedPaths.delete(relPath);
     fileRecords.push({ path: relPath, sha256: actualSha, size: data.length });
   }
@@ -540,6 +544,7 @@ function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
     files: fileRecords,
     unpackedSize,
     fileCount: fileRecords.length,
+    readme,
   };
 }
 

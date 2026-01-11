@@ -7,7 +7,6 @@ const { verifyBytesSignature, sha256 } = require("../../../shared/crypto/signing
 const {
   canonicalJsonBytes,
   detectExtensionPackageFormatVersion,
-  readExtensionPackageV2,
   verifyExtensionPackageV2,
 } = require("../../../shared/extension-package");
 const { compareSemver, isValidSemver, maxSemver } = require("../../../shared/semver");
@@ -700,6 +699,7 @@ class MarketplaceStore {
       fileRecords = verified.files;
       fileCount = verified.fileCount;
       unpackedSize = verified.unpackedSize;
+      readme = verified.readme || "";
 
       if (fileCount > MAX_FILES) throw new Error("Extension package contains too many files");
       if (unpackedSize > MAX_UNPACKED_BYTES) {
@@ -712,14 +712,6 @@ class MarketplaceStore {
         }
         if (typeof file.size === "number" && file.size > MAX_SINGLE_FILE_BYTES) {
           throw new Error(`Extension package contains oversized file: ${file.path}`);
-        }
-      }
-
-      const parsed = readExtensionPackageV2(packageBytes);
-      for (const [relPath, bytes] of parsed.files.entries()) {
-        if (relPath.toLowerCase() === "readme.md") {
-          readme = bytes.toString("utf8");
-          break;
         }
       }
     } else {
