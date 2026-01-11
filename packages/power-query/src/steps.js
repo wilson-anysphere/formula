@@ -1405,13 +1405,14 @@ export function compileStreamingPipeline(operations, inputColumns) {
     if (done) return { rows: [], done: true };
     /** @type {unknown[][]} */
     let current = rows;
+    let stop = false;
     for (const fn of transforms) {
-      if (done) break;
       const result = fn(current);
       current = result.rows;
-      if (result.done) done = true;
-      if (current.length === 0 && done) break;
+      if (result.done) stop = true;
+      if (current.length === 0) break;
     }
+    if (stop) done = true;
     return { rows: current, done };
   };
 

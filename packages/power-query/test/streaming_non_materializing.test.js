@@ -233,3 +233,30 @@ test("executeQueryStreaming(..., materialize:false) streams query reference sour
   const expected = (await engineMaterialized.executeQuery(query, { queries: { q_base: baseQuery } }, {})).toGrid();
   assert.deepEqual(streamed, expected);
 });
+
+test("executeQueryStreaming(..., materialize:false) applies transforms after take (take not last)", async () => {
+  const engine = new QueryEngine();
+
+  const query = {
+    id: "q_take_not_last",
+    name: "Take then transform",
+    source: {
+      type: "range",
+      range: {
+        values: [["A"], [1], [2], [3]],
+        hasHeaders: true,
+      },
+    },
+    steps: [
+      { id: "s_take", name: "Take", operation: { type: "take", count: 2 } },
+      { id: "s_add", name: "Add", operation: { type: "addColumn", name: "B", formula: "=[A] * 2" } },
+    ],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, {}, { batchSize: 10, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
