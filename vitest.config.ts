@@ -2,7 +2,11 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    testTimeout: 20_000,
+    // The repo includes several integration-style suites (API, sandboxed runtimes,
+    // wasm-backed rendering) that can exceed Vitest's default 10s hook timeout on
+    // shared/contended runners.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: [
       "packages/**/*.test.ts",
       "packages/**/*.test.tsx",

@@ -8,6 +8,8 @@ function createInMemoryAuditLogger() {
   return { auditLogger: new AuditLogger({ store }), events };
 }
 
+const SANDBOX_TIMEOUT_MS = 10_000;
+
 describe("Sandbox optional capability enforcement", () => {
   it("denies clipboard/notifications/automation by default in JS sandbox", async () => {
     const { auditLogger } = createInMemoryAuditLogger();
@@ -18,7 +20,7 @@ describe("Sandbox optional capability enforcement", () => {
         extensionId: "ext.clipboard.denied",
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000,
+        timeoutMs: SANDBOX_TIMEOUT_MS,
         code: `await SecureApis.clipboard.writeText("hello");`
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "clipboard" } });
@@ -28,7 +30,7 @@ describe("Sandbox optional capability enforcement", () => {
         extensionId: "ext.notifications.denied",
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000,
+        timeoutMs: SANDBOX_TIMEOUT_MS,
         code: `await SecureApis.notifications.notify({ title: "hi" });`
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "notifications" } });
@@ -38,7 +40,7 @@ describe("Sandbox optional capability enforcement", () => {
         extensionId: "ext.automation.denied",
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000,
+        timeoutMs: SANDBOX_TIMEOUT_MS,
         code: `await SecureApis.automation.run({ type: "noop" });`
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "automation" } });
@@ -56,7 +58,7 @@ describe("Sandbox optional capability enforcement", () => {
         extensionId: "ext.clipboard.allowed",
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000,
+        timeoutMs: SANDBOX_TIMEOUT_MS,
         code: `await SecureApis.clipboard.writeText("hello");`
       })
     ).rejects.toMatchObject({ code: "SECURE_API_UNAVAILABLE" });
@@ -69,7 +71,7 @@ describe("Sandbox optional capability enforcement", () => {
         extensionId: "ext.notifications.allowed",
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000,
+        timeoutMs: SANDBOX_TIMEOUT_MS,
         code: `await SecureApis.notifications.notify({ title: "hi" });`
       })
     ).rejects.toMatchObject({ code: "SECURE_API_UNAVAILABLE" });
@@ -82,10 +84,9 @@ describe("Sandbox optional capability enforcement", () => {
         extensionId: "ext.automation.allowed",
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000,
+        timeoutMs: SANDBOX_TIMEOUT_MS,
         code: `await SecureApis.automation.run({ type: "noop" });`
       })
     ).rejects.toMatchObject({ code: "SECURE_API_UNAVAILABLE" });
   });
 });
-

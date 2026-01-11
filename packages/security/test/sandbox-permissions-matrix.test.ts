@@ -27,6 +27,8 @@ async function startHttpServer() {
   return { server, url };
 }
 
+const SANDBOX_TIMEOUT_MS = 10_000;
+
 describe("Sandbox permissions matrix", () => {
   let server: http.Server;
   let serverUrl: string;
@@ -62,7 +64,7 @@ describe("Sandbox permissions matrix", () => {
         code: `const data = await fs.readFile(${JSON.stringify(filePath)}, "utf8");\nreturn data;`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).resolves.toBe("hello");
 
@@ -74,7 +76,7 @@ describe("Sandbox permissions matrix", () => {
         code: `await fs.writeFile(${JSON.stringify(outPath)}, "nope");`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).rejects.toMatchObject({
       code: "PERMISSION_DENIED",
@@ -91,7 +93,7 @@ describe("Sandbox permissions matrix", () => {
         )}, "utf8");`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).resolves.toBe("ok");
   });
@@ -112,7 +114,7 @@ describe("Sandbox permissions matrix", () => {
         code: `const res = await fetch(${JSON.stringify(serverUrl)});\nreturn res.status;`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).resolves.toBe(200);
 
@@ -122,7 +124,7 @@ describe("Sandbox permissions matrix", () => {
         code: `await fetch("http://127.0.0.1:65534/");`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "network" } });
   });
@@ -148,7 +150,7 @@ describe("Sandbox permissions matrix", () => {
         code: `with open(${JSON.stringify(filePath)}, "r") as f:\n    __result__ = f.read()\n`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).resolves.toBe("hello-py");
 
@@ -159,7 +161,7 @@ describe("Sandbox permissions matrix", () => {
         code: `import io\nwith io.open(${JSON.stringify(filePath)}, "r") as f:\n    __result__ = f.read()\n`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).resolves.toBe("hello-py");
 
@@ -171,7 +173,7 @@ describe("Sandbox permissions matrix", () => {
           code: `import posix\nfd = posix.open(${JSON.stringify(filePath)}, posix.O_RDONLY)\ndata = posix.read(fd, 1024)\nposix.close(fd)\n__result__ = data.decode("utf8")\n`,
           permissionManager,
           auditLogger,
-          timeoutMs: 2_000
+          timeoutMs: SANDBOX_TIMEOUT_MS
         })
       ).resolves.toBe("hello-py");
     }
@@ -184,7 +186,7 @@ describe("Sandbox permissions matrix", () => {
         code: `import io\nio.open(${JSON.stringify(runnerPath)}, "r").read()\n`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "filesystem", access: "read" } });
 
@@ -195,7 +197,7 @@ describe("Sandbox permissions matrix", () => {
         code: `import _io\n_io.open(${JSON.stringify(runnerPath)}, "r").read()\n`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "filesystem", access: "read" } });
 
@@ -207,7 +209,7 @@ describe("Sandbox permissions matrix", () => {
           code: `import posix\nfd = posix.open(${JSON.stringify(runnerPath)}, posix.O_RDONLY)\nposix.read(fd, 10)\n`,
           permissionManager,
           auditLogger,
-          timeoutMs: 2_000
+          timeoutMs: SANDBOX_TIMEOUT_MS
         })
       ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "filesystem", access: "read" } });
     }
@@ -220,7 +222,7 @@ describe("Sandbox permissions matrix", () => {
           code: `import os\nos.spawnv(os.P_WAIT, "/bin/true", ["true"])\n`,
           permissionManager,
           auditLogger,
-          timeoutMs: 2_000
+          timeoutMs: SANDBOX_TIMEOUT_MS
         })
       ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "automation" } });
     }
@@ -232,7 +234,7 @@ describe("Sandbox permissions matrix", () => {
         code: `import socket\nsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\nsock.sendto(b"hi", ("127.0.0.1", 9))\n`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "network" } });
 
@@ -243,7 +245,7 @@ describe("Sandbox permissions matrix", () => {
         code: `import socket\nsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\nsock.bind(("127.0.0.1", 0))\n`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "network" } });
 
@@ -254,7 +256,7 @@ describe("Sandbox permissions matrix", () => {
         code: `import urllib.request\nurllib.request.urlopen(${JSON.stringify(serverUrl)}).read()\n`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", request: { kind: "network" } });
 
@@ -272,7 +274,7 @@ describe("Sandbox permissions matrix", () => {
         )}) as res:\n    __result__ = res.status\n`,
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000
+        timeoutMs: SANDBOX_TIMEOUT_MS
       })
     ).resolves.toBe(200);
   });

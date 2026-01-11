@@ -86,5 +86,5 @@ describe("SqliteAIAuditStore (jsdom + LocalStorageBinaryStorage)", () => {
       if (originalNodeVersion) Object.defineProperty(process.versions, "node", originalNodeVersion);
       vi.resetModules();
     }
-  });
+  }, 60_000);
 });

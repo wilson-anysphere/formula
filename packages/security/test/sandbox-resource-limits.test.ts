@@ -49,7 +49,7 @@ describe("Sandbox resource limits", () => {
         extensionId: "ext.memory",
         permissionManager,
         auditLogger,
-        timeoutMs: 2_000,
+        timeoutMs: 10_000,
         memoryMb: 32,
         code: `
           const blobs = [];

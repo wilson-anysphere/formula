@@ -78,8 +78,8 @@ describe("observability: request-id, log correlation, db spans", () => {
   });
 
   afterAll(async () => {
-    await app.close();
-    await db.end();
+    await app?.close?.();
+    await db?.end?.();
   });
 
   it("sets x-request-id and respects incoming x-request-id", async () => {

@@ -88,8 +88,8 @@ describe("ApiVersionStore (integration): persists VersionManager history via ser
   });
 
   afterAll(async () => {
-    await app.close();
-    await db.end();
+    await app?.close?.();
+    await db?.end?.();
   });
 
   it("round-trips snapshots/checkpoints, lists, fetches, and deletes via cloud API", async () => {
