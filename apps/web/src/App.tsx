@@ -18,22 +18,19 @@ export function App() {
     async function start() {
       try {
         await engine.init();
-        const engineAny = engine as any;
 
         // Keep the preview deterministic by seeding a tiny workbook.
-        if (typeof engineAny.newWorkbook === "function") {
-          await engineAny.newWorkbook();
-        }
-        await engineAny.setCell("A1", 1);
-        await engineAny.setCell("A2", 2);
-        await engineAny.setCell("B1", "=A1+A2");
-        await engineAny.setCell("B2", "=B1*2");
-        await engineAny.setCell("C1", "hello");
-        await engineAny.recalculate();
+        await engine.newWorkbook();
+        await engine.setCell("A1", 1);
+        await engine.setCell("A2", 2);
+        await engine.setCell("B1", "=A1+A2");
+        await engine.setCell("B2", "=B1*2");
+        await engine.setCell("C1", "hello");
+        await engine.recalculate();
 
-        const pong = typeof engineAny.ping === "function" ? await engineAny.ping() : "ok";
+        const b1 = await engine.getCell("B1");
         if (!cancelled) {
-          setEngineStatus(`ready (${pong})`);
+          setEngineStatus(`ready (B1=${b1.value === null ? "" : String(b1.value)})`);
           const cache = new EngineCellCache(engine);
           setProvider(new EngineGridProvider({ cache, rowCount, colCount, headers: true }));
         }

@@ -161,6 +161,9 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
     let result: unknown;
 
     switch (req.method) {
+      case "ping":
+        result = "pong";
+        break;
       case "newWorkbook":
         workbook = new mod.WasmWorkbook();
         result = null;
