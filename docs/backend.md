@@ -42,6 +42,8 @@ production requires:
 - `SYNC_TOKEN_SECRET` set to a non-dev value
 - `SECRET_STORE_KEYS_JSON` configured (recommended), or `SECRET_STORE_KEY` set to a non-dev value
 - (Legacy-only) `LOCAL_KMS_MASTER_KEY` set to a non-dev value if you need to decrypt/migrate historical encrypted rows
+- (Optional, AWS KMS) `AWS_KMS_ENABLED=true` + `AWS_REGION` when using `org_settings.kms_provider = 'aws'`
+  - Ensure `@aws-sdk/client-kms` is installed in the API runtime image
 
 For OIDC SSO deployments, also set:
 
