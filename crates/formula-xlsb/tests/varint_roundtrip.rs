@@ -7,6 +7,18 @@ use formula_xlsb::biff12_varint::{
 use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 
+fn is_encodable_record_id(id: u32) -> bool {
+    let bytes = id.to_le_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() && (bytes[idx] & 0x80) != 0 {
+        idx += 1;
+    }
+    if idx >= bytes.len() {
+        return false;
+    }
+    bytes[idx + 1..].iter().all(|&b| b == 0)
+}
+
 fn valid_record_id() -> impl Strategy<Value = u32> {
     // BIFF12 record IDs are encoded as a little-endian sequence of bytes, terminated by the
     // first byte with MSB=0. This means only a subset of `u32` values are representable.
@@ -105,6 +117,22 @@ proptest! {
     }
 
     #[test]
+    fn record_id_writer_accepts_exactly_encodable_values(id in 0u32..=0x1FFF_FFFF) {
+        let mut encoded = Vec::new();
+        let res = write_record_id(&mut encoded, id);
+
+        if is_encodable_record_id(id) {
+            prop_assert!(res.is_ok());
+            let mut cursor = Cursor::new(&encoded);
+            let decoded = read_record_id(&mut cursor).unwrap().unwrap();
+            prop_assert_eq!(decoded, id);
+            prop_assert_eq!(cursor.position() as usize, encoded.len());
+        } else {
+            prop_assert!(res.is_err());
+        }
+    }
+
+    #[test]
     fn record_len_roundtrips(len in 0u32..=0x0FFF_FFFF) {
         let mut encoded = Vec::new();
         write_record_len(&mut encoded, len).unwrap();
@@ -115,6 +143,13 @@ proptest! {
         prop_assert_eq!(decoded, len);
         prop_assert_eq!(cursor.position() as usize, encoded.len());
     }
+}
+
+#[test]
+fn record_len_rejects_values_above_28_bits() {
+    let mut encoded = Vec::new();
+    let err = write_record_len(&mut encoded, 0x1000_0000).expect_err("len too large");
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
 }
 
 #[test]
