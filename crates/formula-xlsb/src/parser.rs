@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, BufReader, Read};
 
 use crate::biff12_varint;
+use crate::workbook_context::{ExternName, ExternSheet, SupBook, SupBookKind, WorkbookContext};
 use thiserror::Error;
 
 // Record IDs (BIFF12 / MS-XLSB). Values taken from pyxlsb (public domain-ish) and MS-XLSB.
@@ -283,13 +284,22 @@ impl<'a> RecordReader<'a> {
     }
 }
 
-pub(crate) fn parse_workbook_sheets<R: Read>(
+pub(crate) fn parse_workbook<R: Read>(
     workbook_bin: &mut R,
     rels: &HashMap<String, String>,
-) -> Result<Vec<SheetMeta>, Error> {
+) -> Result<(Vec<SheetMeta>, WorkbookContext), Error> {
     let mut reader = Biff12Reader::new(workbook_bin);
     let mut buf = Vec::new();
     let mut sheets = Vec::new();
+    let mut ctx = WorkbookContext::default();
+
+    // NameX / external-name tables (used for add-ins and external defined names).
+    let mut supbooks: Vec<SupBook> = Vec::new();
+    let mut namex_extern_names: HashMap<(u16, u16), ExternName> = HashMap::new();
+    let mut namex_ixti_supbooks: HashMap<u16, u16> = HashMap::new();
+
+    let mut current_supbook: Option<u16> = None;
+    let mut current_extern_name_idx: u16 = 0;
     while let Some(rec) = reader.read_record(&mut buf)? {
         match rec.id {
             biff12::SHEET => {
@@ -304,11 +314,78 @@ pub(crate) fn parse_workbook_sheets<R: Read>(
                 let part_path = normalize_sheet_target(target);
                 sheets.push(SheetMeta { name, part_path });
             }
-            biff12::SHEETS_END => break,
-            _ => {}
+            // External references.
+            id if is_supbook_record(id) => {
+                if let Some(supbook) = parse_supbook(rec.data) {
+                    supbooks.push(supbook);
+                    current_supbook = Some((supbooks.len() - 1) as u16);
+                    current_extern_name_idx = 0;
+                }
+            }
+            id if is_end_supbook_record(id) => {
+                current_supbook = None;
+                current_extern_name_idx = 0;
+            }
+            id if is_extern_name_record(id) => {
+                let Some(supbook_index) = current_supbook else { continue };
+                let Some(mut extern_name) = parse_extern_name(rec.data) else { continue };
+
+                current_extern_name_idx = current_extern_name_idx.saturating_add(1);
+                if matches!(
+                    supbooks.get(supbook_index as usize).map(|s| &s.kind),
+                    Some(SupBookKind::AddIn)
+                ) {
+                    extern_name.is_function = true;
+                }
+
+                namex_extern_names.insert((supbook_index, current_extern_name_idx), extern_name);
+            }
+            id if is_extern_sheet_record(id) => {
+                if let Some(entries) = parse_extern_sheet(rec.data) {
+                    for (ixti, entry) in entries.iter().enumerate() {
+                        namex_ixti_supbooks.insert(ixti as u16, entry.supbook_index);
+                    }
+                }
+            }
+            // Keep scanning after the sheets list; external tables often appear later.
+            biff12::SHEETS_END => {}
+            _ => {
+                // Heuristic fallback: some writers use different record ids for external-link tables
+                // (or we haven't enumerated them yet). Try to recognize structures by shape.
+                if namex_ixti_supbooks.is_empty() {
+                    if let Some(entries) = parse_extern_sheet(rec.data) {
+                        for (ixti, entry) in entries.iter().enumerate() {
+                            namex_ixti_supbooks.insert(ixti as u16, entry.supbook_index);
+                        }
+                    }
+                }
+
+                if current_supbook.is_none() {
+                    if let Some(supbook) = parse_supbook(rec.data) {
+                        if supbook_is_plausible(&supbook) {
+                            supbooks.push(supbook);
+                            current_supbook = Some((supbooks.len() - 1) as u16);
+                            current_extern_name_idx = 0;
+                        }
+                    }
+                } else if let Some(supbook_index) = current_supbook {
+                    if let Some(mut extern_name) = parse_extern_name(rec.data) {
+                        current_extern_name_idx = current_extern_name_idx.saturating_add(1);
+                        if matches!(
+                            supbooks.get(supbook_index as usize).map(|s| &s.kind),
+                            Some(SupBookKind::AddIn)
+                        ) {
+                            extern_name.is_function = true;
+                        }
+                        namex_extern_names.insert((supbook_index, current_extern_name_idx), extern_name);
+                    }
+                }
+            }
         }
     }
-    Ok(sheets)
+
+    ctx.set_namex_tables(supbooks, namex_extern_names, namex_ixti_supbooks);
+    Ok((sheets, ctx))
 }
 
 pub(crate) fn parse_shared_strings<R: Read>(
@@ -335,15 +412,17 @@ pub(crate) fn parse_shared_strings<R: Read>(
 pub(crate) fn parse_sheet<R: Read>(
     sheet_bin: &mut R,
     shared_strings: &[String],
+    ctx: &WorkbookContext,
 ) -> Result<SheetData, Error> {
     let mut cells = Vec::new();
-    let dimension = parse_sheet_stream(sheet_bin, shared_strings, |cell| cells.push(cell))?;
+    let dimension = parse_sheet_stream(sheet_bin, shared_strings, ctx, |cell| cells.push(cell))?;
     Ok(SheetData { dimension, cells })
 }
 
 pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
     sheet_bin: &mut R,
     shared_strings: &[String],
+    ctx: &WorkbookContext,
     mut on_cell: F,
 ) -> Result<Option<Dimension>, Error> {
     let mut reader = Biff12Reader::new(sheet_bin);
@@ -428,7 +507,9 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
-                        let text = crate::rgce::decode_rgce(&rgce).ok();
+                        let text = crate::rgce::decode_rgce_with_context(&rgce, ctx)
+                            .or_else(|_| crate::rgce::decode_rgce(&rgce))
+                            .ok();
                         let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Text(v),
@@ -451,7 +532,9 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
-                        let text = crate::rgce::decode_rgce(&rgce).ok();
+                        let text = crate::rgce::decode_rgce_with_context(&rgce, ctx)
+                            .or_else(|_| crate::rgce::decode_rgce(&rgce))
+                            .ok();
                         let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Number(v),
@@ -474,7 +557,9 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
-                        let text = crate::rgce::decode_rgce(&rgce).ok();
+                        let text = crate::rgce::decode_rgce_with_context(&rgce, ctx)
+                            .or_else(|_| crate::rgce::decode_rgce(&rgce))
+                            .ok();
                         let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Bool(v),
@@ -497,7 +582,9 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
-                        let text = crate::rgce::decode_rgce(&rgce).ok();
+                        let text = crate::rgce::decode_rgce_with_context(&rgce, ctx)
+                            .or_else(|_| crate::rgce::decode_rgce(&rgce))
+                            .ok();
                         let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Error(v),
@@ -829,4 +916,210 @@ fn normalize_sheet_target(target: &str) -> String {
     // Relationship targets are typically relative to `xl/`.
     let target = target.trim_start_matches('/');
     format!("xl/{}", target.replace('\\', "/"))
+}
+
+fn is_supbook_record(id: u32) -> bool {
+    matches!(
+        id,
+        // BIFF8 `SupBook`
+        0x01AE
+            // Common BIFF12 candidates observed in the wild (keep parsing robust across writers).
+            | 0x0162
+            | 0x0161
+    )
+}
+
+fn is_end_supbook_record(id: u32) -> bool {
+    matches!(id, 0x0163 | 0x01AF)
+}
+
+fn is_extern_sheet_record(id: u32) -> bool {
+    matches!(
+        id,
+        // BIFF8 `ExternSheet`
+        0x0017
+            // Common BIFF12 candidate.
+            | 0x0167
+    )
+}
+
+fn is_extern_name_record(id: u32) -> bool {
+    matches!(
+        id,
+        // BIFF8 `ExternName`
+        0x0023
+            // Common BIFF12 candidate.
+            | 0x0168
+    )
+}
+
+fn parse_supbook(data: &[u8]) -> Option<SupBook> {
+    // Try a few plausible layouts:
+    // - u16 ctab + utf16string (BIFF8-like)
+    // - u32 ctab + utf16string (BIFF12-like)
+    {
+        let mut rr = RecordReader::new(data);
+        if rr.read_u16().is_ok() {
+            if let Ok(raw_name) = rr.read_utf16_string() {
+                let kind = if raw_name.is_empty() {
+                    SupBookKind::Internal
+                } else if raw_name == "\u{0001}" {
+                    SupBookKind::AddIn
+                } else {
+                    SupBookKind::ExternalWorkbook
+                };
+                return Some(SupBook { raw_name, kind });
+            }
+        }
+    }
+
+    {
+        let mut rr = RecordReader::new(data);
+        if rr.read_u32().is_ok() {
+            if let Ok(raw_name) = rr.read_utf16_string() {
+                let kind = if raw_name.is_empty() {
+                    SupBookKind::Internal
+                } else if raw_name == "\u{0001}" {
+                    SupBookKind::AddIn
+                } else {
+                    SupBookKind::ExternalWorkbook
+                };
+                return Some(SupBook { raw_name, kind });
+            }
+        }
+    }
+
+    None
+}
+
+fn supbook_is_plausible(supbook: &SupBook) -> bool {
+    if supbook.raw_name.is_empty() || supbook.raw_name == "\u{0001}" {
+        return true;
+    }
+
+    let name = supbook.raw_name.to_ascii_lowercase();
+    name.contains(['/', '\\'])
+        || name.ends_with(".xls")
+        || name.ends_with(".xlsx")
+        || name.ends_with(".xlsm")
+        || name.ends_with(".xlsb")
+        || name.ends_with(".xlam")
+        || name.ends_with(".xll")
+}
+
+fn parse_extern_sheet(data: &[u8]) -> Option<Vec<ExternSheet>> {
+    // BIFF8 layout: u16 cxti + cxti * (u16, u16, u16)
+    if data.len() >= 2 {
+        let cxti = u16::from_le_bytes([data[0], data[1]]) as usize;
+        if data.len() == 2 + cxti * 6 {
+            let mut out = Vec::with_capacity(cxti);
+            let mut offset = 2;
+            for _ in 0..cxti {
+                let supbook = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                let first = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as u32;
+                let last = u16::from_le_bytes([data[offset + 4], data[offset + 5]]) as u32;
+                out.push(ExternSheet {
+                    supbook_index: supbook,
+                    sheet_first: first,
+                    sheet_last: last,
+                });
+                offset += 6;
+            }
+            return Some(out);
+        }
+    }
+
+    // BIFF12-like layout: u32 cxti + entries (either 6 or 12 bytes each).
+    if data.len() >= 4 {
+        let cxti = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        if data.len() == 4 + cxti * 6 {
+            let mut out = Vec::with_capacity(cxti);
+            let mut offset = 4;
+            for _ in 0..cxti {
+                let supbook = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                let first = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as u32;
+                let last = u16::from_le_bytes([data[offset + 4], data[offset + 5]]) as u32;
+                out.push(ExternSheet {
+                    supbook_index: supbook,
+                    sheet_first: first,
+                    sheet_last: last,
+                });
+                offset += 6;
+            }
+            return Some(out);
+        }
+
+        if data.len() == 4 + cxti * 12 {
+            let mut out = Vec::with_capacity(cxti);
+            let mut offset = 4;
+            for _ in 0..cxti {
+                let supbook = u32::from_le_bytes([
+                    data[offset],
+                    data[offset + 1],
+                    data[offset + 2],
+                    data[offset + 3],
+                ]) as u16;
+                let first = u32::from_le_bytes([
+                    data[offset + 4],
+                    data[offset + 5],
+                    data[offset + 6],
+                    data[offset + 7],
+                ]);
+                let last = u32::from_le_bytes([
+                    data[offset + 8],
+                    data[offset + 9],
+                    data[offset + 10],
+                    data[offset + 11],
+                ]);
+                out.push(ExternSheet {
+                    supbook_index: supbook,
+                    sheet_first: first,
+                    sheet_last: last,
+                });
+                offset += 12;
+            }
+            return Some(out);
+        }
+    }
+
+    None
+}
+
+fn parse_extern_name(data: &[u8]) -> Option<ExternName> {
+    // Try a few plausible layouts. We only need the name string and (optionally) sheet scope.
+    let mut rr = RecordReader::new(data);
+    let flags = rr.read_u16().ok()?;
+
+    // Layout A: flags: u16, scope: u16, name: xlWideString
+    if let Ok(scope) = rr.read_u16() {
+        if let Ok(name) = rr.read_utf16_string() {
+            return Some(ExternName {
+                name,
+                is_function: flags & 0x0002 != 0,
+                scope_sheet: scope_to_option(scope as u32),
+            });
+        }
+    }
+
+    // Layout B: flags: u16, scope: u32, name: xlWideString
+    let mut rr = RecordReader::new(data);
+    let flags = rr.read_u16().ok()?;
+    if let Ok(scope) = rr.read_u32() {
+        if let Ok(name) = rr.read_utf16_string() {
+            return Some(ExternName {
+                name,
+                is_function: flags & 0x0002 != 0,
+                scope_sheet: scope_to_option(scope),
+            });
+        }
+    }
+
+    None
+}
+
+fn scope_to_option(scope: u32) -> Option<u32> {
+    match scope {
+        0xFFFF | 0xFFFFFFFF => None,
+        other => Some(other),
+    }
 }

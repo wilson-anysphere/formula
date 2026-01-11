@@ -26,5 +26,18 @@ pub fn parse_sheet_bin<R: std::io::Read>(
     sheet_bin: &mut R,
     shared_strings: &[String],
 ) -> Result<SheetData, Error> {
-    parser::parse_sheet(sheet_bin, shared_strings)
+    let ctx = workbook_context::WorkbookContext::default();
+    parser::parse_sheet(sheet_bin, shared_strings, &ctx)
+}
+
+/// Parse a worksheet `.bin` stream (BIFF12) using the provided workbook context.
+///
+/// This enables decoding of formulas that reference workbook-defined names, 3D
+/// references, external defined names (`PtgNameX`), and add-in/UDF calls.
+pub fn parse_sheet_bin_with_context<R: std::io::Read>(
+    sheet_bin: &mut R,
+    shared_strings: &[String],
+    ctx: &workbook_context::WorkbookContext,
+) -> Result<SheetData, Error> {
+    parser::parse_sheet(sheet_bin, shared_strings, ctx)
 }

@@ -221,6 +221,21 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
 
                 stack.push(format!("\"{}\"", String::from_utf16_lossy(&units)));
             }
+            0x19 => {
+                // PtgAttr: [grbit: u8][unused: u16]
+                //
+                // Commonly used for spacing/optimization and does not affect expression semantics
+                // for our best-effort display purposes.
+                if rgce.len().saturating_sub(i) < 3 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 3,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 3;
+            }
             0x1C => {
                 // PtgErr: [err: u8]
                 if rgce.len().saturating_sub(i) < 1 {
@@ -534,6 +549,30 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
                 };
                 stack.push(txt);
             }
+            0x39 | 0x59 | 0x79 => {
+                // PtgNameX: [ixti: u16][nameIndex: u16]
+                if rgce.len().saturating_sub(i) < 4 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 4,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+
+                let Some(ctx) = ctx else {
+                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                };
+
+                let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
+                let name_index = u16::from_le_bytes([rgce[i + 2], rgce[i + 3]]);
+                i += 4;
+
+                let txt = ctx
+                    .format_namex(ixti, name_index)
+                    .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                stack.push(txt);
+            }
             0x22 | 0x42 | 0x62 => {
                 // PtgFuncVar: [argc: u8][iftab: u16]
                 if rgce.len().saturating_sub(i) < 3 {
@@ -549,19 +588,39 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
                 let iftab = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]);
                 i += 3;
 
-                let name = function_name(iftab).ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                // Excel uses a sentinel function id for user-defined functions: the top-of-stack
+                // item is the function name (typically from `PtgNameX`), followed by args.
+                if iftab == 0x00FF {
+                    if argc == 0 {
+                        return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                    }
+                    if stack.len() < argc {
+                        return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                    }
 
-                if stack.len() < argc {
-                    return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                    let func_name = stack.pop().expect("len checked");
+                    let mut args = Vec::with_capacity(argc - 1);
+                    for _ in 0..argc.saturating_sub(1) {
+                        args.push(stack.pop().expect("len checked"));
+                    }
+                    args.reverse();
+                    stack.push(format!("{func_name}({})", args.join(",")));
+                } else {
+                    let name =
+                        function_name(iftab).ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+
+                    if stack.len() < argc {
+                        return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                    }
+
+                    let mut args = Vec::with_capacity(argc);
+                    for _ in 0..argc {
+                        args.push(stack.pop().expect("len checked"));
+                    }
+                    args.reverse();
+
+                    stack.push(format!("{name}({})", args.join(",")));
                 }
-
-                let mut args = Vec::with_capacity(argc);
-                for _ in 0..argc {
-                    args.push(stack.pop().expect("len checked"));
-                }
-                args.reverse();
-
-                stack.push(format!("{name}({})", args.join(",")));
             }
             _ => return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg }),
         }

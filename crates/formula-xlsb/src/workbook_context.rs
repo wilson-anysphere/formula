@@ -20,6 +20,48 @@ pub struct WorkbookContext {
     names: HashMap<NameKey, u32>,
     /// Reverse lookup for name index -> definition (display name + scope).
     names_rev: HashMap<u32, NameDefinition>,
+
+    /// SupBook table backing `PtgNameX` references (external names / add-ins).
+    namex_supbooks: Vec<SupBook>,
+    /// ExternName table keyed by (supbook index, extern name index).
+    namex_extern_names: HashMap<(u16, u16), ExternName>,
+    /// Map `ixti` (ExternSheet index) -> supbook index for `PtgNameX`.
+    namex_ixti_supbooks: HashMap<u16, u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SupBookKind {
+    /// References the current workbook.
+    Internal,
+    /// References an external workbook (another file).
+    ExternalWorkbook,
+    /// References an add-in / XLL.
+    AddIn,
+    /// Unknown / unclassified SupBook.
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupBook {
+    /// Raw SupBook identifier (often a file name/path or special marker).
+    pub raw_name: String,
+    pub kind: SupBookKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternSheet {
+    /// Index into the workbook SupBook table.
+    pub supbook_index: u16,
+    pub sheet_first: u32,
+    pub sheet_last: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternName {
+    pub name: String,
+    pub is_function: bool,
+    /// Optional sheet scope within the referenced SupBook.
+    pub scope_sheet: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -156,8 +198,53 @@ impl WorkbookContext {
     pub fn name_definition(&self, index: u32) -> Option<&NameDefinition> {
         self.names_rev.get(&index)
     }
+
+    pub(crate) fn set_namex_tables(
+        &mut self,
+        supbooks: Vec<SupBook>,
+        extern_names: HashMap<(u16, u16), ExternName>,
+        ixti_supbooks: HashMap<u16, u16>,
+    ) {
+        self.namex_supbooks = supbooks;
+        self.namex_extern_names = extern_names;
+        self.namex_ixti_supbooks = ixti_supbooks;
+    }
+
+    pub(crate) fn format_namex(&self, ixti: u16, name_index: u16) -> Option<String> {
+        // In BIFF, PtgNameX stores `ixti` (index into ExternSheet). Some writers appear to store a
+        // SupBook index directly when the ExternSheet table is missing. Handle both.
+        let supbook_index = self
+            .namex_ixti_supbooks
+            .get(&ixti)
+            .copied()
+            .unwrap_or(ixti);
+
+        let extern_name = self
+            .namex_extern_names
+            .get(&(supbook_index, name_index))?;
+
+        if extern_name.is_function {
+            return Some(extern_name.name.clone());
+        }
+
+        match self
+            .namex_supbooks
+            .get(supbook_index as usize)
+            .map(|s| &s.kind)
+        {
+            Some(SupBookKind::ExternalWorkbook) => {
+                let raw = &self.namex_supbooks.get(supbook_index as usize)?.raw_name;
+                Some(format!("[{}]{}", display_supbook_name(raw), extern_name.name))
+            }
+            _ => Some(extern_name.name.clone()),
+        }
+    }
 }
 
 fn normalize_key(s: &str) -> String {
     s.to_ascii_lowercase()
+}
+
+fn display_supbook_name(raw: &str) -> String {
+    raw.rsplit(['/', '\\']).next().unwrap_or(raw).to_string()
 }

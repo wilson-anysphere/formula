@@ -1,9 +1,10 @@
 use crate::parser::Error as ParseError;
 use crate::parser::{
-    parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook_sheets, Cell, CellValue,
-    SheetData, SheetMeta,
+    parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook, Cell, CellValue, SheetData,
+    SheetMeta,
 };
 use crate::patch::{patch_sheet_bin, CellEdit};
+use crate::workbook_context::WorkbookContext;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
@@ -52,6 +53,7 @@ pub struct XlsbWorkbook {
     path: PathBuf,
     sheets: Vec<SheetMeta>,
     shared_strings: Vec<String>,
+    workbook_context: WorkbookContext,
     preserved_parts: HashMap<String, Vec<u8>>,
 }
 
@@ -94,7 +96,7 @@ impl XlsbWorkbook {
             bytes
         };
 
-        let sheets = parse_workbook_sheets(&mut Cursor::new(&workbook_bin), &workbook_rels)?;
+        let (sheets, workbook_context) = parse_workbook(&mut Cursor::new(&workbook_bin), &workbook_rels)?;
         if options.preserve_parsed_parts {
             preserved_parts.insert("xl/workbook.bin".to_string(), workbook_bin);
         }
@@ -154,6 +156,7 @@ impl XlsbWorkbook {
             path,
             sheets,
             shared_strings,
+            workbook_context,
             preserved_parts,
         })
     }
@@ -164,6 +167,10 @@ impl XlsbWorkbook {
 
     pub fn shared_strings(&self) -> &[String] {
         &self.shared_strings
+    }
+
+    pub fn workbook_context(&self) -> &WorkbookContext {
+        &self.workbook_context
     }
 
     /// Raw bytes for parts that should be preserved on round-trip.
@@ -196,7 +203,7 @@ impl XlsbWorkbook {
         let mut zip = ZipArchive::new(file)?;
         let mut sheet = zip.by_name(&meta.part_path)?;
 
-        parse_sheet(&mut sheet, &self.shared_strings)
+        parse_sheet(&mut sheet, &self.shared_strings, &self.workbook_context)
     }
 
     /// Stream cells from a worksheet without materializing the whole sheet.
@@ -213,7 +220,7 @@ impl XlsbWorkbook {
         let mut zip = ZipArchive::new(file)?;
         let mut sheet = zip.by_name(&meta.part_path)?;
 
-        parse_sheet_stream(&mut sheet, &self.shared_strings, |cell| f(cell))?;
+        parse_sheet_stream(&mut sheet, &self.shared_strings, &self.workbook_context, |cell| f(cell))?;
         Ok(())
     }
 

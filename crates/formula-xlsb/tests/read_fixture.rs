@@ -197,3 +197,21 @@ fn generated_fixture_supports_inline_strings_without_shared_strings_part() {
         .expect("cell A1");
     assert_eq!(cell.value, CellValue::Text("Hello".to_string()));
 }
+
+#[test]
+fn decodes_addin_udf_calls_via_namex() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/udf.xlsb");
+    let wb = XlsbWorkbook::open(path).expect("open xlsb");
+
+    let sheet = wb.read_sheet(0).expect("read sheet1");
+    let mut cells = sheet
+        .cells
+        .iter()
+        .map(|c| ((c.row, c.col), c))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let udf_cell = cells.remove(&(0, 3)).expect("D1 cell");
+    assert_eq!(udf_cell.value, CellValue::Number(0.0));
+    let formula = udf_cell.formula.as_ref().expect("formula payload preserved");
+    assert_eq!(formula.text.as_deref(), Some("MyAddinFunc(1,2)"));
+}
