@@ -101,15 +101,15 @@ export function normalizeSelectorColumns(selector: unknown): NormalizedSelectorC
         }
 
         return {
-        scope,
+          scope,
           sheetId,
           tableId,
-        row: null,
-        col: null,
-        startRow: null,
-        startCol: null,
-        endRow: null,
-        endCol: null,
+          row: null,
+          col: null,
+          startRow: null,
+          startCol: null,
+          endRow: null,
+          endCol: null,
           columnIndex,
           columnId
         };
@@ -121,17 +121,17 @@ export function normalizeSelectorColumns(selector: unknown): NormalizedSelectorC
         const col = requireNonNegativeInt(selector.col, "Selector.col");
 
         return {
-        scope,
+          scope,
           sheetId,
-        tableId: null,
+          tableId: null,
           row,
           col,
-        startRow: null,
-        startCol: null,
-        endRow: null,
-        endCol: null,
-        columnIndex: null,
-        columnId: null
+          startRow: null,
+          startCol: null,
+          endRow: null,
+          endCol: null,
+          columnIndex: null,
+          columnId: null
         };
       }
     case "range": {
@@ -394,7 +394,7 @@ async function queryCandidatesForRange(
   startCol: number,
   endRow: number,
   endCol: number
-) : Promise<RangeResolutionCandidateRow[]> {
+): Promise<RangeResolutionCandidateRow[]> {
   const res = await db.query(
     `
       SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
