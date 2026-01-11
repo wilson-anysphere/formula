@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { appendFile, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -143,6 +144,22 @@ test("NodeFsOfflineAuditQueue rotates segments by maxSegmentAgeMs", async () => 
 
   assert.equal(openSegments.length, 1);
   assert.equal(pendingSegments.length, 1);
+});
+
+test("NodeFsOfflineAuditQueue reclaims enqueue lock from a crashed writer", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-enqueue-lock-"));
+
+  const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+  const pid = child.pid;
+  await new Promise((resolve, reject) => {
+    child.on("exit", resolve);
+    child.on("error", reject);
+  });
+
+  await writeFile(path.join(dir, "queue.enqueue.lock"), JSON.stringify({ pid, createdAt: Date.now() }), "utf8");
+
+  const queue = new NodeFsOfflineAuditQueue({ dirPath: dir, maxBytes: 1024 * 1024 });
+  await queue.enqueue(makeEvent({ secret: "lock1" }));
 });
 
 test("NodeFsOfflineAuditQueue does not lose events when flushing an open segment with a partial tail record", async () => {

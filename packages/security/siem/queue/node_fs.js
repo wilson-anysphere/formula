@@ -192,6 +192,13 @@ async function acquireLock(
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
 
+      const existingLock = await safeReadJson(lockPath);
+      const existingPid = Number(existingLock?.pid);
+      if (Number.isFinite(existingPid) && existingPid > 0 && !isPidAlive(existingPid)) {
+        await safeUnlink(lockPath);
+        continue;
+      }
+
       try {
         const info = await stat(lockPath);
         if (Date.now() - info.mtimeMs > staleMs) {
