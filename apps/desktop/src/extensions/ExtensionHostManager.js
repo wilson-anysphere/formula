@@ -112,6 +112,8 @@ export class ExtensionHostManager {
 
     this._extensionManagerSubscription = null;
     this._started = false;
+    /** @type {Set<(event: any) => void>} */
+    this._contributionListeners = new Set();
 
     if (extensionManager) {
       this.bindToExtensionManager(extensionManager);
@@ -130,6 +132,37 @@ export class ExtensionHostManager {
 
     this._stateWatcher = null;
     this._stateWatchTimer = null;
+  }
+
+  /**
+   * Subscribe to contribution changes (commands, panels, menus, etc) caused by
+   * startup/sync/reload/unload operations.
+   *
+   * @param {(event: ReturnType<ExtensionHostManager["listContributions"]>) => void} listener
+   * @returns {{ dispose: () => void }}
+   */
+  onDidChangeContributions(listener) {
+    if (typeof listener !== "function") {
+      throw new Error("onDidChangeContributions listener must be a function");
+    }
+    this._contributionListeners.add(listener);
+    return {
+      dispose: () => {
+        this._contributionListeners.delete(listener);
+      },
+    };
+  }
+
+  _emitContributionsChanged() {
+    if (this._contributionListeners.size === 0) return;
+    const snapshot = this.listContributions();
+    for (const listener of [...this._contributionListeners]) {
+      try {
+        listener(snapshot);
+      } catch {
+        // ignore
+      }
+    }
   }
 
   _runHostOperation(fn) {
@@ -228,6 +261,8 @@ export class ExtensionHostManager {
         await this._host.startup();
         this._started = true;
       }
+
+      this._emitContributionsChanged();
     });
   }
 
@@ -341,6 +376,7 @@ export class ExtensionHostManager {
     const state = await this._loadInstalledState();
     const installed = state.installed ?? {};
     const installedIds = new Set(Object.keys(installed));
+    let didChange = false;
 
     // Always re-verify integrity for installed extensions when syncing. This allows the
     // runtime to detect on-disk tampering that happens after the initial install/startup
@@ -350,6 +386,7 @@ export class ExtensionHostManager {
       try {
         const verification = await this._verifyInstalledExtension(state, id);
         if (!verification.ok) {
+          didChange = true;
           // eslint-disable-next-line no-console
           console.warn(
             `Quarantining extension ${id}: integrity check failed: ${verification.reason || "unknown reason"}`
@@ -358,6 +395,7 @@ export class ExtensionHostManager {
       } catch (error) {
         const reason = error?.message ?? String(error);
         await this._markCorrupted(state, id, reason);
+        didChange = true;
         // eslint-disable-next-line no-console
         console.warn(`Quarantining extension ${id}: integrity check failed: ${reason}`);
       }
@@ -419,6 +457,8 @@ export class ExtensionHostManager {
         console.warn(`Failed to load extension ${id}: ${String(error?.message ?? error)}`);
       }
     }
+
+    return didChange || toUnload.length > 0 || toReload.length > 0 || toLoad.length > 0;
   }
 
   async syncInstalledExtensions() {
@@ -430,9 +470,15 @@ export class ExtensionHostManager {
 
     this._syncRunner = this._runHostOperation(async () => {
       try {
+        let didChange = false;
         while (this._syncRequested) {
           this._syncRequested = false;
-          await this._syncInstalledExtensionsOnce();
+          // eslint-disable-next-line no-await-in-loop
+          didChange = (await this._syncInstalledExtensionsOnce()) || didChange;
+        }
+
+        if (didChange) {
+          this._emitContributionsChanged();
         }
       } finally {
         this._syncRequested = false;
@@ -513,7 +559,10 @@ export class ExtensionHostManager {
   }
 
   async reloadExtension(extensionId) {
-    return this._runHostOperation(() => this._reloadExtensionUnsafe(extensionId));
+    return this._runHostOperation(async () => {
+      await this._reloadExtensionUnsafe(extensionId);
+      this._emitContributionsChanged();
+    });
   }
 
   /**
@@ -527,6 +576,9 @@ export class ExtensionHostManager {
   }
 
   async unloadExtension(extensionId) {
-    return this._runHostOperation(() => this._unloadExtensionUnsafe(extensionId));
+    return this._runHostOperation(async () => {
+      await this._unloadExtensionUnsafe(extensionId);
+      this._emitContributionsChanged();
+    });
   }
 }
