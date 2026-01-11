@@ -88,6 +88,12 @@ pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
                 continue;
             }
             _ if !in_string && has_xlfn_prefix_at(bytes, i) => {
+                // Only treat `_xlfn.` as a prefix when it occurs at an identifier boundary.
+                // This avoids stripping `_xlfn.` when it appears in the middle of some other
+                // identifier (e.g. a user-defined function name containing `_xlfn`).
+                if i > 0 && is_ident_byte(bytes[i - 1]) {
+                    // Fall through: emit the current byte verbatim.
+                } else {
                 let after_prefix = i + XL_FN_PREFIX.len();
                 let mut j = after_prefix;
                 while j < bytes.len() && is_ident_byte(bytes[j]) {
@@ -104,6 +110,7 @@ pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
                         i = after_prefix;
                         continue;
                     }
+                }
                 }
             }
             _ => {}
@@ -242,6 +249,12 @@ mod tests {
     #[test]
     fn strip_xlfn_prefixes_is_case_insensitive_for_prefix() {
         assert_eq!(strip_xlfn_prefixes("_XLFN.SEQUENCE(1)"), "SEQUENCE(1)");
+    }
+
+    #[test]
+    fn strip_xlfn_prefixes_does_not_strip_mid_identifier() {
+        let input = "FOO_xlfn.SEQUENCE(1)";
+        assert_eq!(strip_xlfn_prefixes(input), input);
     }
 
     #[test]
