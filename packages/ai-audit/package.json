@@ -19,5 +19,8 @@
   },
   "dependencies": {
     "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.2"
   }
 }

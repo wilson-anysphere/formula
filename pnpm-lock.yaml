@@ -128,6 +128,10 @@ importers:
       sql.js:
         specifier: ^1.13.0
         version: 1.13.0
+    devDependencies:
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
 
   packages/ai-completion: {}
 
@@ -162,15 +166,6 @@ importers:
         version: 0.7.1
 
   packages/engine: {}
-
-  packages/spreadsheet-frontend:
-    dependencies:
-      '@formula/engine':
-        specifier: workspace:*
-        version: link:../engine
-      '@formula/grid':
-        specifier: workspace:*
-        version: link:../grid
 
   packages/extension-api: {}
 
@@ -226,6 +221,15 @@ importers:
         version: 5.9.3
 
   packages/security: {}
+
+  packages/spreadsheet-frontend:
+    dependencies:
+      '@formula/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@formula/grid':
+        specifier: workspace:*
+        version: link:../grid
 
   packages/text-layout: {}
 
