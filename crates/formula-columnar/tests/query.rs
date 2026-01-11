@@ -205,6 +205,57 @@ fn group_by_skew_duplicates() {
 }
 
 #[test]
+fn group_by_rows_matches_group_by_on_selected_rows() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "v".to_owned(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let rows = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(1.0)],
+        vec![Value::String(Arc::<str>::from("B")), Value::Number(2.0)],
+        vec![Value::Null, Value::Number(3.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        vec![Value::String(Arc::<str>::from("C")), Value::Number(4.0)],
+    ];
+    let table = build_table(schema.clone(), rows.clone());
+
+    let selected = vec![0usize, 2, 3, 4];
+    let filtered_rows: Vec<Vec<Value>> = selected.iter().map(|&i| rows[i].clone()).collect();
+    let filtered_table = build_table(schema, filtered_rows);
+
+    let expected = filtered_table
+        .group_by(&[0], &[AggSpec::count_rows(), AggSpec::sum_f64(1)])
+        .unwrap()
+        .to_values();
+
+    let actual = table
+        .group_by_rows(&[0], &[AggSpec::count_rows(), AggSpec::sum_f64(1)], &selected)
+        .unwrap()
+        .to_values();
+
+    fn as_map(cols: &[Vec<Value>]) -> std::collections::HashMap<String, (Value, Value)> {
+        let mut out = std::collections::HashMap::new();
+        for row in 0..cols[0].len() {
+            let key = match &cols[0][row] {
+                Value::Null => "<null>".to_owned(),
+                Value::String(s) => s.as_ref().to_owned(),
+                other => format!("{other:?}"),
+            };
+            out.insert(key, (cols[1][row].clone(), cols[2][row].clone()));
+        }
+        out
+    }
+
+    assert_eq!(as_map(&expected), as_map(&actual));
+}
+
+#[test]
 fn hash_join_handles_duplicate_keys() {
     let schema = vec![ColumnSchema {
         name: "k".to_owned(),

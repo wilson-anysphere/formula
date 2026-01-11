@@ -322,6 +322,15 @@ impl ColumnarTable {
         crate::query::group_by(self, keys, aggs)
     }
 
+    pub fn group_by_rows(
+        &self,
+        keys: &[usize],
+        aggs: &[crate::query::AggSpec],
+        rows: &[usize],
+    ) -> Result<crate::query::GroupByResult, crate::query::QueryError> {
+        crate::query::group_by_rows(self, keys, aggs, rows)
+    }
+
     /// Hash join on a single key column.
     ///
     /// Returns row index mappings instead of materializing joined rows.

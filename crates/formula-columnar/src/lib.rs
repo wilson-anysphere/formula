@@ -19,7 +19,10 @@ mod table;
 mod types;
 
 pub use crate::cache::{CacheStats, PageCacheConfig};
-pub use crate::query::{hash_join, group_by, AggOp, AggSpec, GroupByEngine, GroupByResult, JoinResult, QueryError};
+pub use crate::query::{
+    group_by, group_by_rows, hash_join, AggOp, AggSpec, GroupByEngine, GroupByResult, JoinResult,
+    QueryError,
+};
 pub use crate::stats::ColumnStats;
 pub use crate::table::{
     ColumnSchema, ColumnarRange, ColumnarTable, ColumnarTableBuilder, MutableColumnarTable,

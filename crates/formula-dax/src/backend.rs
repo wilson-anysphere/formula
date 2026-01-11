@@ -305,6 +305,7 @@ impl ColumnarTableBackend {
         &self,
         group_by: &[usize],
         aggs: &[AggregationSpec],
+        rows: Option<&[usize]>,
     ) -> Option<Vec<Vec<Value>>> {
         use formula_columnar::{AggOp, AggSpec};
         use std::collections::HashMap;
@@ -401,7 +402,22 @@ impl ColumnarTableBackend {
             plans.push(plan);
         }
 
-        let grouped = self.table.group_by(group_by, &planned).ok()?;
+        let row_count = self.table.row_count();
+        let rows = match rows {
+            Some(rows)
+                if rows.len() == row_count
+                    && rows.first().copied() == Some(0)
+                    && rows.last().copied() == row_count.checked_sub(1) =>
+            {
+                None
+            }
+            other => other,
+        };
+
+        let grouped = match rows {
+            Some(rows) => self.table.group_by_rows(group_by, &planned, rows).ok()?,
+            None => self.table.group_by(group_by, &planned).ok()?,
+        };
         let grouped_cols = grouped.to_values();
         let group_count = grouped.row_count();
 
@@ -432,7 +448,10 @@ impl ColumnarTableBackend {
 
             let mut keys_plus = group_by.to_vec();
             keys_plus.push(column);
-            let distinct = self.table.group_by(&keys_plus, &[]).ok()?;
+            let distinct = match rows {
+                Some(rows) => self.table.group_by_rows(&keys_plus, &[], rows).ok()?,
+                None => self.table.group_by(&keys_plus, &[]).ok()?,
+            };
             let distinct_cols = distinct.to_values();
             let distinct_rows = distinct.row_count();
 
@@ -767,12 +786,21 @@ impl TableBackend for ColumnarTableBackend {
     }
 
     fn distinct_values_filtered(&self, idx: usize, rows: Option<&[usize]>) -> Option<Vec<Value>> {
-        use std::collections::HashSet;
-
         let row_count = self.table.row_count();
         if idx >= self.table.column_count() {
             return None;
         }
+
+        let rows = match rows {
+            Some(rows)
+                if rows.len() == row_count
+                    && rows.first().copied() == Some(0)
+                    && rows.last().copied() == row_count.checked_sub(1) =>
+            {
+                None
+            }
+            other => other,
+        };
 
         if rows.is_none() {
             if let Some(values) = self.dictionary_values(idx) {
@@ -794,6 +822,22 @@ impl TableBackend for ColumnarTableBackend {
                 return Some(out);
             }
         }
+
+        if let Some(rows) = rows {
+            if let Ok(result) = self.table.group_by_rows(&[idx], &[], rows) {
+                let values = result.to_values();
+                let mut out = Vec::with_capacity(result.row_count());
+                if let Some(col) = values.get(0) {
+                    for v in col {
+                        out.push(Self::dax_from_columnar(v.clone()));
+                    }
+                }
+                return Some(out);
+            }
+        }
+
+        // Fallback: decode selected pages and de-duplicate in memory.
+        use std::collections::HashSet;
 
         let mut seen: HashSet<Value> = HashSet::new();
         let mut out = Vec::new();
@@ -859,10 +903,8 @@ impl TableBackend for ColumnarTableBackend {
             return None;
         }
 
-        if rows.is_none() {
-            if let Some(out) = self.group_by_aggregations_query(group_by, aggs) {
-                return Some(out);
-            }
+        if let Some(out) = self.group_by_aggregations_query(group_by, aggs, rows) {
+            return Some(out);
         }
 
         self.group_by_aggregations_scan(group_by, aggs, rows)
