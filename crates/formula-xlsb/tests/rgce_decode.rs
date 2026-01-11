@@ -100,6 +100,22 @@ fn decodes_ptg_areanv_as_explicit_implicit_intersection() {
 }
 
 #[test]
+fn decodes_ptg_namev_as_explicit_implicit_intersection() {
+    // PtgNameV (value class) should render with `@` to preserve legacy implicit intersection.
+    let mut ctx = WorkbookContext::default();
+    ctx.add_workbook_name("MyNamedRange", 1);
+
+    // PtgNameV: [ptg][nameId: u32][reserved: u16]
+    let mut rgce = vec![0x43];
+    rgce.extend_from_slice(&1u32.to_le_bytes());
+    rgce.extend_from_slice(&0u16.to_le_bytes());
+
+    let text = decode_rgce_with_context(&rgce, &ctx).expect("decode");
+    assert_eq!(text, "@MyNamedRange");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
 fn decodes_ptgerr_known_code() {
     let rgce = [0x1C, 0x07]; // PtgErr #DIV/0!
     let decoded = decode_formula_rgce(&rgce);

@@ -762,10 +762,17 @@ fn decode_rgce_impl(
                     .name_definition(name_id)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
 
-                let txt = match &def.scope {
+                let is_value_class = (ptg & 0x60) == 0x40;
+                let mut txt = match &def.scope {
                     NameScope::Workbook => def.name.clone(),
                     NameScope::Sheet(sheet) => format!("{sheet}!{}", def.name),
                 };
+                if is_value_class {
+                    // Like value-class range tokens, a value-class name can require legacy implicit
+                    // intersection (e.g. when the name refers to a multi-cell range). Emit an
+                    // explicit `@` so the formula text preserves scalar semantics.
+                    txt = format!("@{txt}");
+                }
                 stack.push(txt);
             }
             0x39 | 0x59 | 0x79 => {
