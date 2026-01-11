@@ -103,6 +103,30 @@ test("group-by: supports signed i32 keys (including -1)", async () => {
   assert.deepEqual(Array.from(out.sums), [4, 2, 4]);
 });
 
+test("group-by: two-key groupBySum2 is lexicographically sorted by (keyA, keyB)", async () => {
+  const cpu = new CpuBackend();
+  const keysA = new Uint32Array([1, 1, 2, 2, 2]);
+  const keysB = new Uint32Array([10, 10, 10, 11, 11]);
+  const values = new Float64Array([1, 2, 3, 4, 5]);
+
+  const out = await cpu.groupBySum2(keysA, keysB, values);
+  assert.deepEqual(Array.from(out.uniqueKeysA), [1, 2, 2]);
+  assert.deepEqual(Array.from(out.uniqueKeysB), [10, 10, 11]);
+  assert.deepEqual(Array.from(out.counts), [2, 1, 2]);
+  assert.deepEqual(Array.from(out.sums), [3, 3, 9]);
+});
+
+test("group-by: two-key groupByCount2 supports signed keys and ordering", async () => {
+  const cpu = new CpuBackend();
+  const keysA = new Int32Array([-1, 0, -1, 0]);
+  const keysB = new Int32Array([5, 5, 4, 5]);
+
+  const out = await cpu.groupByCount2(keysA, keysB);
+  assert.deepEqual(Array.from(out.uniqueKeysA), [-1, -1, 0]);
+  assert.deepEqual(Array.from(out.uniqueKeysB), [4, 5, 5]);
+  assert.deepEqual(Array.from(out.counts), [1, 1, 2]);
+});
+
 test("hashJoin: inner join correctness with duplicates", async () => {
   const cpu = new CpuBackend();
   const leftKeys = new Uint32Array([1, 2, 2, 3]);

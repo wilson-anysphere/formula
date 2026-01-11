@@ -12,6 +12,10 @@ export const DEFAULT_THRESHOLDS = {
   groupBySum: 1 << 15,
   groupByMin: 1 << 15,
   groupByMax: 1 << 15,
+  groupByCount2: 1 << 15,
+  groupBySum2: 1 << 15,
+  groupByMin2: 1 << 15,
+  groupByMax2: 1 << 15,
   hashJoin: 1 << 15,
   // Rough heuristic based on multiply-add count (aRows * aCols * bCols).
   mmult: 1 << 20,
@@ -73,6 +77,10 @@ export class KernelEngine {
       groupBySum: "cpu",
       groupByMin: "cpu",
       groupByMax: "cpu",
+      groupByCount2: "cpu",
+      groupBySum2: "cpu",
+      groupByMin2: "cpu",
+      groupByMax2: "cpu",
       hashJoin: "cpu",
       mmult: "cpu",
       sort: "cpu",
@@ -91,6 +99,10 @@ export class KernelEngine {
       groupBySum: "f64",
       groupByMin: "f64",
       groupByMax: "f64",
+      groupByCount2: "u32",
+      groupBySum2: "f64",
+      groupByMin2: "f64",
+      groupByMax2: "f64",
       hashJoin: "u32",
       mmult: "f64",
       sort: "f64",
@@ -165,7 +177,7 @@ export class KernelEngine {
   }
 
   /**
-   * @param {"sum" | "min" | "max" | "average" | "count" | "sumproduct" | "groupByCount" | "groupBySum" | "groupByMin" | "groupByMax" | "hashJoin" | "mmult" | "sort" | "histogram"} kernel
+   * @param {"sum" | "min" | "max" | "average" | "count" | "sumproduct" | "groupByCount" | "groupBySum" | "groupByMin" | "groupByMax" | "groupByCount2" | "groupBySum2" | "groupByMin2" | "groupByMax2" | "hashJoin" | "mmult" | "sort" | "histogram"} kernel
    * @param {number} workloadSize
    * @param {"f32" | "f64" | "u32"} gpuPrecision
    * @returns {"cpu" | "webgpu"}
@@ -184,7 +196,7 @@ export class KernelEngine {
   }
 
   /**
-   * @param {"sum" | "min" | "max" | "average" | "count" | "sumproduct" | "groupByCount" | "groupBySum" | "groupByMin" | "groupByMax" | "hashJoin" | "mmult" | "sort" | "histogram"} kernel
+   * @param {"sum" | "min" | "max" | "average" | "count" | "sumproduct" | "groupByCount" | "groupBySum" | "groupByMin" | "groupByMax" | "groupByCount2" | "groupBySum2" | "groupByMin2" | "groupByMax2" | "hashJoin" | "mmult" | "sort" | "histogram"} kernel
    * @param {"f32" | "f64" | "u32"} precision
    */
   _gpuSupports(kernel, precision) {
@@ -245,7 +257,7 @@ export class KernelEngine {
   }
 
   /**
-   * @param {"sum" | "min" | "max" | "average" | "sumproduct" | "histogram" | "groupByCount" | "groupBySum" | "groupByMin" | "groupByMax" | "hashJoin"} kernel
+   * @param {"sum" | "min" | "max" | "average" | "sumproduct" | "histogram" | "groupByCount" | "groupBySum" | "groupByMin" | "groupByMax" | "groupByCount2" | "groupBySum2" | "groupByMin2" | "groupByMax2" | "hashJoin"} kernel
    * @param {number} workloadSize
    */
   _shouldValidate(kernel, workloadSize) {
@@ -262,6 +274,10 @@ export class KernelEngine {
       kernel === "groupBySum" ||
       kernel === "groupByMin" ||
       kernel === "groupByMax" ||
+      kernel === "groupByCount2" ||
+      kernel === "groupBySum2" ||
+      kernel === "groupByMin2" ||
+      kernel === "groupByMax2" ||
       kernel === "hashJoin"
     );
   }
@@ -788,6 +804,251 @@ export class KernelEngine {
     this._lastKernelBackend.groupByMax = "cpu";
     this._lastKernelPrecision.groupByMax = "f64";
     return this._cpu.groupByMax(keys, values);
+  }
+
+  /**
+   * Two-key group-by COUNT. CPU-only for now.
+   * @param {Uint32Array | Int32Array} keysA
+   * @param {Uint32Array | Int32Array} keysB
+   */
+  async groupByCount2(keysA, keysB) {
+    const workloadSize = keysA.length;
+    const backend = this._chooseBackend("groupByCount2", workloadSize, "u32");
+
+    if (backend === "webgpu") {
+      try {
+        if (typeof this._gpu.groupByCount2 !== "function") {
+          throw new Error("WebGPU backend does not implement groupByCount2");
+        }
+        const gpu = await this._gpu.groupByCount2(keysA, keysB);
+        if (this._shouldValidate("groupByCount2", workloadSize)) {
+          const cpu = await this._cpu.groupByCount2(keysA, keysB);
+          let ok =
+            cpu.uniqueKeysA.length === gpu.uniqueKeysA.length &&
+            cpu.uniqueKeysB.length === gpu.uniqueKeysB.length &&
+            cpu.counts.length === gpu.counts.length;
+          if (ok) {
+            for (let i = 0; i < cpu.counts.length; i++) {
+              if (cpu.uniqueKeysA[i] !== gpu.uniqueKeysA[i] || cpu.uniqueKeysB[i] !== gpu.uniqueKeysB[i] || cpu.counts[i] !== gpu.counts[i]) {
+                ok = false;
+                break;
+              }
+            }
+          }
+          if (!ok) {
+            this._validationState.mismatches += 1;
+            this._validationState.lastMismatch = { kernel: "groupByCount2", precision: "u32", workloadSize };
+            this._lastKernelBackend.groupByCount2 = "cpu";
+            this._lastKernelPrecision.groupByCount2 = "u32";
+            return cpu;
+          }
+        }
+        this._lastKernelBackend.groupByCount2 = "webgpu";
+        this._lastKernelPrecision.groupByCount2 = "u32";
+        return gpu;
+      } catch (err) {
+        this._recordGpuError("groupByCount2", "u32", err);
+        this._lastKernelBackend.groupByCount2 = "cpu";
+        this._lastKernelPrecision.groupByCount2 = "u32";
+        return this._cpu.groupByCount2(keysA, keysB);
+      }
+    }
+
+    this._lastKernelBackend.groupByCount2 = "cpu";
+    this._lastKernelPrecision.groupByCount2 = "u32";
+    return this._cpu.groupByCount2(keysA, keysB);
+  }
+
+  /**
+   * Two-key group-by SUM(+COUNT). CPU-only for now.
+   * @param {Uint32Array | Int32Array} keysA
+   * @param {Uint32Array | Int32Array} keysB
+   * @param {Float32Array | Float64Array} values
+   */
+  async groupBySum2(keysA, keysB, values) {
+    const gpuPrecision = this._gpuPrecisionForValues("f32", values);
+    const workloadSize = keysA.length;
+    const backend = this._chooseBackend("groupBySum2", workloadSize, gpuPrecision);
+
+    if (backend === "webgpu") {
+      try {
+        if (typeof this._gpu.groupBySum2 !== "function") {
+          throw new Error("WebGPU backend does not implement groupBySum2");
+        }
+        const gpu = await this._gpu.groupBySum2(keysA, keysB, values, {
+          precision: gpuPrecision,
+          allowFp32FallbackForF64: this._allowFp32FallbackForF64
+        });
+        if (this._shouldValidate("groupBySum2", workloadSize)) {
+          const cpu = await this._cpu.groupBySum2(keysA, keysB, values);
+          let ok =
+            cpu.uniqueKeysA.length === gpu.uniqueKeysA.length &&
+            cpu.uniqueKeysB.length === gpu.uniqueKeysB.length &&
+            cpu.sums.length === gpu.sums.length &&
+            cpu.counts.length === gpu.counts.length;
+          if (ok) {
+            for (let i = 0; i < cpu.counts.length; i++) {
+              if (
+                cpu.uniqueKeysA[i] !== gpu.uniqueKeysA[i] ||
+                cpu.uniqueKeysB[i] !== gpu.uniqueKeysB[i] ||
+                cpu.counts[i] !== gpu.counts[i] ||
+                !this._withinTolerance(gpu.sums[i], cpu.sums[i])
+              ) {
+                ok = false;
+                break;
+              }
+            }
+          }
+          if (!ok) {
+            this._validationState.mismatches += 1;
+            this._validationState.lastMismatch = { kernel: "groupBySum2", precision: gpuPrecision, workloadSize };
+            this._lastKernelBackend.groupBySum2 = "cpu";
+            this._lastKernelPrecision.groupBySum2 = "f64";
+            return cpu;
+          }
+        }
+        this._lastKernelBackend.groupBySum2 = "webgpu";
+        this._lastKernelPrecision.groupBySum2 = gpuPrecision;
+        return gpu;
+      } catch (err) {
+        this._recordGpuError("groupBySum2", gpuPrecision, err);
+        this._lastKernelBackend.groupBySum2 = "cpu";
+        this._lastKernelPrecision.groupBySum2 = "f64";
+        return this._cpu.groupBySum2(keysA, keysB, values);
+      }
+    }
+
+    this._lastKernelBackend.groupBySum2 = "cpu";
+    this._lastKernelPrecision.groupBySum2 = "f64";
+    return this._cpu.groupBySum2(keysA, keysB, values);
+  }
+
+  /**
+   * Two-key group-by MIN(+COUNT). CPU-only for now.
+   * @param {Uint32Array | Int32Array} keysA
+   * @param {Uint32Array | Int32Array} keysB
+   * @param {Float32Array | Float64Array} values
+   */
+  async groupByMin2(keysA, keysB, values) {
+    const gpuPrecision = this._gpuPrecisionForValues("f32", values);
+    const workloadSize = keysA.length;
+    const backend = this._chooseBackend("groupByMin2", workloadSize, gpuPrecision);
+
+    if (backend === "webgpu") {
+      try {
+        if (typeof this._gpu.groupByMin2 !== "function") {
+          throw new Error("WebGPU backend does not implement groupByMin2");
+        }
+        const gpu = await this._gpu.groupByMin2(keysA, keysB, values, {
+          precision: gpuPrecision,
+          allowFp32FallbackForF64: this._allowFp32FallbackForF64
+        });
+        if (this._shouldValidate("groupByMin2", workloadSize)) {
+          const cpu = await this._cpu.groupByMin2(keysA, keysB, values);
+          let ok =
+            cpu.uniqueKeysA.length === gpu.uniqueKeysA.length &&
+            cpu.uniqueKeysB.length === gpu.uniqueKeysB.length &&
+            cpu.mins.length === gpu.mins.length &&
+            cpu.counts.length === gpu.counts.length;
+          if (ok) {
+            for (let i = 0; i < cpu.counts.length; i++) {
+              if (
+                cpu.uniqueKeysA[i] !== gpu.uniqueKeysA[i] ||
+                cpu.uniqueKeysB[i] !== gpu.uniqueKeysB[i] ||
+                cpu.counts[i] !== gpu.counts[i] ||
+                !Object.is(gpu.mins[i], cpu.mins[i])
+              ) {
+                ok = false;
+                break;
+              }
+            }
+          }
+          if (!ok) {
+            this._validationState.mismatches += 1;
+            this._validationState.lastMismatch = { kernel: "groupByMin2", precision: gpuPrecision, workloadSize };
+            this._lastKernelBackend.groupByMin2 = "cpu";
+            this._lastKernelPrecision.groupByMin2 = "f64";
+            return cpu;
+          }
+        }
+        this._lastKernelBackend.groupByMin2 = "webgpu";
+        this._lastKernelPrecision.groupByMin2 = gpuPrecision;
+        return gpu;
+      } catch (err) {
+        this._recordGpuError("groupByMin2", gpuPrecision, err);
+        this._lastKernelBackend.groupByMin2 = "cpu";
+        this._lastKernelPrecision.groupByMin2 = "f64";
+        return this._cpu.groupByMin2(keysA, keysB, values);
+      }
+    }
+
+    this._lastKernelBackend.groupByMin2 = "cpu";
+    this._lastKernelPrecision.groupByMin2 = "f64";
+    return this._cpu.groupByMin2(keysA, keysB, values);
+  }
+
+  /**
+   * Two-key group-by MAX(+COUNT). CPU-only for now.
+   * @param {Uint32Array | Int32Array} keysA
+   * @param {Uint32Array | Int32Array} keysB
+   * @param {Float32Array | Float64Array} values
+   */
+  async groupByMax2(keysA, keysB, values) {
+    const gpuPrecision = this._gpuPrecisionForValues("f32", values);
+    const workloadSize = keysA.length;
+    const backend = this._chooseBackend("groupByMax2", workloadSize, gpuPrecision);
+
+    if (backend === "webgpu") {
+      try {
+        if (typeof this._gpu.groupByMax2 !== "function") {
+          throw new Error("WebGPU backend does not implement groupByMax2");
+        }
+        const gpu = await this._gpu.groupByMax2(keysA, keysB, values, {
+          precision: gpuPrecision,
+          allowFp32FallbackForF64: this._allowFp32FallbackForF64
+        });
+        if (this._shouldValidate("groupByMax2", workloadSize)) {
+          const cpu = await this._cpu.groupByMax2(keysA, keysB, values);
+          let ok =
+            cpu.uniqueKeysA.length === gpu.uniqueKeysA.length &&
+            cpu.uniqueKeysB.length === gpu.uniqueKeysB.length &&
+            cpu.maxs.length === gpu.maxs.length &&
+            cpu.counts.length === gpu.counts.length;
+          if (ok) {
+            for (let i = 0; i < cpu.counts.length; i++) {
+              if (
+                cpu.uniqueKeysA[i] !== gpu.uniqueKeysA[i] ||
+                cpu.uniqueKeysB[i] !== gpu.uniqueKeysB[i] ||
+                cpu.counts[i] !== gpu.counts[i] ||
+                !Object.is(gpu.maxs[i], cpu.maxs[i])
+              ) {
+                ok = false;
+                break;
+              }
+            }
+          }
+          if (!ok) {
+            this._validationState.mismatches += 1;
+            this._validationState.lastMismatch = { kernel: "groupByMax2", precision: gpuPrecision, workloadSize };
+            this._lastKernelBackend.groupByMax2 = "cpu";
+            this._lastKernelPrecision.groupByMax2 = "f64";
+            return cpu;
+          }
+        }
+        this._lastKernelBackend.groupByMax2 = "webgpu";
+        this._lastKernelPrecision.groupByMax2 = gpuPrecision;
+        return gpu;
+      } catch (err) {
+        this._recordGpuError("groupByMax2", gpuPrecision, err);
+        this._lastKernelBackend.groupByMax2 = "cpu";
+        this._lastKernelPrecision.groupByMax2 = "f64";
+        return this._cpu.groupByMax2(keysA, keysB, values);
+      }
+    }
+
+    this._lastKernelBackend.groupByMax2 = "cpu";
+    this._lastKernelPrecision.groupByMax2 = "f64";
+    return this._cpu.groupByMax2(keysA, keysB, values);
   }
 
   /**

@@ -28,6 +28,10 @@ export class CpuBackend {
         groupBySum: true,
         groupByMin: true,
         groupByMax: true,
+        groupByCount2: true,
+        groupBySum2: true,
+        groupByMin2: true,
+        groupByMax2: true,
         hashJoin: true,
         mmult: true,
         sort: true,
@@ -325,6 +329,285 @@ export class CpuBackend {
       counts[i] = entry?.count ?? 0;
     }
     return { uniqueKeys, maxs, counts };
+  }
+
+  /**
+   * Group-by COUNT on two key columns.
+   *
+   * Keys may be `Uint32Array` (dictionary ids) or `Int32Array` (signed keys).
+   * Returned keys are sorted lexicographically by `(keyA, keyB)` using each
+   * key column's numeric ordering.
+   *
+   * @param {Uint32Array | Int32Array} keysA
+   * @param {Uint32Array | Int32Array} keysB
+   * @returns {Promise<{ uniqueKeysA: Uint32Array | Int32Array, uniqueKeysB: Uint32Array | Int32Array, counts: Uint32Array }>}
+   */
+  async groupByCount2(keysA, keysB) {
+    if (keysA.length !== keysB.length) {
+      throw new Error(`groupByCount2 length mismatch: keysA=${keysA.length} keysB=${keysB.length}`);
+    }
+    const n = keysA.length;
+    if (n === 0) {
+      return {
+        uniqueKeysA: keysA instanceof Int32Array ? new Int32Array() : new Uint32Array(),
+        uniqueKeysB: keysB instanceof Int32Array ? new Int32Array() : new Uint32Array(),
+        counts: new Uint32Array()
+      };
+    }
+
+    const signedA = keysA instanceof Int32Array;
+    const signedB = keysB instanceof Int32Array;
+
+    /** @type {Map<bigint, number>} */
+    const countsMap = new Map();
+    for (let i = 0; i < n; i++) {
+      const aBits = keysA[i] >>> 0;
+      const bBits = keysB[i] >>> 0;
+      const key = (BigInt(aBits) << 32n) | BigInt(bBits);
+      countsMap.set(key, (countsMap.get(key) ?? 0) + 1);
+    }
+
+    /** @type {{ key: bigint, sortKey: bigint, count: number }[]} */
+    const entries = [];
+    for (const [key, count] of countsMap) {
+      const aBits = Number(key >> 32n) >>> 0;
+      const bBits = Number(key & 0xffff_ffffn) >>> 0;
+      const aSort = (aBits ^ (signedA ? 0x8000_0000 : 0)) >>> 0;
+      const bSort = (bBits ^ (signedB ? 0x8000_0000 : 0)) >>> 0;
+      const sortKey = (BigInt(aSort) << 32n) | BigInt(bSort);
+      entries.push({ key, sortKey, count });
+    }
+    entries.sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
+
+    const uniqueKeysA = signedA ? new Int32Array(entries.length) : new Uint32Array(entries.length);
+    const uniqueKeysB = signedB ? new Int32Array(entries.length) : new Uint32Array(entries.length);
+    const counts = new Uint32Array(entries.length);
+    for (let i = 0; i < entries.length; i++) {
+      const key = entries[i].key;
+      const aBits = Number(key >> 32n) >>> 0;
+      const bBits = Number(key & 0xffff_ffffn) >>> 0;
+      uniqueKeysA[i] = signedA ? aBits | 0 : aBits;
+      uniqueKeysB[i] = signedB ? bBits | 0 : bBits;
+      counts[i] = entries[i].count;
+    }
+
+    return { uniqueKeysA, uniqueKeysB, counts };
+  }
+
+  /**
+   * Group-by SUM(+COUNT) on two key columns.
+   *
+   * @param {Uint32Array | Int32Array} keysA
+   * @param {Uint32Array | Int32Array} keysB
+   * @param {Float32Array | Float64Array} values
+   * @returns {Promise<{ uniqueKeysA: Uint32Array | Int32Array, uniqueKeysB: Uint32Array | Int32Array, sums: Float64Array, counts: Uint32Array }>}
+   */
+  async groupBySum2(keysA, keysB, values) {
+    if (keysA.length !== keysB.length) {
+      throw new Error(`groupBySum2 length mismatch: keysA=${keysA.length} keysB=${keysB.length}`);
+    }
+    if (keysA.length !== values.length) {
+      throw new Error(`groupBySum2 length mismatch: keys=${keysA.length} values=${values.length}`);
+    }
+    const n = keysA.length;
+    if (n === 0) {
+      return {
+        uniqueKeysA: keysA instanceof Int32Array ? new Int32Array() : new Uint32Array(),
+        uniqueKeysB: keysB instanceof Int32Array ? new Int32Array() : new Uint32Array(),
+        sums: new Float64Array(),
+        counts: new Uint32Array()
+      };
+    }
+
+    const signedA = keysA instanceof Int32Array;
+    const signedB = keysB instanceof Int32Array;
+
+    /** @type {Map<bigint, { sum: number, count: number }>} */
+    const map = new Map();
+    for (let i = 0; i < n; i++) {
+      const aBits = keysA[i] >>> 0;
+      const bBits = keysB[i] >>> 0;
+      const key = (BigInt(aBits) << 32n) | BigInt(bBits);
+      const entry = map.get(key);
+      if (entry) {
+        entry.sum += values[i];
+        entry.count += 1;
+      } else {
+        map.set(key, { sum: values[i], count: 1 });
+      }
+    }
+
+    /** @type {{ key: bigint, sortKey: bigint, sum: number, count: number }[]} */
+    const entries = [];
+    for (const [key, entry] of map) {
+      const aBits = Number(key >> 32n) >>> 0;
+      const bBits = Number(key & 0xffff_ffffn) >>> 0;
+      const aSort = (aBits ^ (signedA ? 0x8000_0000 : 0)) >>> 0;
+      const bSort = (bBits ^ (signedB ? 0x8000_0000 : 0)) >>> 0;
+      const sortKey = (BigInt(aSort) << 32n) | BigInt(bSort);
+      entries.push({ key, sortKey, sum: entry.sum, count: entry.count });
+    }
+    entries.sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
+
+    const uniqueKeysA = signedA ? new Int32Array(entries.length) : new Uint32Array(entries.length);
+    const uniqueKeysB = signedB ? new Int32Array(entries.length) : new Uint32Array(entries.length);
+    const sums = new Float64Array(entries.length);
+    const counts = new Uint32Array(entries.length);
+    for (let i = 0; i < entries.length; i++) {
+      const key = entries[i].key;
+      const aBits = Number(key >> 32n) >>> 0;
+      const bBits = Number(key & 0xffff_ffffn) >>> 0;
+      uniqueKeysA[i] = signedA ? aBits | 0 : aBits;
+      uniqueKeysB[i] = signedB ? bBits | 0 : bBits;
+      sums[i] = entries[i].sum;
+      counts[i] = entries[i].count;
+    }
+
+    return { uniqueKeysA, uniqueKeysB, sums, counts };
+  }
+
+  /**
+   * Group-by MIN(+COUNT) on two key columns.
+   *
+   * @param {Uint32Array | Int32Array} keysA
+   * @param {Uint32Array | Int32Array} keysB
+   * @param {Float32Array | Float64Array} values
+   * @returns {Promise<{ uniqueKeysA: Uint32Array | Int32Array, uniqueKeysB: Uint32Array | Int32Array, mins: Float64Array, counts: Uint32Array }>}
+   */
+  async groupByMin2(keysA, keysB, values) {
+    if (keysA.length !== keysB.length) {
+      throw new Error(`groupByMin2 length mismatch: keysA=${keysA.length} keysB=${keysB.length}`);
+    }
+    if (keysA.length !== values.length) {
+      throw new Error(`groupByMin2 length mismatch: keys=${keysA.length} values=${values.length}`);
+    }
+    const n = keysA.length;
+    if (n === 0) {
+      return {
+        uniqueKeysA: keysA instanceof Int32Array ? new Int32Array() : new Uint32Array(),
+        uniqueKeysB: keysB instanceof Int32Array ? new Int32Array() : new Uint32Array(),
+        mins: new Float64Array(),
+        counts: new Uint32Array()
+      };
+    }
+
+    const signedA = keysA instanceof Int32Array;
+    const signedB = keysB instanceof Int32Array;
+
+    /** @type {Map<bigint, { min: number, count: number }>} */
+    const map = new Map();
+    for (let i = 0; i < n; i++) {
+      const aBits = keysA[i] >>> 0;
+      const bBits = keysB[i] >>> 0;
+      const key = (BigInt(aBits) << 32n) | BigInt(bBits);
+      const entry = map.get(key);
+      if (entry) {
+        entry.min = Math.min(entry.min, values[i]);
+        entry.count += 1;
+      } else {
+        map.set(key, { min: values[i], count: 1 });
+      }
+    }
+
+    /** @type {{ key: bigint, sortKey: bigint, min: number, count: number }[]} */
+    const entries = [];
+    for (const [key, entry] of map) {
+      const aBits = Number(key >> 32n) >>> 0;
+      const bBits = Number(key & 0xffff_ffffn) >>> 0;
+      const aSort = (aBits ^ (signedA ? 0x8000_0000 : 0)) >>> 0;
+      const bSort = (bBits ^ (signedB ? 0x8000_0000 : 0)) >>> 0;
+      const sortKey = (BigInt(aSort) << 32n) | BigInt(bSort);
+      entries.push({ key, sortKey, min: entry.min, count: entry.count });
+    }
+    entries.sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
+
+    const uniqueKeysA = signedA ? new Int32Array(entries.length) : new Uint32Array(entries.length);
+    const uniqueKeysB = signedB ? new Int32Array(entries.length) : new Uint32Array(entries.length);
+    const mins = new Float64Array(entries.length);
+    const counts = new Uint32Array(entries.length);
+    for (let i = 0; i < entries.length; i++) {
+      const key = entries[i].key;
+      const aBits = Number(key >> 32n) >>> 0;
+      const bBits = Number(key & 0xffff_ffffn) >>> 0;
+      uniqueKeysA[i] = signedA ? aBits | 0 : aBits;
+      uniqueKeysB[i] = signedB ? bBits | 0 : bBits;
+      mins[i] = entries[i].min;
+      counts[i] = entries[i].count;
+    }
+
+    return { uniqueKeysA, uniqueKeysB, mins, counts };
+  }
+
+  /**
+   * Group-by MAX(+COUNT) on two key columns.
+   *
+   * @param {Uint32Array | Int32Array} keysA
+   * @param {Uint32Array | Int32Array} keysB
+   * @param {Float32Array | Float64Array} values
+   * @returns {Promise<{ uniqueKeysA: Uint32Array | Int32Array, uniqueKeysB: Uint32Array | Int32Array, maxs: Float64Array, counts: Uint32Array }>}
+   */
+  async groupByMax2(keysA, keysB, values) {
+    if (keysA.length !== keysB.length) {
+      throw new Error(`groupByMax2 length mismatch: keysA=${keysA.length} keysB=${keysB.length}`);
+    }
+    if (keysA.length !== values.length) {
+      throw new Error(`groupByMax2 length mismatch: keys=${keysA.length} values=${values.length}`);
+    }
+    const n = keysA.length;
+    if (n === 0) {
+      return {
+        uniqueKeysA: keysA instanceof Int32Array ? new Int32Array() : new Uint32Array(),
+        uniqueKeysB: keysB instanceof Int32Array ? new Int32Array() : new Uint32Array(),
+        maxs: new Float64Array(),
+        counts: new Uint32Array()
+      };
+    }
+
+    const signedA = keysA instanceof Int32Array;
+    const signedB = keysB instanceof Int32Array;
+
+    /** @type {Map<bigint, { max: number, count: number }>} */
+    const map = new Map();
+    for (let i = 0; i < n; i++) {
+      const aBits = keysA[i] >>> 0;
+      const bBits = keysB[i] >>> 0;
+      const key = (BigInt(aBits) << 32n) | BigInt(bBits);
+      const entry = map.get(key);
+      if (entry) {
+        entry.max = Math.max(entry.max, values[i]);
+        entry.count += 1;
+      } else {
+        map.set(key, { max: values[i], count: 1 });
+      }
+    }
+
+    /** @type {{ key: bigint, sortKey: bigint, max: number, count: number }[]} */
+    const entries = [];
+    for (const [key, entry] of map) {
+      const aBits = Number(key >> 32n) >>> 0;
+      const bBits = Number(key & 0xffff_ffffn) >>> 0;
+      const aSort = (aBits ^ (signedA ? 0x8000_0000 : 0)) >>> 0;
+      const bSort = (bBits ^ (signedB ? 0x8000_0000 : 0)) >>> 0;
+      const sortKey = (BigInt(aSort) << 32n) | BigInt(bSort);
+      entries.push({ key, sortKey, max: entry.max, count: entry.count });
+    }
+    entries.sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
+
+    const uniqueKeysA = signedA ? new Int32Array(entries.length) : new Uint32Array(entries.length);
+    const uniqueKeysB = signedB ? new Int32Array(entries.length) : new Uint32Array(entries.length);
+    const maxs = new Float64Array(entries.length);
+    const counts = new Uint32Array(entries.length);
+    for (let i = 0; i < entries.length; i++) {
+      const key = entries[i].key;
+      const aBits = Number(key >> 32n) >>> 0;
+      const bBits = Number(key & 0xffff_ffffn) >>> 0;
+      uniqueKeysA[i] = signedA ? aBits | 0 : aBits;
+      uniqueKeysB[i] = signedB ? bBits | 0 : bBits;
+      maxs[i] = entries[i].max;
+      counts[i] = entries[i].count;
+    }
+
+    return { uniqueKeysA, uniqueKeysB, maxs, counts };
   }
 
   /**

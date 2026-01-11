@@ -8,6 +8,7 @@ Optional WebGPU compute acceleration for heavy spreadsheet/analytics kernels wit
   - `COUNT`, `SUM`, `MIN`, `MAX`
   - Keys: `Uint32Array` (dictionary ids) or `Int32Array` (signed 32-bit keys)
   - Outputs are returned sorted by `uniqueKeys`
+  - Two-key CPU group-by variants: `groupByCount2/groupBySum2/groupByMin2/groupByMax2`
 - **Hash join** on two key arrays producing matching `(leftIndex, rightIndex)` pairs (inner and left join)
 - **MMULT** (matrix multiplication)
 - **Sort** (bitonic sort for numeric vectors)
@@ -37,6 +38,12 @@ const valuesByKey = new Float64Array([10, 5, 1, 2, 3]);
 const grouped = await engine.groupBySum(keys, valuesByKey);
 console.log(grouped.uniqueKeys, grouped.sums, grouped.counts);
 
+// Two-key group-by SUM(+COUNT) (CPU-only for now).
+const keysA = new Uint32Array([1, 1, 2, 2]);
+const keysB = new Uint32Array([10, 11, 10, 11]);
+const grouped2 = await engine.groupBySum2(keysA, keysB, new Float64Array([1, 2, 3, 4]));
+console.log(grouped2.uniqueKeysA, grouped2.uniqueKeysB, grouped2.sums, grouped2.counts);
+
 // Hash join (inner join).
 const leftKeys = new Uint32Array([1, 2, 2, 3]);
 const rightKeys = new Uint32Array([2, 2, 3, 4]);
@@ -55,6 +62,7 @@ await engine.dispose();
   - `precision: "fast"`: prefers **f32** GPU kernels and may downcast `Float64Array` inputs for performance.
 - Current WebGPU coverage:
   - `groupBySum/groupByMin/groupByMax` are currently **f32-only** (implemented via atomic CAS loops), so `"excel"` mode will fall back to CPU for these.
+  - `groupBy*2` (two-key group-by) is currently **CPU-only**.
 - Optional safety net: in `"excel"` mode the engine can validate some GPU results against CPU for smaller workloads (default `maxElements=32768`) and fall back to CPU if the difference exceeds a strict tolerance (`abs=1e-9`, `rel=1e-12`). Configure via the `validation` option.
 - In `"excel"` mode, if a WebGPU kernel throws at runtime (pipeline/dispatch/device issues), the engine records diagnostics and **falls back to CPU**.
 - Kernel edge cases:
