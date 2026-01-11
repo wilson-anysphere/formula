@@ -243,5 +243,47 @@ describe("CanvasGrid scrollbars", () => {
     });
     host.remove();
   });
-});
 
+  it("uses ctrl+wheel to zoom the grid", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 200,
+      width: 200,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    } as unknown as DOMRect);
+
+    const apiRef = React.createRef<GridApi>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<CanvasGrid provider={{ getCell: () => null }} rowCount={100} colCount={10} defaultRowHeight={10} defaultColWidth={10} apiRef={apiRef} />);
+    });
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    expect(apiRef.current?.getZoom()).toBe(1);
+
+    await act(async () => {
+      container.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, clientX: 100, clientY: 100, bubbles: true, cancelable: true })
+      );
+    });
+
+    const zoom = apiRef.current?.getZoom() ?? 0;
+    expect(zoom).toBeGreaterThan(1);
+    expect(zoom).toBeCloseTo(Math.exp(0.1), 3);
+    expect(apiRef.current?.getColWidth(0)).toBeCloseTo(10 * zoom, 3);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+});

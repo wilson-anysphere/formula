@@ -769,6 +769,26 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const pageWidth = Math.max(0, viewport.width - viewport.frozenWidth);
       const pageHeight = Math.max(0, viewport.height - viewport.frozenHeight);
 
+      // On most browsers, trackpad pinch-to-zoom is surfaced as a ctrl+wheel event.
+      // Treat it as a zoom gesture (like common spreadsheet apps) instead of scrolling
+      // the page or the grid.
+      if (event.ctrlKey) {
+        const delta = wheelDeltaToPixels(event.deltaY, event.deltaMode, { lineHeight, pageSize: viewport.height });
+        if (delta === 0) return;
+
+        event.preventDefault();
+
+        const rect = container.getBoundingClientRect();
+        const anchorX = event.clientX - rect.left;
+        const anchorY = event.clientY - rect.top;
+
+        // `delta` is in pixels (after normalization). Use an exponential scale so
+        // small trackpad deltas feel smooth while mouse wheels produce ~10% steps.
+        const zoomFactor = Math.exp(-delta * 0.001);
+        setZoomInternal(zoomRef.current * zoomFactor, { anchorX, anchorY });
+        return;
+      }
+
       let deltaX = wheelDeltaToPixels(event.deltaX, event.deltaMode, { lineHeight, pageSize: pageWidth });
       let deltaY = wheelDeltaToPixels(event.deltaY, event.deltaMode, { lineHeight, pageSize: pageHeight });
 
