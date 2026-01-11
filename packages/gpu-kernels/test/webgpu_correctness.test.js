@@ -171,6 +171,11 @@ test("webgpu: f32 + f64 correctness for common kernels (if WebGPU available)", a
     const gpuOut = await gpu.hashJoin(leftKeys, rightKeys);
     assert.deepEqual(Array.from(gpuOut.leftIndex), Array.from(cpuOut.leftIndex));
     assert.deepEqual(Array.from(gpuOut.rightIndex), Array.from(cpuOut.rightIndex));
+
+    const cpuLeft = await cpu.hashJoin(leftKeys, rightKeys, { joinType: "left" });
+    const gpuLeft = await gpu.hashJoin(leftKeys, rightKeys, { joinType: "left" });
+    assert.deepEqual(Array.from(gpuLeft.leftIndex), Array.from(cpuLeft.leftIndex));
+    assert.deepEqual(Array.from(gpuLeft.rightIndex), Array.from(cpuLeft.rightIndex));
   });
 
   // -------- f64 paths (when supported) --------
