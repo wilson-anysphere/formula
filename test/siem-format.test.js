@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createAuditEvent } from "../packages/audit-core/index.js";
+import { createAuditEvent, serializeBatch } from "../packages/audit-core/index.js";
 import { toCef, toLeef } from "../packages/security/siem/format.js";
 
 test("toCef formats an audit event and redacts sensitive fields", () => {
@@ -76,4 +76,34 @@ test("toLeef formats an audit event with tab-delimited attributes and redaction"
   assert.ok(segments.some((segment) => segment.includes('"apiKey":"[REDACTED]"')));
   assert.ok(!formatted.includes("dd_api_key"));
   assert.ok(!formatted.includes("secret"));
+});
+
+test("SIEM formatters strip internal __audit metadata from details", () => {
+  const event = createAuditEvent({
+    id: "55555555-5555-4555-8555-555555555555",
+    timestamp: "2025-01-03T00:00:00.000Z",
+    eventType: "test.internal_meta",
+    actor: { type: "user", id: "user_1" },
+    context: { orgId: "org_1" },
+    success: true,
+    details: {
+      token: "supersecret",
+      __audit: {
+        actor: { type: "system", id: "api" },
+        correlation: { requestId: "req_1", traceId: "trace_1" }
+      }
+    }
+  });
+
+  const cef = toCef(event);
+  assert.ok(!cef.includes("__audit"));
+
+  const leef = toLeef(event);
+  assert.ok(!leef.includes("__audit"));
+
+  const json = serializeBatch([event], { format: "json", redact: false });
+  const payload = JSON.parse(json.body.toString("utf8"));
+  assert.ok(!("__audit" in payload[0].details));
+  // Ensure formatting does not mutate caller-provided objects.
+  assert.ok("__audit" in event.details);
 });

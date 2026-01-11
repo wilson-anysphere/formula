@@ -294,6 +294,24 @@ function pickUserId(event) {
   return event?.context?.userId ?? (event?.actor?.type === "user" ? event.actor.id : undefined);
 }
 
+function stripInternalDetailsAuditMeta(details) {
+  if (!isPlainObject(details)) return details;
+  if (!Object.prototype.hasOwnProperty.call(details, "__audit")) return details;
+
+  const output = { ...details };
+  delete output.__audit;
+  return output;
+}
+
+function stripInternalAuditMeta(event) {
+  if (!event || typeof event !== "object") return event;
+
+  const details = stripInternalDetailsAuditMeta(event.details);
+  if (details === event.details) return event;
+
+  return { ...event, details };
+}
+
 function buildCefExtension(event) {
   const timestampMs = toTimestampMs(event.timestamp) ?? Date.now();
   const ctx = event.context || {};
@@ -352,7 +370,7 @@ function buildCefExtension(event) {
 }
 
 function toCef(event, options = {}) {
-  const safeEvent = options.redact === false ? event : redactAuditEvent(event, options.redactionOptions);
+  const safeEvent = stripInternalAuditMeta(options.redact === false ? event : redactAuditEvent(event, options.redactionOptions));
   const vendor = options.vendor ?? "Formula";
   const product = options.product ?? "Spreadsheet";
   const deviceVersion = options.deviceVersion ?? "1.0";
@@ -375,7 +393,7 @@ function toCef(event, options = {}) {
 }
 
 function toLeef(event, options = {}) {
-  const safeEvent = options.redact === false ? event : redactAuditEvent(event, options.redactionOptions);
+  const safeEvent = stripInternalAuditMeta(options.redact === false ? event : redactAuditEvent(event, options.redactionOptions));
   const vendor = options.vendor ?? "Formula";
   const product = options.product ?? "Spreadsheet";
   const productVersion = options.productVersion ?? "1.0";
@@ -428,18 +446,19 @@ function serializeBatch(events, options = {}) {
   const format = options.format ?? "json";
   const redactionOptions = options.redactionOptions;
   const safeEvents = options.redact === false ? events : events.map((event) => redactAuditEvent(event, redactionOptions));
+  const sanitizedEvents = safeEvents.map(stripInternalAuditMeta);
 
   if (format === "cef") {
-    const lines = safeEvents.map((event) => toCef(event, { ...options, redact: false }));
+    const lines = sanitizedEvents.map((event) => toCef(event, { ...options, redact: false }));
     return { contentType: "text/plain", body: Buffer.from(lines.join("\n") + "\n", "utf8") };
   }
 
   if (format === "leef") {
-    const lines = safeEvents.map((event) => toLeef(event, { ...options, redact: false }));
+    const lines = sanitizedEvents.map((event) => toLeef(event, { ...options, redact: false }));
     return { contentType: "text/plain", body: Buffer.from(lines.join("\n") + "\n", "utf8") };
   }
 
-  return { contentType: "application/json", body: Buffer.from(JSON.stringify(safeEvents), "utf8") };
+  return { contentType: "application/json", body: Buffer.from(JSON.stringify(sanitizedEvents), "utf8") };
 }
 
 // --- Storage adapters
