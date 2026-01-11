@@ -779,9 +779,12 @@ export class SpreadsheetApp {
     this.root.focus();
   }
 
-  whenIdle(): Promise<void> {
-    const wasm = this.wasmSyncPromise;
-    return Promise.all([this.idle.whenIdle(), wasm.catch(() => {})]).then(() => {});
+  async whenIdle(): Promise<void> {
+    while (true) {
+      const wasm = this.wasmSyncPromise;
+      await Promise.all([this.idle.whenIdle(), wasm.catch(() => {})]);
+      if (this.wasmSyncPromise === wasm) return;
+    }
   }
 
   getRecalcCount(): number {
@@ -3478,7 +3481,8 @@ export class SpreadsheetApp {
         }
       }
 
-      const value = ref.value;
+      let value = ref.value;
+      if (value === undefined) value = null;
       if (value !== null && typeof value !== "number" && typeof value !== "string" && typeof value !== "boolean") {
         continue;
       }

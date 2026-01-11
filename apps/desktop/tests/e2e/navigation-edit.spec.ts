@@ -7,6 +7,7 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
 test.describe("grid keyboard navigation + in-place editing", () => {
   test("arrow navigation updates active cell", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     // Focus + select A1 (top-left).
     await page.click("#grid", { position: { x: 5, y: 5 } });
@@ -23,6 +24,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
   test("typing begins in-place edit and commits", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
     const recalcBefore = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
@@ -50,6 +52,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     test.skip(browserName === "webkit", "End/Home key handling is unreliable in webkit headless");
 
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
     await page.keyboard.press("Control+End");
@@ -59,6 +62,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
   test("PageDown scrolls the grid and keeps the active cell visible", async ({ page, browserName }) => {
     test.skip(browserName === "webkit", "PageDown key handling can be unreliable in webkit headless");
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
     const grid = page.locator("#grid");
     await grid.click({ position: { x: 60, y: 40 } });
 
@@ -76,6 +80,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
   test("F2 edit commits with Enter and cancels with Escape", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
     const recalcBefore = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
@@ -126,6 +131,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
   test("Ctrl/Cmd+Z undo + Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y redo update cells", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
     // Clear any seeded value so undo returns to an empty cell.
@@ -201,6 +207,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
   test("Ctrl/Cmd+Z does not steal undo while editing a cell", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
     // Clear any seeded value.
@@ -239,6 +246,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
   test("Ctrl/Cmd+Z does not steal undo while editing the formula bar", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
     // Clear any seeded value.
