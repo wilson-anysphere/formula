@@ -44,6 +44,7 @@ struct PostgresConnectionDescriptor {
     host: Option<String>,
     port: Option<u16>,
     database: Option<String>,
+    #[serde(alias = "username")]
     user: Option<String>,
     ssl: Option<bool>,
 }
@@ -70,6 +71,15 @@ fn credential_password(credentials: Option<&JsonValue>) -> Option<String> {
             .or_else(|| credential_string(credentials, "token"))
             .or_else(|| credential_string(credentials, "secret")),
     }
+}
+
+fn credential_username(credentials: Option<&JsonValue>) -> Option<String> {
+    let creds = credentials?;
+    let obj = creds.as_object()?;
+    obj.get("user")
+        .or_else(|| obj.get("username"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 fn sqlite_type_to_data_type(type_name: &str) -> SqlDataType {
@@ -498,6 +508,8 @@ pub async fn sql_query(
             }
             if let Some(user) = descriptor.user {
                 opts = opts.username(&user);
+            } else if let Some(user) = credential_username(credentials.as_ref()) {
+                opts = opts.username(&user);
             }
 
             if let Some(password) = credential_password(credentials.as_ref()) {
@@ -573,6 +585,8 @@ pub async fn sql_get_schema(
                 opts = opts.database(&database);
             }
             if let Some(user) = descriptor.user {
+                opts = opts.username(&user);
+            } else if let Some(user) = credential_username(credentials.as_ref()) {
                 opts = opts.username(&user);
             }
 
