@@ -33,7 +33,9 @@ class MergedDemoProvider implements CellProvider {
   }
 
   getCell(row: number, col: number): CellData | null {
-    const headerStyle: CellStyle = { fill: "#f5f5f5", fontWeight: "600" };
+    // Avoid hard-coded header colors so the demo respects `GridTheme.headerBg/headerText`
+    // (and the CSS variable theme examples in `packages/grid/index.html`).
+    const headerStyle: CellStyle = { fontWeight: "600" };
     if (row === 0) return { row, col, value: col === 0 ? "" : `Col ${col}`, style: headerStyle };
     if (col === 0) return { row, col, value: row, style: headerStyle };
 
@@ -90,9 +92,18 @@ export function MergedCellsDemo(): React.ReactElement {
 
   return (
     <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ padding: 12, borderBottom: "1px solid #e5e7eb", fontFamily: "system-ui, sans-serif", fontSize: 14 }}>
+      <div
+        style={{
+          padding: 12,
+          borderBottom: "1px solid var(--formula-grid-line, #e5e7eb)",
+          background: "var(--formula-grid-header-bg, #fff)",
+          color: "var(--formula-grid-header-text, #0f172a)",
+          fontFamily: "system-ui, sans-serif",
+          fontSize: 14
+        }}
+      >
         <div style={{ fontWeight: 600 }}>Merged cells + Excel-style text overflow</div>
-        <div style={{ marginTop: 4, color: "#4b5563" }}>
+        <div style={{ marginTop: 4, color: "var(--formula-grid-cell-text, #4b5563)", opacity: 0.75 }}>
           Try clicking inside merged regions (selection snaps to the anchor) and observe text overflowing into empty neighbors.
           Append <code>?demo=perf</code> to the URL to switch back to the perf harness.
         </div>
@@ -104,4 +115,3 @@ export function MergedCellsDemo(): React.ReactElement {
     </div>
   );
 }
-
