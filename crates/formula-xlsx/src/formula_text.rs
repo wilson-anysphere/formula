@@ -1,5 +1,7 @@
 const XL_FN_PREFIX: &str = "_xlfn.";
 const XL_FN_PREFIX_BYTES: &[u8] = b"_xlfn.";
+const XL_WS_PREFIX: &str = "_xlws.";
+const XL_UDF_PREFIX: &str = "_xludf.";
 
 // Functions that Excel stores in OOXML formulas with an `_xlfn.` prefix for forward
 // compatibility (typically Excel 365 "future functions").
@@ -186,6 +188,19 @@ pub(crate) fn add_xlfn_prefixes(formula: &str) -> String {
 }
 
 fn needs_xlfn_prefix(ident: &str) -> bool {
+    // Excel may store certain function namespaces without the leading `_xlfn.` prefix in the
+    // UI-facing formula text we operate on here (because we strip `_xlfn.` when normalizing
+    // display formulas). When writing back to OOXML we must restore `_xlfn.` for these
+    // namespace-qualified functions so round-trips preserve the original file form.
+    if ident
+        .get(..XL_WS_PREFIX.len())
+        .is_some_and(|p| p.eq_ignore_ascii_case(XL_WS_PREFIX))
+        || ident
+            .get(..XL_UDF_PREFIX.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(XL_UDF_PREFIX))
+    {
+        return true;
+    }
     XL_FN_REQUIRED_FUNCTIONS
         .iter()
         .any(|required| ident.eq_ignore_ascii_case(required))
@@ -227,6 +242,22 @@ mod tests {
     #[test]
     fn strip_xlfn_prefixes_is_case_insensitive_for_prefix() {
         assert_eq!(strip_xlfn_prefixes("_XLFN.SEQUENCE(1)"), "SEQUENCE(1)");
+    }
+
+    #[test]
+    fn xlfn_roundtrip_preserves_xlws_namespace_functions() {
+        let file = r#"_xlfn._xlws.WEBSERVICE("https://example.com")"#;
+        let display = strip_xlfn_prefixes(file);
+        assert_eq!(display, r#"_xlws.WEBSERVICE("https://example.com")"#);
+        assert_eq!(add_xlfn_prefixes(&display), file);
+    }
+
+    #[test]
+    fn xlfn_roundtrip_preserves_xludf_namespace_functions() {
+        let file = "_xlfn._xludf.MYFUNC(1)";
+        let display = strip_xlfn_prefixes(file);
+        assert_eq!(display, "_xludf.MYFUNC(1)");
+        assert_eq!(add_xlfn_prefixes(&display), file);
     }
 
     #[test]
