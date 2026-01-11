@@ -192,6 +192,8 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
     #[cfg(not(target_arch = "wasm32"))]
     use openssl::stack::Stack;
     #[cfg(not(target_arch = "wasm32"))]
+    use openssl::x509::X509;
+    #[cfg(not(target_arch = "wasm32"))]
     use openssl::x509::store::X509StoreBuilder;
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -205,10 +207,15 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
         Err(_) => return VbaSignatureVerification::SignedInvalid,
     };
     #[cfg(not(target_arch = "wasm32"))]
-    let extra_certs = match Stack::new() {
+    let empty_certs = match Stack::<X509>::new() {
         Ok(stack) => stack,
         Err(_) => return VbaSignatureVerification::SignedInvalid,
     };
+    #[cfg(not(target_arch = "wasm32"))]
+    let certs = pkcs7
+        .signed()
+        .and_then(|s| s.certificates())
+        .unwrap_or(&empty_certs);
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -217,7 +224,7 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
         let flags = Pkcs7Flags::NOVERIFY;
 
         // First try verifying as a "normal" PKCS#7 blob with embedded content.
-        if pkcs7.verify(&extra_certs, &store, None, None, flags).is_ok() {
+        if pkcs7.verify(certs, &store, None, None, flags).is_ok() {
             return VbaSignatureVerification::SignedVerified;
         }
 
@@ -228,14 +235,14 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
             let prefix = &signature[..pkcs7_offset];
             if pkcs7
                 .verify(
-                    &extra_certs,
+                    certs,
                     &store,
                     Some(prefix),
                     None,
                     flags | Pkcs7Flags::DETACHED,
                 )
                 .is_ok()
-                || pkcs7.verify(&extra_certs, &store, Some(prefix), None, flags).is_ok()
+                || pkcs7.verify(certs, &store, Some(prefix), None, flags).is_ok()
             {
                 return VbaSignatureVerification::SignedVerified;
             }
