@@ -169,6 +169,10 @@ export function deserializeAnyTable(payload) {
     }
     const bytes = payload.bytes instanceof Uint8Array ? payload.bytes : new Uint8Array(payload.bytes);
     const table = arrowTableFromIPC(bytes);
+    const fieldCount = table?.schema?.fields?.length ?? null;
+    if (typeof fieldCount === "number" && Array.isArray(payload.columns) && payload.columns.length !== fieldCount) {
+      throw new Error(`Cached Arrow payload is inconsistent (expected ${payload.columns.length} fields, got ${fieldCount})`);
+    }
     return new ArrowTableAdapter(table, payload.columns);
   }
 
