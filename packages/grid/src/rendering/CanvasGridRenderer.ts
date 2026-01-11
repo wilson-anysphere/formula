@@ -169,6 +169,7 @@ export class CanvasGridRenderer {
   private rangeSelection: CellRange | null = null;
 
   private remotePresences: GridPresence[] = [];
+  private remotePresenceDirtyPadding = 1;
 
   private readonly textWidthCache = new LruCache<string, number>(10_000);
   private textLayoutEngine?: TextLayoutEngine;
@@ -283,6 +284,9 @@ export class CanvasGridRenderer {
       this.unsubscribeProvider = this.provider.subscribe((update) => this.onProviderUpdate(update));
     }
 
+    if (this.selectionCtx) {
+      this.remotePresenceDirtyPadding = this.getRemotePresenceDirtyPadding(this.selectionCtx);
+    }
     this.markAllDirty();
   }
 
@@ -384,6 +388,11 @@ export class CanvasGridRenderer {
   setRemotePresences(presences: GridPresence[] | null): void {
     if (presences === this.remotePresences) return;
     this.remotePresences = presences ?? [];
+    if (this.selectionCtx) {
+      this.remotePresenceDirtyPadding = this.getRemotePresenceDirtyPadding(this.selectionCtx);
+    } else {
+      this.remotePresenceDirtyPadding = 1;
+    }
 
     const viewport = this.scroll.getViewportState();
     this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
@@ -801,8 +810,7 @@ export class CanvasGridRenderer {
     // Remote presence cursor badges can extend beyond their cursor cell (e.g. above + to the right).
     // When we blit-scroll the selection layer we only redraw newly exposed stripes; without padding,
     // badges for cursors that become visible in the new stripe can be clipped/truncated.
-    const selectionPadding =
-      this.remotePresences.length > 0 && this.selectionCtx ? this.getRemotePresenceDirtyPadding(this.selectionCtx) : 1;
+    const selectionPadding = this.remotePresences.length > 0 ? this.remotePresenceDirtyPadding : 1;
 
     for (const { rect, shiftX, shiftY } of candidates) {
       if (rect.width <= 0 || rect.height <= 0) continue;
@@ -836,6 +844,20 @@ export class CanvasGridRenderer {
         this.markDirtyBoth(stripe);
         this.markDirtySelection(stripe, selectionPadding);
       }
+    }
+
+    // Freeze lines are drawn on the selection layer but should not move with scroll. When we blit
+    // the selection layer, the previous freeze line pixels get shifted into the scrollable
+    // quadrants, leaving "ghost" lines behind. Mark those shifted lines as dirty so they get
+    // cleared and redrawn in the correct location.
+    const ghostWidth = 6;
+    if (viewport.frozenCols > 0 && deltaX !== 0) {
+      const ghostX = crispLine(viewport.frozenWidth) + deltaX;
+      this.dirty.selection.markDirty({ x: ghostX - ghostWidth, y: 0, width: ghostWidth * 2, height: viewport.height });
+    }
+    if (viewport.frozenRows > 0 && deltaY !== 0) {
+      const ghostY = crispLine(viewport.frozenHeight) + deltaY;
+      this.dirty.selection.markDirty({ x: 0, y: ghostY - ghostWidth, width: viewport.width, height: ghostWidth * 2 });
     }
   }
 
