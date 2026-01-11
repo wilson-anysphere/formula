@@ -6,6 +6,8 @@ import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/l
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 
+import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
+
 import type { ToolExecutionResult } from "../../../../../packages/ai-tools/src/executor/tool-executor.js";
 import type {
   LLMToolCall,
@@ -121,16 +123,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController);
 
-  const contextManager =
-    options.contextManager ??
-    (options.ragStore && options.embedder
-      ? new ContextManager({
-          workbookRag: {
-            vectorStore: options.ragStore,
-            embedder: options.embedder
-          }
-        })
-      : null);
+  const contextManager = options.contextManager ?? createDefaultContextManager(options);
 
   const baseSystemPrompt =
     options.systemPrompt ??
@@ -143,14 +136,12 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const activeSheetId = options.getActiveSheetId?.() ?? "Sheet1";
     const attachments = params.attachments ?? [];
 
-    const workbookContext = contextManager
-      ? await contextManager.buildWorkbookContextFromSpreadsheetApi({
-          spreadsheet,
-          workbookId: options.workbookId,
-          query: text,
-          attachments
-        })
-      : { promptContext: "", retrieved: [], indexStats: undefined };
+    const workbookContext = await contextManager.buildWorkbookContextFromSpreadsheetApi({
+      spreadsheet,
+      workbookId: options.workbookId,
+      query: text,
+      attachments
+    });
 
     const promptContext = formatPromptContext(workbookContext.promptContext);
 
@@ -344,4 +335,28 @@ function sanitizeHistory(history: LLMMessage[] | undefined): LLMMessage[] {
   // The orchestrator always injects its own system prompt (including context).
   // Drop any system messages that callers may have included.
   return history.filter((m) => m.role !== "system");
+}
+
+function createDefaultContextManager(options: AiChatOrchestratorOptions): ContextManager {
+  if (options.ragStore || options.embedder) {
+    if (!options.ragStore || !options.embedder) {
+      throw new Error("createAiChatOrchestrator requires both ragStore and embedder when providing workbook RAG");
+    }
+    return new ContextManager({
+      workbookRag: {
+        vectorStore: options.ragStore,
+        embedder: options.embedder
+      }
+    });
+  }
+
+  const dimension = 384;
+  const vectorStore = new InMemoryVectorStore({ dimension });
+  const embedder = new HashEmbedder({ dimension });
+  return new ContextManager({
+    workbookRag: {
+      vectorStore,
+      embedder
+    }
+  });
 }
