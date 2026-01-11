@@ -1,14 +1,22 @@
 use crate::schema;
+use crate::encryption::{
+    decrypt_sqlite_bytes, encrypt_sqlite_bytes, is_encrypted_container, load_or_create_keyring,
+    KeyProvider,
+};
 use crate::types::{
     CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
 };
 use formula_model::{validate_sheet_name, ErrorValue, SheetNameError};
+use rusqlite::backup::Backup;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde_json::json;
-use std::path::Path;
+use std::fs;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
+use tempfile::NamedTempFile;
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
@@ -18,6 +26,10 @@ pub enum StorageError {
     Sqlite(#[from] rusqlite::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Encryption(#[from] crate::encryption::EncryptionError),
     #[error("workbook not found: {0}")]
     WorkbookNotFound(Uuid),
     #[error("sheet not found: {0}")]
@@ -45,9 +57,36 @@ fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
         .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Storage {
     conn: Arc<Mutex<Connection>>,
+    encrypted: Option<Arc<EncryptedStorageContext>>,
+}
+
+struct EncryptedStorageContext {
+    path: PathBuf,
+    key_provider: Arc<dyn KeyProvider>,
+}
+
+impl std::fmt::Debug for EncryptedStorageContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EncryptedStorageContext")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for Storage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Storage");
+        s.field("conn", &self.conn);
+        if let Some(ctx) = &self.encrypted {
+            s.field("encrypted_path", &Some(&ctx.path));
+        } else {
+            s.field("encrypted_path", &Option::<&PathBuf>::None);
+        }
+        s.finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +135,7 @@ impl Storage {
         schema::init(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            encrypted: None,
         })
     }
 
@@ -105,6 +145,7 @@ impl Storage {
         schema::init(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            encrypted: None,
         })
     }
 
@@ -117,7 +158,77 @@ impl Storage {
         schema::init(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            encrypted: None,
         })
+    }
+
+    /// Open (or create) a workbook at `path`, encrypting the persisted bytes with AES-256-GCM.
+    ///
+    /// This keeps the live SQLite database in-memory; callers must invoke [`Storage::persist`]
+    /// to flush the encrypted container to disk.
+    pub fn open_encrypted_path(
+        path: impl AsRef<Path>,
+        key_provider: Arc<dyn KeyProvider>,
+    ) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let mut conn = Connection::open_in_memory()?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+
+        match fs::metadata(&path) {
+            Ok(metadata) => {
+                if metadata.len() > 0 {
+                    let mut prefix = [0u8; 8];
+                    let read_len = {
+                        let mut file = fs::File::open(&path)?;
+                        file.read(&mut prefix)?
+                    };
+
+                    if is_encrypted_container(&prefix[..read_len]) {
+                        let bytes = fs::read(&path)?;
+                        let keyring = load_or_create_keyring(key_provider.as_ref(), false)?;
+                        let sqlite_bytes = decrypt_sqlite_bytes(&bytes, &keyring)?;
+                        load_sqlite_bytes_into_connection(&mut conn, &sqlite_bytes)?;
+                    } else {
+                        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY;
+                        let src = Connection::open_with_flags(&path, flags)?;
+                        backup_connection(&src, &mut conn)?;
+                    }
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+
+        schema::init(&mut conn)?;
+
+        // Ensure a keyring exists for new/plaintext workbooks so the first persist can encrypt.
+        let _ = load_or_create_keyring(key_provider.as_ref(), true)?;
+
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+            encrypted: Some(Arc::new(EncryptedStorageContext { path, key_provider })),
+        })
+    }
+
+    /// Persist the workbook to disk if opened in encrypted mode.
+    ///
+    /// Plaintext-backed storages (`open_path`, `open_uri`, `open_in_memory`) are already persisted
+    /// by SQLite itself, so this is a no-op for them.
+    pub fn persist(&self) -> Result<()> {
+        let Some(ctx) = self.encrypted.as_ref() else {
+            return Ok(());
+        };
+
+        let sqlite_bytes = {
+            let conn = self.conn.lock().expect("storage mutex poisoned");
+            export_connection_to_sqlite_bytes(&conn)?
+        };
+
+        let keyring = load_or_create_keyring(ctx.key_provider.as_ref(), true)?;
+        let encrypted_bytes = encrypt_sqlite_bytes(&sqlite_bytes, &keyring)?;
+
+        atomic_write(&ctx.path, &encrypted_bytes)?;
+        Ok(())
     }
 
     pub fn create_workbook(
@@ -1066,4 +1177,53 @@ fn get_or_insert_style_tx(tx: &Transaction<'_>, style: &Style) -> Result<i64> {
     )?;
 
     Ok(tx.last_insert_rowid())
+}
+
+fn backup_connection(src: &Connection, dst: &mut Connection) -> Result<()> {
+    let backup = Backup::new(src, dst)?;
+    backup.run_to_completion(128, Duration::from_millis(0), None)?;
+    Ok(())
+}
+
+fn load_sqlite_bytes_into_connection(dst: &mut Connection, sqlite_bytes: &[u8]) -> Result<()> {
+    let mut temp = NamedTempFile::new()?;
+    temp.write_all(sqlite_bytes)?;
+    temp.flush()?;
+    let temp_path = temp.into_temp_path();
+
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY;
+    let src = Connection::open_with_flags(&temp_path, flags)?;
+    backup_connection(&src, dst)?;
+    Ok(())
+}
+
+fn export_connection_to_sqlite_bytes(conn: &Connection) -> Result<Vec<u8>> {
+    let temp = NamedTempFile::new()?;
+    let temp_path = temp.into_temp_path();
+
+    let mut dst = Connection::open(&temp_path)?;
+    backup_connection(conn, &mut dst)?;
+    drop(dst);
+
+    Ok(fs::read(&temp_path)?)
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = NamedTempFile::new_in(dir)?;
+    temp.write_all(bytes)?;
+    temp.flush()?;
+    temp.as_file().sync_all()?;
+
+    match temp.persist(path) {
+        Ok(_) => Ok(()),
+        Err(err) => match err.error.kind() {
+            // Best-effort replacement on platforms where rename doesn't clobber.
+            std::io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(path);
+                err.file.persist(path).map(|_| ()).map_err(|e| e.error)
+            }
+            _ => Err(err.error),
+        },
+    }
 }

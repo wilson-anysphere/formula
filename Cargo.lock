@@ -1566,8 +1566,11 @@ dependencies = [
 name = "formula-storage"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
  "formula-model",
  "lru",
+ "rand 0.8.5",
  "rusqlite",
  "serde",
  "serde_json",
