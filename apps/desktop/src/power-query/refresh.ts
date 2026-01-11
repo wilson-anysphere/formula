@@ -5,6 +5,8 @@ import { RefreshOrchestrator } from "../../../../packages/power-query/src/refres
 
 import type { DocumentController } from "../document/documentController.js";
 
+import type { RefreshStateStore } from "./refreshStateStore.ts";
+
 // Use `.ts` extension so Node's `--experimental-strip-types` test runner can resolve
 // the module without relying on bundler-specific `.js`→`.ts` mapping.
 import { applyTableToDocument, type ApplyToDocumentResult, type QuerySheetDestination } from "./applyToDocument.ts";
@@ -91,7 +93,7 @@ export type DesktopPowerQueryRefreshOptions = {
   getContext?: () => QueryExecutionContext;
   concurrency?: number;
   batchSize?: number;
-  stateStore?: { load(): Promise<any>; save(state: any): Promise<void> };
+  stateStore?: RefreshStateStore;
 };
 
 /**
@@ -109,6 +111,7 @@ export class DesktopPowerQueryRefreshManager {
 
   manager: RefreshManager;
   orchestrator: RefreshOrchestrator;
+  ready: Promise<void>;
 
   constructor(options: DesktopPowerQueryRefreshOptions) {
     this.doc = options.document;
@@ -121,8 +124,9 @@ export class DesktopPowerQueryRefreshManager {
       engine: engine as any,
       getContext: options.getContext,
       concurrency: options.concurrency,
-      stateStore: options.stateStore as any,
+      stateStore: options.stateStore,
     });
+    this.ready = this.manager.ready;
 
     this.orchestrator = new RefreshOrchestrator({
       engine: engine as any,

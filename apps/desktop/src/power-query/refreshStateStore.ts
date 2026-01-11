@@ -3,12 +3,23 @@ import type { RefreshPolicy } from "../../../../packages/power-query/src/model.j
 export type RefreshStateEntry = { policy: RefreshPolicy; lastRunAtMs?: number };
 export type RefreshState = Record<string, RefreshStateEntry>;
 
+/**
+ * Desktop persistence hooks for `RefreshManager` scheduling state.
+ *
+ * Tauri webviews do not expose Node filesystem APIs, so we default to
+ * LocalStorage in-browser (stable per-workbook key) with an in-memory fallback
+ * for non-browser environments (tests, previews).
+ */
 export type RefreshStateStore = {
   load(): Promise<RefreshState>;
   save(state: RefreshState): Promise<void>;
 };
 
-type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void };
+export type StorageLike = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
+};
 
 function safeStorage(storage: StorageLike): StorageLike {
   return {
@@ -28,7 +39,7 @@ function safeStorage(storage: StorageLike): StorageLike {
     },
     removeItem(key) {
       try {
-        storage.removeItem(key);
+        storage.removeItem?.(key);
       } catch {
         // ignore
       }
@@ -80,38 +91,43 @@ function cloneState(state: RefreshState): RefreshState {
   return JSON.parse(JSON.stringify(state)) as RefreshState;
 }
 
+const FALLBACK_STATE_BY_KEY = new Map<string, RefreshState>();
+
 /**
  * Create a `RefreshStateStore` suitable for the desktop app.
  *
  * Uses browser `localStorage` when available and falls back to an in-memory store in
  * non-browser environments (tests, storybook, etc).
  */
-export function createPowerQueryRefreshStateStore(options: {
-  workbookId?: string;
-  storage?: StorageLike;
-} = {}): RefreshStateStore {
-  const storage = options.storage ?? getLocalStorageOrNull();
+export function createPowerQueryRefreshStateStore(
+  options: {
+    workbookId?: string;
+    storage?: StorageLike | null;
+  } = {},
+): RefreshStateStore {
+  const storage = options.storage === undefined ? getLocalStorageOrNull() : options.storage;
   const key = storageKey(options.workbookId);
 
   if (!storage) {
-    let state: RefreshState = {};
     return {
       async load() {
-        return cloneState(state);
+        return cloneState(FALLBACK_STATE_BY_KEY.get(key) ?? {});
       },
       async save(next) {
-        state = cloneState(next ?? {});
+        FALLBACK_STATE_BY_KEY.set(key, cloneState(next ?? {}));
       },
     };
   }
 
   return {
     async load() {
-      return safeParseState(storage.getItem(key));
+      return safeParseState(safeStorage(storage).getItem(key));
     },
     async save(state) {
-      storage.setItem(key, JSON.stringify(state ?? {}));
+      safeStorage(storage).setItem(key, JSON.stringify(state ?? {}));
     },
   };
 }
 
+// Backwards-compatible alias (older call sites/tests).
+export const createDesktopRefreshStateStore = createPowerQueryRefreshStateStore;

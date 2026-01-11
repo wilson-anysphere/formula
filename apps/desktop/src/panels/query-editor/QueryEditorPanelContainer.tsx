@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Query } from "../../../../../packages/power-query/src/model.js";
 import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
@@ -41,6 +41,25 @@ function isQuerySheetDestination(dest: unknown): dest is QuerySheetDestination {
   if (typeof obj.start.row !== "number" || typeof obj.start.col !== "number") return false;
   if (typeof obj.includeHeader !== "boolean") return false;
   return true;
+}
+
+const TRIGGERED_ON_OPEN_BY_WORKBOOK = new Map<string, Set<string>>();
+
+function workbookKey(workbookId: string | undefined): string {
+  return workbookId ?? "default";
+}
+
+function hasTriggeredOnOpen(workbookId: string | undefined, queryId: string): boolean {
+  const key = workbookKey(workbookId);
+  const existing = TRIGGERED_ON_OPEN_BY_WORKBOOK.get(key);
+  return existing?.has(queryId) ?? false;
+}
+
+function markTriggeredOnOpen(workbookId: string | undefined, queryId: string): void {
+  const key = workbookKey(workbookId);
+  const existing = TRIGGERED_ON_OPEN_BY_WORKBOOK.get(key) ?? new Set<string>();
+  existing.add(queryId);
+  TRIGGERED_ON_OPEN_BY_WORKBOOK.set(key, existing);
 }
 
 function defaultQuery(): Query {
@@ -117,11 +136,9 @@ export function QueryEditorPanelContainer(props: Props) {
   });
 
   const doc = props.getDocumentController();
-
   const refreshStateStore = useMemo(() => {
     return createPowerQueryRefreshStateStore({ workbookId: props.workbookId });
   }, [props.workbookId]);
-
   const refreshManager = useMemo(() => {
     return new DesktopPowerQueryRefreshManager({
       engine,
@@ -157,32 +174,44 @@ export function QueryEditorPanelContainer(props: Props) {
   const [activeLoad, setActiveLoad] = useState<{ jobId: string; controller: AbortController } | null>(null);
   const [activeRefresh, setActiveRefresh] = useState<{ jobId: string; cancel: () => void; applying: boolean } | null>(null);
   const [activeRefreshAll, setActiveRefreshAll] = useState<{ sessionId: string; cancel: () => void } | null>(null);
-  const triggeredOnOpenForQueryId = useRef<string | null>(null);
 
   useEffect(() => {
-    try {
-      refreshManager.registerQuery(query);
-      // Trigger "on-open" policies once per query id while the panel is mounted.
-      if (query.refreshPolicy?.type === "on-open" && triggeredOnOpenForQueryId.current !== query.id) {
-        refreshManager.triggerOnOpen(query.id);
-        triggeredOnOpenForQueryId.current = query.id;
-      }
-    } catch (err: any) {
-      // Invalid refresh policies (e.g. malformed cron expression) should not crash the panel.
-      setActionError(err?.message ?? String(err));
-      const fallback: Query = { ...query, refreshPolicy: { type: "manual" } };
-      try {
-        refreshManager.registerQuery(fallback);
-      } catch {
-        // ignore
-      }
-      // Persist the fallback so the user doesn't get stuck in a crash loop.
-      setQuery(fallback);
-    }
+    let cancelled = false;
 
-    return () => refreshManager.unregisterQuery(query.id);
+    void (async () => {
+      await refreshManager.ready;
+      if (cancelled) return;
+
+      try {
+        refreshManager.registerQuery(query);
+      } catch (err: any) {
+        // Invalid refresh policies (e.g. malformed cron expression) should not crash the panel.
+        setActionError(err?.message ?? String(err));
+        const fallback: Query = { ...query, refreshPolicy: { type: "manual" } };
+        try {
+          refreshManager.registerQuery(fallback);
+        } catch {
+          // ignore
+        }
+        // Persist the fallback so the user doesn't get stuck in a crash loop.
+        setQuery(fallback);
+        return;
+      }
+
+      // Trigger "on-open" policies once per query id for the active workbook
+      // (panel remounts should not retrigger).
+      if (query.refreshPolicy?.type === "on-open" && !hasTriggeredOnOpen(props.workbookId, query.id)) {
+        refreshManager.triggerOnOpen(query.id);
+        markTriggeredOnOpen(props.workbookId, query.id);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      refreshManager.unregisterQuery(query.id);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshManager, query]);
+  }, [refreshManager, query, props.workbookId]);
 
   useEffect(() => {
     refreshOrchestrator.registerQuery(query);

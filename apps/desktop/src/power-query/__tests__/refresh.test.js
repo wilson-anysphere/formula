@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DataTable } from "../../../../../packages/power-query/src/table.js";
+import { RefreshManager } from "../../../../../packages/power-query/src/refresh.js";
 
 import { DocumentController } from "../../document/documentController.js";
 import { MockEngine } from "../../document/engine.js";
 
 import { DesktopPowerQueryRefreshManager } from "../refresh.ts";
 import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
+import { createPowerQueryRefreshStateStore } from "../refreshStateStore.ts";
 
 function makeMeta(queryId, table) {
   return {
@@ -372,7 +374,69 @@ test("DesktopPowerQueryRefreshManager dispose cancels in-flight refreshAll sessi
   await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
   assert.equal(engine.calls.length, 1, "dispose should cancel queued work before it starts");
 });
+function makeQuery(id, refreshPolicy) {
+  const query = {
+    id,
+    name: id,
+    source: { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } },
+    steps: [],
+  };
+  if (refreshPolicy) query.refreshPolicy = refreshPolicy;
+  return query;
+}
 
+function makeResult(queryId) {
+  const table = new DataTable([], []);
+  return { table, meta: makeMeta(queryId, table) };
+}
+
+class FakeTimers {
+  constructor(now = 0) {
+    this.now = now;
+    this.nextId = 1;
+    /** @type {Map<number, { time: number, fn: () => void }>} */
+    this.tasks = new Map();
+  }
+
+  setTimeout(fn, ms) {
+    const id = this.nextId++;
+    this.tasks.set(id, { time: this.now + ms, fn });
+    return id;
+  }
+
+  clearTimeout(id) {
+    this.tasks.delete(id);
+  }
+
+  advance(ms) {
+    this.now += ms;
+    while (true) {
+      let next = null;
+      for (const [id, task] of this.tasks) {
+        if (task.time <= this.now) {
+          if (!next || task.time < next.task.time) next = { id, task };
+        }
+      }
+      if (!next) break;
+      this.tasks.delete(next.id);
+      next.task.fn();
+    }
+  }
+}
+
+class MapStorage {
+  constructor() {
+    this.map = new Map();
+  }
+
+  getItem(key) {
+    return this.map.get(key) ?? null;
+  }
+
+  setItem(key, value) {
+    this.map.set(key, value);
+  }
+}
 test("DesktopPowerQueryRefreshManager applies completed refresh results into the destination", async () => {
   const table = DataTable.fromGrid(
     [
@@ -467,4 +531,191 @@ test("DesktopPowerQueryRefreshManager cancellation aborts apply and reverts part
   assert.equal(doc.batchDepth, 0);
 
   mgr.dispose();
+});
+
+test("RefreshManager persists interval schedules via the desktop refresh state store", async () => {
+  const storage = new MapStorage();
+  const stateStore1 = createPowerQueryRefreshStateStore({ workbookId: "wb_refresh", storage });
+  const timers = new FakeTimers();
+
+  const engine1 = new ControlledEngine();
+  const manager1 = new RefreshManager({
+    engine: engine1,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    stateStore: stateStore1,
+  });
+
+  manager1.registerQuery(makeQuery("q_interval", { type: "interval", intervalMs: 10 }));
+  await manager1.ready;
+
+  const completed1 = new Promise((resolve) => {
+    manager1.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "q_interval") resolve(undefined);
+    });
+  });
+
+  timers.advance(10);
+  assert.equal(engine1.calls.length, 1);
+  engine1.calls[0].deferred.resolve(makeResult("q_interval"));
+  await completed1;
+  await Promise.resolve(); // allow lastRunAtMs persistence
+
+  const persisted1 = await stateStore1.load();
+  assert.deepEqual(persisted1.q_interval.policy, { type: "interval", intervalMs: 10 });
+  assert.equal(persisted1.q_interval.lastRunAtMs, 10);
+
+  timers.advance(5); // now = 15
+  manager1.dispose();
+
+  const stateStore2 = createPowerQueryRefreshStateStore({ workbookId: "wb_refresh", storage });
+  const engine2 = new ControlledEngine();
+  const manager2 = new RefreshManager({
+    engine: engine2,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    stateStore: stateStore2,
+  });
+
+  const query2 = makeQuery("q_interval");
+  delete query2.refreshPolicy;
+  manager2.registerQuery(query2);
+  await manager2.ready;
+
+  const completed2 = new Promise((resolve) => {
+    manager2.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "q_interval") resolve(undefined);
+    });
+  });
+
+  timers.advance(4);
+  assert.equal(engine2.calls.length, 0);
+
+  timers.advance(1);
+  assert.equal(engine2.calls.length, 1, "expected interval schedule to be relative to persisted lastRunAtMs");
+  engine2.calls[0].deferred.resolve(makeResult("q_interval"));
+  await completed2;
+
+  manager2.dispose();
+});
+
+test("RefreshManager persists cron schedules via the desktop refresh state store", async () => {
+  const storage = new MapStorage();
+  const stateStore1 = createPowerQueryRefreshStateStore({ workbookId: "wb_cron", storage });
+  const timers = new FakeTimers(0);
+
+  const engine1 = new ControlledEngine();
+  const manager1 = new RefreshManager({
+    engine: engine1,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    timezone: "utc",
+    stateStore: stateStore1,
+  });
+
+  manager1.registerQuery(makeQuery("q_cron", { type: "cron", cron: "* * * * *" }));
+  await manager1.ready;
+
+  const completed1 = new Promise((resolve) => {
+    manager1.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "q_cron") resolve(undefined);
+    });
+  });
+
+  timers.advance(60 * 1000);
+  assert.equal(engine1.calls.length, 1);
+  engine1.calls[0].deferred.resolve(makeResult("q_cron"));
+  await completed1;
+  await Promise.resolve();
+
+  const persisted = await stateStore1.load();
+  assert.deepEqual(persisted.q_cron.policy, { type: "cron", cron: "* * * * *" });
+  assert.equal(persisted.q_cron.lastRunAtMs, 60 * 1000);
+
+  manager1.dispose();
+
+  // Simulate a clock reset (or VM suspend) that would otherwise schedule an
+  // already-executed cron minute.
+  const resetTimers = new FakeTimers(0);
+  const stateStore2 = createPowerQueryRefreshStateStore({ workbookId: "wb_cron", storage });
+  const engine2 = new ControlledEngine();
+  const manager2 = new RefreshManager({
+    engine: engine2,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => resetTimers.setTimeout(...args), clearTimeout: (id) => resetTimers.clearTimeout(id) },
+    now: () => resetTimers.now,
+    timezone: "utc",
+    stateStore: stateStore2,
+  });
+
+  const query2 = makeQuery("q_cron");
+  delete query2.refreshPolicy;
+  manager2.registerQuery(query2);
+  await manager2.ready;
+
+  resetTimers.advance(60 * 1000);
+  assert.equal(engine2.calls.length, 0, "expected restored lastRunAtMs to avoid rerunning the same cron minute");
+
+  resetTimers.advance(60 * 1000);
+  assert.equal(engine2.calls.length, 1);
+  engine2.calls[0].deferred.resolve(makeResult("q_cron"));
+  await engine2.calls[0].deferred.promise;
+
+  manager2.dispose();
+});
+
+test("RefreshManager saves policy updates to the desktop refresh state store", async () => {
+  const storage = new MapStorage();
+  const stateStore = createPowerQueryRefreshStateStore({ workbookId: "wb_policy", storage });
+  const engine = new ControlledEngine();
+  const timers = new FakeTimers();
+  const manager = new RefreshManager({
+    engine,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    stateStore,
+  });
+
+  manager.registerQuery(makeQuery("q_policy", { type: "manual" }));
+  await manager.ready;
+
+  manager.registerQuery(makeQuery("q_policy", { type: "interval", intervalMs: 123 }));
+  // `RefreshManager` persists state asynchronously and batches overlapping saves.
+  // Yield a couple ticks to allow the queued save to flush.
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const persisted = await stateStore.load();
+  assert.deepEqual(persisted.q_policy.policy, { type: "interval", intervalMs: 123 });
+
+  manager.dispose();
+});
+
+test("RefreshManager persistence failures are best-effort", async () => {
+  const brokenStore = {
+    async load() {
+      throw new Error("load failed");
+    },
+    async save() {
+      throw new Error("save failed");
+    },
+  };
+
+  const engine = new ControlledEngine();
+  const manager = new RefreshManager({ engine, concurrency: 1, stateStore: brokenStore });
+
+  const query = makeQuery("q_broken", { type: "manual" });
+  manager.registerQuery(query);
+  await manager.ready;
+
+  const handle = manager.refresh(query.id);
+  assert.equal(engine.calls.length, 1);
+  engine.calls[0].deferred.resolve(makeResult(query.id));
+  await handle.promise;
+
+  manager.dispose();
 });
