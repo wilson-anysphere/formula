@@ -5527,6 +5527,59 @@ mod tests {
     }
 
     #[test]
+    fn lambda_invocation_syntax_evaluates() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=LAMBDA(x,x+1)(3)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(4.0));
+    }
+
+    #[test]
+    fn nested_lambda_invocation_syntax_evaluates() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=LAMBDA(x,LAMBDA(y,x+y))(1)(2)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    }
+
+    #[test]
+    fn lambda_invocation_tracks_dependencies() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_value("Sheet1", "B1", Value::Number(10.0))
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=LAMBDA(x,B1+x)(1)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(11.0));
+
+        engine
+            .set_cell_value("Sheet1", "B1", Value::Number(20.0))
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(21.0));
+    }
+
+    #[test]
+    fn parenthesized_name_invocation_preserves_lambda_recursion() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                "=LET(f,LAMBDA(n,IF(n=0,1,n*f(n-1))),(f)(5))",
+            )
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(120.0));
+    }
+
+    #[test]
     fn multithreaded_and_singlethreaded_match_for_volatiles_given_same_recalc_context() {
         fn setup(engine: &mut Engine) {
             engine

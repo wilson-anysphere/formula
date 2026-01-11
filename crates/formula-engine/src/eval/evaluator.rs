@@ -10,6 +10,9 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+/// Synthetic call name used for anonymous `LAMBDA(...)(...)` invocations.
+///
+/// The leading NUL byte ensures this key cannot be referenced by user formulas.
 const ANON_LAMBDA_CALL_NAME: &str = "\u{0}ANON_LAMBDA_CALL";
 
 #[derive(Debug, Clone, Copy)]
