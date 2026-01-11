@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rand_core::RngCore;
 use serde::{Deserialize, Serialize};
+use std::sync::{Mutex, OnceLock};
 
 use super::encryption::{DesktopStorageEncryptionError, KeychainProvider, OsKeychainProvider};
 
@@ -8,6 +9,12 @@ const POWER_QUERY_CACHE_KEY_KEYCHAIN_SERVICE: &str = "formula.desktop";
 const POWER_QUERY_CACHE_KEY_KEYCHAIN_ACCOUNT: &str = "power-query-cache-key";
 const POWER_QUERY_CACHE_KEY_BYTES: usize = 32;
 const POWER_QUERY_CACHE_KEY_VERSION: u32 = 1;
+
+static POWER_QUERY_CACHE_KEY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn cache_key_lock() -> &'static Mutex<()> {
+    POWER_QUERY_CACHE_KEY_LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum PowerQueryCacheKeyStoreError {
@@ -77,6 +84,13 @@ impl<P: KeychainProvider> PowerQueryCacheKeyStore<P> {
     }
 
     pub fn get_or_create(&self) -> Result<PowerQueryCacheKey, PowerQueryCacheKeyStoreError> {
+        // Ensure concurrent requests (multiple webviews / JS calls) cannot race and
+        // generate multiple encryption keys. We keep the lock scoped to the key
+        // creation flow (keychain read + optional write).
+        let _guard = cache_key_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+
         let secret = self
             .keychain
             .get_secret(
@@ -106,6 +120,8 @@ impl<P: KeychainProvider> PowerQueryCacheKeyStore<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::thread;
 
     use crate::storage::encryption::InMemoryKeychainProvider;
 
@@ -120,5 +136,29 @@ mod tests {
         assert_eq!(second.key_version, 1);
         assert_eq!(second.key_base64, first.key_base64);
     }
-}
 
+    #[test]
+    fn concurrent_get_or_create_returns_the_same_key() {
+        let store = Arc::new(PowerQueryCacheKeyStore::new(
+            InMemoryKeychainProvider::default(),
+        ));
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let cloned = store.clone();
+                thread::spawn(move || cloned.get_or_create().expect("key"))
+            })
+            .collect();
+
+        let mut keys = Vec::new();
+        for handle in handles {
+            keys.push(handle.join().expect("thread join"));
+        }
+
+        let first = keys.first().expect("at least one key");
+        for key in &keys {
+            assert_eq!(key.key_version, first.key_version);
+            assert_eq!(key.key_base64, first.key_base64);
+        }
+    }
+}
