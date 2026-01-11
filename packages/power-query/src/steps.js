@@ -9,6 +9,23 @@ import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime, parseIsoLike
 let arrowTableFromColumns = null;
 try {
   ({ arrowTableFromColumns } = await import("../../data-io/src/index.js"));
+
+  // `@formula/data-io` can be present without the heavy optional `apache-arrow`
+  // dependency installed (e.g. in some test sandboxes). In that case the module
+  // loads, but calling `arrowTableFromColumns` throws. Treat that as "Arrow
+  // output unavailable" so Arrow-backed operations can fall back to `DataTable`.
+  if (typeof arrowTableFromColumns === "function") {
+    try {
+      arrowTableFromColumns({ __probe: [1] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("optional 'apache-arrow'")) {
+        arrowTableFromColumns = null;
+      } else {
+        throw err;
+      }
+    }
+  }
 } catch (err) {
   // Arrow-backed execution is optional; most of Power Query (including SQL folding)
   // can run without Arrow/Parquet dependencies installed.
