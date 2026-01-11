@@ -342,7 +342,7 @@ export default {
     {
       "name": "COUNTIFS",
       "min_args": 2,
-      "max_args": 255,
+      "max_args": 254,
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
@@ -661,11 +661,31 @@ export default {
       ]
     },
     {
+      "name": "GEOMEAN",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "GETPIVOTDATA",
       "min_args": 2,
       "max_args": 255,
       "volatility": "non_volatile",
       "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "HARMEAN",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
       "arg_types": [
         "any"
       ]

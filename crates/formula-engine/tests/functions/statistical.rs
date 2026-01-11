@@ -201,6 +201,27 @@ fn sumsq_devsq_and_avedev_match_known_values() {
 }
 
 #[test]
+fn geomean_and_harmean_match_known_values() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=GEOMEAN({1,4})"), 2.0);
+    assert_number(&sheet.eval("=HARMEAN({1,2,4})"), 12.0 / 7.0);
+}
+
+#[test]
+fn geomean_and_harmean_reject_non_positive_values() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.eval("=GEOMEAN({0,1})"), Value::Error(ErrorKind::Num));
+    assert_eq!(sheet.eval("=HARMEAN({-1,1})"), Value::Error(ErrorKind::Num));
+}
+
+#[test]
+fn geomean_returns_div0_when_no_numeric_values_in_reference() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Text("x".to_string()));
+    assert_eq!(sheet.eval("=GEOMEAN(A1)"), Value::Error(ErrorKind::Div0));
+}
+
+#[test]
 fn devsq_returns_div0_when_no_numeric_values_in_reference() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", Value::Text("x".to_string()));

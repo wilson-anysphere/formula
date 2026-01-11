@@ -134,6 +134,71 @@ pub fn avedev(values: &[f64]) -> Result<f64, ErrorKind> {
     }
 }
 
+pub fn geomean(values: &[f64]) -> Result<f64, ErrorKind> {
+    if values.is_empty() {
+        return Err(ErrorKind::Div0);
+    }
+
+    let mut sum = 0.0;
+    let mut c = 0.0;
+    for &x in values {
+        if !(x > 0.0) || !x.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+        let term = x.ln();
+        if !term.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+
+        let y = term - c;
+        let t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    }
+
+    let mean_log = sum / (values.len() as f64);
+    let out = mean_log.exp();
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
+pub fn harmean(values: &[f64]) -> Result<f64, ErrorKind> {
+    if values.is_empty() {
+        return Err(ErrorKind::Div0);
+    }
+
+    let mut sum = 0.0;
+    let mut c = 0.0;
+    for &x in values {
+        if !(x > 0.0) || !x.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+        let term = 1.0 / x;
+        if !term.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+
+        let y = term - c;
+        let t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    }
+
+    if sum == 0.0 {
+        return Err(ErrorKind::Div0);
+    }
+
+    let out = (values.len() as f64) / sum;
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
 pub fn trimmean(values: &[f64], percent: f64) -> Result<f64, ErrorKind> {
     if !percent.is_finite() || percent < 0.0 || percent > 1.0 {
         return Err(ErrorKind::Num);

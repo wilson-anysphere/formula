@@ -374,6 +374,56 @@ fn avedev_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "GEOMEAN",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: geomean_fn,
+    }
+}
+
+fn geomean_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::geomean(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "HARMEAN",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: harmean_fn,
+    }
+}
+
+fn harmean_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::harmean(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "TRIMMEAN",
         min_args: 2,
         max_args: 2,

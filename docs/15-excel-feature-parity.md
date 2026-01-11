@@ -294,9 +294,9 @@ This document tracks every Excel feature and our implementation status. Features
 | GAMMALN | ⬜ | |
 | GAMMALN.PRECISE | ⬜ | |
 | GAUSS | ⬜ | |
-| GEOMEAN | ⬜ | |
+| GEOMEAN | ✅ | |
 | GROWTH | ⬜ | Array function |
-| HARMEAN | ⬜ | |
+| HARMEAN | ✅ | |
 | HYPGEOM.DIST | ⬜ | |
 | INTERCEPT | ✅ | |
 | KURT | ⬜ | |
