@@ -30,6 +30,16 @@ function rangesIntersect(a, b) {
   );
 }
 
+export function rangesOverlap(ranges) {
+  const list = ranges ?? [];
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      if (rangesIntersect(list[i], list[j])) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Excel treats merged regions as a single cell with the address of its
  * top-left corner. When the search scope is `selection`, the selection may
@@ -101,4 +111,3 @@ export function rangeContains(range, row, col) {
     col <= range.endCol
   );
 }
-

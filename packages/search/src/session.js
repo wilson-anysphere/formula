@@ -7,6 +7,7 @@ import {
   getMergedMasterCell,
   getSheetByName,
   rangeContains,
+  rangesOverlap,
 } from "./scope.js";
 import { decodeCellId, encodeCellId } from "./indexing.js";
 import { getCellText } from "./text.js";
@@ -182,7 +183,8 @@ export class SearchSession {
 
           // Process each range in-order (important for multi-area selections).
           const seenCandidateIds = Array.isArray(candidates) ? new Set() : null;
-          const visited = !seenCandidateIds && segment.ranges.length > 1 ? new Set() : null;
+          const visited =
+            !seenCandidateIds && segment.ranges.length > 1 && rangesOverlap(segment.ranges) ? new Set() : null;
           for (const range of segment.ranges) {
             throwIfAborted(effectiveSignal);
 

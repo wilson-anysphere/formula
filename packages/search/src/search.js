@@ -6,6 +6,7 @@ import {
   expandSelectionRangesForMerges,
   getMergedMasterCell,
   getSheetByName,
+  rangesOverlap,
 } from "./scope.js";
 import { encodeCellId } from "./indexing.js";
 import { getCellText } from "./text.js";
@@ -44,7 +45,7 @@ async function* iterateCellsInScope(
 
   for (const segment of segments) {
     const sheet = getSheetByName(workbook, segment.sheetName);
-    const visited = segment.ranges.length > 1 ? new Set() : null;
+    const visited = segment.ranges.length > 1 && rangesOverlap(segment.ranges) ? new Set() : null;
 
     for (const range of segment.ranges) {
       if (typeof sheet.iterateCells === "function") {
