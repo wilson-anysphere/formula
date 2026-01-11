@@ -286,6 +286,42 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("returns recalc changes in deterministic (sheet, row, col) order", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+
+      await engine.setCell("A1", 1, "Sheet1");
+      await engine.setCell("A2", "=A1*2", "Sheet1");
+
+      await engine.setCell("A1", 10, "Sheet2");
+      await engine.setCell("A2", "=A1*2", "Sheet2");
+
+      await engine.recalculate();
+
+      // Dirty both sheets before a single recalc tick. Recalculate should return formula deltas
+      // sorted by (sheet, row, col): Sheet1 before Sheet2.
+      await engine.setCell("A1", 2, "Sheet1");
+      await engine.setCell("A1", 11, "Sheet2");
+
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([
+        { sheet: "Sheet1", address: "A2", value: 4 },
+        { sheet: "Sheet2", address: "A2", value: 22 }
+      ]);
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("filters recalc changes by sheet name (case-insensitive)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
