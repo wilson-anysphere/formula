@@ -2989,7 +2989,7 @@ export class QueryEngine {
     if (!canStreamSteps || !canStreamSource) {
       // Fall back to materializing the referenced query when it can't be streamed.
       const { batchSize: _batchSize, includeHeader: _includeHeader, onBatch: _onBatch, materialize: _materialize, ...executeOptions } = options;
-      const table = await this.executeQuery(query, context, executeOptions);
+      const { table } = await this.executeQueryInternal(query, context, executeOptions, state, callStack);
       const columns = table.columns.map((c) => ({ name: c.name, type: c.type ?? "any" }));
 
       async function* batches() {
