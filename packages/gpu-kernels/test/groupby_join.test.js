@@ -252,3 +252,13 @@ test("group-by/hashJoin: supports key 0xFFFF_FFFF (u32 max) in unsigned mode", a
   assert.deepEqual(Array.from(joined.leftIndex), [0, 0, 2, 2]);
   assert.deepEqual(Array.from(joined.rightIndex), [1, 2, 1, 2]);
 });
+
+test("group-by: groupByCount supports key 0xFFFF_FFFF (u32 max) in unsigned mode", async () => {
+  const cpu = new CpuBackend();
+  const k = 0xffff_ffff;
+  const keys = new Uint32Array([k, 1, k, 1, 1]);
+
+  const out = await cpu.groupByCount(keys);
+  assert.deepEqual(Array.from(out.uniqueKeys), [1, k]);
+  assert.deepEqual(Array.from(out.counts), [3, 2]);
+});

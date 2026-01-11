@@ -182,22 +182,40 @@ export class CpuBackend {
    * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, counts: Uint32Array }>}
    */
   async groupByCount(keys) {
-    /** @type {Map<number, number>} */
-    const countsMap = new Map();
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      countsMap.set(k, (countsMap.get(k) ?? 0) + 1);
+    const n = keys.length;
+    if (n === 0) {
+      return { uniqueKeys: keys instanceof Int32Array ? new Int32Array() : new Uint32Array(), counts: new Uint32Array() };
     }
 
-    const unique = Array.from(countsMap.keys());
+    /** @type {Map<number, number>} */
+    const index = new Map();
+    /** @type {number[]} */
+    const unique = [];
+    /** @type {number[]} */
+    const countsList = [];
+
+    for (let i = 0; i < n; i++) {
+      const k = keys[i];
+      const idx = index.get(k);
+      if (idx === undefined) {
+        index.set(k, unique.length);
+        unique.push(k);
+        countsList.push(1);
+      } else {
+        countsList[idx] += 1;
+      }
+    }
+
     unique.sort((a, b) => a - b);
 
     const uniqueKeys = keys instanceof Int32Array ? new Int32Array(unique.length) : new Uint32Array(unique.length);
     const counts = new Uint32Array(unique.length);
     for (let i = 0; i < unique.length; i++) {
       const k = unique[i];
+      // `index` stores indices into `countsList` for each key.
+      const idx = index.get(k);
       uniqueKeys[i] = k;
-      counts[i] = countsMap.get(k) ?? 0;
+      counts[i] = idx === undefined ? 0 : countsList[idx];
     }
     return { uniqueKeys, counts };
   }
@@ -214,22 +232,35 @@ export class CpuBackend {
     if (keys.length !== values.length) {
       throw new Error(`groupBySum length mismatch: keys=${keys.length} values=${values.length}`);
     }
+    const n = keys.length;
+    if (n === 0) {
+      return { uniqueKeys: keys instanceof Int32Array ? new Int32Array() : new Uint32Array(), sums: new Float64Array(), counts: new Uint32Array() };
+    }
 
-    /** @type {Map<number, { sum: number, count: number }>} */
-    const map = new Map();
-    for (let i = 0; i < keys.length; i++) {
+    /** @type {Map<number, number>} */
+    const index = new Map();
+    /** @type {number[]} */
+    const unique = [];
+    /** @type {number[]} */
+    const sumsList = [];
+    /** @type {number[]} */
+    const countsList = [];
+
+    for (let i = 0; i < n; i++) {
       const k = keys[i];
       const v = values[i];
-      const entry = map.get(k);
-      if (entry) {
-        entry.sum += v;
-        entry.count += 1;
+      const idx = index.get(k);
+      if (idx === undefined) {
+        index.set(k, unique.length);
+        unique.push(k);
+        sumsList.push(v);
+        countsList.push(1);
       } else {
-        map.set(k, { sum: v, count: 1 });
+        sumsList[idx] += v;
+        countsList[idx] += 1;
       }
     }
 
-    const unique = Array.from(map.keys());
     unique.sort((a, b) => a - b);
 
     const uniqueKeys = keys instanceof Int32Array ? new Int32Array(unique.length) : new Uint32Array(unique.length);
@@ -237,10 +268,10 @@ export class CpuBackend {
     const counts = new Uint32Array(unique.length);
     for (let i = 0; i < unique.length; i++) {
       const k = unique[i];
-      const entry = map.get(k);
+      const idx = index.get(k);
       uniqueKeys[i] = k;
-      sums[i] = entry?.sum ?? 0;
-      counts[i] = entry?.count ?? 0;
+      sums[i] = idx === undefined ? 0 : sumsList[idx];
+      counts[i] = idx === undefined ? 0 : countsList[idx];
     }
     return { uniqueKeys, sums, counts };
   }
@@ -257,22 +288,35 @@ export class CpuBackend {
     if (keys.length !== values.length) {
       throw new Error(`groupByMin length mismatch: keys=${keys.length} values=${values.length}`);
     }
+    const n = keys.length;
+    if (n === 0) {
+      return { uniqueKeys: keys instanceof Int32Array ? new Int32Array() : new Uint32Array(), mins: new Float64Array(), counts: new Uint32Array() };
+    }
 
-    /** @type {Map<number, { min: number, count: number }>} */
-    const map = new Map();
-    for (let i = 0; i < keys.length; i++) {
+    /** @type {Map<number, number>} */
+    const index = new Map();
+    /** @type {number[]} */
+    const unique = [];
+    /** @type {number[]} */
+    const minsList = [];
+    /** @type {number[]} */
+    const countsList = [];
+
+    for (let i = 0; i < n; i++) {
       const k = keys[i];
       const v = values[i];
-      const entry = map.get(k);
-      if (entry) {
-        entry.min = Math.min(entry.min, v);
-        entry.count += 1;
+      const idx = index.get(k);
+      if (idx === undefined) {
+        index.set(k, unique.length);
+        unique.push(k);
+        minsList.push(v);
+        countsList.push(1);
       } else {
-        map.set(k, { min: v, count: 1 });
+        minsList[idx] = Math.min(minsList[idx], v);
+        countsList[idx] += 1;
       }
     }
 
-    const unique = Array.from(map.keys());
     unique.sort((a, b) => a - b);
 
     const uniqueKeys = keys instanceof Int32Array ? new Int32Array(unique.length) : new Uint32Array(unique.length);
@@ -280,10 +324,10 @@ export class CpuBackend {
     const counts = new Uint32Array(unique.length);
     for (let i = 0; i < unique.length; i++) {
       const k = unique[i];
-      const entry = map.get(k);
+      const idx = index.get(k);
       uniqueKeys[i] = k;
-      mins[i] = entry?.min ?? Number.POSITIVE_INFINITY;
-      counts[i] = entry?.count ?? 0;
+      mins[i] = idx === undefined ? Number.POSITIVE_INFINITY : minsList[idx];
+      counts[i] = idx === undefined ? 0 : countsList[idx];
     }
     return { uniqueKeys, mins, counts };
   }
@@ -300,22 +344,35 @@ export class CpuBackend {
     if (keys.length !== values.length) {
       throw new Error(`groupByMax length mismatch: keys=${keys.length} values=${values.length}`);
     }
+    const n = keys.length;
+    if (n === 0) {
+      return { uniqueKeys: keys instanceof Int32Array ? new Int32Array() : new Uint32Array(), maxs: new Float64Array(), counts: new Uint32Array() };
+    }
 
-    /** @type {Map<number, { max: number, count: number }>} */
-    const map = new Map();
-    for (let i = 0; i < keys.length; i++) {
+    /** @type {Map<number, number>} */
+    const index = new Map();
+    /** @type {number[]} */
+    const unique = [];
+    /** @type {number[]} */
+    const maxsList = [];
+    /** @type {number[]} */
+    const countsList = [];
+
+    for (let i = 0; i < n; i++) {
       const k = keys[i];
       const v = values[i];
-      const entry = map.get(k);
-      if (entry) {
-        entry.max = Math.max(entry.max, v);
-        entry.count += 1;
+      const idx = index.get(k);
+      if (idx === undefined) {
+        index.set(k, unique.length);
+        unique.push(k);
+        maxsList.push(v);
+        countsList.push(1);
       } else {
-        map.set(k, { max: v, count: 1 });
+        maxsList[idx] = Math.max(maxsList[idx], v);
+        countsList[idx] += 1;
       }
     }
 
-    const unique = Array.from(map.keys());
     unique.sort((a, b) => a - b);
 
     const uniqueKeys = keys instanceof Int32Array ? new Int32Array(unique.length) : new Uint32Array(unique.length);
@@ -323,10 +380,10 @@ export class CpuBackend {
     const counts = new Uint32Array(unique.length);
     for (let i = 0; i < unique.length; i++) {
       const k = unique[i];
-      const entry = map.get(k);
+      const idx = index.get(k);
       uniqueKeys[i] = k;
-      maxs[i] = entry?.max ?? Number.NEGATIVE_INFINITY;
-      counts[i] = entry?.count ?? 0;
+      maxs[i] = idx === undefined ? Number.NEGATIVE_INFINITY : maxsList[idx];
+      counts[i] = idx === undefined ? 0 : countsList[idx];
     }
     return { uniqueKeys, maxs, counts };
   }
