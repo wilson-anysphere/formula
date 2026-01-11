@@ -70,3 +70,33 @@ impl<P: KeychainProvider> PowerQueryRefreshStateStore<P> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::fs;
+
+    use serde_json::json;
+
+    use crate::storage::encryption::InMemoryKeychainProvider;
+
+    #[test]
+    fn refresh_state_is_encrypted_at_rest_and_roundtrips() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("pq_refresh_state.json");
+        let store = PowerQueryRefreshStateStore::new(file_path.clone(), InMemoryKeychainProvider::default());
+
+        let state = json!({
+            "q1": { "policy": { "type": "interval", "intervalMs": 123 }, "lastRunAtMs": 456 }
+        });
+        store.save("workbook-1", state.clone()).expect("save");
+
+        let on_disk = fs::read_to_string(&file_path).expect("read store file");
+        assert!(on_disk.contains("\"encrypted\": true"));
+        assert!(!on_disk.contains("intervalMs"), "expected encrypted blob not to contain plaintext schedule");
+        assert!(!on_disk.contains("q1"), "expected encrypted blob not to contain plaintext query ids");
+
+        let loaded = store.load("workbook-1").expect("load").expect("present");
+        assert_eq!(loaded, state);
+    }
+}
