@@ -300,6 +300,58 @@ test("concurrent value vs formula surfaces a content conflict on the formula wri
   assert.equal(getValue(bob.cells, "s:0:0"), "bob");
 });
 
+test("legacy value writes that do not create a formula marker still surface a content conflict (and resolving remote value clears the formula)", () => {
+  // Alice uses the monitor in formula+value mode, but Bob is a legacy client that
+  // sets `value` without creating a `formula=null` marker. If Bob doesn't have the
+  // formula key locally, `delete(\"formula\")` is a no-op in Yjs, so the concurrent
+  // formula insert can survive and the cell may contain both `formula` and `value`.
+  const alice = createClient("alice", { clientID: 1, mode: "formula+value" });
+  const bobDoc = new Y.Doc();
+  bobDoc.clientID = 2;
+  const bobCells = bobDoc.getMap("cells");
+
+  // Establish a shared base cell map with only a literal value (no formula key).
+  alice.doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "base");
+    cell.set("modifiedBy", "alice");
+    cell.set("modified", Date.now());
+    alice.cells.set("s:0:0", cell);
+  }, alice.monitor.origin);
+  syncDocs(alice.doc, bobDoc);
+
+  const bobCell = /** @type {Y.Map<any>} */ (bobCells.get("s:0:0"));
+  assert.ok(bobCell, "expected base cell map on bob");
+  assert.equal(bobCell.get("formula"), undefined);
+
+  // Offline concurrent edits: alice writes a formula (also sets value=null); bob writes a value
+  // and attempts to delete formula (no-op because it doesn't exist on bob).
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  bobDoc.transact(() => {
+    bobCell.set("value", "bob");
+    bobCell.delete("formula");
+    bobCell.set("modifiedBy", "bob");
+    bobCell.set("modified", Date.now());
+  });
+  syncDocs(alice.doc, bobDoc);
+
+  const conflict = alice.conflicts.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict on alice");
+  assert.equal(conflict.local.type, "formula");
+  assert.equal(conflict.local.formula, "=1");
+  assert.equal(conflict.remote.type, "value");
+  assert.equal(conflict.remote.value, "bob");
+
+  // Choosing the remote value must clear the formula even if the value is already applied.
+  assert.ok(alice.monitor.resolveConflict(conflict.id, conflict.remote));
+  syncDocs(alice.doc, bobDoc);
+
+  assert.equal(getFormula(alice.cells, "s:0:0"), "");
+  assert.equal(getValue(alice.cells, "s:0:0"), "bob");
+  assert.equal(getFormula(bobCells, "s:0:0"), "");
+  assert.equal(getValue(bobCells, "s:0:0"), "bob");
+});
+
 test("sequential value -> formula edits do not surface a content conflict", () => {
   const alice = createClient("alice", { mode: "formula+value" });
   const bob = createClient("bob", { mode: "formula+value" });

@@ -235,16 +235,20 @@ export class FormulaConflictMonitor {
       const choice = /** @type {any} */ (chosen);
       if (!choice || typeof choice !== "object") return false;
 
+      const cell = this._ensureCell(conflict.cellKey);
+      const currentFormula = (cell.get("formula") ?? "").toString();
+      const currentValue = cell.get("value") ?? null;
+
       if (choice.type === "formula") {
         const chosenFormula = String(choice.formula ?? "");
-        if (!(conflict.remote.type === "formula" && formulasRoughlyEqual(chosenFormula, conflict.remote.formula))) {
-          this.setLocalFormula(conflict.cellKey, chosenFormula);
-        }
+        const formulaAlready = formulasRoughlyEqual(currentFormula, chosenFormula);
+        const valueAlreadyCleared = currentValue === null;
+        if (!(formulaAlready && valueAlreadyCleared)) this.setLocalFormula(conflict.cellKey, chosenFormula);
       } else if (choice.type === "value") {
         const chosenValue = choice.value ?? null;
-        if (!(conflict.remote.type === "value" && valuesDeeplyEqual(chosenValue, conflict.remote.value))) {
-          this.setLocalValue(conflict.cellKey, chosenValue);
-        }
+        const valueAlready = valuesDeeplyEqual(currentValue, chosenValue);
+        const formulaAlreadyCleared = formulasRoughlyEqual(currentFormula, "");
+        if (!(valueAlready && formulaAlreadyCleared)) this.setLocalValue(conflict.cellKey, chosenValue);
       } else {
         return false;
       }
@@ -552,6 +556,59 @@ export class FormulaConflictMonitor {
 
     const isLocal = this.localOrigins.has(origin);
     if (isLocal) return;
+
+    // Content conflict (legacy/split-key): local formula write (value=null) vs a
+    // remote value write that overwrote the value key without clearing the formula key.
+    // This can happen with legacy clients that clear formulas via key deletion:
+    // deleting a missing `formula` key is a no-op and won't conflict with a concurrent
+    // formula insert, leaving both `formula` and `value` present.
+    if (this.includeValueConflicts) {
+      const lastContent = this._lastLocalContentEditByCellKey.get(cellKey);
+      if (lastContent?.kind === "formula" && lastContent.formula && valuesDeeplyEqual(oldValue, null) && newValue !== null) {
+        // Sequential delete: remote explicitly deleted the exact item we wrote.
+        if (action === "delete" && idsEqual(itemId, lastContent.valueItemId)) {
+          this._lastLocalContentEditByCellKey.delete(cellKey);
+          this._lastLocalFormulaEditByCellKey.delete(cellKey);
+          return;
+        }
+
+        // Sequential overwrite (remote saw our write) - ignore.
+        if (idsEqual(newItemOriginId, lastContent.valueItemId)) {
+          this._lastLocalContentEditByCellKey.delete(cellKey);
+          this._lastLocalFormulaEditByCellKey.delete(cellKey);
+          return;
+        }
+
+        // We no longer consider that local edit "pending" for conflict detection.
+        this._lastLocalContentEditByCellKey.delete(cellKey);
+        this._lastLocalFormulaEditByCellKey.delete(cellKey);
+
+        const cell = cellRefFromKey(cellKey);
+        const conflict = /** @type {FormulaConflict} */ ({
+          id: crypto.randomUUID(),
+          kind: "content",
+          cell,
+          cellKey,
+          local: { type: "formula", formula: lastContent.formula },
+          remote: { type: "value", value: newValue },
+          remoteUserId,
+          detectedAt: Date.now()
+        });
+
+        if (this.getCellValue) {
+          const localPreview = tryEvaluateFormula(lastContent.formula, {
+            getCellValue: ({ col, row }) => this.getCellValue({ sheetId: cell.sheetId, col, row })
+          });
+          if (conflict.local.type === "formula") {
+            conflict.local.preview = localPreview.ok ? localPreview.value : null;
+          }
+        }
+
+        this._conflicts.set(conflict.id, conflict);
+        this.onConflict(conflict);
+        return;
+      }
+    }
 
     const lastLocal = this._lastLocalValueEditByCellKey.get(cellKey);
     if (!lastLocal) return;
