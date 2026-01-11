@@ -294,6 +294,19 @@ impl Storage {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
 
+        let theme = (!workbook.theme.is_default())
+            .then_some(serde_json::to_value(&workbook.theme)?);
+        let workbook_protection = (!formula_model::WorkbookProtection::is_default(
+            &workbook.workbook_protection,
+        ))
+        .then_some(serde_json::to_value(&workbook.workbook_protection)?);
+        let defined_names = (!workbook.defined_names.is_empty())
+            .then_some(serde_json::to_value(&workbook.defined_names)?);
+        let print_settings = (!workbook.print_settings.is_empty())
+            .then_some(serde_json::to_value(&workbook.print_settings)?);
+        let view = (workbook.view != formula_model::WorkbookView::default())
+            .then_some(serde_json::to_value(&workbook.view)?);
+
         tx.execute(
             r#"
             INSERT INTO workbooks (
@@ -303,8 +316,13 @@ impl Storage {
               model_schema_version,
               model_workbook_id,
               date_system,
-              calc_settings
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+              calc_settings,
+              theme,
+              workbook_protection,
+              defined_names,
+              print_settings,
+              view
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             "#,
             params![
                 workbook_meta.id.to_string(),
@@ -313,7 +331,12 @@ impl Storage {
                 workbook.schema_version as i64,
                 workbook.id as i64,
                 date_system_to_str(workbook.date_system),
-                serde_json::to_value(&workbook.calc_settings)?
+                serde_json::to_value(&workbook.calc_settings)?,
+                theme,
+                workbook_protection,
+                defined_names,
+                print_settings,
+                view
             ],
         )?;
 
@@ -461,7 +484,16 @@ impl Storage {
         let row = conn
             .query_row(
                 r#"
-                SELECT model_schema_version, model_workbook_id, date_system, calc_settings
+                SELECT
+                  model_schema_version,
+                  model_workbook_id,
+                  date_system,
+                  calc_settings,
+                  theme,
+                  workbook_protection,
+                  defined_names,
+                  print_settings,
+                  view
                 FROM workbooks
                 WHERE id = ?1
                 "#,
@@ -472,12 +504,27 @@ impl Storage {
                         r.get::<_, Option<i64>>(1)?,
                         r.get::<_, Option<String>>(2)?,
                         r.get::<_, Option<serde_json::Value>>(3)?,
+                        r.get::<_, Option<serde_json::Value>>(4)?,
+                        r.get::<_, Option<serde_json::Value>>(5)?,
+                        r.get::<_, Option<serde_json::Value>>(6)?,
+                        r.get::<_, Option<serde_json::Value>>(7)?,
+                        r.get::<_, Option<serde_json::Value>>(8)?,
                     ))
                 },
             )
             .optional()?;
 
-        let Some((model_schema_version, model_workbook_id, date_system, calc_settings)) = row
+        let Some((
+            model_schema_version,
+            model_workbook_id,
+            date_system,
+            calc_settings,
+            theme,
+            workbook_protection,
+            defined_names,
+            print_settings,
+            view,
+        )) = row
         else {
             return Err(StorageError::WorkbookNotFound(workbook_id));
         };
@@ -496,6 +543,21 @@ impl Storage {
         }
         if let Some(calc_settings) = calc_settings {
             model_workbook.calc_settings = serde_json::from_value(calc_settings)?;
+        }
+        if let Some(theme) = theme {
+            model_workbook.theme = serde_json::from_value(theme)?;
+        }
+        if let Some(workbook_protection) = workbook_protection {
+            model_workbook.workbook_protection = serde_json::from_value(workbook_protection)?;
+        }
+        if let Some(defined_names) = defined_names {
+            model_workbook.defined_names = serde_json::from_value(defined_names)?;
+        }
+        if let Some(print_settings) = print_settings {
+            model_workbook.print_settings = serde_json::from_value(print_settings)?;
+        }
+        if let Some(view) = view {
+            model_workbook.view = serde_json::from_value(view)?;
         }
         model_workbook.styles = styles;
 

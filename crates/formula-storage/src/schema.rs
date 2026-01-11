@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, Transaction};
 
-const LATEST_SCHEMA_VERSION: i64 = 3;
+const LATEST_SCHEMA_VERSION: i64 = 4;
 
 pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     // Ensure foreign keys are enforced (disabled by default in SQLite).
@@ -27,6 +27,7 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
             1 => migrate_to_v1(&tx)?,
             2 => migrate_to_v2(&tx)?,
             3 => migrate_to_v3(&tx)?,
+            4 => migrate_to_v4(&tx)?,
             _ => unreachable!("unknown schema migration target: {next}"),
         }
         tx.execute(
@@ -201,6 +202,21 @@ fn migrate_to_v3(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         "#,
     )?;
 
+    Ok(())
+}
+
+fn migrate_to_v4(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    // Additional `formula_model::Workbook` metadata for round-trip fidelity.
+    ensure_column(tx, "workbooks", "theme", "theme JSON")?;
+    ensure_column(
+        tx,
+        "workbooks",
+        "workbook_protection",
+        "workbook_protection JSON",
+    )?;
+    ensure_column(tx, "workbooks", "defined_names", "defined_names JSON")?;
+    ensure_column(tx, "workbooks", "print_settings", "print_settings JSON")?;
+    ensure_column(tx, "workbooks", "view", "view JSON")?;
     Ok(())
 }
 

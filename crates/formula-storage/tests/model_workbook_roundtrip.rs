@@ -1,6 +1,7 @@
 use formula_model::{
     ArrayValue, CalcSettings, CalculationMode, Cell, CellRef, CellValue, DateSystem, ErrorValue,
-    Font, RichText, SheetVisibility, SpillValue, Style, TabColor,
+    DefinedNameScope, Font, Range, RichText, SheetVisibility, SpillValue, Style, TabColor,
+    ThemePalette, WorkbookProtection, WorkbookView, WorkbookWindow, WorkbookWindowState,
 };
 use formula_storage::{ImportModelWorkbookOptions, Storage};
 
@@ -29,9 +30,52 @@ fn model_workbook_import_export_round_trips() {
         },
         full_precision: false,
     };
+    workbook.theme = ThemePalette::office_2007();
+    workbook.workbook_protection = WorkbookProtection {
+        lock_structure: true,
+        lock_windows: true,
+        password_hash: Some(123),
+    };
 
     let sheet_a = workbook.add_sheet("Äbc").expect("add sheet A");
     let sheet_b = workbook.add_sheet("Data").expect("add sheet B");
+    workbook
+        .create_defined_name(
+            DefinedNameScope::Workbook,
+            "MyGlobalName",
+            "=Data!$A$1",
+            Some("comment".to_string()),
+            true,
+            None,
+        )
+        .expect("create workbook defined name");
+    workbook
+        .create_defined_name(
+            DefinedNameScope::Sheet(sheet_a),
+            "MyLocalName",
+            "Data!$A$2",
+            None,
+            false,
+            Some(7),
+        )
+        .expect("create sheet defined name");
+    assert!(
+        workbook.set_sheet_print_area(
+            sheet_b,
+            Some(vec![Range::new(CellRef::new(0, 0), CellRef::new(10, 3))]),
+        ),
+        "set print area"
+    );
+    workbook.view = WorkbookView {
+        active_sheet_id: Some(sheet_b),
+        window: Some(WorkbookWindow {
+            x: Some(10),
+            y: Some(20),
+            width: Some(800),
+            height: Some(600),
+            state: Some(WorkbookWindowState::Maximized),
+        }),
+    };
 
     // Add some styles to the workbook style table.
     let style_bold = Style {
@@ -179,6 +223,11 @@ fn model_workbook_import_export_round_trips() {
     assert_eq!(exported.id, workbook.id);
     assert_eq!(exported.date_system, workbook.date_system);
     assert_eq!(exported.calc_settings, workbook.calc_settings);
+    assert_eq!(exported.theme, workbook.theme);
+    assert_eq!(exported.workbook_protection, workbook.workbook_protection);
+    assert_eq!(exported.defined_names, workbook.defined_names);
+    assert_eq!(exported.print_settings, workbook.print_settings);
+    assert_eq!(exported.view, workbook.view);
     assert_eq!(exported.styles.styles, workbook.styles.styles);
 
     assert_eq!(exported.sheets.len(), workbook.sheets.len());
@@ -196,4 +245,3 @@ fn model_workbook_import_export_round_trips() {
         assert_eq!(cells_as_map(actual), cells_as_map(expected));
     }
 }
-
