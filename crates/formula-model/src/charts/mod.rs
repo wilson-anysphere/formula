@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+mod model;
+pub use model::*;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum ChartType {

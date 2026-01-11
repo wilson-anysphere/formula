@@ -4,6 +4,10 @@ use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
 
+mod parse_chart_space;
+
+pub use parse_chart_space::{parse_chart_space, ChartSpaceParseError};
+
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
