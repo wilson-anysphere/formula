@@ -95,6 +95,15 @@ describe("DocumentControllerSpreadsheetApi", () => {
 
     const api = new DocumentControllerSpreadsheetApi(controller);
     expect(api.listNonEmptyCells("Sheet1")).toEqual([]);
+    expect(api.getLastUsedRow("Sheet1")).toBe(0);
+  });
+
+  it("counts supported formatting-only cells for getLastUsedRow()", () => {
+    const controller = new DocumentController();
+    controller.setRangeFormat("Sheet1", "A5", { font: { bold: true } }, { label: "Bold" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    expect(api.getLastUsedRow("Sheet1")).toBe(5);
   });
 
   it("applies per-cell formatting provided to writeRange()", () => {

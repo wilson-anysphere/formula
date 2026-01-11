@@ -255,8 +255,10 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const sheetModel = sheets?.get?.(sheet);
     if (!sheetModel) return 0;
     let max = 0;
-    for (const key of sheetModel.cells?.keys?.() ?? []) {
+    for (const [key, state] of sheetModel.cells?.entries?.() ?? []) {
       const { row } = parseRowColKey(key);
+      const cell = toCellData(this.controller, state);
+      if (isCellEmpty(cell)) continue;
       max = Math.max(max, row + 1);
     }
     return max;
