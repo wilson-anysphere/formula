@@ -3,8 +3,6 @@ import type { QueryExecutionContext, QueryEngine } from "../../../../packages/po
 import { ArrowTableAdapter } from "../../../../packages/power-query/src/arrowTable.js";
 import { DataTable } from "../../../../packages/power-query/src/table.js";
 
-import { arrowTableToGridBatches } from "@formula/data-io";
-
 import type { DocumentController } from "../document/documentController.js";
 
 export type QuerySheetDestination = {
@@ -60,6 +58,38 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 type GridBatch = { rowOffset: number; values: unknown[][] };
 
+function cellValueToDocumentInput(value: unknown): unknown {
+  // `DocumentController.setRangeValues` interprets string primitives with:
+  // - leading "=" as a formula
+  // - leading "'" as a literal escape (and it strips the apostrophe)
+  //
+  // Power Query output should always be loaded as *values*, even if it looks like a formula.
+  // Wrap these strings in `{ value }` to bypass the string parsing path.
+  if (typeof value === "string") {
+    const trimmed = value.trimStart();
+    if ((trimmed.startsWith("=") && trimmed.length > 1) || value.startsWith("'")) {
+      return { value };
+    }
+  }
+  return value === undefined ? null : value;
+}
+
+function gridToDocumentInputs(grid: unknown[][]): unknown[][] {
+  let anyChanged = false;
+  const out = grid.map((row) => {
+    if (!Array.isArray(row) || row.length === 0) return row;
+    let changed = false;
+    const mappedRow = row.map((cell) => {
+      const mapped = cellValueToDocumentInput(cell);
+      if (mapped !== cell) changed = true;
+      return mapped;
+    });
+    if (changed) anyChanged = true;
+    return changed ? mappedRow : row;
+  });
+  return anyChanged ? out : grid;
+}
+
 async function* tableToGridBatches(
   table: DataTable | ArrowTableAdapter,
   options: { batchSize: number; includeHeader: boolean },
@@ -73,8 +103,27 @@ async function* tableToGridBatches(
       yield { rowOffset: 0, values: [table.columns.map((c) => c.name)] };
     }
 
-    for await (const batch of arrowTableToGridBatches(table.table, { batchSize, includeHeader: false })) {
-      yield { rowOffset: baseOffset + batch.rowOffset, values: batch.values };
+    try {
+      // Prefer the optimized Arrow grid conversion when available.
+      const mod = await import("@formula/data-io");
+      const arrowTableToGridBatches: any = (mod as any).arrowTableToGridBatches;
+      if (typeof arrowTableToGridBatches === "function") {
+        for await (const batch of arrowTableToGridBatches(table.table, { batchSize, includeHeader: false })) {
+          yield { rowOffset: baseOffset + batch.rowOffset, values: batch.values };
+        }
+        return;
+      }
+    } catch {
+      // Fall back to row iteration (slower) when Arrow helpers aren't available.
+    }
+
+    for (let rowStart = 0; rowStart < table.rowCount; rowStart += batchSize) {
+      const end = Math.min(table.rowCount, rowStart + batchSize);
+      const slice = [];
+      for (let rowIndex = rowStart; rowIndex < end; rowIndex++) {
+        slice.push(table.getRow(rowIndex));
+      }
+      yield { rowOffset: baseOffset + rowStart, values: slice };
     }
     return;
   }
@@ -108,11 +157,12 @@ async function applyBatchesToDocument(
 
   for await (const batch of batches) {
     throwIfAborted(options.signal);
+    const values = gridToDocumentInputs(batch.values);
 
     doc.setRangeValues(
       destination.sheetId,
       { row: destination.start.row + batch.rowOffset, col: destination.start.col },
-      batch.values,
+      values,
     );
 
     rowsWritten = Math.max(rowsWritten, batch.rowOffset + batch.values.length);
@@ -180,10 +230,11 @@ export async function applyQueryToDocument(
         // Make cancellation responsive by explicitly checking before writing each batch.
         throwIfAborted(options.signal);
 
+        const values = gridToDocumentInputs(batch.values);
         doc.setRangeValues(
           destination.sheetId,
           { row: destination.start.row + batch.rowOffset, col: destination.start.col },
-          batch.values,
+          values,
         );
 
         rowsWritten = Math.max(rowsWritten, batch.rowOffset + batch.values.length);

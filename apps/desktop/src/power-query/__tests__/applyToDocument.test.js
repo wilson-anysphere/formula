@@ -38,6 +38,39 @@ test("applyQueryToDocument writes query output into the destination range (file 
   assert.equal(doc.getCell("Sheet1", { row: 2, col: 1 }).value, 200);
 });
 
+test("applyQueryToDocument loads formula-like strings as values (not formulas)", async () => {
+  const engine = new QueryEngine();
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const query = {
+    id: "q_text",
+    name: "Text",
+    source: {
+      type: "range",
+      range: {
+        values: [["=Header"], ["=1+1"], ["'literal"]],
+        hasHeaders: true,
+      },
+    },
+    steps: [],
+  };
+
+  const destination = { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true };
+  await applyQueryToDocument(doc, query, destination, { engine, batchSize: 2 });
+
+  const header = doc.getCell("Sheet1", { row: 0, col: 0 });
+  assert.equal(header.value, "=Header");
+  assert.equal(header.formula, null);
+
+  const formulaLike = doc.getCell("Sheet1", { row: 1, col: 0 });
+  assert.equal(formulaLike.value, "=1+1");
+  assert.equal(formulaLike.formula, null);
+
+  const apostrophe = doc.getCell("Sheet1", { row: 2, col: 0 });
+  assert.equal(apostrophe.value, "'literal");
+  assert.equal(apostrophe.formula, null);
+});
+
 test("applyQueryToDocument supports HTTP sources via injected HttpConnector", async () => {
   const fetchStub = async () =>
     new Response(["Name,Score", "Alice,10", "Bob,20"].join("\n"), {
@@ -112,4 +145,3 @@ test("applyQueryToDocument stops and reverts writes when cancelled", async () =>
   assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, null);
   assert.equal((doc).batchDepth, 0);
 });
-
