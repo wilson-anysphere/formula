@@ -182,6 +182,8 @@ importers:
         specifier: ^13.6.27
         version: 13.6.29
 
+  packages/collab/encryption: {}
+
   packages/collab/presence: {}
 
   packages/collab/session:
@@ -189,6 +191,9 @@ importers:
       '@formula/collab-conflicts':
         specifier: workspace:*
         version: link:../conflicts
+      '@formula/collab-encryption':
+        specifier: workspace:*
+        version: link:../encryption
       '@formula/collab-presence':
         specifier: workspace:*
         version: link:../presence
@@ -209,13 +214,22 @@ importers:
         specifier: ^8.18.0
         version: 8.19.0
 
-  packages/collab/workbook:
+  packages/collab/undo:
     dependencies:
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
 
-  packages/collab/undo:
+  packages/collab/versioning:
+    dependencies:
+      '@formula/collab-session':
+        specifier: workspace:*
+        version: link:../session
+      yjs:
+        specifier: ^13.6.27
+        version: 13.6.29
+
+  packages/collab/workbook:
     dependencies:
       yjs:
         specifier: ^13.6.27
