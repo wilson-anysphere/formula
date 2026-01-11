@@ -1,6 +1,13 @@
 import * as Y from "yjs";
 
 import { makeCellKey, normalizeCellKey, parseCellKey } from "../session/src/cell-key.js";
+import {
+  decryptCellPlaintext,
+  encryptCellPlaintext,
+  isEncryptedCellPayload,
+} from "../encryption/src/index.node.js";
+
+const MASKED_CELL_VALUE = "###";
 
 function stableStringify(value) {
   if (value === undefined) return "undefined";
@@ -53,10 +60,64 @@ function normalizeFormula(value) {
 
 /**
  * @param {Y.Map<any>} cell
- * @returns {ParsedYjsCell}
+ * @param {{ sheetId: string, row: number, col: number }} cellRef
+ * @param {{
+ *   keyForCell: (cell: { sheetId: string, row: number, col: number }) => { keyId: string, keyBytes: Uint8Array } | null,
+ * } | null} encryption
+ * @param {string} docIdForEncryption
+ * @returns {Promise<ParsedYjsCell>}
  */
-function readCellFromYjs(cell) {
-  const formula = normalizeFormula(cell.get("formula") ?? null);
+async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption) {
+  let value;
+  let formula;
+
+  // If `enc` is present, treat the cell as encrypted even if the payload is malformed.
+  // This avoids accidentally falling back to plaintext fields.
+  const encRaw = typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc");
+  if (encRaw !== undefined) {
+    if (isEncryptedCellPayload(encRaw)) {
+      const key = encryption?.keyForCell?.(cellRef) ?? null;
+      if (key && key.keyId === encRaw.keyId) {
+        try {
+          const plaintext = await decryptCellPlaintext({
+            encrypted: encRaw,
+            key,
+            context: {
+              docId: docIdForEncryption,
+              sheetId: cellRef.sheetId,
+              row: cellRef.row,
+              col: cellRef.col,
+            },
+          });
+
+          const decryptedFormula = normalizeFormula(plaintext?.formula ?? null);
+          if (decryptedFormula) {
+            value = null;
+            formula = decryptedFormula;
+          } else {
+            value = plaintext?.value ?? null;
+            formula = null;
+          }
+        } catch {
+          // fall through to masked state
+        }
+      }
+    }
+
+    if (value === undefined && formula === undefined) {
+      value = MASKED_CELL_VALUE;
+      formula = null;
+    }
+  } else {
+    formula = normalizeFormula(cell.get("formula") ?? null);
+    if (formula) {
+      value = null;
+    } else {
+      value = cell.get("value") ?? null;
+      formula = null;
+    }
+  }
+
   let format = undefined;
   let formatKey = undefined;
   if (typeof cell.has === "function" ? cell.has("format") : cell.get("format") !== undefined) {
@@ -66,7 +127,7 @@ function readCellFromYjs(cell) {
   if (formula) {
     return { value: null, formula, format, formatKey };
   }
-  return { value: cell.get("value") ?? null, formula: null, format, formatKey };
+  return { value, formula: null, format, formatKey };
 }
 
 function sameNormalizedCell(a, b) {
@@ -87,6 +148,10 @@ function sameNormalizedCell(a, b) {
  *   undoService?: { transact?: (fn: () => void) => void, origin?: any, localOrigins?: Set<any> } | null,
  *   defaultSheetId?: string,
  *   userId?: string | null,
+ *   encryption?: {
+ *     keyForCell: (cell: { sheetId: string, row: number, col: number }) => { keyId: string, keyBytes: Uint8Array } | null,
+ *     shouldEncryptCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
+ *   } | null,
  * }} options
  */
 export function bindYjsToDocumentController(options) {
@@ -96,12 +161,14 @@ export function bindYjsToDocumentController(options) {
     undoService = null,
     defaultSheetId = "Sheet1",
     userId = null,
+    encryption = null,
   } = options ?? {};
 
   if (!ydoc) throw new Error("bindYjsToDocumentController requires { ydoc }");
   if (!documentController) throw new Error("bindYjsToDocumentController requires { documentController }");
 
   const cells = ydoc.getMap("cells");
+  const docIdForEncryption = ydoc.guid ?? "unknown";
 
   // Stable origin token for local DocumentController -> Yjs transactions when
   // we don't have a dedicated undo service wrapper.
@@ -143,8 +210,35 @@ export function bindYjsToDocumentController(options) {
    * (`${sheetId}:${row},${col}` or `r{row}c{col}`).
    *
    * @type {Map<string, Set<string>>}
-   */
+  */
   const yjsKeysByCell = new Map();
+
+  // Serialize Yjs -> DocumentController updates (decryption can be async).
+  let applyChain = Promise.resolve();
+  // Serialize DocumentController -> Yjs writes (encryption can be async).
+  let writeChain = Promise.resolve();
+
+  /**
+   * @param {Set<string>} changedCanonicalKeys
+   */
+  function enqueueApply(changedCanonicalKeys) {
+    if (!changedCanonicalKeys || changedCanonicalKeys.size === 0) return;
+    const snapshot = new Set(changedCanonicalKeys);
+    applyChain = applyChain.then(() => applyYjsChangesToDocumentController(snapshot)).catch((err) => {
+      // Avoid breaking the chain.
+      console.error(err);
+    });
+  }
+
+  /**
+   * @param {any[]} deltas
+   */
+  function enqueueWrite(deltas) {
+    const snapshot = Array.from(deltas ?? []);
+    writeChain = writeChain.then(() => applyDocumentDeltas(snapshot)).catch((err) => {
+      console.error(err);
+    });
+  }
 
   /**
    * @param {string} canonicalKey
@@ -180,9 +274,12 @@ export function bindYjsToDocumentController(options) {
 
   /**
    * @param {string} canonicalKey
-   * @returns {ParsedYjsCell | null}
+   * @returns {Promise<ParsedYjsCell | null>}
    */
-  function readCanonicalCellFromYjs(canonicalKey) {
+  async function readCanonicalCellFromYjs(canonicalKey) {
+    const cellRef = parseCellKey(canonicalKey, { defaultSheetId });
+    if (!cellRef) return null;
+
     const rawKeys = yjsKeysByCell.get(canonicalKey);
     let candidates;
     if (rawKeys && rawKeys.size > 0) {
@@ -199,7 +296,7 @@ export function bindYjsToDocumentController(options) {
       const cellData = cells.get(rawKey);
       const cell = getYMapCell(cellData);
       if (!cell) continue;
-      const parsed = readCellFromYjs(cell);
+      const parsed = await readCellFromYjs(cell, cellRef, encryption, docIdForEncryption);
       const hasData =
         parsed.value != null || parsed.formula != null || parsed.formatKey !== undefined;
       if (!hasData) continue;
@@ -215,7 +312,7 @@ export function bindYjsToDocumentController(options) {
    *
    * @param {Set<string>} changedCanonicalKeys
    */
-  function applyYjsChangesToDocumentController(changedCanonicalKeys) {
+  async function applyYjsChangesToDocumentController(changedCanonicalKeys) {
     if (!changedCanonicalKeys || changedCanonicalKeys.size === 0) return;
 
     /** @type {any[]} */
@@ -230,7 +327,7 @@ export function bindYjsToDocumentController(options) {
       const before = documentController.getCell(parsed.sheetId, { row: parsed.row, col: parsed.col });
       const prev = cache.get(canonicalKey) ?? null;
 
-      const curr = readCanonicalCellFromYjs(canonicalKey);
+      const curr = await readCanonicalCellFromYjs(canonicalKey);
 
       const currValue = curr?.formula ? null : (curr?.value ?? null);
       const currFormula = curr?.formula ?? null;
@@ -316,7 +413,7 @@ export function bindYjsToDocumentController(options) {
       changedKeys.add(canonicalKey);
     });
 
-    applyYjsChangesToDocumentController(changedKeys);
+    enqueueApply(changedKeys);
   }
 
   /**
@@ -339,7 +436,9 @@ export function bindYjsToDocumentController(options) {
         if (typeof rawKey !== "string") continue;
 
         const changes = event?.changes?.keys;
-        if (changes && !(changes.has("value") || changes.has("formula") || changes.has("format"))) continue;
+        if (changes && !(changes.has("value") || changes.has("formula") || changes.has("format") || changes.has("enc"))) {
+          continue;
+        }
 
         const canonicalKey = canonicalKeyFromRawKey(rawKey);
         if (!canonicalKey) continue;
@@ -366,29 +465,90 @@ export function bindYjsToDocumentController(options) {
       }
     }
 
-    applyYjsChangesToDocumentController(changed);
+    enqueueApply(changed);
   };
 
   /**
-   * @param {any} payload
+   * Apply DocumentController deltas into Yjs, encrypting cell contents when configured.
+   *
+   * @param {any[]} deltas
    */
-  const handleDocumentChange = (payload) => {
-    if (applyingRemote) return;
-    const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
-    if (deltas.length === 0) return;
+  async function applyDocumentDeltas(deltas) {
+    if (!deltas || deltas.length === 0) return;
+
+    /** @type {Array<any>} */
+    const prepared = [];
+
+    for (const delta of deltas) {
+      const cellRef = { sheetId: delta.sheetId, row: delta.row, col: delta.col };
+      const canonicalKey = makeCellKey(cellRef);
+
+      const value = delta.after?.value ?? null;
+      const formula = normalizeFormula(delta.after?.formula ?? null);
+      const styleId = Number.isInteger(delta.after?.styleId) ? delta.after.styleId : 0;
+      const format = styleId === 0 ? null : documentController.styleTable.get(styleId);
+      const formatKey = styleId === 0 ? undefined : stableStringify(format);
+
+      const rawKeys = yjsKeysByCell.get(canonicalKey);
+      const targets = rawKeys && rawKeys.size > 0 ? Array.from(rawKeys) : [canonicalKey];
+
+      const hasContent = value != null || formula != null;
+
+      // Once a cell is encrypted in Yjs, we must keep it encrypted to avoid leaking
+      // new plaintext writes into the shared CRDT.
+      let existingEnc = false;
+      for (const rawKey of targets) {
+        const cellData = cells.get(rawKey);
+        const cell = getYMapCell(cellData);
+        if (!cell) continue;
+        const hasEnc = typeof cell.has === "function" ? cell.has("enc") : cell.get("enc") !== undefined;
+        if (hasEnc) {
+          existingEnc = true;
+          break;
+        }
+      }
+
+      const key = encryption?.keyForCell?.(cellRef) ?? null;
+      const shouldEncryptByConfig = encryption
+        ? typeof encryption.shouldEncryptCell === "function"
+          ? encryption.shouldEncryptCell(cellRef)
+          : key != null
+        : false;
+
+      const wantsEncryption = hasContent && (existingEnc || shouldEncryptByConfig);
+
+      let encryptedPayload = null;
+      if (wantsEncryption) {
+        if (!key) {
+          throw new Error(`Missing encryption key for cell ${canonicalKey}`);
+        }
+        encryptedPayload = await encryptCellPlaintext({
+          plaintext: { value: formula != null ? null : value, formula: formula ?? null },
+          key,
+          context: {
+            docId: docIdForEncryption,
+            sheetId: cellRef.sheetId,
+            row: cellRef.row,
+            col: cellRef.col,
+          },
+        });
+      }
+
+      prepared.push({
+        canonicalKey,
+        targets,
+        value,
+        formula,
+        styleId,
+        format,
+        formatKey,
+        encryptedPayload,
+      });
+    }
 
     const apply = () => {
-      for (const delta of deltas) {
-        const canonicalKey = makeCellKey({ sheetId: delta.sheetId, row: delta.row, col: delta.col });
-
-        const value = delta.after?.value ?? null;
-        const formula = normalizeFormula(delta.after?.formula ?? null);
-        const styleId = Number.isInteger(delta.after?.styleId) ? delta.after.styleId : 0;
-        const format = styleId === 0 ? null : documentController.styleTable.get(styleId);
-        const formatKey = styleId === 0 ? undefined : stableStringify(format);
-
-        const rawKeys = yjsKeysByCell.get(canonicalKey);
-        const targets = rawKeys && rawKeys.size > 0 ? Array.from(rawKeys) : [canonicalKey];
+      for (const item of prepared) {
+        const { canonicalKey, targets, value, formula, styleId, format, encryptedPayload, formatKey } = item;
 
         if (value == null && formula == null && styleId === 0) {
           for (const rawKey of targets) {
@@ -407,12 +567,19 @@ export function bindYjsToDocumentController(options) {
             cells.set(rawKey, cell);
           }
 
-          if (formula != null) {
-            cell.set("formula", formula);
-            cell.set("value", null);
-          } else {
+          if (encryptedPayload) {
+            cell.set("enc", encryptedPayload);
+            cell.delete("value");
             cell.delete("formula");
-            cell.set("value", value);
+          } else {
+            cell.delete("enc");
+            if (formula != null) {
+              cell.set("formula", formula);
+              cell.set("value", null);
+            } else {
+              cell.delete("formula");
+              cell.set("value", value);
+            }
           }
 
           if (styleId === 0) {
@@ -442,6 +609,16 @@ export function bindYjsToDocumentController(options) {
     } else {
       ydoc.transact(apply, binderOrigin);
     }
+  }
+
+  /**
+   * @param {any} payload
+   */
+  const handleDocumentChange = (payload) => {
+    if (applyingRemote) return;
+    const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+    if (deltas.length === 0) return;
+    enqueueWrite(deltas);
   };
 
   const unsubscribe = documentController.on("change", handleDocumentChange);
@@ -465,4 +642,3 @@ function isUndoManager(value) {
   if (maybe.constructor?.name === "UndoManager") return true;
   return typeof maybe.undo === "function" && typeof maybe.redo === "function" && maybe.trackedOrigins instanceof Set;
 }
-
