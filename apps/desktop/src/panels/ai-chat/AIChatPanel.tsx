@@ -109,25 +109,23 @@ export function AIChatPanel(props: AIChatPanelProps) {
 
       const onToolCall = (call: ToolCall, meta: { requiresApproval: boolean }) => {
         setMessages((prev) => [
-          ...prev,
-          {
+          ...insertBeforePendingAssistant(prev, {
             id: messageId(),
             role: "tool",
             content: `${call.name}(${JSON.stringify(call.arguments)})`,
             requiresApproval: meta.requiresApproval,
-          },
+          }),
         ]);
       };
 
       const onToolResult = (call: ToolCall, result: unknown) => {
         executedToolCalls.push({ name: call.name, ok: typeof (result as any)?.ok === "boolean" ? (result as any).ok : undefined });
         setMessages((prev) => [
-          ...prev,
-          {
+          ...insertBeforePendingAssistant(prev, {
             id: messageId(),
             role: "tool",
             content: `${call.name} result:\n${formatToolResult(result)}`,
-          },
+          }),
         ]);
       };
 
@@ -175,6 +173,17 @@ export function AIChatPanel(props: AIChatPanelProps) {
     } finally {
       setSending(false);
     }
+  }
+
+  function insertBeforePendingAssistant(prev: ChatMessage[], message: ChatMessage): ChatMessage[] {
+    const next = prev.slice();
+    const pendingIndex = next.findIndex((m) => m.role === "assistant" && m.pending);
+    if (pendingIndex === -1) {
+      next.push(message);
+    } else {
+      next.splice(pendingIndex, 0, message);
+    }
+    return next;
   }
 
   return (
