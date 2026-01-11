@@ -7,7 +7,6 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-formula-core = { path = "../formula-core" }
 formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
 formula-xlsx = { path = "../formula-xlsx" }

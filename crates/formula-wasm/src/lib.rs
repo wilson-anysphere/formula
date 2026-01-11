@@ -1,14 +1,28 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use formula_core::{CellChange, CellData, DEFAULT_SHEET};
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
-use formula_model::{
-    display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range,
-};
+use formula_model::{display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range};
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use wasm_bindgen::prelude::*;
+
+pub const DEFAULT_SHEET: &str = "Sheet1";
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CellData {
+    pub sheet: String,
+    pub address: String,
+    pub input: JsonValue,
+    pub value: JsonValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CellChange {
+    pub sheet: String,
+    pub address: String,
+    pub value: JsonValue,
+}
 
 fn js_err(message: impl ToString) -> JsValue {
     JsValue::from_str(&message.to_string())
@@ -90,9 +104,13 @@ fn is_scalar_json(value: &JsonValue) -> bool {
 }
 
 fn is_formula_input(value: &JsonValue) -> bool {
-    value
-        .as_str()
-        .is_some_and(|s| s.trim_start().starts_with('='))
+    value.as_str().is_some_and(|s| {
+        let trimmed = s.trim_start();
+        let Some(rest) = trimmed.strip_prefix('=') else {
+            return false;
+        };
+        !rest.trim().is_empty()
+    })
 }
 
 fn normalize_sheet_key(name: &str) -> String {
@@ -126,14 +144,14 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
         EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => {
             JsonValue::String(ErrorKind::Value.as_code().to_string())
         }
-        // The JS protocol only supports scalar-ish values. Spill markers should not leak because
-        // `Engine::get_cell_value` resolves spill cells to their concrete values. Keep a defensive
-        // fallback anyway.
-        EngineValue::Array(_) | EngineValue::Spill { .. } => {
-            JsonValue::String(ErrorKind::Spill.as_code().to_string())
-        }
+        // Arrays should generally be spilled into grid cells. If one reaches the JS boundary,
+        // degrade to its top-left value so callers still get a scalar.
+        EngineValue::Array(arr) => engine_value_to_json(arr.top_left()),
+        // Spill markers should not leak because `Engine::get_cell_value` resolves spill cells to
+        // their concrete values. Keep a defensive fallback anyway.
+        EngineValue::Spill { .. } => JsonValue::String(ErrorKind::Spill.as_code().to_string()),
         // `LAMBDA` results are valid Excel scalars but cannot be represented in the current
-        // worker JSON protocol. Use the engine's display string so the UI won't crash.
+        // worker JSON protocol. Use a stable display string so the UI won't crash.
         EngineValue::Lambda(_) => JsonValue::String("<LAMBDA>".to_string()),
     }
 }
@@ -188,9 +206,9 @@ struct WorkbookState {
     ///
     /// The JS frontend applies `directChange` updates for literal edits but not for formulas; the
     /// WASM bridge resets formula cells to blank until the next `recalculate()` so `getCell` matches
-    /// the existing `formula-core` semantics. This can hide "value cleared" edits when the new
-    /// formula result is also blank, so we keep the previous value here and explicitly diff it
-    /// against the post-recalc value.
+    /// the existing semantics. This can hide "value cleared" edits when the new formula result is
+    /// also blank, so we keep the previous value here and explicitly diff it against the post-recalc
+    /// value.
     pending_formula_baselines: BTreeMap<FormulaCellKey, JsonValue>,
 }
 
@@ -307,12 +325,10 @@ impl WorkbookState {
             let key = FormulaCellKey::new(sheet.clone(), cell_ref);
             self.pending_formula_baselines
                 .entry(key)
-                .or_insert_with(|| {
-                    engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
-                });
+                .or_insert_with(|| engine_value_to_json(self.engine.get_cell_value(&sheet, &address)));
 
             // Reset the stored value to blank so `getCell` returns null until the next recalc,
-            // matching the existing `formula-core` semantics.
+            // matching the existing worker semantics.
             self.engine
                 .set_cell_value(&sheet, &address, EngineValue::Blank)
                 .map_err(|err| js_err(err.to_string()))?;
@@ -362,9 +378,7 @@ impl WorkbookState {
     }
 
     fn recalculate_internal(&mut self, sheet: Option<&str>) -> Result<Vec<CellChange>, JsValue> {
-        if let Some(sheet) = sheet {
-            self.require_sheet(sheet)?;
-        }
+        let _ = sheet;
 
         let recalc_changes = self.engine.recalculate_with_value_changes_single_threaded();
         let mut by_cell: BTreeMap<FormulaCellKey, JsonValue> = BTreeMap::new();
@@ -380,8 +394,8 @@ impl WorkbookState {
             );
         }
 
-        let pending = std::mem::take(&mut self.pending_spill_clears);
-        for key in pending {
+        let pending_spills = std::mem::take(&mut self.pending_spill_clears);
+        for key in pending_spills {
             if by_cell.contains_key(&key) {
                 continue;
             }
@@ -390,8 +404,8 @@ impl WorkbookState {
             by_cell.insert(key, value);
         }
 
-        let pending = std::mem::take(&mut self.pending_formula_baselines);
-        for (key, before) in pending {
+        let pending_formulas = std::mem::take(&mut self.pending_formula_baselines);
+        for (key, before) in pending_formulas {
             if by_cell.contains_key(&key) {
                 continue;
             }
@@ -477,8 +491,8 @@ impl WasmWorkbook {
             cells: BTreeMap<String, JsonValue>,
         }
 
-        let parsed: WorkbookJson = serde_json::from_str(json)
-            .map_err(|err| js_err(format!("invalid workbook json: {}", err)))?;
+        let parsed: WorkbookJson =
+            serde_json::from_str(json).map_err(|err| js_err(format!("invalid workbook json: {err}")))?;
 
         let mut wb = WorkbookState::new_empty();
 
@@ -509,8 +523,8 @@ impl WasmWorkbook {
 
     #[wasm_bindgen(js_name = "fromXlsxBytes")]
     pub fn from_xlsx_bytes(bytes: &[u8]) -> Result<WasmWorkbook, JsValue> {
-        let model = formula_xlsx::read_workbook_model_from_bytes(bytes)
-            .map_err(|err| js_err(err.to_string()))?;
+        let model =
+            formula_xlsx::read_workbook_model_from_bytes(bytes).map_err(|err| js_err(err.to_string()))?;
 
         let mut wb = WorkbookState::new_empty();
 
@@ -644,7 +658,7 @@ impl WasmWorkbook {
         }
 
         serde_json::to_string(&WorkbookJson { sheets })
-            .map_err(|err| js_err(format!("invalid workbook json: {}", err)))
+            .map_err(|err| js_err(format!("invalid workbook json: {err}")))
     }
 
     #[wasm_bindgen(js_name = "getCell")]
@@ -739,16 +753,6 @@ impl WasmWorkbook {
     pub fn default_sheet_name() -> String {
         DEFAULT_SHEET.to_string()
     }
-}
-
-// Re-export the DTO types for consumers (tests, TS generator tooling, etc).
-pub use formula_core::{CellChange as CoreCellChange, CellData as CoreCellData};
-
-#[allow(dead_code)]
-fn _assert_dto_serializable() {
-    fn assert_serde<T: serde::Serialize + for<'de> serde::Deserialize<'de>>() {}
-    assert_serde::<CellData>();
-    assert_serde::<CellChange>();
 }
 
 #[cfg(test)]
