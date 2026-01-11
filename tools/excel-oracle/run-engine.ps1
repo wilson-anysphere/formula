@@ -60,10 +60,27 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "../..")
-if ([string]::IsNullOrWhiteSpace($env:CARGO_HOME)) {
+$defaultGlobalCargoHome = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".cargo"
+if (
+  [string]::IsNullOrWhiteSpace($env:CARGO_HOME) -or
+  (
+    -not $env:CI -and
+    -not $env:FORMULA_ALLOW_GLOBAL_CARGO_HOME -and
+    $env:CARGO_HOME -eq $defaultGlobalCargoHome
+  )
+) {
   $env:CARGO_HOME = Join-Path $repoRoot "target/cargo-home"
 }
+
 New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
+
+# Ensure tools installed via `cargo install` under this CARGO_HOME are available.
+$cargoBinDir = Join-Path $env:CARGO_HOME "bin"
+New-Item -ItemType Directory -Force -Path $cargoBinDir | Out-Null
+$pathEntries = $env:Path -split ';'
+if (-not ($pathEntries -contains $cargoBinDir)) {
+  $env:Path = "$cargoBinDir;$env:Path"
+}
 
 if (-not $EngineCommand) {
   $EngineCommand = $env:FORMULA_ENGINE_CMD
