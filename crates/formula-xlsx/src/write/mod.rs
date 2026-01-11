@@ -25,6 +25,8 @@ const REL_TYPE_STYLES: &str =
 const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
+mod dimension;
+
 #[derive(Debug, Error)]
 pub enum WriteError {
     #[error("io error: {0}")]
@@ -836,11 +838,9 @@ fn write_worksheet_xml(
         return patch_worksheet_xml(doc, sheet_meta, sheet, original, shared_lookup, style_to_xf);
     }
 
-    let dimension = sheet
-        .used_range()
-        .unwrap_or(Range::new(CellRef::new(0, 0), CellRef::new(0, 0)))
-        .to_string();
-    let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup, style_to_xf, None);
+    let dimension = dimension::worksheet_dimension_range(sheet).to_string();
+    let sheet_data_xml =
+        render_sheet_data(doc, sheet_meta, sheet, shared_lookup, style_to_xf, None);
 
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
@@ -861,6 +861,12 @@ fn patch_worksheet_xml(
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
 ) -> Result<Vec<u8>, WriteError> {
+    let (original_has_dimension, original_used_range) = scan_worksheet_xml(original)?;
+    let new_used_range = dimension::worksheet_used_range(sheet);
+    let insert_dimension = !original_has_dimension && original_used_range != new_used_range;
+    let dimension_range = dimension::worksheet_dimension_range(sheet);
+    let dimension_ref = dimension_range.to_string();
+
     let outline = std::str::from_utf8(original)
         .ok()
         .and_then(|xml| crate::outline::read_outline_from_worksheet_xml(xml).ok());
@@ -879,13 +885,69 @@ fn patch_worksheet_xml(
     let mut writer = Writer::new(Vec::with_capacity(original.len() + sheet_data_xml.len()));
 
     let mut skipping_sheet_data = false;
+    let mut inserted_dimension = false;
+    let mut saw_sheet_pr = false;
+    let mut in_sheet_pr = false;
     loop {
         match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.name().as_ref() == b"sheetPr" => {
+                saw_sheet_pr = true;
+                in_sheet_pr = true;
+                writer.write_event(Event::Start(e.into_owned()))?;
+            }
+            Event::Empty(e) if e.name().as_ref() == b"sheetPr" => {
+                saw_sheet_pr = true;
+                writer.write_event(Event::Empty(e.into_owned()))?;
+                if insert_dimension && !inserted_dimension {
+                    insert_dimension_element(&mut writer, &dimension_ref);
+                    inserted_dimension = true;
+                }
+            }
+            Event::End(e) if e.name().as_ref() == b"sheetPr" => {
+                in_sheet_pr = false;
+                writer.write_event(Event::End(e.into_owned()))?;
+                if insert_dimension && !inserted_dimension {
+                    insert_dimension_element(&mut writer, &dimension_ref);
+                    inserted_dimension = true;
+                }
+            }
+
+            Event::Start(e) if e.name().as_ref() == b"dimension" => {
+                if dimension_matches(&e, dimension_range)? {
+                    writer.write_event(Event::Start(e.into_owned()))?;
+                } else {
+                    write_dimension_element(&mut writer, &e, &dimension_ref, false)?;
+                }
+            }
+            Event::Empty(e) if e.name().as_ref() == b"dimension" => {
+                if dimension_matches(&e, dimension_range)? {
+                    writer.write_event(Event::Empty(e.into_owned()))?;
+                } else {
+                    write_dimension_element(&mut writer, &e, &dimension_ref, true)?;
+                }
+            }
+
             Event::Start(e) if e.name().as_ref() == b"sheetData" => {
+                if insert_dimension
+                    && !inserted_dimension
+                    && !saw_sheet_pr
+                    && !in_sheet_pr
+                {
+                    insert_dimension_element(&mut writer, &dimension_ref);
+                    inserted_dimension = true;
+                }
                 skipping_sheet_data = true;
                 writer.get_mut().extend_from_slice(sheet_data_xml.as_bytes());
             }
             Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
+                if insert_dimension
+                    && !inserted_dimension
+                    && !saw_sheet_pr
+                    && !in_sheet_pr
+                {
+                    insert_dimension_element(&mut writer, &dimension_ref);
+                    inserted_dimension = true;
+                }
                 writer.get_mut().extend_from_slice(sheet_data_xml.as_bytes());
                 drop(e);
             }
@@ -895,12 +957,158 @@ fn patch_worksheet_xml(
             }
             Event::Eof => break,
             ev if skipping_sheet_data => drop(ev),
-            ev => writer.write_event(ev.into_owned())?,
+            ev => {
+                match &ev {
+                    Event::Start(e) | Event::Empty(e)
+                        if insert_dimension
+                            && !inserted_dimension
+                            && !saw_sheet_pr
+                            && !in_sheet_pr
+                            && e.name().as_ref() != b"worksheet" =>
+                    {
+                        insert_dimension_element(&mut writer, &dimension_ref);
+                        inserted_dimension = true;
+                    }
+                    Event::End(e)
+                        if insert_dimension
+                            && !inserted_dimension
+                            && e.name().as_ref() == b"worksheet" =>
+                    {
+                        insert_dimension_element(&mut writer, &dimension_ref);
+                        inserted_dimension = true;
+                    }
+                    _ => {}
+                }
+                writer.write_event(ev.into_owned())?
+            }
         }
         buf.clear();
     }
 
     Ok(writer.into_inner())
+}
+
+fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteError> {
+    let mut reader = Reader::from_reader(original);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+
+    let mut has_dimension = false;
+    let mut in_sheet_data = false;
+    let mut min_cell: Option<CellRef> = None;
+    let mut max_cell: Option<CellRef> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"dimension" => {
+                has_dimension = true;
+            }
+            Event::Start(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = true,
+            Event::End(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = false,
+            Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
+                in_sheet_data = false;
+                drop(e);
+            }
+            Event::Start(e) | Event::Empty(e) if in_sheet_data && e.name().as_ref() == b"c" => {
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() != b"r" {
+                        continue;
+                    }
+                    let a1 = attr.unescape_value()?.into_owned();
+                    let Ok(cell_ref) = CellRef::from_a1(&a1) else {
+                        continue;
+                    };
+                    min_cell = Some(match min_cell {
+                        Some(min) => CellRef::new(min.row.min(cell_ref.row), min.col.min(cell_ref.col)),
+                        None => cell_ref,
+                    });
+                    max_cell = Some(match max_cell {
+                        Some(max) => CellRef::new(max.row.max(cell_ref.row), max.col.max(cell_ref.col)),
+                        None => cell_ref,
+                    });
+                    break;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let used_range = match (min_cell, max_cell) {
+        (Some(start), Some(end)) => Some(Range::new(start, end)),
+        _ => None,
+    };
+    Ok((has_dimension, used_range))
+}
+
+fn insert_dimension_element(writer: &mut Writer<Vec<u8>>, dimension_ref: &str) {
+    writer.get_mut().extend_from_slice(b"<dimension ref=\"");
+    writer
+        .get_mut()
+        .extend_from_slice(escape_attr(dimension_ref).as_bytes());
+    writer.get_mut().extend_from_slice(b"\"/>");
+}
+
+fn dimension_matches(
+    e: &quick_xml::events::BytesStart<'_>,
+    expected: Range,
+) -> Result<bool, WriteError> {
+    let mut ref_value = None;
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"ref" {
+            ref_value = Some(attr.unescape_value()?.into_owned());
+            break;
+        }
+    }
+    let Some(ref_value) = ref_value else {
+        return Ok(false);
+    };
+    Ok(dimension::parse_dimension_ref(&ref_value) == Some(expected))
+}
+
+fn write_dimension_element(
+    writer: &mut Writer<Vec<u8>>,
+    e: &quick_xml::events::BytesStart<'_>,
+    dimension_ref: &str,
+    is_empty: bool,
+) -> Result<(), WriteError> {
+    writer.get_mut().extend_from_slice(b"<dimension");
+    let mut wrote_ref = false;
+    for attr in e.attributes() {
+        let attr = attr?;
+        writer.get_mut().push(b' ');
+        writer.get_mut().extend_from_slice(attr.key.as_ref());
+        writer.get_mut().extend_from_slice(b"=\"");
+        if attr.key.as_ref() == b"ref" {
+            wrote_ref = true;
+            writer
+                .get_mut()
+                .extend_from_slice(escape_attr(dimension_ref).as_bytes());
+        } else {
+            writer.get_mut().extend_from_slice(
+                escape_attr(&attr.unescape_value()?.into_owned()).as_bytes(),
+            );
+        }
+        writer.get_mut().push(b'"');
+    }
+
+    if !wrote_ref {
+        writer.get_mut().extend_from_slice(b" ref=\"");
+        writer
+            .get_mut()
+            .extend_from_slice(escape_attr(dimension_ref).as_bytes());
+        writer.get_mut().push(b'"');
+    }
+
+    if is_empty {
+        writer.get_mut().extend_from_slice(b"/>");
+    } else {
+        writer.get_mut().push(b'>');
+    }
+    Ok(())
 }
 
 fn render_sheet_data(
