@@ -1,256 +1,324 @@
 # Formula Design System
 
-Pixel-perfect mockups and design specifications for Formula's UI.
-
-## Viewing Mockups
-
-Open the HTML files directly in a browser:
-
-```bash
-open mockups/spreadsheet-main.html
-```
-
-## Design Philosophy
-
-### Anti-"AI Slop" Principles
-
-1. **No purple gradients** - We use electric blue (#3b82f6) as primary accent
-2. **No Inter/Roboto** - IBM Plex family (Sans + Mono) for distinctive typography
-3. **Deep, not flat** - Rich charcoal backgrounds with subtle depth, not gray-on-white
-4. **Data-dense** - Optimized for power users who work with large datasets
-5. **Sharp, not soft** - Precise borders, defined edges, professional feel
-
-### Aesthetic Direction
-
-**Inspiration:**
-- Bloomberg Terminal (data density, professional gravitas)
-- Linear (polish, attention to detail)
-- Raycast (keyboard-first, focused UI)
-- VS Code (developer-grade tooling)
-
-**NOT like:**
-- Notion (too playful, too much whitespace)
-- Generic SaaS dashboards (purple gradients, rounded everything)
-- Google Sheets (utilitarian, no personality)
+> **Excel functionality + Cursor polish**
+> 
+> Full Excel feature set (ribbon, formulas, sheets) with modern, clean aesthetics.
+> Light mode. Professional. Polished.
 
 ---
 
-## Color Palette
+## ⛔ STOP. READ THIS FIRST. NON-NEGOTIABLE. ⛔
 
-### Base Colors (Dark Theme)
+**FUNCTIONALITY and STYLING are TWO INDEPENDENT AXES.**
 
-```css
---bg-base: #0f1114;      /* App background */
---bg-surface: #161a1e;   /* Panels, sidebars */
---bg-elevated: #1c2127;  /* Cards, inputs */
---bg-hover: #252b33;     /* Hover states */
---bg-active: #2d353f;    /* Active/pressed */
+```
+FUNCTIONALITY (# of Excel features/buttons)
+        ↑
+        │
+  LOW   │   HIGH ← we want HIGH functionality
+────────┼────────→ STYLING
+        │         (clean vs bloated)
+        │
+        we want CLEAN styling →
 ```
 
-### Grid Colors
+### THE RULE:
 
-```css
---grid-bg: #12151a;                      /* Cell background */
---grid-line: rgba(255, 255, 255, 0.06);  /* Grid lines */
---grid-header-bg: #181c22;               /* Row/column headers */
---grid-selection: rgba(59, 130, 246, 0.15);
---grid-selection-border: #3b82f6;
+**1. ADD ALL THE EXCEL BUTTONS.** Every feature Excel has. Font dropdown. Bold. Italic. Underline. Borders. Fill. Merge. AutoSum. Conditional Formatting. ALL OF THEM.
+
+**2. STYLE THEM CLEANLY.** No Microsoft bloat. No complex nested layouts. No heavy borders. No gradient icons. Just clean, minimal, Cursor-style buttons.
+
+### THE FAILURE MODES (both wrong):
+
+| Mode | Functionality | Styling | Why it's wrong |
+|------|--------------|---------|----------------|
+| **Microsoft Bureaucracy** | HIGH ✓ | BLOATED ✗ | Complex layouts, heavy UI, enterprise feel |
+| **Stripped Minimal** | LOW ✗ | CLEAN ✓ | Removed features to "look minimal" |
+
+### THE CORRECT MODE:
+
+| Mode | Functionality | Styling | Result |
+|------|--------------|---------|--------|
+| **Formula** | HIGH ✓ | CLEAN ✓ | Full Excel power, Cursor aesthetics |
+
+### "MINIMAL" MEANS:
+
+- ✅ Visual simplicity (clean borders, subtle colors, tight spacing)
+- ❌ NOT feature removal (removing buttons to look "clean")
+
+### EXAMPLES:
+
+```
+Want a font dropdown?     → ADD IT. Style it clean.
+Want Bold/Italic buttons? → ADD THEM. Style them clean.  
+Want Conditional Format?  → ADD IT. Style it clean.
+Want Merge & Center?      → ADD IT. Style it clean.
+Want all 8 ribbon tabs?   → ADD THEM. Style them clean.
 ```
 
-### Text Hierarchy
-
-```css
---text-primary: #f1f3f5;    /* Main text */
---text-secondary: #8b939e;  /* Labels, descriptions */
---text-muted: #5c6370;      /* Placeholders, hints */
---text-disabled: #3d4450;   /* Disabled states */
-```
-
-### Accent & Semantic
-
-```css
---accent: #3b82f6;          /* Primary actions, focus rings */
---accent-hover: #2563eb;    /* Hover state */
---accent-subtle: rgba(59, 130, 246, 0.12);
-
---success: #10b981;         /* Positive values, confirmations */
---warning: #f59e0b;         /* Warnings */
---error: #ef4444;           /* Errors, negative values */
---info: #06b6d4;            /* Informational */
-```
-
-### Formula Syntax
-
-```css
---syntax-function: #60a5fa;   /* SUM, VLOOKUP, etc. */
---syntax-reference: #a78bfa;  /* A1, $B$2, Sheet1!A1 */
---syntax-string: #fbbf24;     /* "text" */
---syntax-number: #34d399;     /* 123, 45.67 */
---syntax-operator: #f1f3f5;   /* +, -, *, / */
---syntax-error: #f87171;      /* #REF!, #VALUE! */
-```
+**DO NOT swing between "Microsoft bloat" and "stripped down". Stay in the HIGH functionality + CLEAN styling quadrant. ALWAYS.**
 
 ---
 
-## Typography
+## Philosophy
 
-### Font Stack
+### What We Are
+- **An Excel replacement** - all the features power users expect
+- **With modern polish** - clean, light, professional like Cursor
+- **AI-native** - deeply integrated, not bolted on
 
-```css
---font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
---font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
-```
+### What We're Not
+- A "modern minimal" reimagining that loses functionality
+- A dark-mode-only developer tool
+- A chatbot with a spreadsheet attached
 
-### Sizes
+### Two Modes, Two Densities
 
-| Use Case | Size | Weight | Font |
-|----------|------|--------|------|
-| Grid cells | 12px | 400 | Mono |
-| UI labels | 13px | 400-500 | Sans |
-| Panel titles | 13px | 600 | Sans |
-| Section headers | 11px | 600 | Sans |
-| Column headers | 11px | 500 | Mono |
+**Spreadsheet View** (where you work)
+- Dense, tight, every pixel counts
+- Ribbon is compact but readable
+- Grid is information-dense
+- AI sidebar is minimal
 
-### Grid Typography
+**Agent View** (where you observe)
+- Relaxed, spacious, easy to scan
+- Steps are clearly separated
+- Code blocks have breathing room
+- This is a view, not a workspace
 
-- Numbers: **right-aligned**, tabular numerals (`font-variant-numeric: tabular-nums`)
-- Text: left-aligned
-- Headers: centered, uppercase, letter-spacing: 0.02em
+## Target Users
 
----
+CFOs, financial analysts, accountants, operations managers, data scientists. People who:
+- Use Excel 8+ hours/day
+- Know every keyboard shortcut
+- Build complex financial models
+- Need their tools to be reliable and professional
 
-## Spacing Scale
+## Design Tokens
 
-```css
---space-1: 4px;
---space-2: 8px;
---space-3: 12px;
---space-4: 16px;
---space-5: 20px;
---space-6: 24px;
---space-8: 32px;
-```
+### Core Principle: Density + Depth
 
-**Usage:**
-- `space-1`: Tight gaps (icon + label)
-- `space-2`: Related elements (buttons in a group)
-- `space-3`: Standard component padding
-- `space-4`: Section margins, larger padding
-- `space-6+`: Major section breaks
+Every pixel counts. Tighten spacing, add subtle shades for depth. No wasted whitespace.
 
----
-
-## Component Patterns
-
-### Inputs
+### Colors
 
 ```css
-/* Base input */
-height: 28px;
-padding: 0 8px;
-background: var(--bg-elevated);
-border: 1px solid var(--border-default);
-border-radius: 4px;
+/* Backgrounds - layered with subtle depth */
+--bg-app: #f5f5f5;          /* App background */
+--bg-surface: #fafafa;      /* Panels, card backgrounds */
+--bg-elevated: #ffffff;     /* Active content, inputs */
+--bg-hover: #eeeeee;        /* Hover states */
+--bg-inset: #f0f0f0;        /* Inset panels, code blocks */
 
-/* Focus state */
-border-color: var(--accent);
-box-shadow: 0 0 0 2px var(--accent-subtle);
+/* Text - clear hierarchy */
+--text-primary: #1a1a1a;    /* Primary text */
+--text-secondary: #5c5c5c;  /* Secondary text */
+--text-tertiary: #8a8a8a;   /* Hints, labels */
+
+/* Borders */
+--border: #e0e0e0;          /* Standard border */
+--border-strong: #c8c8c8;   /* Emphasized border */
+
+/* Accent - professional blue */
+--accent: #0969da;          /* Primary accent */
+--accent-bg: #ddf4ff;       /* Accent background */
+--accent-border: #54aeff;   /* Accent border */
+
+/* Selection */
+--selection-bg: rgba(9, 105, 218, 0.08);
+--selection-border: #0969da;
+
+/* Semantic */
+--green: #1a7f37;           /* Positive values */
+--green-bg: #dafbe1;
+--red: #cf222e;             /* Negative values */
+--red-bg: #ffebe9;
+--yellow: #9a6700;          /* Warnings */
 ```
 
-### Buttons
+### Typography
 
 ```css
-/* Default button */
-height: 28px;
-padding: 0 12px;
-background: var(--bg-elevated);
-border: 1px solid var(--border-default);
-border-radius: 4px;
+/* System fonts - professional, readable */
+--font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+--font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
-/* Primary button */
-background: var(--accent);
-border-color: var(--accent);
-color: white;
+/* Sizes - compact, dense */
+9px   /* Smallest labels, hints */
+10px  /* Labels, tags, secondary */
+11px  /* Cells, UI text */
+12px  /* Primary UI, inputs */
 ```
 
-### Panels
+### Sizing
 
 ```css
-background: var(--bg-surface);
-border-left: 1px solid var(--border-subtle); /* or border-right */
+/* Border radius - tight, modern */
+--radius: 4px;      /* Panels, cards, buttons */
+--radius-sm: 3px;   /* Small elements, tags */
+
+/* Heights - compact */
+20px  /* Small buttons, grid cells */
+22px  /* Standard small buttons */
+24px  /* Primary buttons */
+26px  /* Large inputs */
+
+/* Grid */
+Row height: 20px
+Column width: 80px (min)
+Row header: 36px
+
+/* Ribbon */
+Tab height: 26px
+Content height: 52px
 ```
 
-### Grid Cells
+## Layout
 
-```css
-height: 24px;
-padding: 0 8px;
-border-right: 1px solid var(--grid-line);
-border-bottom: 1px solid var(--grid-line);
+### App Structure
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Title Bar (window controls, app name, doc name, actions)    │
+├─────────────────────────────────────────────────────────────┤
+│ Ribbon (Home | Insert | Formulas | Data | ...)              │
+│ ┌─────────┬─────────┬─────────┬─────────┬─────────┐        │
+│ │ Clipboard│  Font   │ Number  │  Cells  │ Editing │        │
+│ └─────────┴─────────┴─────────┴─────────┴─────────┘        │
+├─────────────────────────────────────────────────────────────┤
+│ Formula Bar (name box | fx | formula input | AI trigger)    │
+├───────────────────────────────────────────────┬─────────────┤
+│                                               │             │
+│                                               │ AI Sidebar  │
+│                    Grid                       │ - Modes     │
+│                                               │ - Context   │
+│                                               │ - Messages  │
+│                                               │ - Input     │
+├───────────────────────────────────────────────┴─────────────┤
+│ Sheet Tabs (nav | Sheet1 | Sheet2 | ... | +)                │
+├─────────────────────────────────────────────────────────────┤
+│ Status Bar (status | sum | average | count | zoom)          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
----
+### Ribbon Groups
 
-## Animation
+**Home**: Clipboard, Font, Alignment, Number, Cells, Editing
+**Insert**: Tables, Charts, Sparklines, Filters, Links, Text
+**Formulas**: Function Library, Named Ranges, Formula Auditing
+**Data**: Get Data, Sort & Filter, Data Tools, Outline
+**Review**: Comments, Changes, Protection
+**View**: Workbook Views, Show, Zoom, Window
 
-### Transitions
+## AI Integration
 
-```css
---transition-fast: 100ms ease;    /* Hover states */
---transition-normal: 150ms ease;  /* Focus, panel opens */
-```
+> **This is a Cursor product.** All AI goes through Cursor servers.
+> No local models. No API keys. No provider selection.
+> Cursor controls the harness and prompts.
 
-### Principles
+### One Panel, Full Power
 
-1. **Subtle, not flashy** - Animations should feel snappy, not theatrical
-2. **Purpose-driven** - Only animate to provide feedback or guide attention
-3. **Respect reduced-motion** - Check `prefers-reduced-motion`
+The AI sidebar is a unified panel - no mode tabs. Just type what you want:
+- Ask questions → AI answers
+- Request changes → AI proposes diff  
+- Complex tasks → opens Agent view
 
----
+### Key Features
 
-## Icons
+- **Context awareness** - shows what sheets/ranges AI sees
+- **Diff preview** - shows proposed changes before apply
+- **Accept/reject** - per-change and bulk controls
+- **Agent mode** - full-screen view for autonomous multi-step execution
 
-- **Size**: 16px default, 14px for tight spaces
-- **Stroke**: 2px, round caps and joins
-- **Style**: Outlined (not filled)
-- **Source**: Lucide icons (MIT licensed)
+### Triggers
 
-```html
-<svg class="icon" viewBox="0 0 24 24">
-  <!-- icon paths -->
-</svg>
-```
+- **⌘K** - Inline edit (from anywhere)
+- **Tab** - Accept AI suggestion (in formula bar)
+- **⌘I** - Toggle AI sidebar
+- **Agent view** - Separate full-height view for autonomous tasks
 
----
+## Keyboard Shortcuts
+
+### Excel-Compatible (must work)
+
+| Shortcut | Action |
+|----------|--------|
+| F2 | Edit cell |
+| F4 | Toggle absolute/relative |
+| Ctrl+C/X/V | Copy/Cut/Paste |
+| Ctrl+Z/Y | Undo/Redo |
+| Ctrl+D | Fill down |
+| Ctrl+R | Fill right |
+| Ctrl+; | Insert date |
+| Alt+= | AutoSum |
+| Ctrl+Home | Go to A1 |
+| Ctrl+End | Go to last cell |
+| Ctrl+Arrow | Jump to edge |
+
+### AI Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| ⌘K | Open AI inline edit |
+| ⌘I | Toggle AI sidebar |
+| Tab | Accept AI suggestion |
 
 ## Mockup Files
 
 | File | Description |
 |------|-------------|
-| `spreadsheet-main.html` | Main app with grid, formula bar, and AI panel |
-| *(more coming)* | |
+| `spreadsheet-main.html` | Main app - ribbon, grid, AI sidebar |
+| `ai-agent-mode.html` | Agent execution view |
+| `command-palette.html` | Quick command/function search |
+
+> ⚠️ **These are directional mockups, not pixel-perfect specs.**
+>
+> Use them for **vision, layout, and design language** — but apply judgment:
+> - They are **crude prototypes** with missing features and rough edges
+> - Many interactions, states, and edge cases are not shown
+> - Polish, refine, and fill gaps as you implement
+> - Follow the **principles** (Excel functionality + Cursor polish) over exact pixels
+
+## Implementation Notes
+
+### Do
+
+- Use the ribbon - it's what Excel users expect
+- Keep light mode - professionals prefer it
+- Show all status bar calculations
+- Use monospace for cells/formulas
+- Maintain Excel keyboard shortcuts
+- Show formula bar always
+- **Tighten all spacing** - no wasted whitespace
+- **Layer backgrounds** - use subtle shades for depth
+- **Keep elements small** - 20-24px heights, 9-12px fonts
+
+### Don't
+
+- Hide functionality in menus
+- Use dark mode by default
+- Simplify away features
+- Change keyboard shortcuts
+- Make AI the primary interface
+- **Add giant buttons** - no "Chat" "Edit" "Agent" pills
+- **Use gradients on icons** - solid accent colors only
+- **Pad excessively** - every pixel has value
+- **Make headings oversized** - content over chrome
+
+### Anti-patterns (AI Slop)
+
+These make designs look generic and unpolished:
+
+```
+❌ Giant mode buttons with icons
+❌ Gradient backgrounds on small elements
+❌ 16-20px padding everywhere
+❌ 14-16px font sizes for UI text
+❌ Large rounded corners (8px+)
+❌ "Chat" / "Edit" / "Agent" as big pills
+❌ Oversized avatars and icons
+```
 
 ---
 
-## Implementation Notes for Agents
-
-When implementing UI components:
-
-1. **Reference the mockups** - Don't guess at spacing, colors, or typography
-2. **Use CSS variables** - All colors and spacing should use the design tokens
-3. **Test at 1x and 2x** - Ensure crisp rendering on Retina displays
-4. **Check dark mode only** - We're dark-first (light theme is future work)
-5. **Match the font stack** - Don't substitute fonts without approval
-
-### CSS Import
-
-```css
-/* At top of component CSS */
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
-```
-
-### Color Blind Accessibility
-
-- Don't rely solely on red/green for positive/negative
-- Use icons or patterns as secondary indicators
-- Test with Sim Daltonism or similar tools
+*Excel functionality. Cursor density. Every pixel designed.*

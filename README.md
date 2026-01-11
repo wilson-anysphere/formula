@@ -1,5 +1,7 @@
 # Formula — AI-Native Spreadsheet (Excel-Compatible)
 
+> **A Cursor product.** All AI features are powered by Cursor's backend—no local models, no API keys, no provider configuration.
+
 Formula is a next-generation spreadsheet with a **desktop-first** product strategy (Tauri) and an **optional web target** used to keep the core engine/UI portable.
 
 ## Python scripting

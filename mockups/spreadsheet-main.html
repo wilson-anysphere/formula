@@ -3,88 +3,58 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Formula – Mockup</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Formula</title>
   <style>
+    /*
+     * FORMULA DESIGN SYSTEM
+     * Excel functionality + Cursor polish
+     * Light mode, professional, clean
+     */
+    
     :root {
-      /* 
-       * FORMULA DESIGN SYSTEM
-       * Inspired by: Bloomberg Terminal depth + Linear polish + Raycast focus
-       * Aesthetic: Professional finance tool that feels alive
-       */
+      /* Light mode - subtle depth, professional */
+      --bg-app: #f5f5f5;
+      --bg-surface: #fafafa;
+      --bg-elevated: #ffffff;
+      --bg-hover: #eeeeee;
+      --bg-active: #e4e4e4;
+      --bg-inset: #f0f0f0;
       
-      /* Base colors - Deep charcoal foundation, not pure black */
-      --bg-base: #0f1114;
-      --bg-surface: #161a1e;
-      --bg-elevated: #1c2127;
-      --bg-hover: #252b33;
-      --bg-active: #2d353f;
+      /* Text */
+      --text-primary: #1a1a1a;
+      --text-secondary: #5c5c5c;
+      --text-tertiary: #8a8a8a;
       
-      /* Grid specific */
-      --grid-bg: #12151a;
-      --grid-line: rgba(255, 255, 255, 0.06);
-      --grid-header-bg: #181c22;
-      --grid-selection: rgba(59, 130, 246, 0.15);
-      --grid-selection-border: #3b82f6;
+      /* Borders - subtle */
+      --border: #e0e0e0;
+      --border-strong: #c8c8c8;
       
-      /* Text hierarchy */
-      --text-primary: #f1f3f5;
-      --text-secondary: #8b939e;
-      --text-muted: #5c6370;
-      --text-disabled: #3d4450;
+      /* Accent - professional blue */
+      --accent: #0969da;
+      --accent-bg: #ddf4ff;
+      --accent-border: #54aeff;
       
-      /* Accent - Electric blue, not purple */
-      --accent: #3b82f6;
-      --accent-hover: #2563eb;
-      --accent-subtle: rgba(59, 130, 246, 0.12);
+      /* Selection */
+      --selection-bg: rgba(9, 105, 218, 0.08);
+      --selection-border: #0969da;
       
       /* Semantic */
-      --success: #10b981;
-      --warning: #f59e0b;
-      --error: #ef4444;
-      --info: #06b6d4;
+      --green: #1a7f37;
+      --green-bg: #dafbe1;
+      --red: #cf222e;
+      --red-bg: #ffebe9;
       
-      /* Formula syntax colors */
-      --syntax-function: #60a5fa;
-      --syntax-reference: #a78bfa;
-      --syntax-string: #fbbf24;
-      --syntax-number: #34d399;
-      --syntax-operator: #f1f3f5;
-      --syntax-error: #f87171;
+      /* Grid */
+      --grid-line: #e6e6e6;
+      --grid-header-bg: #f5f5f5;
       
-      /* Borders */
-      --border-subtle: rgba(255, 255, 255, 0.06);
-      --border-default: rgba(255, 255, 255, 0.1);
-      --border-strong: rgba(255, 255, 255, 0.15);
-      
-      /* Shadows */
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-      --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+      /* Sizing */
+      --radius: 6px;
+      --radius-sm: 4px;
       
       /* Typography */
-      --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-      --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
-      
-      /* Spacing scale */
-      --space-1: 4px;
-      --space-2: 8px;
-      --space-3: 12px;
-      --space-4: 16px;
-      --space-5: 20px;
-      --space-6: 24px;
-      --space-8: 32px;
-      
-      /* Radii */
-      --radius-sm: 4px;
-      --radius-md: 6px;
-      --radius-lg: 8px;
-      
-      /* Transitions */
-      --transition-fast: 100ms ease;
-      --transition-normal: 150ms ease;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
 
     * {
@@ -97,88 +67,288 @@
       height: 100%;
       font-family: var(--font-sans);
       font-size: 13px;
-      line-height: 1.5;
-      background: var(--bg-base);
+      background: var(--bg-app);
       color: var(--text-primary);
       -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
     }
 
-    /* ═══════════════════════════════════════════════════════════════
-       APP LAYOUT
-       ═══════════════════════════════════════════════════════════════ */
-    
     .app {
-      display: grid;
-      grid-template-rows: auto auto 1fr auto;
       height: 100vh;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      overflow: hidden;
+    }
+
+    .app-main {
+      display: grid;
+      grid-template-rows: auto auto auto 1fr auto auto;
       overflow: hidden;
     }
 
     /* ═══════════════════════════════════════════════════════════════
-       TITLE BAR (macOS style)
+       TITLE BAR
        ═══════════════════════════════════════════════════════════════ */
     
     .titlebar {
       display: flex;
       align-items: center;
-      gap: var(--space-4);
-      height: 38px;
-      padding: 0 var(--space-4);
-      background: var(--bg-surface);
-      border-bottom: 1px solid var(--border-subtle);
-      -webkit-app-region: drag;
+      height: 32px;
+      padding: 0 10px;
+      background: var(--bg-app);
+      border-bottom: 1px solid var(--border);
+      gap: 10px;
     }
 
     .window-controls {
       display: flex;
-      gap: 8px;
-      -webkit-app-region: no-drag;
+      gap: 6px;
     }
 
     .window-btn {
-      width: 12px;
-      height: 12px;
+      width: 11px;
+      height: 11px;
       border-radius: 50%;
       border: none;
-      cursor: pointer;
     }
 
     .window-btn.close { background: #ff5f57; }
-    .window-btn.minimize { background: #ffbd2e; }
+    .window-btn.minimize { background: #febc2e; }
     .window-btn.maximize { background: #28c840; }
 
-    .titlebar-title {
+    .app-title {
+      font-weight: 600;
       font-size: 12px;
-      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .doc-name {
       color: var(--text-secondary);
+      font-weight: 400;
+      font-size: 12px;
+    }
+
+    .titlebar-spacer {
       flex: 1;
-      text-align: center;
     }
 
     .titlebar-actions {
       display: flex;
-      gap: var(--space-2);
-      -webkit-app-region: no-drag;
+      gap: 6px;
     }
 
     .titlebar-btn {
+      height: 22px;
+      padding: 0 10px;
       display: flex;
       align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 24px;
-      border: none;
+      gap: 4px;
+      border: 1px solid var(--border);
       border-radius: var(--radius-sm);
-      background: transparent;
+      background: var(--bg-surface);
       color: var(--text-secondary);
+      font-size: 11px;
       cursor: pointer;
-      transition: all var(--transition-fast);
     }
 
     .titlebar-btn:hover {
       background: var(--bg-hover);
+    }
+
+    .titlebar-btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .titlebar-btn.primary:hover {
+      filter: brightness(1.1);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       RIBBON - Excel-style tabs and commands
+       ═══════════════════════════════════════════════════════════════ */
+    
+    .ribbon {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .ribbon-tabs {
+      display: flex;
+      height: 26px;
+      padding: 0 6px;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-surface);
+    }
+
+    .ribbon-tab {
+      padding: 0 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: all 80ms;
+    }
+
+    .ribbon-tab:hover {
       color: var(--text-primary);
+    }
+
+    .ribbon-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .ribbon-tab.file {
+      background: var(--accent);
+      color: white;
+      border-radius: 2px;
+      margin-right: 4px;
+      border-bottom: none;
+    }
+
+    .ribbon-tab.file:hover {
+      filter: brightness(1.1);
+    }
+
+    .ribbon-content {
+      display: flex;
+      padding: 4px 8px;
+      gap: 10px;
+      min-height: 70px;
+      background: var(--bg-surface);
+    }
+
+    .ribbon-group {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding-right: 10px;
+      border-right: 1px solid var(--border);
+    }
+
+    .ribbon-group:last-child {
+      border-right: none;
+    }
+
+    .ribbon-group-content {
+      display: flex;
+      gap: 4px;
+      flex: 1;
+      align-items: flex-start;
+    }
+
+    .ribbon-group-label {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      text-align: center;
+    }
+
+    .ribbon-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 3px 6px;
+      border: none;
+      border-radius: 2px;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 10px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .ribbon-btn:hover {
+      background: var(--bg-hover);
+    }
+
+    .ribbon-btn-lg {
+      flex-direction: column;
+      padding: 4px 6px;
+      min-width: 48px;
+    }
+
+    .ribbon-btn-lg .ribbon-btn-icon {
+      font-size: 18px;
+    }
+
+    .ribbon-btn-lg span:last-child {
+      font-size: 9px;
+    }
+
+    .ribbon-btn-sm {
+      font-size: 10px;
+      justify-content: flex-start;
+    }
+
+    .ribbon-btn-icon {
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      border-radius: 2px;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .ribbon-btn-icon:hover {
+      background: var(--bg-hover);
+    }
+
+    .ribbon-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .ribbon-row {
+      display: flex;
+      gap: 1px;
+      align-items: center;
+    }
+
+    .ribbon-sep {
+      width: 1px;
+      height: 16px;
+      background: var(--border);
+      margin: 0 3px;
+    }
+
+    .ribbon-select {
+      height: 22px;
+      padding: 0 6px;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      background: var(--bg-elevated);
+      font-size: 11px;
+      color: var(--text-primary);
+      cursor: pointer;
+    }
+
+    .ribbon-select:hover {
+      border-color: var(--border-strong);
+    }
+
+    .font-select {
+      width: 100px;
+    }
+
+    .size-select {
+      width: 44px;
+    }
+
+    .number-select {
+      width: 90px;
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -186,965 +356,1089 @@
        ═══════════════════════════════════════════════════════════════ */
     
     .formula-bar {
-      display: grid;
-      grid-template-columns: 80px auto 1fr auto;
-      gap: var(--space-3);
-      align-items: start;
-      padding: var(--space-3) var(--space-4);
+      display: flex;
+      align-items: center;
+      height: 26px;
       background: var(--bg-surface);
-      border-bottom: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .name-box-container {
+      display: flex;
+      align-items: center;
+      width: 100px;
+      height: 100%;
+      border-right: 1px solid var(--border);
     }
 
     .name-box {
-      position: relative;
-    }
-
-    .name-box-input {
-      width: 100%;
-      height: 28px;
-      padding: 0 var(--space-2);
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 500;
+      flex: 1;
+      height: 100%;
+      padding: 0 6px;
+      border: none;
+      background: transparent;
+      font-size: 11px;
       color: var(--text-primary);
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-sm);
+      text-align: center;
+    }
+
+    .name-box:focus {
       outline: none;
-      transition: all var(--transition-fast);
+      background: var(--bg-elevated);
     }
 
-    .name-box-input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-subtle);
+    .name-box-dropdown {
+      width: 16px;
+      height: 100%;
+      border: none;
+      background: transparent;
+      color: var(--text-tertiary);
+      font-size: 8px;
+      cursor: pointer;
     }
 
-    .formula-bar-fx {
+    .name-box-dropdown:hover {
+      background: var(--bg-hover);
+    }
+
+    .formula-buttons {
       display: flex;
       align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 28px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--accent);
-      background: var(--accent-subtle);
-      border-radius: var(--radius-sm);
-      user-select: none;
-    }
-
-    .formula-editor {
-      position: relative;
-      min-height: 28px;
-    }
-
-    .formula-highlight {
-      position: absolute;
-      inset: 0;
-      padding: 4px 10px;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 20px;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      pointer-events: none;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-sm);
-      overflow: hidden;
-    }
-
-    .formula-input {
-      position: relative;
-      width: 100%;
-      min-height: 28px;
-      padding: 4px 10px;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 20px;
-      color: transparent;
-      caret-color: var(--text-primary);
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: var(--radius-sm);
-      outline: none;
-      resize: none;
-      overflow: hidden;
-    }
-
-    .formula-input:focus + .formula-highlight {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-subtle);
-    }
-
-    /* Syntax highlighting */
-    .token-function { color: var(--syntax-function); font-weight: 500; }
-    .token-reference { color: var(--syntax-reference); }
-    .token-string { color: var(--syntax-string); }
-    .token-number { color: var(--syntax-number); }
-    .token-operator { color: var(--text-secondary); }
-    .token-paren { color: var(--text-muted); }
-    .token-ghost { color: var(--text-muted); opacity: 0.5; }
-
-    .formula-actions {
-      display: flex;
-      gap: var(--space-2);
+      height: 100%;
+      border-right: 1px solid var(--border);
     }
 
     .formula-btn {
+      width: 24px;
+      height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 28px;
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-sm);
-      background: var(--bg-elevated);
-      color: var(--text-secondary);
+      border: none;
+      background: transparent;
+      color: var(--text-tertiary);
+      font-size: 12px;
       cursor: pointer;
-      transition: all var(--transition-fast);
     }
 
     .formula-btn:hover {
       background: var(--bg-hover);
       color: var(--text-primary);
-      border-color: var(--border-strong);
     }
 
-    .formula-btn.primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: white;
+    .formula-btn.cancel:hover {
+      color: var(--red);
     }
 
-    .formula-btn.primary:hover {
-      background: var(--accent-hover);
+    .formula-btn.confirm:hover {
+      color: var(--green);
+    }
+
+    .formula-btn.fx {
+      font-style: italic;
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .formula-input {
+      flex: 1;
+      height: 100%;
+      padding: 0 8px;
+      border: none;
+      background: transparent;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-primary);
+    }
+
+    .formula-input:focus {
+      outline: none;
+      background: var(--bg-elevated);
     }
 
     /* ═══════════════════════════════════════════════════════════════
-       MAIN WORKSPACE
+       MAIN AREA
        ═══════════════════════════════════════════════════════════════ */
     
-    .workspace {
-      display: grid;
-      grid-template-columns: 1fr 360px;
+    .main {
+      display: flex;
       overflow: hidden;
+      flex: 1;
     }
 
     /* ═══════════════════════════════════════════════════════════════
-       SPREADSHEET GRID
+       GRID
        ═══════════════════════════════════════════════════════════════ */
     
     .grid-container {
-      display: flex;
-      flex-direction: column;
+      flex: 1;
       overflow: hidden;
-      background: var(--grid-bg);
+      background: var(--bg-surface);
     }
 
-    .grid-viewport {
-      flex: 1;
+    .grid-scroll {
+      height: 100%;
       overflow: auto;
-      position: relative;
     }
 
     .grid {
       display: grid;
-      /* A-J columns + row header */
-      grid-template-columns: 44px repeat(10, 100px);
-      font-family: var(--font-mono);
-      font-size: 12px;
-      border-collapse: collapse;
+      grid-template-columns: 36px repeat(10, minmax(80px, 1fr));
+      font-size: 11px;
     }
 
-    .grid-header-corner {
+    .grid-corner {
       position: sticky;
       top: 0;
       left: 0;
       z-index: 30;
       background: var(--grid-header-bg);
-      border-right: 1px solid var(--grid-line);
-      border-bottom: 1px solid var(--grid-line);
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
     }
 
-    .grid-header-cell {
+    .col-header {
       position: sticky;
       top: 0;
       z-index: 20;
-      height: 26px;
+      height: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--grid-header-bg);
+      background: var(--bg-app);
       border-right: 1px solid var(--grid-line);
-      border-bottom: 1px solid var(--grid-line);
-      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
       font-weight: 500;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
+      color: var(--text-tertiary);
+      font-size: 10px;
       user-select: none;
     }
 
-    .grid-header-cell.selected {
-      background: var(--accent-subtle);
+    .col-header:hover {
+      background: var(--bg-hover);
+    }
+
+    .col-header.selected {
+      background: var(--accent-bg);
       color: var(--accent);
     }
 
-    .grid-row-header {
+    .row-header {
       position: sticky;
       left: 0;
       z-index: 10;
-      width: 44px;
-      height: 24px;
+      width: 36px;
+      height: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--grid-header-bg);
-      border-right: 1px solid var(--grid-line);
+      background: var(--bg-app);
+      border-right: 1px solid var(--border);
       border-bottom: 1px solid var(--grid-line);
-      color: var(--text-secondary);
       font-weight: 500;
-      font-size: 11px;
+      color: var(--text-tertiary);
+      font-size: 10px;
       user-select: none;
     }
 
-    .grid-row-header.selected {
-      background: var(--accent-subtle);
+    .row-header:hover {
+      background: var(--bg-hover);
+    }
+
+    .row-header.selected {
+      background: var(--accent-bg);
       color: var(--accent);
     }
 
-    .grid-cell {
-      height: 24px;
-      padding: 0 8px;
+    .cell {
+      height: 20px;
+      padding: 0 5px;
       display: flex;
       align-items: center;
-      background: var(--grid-bg);
+      background: var(--bg-elevated);
       border-right: 1px solid var(--grid-line);
       border-bottom: 1px solid var(--grid-line);
-      color: var(--text-primary);
-      white-space: nowrap;
+      font-family: var(--font-mono);
+      font-size: 11px;
       overflow: hidden;
-      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .grid-cell.number {
+    .cell.number {
       justify-content: flex-end;
       font-variant-numeric: tabular-nums;
     }
 
-    .grid-cell.formula {
-      color: var(--syntax-number);
+    .cell.header {
+      font-family: var(--font-sans);
+      font-weight: 500;
+      color: var(--text-primary);
+      background: var(--bg-surface);
     }
 
-    .grid-cell.selected {
-      background: var(--grid-selection);
+    .cell.selected {
+      background: var(--selection-bg);
     }
 
-    .grid-cell.active {
-      position: relative;
-      background: var(--grid-selection);
-      box-shadow: inset 0 0 0 2px var(--grid-selection-border);
+    .cell.active {
+      box-shadow: inset 0 0 0 2px var(--selection-border);
+      background: var(--bg-surface);
       z-index: 5;
+      position: relative;
     }
 
-    .grid-cell.error {
-      color: var(--error);
-    }
+    .cell.positive { color: var(--green); }
+    .cell.negative { color: var(--red); }
 
     /* ═══════════════════════════════════════════════════════════════
-       AI PANEL
+       AI SIDEBAR
        ═══════════════════════════════════════════════════════════════ */
     
-    .ai-panel {
+    .ai-sidebar {
       display: flex;
       flex-direction: column;
       background: var(--bg-surface);
-      border-left: 1px solid var(--border-subtle);
+      border-left: 1px solid var(--border);
+      height: 100vh;
     }
 
-    .panel-header {
+    .ai-context {
+      padding: 6px 10px;
+      background: var(--bg-inset);
+      border-bottom: 1px solid var(--border);
       display: flex;
+      gap: 6px;
       align-items: center;
-      justify-content: space-between;
-      height: 44px;
-      padding: 0 var(--space-4);
-      border-bottom: 1px solid var(--border-subtle);
     }
 
-    .panel-title {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      font-weight: 600;
-      font-size: 13px;
-    }
-
-    .panel-title-icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 20px;
-      height: 20px;
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-      border-radius: var(--radius-sm);
-      color: white;
+    .ai-tag {
+      padding: 2px 6px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
       font-size: 10px;
+      color: var(--text-secondary);
     }
 
-    .panel-actions {
-      display: flex;
-      gap: var(--space-1);
-    }
-
-    .panel-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 28px;
-      border: none;
-      border-radius: var(--radius-sm);
-      background: transparent;
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all var(--transition-fast);
-    }
-
-    .panel-btn:hover {
-      background: var(--bg-hover);
-      color: var(--text-primary);
+    .ai-tag.active {
+      background: var(--accent-bg);
+      border-color: var(--accent-border);
+      color: var(--accent);
     }
 
     .ai-messages {
       flex: 1;
       overflow-y: auto;
-      padding: var(--space-4);
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-4);
+      padding: 8px 10px;
     }
 
-    .ai-message {
+    .ai-msg {
+      margin-bottom: 12px;
+    }
+
+    .ai-msg-header {
       display: flex;
-      gap: var(--space-3);
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
     }
 
     .ai-avatar {
-      flex-shrink: 0;
-      width: 28px;
-      height: 28px;
-      border-radius: var(--radius-md);
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 12px;
+      font-size: 9px;
       font-weight: 600;
-    }
-
-    .ai-avatar.assistant {
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-      color: white;
     }
 
     .ai-avatar.user {
-      background: var(--bg-elevated);
+      background: var(--bg-inset);
       color: var(--text-secondary);
-      border: 1px solid var(--border-default);
+      border: 1px solid var(--border);
     }
 
-    .ai-content {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .ai-content-header {
-      display: flex;
-      align-items: baseline;
-      gap: var(--space-2);
-      margin-bottom: var(--space-1);
+    .ai-avatar.assistant {
+      background: var(--accent);
+      color: white;
     }
 
     .ai-sender {
-      font-weight: 600;
-      font-size: 13px;
+      font-weight: 500;
+      font-size: 11px;
     }
 
     .ai-time {
-      font-size: 11px;
-      color: var(--text-muted);
+      font-size: 10px;
+      color: var(--text-tertiary);
     }
 
-    .ai-text {
-      font-size: 13px;
-      line-height: 1.6;
+    .ai-msg-body {
+      padding-left: 24px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--text-primary);
+    }
+
+    .ai-msg-body p {
+      margin: 0 0 6px;
+    }
+
+    /* Diff preview */
+    .ai-diff {
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: var(--bg-elevated);
+    }
+
+    .ai-diff-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 8px;
+      background: var(--bg-inset);
+      border-bottom: 1px solid var(--border);
+      font-size: 10px;
+      font-weight: 500;
       color: var(--text-secondary);
     }
 
-    .ai-text p {
-      margin: 0 0 var(--space-2);
+    .ai-diff-stats {
+      display: flex;
+      gap: 8px;
+      font-size: 10px;
+      font-weight: 400;
     }
 
-    .ai-text p:last-child {
-      margin-bottom: 0;
-    }
+    .ai-diff-stats .add { color: var(--green); }
+    .ai-diff-stats .mod { color: #9a6700; }
 
-    .ai-code {
-      margin: var(--space-2) 0;
-      padding: var(--space-3);
-      background: var(--bg-base);
-      border-radius: var(--radius-md);
+    .ai-diff-body {
+      padding: 4px 6px;
       font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.5;
-      overflow-x: auto;
+      font-size: 10px;
+      max-height: 140px;
+      overflow-y: auto;
     }
 
-    .ai-suggestion {
-      margin-top: var(--space-3);
-      padding: var(--space-3);
-      background: var(--accent-subtle);
-      border: 1px solid rgba(59, 130, 246, 0.2);
-      border-radius: var(--radius-md);
+    .ai-diff-line {
+      display: flex;
+      padding: 2px 6px;
+      border-radius: 2px;
+      margin-bottom: 1px;
     }
 
-    .ai-suggestion-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--accent);
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      margin-bottom: var(--space-2);
+    .ai-diff-line.add {
+      background: var(--green-bg);
+      color: var(--green);
     }
 
-    .ai-suggestion-action {
-      display: inline-flex;
+    .ai-diff-line .cell-ref {
+      width: 52px;
+      font-weight: 500;
+    }
+
+    .ai-diff-actions {
+      display: flex;
+      gap: 6px;
+      padding: 6px 8px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-inset);
+    }
+
+    .ai-btn {
+      flex: 1;
+      height: 24px;
+      display: flex;
       align-items: center;
-      gap: var(--space-2);
-      padding: var(--space-2) var(--space-3);
-      background: var(--accent);
-      border: none;
+      justify-content: center;
       border-radius: var(--radius-sm);
-      color: white;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
       cursor: pointer;
-      transition: all var(--transition-fast);
     }
 
-    .ai-suggestion-action:hover {
-      background: var(--accent-hover);
+    .ai-btn.primary {
+      background: var(--accent);
+      border: none;
+      color: white;
     }
 
-    .ai-input-container {
-      padding: var(--space-4);
-      border-top: 1px solid var(--border-subtle);
+    .ai-btn.primary:hover {
+      filter: brightness(1.1);
     }
 
-    .ai-input-wrapper {
+    .ai-btn.secondary {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+
+    .ai-btn.secondary:hover {
+      background: var(--bg-hover);
+    }
+
+    .ai-input-area {
+      padding: 8px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-app);
+    }
+
+    .ai-input-box {
       display: flex;
       align-items: flex-end;
-      gap: var(--space-2);
-      padding: var(--space-2);
+      gap: 6px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
       background: var(--bg-elevated);
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-md);
-      transition: all var(--transition-fast);
     }
 
-    .ai-input-wrapper:focus-within {
+    .ai-input-box:focus-within {
       border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-subtle);
     }
 
     .ai-input {
       flex: 1;
-      min-height: 20px;
-      max-height: 120px;
-      padding: var(--space-1) var(--space-2);
-      font-family: var(--font-sans);
-      font-size: 13px;
-      line-height: 1.5;
-      color: var(--text-primary);
-      background: transparent;
       border: none;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      color: var(--text-primary);
       outline: none;
       resize: none;
+      min-height: 18px;
+      max-height: 60px;
+      background: transparent;
     }
 
     .ai-input::placeholder {
-      color: var(--text-muted);
+      color: var(--text-tertiary);
     }
 
-    .ai-send-btn {
+    .ai-send {
+      width: 22px;
+      height: 22px;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 32px;
-      height: 32px;
       background: var(--accent);
       border: none;
-      border-radius: var(--radius-sm);
+      border-radius: 3px;
       color: white;
       cursor: pointer;
-      transition: all var(--transition-fast);
+      font-size: 11px;
     }
 
-    .ai-send-btn:hover {
-      background: var(--accent-hover);
+    .ai-send:hover {
+      filter: brightness(1.1);
     }
 
-    .ai-send-btn:disabled {
-      background: var(--bg-hover);
-      color: var(--text-muted);
-      cursor: not-allowed;
+    .ai-hints {
+      display: flex;
+      gap: 10px;
+      margin-top: 6px;
+      font-size: 10px;
+      color: var(--text-tertiary);
+    }
+
+    .ai-hints kbd {
+      padding: 1px 3px;
+      background: var(--bg-surface);
+      border-radius: 2px;
+      font-family: var(--font-mono);
+      font-size: 9px;
     }
 
     /* ═══════════════════════════════════════════════════════════════
        SHEET TABS
        ═══════════════════════════════════════════════════════════════ */
     
-    .sheet-tabs {
+    .sheet-bar {
       display: flex;
       align-items: center;
-      gap: var(--space-1);
-      height: 36px;
-      padding: 0 var(--space-3);
-      background: var(--bg-surface);
-      border-top: 1px solid var(--border-subtle);
+      height: 24px;
+      padding: 0 6px;
+      background: var(--bg-app);
+      border-top: 1px solid var(--border);
+      gap: 2px;
+    }
+
+    .sheet-nav {
+      display: flex;
+      gap: 1px;
+    }
+
+    .sheet-nav-btn {
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      border-radius: 2px;
+      background: transparent;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      font-size: 9px;
+    }
+
+    .sheet-nav-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .sheet-tabs {
+      display: flex;
+      gap: 1px;
+      flex: 1;
     }
 
     .sheet-tab {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      height: 28px;
-      padding: 0 var(--space-3);
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: var(--radius-sm);
+      padding: 3px 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 3px 3px 0 0;
+      font-size: 10px;
       color: var(--text-secondary);
-      font-size: 12px;
-      font-weight: 500;
       cursor: pointer;
-      transition: all var(--transition-fast);
     }
 
     .sheet-tab:hover {
       background: var(--bg-hover);
-      color: var(--text-primary);
     }
 
     .sheet-tab.active {
       background: var(--bg-elevated);
-      border-color: var(--border-default);
       color: var(--text-primary);
+      font-weight: 500;
+      border-bottom: 1px solid var(--bg-elevated);
+      margin-bottom: -1px;
     }
 
-    .sheet-tab-icon {
-      width: 14px;
-      height: 14px;
-      opacity: 0.6;
-    }
-
-    .sheet-tab-add {
+    .sheet-add {
+      width: 18px;
+      height: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 28px;
+      border: none;
+      border-radius: 2px;
       background: transparent;
-      border: 1px dashed var(--border-default);
-      border-radius: var(--radius-sm);
-      color: var(--text-muted);
-      font-size: 16px;
+      color: var(--text-tertiary);
       cursor: pointer;
-      transition: all var(--transition-fast);
+      font-size: 12px;
     }
 
-    .sheet-tab-add:hover {
+    .sheet-add:hover {
       background: var(--bg-hover);
-      border-color: var(--text-muted);
+      color: var(--text-primary);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       STATUS BAR
+       ═══════════════════════════════════════════════════════════════ */
+    
+    .statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 20px;
+      padding: 0 8px;
+      background: var(--bg-app);
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      color: var(--text-tertiary);
+    }
+
+    .status-left, .status-right {
+      display: flex;
+      gap: 12px;
+    }
+
+    .status-item strong {
+      font-weight: 500;
       color: var(--text-secondary);
     }
 
-    .sheet-tabs-spacer {
-      flex: 1;
-    }
-
-    .sheet-tabs-meta {
-      display: flex;
-      align-items: center;
-      gap: var(--space-4);
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-
-    .sheet-tabs-meta span {
-      display: flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       ICONS (inline SVG)
-       ═══════════════════════════════════════════════════════════════ */
-    
-    .icon {
-      width: 16px;
-      height: 16px;
-      fill: none;
-      stroke: currentColor;
-      stroke-width: 2;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-    }
-
-    .icon-sm {
-      width: 14px;
-      height: 14px;
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       SCROLLBARS
-       ═══════════════════════════════════════════════════════════════ */
-    
+    /* Scrollbar */
     ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
     }
 
     ::-webkit-scrollbar-track {
-      background: transparent;
+      background: var(--bg-app);
     }
 
     ::-webkit-scrollbar-thumb {
-      background: var(--bg-active);
-      border-radius: 4px;
+      background: var(--border-strong);
+      border-radius: 5px;
+      border: 2px solid var(--bg-app);
     }
 
     ::-webkit-scrollbar-thumb:hover {
-      background: var(--text-muted);
-    }
-
-    ::-webkit-scrollbar-corner {
-      background: transparent;
+      background: var(--text-tertiary);
     }
   </style>
 </head>
 <body>
   <div class="app">
-    <!-- Title Bar -->
-    <div class="titlebar">
+    <!-- Left side: Excel chrome -->
+    <div class="app-main">
+      <!-- Title Bar -->
+      <div class="titlebar">
       <div class="window-controls">
         <button class="window-btn close"></button>
         <button class="window-btn minimize"></button>
         <button class="window-btn maximize"></button>
       </div>
-      <div class="titlebar-title">Q4 Financial Model.xlsx — Formula</div>
+      <span class="app-title">Formula</span>
+      <span class="doc-name">— Q4 Revenue Model.xlsx</span>
+      <div class="titlebar-spacer"></div>
       <div class="titlebar-actions">
-        <button class="titlebar-btn" title="Share">
-          <svg class="icon" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-        </button>
-        <button class="titlebar-btn" title="Settings">
-          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
+        <button class="titlebar-btn">Share</button>
+        <button class="titlebar-btn primary">Save</button>
+      </div>
+    </div>
+
+    <!-- Ribbon -->
+    <div class="ribbon">
+      <div class="ribbon-tabs">
+        <button class="ribbon-tab file">File</button>
+        <button class="ribbon-tab active">Home</button>
+        <button class="ribbon-tab">Insert</button>
+        <button class="ribbon-tab">Page Layout</button>
+        <button class="ribbon-tab">Formulas</button>
+        <button class="ribbon-tab">Data</button>
+        <button class="ribbon-tab">Review</button>
+        <button class="ribbon-tab">View</button>
+        <button class="ribbon-tab">Help</button>
+      </div>
+      <div class="ribbon-content">
+        <!-- Clipboard -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-content">
+            <button class="ribbon-btn ribbon-btn-lg">
+              <span class="ribbon-btn-icon">📋</span>
+              <span>Paste</span>
+            </button>
+            <div class="ribbon-stack">
+              <button class="ribbon-btn ribbon-btn-sm">✂️ Cut</button>
+              <button class="ribbon-btn ribbon-btn-sm">📄 Copy</button>
+              <button class="ribbon-btn ribbon-btn-sm">🖌️ Format Painter</button>
+            </div>
+          </div>
+          <div class="ribbon-group-label">Clipboard</div>
+        </div>
+
+        <!-- Font -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-content">
+            <div class="ribbon-stack">
+              <div class="ribbon-row">
+                <select class="ribbon-select font-select"><option>Calibri</option></select>
+                <select class="ribbon-select size-select"><option>11</option></select>
+              </div>
+              <div class="ribbon-row">
+                <button class="ribbon-btn-icon" title="Bold"><b>B</b></button>
+                <button class="ribbon-btn-icon" title="Italic"><i>I</i></button>
+                <button class="ribbon-btn-icon" title="Underline"><u>U</u></button>
+                <span class="ribbon-sep"></span>
+                <button class="ribbon-btn-icon" title="Borders">⊞</button>
+                <button class="ribbon-btn-icon" title="Fill Color">🎨</button>
+                <button class="ribbon-btn-icon" title="Font Color">A̲</button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-group-label">Font</div>
+        </div>
+
+        <!-- Alignment -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-content">
+            <div class="ribbon-stack">
+              <div class="ribbon-row">
+                <button class="ribbon-btn-icon" title="Align Top">⬆</button>
+                <button class="ribbon-btn-icon" title="Align Middle">⇅</button>
+                <button class="ribbon-btn-icon" title="Align Bottom">⬇</button>
+                <span class="ribbon-sep"></span>
+                <button class="ribbon-btn-icon" title="Orientation">↻</button>
+              </div>
+              <div class="ribbon-row">
+                <button class="ribbon-btn-icon" title="Align Left">⬅</button>
+                <button class="ribbon-btn-icon" title="Center">⬌</button>
+                <button class="ribbon-btn-icon" title="Align Right">➡</button>
+                <span class="ribbon-sep"></span>
+                <button class="ribbon-btn-icon" title="Indent">⇥</button>
+                <button class="ribbon-btn-icon" title="Outdent">⇤</button>
+              </div>
+            </div>
+            <div class="ribbon-stack">
+              <button class="ribbon-btn ribbon-btn-sm">↩ Wrap Text</button>
+              <button class="ribbon-btn ribbon-btn-sm">⊞ Merge & Center ▾</button>
+            </div>
+          </div>
+          <div class="ribbon-group-label">Alignment</div>
+        </div>
+
+        <!-- Number -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-content">
+            <div class="ribbon-stack">
+              <select class="ribbon-select number-select"><option>General</option></select>
+              <div class="ribbon-row">
+                <button class="ribbon-btn-icon" title="Currency">$</button>
+                <button class="ribbon-btn-icon" title="Percent">%</button>
+                <button class="ribbon-btn-icon" title="Comma">,</button>
+                <span class="ribbon-sep"></span>
+                <button class="ribbon-btn-icon" title="Increase Decimal">.0→</button>
+                <button class="ribbon-btn-icon" title="Decrease Decimal">←.0</button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-group-label">Number</div>
+        </div>
+
+        <!-- Styles -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-content">
+            <button class="ribbon-btn ribbon-btn-lg">
+              <span class="ribbon-btn-icon">📊</span>
+              <span>Conditional Formatting ▾</span>
+            </button>
+            <button class="ribbon-btn ribbon-btn-lg">
+              <span class="ribbon-btn-icon">📋</span>
+              <span>Format as Table ▾</span>
+            </button>
+            <button class="ribbon-btn ribbon-btn-lg">
+              <span class="ribbon-btn-icon">🎨</span>
+              <span>Cell Styles ▾</span>
+            </button>
+          </div>
+          <div class="ribbon-group-label">Styles</div>
+        </div>
+
+        <!-- Cells -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-content">
+            <div class="ribbon-stack">
+              <button class="ribbon-btn ribbon-btn-sm">⊕ Insert ▾</button>
+              <button class="ribbon-btn ribbon-btn-sm">⊖ Delete ▾</button>
+              <button class="ribbon-btn ribbon-btn-sm">⊡ Format ▾</button>
+            </div>
+          </div>
+          <div class="ribbon-group-label">Cells</div>
+        </div>
+
+        <!-- Editing -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-content">
+            <div class="ribbon-stack">
+              <button class="ribbon-btn ribbon-btn-sm">Σ AutoSum ▾</button>
+              <button class="ribbon-btn ribbon-btn-sm">↓ Fill ▾</button>
+              <button class="ribbon-btn ribbon-btn-sm">⌫ Clear ▾</button>
+            </div>
+            <div class="ribbon-stack">
+              <button class="ribbon-btn ribbon-btn-sm">⇅ Sort & Filter ▾</button>
+              <button class="ribbon-btn ribbon-btn-sm">⌕ Find & Select ▾</button>
+            </div>
+          </div>
+          <div class="ribbon-group-label">Editing</div>
+        </div>
       </div>
     </div>
 
     <!-- Formula Bar -->
     <div class="formula-bar">
-      <div class="name-box">
-        <input type="text" class="name-box-input" value="D7" readonly>
+      <div class="name-box-container">
+        <input type="text" class="name-box" value="D7">
+        <button class="name-box-dropdown">▾</button>
       </div>
-      <div class="formula-bar-fx">fx</div>
-      <div class="formula-editor">
-        <textarea class="formula-input" rows="1">=SUM(B7:C7)*1.08</textarea>
-        <div class="formula-highlight">
-          <span class="token-operator">=</span><span class="token-function">SUM</span><span class="token-paren">(</span><span class="token-reference">B7:C7</span><span class="token-paren">)</span><span class="token-operator">*</span><span class="token-number">1.08</span><span class="token-ghost"> + tax_rate</span>
-        </div>
+      <div class="formula-buttons">
+        <button class="formula-btn cancel" title="Cancel">✕</button>
+        <button class="formula-btn confirm" title="Enter">✓</button>
+        <button class="formula-btn fx" title="Insert Function">fx</button>
       </div>
-      <div class="formula-actions">
-        <button class="formula-btn" title="Cancel (Esc)">
-          <svg class="icon-sm" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-        <button class="formula-btn primary" title="Confirm (Enter)">
-          <svg class="icon-sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-        </button>
-      </div>
+      <input type="text" class="formula-input" value="=SUM(D3:D6)">
     </div>
 
-    <!-- Main Workspace -->
-    <div class="workspace">
-      <!-- Spreadsheet Grid -->
+    <!-- Main Area -->
+    <div class="main">
+      <!-- Grid -->
       <div class="grid-container">
-        <div class="grid-viewport">
-          <div class="grid" id="grid">
-            <!-- Header row -->
-            <div class="grid-header-corner"></div>
-            <div class="grid-header-cell">A</div>
-            <div class="grid-header-cell">B</div>
-            <div class="grid-header-cell">C</div>
-            <div class="grid-header-cell selected">D</div>
-            <div class="grid-header-cell">E</div>
-            <div class="grid-header-cell">F</div>
-            <div class="grid-header-cell">G</div>
-            <div class="grid-header-cell">H</div>
-            <div class="grid-header-cell">I</div>
-            <div class="grid-header-cell">J</div>
-            
-            <!-- Row 1 -->
-            <div class="grid-row-header">1</div>
-            <div class="grid-cell" style="font-weight: 600;">Q4 Revenue Forecast</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            
-            <!-- Row 2 -->
-            <div class="grid-row-header">2</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            
-            <!-- Row 3 (headers) -->
-            <div class="grid-row-header">3</div>
-            <div class="grid-cell" style="font-weight: 600; color: var(--text-secondary);">Product</div>
-            <div class="grid-cell" style="font-weight: 600; color: var(--text-secondary);">Units</div>
-            <div class="grid-cell" style="font-weight: 600; color: var(--text-secondary);">Price</div>
-            <div class="grid-cell" style="font-weight: 600; color: var(--text-secondary);">Total</div>
-            <div class="grid-cell" style="font-weight: 600; color: var(--text-secondary);">Growth</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            
-            <!-- Row 4 -->
-            <div class="grid-row-header">4</div>
-            <div class="grid-cell">Enterprise</div>
-            <div class="grid-cell number">1,250</div>
-            <div class="grid-cell number">$2,400</div>
-            <div class="grid-cell number formula">$3,000,000</div>
-            <div class="grid-cell number" style="color: var(--success);">+12.4%</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            
-            <!-- Row 5 -->
-            <div class="grid-row-header">5</div>
-            <div class="grid-cell">Professional</div>
-            <div class="grid-cell number">8,400</div>
-            <div class="grid-cell number">$480</div>
-            <div class="grid-cell number formula">$4,032,000</div>
-            <div class="grid-cell number" style="color: var(--success);">+8.2%</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            
-            <!-- Row 6 -->
-            <div class="grid-row-header">6</div>
-            <div class="grid-cell">Starter</div>
-            <div class="grid-cell number">24,800</div>
-            <div class="grid-cell number">$96</div>
-            <div class="grid-cell number formula">$2,380,800</div>
-            <div class="grid-cell number" style="color: var(--error);">-2.1%</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            
-            <!-- Row 7 (active) -->
-            <div class="grid-row-header selected">7</div>
-            <div class="grid-cell selected" style="font-weight: 600;">Total</div>
-            <div class="grid-cell number selected">34,450</div>
-            <div class="grid-cell selected"></div>
-            <div class="grid-cell number formula active">$9,412,800</div>
-            <div class="grid-cell number selected" style="color: var(--success);">+7.8%</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            
-            <!-- Rows 8-15 (empty) -->
-            <div class="grid-row-header">8</div>
-            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-            
-            <div class="grid-row-header">9</div>
-            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-            
-            <div class="grid-row-header">10</div>
-            <div class="grid-cell" style="font-weight: 600; color: var(--text-secondary);">Expenses</div>
-            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-            
-            <div class="grid-row-header">11</div>
-            <div class="grid-cell">Payroll</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell number formula">$3,200,000</div>
-            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-            
-            <div class="grid-row-header">12</div>
-            <div class="grid-cell">Infrastructure</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell number formula">$890,000</div>
-            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-            
-            <div class="grid-row-header">13</div>
-            <div class="grid-cell">Marketing</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell number formula">$1,420,000</div>
-            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-            
-            <div class="grid-row-header">14</div>
-            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-            
-            <div class="grid-row-header">15</div>
-            <div class="grid-cell" style="font-weight: 600;">Net Margin</div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell"></div>
-            <div class="grid-cell number formula" style="font-weight: 600; color: var(--success);">$3,902,800</div>
-            <div class="grid-cell number" style="color: var(--success);">41.5%</div>
-            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-          </div>
-        </div>
-      </div>
+        <div class="grid-scroll">
+          <div class="grid">
+            <!-- Headers -->
+            <div class="grid-corner"></div>
+            <div class="col-header">A</div>
+            <div class="col-header">B</div>
+            <div class="col-header">C</div>
+            <div class="col-header selected">D</div>
+            <div class="col-header">E</div>
+            <div class="col-header">F</div>
+            <div class="col-header">G</div>
+            <div class="col-header">H</div>
+            <div class="col-header">I</div>
+            <div class="col-header">J</div>
 
-      <!-- AI Panel -->
-      <div class="ai-panel">
-        <div class="panel-header">
-          <div class="panel-title">
-            <div class="panel-title-icon">✦</div>
-            <span>AI Assistant</span>
-          </div>
-          <div class="panel-actions">
-            <button class="panel-btn" title="New conversation">
-              <svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </button>
-            <button class="panel-btn" title="Close panel">
-              <svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </div>
-        </div>
-        
-        <div class="ai-messages">
-          <div class="ai-message">
-            <div class="ai-avatar user">U</div>
-            <div class="ai-content">
-              <div class="ai-content-header">
-                <span class="ai-sender">You</span>
-                <span class="ai-time">2 min ago</span>
-              </div>
-              <div class="ai-text">
-                <p>Add a column showing year-over-year growth rate for each product line</p>
-              </div>
-            </div>
-          </div>
-          
-          <div class="ai-message">
-            <div class="ai-avatar assistant">✦</div>
-            <div class="ai-content">
-              <div class="ai-content-header">
-                <span class="ai-sender">Formula AI</span>
-                <span class="ai-time">2 min ago</span>
-              </div>
-              <div class="ai-text">
-                <p>I'll add a Growth column (E) with year-over-year calculations. Here's what I'll do:</p>
-                <div class="ai-code">
-E4: =(D4-D4_prev)/D4_prev
-E5: =(D5-D5_prev)/D5_prev
-E6: =(D6-D6_prev)/D6_prev
-E7: =AVERAGE(E4:E6)</div>
-                <p>I've referenced the Q3 data from the "Historical" sheet for the previous values.</p>
-              </div>
-              <div class="ai-suggestion">
-                <div class="ai-suggestion-label">Suggested Action</div>
-                <button class="ai-suggestion-action">
-                  <svg class="icon-sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                  Apply Changes
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div class="ai-input-container">
-          <div class="ai-input-wrapper">
-            <textarea class="ai-input" placeholder="Ask about your data..." rows="1"></textarea>
-            <button class="ai-send-btn">
-              <svg class="icon" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            </button>
+            <!-- Row 1 -->
+            <div class="row-header">1</div>
+            <div class="cell header" style="grid-column: span 4">Q4 Revenue Forecast</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <!-- Row 2 - Headers -->
+            <div class="row-header">2</div>
+            <div class="cell header">Segment</div>
+            <div class="cell header number">Units</div>
+            <div class="cell header number">Price</div>
+            <div class="cell header number">Revenue</div>
+            <div class="cell header number">YoY</div>
+            <div class="cell header number">Q3 Actual</div>
+            <div class="cell header number">Variance</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <!-- Row 3 -->
+            <div class="row-header">3</div>
+            <div class="cell">Enterprise</div>
+            <div class="cell number">1,250</div>
+            <div class="cell number">$2,400</div>
+            <div class="cell number">$3,000,000</div>
+            <div class="cell number positive">+12.4%</div>
+            <div class="cell number">$2,668,000</div>
+            <div class="cell number positive">$332,000</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <!-- Row 4 -->
+            <div class="row-header">4</div>
+            <div class="cell">Professional</div>
+            <div class="cell number">8,400</div>
+            <div class="cell number">$480</div>
+            <div class="cell number">$4,032,000</div>
+            <div class="cell number positive">+8.2%</div>
+            <div class="cell number">$3,727,000</div>
+            <div class="cell number positive">$305,000</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <!-- Row 5 -->
+            <div class="row-header">5</div>
+            <div class="cell">Starter</div>
+            <div class="cell number">24,800</div>
+            <div class="cell number">$96</div>
+            <div class="cell number">$2,380,800</div>
+            <div class="cell number negative">−2.1%</div>
+            <div class="cell number">$2,431,700</div>
+            <div class="cell number negative">($50,900)</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <!-- Row 6 -->
+            <div class="row-header">6</div>
+            <div class="cell">Services</div>
+            <div class="cell number">—</div>
+            <div class="cell number">—</div>
+            <div class="cell number">$1,845,000</div>
+            <div class="cell number positive">+18.5%</div>
+            <div class="cell number">$1,557,000</div>
+            <div class="cell number positive">$288,000</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <!-- Row 7 - Total -->
+            <div class="row-header selected">7</div>
+            <div class="cell header selected">Total</div>
+            <div class="cell header number selected">34,450</div>
+            <div class="cell header selected"></div>
+            <div class="cell header number active">$11,257,800</div>
+            <div class="cell header number positive">+9.1%</div>
+            <div class="cell header number">$10,383,700</div>
+            <div class="cell header number positive">$874,100</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <!-- Empty rows -->
+            <div class="row-header">8</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">9</div>
+            <div class="cell header" style="grid-column: span 2">Expenses</div>
+            <div class="cell header"></div>
+            <div class="cell header number">Amount</div>
+            <div class="cell header number">% Rev</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">10</div>
+            <div class="cell">Cost of Revenue</div>
+            <div class="cell"></div><div class="cell"></div>
+            <div class="cell number">$3,377,340</div>
+            <div class="cell number">30%</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">11</div>
+            <div class="cell">Sales & Marketing</div>
+            <div class="cell"></div><div class="cell"></div>
+            <div class="cell number">$2,251,560</div>
+            <div class="cell number">20%</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">12</div>
+            <div class="cell">R&D</div>
+            <div class="cell"></div><div class="cell"></div>
+            <div class="cell number">$1,688,670</div>
+            <div class="cell number">15%</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">13</div>
+            <div class="cell">G&A</div>
+            <div class="cell"></div><div class="cell"></div>
+            <div class="cell number">$1,125,780</div>
+            <div class="cell number">10%</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">14</div>
+            <div class="cell header">Total Expenses</div>
+            <div class="cell header"></div><div class="cell header"></div>
+            <div class="cell header number">$8,443,350</div>
+            <div class="cell header number">75%</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">15</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">16</div>
+            <div class="cell header">Net Income</div>
+            <div class="cell header"></div><div class="cell header"></div>
+            <div class="cell header number positive">$2,814,450</div>
+            <div class="cell header number positive">25%</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">17</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">18</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">19</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+            <div class="row-header">20</div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
           </div>
         </div>
       </div>
     </div>
 
     <!-- Sheet Tabs -->
-    <div class="sheet-tabs">
-      <button class="sheet-tab active">
-        <svg class="sheet-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-        Q4 Forecast
-      </button>
-      <button class="sheet-tab">
-        <svg class="sheet-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-        Historical
-      </button>
-      <button class="sheet-tab">
-        <svg class="sheet-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-        Assumptions
-      </button>
-      <button class="sheet-tab-add" title="Add sheet">+</button>
-      <div class="sheet-tabs-spacer"></div>
-      <div class="sheet-tabs-meta">
-        <span>
-          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          Saved 30s ago
-        </span>
-        <span>
-          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          3 viewing
-        </span>
+    <div class="sheet-bar">
+      <div class="sheet-nav">
+        <button class="sheet-nav-btn">◀</button>
+        <button class="sheet-nav-btn">▶</button>
+      </div>
+      <div class="sheet-tabs">
+        <div class="sheet-tab active">Q4 Forecast</div>
+        <div class="sheet-tab">Historical</div>
+        <div class="sheet-tab">Assumptions</div>
+      </div>
+      <button class="sheet-add">+</button>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="statusbar">
+      <div class="status-left">
+        <span>Ready</span>
+      </div>
+      <div class="status-right">
+        <span>Sum: <strong>$11,257,800</strong></span>
+        <span>Average: <strong>$2,814,450</strong></span>
+        <span>Count: <strong>4</strong></span>
+        <span>100%</span>
+      </div>
+    </div>
+    </div><!-- end app-main -->
+
+    <!-- AI Sidebar - full height -->
+    <div class="ai-sidebar">
+      <div class="ai-context">
+        <span class="ai-tag active">Q4 Revenue Model</span>
+        <span class="ai-tag">D7</span>
+        <span class="ai-tag">12 formulas</span>
+      </div>
+
+      <div class="ai-messages">
+        <div class="ai-msg">
+          <div class="ai-msg-header">
+            <div class="ai-avatar user">Y</div>
+            <span class="ai-sender">You</span>
+            <span class="ai-time">2m ago</span>
+          </div>
+          <div class="ai-msg-body">
+            <p>Add a sensitivity table showing net income at 5%, 10%, 15% revenue growth</p>
+          </div>
+        </div>
+
+        <div class="ai-msg">
+          <div class="ai-msg-header">
+            <div class="ai-avatar assistant">F</div>
+            <span class="ai-sender">Formula</span>
+            <span class="ai-time">2m ago</span>
+          </div>
+          <div class="ai-msg-body">
+            <p>I'll create a sensitivity analysis table in H9:K13.</p>
+            
+            <div class="ai-diff">
+              <div class="ai-diff-header">
+                <span>Proposed Changes</span>
+                <div class="ai-diff-stats">
+                  <span class="add">+18 cells</span>
+                </div>
+              </div>
+              <div class="ai-diff-body">
+                <div class="ai-diff-line add">
+                  <span class="cell-ref">H9</span>
+                  <span>"Sensitivity"</span>
+                </div>
+                <div class="ai-diff-line add">
+                  <span class="cell-ref">I9:K9</span>
+                  <span>+5%, +10%, +15%</span>
+                </div>
+                <div class="ai-diff-line add">
+                  <span class="cell-ref">H10</span>
+                  <span>"Revenue"</span>
+                </div>
+                <div class="ai-diff-line add">
+                  <span class="cell-ref">I10</span>
+                  <span>=D7*1.05</span>
+                </div>
+                <div class="ai-diff-line add">
+                  <span class="cell-ref">H11</span>
+                  <span>"Net Income"</span>
+                </div>
+                <div class="ai-diff-line add">
+                  <span class="cell-ref">I11</span>
+                  <span>=I10*0.25</span>
+                </div>
+              </div>
+              <div class="ai-diff-actions">
+                <button class="ai-btn secondary">Reject</button>
+                <button class="ai-btn primary">Apply Changes</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ai-input-area">
+        <div class="ai-input-box">
+          <textarea class="ai-input" placeholder="Ask anything about your spreadsheet..." rows="1"></textarea>
+          <button class="ai-send">→</button>
+        </div>
+        <div class="ai-hints">
+          <span><kbd>⌘K</kbd> inline edit</span>
+          <span><kbd>@</kbd> mention range</span>
+        </div>
       </div>
     </div>
   </div>
-
-  <script>
-    // Auto-resize formula input
-    const formulaInput = document.querySelector('.formula-input');
-    const formulaHighlight = document.querySelector('.formula-highlight');
-    
-    formulaInput.addEventListener('input', () => {
-      formulaInput.style.height = 'auto';
-      formulaInput.style.height = formulaInput.scrollHeight + 'px';
-    });
-
-    // Auto-resize AI input
-    const aiInput = document.querySelector('.ai-input');
-    aiInput.addEventListener('input', () => {
-      aiInput.style.height = 'auto';
-      aiInput.style.height = Math.min(aiInput.scrollHeight, 120) + 'px';
-    });
-  </script>
 </body>
 </html>

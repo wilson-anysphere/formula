@@ -3,454 +3,317 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Formula – Command Palette Mockup</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Formula – Command Palette</title>
   <style>
     :root {
-      --bg-base: #0f1114;
-      --bg-surface: #161a1e;
-      --bg-elevated: #1c2127;
-      --bg-hover: #252b33;
-      --bg-active: #2d353f;
+      --bg-app: #f5f5f5;
+      --bg-surface: #fafafa;
+      --bg-elevated: #ffffff;
+      --bg-hover: #eeeeee;
+      --bg-inset: #f0f0f0;
       
-      --text-primary: #f1f3f5;
-      --text-secondary: #8b939e;
-      --text-muted: #5c6370;
+      --text-primary: #1a1a1a;
+      --text-secondary: #5c5c5c;
+      --text-tertiary: #8a8a8a;
       
-      --accent: #3b82f6;
-      --accent-hover: #2563eb;
-      --accent-subtle: rgba(59, 130, 246, 0.12);
+      --border: #e0e0e0;
       
-      --success: #10b981;
-      --warning: #f59e0b;
-      --error: #ef4444;
+      --accent: #0969da;
+      --accent-bg: #ddf4ff;
       
-      --border-subtle: rgba(255, 255, 255, 0.06);
-      --border-default: rgba(255, 255, 255, 0.1);
+      --green: #1a7f37;
+      --green-bg: #dafbe1;
+      --yellow: #9a6700;
       
-      --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      --radius: 6px;
+      --radius-sm: 3px;
       
-      --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-      --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
 
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     html, body {
       height: 100%;
       font-family: var(--font-sans);
-      font-size: 13px;
-      line-height: 1.5;
-      background: var(--bg-base);
-      color: var(--text-primary);
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.25);
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 80px;
       -webkit-font-smoothing: antialiased;
     }
 
-    /* Backdrop with app preview */
-    .backdrop {
-      position: fixed;
-      inset: 0;
-      background: var(--bg-base);
-      opacity: 0.85;
-    }
-
-    .app-preview {
-      position: fixed;
-      inset: 0;
-      background: 
-        linear-gradient(90deg, var(--bg-surface) 44px, transparent 44px),
-        linear-gradient(var(--bg-surface) 26px, transparent 26px),
-        repeating-linear-gradient(90deg, var(--border-subtle) 0px, var(--border-subtle) 1px, transparent 1px, transparent 100px),
-        repeating-linear-gradient(var(--border-subtle) 0px, var(--border-subtle) 1px, transparent 1px, transparent 24px);
-      background-size: 100% 100%, 100% 100%, 100px 100%, 100% 24px;
-      background-position: 0 64px, 0 38px, 44px 64px, 44px 90px;
-      filter: blur(1px);
-      opacity: 0.3;
-    }
-
-    /* Command Palette */
-    .command-palette {
-      position: fixed;
-      top: 15%;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 580px;
-      max-height: 480px;
-      background: var(--bg-surface);
-      border-radius: 12px;
-      box-shadow: var(--shadow-lg);
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      animation: palette-in 150ms ease-out;
-    }
-
-    @keyframes palette-in {
-      from {
-        opacity: 0;
-        transform: translateX(-50%) scale(0.96);
-      }
-      to {
-        opacity: 1;
-        transform: translateX(-50%) scale(1);
-      }
-    }
-
-    .palette-input-container {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .palette-icon {
-      width: 20px;
-      height: 20px;
-      color: var(--text-muted);
-      flex-shrink: 0;
-    }
-
-    .palette-input {
-      flex: 1;
-      height: 24px;
-      font-family: var(--font-sans);
-      font-size: 16px;
-      font-weight: 400;
-      color: var(--text-primary);
-      background: transparent;
-      border: none;
-      outline: none;
-    }
-
-    .palette-input::placeholder {
-      color: var(--text-muted);
-    }
-
-    .palette-kbd {
-      padding: 2px 6px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-muted);
+    .palette {
+      width: 500px;
       background: var(--bg-elevated);
-      border: 1px solid var(--border-default);
-      border-radius: 4px;
+      border-radius: var(--radius);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.04);
+      overflow: hidden;
     }
 
-    .palette-results {
-      flex: 1;
+    .search {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      color: var(--text-primary);
+      outline: none;
+      background: var(--bg-surface);
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+    }
+
+    .search-input::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    .results {
+      max-height: 320px;
       overflow-y: auto;
-      padding: 8px;
     }
 
-    .palette-section {
-      margin-bottom: 8px;
+    .group {
+      padding: 4px 0;
     }
 
-    .palette-section:last-child {
-      margin-bottom: 0;
-    }
-
-    .palette-section-title {
-      padding: 8px 12px 6px;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
+    .group-title {
+      padding: 4px 10px 6px;
+      font-size: 9px;
+      font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.5px;
+      color: var(--text-tertiary);
     }
 
-    .palette-item {
+    .item {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 10px 12px;
-      border-radius: 6px;
+      gap: 8px;
+      padding: 6px 10px;
       cursor: pointer;
-      transition: background 100ms ease;
     }
 
-    .palette-item:hover {
+    .item:hover {
       background: var(--bg-hover);
     }
 
-    .palette-item.selected {
-      background: var(--accent-subtle);
+    .item.selected {
+      background: var(--accent-bg);
     }
 
-    .palette-item-icon {
-      width: 32px;
-      height: 32px;
+    .item-icon {
+      width: 20px;
+      height: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--bg-elevated);
-      border-radius: 6px;
-      color: var(--text-secondary);
+      font-size: 11px;
+      border-radius: var(--radius-sm);
       flex-shrink: 0;
     }
 
-    .palette-item.selected .palette-item-icon {
-      background: var(--accent);
-      color: white;
+    .item-icon.fn {
+      background: var(--green-bg);
+      color: var(--green);
+      font-weight: 600;
+      font-family: var(--font-mono);
+      font-size: 9px;
     }
 
-    .palette-item-content {
+    .item-icon.cmd {
+      background: var(--bg-inset);
+      color: var(--text-secondary);
+    }
+
+    .item-icon.ai {
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+
+    .item-content {
       flex: 1;
       min-width: 0;
     }
 
-    .palette-item-title {
-      font-weight: 500;
+    .item-title {
+      font-size: 11px;
       color: var(--text-primary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
 
-    .palette-item-title mark {
-      background: transparent;
-      color: var(--accent);
-      font-weight: 600;
+    .item-title .match {
+      background: rgba(241, 180, 103, 0.4);
+      padding: 0 1px;
+      border-radius: 2px;
     }
 
-    .palette-item-desc {
-      font-size: 12px;
+    .item-desc {
+      font-size: 10px;
       color: var(--text-secondary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      margin-top: 1px;
     }
 
-    .palette-item-shortcut {
-      display: flex;
-      gap: 4px;
-      flex-shrink: 0;
-    }
-
-    .palette-footer {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 12px 16px;
-      border-top: 1px solid var(--border-subtle);
-      background: var(--bg-elevated);
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    .palette-footer-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .palette-footer kbd {
-      padding: 2px 5px;
+    .item-syntax {
+      margin-top: 4px;
+      padding: 4px 6px;
+      background: var(--bg-inset);
+      border-radius: var(--radius-sm);
       font-family: var(--font-mono);
       font-size: 10px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      background: var(--bg-surface);
-      border: 1px solid var(--border-default);
-      border-radius: 3px;
-    }
-
-    /* AI Mode indicator */
-    .palette-ai-mode {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      margin: 8px 8px 0;
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
-      border: 1px solid rgba(59, 130, 246, 0.2);
-      border-radius: 6px;
-      font-size: 12px;
       color: var(--text-secondary);
     }
 
-    .palette-ai-mode-icon {
-      width: 16px;
-      height: 16px;
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-      border-radius: 4px;
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 9px;
+    .item-syntax .fn-name {
+      color: var(--green);
       font-weight: 600;
     }
 
-    .icon {
-      width: 16px;
-      height: 16px;
-      fill: none;
-      stroke: currentColor;
-      stroke-width: 2;
-      stroke-linecap: round;
-      stroke-linejoin: round;
+    .item-syntax .arg {
+      color: var(--accent);
     }
 
-    .icon-lg {
-      width: 20px;
-      height: 20px;
+    .item-shortcut {
+      font-size: 10px;
+      color: var(--text-tertiary);
     }
 
-    ::-webkit-scrollbar {
-      width: 6px;
+    .item-shortcut kbd {
+      padding: 1px 4px;
+      background: var(--bg-inset);
+      border-radius: 2px;
+      font-family: var(--font-mono);
+      font-size: 9px;
     }
 
-    ::-webkit-scrollbar-track {
-      background: transparent;
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-top: 1px solid var(--border);
+      font-size: 9px;
+      color: var(--text-tertiary);
+      background: var(--bg-app);
     }
 
-    ::-webkit-scrollbar-thumb {
-      background: var(--bg-active);
-      border-radius: 3px;
+    .footer-nav {
+      display: flex;
+      gap: 12px;
     }
+
+    .footer-nav kbd {
+      padding: 0 3px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      font-family: var(--font-mono);
+      font-size: 8px;
+    }
+
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #b0b0b0; }
   </style>
 </head>
 <body>
-  <div class="app-preview"></div>
-  <div class="backdrop"></div>
-  
-  <div class="command-palette">
-    <div class="palette-input-container">
-      <svg class="palette-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="11" cy="11" r="8"/>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-      </svg>
-      <input type="text" class="palette-input" placeholder="Type a command or search..." value="sum" autofocus>
-      <span class="palette-kbd">esc</span>
+  <div class="palette">
+    <div class="search">
+      <input type="text" class="search-input" placeholder="Search functions, commands, or ask AI..." value="sum" autofocus>
     </div>
 
-    <div class="palette-ai-mode">
-      <span class="palette-ai-mode-icon">✦</span>
-      <span>Press <kbd style="margin: 0 2px;">Tab</kbd> to ask AI instead</span>
-    </div>
-
-    <div class="palette-results">
-      <div class="palette-section">
-        <div class="palette-section-title">Functions</div>
+    <div class="results">
+      <div class="group">
+        <div class="group-title">Functions</div>
         
-        <div class="palette-item selected">
-          <div class="palette-item-icon">
-            <svg class="icon" viewBox="0 0 24 24"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+        <div class="item selected">
+          <div class="item-icon fn">Σ</div>
+          <div class="item-content">
+            <div class="item-title"><span class="match">SUM</span></div>
+            <div class="item-desc">Adds all numbers in a range</div>
+            <div class="item-syntax"><span class="fn-name">SUM</span>(<span class="arg">number1</span>, [number2], ...)</div>
           </div>
-          <div class="palette-item-content">
-            <div class="palette-item-title"><mark>SUM</mark></div>
-            <div class="palette-item-desc">Add all numbers in a range</div>
-          </div>
-          <div class="palette-item-shortcut">
-            <span class="palette-kbd">↵</span>
+          <span class="item-shortcut"><kbd>↵</kbd></span>
+        </div>
+
+        <div class="item">
+          <div class="item-icon fn">Σ</div>
+          <div class="item-content">
+            <div class="item-title"><span class="match">SUM</span>IF</div>
+            <div class="item-desc">Adds cells that meet a condition</div>
+            <div class="item-syntax"><span class="fn-name">SUMIF</span>(<span class="arg">range</span>, <span class="arg">criteria</span>, [sum_range])</div>
           </div>
         </div>
 
-        <div class="palette-item">
-          <div class="palette-item-icon">
-            <svg class="icon" viewBox="0 0 24 24"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
-          </div>
-          <div class="palette-item-content">
-            <div class="palette-item-title"><mark>SUM</mark>IF</div>
-            <div class="palette-item-desc">Sum cells that meet a condition</div>
+        <div class="item">
+          <div class="item-icon fn">Σ</div>
+          <div class="item-content">
+            <div class="item-title"><span class="match">SUM</span>IFS</div>
+            <div class="item-desc">Adds cells that meet multiple conditions</div>
           </div>
         </div>
 
-        <div class="palette-item">
-          <div class="palette-item-icon">
-            <svg class="icon" viewBox="0 0 24 24"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
-          </div>
-          <div class="palette-item-content">
-            <div class="palette-item-title"><mark>SUM</mark>IFS</div>
-            <div class="palette-item-desc">Sum cells meeting multiple conditions</div>
-          </div>
-        </div>
-
-        <div class="palette-item">
-          <div class="palette-item-icon">
-            <svg class="icon" viewBox="0 0 24 24"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
-          </div>
-          <div class="palette-item-content">
-            <div class="palette-item-title"><mark>SUM</mark>PRODUCT</div>
-            <div class="palette-item-desc">Multiply ranges and return sum</div>
+        <div class="item">
+          <div class="item-icon fn">Σ</div>
+          <div class="item-content">
+            <div class="item-title"><span class="match">SUM</span>PRODUCT</div>
+            <div class="item-desc">Sum of products of corresponding arrays</div>
           </div>
         </div>
       </div>
 
-      <div class="palette-section">
-        <div class="palette-section-title">Actions</div>
+      <div class="group">
+        <div class="group-title">AI Assist</div>
         
-        <div class="palette-item">
-          <div class="palette-item-icon">
-            <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <div class="item">
+          <div class="item-icon ai">✨</div>
+          <div class="item-content">
+            <div class="item-title">Auto<span class="match">sum</span> with AI</div>
+            <div class="item-desc">AI detects the range and applies SUM formula</div>
           </div>
-          <div class="palette-item-content">
-            <div class="palette-item-title">Insert <mark>Sum</mark>mary Row</div>
-            <div class="palette-item-desc">Add a row with totals below selection</div>
-          </div>
-          <div class="palette-item-shortcut">
-            <span class="palette-kbd">⌘</span>
-            <span class="palette-kbd">⇧</span>
-            <span class="palette-kbd">S</span>
-          </div>
+          <span class="item-shortcut"><kbd>Tab</kbd></span>
         </div>
 
-        <div class="palette-item">
-          <div class="palette-item-icon">
-            <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-          </div>
-          <div class="palette-item-content">
-            <div class="palette-item-title">Auto<mark>sum</mark> Selected Cells</div>
-            <div class="palette-item-desc">Insert SUM formula for current selection</div>
-          </div>
-          <div class="palette-item-shortcut">
-            <span class="palette-kbd">⌥</span>
-            <span class="palette-kbd">=</span>
+        <div class="item">
+          <div class="item-icon ai">✨</div>
+          <div class="item-content">
+            <div class="item-title">Explain this <span class="match">SUM</span> formula</div>
+            <div class="item-desc">Get a plain English explanation</div>
           </div>
         </div>
       </div>
 
-      <div class="palette-section">
-        <div class="palette-section-title">Recent</div>
+      <div class="group">
+        <div class="group-title">Commands</div>
         
-        <div class="palette-item">
-          <div class="palette-item-icon">
-            <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <div class="item">
+          <div class="item-icon cmd">Σ</div>
+          <div class="item-content">
+            <div class="item-title">Auto<span class="match">Sum</span></div>
+            <div class="item-desc">Insert SUM formula for adjacent cells</div>
           </div>
-          <div class="palette-item-content">
-            <div class="palette-item-title">Q4 Forecast.xlsx</div>
-            <div class="palette-item-desc">Opened 2 hours ago</div>
-          </div>
+          <span class="item-shortcut"><kbd>Alt</kbd> <kbd>=</kbd></span>
         </div>
       </div>
     </div>
 
-    <div class="palette-footer">
-      <div class="palette-footer-item">
-        <kbd>↑</kbd><kbd>↓</kbd>
-        <span>Navigate</span>
+    <div class="footer">
+      <div class="footer-nav">
+        <span><kbd>↑</kbd> <kbd>↓</kbd> navigate</span>
+        <span><kbd>↵</kbd> select</span>
+        <span><kbd>esc</kbd> close</span>
       </div>
-      <div class="palette-footer-item">
-        <kbd>↵</kbd>
-        <span>Select</span>
-      </div>
-      <div class="palette-footer-item">
-        <kbd>Tab</kbd>
-        <span>AI Mode</span>
-      </div>
-      <div class="palette-footer-item">
-        <kbd>Esc</kbd>
-        <span>Close</span>
-      </div>
+      <span>8 results</span>
     </div>
   </div>
 </body>

@@ -492,67 +492,153 @@ kill <specific-pid>                   # Only YOUR process
 
 ## UI/UX Design Guidelines
 
-When implementing or modifying UI components, follow these guidelines strictly.
+> **Excel functionality + Cursor polish**
+>
+> Full Excel feature set (ribbon, sheets, formulas) with modern, clean aesthetics.
+> Light mode. Professional. Polished.
+
+### ⛔ CRITICAL: FUNCTIONALITY ≠ STYLING ⛔
+
+**These are TWO INDEPENDENT AXES. Do not confuse them.**
+
+```
+FUNCTIONALITY (# of Excel buttons/features)
+        ↑
+  LOW   │   HIGH
+────────┼────────→ STYLING (clean vs bloated)
+        │
+```
+
+**THE RULE:**
+1. **ADD all Excel buttons** - Font, Bold, Italic, Borders, Fill, Merge, AutoSum, Conditional Formatting, ALL of them
+2. **STYLE them cleanly** - No Microsoft bloat, no complex nested layouts, just clean Cursor-style buttons
+
+**FAILURE MODES (both wrong):**
+- ❌ **Microsoft Bureaucracy**: HIGH functionality + BLOATED styling (complex layouts, heavy borders)
+- ❌ **Stripped Minimal**: LOW functionality + CLEAN styling (removed features to "look minimal")
+
+**CORRECT MODE:**
+- ✅ **Formula**: HIGH functionality + CLEAN styling
+
+**"Minimal" means visual simplicity, NOT feature removal.**
+
+See `mockups/README.md` for the full design system.
+
+### Core Philosophy
+
+1. **Excel functionality is non-negotiable** – ribbon, sheets, formula bar, ALL buttons
+2. **Light mode** – professionals prefer it
+3. **Cursor-level polish** – clean, subtle, modern (but with ALL features)
+4. **AI as co-pilot** – integrated but not the primary interface
 
 ### Reference Materials
 
-**ALWAYS check the mockups first:**
+**Check the mockups for direction, not pixel-perfect specs:**
 
 ```bash
-open mockups/spreadsheet-main.html    # Main app layout
-open mockups/command-palette.html     # Cmd+K palette
-open mockups/README.md                # Full design system
+mockups/spreadsheet-main.html    # Main app – ribbon, grid, AI sidebar
+mockups/ai-agent-mode.html       # Agent execution view
+mockups/command-palette.html     # Quick command search
+mockups/README.md                # Full design system
 ```
 
-### Anti-"AI Slop" Rules
+> ⚠️ **Mockups are directional, not literal.**
+> - Use them for **vision, layout, and design language**
+> - They are **crude prototypes** — missing features, rough edges, incomplete details
+> - Apply judgment: add polish, fix inconsistencies, implement missing interactions
+> - Follow the **principles** (density, Excel functionality, Cursor polish) over exact pixels
 
-| ❌ DON'T | ✅ DO |
-|----------|-------|
-| Purple gradients | Electric blue accent (#3b82f6) |
-| Inter, Roboto, system fonts | IBM Plex Sans/Mono |
-| Rounded everything (16px radius) | Sharp corners (4-6px radius) |
-| Excessive whitespace | Data-dense layouts |
-| Playful/bubbly aesthetic | Professional, Bloomberg-like |
-| Light gray backgrounds | Deep charcoal (#0f1114, #161a1e) |
+### Design Tokens
 
-### Color Tokens (MUST USE)
-
+**Colors (light mode):**
 ```css
-/* Never hardcode colors - use these variables */
---bg-base: #0f1114;           /* App background */
---bg-surface: #161a1e;        /* Panels */
---bg-elevated: #1c2127;       /* Cards, inputs */
---accent: #3b82f6;            /* Primary actions */
---text-primary: #f1f3f5;      /* Main text */
---text-secondary: #8b939e;    /* Labels */
+/* Backgrounds */
+--bg-app: #f8f8f8;          /* App background */
+--bg-surface: #ffffff;       /* Panels, cards */
+--bg-hover: #f0f0f0;         /* Hover states */
+
+/* Text */
+--text-primary: #1f1f1f;     /* Primary text */
+--text-secondary: #6e6e6e;   /* Secondary text */
+--text-tertiary: #9a9a9a;    /* Hints */
+
+/* Borders */
+--border: #e5e5e5;           /* Standard */
+--border-strong: #d0d0d0;    /* Emphasized */
+
+/* Accent - professional blue */
+--accent: #0969da;
+--accent-bg: #ddf4ff;
+
+/* Semantic */
+--green: #1a7f37;            /* Positive */
+--red: #cf222e;              /* Negative */
 ```
 
-### Typography
-
+**Typography:**
 ```css
-/* Sans for UI */
-font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+--font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+--font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
-/* Mono for data, code, formulas */
-font-family: 'IBM Plex Mono', 'SF Mono', monospace;
+/* Sizes: 10px, 11px, 12px, 13px, 14px */
 ```
 
-### Component Sizes
+**Sizes:**
+```css
+--radius: 6px;      /* Panels, buttons */
+--radius-sm: 4px;   /* Tags, small elements */
 
-| Component | Height | Padding |
-|-----------|--------|---------|
-| Input fields | 28px | 0 8px |
-| Buttons | 28px | 0 12px |
-| Grid cells | 24px | 0 8px |
-| Panel headers | 44px | 0 16px |
+/* Grid: 22px rows, 90px columns, 40px row headers */
+```
+
+### Design Rules
+
+| ✅ DO | ❌ DON'T |
+|-------|----------|
+| Light mode | Dark mode by default |
+| Full ribbon interface | Hamburger menus |
+| Sheet tabs at bottom | Hide sheet navigation |
+| Visible formula bar | Collapsed inputs |
+| Status bar calculations | Minimal status |
+| Monospace for cells | Sans for numbers |
+| System fonts | Trendy fonts |
+| Professional blue accent | Purple AI gradients |
+
+### Keyboard Shortcuts
+
+**Excel-compatible (MUST work):**
+- `F2` – Edit cell
+- `F4` – Toggle absolute/relative
+- `Ctrl+D` – Fill down
+- `Ctrl+;` – Insert date
+- `Alt+=` – AutoSum
+- All standard Ctrl+C/V/X/Z/Y
+
+**AI shortcuts:**
+- `⌘K` – Inline AI edit
+- `⌘I` – Toggle AI sidebar
+- `Tab` – Accept suggestion
+
+### AI Sidebar
+
+**One unified panel** - no mode tabs. Just type what you want:
+- Ask questions → AI answers
+- Request changes → AI proposes diff
+- Complex tasks → opens Agent view
+
+Features:
+- Context tags showing what AI sees
+- Diff preview before apply
+- Accept/reject per change
+- Agent view for autonomous multi-step execution (full-height separate view)
 
 ### Implementation Checklist
 
-Before submitting UI changes:
-
-- [ ] Colors use CSS variables from design system
-- [ ] Typography matches mockups (IBM Plex, not Inter)
-- [ ] Spacing uses the scale (4, 8, 12, 16, 20, 24, 32px)
-- [ ] No purple gradients or overly rounded corners
-- [ ] Works in dark mode (light mode is future work)
-- [ ] Tested at 1x and 2x pixel density
+- [ ] Full ribbon interface with tabs/groups
+- [ ] Light mode colors
+- [ ] Sheet tabs at bottom
+- [ ] Formula bar always visible
+- [ ] Status bar with Sum/Avg/Count
+- [ ] Excel keyboard shortcuts work
+- [ ] Monospace font for cells
+- [ ] Tested with financial data

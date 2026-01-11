@@ -91,9 +91,8 @@ Microsoft Copilot for Excel demonstrates the opportunity but is **bolted onto le
 │  ├── Format Converters (XLSX, XLSB, CSV, Parquet, Arrow)                    │
 │  └── External Connectors (databases, APIs, cloud storage)                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  AI LAYER                                                                    │
-│  ├── Local Models (formula completion, code assistance)                      │
-│  ├── Cloud Models (complex analysis, data fetching agents)                  │
+│  AI LAYER (Cursor-managed)                                                   │
+│  ├── Cursor AI Backend (all inference via Cursor servers)                   │
 │  ├── Context Manager (schema extraction, sampling, RAG)                     │
 │  └── Tool Calling Interface (spreadsheet operations)                        │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -108,7 +107,7 @@ Microsoft Copilot for Excel demonstrates the opportunity but is **bolted onto le
 | Grid Rendering | **Canvas-based** | Only viable approach for 60fps with millions of rows; DOM cannot scale |
 | Collaboration | **CRDT (Yjs)** | Better offline support than OT; peer-to-peer capable; proven at scale |
 | Storage | **SQLite + custom columnar** | Relational queries for metadata, columnar for large data ranges |
-| AI Integration | **Multi-modal (local + cloud)** | Fast completion locally, powerful reasoning in cloud |
+| AI Integration | **Cursor AI Backend** | All AI via Cursor servers; Cursor controls harness and prompts |
 
 ### Technology Stack
 
@@ -127,9 +126,9 @@ Microsoft Copilot for Excel demonstrates the opportunity but is **bolted onto le
 - tokio (async runtime)
 
 **AI:**
-- Local: Ollama or custom fine-tuned models
-- Cloud: Claude/GPT-4 via API
-- Embeddings: local sentence transformers for RAG
+- All AI inference via Cursor servers (no local models, no user API keys)
+- Cursor controls model selection, prompts, and harness
+- Embeddings managed by Cursor backend
 
 ---
 
@@ -522,8 +521,7 @@ Workstream C: File I/O
 
 Workstream D: AI Integration
 ├── Context Management
-├── Local Model Integration
-├── Cloud API Integration
+├── Cursor Backend Integration (all AI via Cursor servers)
 ├── Tool Calling Framework
 └── Safety & Verification
 

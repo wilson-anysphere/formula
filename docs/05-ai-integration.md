@@ -4,6 +4,13 @@
 
 AI integration is not a feature bolted on—it's woven into the fabric of the application. Following Cursor's proven paradigm, we implement an **autonomy slider** from passive assistance through active co-piloting to fully autonomous agents.
 
+> **⚠️ This is a Cursor product. All AI goes through Cursor servers.**
+>
+> - **No local models** - all inference via Cursor backend
+> - **No user API keys** - Cursor manages authentication
+> - **No provider selection** - Cursor controls model routing
+> - **Cursor controls harness and prompts** - consistent experience across all users
+
 ---
 
 ## Integration Modes
@@ -28,8 +35,7 @@ AI integration is not a feature bolted on—it's woven into the fabric of the ap
 │  Latency:       Latency:       Latency:     Latency:    Latency:            │
 │  <100ms         <2s            <5s          <30s        minutes             │
 │                                                                                │
-│  Model:         Model:         Model:       Model:      Model:              │
-│  Local/Fast     Local/Fast     Cloud        Cloud       Cloud               │
+│  (All AI via Cursor servers - model selection managed by Cursor)            │
 │                                                                                │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -38,7 +44,7 @@ AI integration is not a feature bolted on—it's woven into the fabric of the ap
 
 **Trigger:** User typing in formula bar or cell
 **Latency requirement:** <100ms
-**Model:** Local fine-tuned model or cloud with aggressive caching
+**Backend:** Cursor servers with aggressive caching
 
 ```typescript
 interface TabCompletion {
@@ -85,7 +91,7 @@ Suggestions:
 
 ```typescript
 class TabCompletionEngine {
-  private localModel: LocalLLM;
+  private cursorBackend: CursorAIClient;
   private cache: LRUCache<string, Suggestion[]>;
   
   async getSuggestions(context: CompletionContext): Promise<Suggestion[]> {
@@ -129,8 +135,8 @@ class TabCompletionEngine {
       return this.suggestRanges(context);
     }
     
-    // General formula completion via local LLM
-    return this.localModel.complete(context.currentInput, {
+    // General formula completion via Cursor backend
+    return this.cursorBackend.complete(context.currentInput, {
       maxTokens: 50,
       temperature: 0.1,
       stop: [")", ",", "\n"]
@@ -143,7 +149,7 @@ class TabCompletionEngine {
 
 **Trigger:** User selects range and presses Cmd+K (or equivalent)
 **Latency requirement:** <2s for small operations
-**Model:** Local or cloud depending on complexity
+**Backend:** Cursor servers
 
 ```typescript
 interface InlineEditRequest {
@@ -247,7 +253,7 @@ function extract(value) {
 
 **Trigger:** User opens AI panel, asks questions
 **Latency requirement:** <5s for most queries
-**Model:** Cloud (Claude, GPT-4)
+**Backend:** Cursor servers
 
 ```typescript
 interface ChatMessage {
@@ -351,7 +357,7 @@ class ChatPanelEngine {
 
 **Trigger:** User enters AI formula
 **Latency requirement:** Async with loading state
-**Model:** Cloud
+**Backend:** Cursor servers
 
 ```
 =AI("Summarize this feedback", A1:A100)
@@ -399,7 +405,7 @@ Cell functions are implemented as an async cell-evaluator + cache:
 
 **Trigger:** User enables agent mode, describes goal
 **Latency requirement:** Minutes (complex workflows)
-**Model:** Cloud with extensive tool use
+**Backend:** Cursor servers with tool calling
 
 **Status:** Implemented in the desktop app.
 
@@ -1097,88 +1103,54 @@ class AIAuditLog {
 
 ---
 
-## Model Configuration
+## Backend Configuration
 
-### Multi-Model Architecture
+### Cursor AI Integration
+
+> **All AI is managed by Cursor.** There are no user-configurable API keys, no provider selection, and no local models. Cursor controls the harness, prompts, and model routing.
 
 ```typescript
-interface ModelConfig {
-  provider: "openai" | "anthropic" | "local";
-  model: string;
-  apiKey?: string;
-  endpoint?: string;
+// Configuration is Cursor-managed, not user-configurable
+interface CursorAIConfig {
+  // These are set by Cursor, not by users
+  mode: AIMode;
   maxTokens: number;
-  temperature: number;
   timeout: number;
 }
 
-const MODEL_CONFIGS: Record<AIMode, ModelConfig> = {
-  tabCompletion: {
-    provider: "local",
-    model: "formula-completion-v1",
-    maxTokens: 50,
-    temperature: 0.1,
-    timeout: 100
-  },
-  inlineEdit: {
-    provider: "anthropic",
-    model: "claude-3-haiku",
-    maxTokens: 500,
-    temperature: 0.3,
-    timeout: 2000
-  },
-  chat: {
-    provider: "anthropic",
-    model: "claude-3-opus",
-    maxTokens: 4000,
-    temperature: 0.7,
-    timeout: 30000
-  },
-  agent: {
-    provider: "anthropic",
-    model: "claude-3-opus",
-    maxTokens: 8000,
-    temperature: 0.5,
-    timeout: 60000
-  }
+// Latency targets by mode (Cursor optimizes routing to meet these)
+const LATENCY_TARGETS: Record<AIMode, number> = {
+  tabCompletion: 100,    // <100ms
+  inlineEdit: 2000,      // <2s
+  chat: 5000,            // <5s
+  cellFunction: 10000,   // async with loading state
+  agent: 60000           // minutes for complex workflows
 };
 ```
 
-### Local Model Integration
+### Client Integration
 
 ```typescript
-class LocalModelManager {
-  private ollama: OllamaClient;
-  
-  async initialize(): Promise<void> {
-    // Check if Ollama is running
-    const healthy = await this.ollama.health();
-    if (!healthy) {
-      throw new Error("Local model server not available");
-    }
-    
-    // Ensure required models are downloaded
-    const required = ["formula-completion", "code-generation"];
-    for (const model of required) {
-      const exists = await this.ollama.hasModel(model);
-      if (!exists) {
-        await this.ollama.pullModel(model);
-      }
-    }
-  }
+class CursorAIClient {
+  // All requests go through Cursor's authenticated backend
+  // No API keys needed - Cursor handles authentication
   
   async complete(prompt: string, options: CompletionOptions): Promise<string> {
-    const response = await this.ollama.generate({
-      model: options.model || "formula-completion",
+    const response = await this.cursorBackend.request({
+      type: "completion",
       prompt,
-      options: {
-        temperature: options.temperature,
-        num_predict: options.maxTokens,
-        stop: options.stop
-      }
+      options
     });
-    
-    return response.response;
+    return response.completion;
+  }
+  
+  async chat(messages: Message[], tools?: Tool[]): Promise<ChatResponse> {
+    const response = await this.cursorBackend.request({
+      type: "chat",
+      messages,
+      tools
+    });
+    return response;
   }
 }
 ```
