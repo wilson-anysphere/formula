@@ -334,7 +334,7 @@ export class WebGpuBackend {
         sum: Boolean(this.pipelines.reduceSum_f64),
         min: Boolean(this.pipelines.reduceMin_f64),
         max: Boolean(this.pipelines.reduceMax_f64),
-        sumproduct: Boolean(this.pipelines.reduceSumproduct_f64),
+        sumproduct: Boolean(this.pipelines.reduceSumproduct_f64 && this.pipelines.reduceSum_f64),
         average: Boolean(this.pipelines.reduceSum_f64),
         count: Boolean(this.pipelines.reduceSum_f64),
         mmult: Boolean(this.pipelines.mmult_f64),
@@ -369,7 +369,9 @@ export class WebGpuBackend {
       case "max":
         return Boolean(this.pipelines.reduceMax_f64);
       case "sumproduct":
-        return Boolean(this.pipelines.reduceSumproduct_f64);
+        // SUMPRODUCT uses its own first-pass kernel then finishes via the
+        // regular sum reduction.
+        return Boolean(this.pipelines.reduceSumproduct_f64 && this.pipelines.reduceSum_f64);
       case "average":
       case "count":
         // `average` and `count` are derived from sum + scalar operations.
