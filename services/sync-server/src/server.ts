@@ -985,7 +985,7 @@ export function createSyncServer(
     // periodic pings (30s) and receives pongs, which lets us refresh `lastSeenMs`
     // even for read-only sessions with no Yjs updates.
     ws.on("pong", () => {
-      void retentionManager?.markSeen(docName);
+      void retentionManager?.markSeen(persistedName);
     });
 
     ws.on("close", () => {
