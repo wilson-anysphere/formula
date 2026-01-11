@@ -139,6 +139,14 @@ function macroError(err: unknown): { message: string; stack?: string } {
   return { message: String(err) };
 }
 
+function canUsePyodideWorkerBackend(): boolean {
+  return (
+    typeof Worker !== "undefined" &&
+    typeof SharedArrayBuffer !== "undefined" &&
+    globalThis.crossOriginIsolated === true
+  );
+}
+
 export class WebMacroBackend implements MacroBackend {
   private readonly storage: Storage | null;
   private readonly macrosCache = new Map<string, StoredMacro[]>();
@@ -308,6 +316,10 @@ export class WebMacroBackend implements MacroBackend {
   }
 
   private async prewarmPython(): Promise<void> {
+    // Prewarming Pyodide on the main thread can freeze the UI. Only warm up
+    // eagerly when we can use the Worker backend.
+    if (!canUsePyodideWorkerBackend()) return;
+
     const doc = this.options.getDocumentController();
     const api = new DocumentControllerBridge(doc, { activeSheetId: this.activeSheetId() });
     await this.ensurePyodideInitialized(api);
