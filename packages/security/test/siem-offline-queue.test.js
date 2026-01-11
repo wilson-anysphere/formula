@@ -292,6 +292,40 @@ test("NodeFsOfflineAuditQueue finalizes orphaned open segments after export", as
   assert.equal(remainingFiles.length, 0);
 });
 
+test("NodeFsOfflineAuditQueue cleans up lockless open segments once stale", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-lockless-open-"));
+  const queue = new NodeFsOfflineAuditQueue({ dirPath: dir, flushBatchSize: 10, orphanOpenSegmentStaleMs: 0 });
+  await queue.ensureDir();
+
+  const segmentsDir = path.join(dir, "segments");
+  const baseName = `segment-${Date.now()}-lockless`;
+  const openPath = path.join(segmentsDir, `${baseName}.open.jsonl`);
+
+  const event = {
+    id: randomUUID(),
+    timestamp: "2025-01-01T00:00:00.000Z",
+    orgId: "org_1",
+    eventType: "document.opened",
+    details: { token: "[REDACTED]" },
+  };
+
+  await writeFile(openPath, `${JSON.stringify(event)}\n`, "utf8");
+
+  const sentIds = [];
+  const exporter = {
+    async sendBatch(batch) {
+      sentIds.push(...batch.map((evt) => evt.id));
+    },
+  };
+
+  const result = await queue.flushToExporter(exporter);
+  assert.equal(result.sent, 1);
+  assert.deepEqual(sentIds, [event.id]);
+
+  const remainingFiles = await listFiles(segmentsDir);
+  assert.equal(remainingFiles.length, 0);
+});
+
 test("IndexedDbOfflineAuditQueue redacts before persistence and flushes batches", async () => {
   globalThis.indexedDB = indexedDB;
   globalThis.IDBKeyRange = IDBKeyRange;

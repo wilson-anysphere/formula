@@ -239,6 +239,7 @@ export class NodeFsOfflineAuditQueue {
     this.maxBytes = options.maxBytes ?? 50 * 1024 * 1024;
     this.maxSegmentBytes = options.maxSegmentBytes ?? 512 * 1024;
     this.maxSegmentAgeMs = options.maxSegmentAgeMs ?? 60_000;
+    this.orphanOpenSegmentStaleMs = options.orphanOpenSegmentStaleMs ?? 5 * 60_000;
     this.flushBatchSize = options.flushBatchSize ?? 250;
     this.redact = options.redact !== false;
     this.redactionOptions = options.redactionOptions;
@@ -276,7 +277,14 @@ export class NodeFsOfflineAuditQueue {
       const lockPath = path.join(this.segmentsDir, lockFileName(baseName));
 
       try {
-        await writeFile(lockPath, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), { encoding: "utf8", flag: "wx" });
+        const handle = await openFile(lockPath, "wx");
+        try {
+          await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: Date.now() }), "utf8");
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await syncDir(this.segmentsDir);
       } catch (error) {
         if (error?.code === "EEXIST") continue;
         throw error;
@@ -434,6 +442,20 @@ export class NodeFsOfflineAuditQueue {
     if (deleted) await syncDir(this.segmentsDir);
   }
 
+  async _isOpenSegmentOrphan(segment) {
+    const lock = await safeReadJson(segment.lockPath);
+    const lockedPid = Number(lock?.pid);
+    if (Number.isFinite(lockedPid) && lockedPid > 0) return !isPidAlive(lockedPid);
+
+    try {
+      const info = await stat(segment.path);
+      return Date.now() - info.mtimeMs > this.orphanOpenSegmentStaleMs;
+    } catch (error) {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
   async flushToExporter(exporter) {
     if (!exporter || typeof exporter.sendBatch !== "function") {
       throw new Error("flushToExporter requires exporter.sendBatch(events)");
@@ -479,9 +501,7 @@ export class NodeFsOfflineAuditQueue {
 
           if (acked >= lineCount) {
             if (segment.state === SEGMENT_STATES.OPEN) {
-              const lock = await safeReadJson(segment.lockPath);
-              const lockedPid = Number(lock?.pid);
-              const orphan = Number.isFinite(lockedPid) && lockedPid > 0 ? !isPidAlive(lockedPid) : false;
+              const orphan = await this._isOpenSegmentOrphan(segment);
               if (!orphan) continue;
 
               const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
@@ -520,9 +540,7 @@ export class NodeFsOfflineAuditQueue {
 
           if (acked >= lineCount) {
             if (segment.state === SEGMENT_STATES.OPEN) {
-              const lock = await safeReadJson(segment.lockPath);
-              const lockedPid = Number(lock?.pid);
-              const orphan = Number.isFinite(lockedPid) && lockedPid > 0 ? !isPidAlive(lockedPid) : false;
+              const orphan = await this._isOpenSegmentOrphan(segment);
               if (!orphan) continue;
 
               const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
