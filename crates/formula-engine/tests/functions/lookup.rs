@@ -208,6 +208,68 @@ fn xlookup_supports_binary_search_mode() {
 }
 
 #[test]
+fn xlookup_supports_searching_last_to_first() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 2.0);
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("B3", 30.0);
+
+    assert_eq!(
+        sheet.eval("=XLOOKUP(2, A1:A3, B1:B3, \"no\", 0, 1)"),
+        Value::Number(20.0)
+    );
+    assert_eq!(
+        sheet.eval("=XLOOKUP(2, A1:A3, B1:B3, \"no\", 0, -1)"),
+        Value::Number(30.0)
+    );
+}
+
+#[test]
+fn xlookup_supports_wildcards_and_reverse_search() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "apple");
+    sheet.set("A2", "banana");
+    sheet.set("A3", "apricot");
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("B3", 30.0);
+
+    assert_eq!(
+        sheet.eval("=XLOOKUP(\"a*\", A1:A3, B1:B3, \"no\", 2, 1)"),
+        Value::Number(10.0)
+    );
+    assert_eq!(
+        sheet.eval("=XLOOKUP(\"a*\", A1:A3, B1:B3, \"no\", 2, -1)"),
+        Value::Number(30.0)
+    );
+}
+
+#[test]
+fn xlookup_supports_binary_search_mode_descending() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 7.0);
+    sheet.set("A2", 5.0);
+    sheet.set("A3", 3.0);
+    sheet.set("A4", 1.0);
+    sheet.set("B1", 70.0);
+    sheet.set("B2", 50.0);
+    sheet.set("B3", 30.0);
+    sheet.set("B4", 10.0);
+
+    assert_eq!(
+        sheet.eval("=XLOOKUP(4, A1:A4, B1:B4, \"no\", -1, -2)"),
+        Value::Number(30.0)
+    );
+    assert_eq!(
+        sheet.eval("=XLOOKUP(4, A1:A4, B1:B4, \"no\", 1, -2)"),
+        Value::Number(50.0)
+    );
+}
+
+#[test]
 fn xlookup_spills_rows_and_columns_from_2d_return_arrays() {
     let mut engine = Engine::new();
 
