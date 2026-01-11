@@ -27,6 +27,16 @@ fn ifs_spills_and_ignores_unselected_branch_errors_per_element() {
 }
 
 #[test]
+fn ifs_does_not_evaluate_unused_branches_in_array_mode() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=IFS({TRUE,TRUE}, 1, TRUE, 1/0)");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 1.0);
+    assert_number(&sheet.get("B1"), 1.0);
+}
+
+#[test]
 fn ifs_returns_value_error_for_incompatible_branch_shapes() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=IFS({TRUE,FALSE}, {10,20}, {FALSE,TRUE}, {30;40})");
@@ -59,6 +69,16 @@ fn switch_spills_and_returns_na_for_unmatched_elements() {
 }
 
 #[test]
+fn switch_does_not_evaluate_unused_branches_in_array_mode() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=SWITCH({1,1}, 1, 10, 2, 1/0)");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_number(&sheet.get("B1"), 10.0);
+}
+
+#[test]
 fn switch_spills_and_ignores_unselected_result_errors_per_element() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=SWITCH({1,2}, 1, 10, 2, 1/0)");
@@ -76,6 +96,16 @@ fn switch_returns_value_error_for_incompatible_result_shapes() {
 
     assert_number(&sheet.get("A1"), 10.0);
     assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::Value));
+}
+
+#[test]
+fn switch_matches_text_case_insensitively_in_array_mode() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=SWITCH({\"a\",\"B\"}, \"A\", 1, \"b\", 2)");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 1.0);
+    assert_number(&sheet.get("B1"), 2.0);
 }
 
 #[test]
