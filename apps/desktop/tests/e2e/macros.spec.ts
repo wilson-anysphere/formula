@@ -37,6 +37,14 @@ test.describe("macros panel", () => {
                       formula: null,
                       display_value: "MacroA2",
                     },
+                    {
+                      sheet_id: "Sheet2",
+                      row: 0,
+                      col: 0,
+                      value: "OtherSheetA1",
+                      formula: null,
+                      display_value: "OtherSheetA1",
+                    },
                   ],
                   error: null,
                 };
@@ -86,6 +94,9 @@ test.describe("macros panel", () => {
 
     await expect(page.getByTestId("active-value")).toHaveText("FromMacro");
     await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A2")) === "MacroA2");
+    await expect(page.getByTestId("sheet-tabs").getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    const sheet2a1 = await page.evaluate(() => (window as any).__formulaApp.getDocument().getCell("Sheet2", "A1").value);
+    expect(sheet2a1).toBe("OtherSheetA1");
 
     // Focus the grid to ensure keyboard shortcuts route to the SpreadsheetApp handler.
     await page.click("#grid", { position: { x: 5, y: 5 } });
@@ -96,6 +107,10 @@ test.describe("macros panel", () => {
     await expect(page.getByTestId("active-value")).toHaveText("Seed");
     const a2 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2"));
     expect(a2).toBe("A");
+    const sheet2a1AfterUndo = await page.evaluate(
+      () => (window as any).__formulaApp.getDocument().getCell("Sheet2", "A1").value,
+    );
+    expect(sheet2a1AfterUndo).toBeNull();
   });
 
   test("runs TypeScript + Python macros in the web demo", async ({ page }) => {

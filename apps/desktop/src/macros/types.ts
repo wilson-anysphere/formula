@@ -13,7 +13,8 @@ export interface MacroInfo {
 export type MacroPermission =
   | "filesystem_read"
   | "filesystem_write"
-  | "network";
+  | "network"
+  | "object_creation";
 
 export interface MacroRunRequest {
   workbookId: string;
