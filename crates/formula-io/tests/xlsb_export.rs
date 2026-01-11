@@ -245,6 +245,7 @@ fn xlsb_export_preserves_defined_names_and_ptgname_formulas() {
             col: 3,
             new_value: formula_xlsb::CellValue::Number(0.0),
             new_formula: Some(rgce),
+            new_rgcb: None,
             shared_string_index: None,
         }],
     )
@@ -361,6 +362,7 @@ fn patch_workbook_bin_append_defined_name(workbook_bin: &[u8], name: &str, value
         let mut buf = Vec::new();
         buf.extend_from_slice(&0u32.to_le_bytes()); // flags (hidden/etc)
         buf.extend_from_slice(&WORKBOOK_SCOPE.to_le_bytes()); // scope sheet index
+        buf.push(0); // reserved
         write_utf16_string(&mut buf, name);
         buf.extend_from_slice(&(rgce.len() as u32).to_le_bytes());
         buf.extend_from_slice(&rgce);

@@ -2134,106 +2134,52 @@ fn parse_extern_name(data: &[u8]) -> Option<ExternName> {
 }
 
 fn scope_to_option(scope: u32) -> Option<u32> {
-    match scope {
-        0xFFFF | 0xFFFFFFFF => None,
-        other => Some(other),
+    // Many BIFF structures represent "no sheet scope" as either:
+    // - `0xFFFF` (u16 sentinel)
+    // - `0xFFFFFFFF` (u32 / i32=-1 sentinel)
+    //
+    // Some BIFF12 producers also use other negative `i32` values (e.g. `-2`), so treat any
+    // negative `i32` as workbook scope.
+    if scope == 0xFFFF || scope == 0xFFFFFFFF {
+        return None;
     }
+    if (scope as i32) < 0 {
+        return None;
+    }
+    Some(scope)
 }
 
 fn parse_defined_name_record(data: &[u8]) -> Option<DefinedName> {
-    // XLSB `BrtName` varies a bit across producers; try a few plausible layouts.
+    // MS-XLSB `BrtName` (record id `0x0027`) layout as produced by Excel and observed in other
+    // readers (e.g. Calamine):
+    //   [flags: u32][itab: u32/i32][reserved: u8][name: xlWideString][cce: u32][rgce bytes...][rgcb bytes...]
     //
-    // We want:
-    // - flags (`hidden` bit)
-    // - sheet scope (workbook vs localSheetId-style index)
-    // - name string
-    // - definition formula token stream (rgce + optional trailing rgcb)
+    // Notes:
+    // - `itab` is the sheet scope: a negative `i32` indicates workbook scope, otherwise it's a
+    //   0-based sheet index.
+    // - Excel's BIFF `Name` flags use bit 0 as "hidden"; we preserve that here.
+    let mut rr = RecordReader::new(data);
+    let flags = rr.read_u32().ok()?;
+    let scope_raw = rr.read_u32().ok()?;
+    rr.read_u8().ok()?; // reserved / unused
 
-    fn parse_tail_formula(data: &[u8], offset: usize) -> Option<(Vec<u8>, Vec<u8>)> {
-        let len = data.len();
-        for skip in [0usize, 2, 4] {
-            let start = offset.checked_add(skip)?;
-            if start >= len {
-                continue;
-            }
+    let name = rr.read_utf16_string().ok()?;
+    let rgce_len = rr.read_u32().ok()? as usize;
+    let rgce = rr.read_slice(rgce_len).ok()?.to_vec();
+    let extra = rr.data[rr.offset..].to_vec();
 
-            // cce as u32.
-            if start + 4 <= len {
-                let cce = u32::from_le_bytes(data[start..start + 4].try_into().ok()?) as usize;
-                let rgce_start = start + 4;
-                let rgce_end = rgce_start.checked_add(cce)?;
-                if rgce_end <= len {
-                    let rgce = data[rgce_start..rgce_end].to_vec();
-                    let extra = data[rgce_end..].to_vec();
-                    return Some((rgce, extra));
-                }
-            }
-
-            // cce as u16.
-            if start + 2 <= len {
-                let cce = u16::from_le_bytes(data[start..start + 2].try_into().ok()?) as usize;
-                let rgce_start = start + 2;
-                let rgce_end = rgce_start.checked_add(cce)?;
-                if rgce_end <= len {
-                    let rgce = data[rgce_start..rgce_end].to_vec();
-                    let extra = data[rgce_end..].to_vec();
-                    return Some((rgce, extra));
-                }
-            }
-        }
-        None
-    }
-
-    fn try_layout(data: &[u8], flags_u32: bool, scope_u32: bool) -> Option<DefinedName> {
-        let mut rr = RecordReader::new(data);
-        let flags: u32 = if flags_u32 {
-            rr.read_u32().ok()?
-        } else {
-            rr.read_u16().ok()? as u32
-        };
-        let scope_raw: u32 = if scope_u32 {
-            rr.read_u32().ok()?
-        } else {
-            rr.read_u16().ok()? as u32
-        };
-        let name = rr.read_utf16_string().ok()?;
-        let offset_after_name = rr.offset;
-        let (rgce, extra) = parse_tail_formula(data, offset_after_name)?;
-
-        Some(DefinedName {
-            index: 0, // patched by caller
-            name,
-            scope_sheet: scope_to_option(scope_raw),
-            hidden: (flags & 0x0001) != 0,
-            formula: Some(Formula {
-                rgce,
-                text: None,
-                flags: 0,
-                extra,
-                warnings: Vec::new(),
-            }),
-            comment: None,
-        })
-    }
-
-    try_layout(data, true, true)
-        .or_else(|| try_layout(data, false, true))
-        .or_else(|| try_layout(data, true, false))
-        .or_else(|| try_layout(data, false, false))
-        // If we can't parse the formula tail, still attempt to parse the header so formulas that
-        // reference this name via `PtgName` can decode.
-        .or_else(|| {
-            let mut rr = RecordReader::new(data);
-            let flags = rr.read_u32().ok()?;
-            let scope_raw = rr.read_u32().ok()?;
-            let name = rr.read_utf16_string().ok()?;
-            Some(DefinedName {
-                index: 0,
-                name,
-                scope_sheet: scope_to_option(scope_raw),
-                hidden: (flags & 0x0001) != 0,
-                formula: None,
-                comment: None,
-            })
-        })
+    Some(DefinedName {
+        index: 0, // patched by caller
+        name,
+        scope_sheet: scope_to_option(scope_raw),
+        hidden: (flags & 0x0001) != 0,
+        formula: Some(Formula {
+            rgce,
+            text: None,
+            flags: 0,
+            extra,
+            warnings: Vec::new(),
+        }),
+        comment: None,
+    })
 }
