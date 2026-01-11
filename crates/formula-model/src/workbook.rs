@@ -193,7 +193,9 @@ impl Workbook {
 
     /// Find a sheet by name (case-insensitive, like Excel).
     pub fn sheet_by_name(&self, name: &str) -> Option<&Worksheet> {
-        self.sheets.iter().find(|s| s.name.eq_ignore_ascii_case(name))
+        self.sheets
+            .iter()
+            .find(|s| crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.name, name))
     }
 
     /// Find a table by its workbook-scoped name.

@@ -66,16 +66,20 @@ fn is_valid_unquoted_sheet_name(name: &str) -> bool {
         return false;
     };
 
-    // Excel allows many Unicode letters in unquoted names, but still requires an identifier-like
-    // start character (can't start with a digit).
+    // Excel allows many Unicode sheet names, but it also permits quoting for all of them.
+    // We keep the unquoted form conservative and ASCII-only; see note below.
     if first.is_ascii_digit() {
         return false;
     }
-    if !(first == '_' || first.is_alphabetic()) {
+    // NOTE: We intentionally restrict unquoted sheet names to an ASCII identifier subset.
+    // - This is always accepted by Excel (more quoting is still valid).
+    // - It keeps our output compatible with the current `formula-engine` lexer, which treats
+    //   non-ASCII identifiers as parse errors unless they are quoted.
+    if !(first == '_' || first.is_ascii_alphabetic()) {
         return false;
     }
 
-    if !chars.all(|ch| ch == '_' || ch == '.' || ch.is_alphanumeric()) {
+    if !chars.all(|ch| ch == '_' || ch == '.' || ch.is_ascii_alphanumeric()) {
         return false;
     }
 
