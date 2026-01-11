@@ -2579,6 +2579,11 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
         EngineValue::Text(s) => CellScalar::Text(s),
         EngineValue::Bool(b) => CellScalar::Bool(b),
         EngineValue::Error(e) => CellScalar::Error(e.as_code().to_string()),
+        // Reference values are not meant to be stored directly in cells; when they
+        // leak out as a final value we treat them like Excel does (a #VALUE! error).
+        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => {
+            CellScalar::Error("#VALUE!".to_string())
+        }
         EngineValue::Array(arr) => engine_value_to_scalar(arr.top_left()),
         EngineValue::Lambda(_) => CellScalar::Text("<LAMBDA>".to_string()),
         EngineValue::Spill { .. } => CellScalar::Error("#SPILL!".to_string()),
