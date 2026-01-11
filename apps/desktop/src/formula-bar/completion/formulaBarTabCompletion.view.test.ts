@@ -134,6 +134,45 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("previews named ranges that refer to a sheet requiring quotes", async () => {
+    const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      doc.setCellValue("My Sheet", { row, col: 0 }, row + 1);
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      schemaProvider: {
+        getNamedRanges: () => [{ name: "SalesData", range: "'My Sheet'!A1:A10" }],
+        getTables: () => [],
+        getSheetNames: () => ["Sheet1", "My Sheet"],
+        getCacheKey: () => "namedRanges:My Sheet",
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(Sal";
+    view.textarea.setSelectionRange(8, 8);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=SUM(SalesData)");
+    expect(view.model.aiSuggestionPreview()).toBe(55);
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("treats formulas that evaluate to blank as non-empty when suggesting ranges", async () => {
     const doc = new DocumentController();
     for (let row = 0; row < 10; row += 1) {

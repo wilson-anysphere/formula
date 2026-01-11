@@ -609,19 +609,27 @@ export class SpreadsheetApp {
         getSheetId: () => this.sheetId,
         limits: this.limits,
         schemaProvider: {
-          getNamedRanges: () =>
-            Array.from(this.searchWorkbook.names.values())
+          getNamedRanges: () => {
+            const formatSheetPrefix = (id: string): string => {
+              const needsQuotes = /[^A-Za-z0-9_]/.test(id);
+              if (!needsQuotes) return `${id}!`;
+              return `'${id.replaceAll("'", "''")}'!`;
+            };
+
+            return Array.from(this.searchWorkbook.names.values())
               .map((entry: any) => {
                 const name = typeof entry?.name === "string" ? entry.name : "";
                 if (!name) return null;
                 const sheetName = typeof entry?.sheetName === "string" ? entry.sheetName : "";
                 const range = entry?.range;
-                const rangeText = sheetName && range ? `${sheetName}!${rangeToA1(range)}` : undefined;
+                const rangeText =
+                  sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
                 return { name, range: rangeText };
               })
               .filter((entry: { name: string; range?: string } | null): entry is { name: string; range?: string } =>
                 Boolean(entry?.name),
-              ),
+              );
+          },
           getTables: () =>
             Array.from(this.searchWorkbook.tables.values())
               .map((table: any) => ({

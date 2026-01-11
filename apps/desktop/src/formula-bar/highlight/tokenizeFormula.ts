@@ -92,7 +92,7 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
   if (!isIdentifierStart(input[start] ?? "")) return null;
 
   let i = start + 1;
-  while (i < input.length && (isIdentifierPart(input[i]) || input[i] === " ")) i += 1;
+  while (i < input.length && isIdentifierPart(input[i])) i += 1;
   if (input[i] === "!") {
     return { text: input.slice(start, i + 1), end: i + 1 };
   }
