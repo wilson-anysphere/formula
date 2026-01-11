@@ -93,11 +93,12 @@ function fnv1a64Hex(bytes) {
     return `${h1.toString(16).padStart(8, "0")}${h2.toString(16).padStart(8, "0")}`;
   }
 
-  let hash = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
+  let hash = BigInt("0xcbf29ce484222325");
+  const prime = BigInt("0x100000001b3");
+  const mask = BigInt("0xffffffffffffffff");
   for (const b of bytes) {
     hash ^= BigInt(b);
-    hash = BigInt.asUintN(64, hash * prime);
+    hash = (hash * prime) & mask;
   }
   return hash.toString(16).padStart(16, "0");
 }
