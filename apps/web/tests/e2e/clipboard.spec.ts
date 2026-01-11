@@ -5,6 +5,17 @@ test("copies and pastes a rectangular grid selection via TSV clipboard payload",
 
   await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
 
+  await page.evaluate(() => {
+    (window as any).__lastCopy = { text: "", html: "" };
+    document.addEventListener("copy", (event) => {
+      const clipboard = (event as ClipboardEvent).clipboardData;
+      (window as any).__lastCopy = {
+        text: clipboard?.getData("text/plain") ?? "",
+        html: clipboard?.getData("text/html") ?? ""
+      };
+    });
+  });
+
   const selectionCanvas = page.getByTestId("canvas-grid-selection");
   await expect(selectionCanvas).toBeVisible({ timeout: 30_000 });
 
@@ -28,6 +39,11 @@ test("copies and pastes a rectangular grid selection via TSV clipboard payload",
   await page.mouse.up();
 
   await page.keyboard.press("ControlOrMeta+C");
+
+  const clipboard = await page.evaluate(() => (window as any).__lastCopy as { text: string; html: string });
+  expect(clipboard.text).toBe("1\n2");
+  expect(clipboard.html).toContain("<table>");
+  expect(clipboard.html).toContain("<td>1</td>");
 
   const c1X = a1X + colWidth * 2;
   await selectionCanvas.click({ position: { x: c1X - box!.x, y: a1Y - box!.y } });
