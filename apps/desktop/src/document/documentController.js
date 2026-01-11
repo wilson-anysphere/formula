@@ -675,6 +675,12 @@ export class DocumentController {
       }
     }
 
+    // Ensure all snapshot sheet ids exist even when they contain no cells (the model is otherwise
+    // lazily materialized via reads/writes).
+    for (const sheetId of nextSheetIds) {
+      this.model.getCell(sheetId, 0, 0);
+    }
+
     // Clear history first: restoring content is not itself undoable.
     this.history = [];
     this.cursor = 0;

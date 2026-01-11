@@ -33,6 +33,19 @@ test("encodeState/applyState roundtrip restores cell inputs and clears history",
   assert.equal(restored.getCell("Sheet1", "B1").formula, "=SUM(A1:A3)");
 });
 
+test("applyState materializes empty sheets from snapshots", () => {
+  const doc = new DocumentController();
+  // DocumentController lazily creates sheets on first access. This creates an empty sheet
+  // that should still survive encode/apply roundtrips.
+  doc.getCell("EmptySheet", "A1");
+
+  const snapshot = doc.encodeState();
+  const restored = new DocumentController();
+  restored.applyState(snapshot);
+
+  assert.deepEqual(restored.getSheetIds(), ["EmptySheet"]);
+});
+
 test("update event fires on edits and undo/redo", () => {
   const doc = new DocumentController();
   let updates = 0;
