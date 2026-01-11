@@ -115,6 +115,71 @@ test("computeParquetProjectionColumns supports fillDown and replaceValues", () =
   assert.deepEqual(new Set(cols), new Set(["a"]));
 });
 
+test("computeParquetProjectionColumns supports skip/removeRows", () => {
+  const steps = [
+    { id: "s_skip", name: "Skip", operation: { type: "skip", count: 10 } },
+    { id: "s_remove", name: "Remove", operation: { type: "removeRows", offset: 0, count: 1 } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a"]));
+});
+
+test("computeParquetProjectionColumns supports combineColumns", () => {
+  const steps = [
+    { id: "s_combine", name: "Combine", operation: { type: "combineColumns", columns: ["a", "b"], delimiter: "-", newColumnName: "ab" } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["ab"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a", "b"]));
+});
+
+test("computeParquetProjectionColumns supports reorderColumns when missingField=error", () => {
+  const steps = [
+    { id: "s_reorder", name: "Reorder", operation: { type: "reorderColumns", columns: ["c", "a"] } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a", "c"]));
+});
+
+test("computeParquetProjectionColumns refuses reorderColumns with missingField!=error before schema is known", () => {
+  const steps = [
+    { id: "s_reorder", name: "Reorder", operation: { type: "reorderColumns", columns: ["missing", "a"], missingField: "ignore" } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+  ];
+
+  assert.equal(computeParquetProjectionColumns(steps), null);
+});
+
+test("computeParquetProjectionColumns supports reorderColumns with missingField!=error once schema is known", () => {
+  const steps = [
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+    { id: "s_reorder", name: "Reorder", operation: { type: "reorderColumns", columns: ["missing", "a"], missingField: "ignore" } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a"]));
+});
+
+test("computeParquetProjectionColumns supports replaceErrorValues", () => {
+  const steps = [
+    { id: "s_replace_errors", name: "Replace errors", operation: { type: "replaceErrorValues", replacements: [{ column: "b", value: 0 }] } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a", "b"]));
+});
+
 test("computeParquetProjectionColumns maps renamed columns through replaceValues", () => {
   const steps = [
     { id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "a", newName: "A" } },

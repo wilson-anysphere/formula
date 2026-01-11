@@ -28,6 +28,12 @@ const SUPPORTED_OPS = new Set([
   "transformColumns",
   "renameColumn",
   "take",
+  "skip",
+  "removeRows",
+  "reorderColumns",
+  "addIndexColumn",
+  "combineColumns",
+  "replaceErrorValues",
   "fillDown",
   "replaceValues",
 ]);
@@ -112,6 +118,25 @@ export function computeParquetProjectionColumns(steps) {
         // `removeColumns` validates column existence, so we must still read these columns.
         op.columns.forEach(requireColumn);
         break;
+      case "reorderColumns": {
+        const missingField = op.missingField ?? "error";
+        if (missingField === "error") {
+          // `reorderColumns` validates column existence when missingField === "error". We must
+          // read these columns even if they are later dropped by a downstream projection.
+          op.columns.forEach(requireColumn);
+          break;
+        }
+
+        // `missingField` modes that tolerate missing columns are only safe to project when we
+        // already have a known schema from an earlier explicit projection. Otherwise we'd risk
+        // requesting a column that doesn't exist in the Parquet file.
+        if (!schema) return null;
+
+        for (const name of op.columns) {
+          if (schema.has(name)) requireColumn(name);
+        }
+        break;
+      }
       case "filterRows": {
         const cols = new Set();
         collectPredicateColumns(op.predicate, cols);
@@ -152,6 +177,17 @@ export function computeParquetProjectionColumns(steps) {
         break;
       case "renameColumn":
         requireColumn(op.oldName);
+        break;
+      case "addIndexColumn":
+        break;
+      case "combineColumns":
+        op.columns.forEach(requireColumn);
+        break;
+      case "replaceErrorValues":
+        op.replacements.forEach((r) => requireColumn(r.column));
+        break;
+      case "skip":
+      case "removeRows":
         break;
       case "fillDown":
         op.columns.forEach(requireColumn);
@@ -197,6 +233,18 @@ export function computeParquetProjectionColumns(steps) {
         }
         break;
       }
+      case "reorderColumns": {
+        if (!schema) break;
+        const missingField = op.missingField ?? "error";
+        if (missingField !== "useNull") break;
+
+        for (const name of op.columns) {
+          if (schema.has(name)) continue;
+          mapping.set(name, null);
+          schema.add(name);
+        }
+        break;
+      }
       case "groupBy": {
         const next = new Map();
         for (const name of op.groupColumns) {
@@ -215,6 +263,19 @@ export function computeParquetProjectionColumns(steps) {
         mapping.set(op.name, null);
         schema?.add(op.name);
         break;
+      case "addIndexColumn":
+        mapping.set(op.name, null);
+        schema?.add(op.name);
+        break;
+      case "combineColumns": {
+        for (const name of op.columns) {
+          mapping.delete(name);
+          schema?.delete(name);
+        }
+        mapping.set(op.newColumnName, null);
+        schema?.add(op.newColumnName);
+        break;
+      }
       default:
         break;
     }
