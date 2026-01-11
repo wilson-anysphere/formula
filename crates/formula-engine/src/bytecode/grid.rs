@@ -105,11 +105,7 @@ impl ColumnarGrid {
 
     #[inline]
     pub fn set_number(&mut self, coord: CellCoord, value: f64) {
-        if coord.row < 0
-            || coord.col < 0
-            || coord.row >= self.rows
-            || coord.col >= self.cols
-        {
+        if coord.row < 0 || coord.col < 0 || coord.row >= self.rows || coord.col >= self.cols {
             return;
         }
         self.cols_data[coord.col as usize][coord.row as usize] = value;
@@ -117,11 +113,7 @@ impl ColumnarGrid {
 
     #[inline]
     pub fn get_raw_number(&self, coord: CellCoord) -> Option<f64> {
-        if coord.row < 0
-            || coord.col < 0
-            || coord.row >= self.rows
-            || coord.col >= self.cols
-        {
+        if coord.row < 0 || coord.col < 0 || coord.row >= self.rows || coord.col >= self.cols {
             return None;
         }
         Some(self.cols_data[coord.col as usize][coord.row as usize])
@@ -161,11 +153,7 @@ impl Grid for ColumnarGrid {
 
 impl GridMut for ColumnarGrid {
     fn set_value(&mut self, coord: CellCoord, value: Value) {
-        if coord.row < 0
-            || coord.col < 0
-            || coord.row >= self.rows
-            || coord.col >= self.cols
-        {
+        if coord.row < 0 || coord.col < 0 || coord.row >= self.rows || coord.col >= self.cols {
             return;
         }
         let slot = &mut self.cols_data[coord.col as usize][coord.row as usize];

@@ -59,9 +59,7 @@ fn array_literal_preserves_scalar_types_and_errors() {
 #[test]
 fn array_literal_rejects_ragged_rows() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_formula("Sheet1", "A1", "={1,2;3}")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "={1,2;3}").unwrap();
     engine.recalculate_single_threaded();
 
     assert_eq!(
@@ -93,9 +91,7 @@ fn array_literal_coerces_nested_arrays_to_value_errors() {
 #[test]
 fn array_literal_supports_missing_elements() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_formula("Sheet1", "A1", "={1,,3}")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "={1,,3}").unwrap();
     engine.recalculate_single_threaded();
 
     let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");

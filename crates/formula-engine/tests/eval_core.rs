@@ -352,10 +352,7 @@ fn array_functions_spill_and_respect_spill_blocking() {
         .unwrap();
     engine.recalculate();
 
-    assert_eq!(
-        engine.spill_range("Sheet1", "D1"),
-        None,
-    );
+    assert_eq!(engine.spill_range("Sheet1", "D1"), None,);
     assert_eq!(
         engine.get_cell_value("Sheet1", "D1"),
         Value::Error(ErrorKind::Spill)

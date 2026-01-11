@@ -1,24 +1,25 @@
 use crate::bytecode;
-use crate::eval::{
-    compile_canonical_expr, lower_ast, parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError,
-    RangeRef, SheetReference, ValueResolver,
+use crate::calc_settings::{CalcSettings, CalculationMode};
+use crate::date::ExcelDateSystem;
+use crate::editing::rewrite::{
+    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map,
+    rewrite_formula_for_structural_edit, GridRange, RangeMapEdit, StructuralEdit,
 };
 use crate::editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
 };
-use crate::editing::rewrite::{
-    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map, rewrite_formula_for_structural_edit, GridRange,
-    RangeMapEdit, StructuralEdit,
+use crate::eval::{
+    compile_canonical_expr, lower_ast, parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError,
+    RangeRef, SheetReference, ValueResolver,
 };
 use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
+use crate::iterative;
 use crate::locale::{canonicalize_formula, canonicalize_formula_with_style, FormulaLocale};
 use crate::value::{Array, ErrorKind, Value};
-use crate::calc_settings::{CalcSettings, CalculationMode};
-use crate::date::ExcelDateSystem;
-use crate::iterative;
 use formula_model::{CellId, CellRef, Range, Table};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
+use std::cell::RefCell;
 use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -109,6 +110,7 @@ struct Cell {
     compiled: Option<CompiledFormula>,
     volatile: bool,
     thread_safe: bool,
+    dynamic_deps: bool,
 }
 
 impl Default for Cell {
@@ -119,6 +121,7 @@ impl Default for Cell {
             compiled: None,
             volatile: false,
             thread_safe: true,
+            dynamic_deps: false,
         }
     }
 }
@@ -340,7 +343,10 @@ impl Engine {
         self.calc_settings = settings;
     }
 
-    pub fn set_external_value_provider(&mut self, provider: Option<Arc<dyn ExternalValueProvider>>) {
+    pub fn set_external_value_provider(
+        &mut self,
+        provider: Option<Arc<dyn ExternalValueProvider>>,
+    ) {
         self.external_value_provider = provider;
     }
 
@@ -357,7 +363,10 @@ impl Engine {
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
                 if cell.compiled.is_some() {
-                    let key = CellKey { sheet: sheet_id, addr: *addr };
+                    let key = CellKey {
+                        sheet: sheet_id,
+                        addr: *addr,
+                    };
                     self.dirty.insert(key);
                     self.dirty_reasons.remove(&key);
                     self.calc_graph.mark_dirty(cell_id_from_key(key));
@@ -412,6 +421,7 @@ impl Engine {
         cell.compiled = None;
         cell.volatile = false;
         cell.thread_safe = true;
+        cell.dynamic_deps = false;
 
         // Mark downstream dependents dirty.
         self.mark_dirty_dependents_with_reasons(key);
@@ -494,7 +504,7 @@ impl Engine {
 
         for (key, ast) in formulas {
             let cell_id = cell_id_from_key(key);
-            let (names, volatile, thread_safe) =
+            let (names, volatile, thread_safe, dynamic_deps) =
                 analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook);
             self.set_cell_name_refs(key, names);
 
@@ -502,8 +512,15 @@ impl Engine {
                 analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
             let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
             calc_vec.sort_by_key(|p| match p {
-                Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
-                Precedent::Range(r) => (1u8, r.sheet_id, r.range.start.row, r.range.start.col),
+                Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
+                Precedent::Range(r) => (
+                    1u8,
+                    r.sheet_id,
+                    r.range.start.row,
+                    r.range.start.col,
+                    r.range.end.row,
+                    r.range.end.col,
+                ),
             });
             let deps = CellDeps::new(calc_vec).volatile(volatile);
             self.calc_graph.update_cell_dependencies(cell_id, deps);
@@ -511,6 +528,7 @@ impl Engine {
             let cell = self.workbook.get_or_create_cell_mut(key);
             cell.volatile = volatile;
             cell.thread_safe = thread_safe;
+            cell.dynamic_deps = dynamic_deps;
 
             self.dirty.insert(key);
             self.dirty_reasons.remove(&key);
@@ -579,7 +597,11 @@ impl Engine {
             NameScope::Workbook => self.workbook.names.remove(&name_key),
             NameScope::Sheet(sheet_name) => {
                 let sheet_id = self.workbook.sheet_id(sheet_name)?;
-                self.workbook.sheets.get_mut(sheet_id)?.names.remove(&name_key)
+                self.workbook
+                    .sheets
+                    .get_mut(sheet_id)?
+                    .names
+                    .remove(&name_key)
             }
         };
 
@@ -603,7 +625,12 @@ impl Engine {
             NameScope::Workbook => self.workbook.names.get(&name_key).map(|n| &n.definition),
             NameScope::Sheet(sheet_name) => {
                 let sheet_id = self.workbook.sheet_id(sheet_name)?;
-                self.workbook.sheets.get(sheet_id)?.names.get(&name_key).map(|n| &n.definition)
+                self.workbook
+                    .sheets
+                    .get(sheet_id)?
+                    .names
+                    .get(&name_key)
+                    .map(|n| &n.definition)
             }
         }
     }
@@ -635,24 +662,41 @@ impl Engine {
         )?;
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
         let compiled = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet);
-        let tables_by_sheet: Vec<Vec<Table>> =
-            self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
-        let (names, volatile, thread_safe) =
+        let tables_by_sheet: Vec<Vec<Table>> = self
+            .workbook
+            .sheets
+            .iter()
+            .map(|s| s.tables.clone())
+            .collect();
+        let (names, volatile, thread_safe, dynamic_deps) =
             analyze_expr_flags(&compiled, key, &tables_by_sheet, &self.workbook);
         self.set_cell_name_refs(key, names);
 
         // Optimized precedents for calculation ordering (range nodes are not expanded).
-        let calc_precedents =
-            analyze_calc_precedents(&compiled, key, &tables_by_sheet, &self.workbook, &self.spills);
+        let calc_precedents = analyze_calc_precedents(
+            &compiled,
+            key,
+            &tables_by_sheet,
+            &self.workbook,
+            &self.spills,
+        );
         let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
         calc_vec.sort_by_key(|p| match p {
-            Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
-            Precedent::Range(r) => (1u8, r.sheet_id, r.range.start.row, r.range.start.col),
+            Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
+            Precedent::Range(r) => (
+                1u8,
+                r.sheet_id,
+                r.range.start.row,
+                r.range.start.col,
+                r.range.end.row,
+                r.range.end.col,
+            ),
         });
         let deps = CellDeps::new(calc_vec).volatile(volatile);
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
-        let compiled_formula = match self.try_compile_bytecode(formula, key, volatile, thread_safe) {
+        let compiled_formula = match self.try_compile_bytecode(formula, key, volatile, thread_safe)
+        {
             Some(program) => CompiledFormula::Bytecode(BytecodeFormula {
                 ast: compiled.clone(),
                 program,
@@ -665,6 +709,7 @@ impl Engine {
         cell.compiled = Some(compiled_formula);
         cell.volatile = volatile;
         cell.thread_safe = thread_safe;
+        cell.dynamic_deps = dynamic_deps;
 
         // Recalculate this cell and anything depending on it.
         self.mark_dirty_including_self_with_reasons(key);
@@ -773,7 +818,10 @@ impl Engine {
         let Ok(addr) = parse_a1(addr) else {
             return Value::Error(ErrorKind::Ref);
         };
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         if let Some(v) = self.spilled_cell_value(key) {
             return v;
         }
@@ -799,7 +847,10 @@ impl Engine {
     pub fn spill_range(&self, sheet: &str, addr: &str) -> Option<(CellAddr, CellAddr)> {
         let sheet_id = self.workbook.sheet_id(sheet)?;
         let addr = parse_a1(addr).ok()?;
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         let origin = self.spill_origin_key(key)?;
         let spill = self.spills.by_origin.get(&origin)?;
         Some((origin.addr, spill.end))
@@ -807,13 +858,16 @@ impl Engine {
 
     /// Returns the spill origin for a cell if it is an array-spill origin or belongs
     /// to a spilled range.
-        pub fn spill_origin(&self, sheet: &str, addr: &str) -> Option<(SheetId, CellAddr)> {
-            let sheet_id = self.workbook.sheet_id(sheet)?;
-            let addr = parse_a1(addr).ok()?;
-            let key = CellKey { sheet: sheet_id, addr };
-            let origin = self.spill_origin_key(key)?;
-            Some((origin.sheet, origin.addr))
-        }
+    pub fn spill_origin(&self, sheet: &str, addr: &str) -> Option<(SheetId, CellAddr)> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
+        let origin = self.spill_origin_key(key)?;
+        Some((origin.sheet, origin.addr))
+    }
 
     pub fn get_cell_formula(&self, sheet: &str, addr: &str) -> Option<&str> {
         let sheet_id = self.workbook.sheet_id(sheet)?;
@@ -832,7 +886,10 @@ impl Engine {
     pub fn get_cell_formula_r1c1(&self, sheet: &str, addr: &str) -> Option<String> {
         let sheet_id = self.workbook.sheet_id(sheet)?;
         let addr = parse_a1(addr).ok()?;
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         let formula = self.workbook.get_cell(key)?.formula.as_deref()?;
 
         let origin = crate::CellAddr::new(addr.row, addr.col);
@@ -1249,21 +1306,21 @@ impl Engine {
 
             let recalc_ctx = recalc_ctx.get_or_insert_with(|| self.begin_recalc_context());
 
-            let spill_dirty_roots = self.recalculate_levels(
+            let (spill_dirty_roots, dynamic_dirty_roots) = self.recalculate_levels(
                 levels,
                 mode,
                 recalc_ctx,
                 date_system,
                 value_changes.as_deref_mut(),
             );
-            if spill_dirty_roots.is_empty() {
+            if spill_dirty_roots.is_empty() && dynamic_dirty_roots.is_empty() {
                 return;
             }
 
             // Spills can change which cells are considered inputs vs computed spill outputs.
             // When the spill footprint changes (new cells gain/lose values), mark the affected
             // coordinates dirty so any dependents recalculate with the updated spill state.
-            for cell in spill_dirty_roots {
+            for cell in spill_dirty_roots.into_iter().chain(dynamic_dirty_roots) {
                 self.calc_graph.mark_dirty(cell);
             }
         }
@@ -1276,7 +1333,7 @@ impl Engine {
         recalc_ctx: &crate::eval::RecalcContext,
         date_system: ExcelDateSystem,
         mut value_changes: Option<&mut RecalcValueChangeCollector>,
-    ) -> Vec<CellId> {
+    ) -> (Vec<CellId>, Vec<CellId>) {
         self.circular_references.clear();
 
         let mut snapshot = Snapshot::from_workbook(
@@ -1285,6 +1342,7 @@ impl Engine {
             self.external_value_provider.clone(),
         );
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
+        let mut dynamic_dirty_roots: Vec<CellId> = Vec::new();
 
         for level in levels {
             let mut keys: Vec<CellKey> = level.into_iter().map(cell_key_from_id).collect();
@@ -1292,6 +1350,7 @@ impl Engine {
 
             let mut parallel_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
             let mut serial_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
+            let mut dynamic_tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
 
             for &k in &keys {
                 let Some(cell) = self.workbook.get_cell(k) else {
@@ -1301,7 +1360,9 @@ impl Engine {
                     continue;
                 };
 
-                if cell.thread_safe {
+                if cell.dynamic_deps {
+                    dynamic_tasks.push((k, compiled));
+                } else if cell.thread_safe {
                     parallel_tasks.push((k, compiled));
                 } else {
                     serial_tasks.push((k, compiled));
@@ -1309,9 +1370,10 @@ impl Engine {
             }
 
             let mut all_tasks: Vec<(CellKey, CompiledFormula)> =
-                Vec::with_capacity(parallel_tasks.len() + serial_tasks.len());
+                Vec::with_capacity(parallel_tasks.len() + serial_tasks.len() + dynamic_tasks.len());
             all_tasks.extend(parallel_tasks.iter().cloned());
             all_tasks.extend(serial_tasks.iter().cloned());
+            all_tasks.extend(dynamic_tasks.iter().cloned());
 
             let sheet_count = self.workbook.sheets.len();
             let column_cache = BytecodeColumnCache::build(sheet_count, &snapshot, &all_tasks);
@@ -1319,7 +1381,6 @@ impl Engine {
 
             let mut results: Vec<(CellKey, Value)> =
                 Vec::with_capacity(parallel_tasks.len() + serial_tasks.len());
-
             let eval_parallel_tasks_serial = |results: &mut Vec<(CellKey, Value)>| {
                 let mut vm = bytecode::Vm::with_capacity(32);
                 for (k, compiled) in &parallel_tasks {
@@ -1463,13 +1524,121 @@ impl Engine {
                     value_changes.as_deref_mut(),
                 );
             }
+
+            // Dynamic-reference formulas (e.g. INDIRECT/OFFSET) must be evaluated serially so we
+            // can trace their runtime precedents and update the dependency graph deterministically.
+            for (k, compiled) in &dynamic_tasks {
+                let ctx = crate::eval::EvalContext {
+                    current_sheet: k.sheet,
+                    current_cell: k.addr,
+                };
+
+                let trace = RefCell::new(crate::eval::DependencyTrace::default());
+
+                let value = match compiled {
+                    CompiledFormula::Ast(expr) => {
+                        let evaluator = crate::eval::Evaluator::new_with_date_system(
+                            &snapshot,
+                            ctx,
+                            recalc_ctx,
+                            date_system,
+                        )
+                        .with_dependency_trace(&trace);
+                        evaluator.eval_formula(expr)
+                    }
+                    CompiledFormula::Bytecode(bc) => {
+                        // Dynamic dependency tracing is only supported for AST formulas. Fallback
+                        // to bytecode evaluation without dependency updates.
+                        let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                        let slice_mode = slice_mode_for_program(&bc.program);
+                        let grid = EngineBytecodeGrid {
+                            snapshot: &snapshot,
+                            sheet: k.sheet,
+                            cols,
+                            slice_mode,
+                        };
+                        let base = bytecode::CellCoord {
+                            row: k.addr.row as i32,
+                            col: k.addr.col as i32,
+                        };
+                        let v = vm.eval(&bc.program, &grid, base);
+                        bytecode_value_to_engine(v)
+                    }
+                };
+
+                self.apply_eval_result(
+                    *k,
+                    value,
+                    &mut snapshot,
+                    &mut spill_dirty_roots,
+                    value_changes.as_deref_mut(),
+                );
+
+                let CompiledFormula::Ast(expr) = compiled else {
+                    continue;
+                };
+
+                let cell_id = cell_id_from_key(*k);
+                let old_precedents: HashSet<Precedent> =
+                    self.calc_graph.precedents_of(cell_id).into_iter().collect();
+
+                let mut new_precedents: HashSet<Precedent> = analyze_calc_precedents(
+                    expr,
+                    *k,
+                    &snapshot.tables,
+                    &self.workbook,
+                    &self.spills,
+                );
+                for reference in trace.borrow().precedents() {
+                    let sheet_id = sheet_id_for_graph(reference.sheet_id);
+                    if reference.start == reference.end {
+                        new_precedents.insert(Precedent::Cell(CellId::new(
+                            sheet_id,
+                            reference.start.row,
+                            reference.start.col,
+                        )));
+                    } else {
+                        let range = Range::new(
+                            CellRef::new(reference.start.row, reference.start.col),
+                            CellRef::new(reference.end.row, reference.end.col),
+                        );
+                        new_precedents.insert(Precedent::Range(SheetRange::new(sheet_id, range)));
+                    }
+                }
+
+                if new_precedents != old_precedents {
+                    let mut vec: Vec<Precedent> = new_precedents.into_iter().collect();
+                    vec.sort_by_key(|p| match p {
+                        Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
+                        Precedent::Range(r) => (
+                            1u8,
+                            r.sheet_id,
+                            r.range.start.row,
+                            r.range.start.col,
+                            r.range.end.row,
+                            r.range.end.col,
+                        ),
+                    });
+
+                    let is_volatile = self
+                        .workbook
+                        .get_cell(*k)
+                        .map(|c| c.volatile)
+                        .unwrap_or(false);
+                    self.calc_graph.update_cell_dependencies(
+                        cell_id,
+                        CellDeps::new(vec).volatile(is_volatile),
+                    );
+                    dynamic_dirty_roots.push(cell_id);
+                }
+            }
         }
 
         self.calc_graph.clear_dirty();
         self.dirty.clear();
         self.dirty_reasons.clear();
 
-        spill_dirty_roots
+        (spill_dirty_roots, dynamic_dirty_roots)
     }
 
     fn recalculate_with_cycles(
@@ -1535,11 +1704,11 @@ impl Engine {
 
             if !is_cycle {
                 let k = scc[0];
-                let Some(expr) = self.workbook.get_cell(k).and_then(|c| {
-                    c.compiled
-                        .as_ref()
-                        .map(|compiled| compiled.ast().clone())
-                }) else {
+                let Some(expr) = self
+                    .workbook
+                    .get_cell(k)
+                    .and_then(|c| c.compiled.as_ref().map(|compiled| compiled.ast().clone()))
+                else {
                     continue;
                 };
                 let ctx = crate::eval::EvalContext {
@@ -1587,11 +1756,11 @@ impl Engine {
             for _ in 0..max_iters {
                 let mut max_delta: f64 = 0.0;
                 for &k in &scc {
-                    let Some(expr) = self.workbook.get_cell(k).and_then(|c| {
-                        c.compiled
-                            .as_ref()
-                            .map(|compiled| compiled.ast().clone())
-                    }) else {
+                    let Some(expr) = self
+                        .workbook
+                        .get_cell(k)
+                        .and_then(|c| c.compiled.as_ref().map(|compiled| compiled.ast().clone()))
+                    else {
                         continue;
                     };
                     let old = snapshot.values.get(&k).cloned().unwrap_or(Value::Blank);
@@ -1733,7 +1902,10 @@ impl Engine {
                                     row: key.addr.row + r as u32,
                                     col: key.addr.col + c as u32,
                                 };
-                                let spill_key = CellKey { sheet: key.sheet, addr };
+                                let spill_key = CellKey {
+                                    sheet: key.sheet,
+                                    addr,
+                                };
                                 if let Some(v) = array.get(r, c).cloned() {
                                     if let Some(changes) = value_changes.as_deref_mut() {
                                         let before =
@@ -1836,7 +2008,11 @@ impl Engine {
             return;
         };
 
-        if let Some(origins) = self.spills.blocked_origins_by_cell.get_mut(&blocked.blocker) {
+        if let Some(origins) = self
+            .spills
+            .blocked_origins_by_cell
+            .get_mut(&blocked.blocker)
+        {
             origins.remove(&origin);
             if origins.is_empty() {
                 self.spills.blocked_origins_by_cell.remove(&blocked.blocker);
@@ -1867,8 +2043,7 @@ impl Engine {
             self.calc_graph.mark_dirty(origin_id);
 
             if self.dirty.insert(origin) {
-                self.dirty_reasons
-                    .insert(origin, DirtyReason::Cell(cell));
+                self.dirty_reasons.insert(origin, DirtyReason::Cell(cell));
             }
             self.mark_dirty_dependents_with_reasons(origin);
         }
@@ -1993,7 +2168,13 @@ impl Engine {
         cell.value = top_left.clone();
         snapshot.values.insert(origin, top_left);
 
-        self.spills.by_origin.insert(origin, Spill { end, array: array.clone() });
+        self.spills.by_origin.insert(
+            origin,
+            Spill {
+                end,
+                array: array.clone(),
+            },
+        );
         snapshot.spill_end_by_origin.insert(origin, end);
 
         let origin_id = cell_id_from_key(origin);
@@ -2024,7 +2205,8 @@ impl Engine {
                 // Register spill cells as formula nodes that depend on the origin so they participate in
                 // calculation ordering and dirty marking.
                 let deps = CellDeps::new(vec![Precedent::Cell(origin_id)]);
-                self.calc_graph.update_cell_dependencies(cell_id_from_key(key), deps);
+                self.calc_graph
+                    .update_cell_dependencies(cell_id_from_key(key), deps);
 
                 spill_dirty_roots.push(cell_id_from_key(key));
             }
@@ -2099,7 +2281,9 @@ impl Engine {
         }
 
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
-            let Some(ctx_sheet) = sheet_names.get(&sheet_id) else { continue };
+            let Some(ctx_sheet) = sheet_names.get(&sheet_id) else {
+                continue;
+            };
             for (name, def) in &sheet.names {
                 let Some((new_def, compiled)) =
                     rewrite_defined_name_structural(self, def, ctx_sheet, edit)?
@@ -2147,7 +2331,9 @@ impl Engine {
         }
 
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
-            let Some(ctx_sheet) = sheet_names.get(&sheet_id) else { continue };
+            let Some(ctx_sheet) = sheet_names.get(&sheet_id) else {
+                continue;
+            };
             for (name, def) in &sheet.names {
                 let Some((new_def, compiled)) =
                     rewrite_defined_name_range_map(self, def, ctx_sheet, edit)?
@@ -2213,21 +2399,25 @@ impl Engine {
             return;
         };
 
-        let tables_by_sheet: Vec<Vec<Table>> =
-            self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+        let tables_by_sheet: Vec<Vec<Table>> = self
+            .workbook
+            .sheets
+            .iter()
+            .map(|s| s.tables.clone())
+            .collect();
 
         for key in cells {
-            let Some(ast) = self.workbook.get_cell(key).and_then(|c| {
-                c.compiled
-                    .as_ref()
-                    .map(|compiled| compiled.ast().clone())
-            }) else {
+            let Some(ast) = self
+                .workbook
+                .get_cell(key)
+                .and_then(|c| c.compiled.as_ref().map(|compiled| compiled.ast().clone()))
+            else {
                 continue;
             };
 
             let cell_id = cell_id_from_key(key);
 
-            let (names, volatile, thread_safe) =
+            let (names, volatile, thread_safe, dynamic_deps) =
                 analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook);
             self.set_cell_name_refs(key, names);
 
@@ -2235,8 +2425,15 @@ impl Engine {
                 analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
             let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
             calc_vec.sort_by_key(|p| match p {
-                Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
-                Precedent::Range(r) => (1u8, r.sheet_id, r.range.start.row, r.range.start.col),
+                Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
+                Precedent::Range(r) => (
+                    1u8,
+                    r.sheet_id,
+                    r.range.start.row,
+                    r.range.start.col,
+                    r.range.end.row,
+                    r.range.end.col,
+                ),
             });
             let deps = CellDeps::new(calc_vec).volatile(volatile);
             self.calc_graph.update_cell_dependencies(cell_id, deps);
@@ -2244,6 +2441,7 @@ impl Engine {
             let cell = self.workbook.get_or_create_cell_mut(key);
             cell.volatile = volatile;
             cell.thread_safe = thread_safe;
+            cell.dynamic_deps = dynamic_deps;
 
             self.mark_dirty_including_self_with_reasons(key);
             self.calc_graph.mark_dirty(cell_id);
@@ -3029,7 +3227,8 @@ fn rewrite_all_formulas_range_map(
                 continue;
             };
             let origin = crate::CellAddr::new(addr.row, addr.col);
-            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
+            let (new_formula, changed) =
+                rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
             if changed {
                 rewrites.push(FormulaRewrite {
                     sheet: ctx_sheet.clone(),
@@ -3371,11 +3570,13 @@ impl Snapshot {
         fn name_to_resolved(def: &DefinedName) -> crate::eval::ResolvedName {
             match &def.definition {
                 NameDefinition::Constant(v) => crate::eval::ResolvedName::Constant(v.clone()),
-                NameDefinition::Reference(_) | NameDefinition::Formula(_) => crate::eval::ResolvedName::Expr(
-                    def.compiled
-                        .clone()
-                        .expect("non-constant defined name must have compiled expression"),
-                ),
+                NameDefinition::Reference(_) | NameDefinition::Formula(_) => {
+                    crate::eval::ResolvedName::Expr(
+                        def.compiled
+                            .clone()
+                            .expect("non-constant defined name must have compiled expression"),
+                    )
+                }
             }
         }
 
@@ -3399,7 +3600,10 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {
-        if let Some(v) = self.values.get(&CellKey { sheet: sheet_id, addr }) {
+        if let Some(v) = self.values.get(&CellKey {
+            sheet: sheet_id,
+            addr,
+        }) {
             return v.clone();
         }
 
@@ -3412,6 +3616,13 @@ impl crate::eval::ValueResolver for Snapshot {
         }
 
         Value::Blank
+    }
+
+    fn sheet_id(&self, name: &str) -> Option<usize> {
+        let needle = name.trim();
+        self.sheet_names_by_id
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(needle))
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
@@ -3452,7 +3663,10 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn spill_origin(&self, sheet_id: usize, addr: CellAddr) -> Option<CellAddr> {
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         if self.spill_end_by_origin.contains_key(&key) {
             return Some(addr);
         }
@@ -3524,6 +3738,9 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Blank => bytecode::Value::Empty,
         Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
         Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
+        Value::Reference(_) | Value::ReferenceUnion(_) => {
+            bytecode::Value::Error(bytecode::ErrorKind::Value)
+        }
         Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
     }
 }
@@ -3598,7 +3815,8 @@ impl BytecodeColumnCache {
         // Collect row windows for each referenced column so the cache can build compact
         // columnar buffers. This avoids allocating/scanning from row 0 (e.g. `A900000:A900010`),
         // and also avoids spanning huge gaps when formulas reference multiple disjoint windows.
-        let mut row_ranges_by_col: Vec<HashMap<i32, Vec<(i32, i32)>>> = vec![HashMap::new(); sheet_count];
+        let mut row_ranges_by_col: Vec<HashMap<i32, Vec<(i32, i32)>>> =
+            vec![HashMap::new(); sheet_count];
 
         for (key, compiled) in tasks {
             let CompiledFormula::Bytecode(bc) = compiled else {
@@ -3637,7 +3855,12 @@ impl BytecodeColumnCache {
             match value {
                 Value::Number(n) => seg.values[(row - seg.row_start) as usize] = *n,
                 Value::Blank => {}
-                Value::Error(_) | Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => {
+                Value::Error(_)
+                | Value::Reference(_)
+                | Value::ReferenceUnion(_)
+                | Value::Array(_)
+                | Value::Lambda(_)
+                | Value::Spill { .. } => {
                     seg.blocked_rows_strict.push(row);
                     seg.blocked_rows_ignore_nonnumeric.push(row);
                 }
@@ -3667,7 +3890,8 @@ impl BytecodeColumnCache {
                 }
                 segments.push((cur_start, cur_end));
 
-                let mut col_segments: Vec<BytecodeColumnSegment> = Vec::with_capacity(segments.len());
+                let mut col_segments: Vec<BytecodeColumnSegment> =
+                    Vec::with_capacity(segments.len());
 
                 let sheet_name = snapshot.sheet_names_by_id.get(sheet_id).map(String::as_str);
                 let provider = snapshot.external_value_provider.as_ref();
@@ -3692,7 +3916,10 @@ impl BytecodeColumnCache {
                                 row: row as u32,
                                 col: (*col) as u32,
                             };
-                            if let Some(v) = snapshot.values.get(&CellKey { sheet: sheet_id, addr }) {
+                            if let Some(v) = snapshot.values.get(&CellKey {
+                                sheet: sheet_id,
+                                addr,
+                            }) {
                                 apply_value(&mut segment, v, row);
                                 continue;
                             }
@@ -3707,17 +3934,18 @@ impl BytecodeColumnCache {
 
                     segment.blocked_rows_strict.sort_unstable();
                     segment.blocked_rows_strict.dedup();
-                    segment
-                        .blocked_rows_ignore_nonnumeric
-                        .sort_unstable();
-                    segment
-                        .blocked_rows_ignore_nonnumeric
-                        .dedup();
+                    segment.blocked_rows_ignore_nonnumeric.sort_unstable();
+                    segment.blocked_rows_ignore_nonnumeric.dedup();
 
                     col_segments.push(segment);
                 }
 
-                cols.insert(*col, BytecodeColumn { segments: col_segments });
+                cols.insert(
+                    *col,
+                    BytecodeColumn {
+                        segments: col_segments,
+                    },
+                );
             }
             by_sheet.push(cols);
         }
@@ -3876,7 +4104,8 @@ fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::Cel
         }
         bytecode::Expr::Unary { expr, .. } => bytecode_expr_within_grid_limits(expr, origin),
         bytecode::Expr::Binary { left, right, .. } => {
-            bytecode_expr_within_grid_limits(left, origin) && bytecode_expr_within_grid_limits(right, origin)
+            bytecode_expr_within_grid_limits(left, origin)
+                && bytecode_expr_within_grid_limits(right, origin)
         }
         bytecode::Expr::FuncCall { args, .. } => args
             .iter()
@@ -3894,7 +4123,9 @@ fn bytecode_expr_is_eligible_inner(
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
             bytecode::Value::Text(_) => allow_text,
             bytecode::Value::Empty => true,
-            bytecode::Value::Error(_) | bytecode::Value::Array(_) | bytecode::Value::Range(_) => false,
+            bytecode::Value::Error(_) | bytecode::Value::Array(_) | bytecode::Value::Range(_) => {
+                false
+            }
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
@@ -3941,10 +4172,11 @@ fn analyze_expr_flags(
     current_cell: CellKey,
     _tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
-) -> (HashSet<String>, bool, bool) {
+) -> (HashSet<String>, bool, bool, bool) {
     let mut names = HashSet::new();
     let mut volatile = false;
     let mut thread_safe = true;
+    let mut dynamic_deps = false;
     let mut visiting_names = HashSet::new();
     let mut lexical_scopes: Vec<HashSet<String>> = Vec::new();
     walk_expr_flags(
@@ -3954,10 +4186,11 @@ fn analyze_expr_flags(
         &mut names,
         &mut volatile,
         &mut thread_safe,
+        &mut dynamic_deps,
         &mut visiting_names,
         &mut lexical_scopes,
     );
-    (names, volatile, thread_safe)
+    (names, volatile, thread_safe, dynamic_deps)
 }
 
 fn walk_expr_flags(
@@ -3967,6 +4200,7 @@ fn walk_expr_flags(
     names: &mut HashSet<String>,
     volatile: &mut bool,
     thread_safe: &mut bool,
+    dynamic_deps: &mut bool,
     visiting_names: &mut HashSet<(SheetId, String)>,
     lexical_scopes: &mut Vec<HashSet<String>>,
 ) {
@@ -4018,6 +4252,7 @@ fn walk_expr_flags(
                         names,
                         volatile,
                         thread_safe,
+                        dynamic_deps,
                         visiting_names,
                         lexical_scopes,
                     );
@@ -4034,9 +4269,10 @@ fn walk_expr_flags(
                 names,
                 volatile,
                 thread_safe,
+                dynamic_deps,
                 visiting_names,
                 lexical_scopes,
-            )
+            );
         }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
             walk_expr_flags(
@@ -4046,6 +4282,7 @@ fn walk_expr_flags(
                 names,
                 volatile,
                 thread_safe,
+                dynamic_deps,
                 visiting_names,
                 lexical_scopes,
             );
@@ -4056,6 +4293,7 @@ fn walk_expr_flags(
                 names,
                 volatile,
                 thread_safe,
+                dynamic_deps,
                 visiting_names,
                 lexical_scopes,
             );
@@ -4067,6 +4305,9 @@ fn walk_expr_flags(
                 }
                 if spec.thread_safety == crate::functions::ThreadSafety::NotThreadSafe {
                     *thread_safe = false;
+                }
+                if matches!(spec.name, "OFFSET" | "INDIRECT") {
+                    *dynamic_deps = true;
                 }
 
                 match spec.name {
@@ -4089,6 +4330,7 @@ fn walk_expr_flags(
                                 names,
                                 volatile,
                                 thread_safe,
+                                dynamic_deps,
                                 visiting_names,
                                 lexical_scopes,
                             );
@@ -4102,6 +4344,7 @@ fn walk_expr_flags(
                             names,
                             volatile,
                             thread_safe,
+                            dynamic_deps,
                             visiting_names,
                             lexical_scopes,
                         );
@@ -4131,6 +4374,7 @@ fn walk_expr_flags(
                             names,
                             volatile,
                             thread_safe,
+                            dynamic_deps,
                             visiting_names,
                             lexical_scopes,
                         );
@@ -4162,6 +4406,7 @@ fn walk_expr_flags(
                                     names,
                                     volatile,
                                     thread_safe,
+                                    dynamic_deps,
                                     visiting_names,
                                     lexical_scopes,
                                 );
@@ -4184,6 +4429,7 @@ fn walk_expr_flags(
                     names,
                     volatile,
                     thread_safe,
+                    dynamic_deps,
                     visiting_names,
                     lexical_scopes,
                 );
@@ -4198,6 +4444,7 @@ fn walk_expr_flags(
                     names,
                     volatile,
                     thread_safe,
+                    dynamic_deps,
                     visiting_names,
                     lexical_scopes,
                 );
@@ -4211,9 +4458,10 @@ fn walk_expr_flags(
                 names,
                 volatile,
                 thread_safe,
+                dynamic_deps,
                 visiting_names,
                 lexical_scopes,
-            )
+            );
         }
         Expr::CellRef(_)
         | Expr::RangeRef(_)
@@ -4403,7 +4651,7 @@ fn walk_calc_expr(
                 precedents,
                 visiting_names,
                 lexical_scopes,
-            )
+            );
         }
         Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => {
             walk_calc_expr(
@@ -4415,7 +4663,7 @@ fn walk_calc_expr(
                 precedents,
                 visiting_names,
                 lexical_scopes,
-            )
+            );
         }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
             walk_calc_expr(
@@ -4575,7 +4823,7 @@ fn walk_calc_expr(
                 precedents,
                 visiting_names,
                 lexical_scopes,
-            )
+            );
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }
@@ -4620,7 +4868,13 @@ fn numeric_value(value: &Value) -> Option<f64> {
         Value::Number(n) => Some(*n),
         Value::Blank => Some(0.0),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Text(_) | Value::Error(_) | Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => None,
+        Value::Text(_)
+        | Value::Error(_)
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => None,
     }
 }
 
@@ -4680,11 +4934,13 @@ fn rewrite_defined_name_range_map(
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
-            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
+            let (new_formula, changed) =
+                rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
             (NameDefinition::Reference(new_formula), changed)
         }
         NameDefinition::Formula(formula) => {
-            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
+            let (new_formula, changed) =
+                rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
             (NameDefinition::Formula(new_formula), changed)
         }
     };
@@ -4777,7 +5033,10 @@ mod tests {
         setup(&mut multi);
 
         let recalc_ctx = crate::eval::RecalcContext {
-            now_utc: chrono::Utc.timestamp_opt(1_700_000_000, 123_456_789).single().unwrap(),
+            now_utc: chrono::Utc
+                .timestamp_opt(1_700_000_000, 123_456_789)
+                .single()
+                .unwrap(),
             recalc_id: 42,
         };
 
@@ -4793,7 +5052,10 @@ mod tests {
             None,
         );
 
-        let levels_multi = multi.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let levels_multi = multi
+            .calc_graph
+            .calc_levels_for_dirty()
+            .expect("calc levels");
         let _ = multi.recalculate_levels(
             levels_multi,
             RecalcMode::MultiThreaded,
@@ -4974,7 +5236,8 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
         );
-        let column_cache = BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+        let column_cache =
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
 
         let col = column_cache.by_sheet[sheet_id]
             .get(&0)
@@ -5077,7 +5340,10 @@ mod tests {
         let mut resolve_sheet = |name: &str| engine.workbook.sheet_id(name);
         let ast = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet);
 
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         let compiled = CompiledFormula::Bytecode(BytecodeFormula { ast, program });
 
         let snapshot = Snapshot::from_workbook(
@@ -5085,7 +5351,8 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
         );
-        let column_cache = BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+        let column_cache =
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
 
         assert!(column_cache.by_sheet[sheet_id].is_empty());
     }

@@ -33,7 +33,10 @@ fn and_or_ignore_text_and_blank_in_ranges_but_error_on_scalar_text() {
     assert_eq!(sheet.eval("=AND(A1:A4)"), Value::Bool(false));
     assert_eq!(sheet.eval("=OR(A4)"), Value::Bool(false));
 
-    assert_eq!(sheet.eval("=AND(\"x\", TRUE)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=AND(\"x\", TRUE)"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]

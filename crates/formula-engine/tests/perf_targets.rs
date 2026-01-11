@@ -5,7 +5,9 @@
 //!
 //! Targets are derived from `docs/16-performance-targets.md`.
 
-use formula_engine::bytecode::{parse_formula, CalcGraph, CellCoord, ColumnarGrid, FormulaCell, RecalcEngine};
+use formula_engine::bytecode::{
+    parse_formula, CalcGraph, CellCoord, ColumnarGrid, FormulaCell, RecalcEngine,
+};
 use std::time::{Duration, Instant};
 
 const ENV: &str = "FORMULA_ENGINE_ENFORCE_PERF_TARGETS";
@@ -33,9 +35,7 @@ fn perf_100k_recalc_under_100ms_reference() {
     );
 }
 
-fn build_independent_workbook(
-    n: usize,
-) -> (RecalcEngine, CalcGraph, ColumnarGrid) {
+fn build_independent_workbook(n: usize) -> (RecalcEngine, CalcGraph, ColumnarGrid) {
     let engine = RecalcEngine::new();
     let rows = n as i32;
     let cols = 4;
@@ -53,7 +53,10 @@ fn build_independent_workbook(
     let mut cells = Vec::with_capacity(n);
     for row in 0..rows {
         let coord = CellCoord::new(row, 2);
-        cells.push(FormulaCell { coord, expr: template.clone() });
+        cells.push(FormulaCell {
+            coord,
+            expr: template.clone(),
+        });
     }
 
     let graph = engine.build_graph(cells);

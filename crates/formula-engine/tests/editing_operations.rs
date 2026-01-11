@@ -136,7 +136,10 @@ fn insert_row_updates_mixed_absolute_and_relative_references() {
         .unwrap();
 
     // Formula moved from B1 -> B2; all references should track the moved cells.
-    assert_eq!(engine.get_cell_formula("Sheet1", "B2"), Some("=$A$2+$A2+A$2"));
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "B2"),
+        Some("=$A$2+$A2+A$2")
+    );
 }
 
 #[test]
@@ -192,7 +195,10 @@ fn structural_edits_rewrite_quoted_sheet_names() {
         })
         .unwrap();
 
-    assert_eq!(engine.get_cell_formula("Other", "A1"), Some("='My Sheet'!A2"));
+    assert_eq!(
+        engine.get_cell_formula("Other", "A1"),
+        Some("='My Sheet'!A2")
+    );
 }
 
 #[test]

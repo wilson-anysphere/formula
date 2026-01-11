@@ -101,4 +101,3 @@ impl RangeData {
         self.rows.get(row).and_then(|r| r.get(col))
     }
 }
-

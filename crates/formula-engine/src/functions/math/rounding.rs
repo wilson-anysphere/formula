@@ -1,6 +1,10 @@
 use crate::error::{ExcelError, ExcelResult};
 
-fn round_to_multiple(number: f64, significance: f64, direction: RoundingDirection) -> ExcelResult<f64> {
+fn round_to_multiple(
+    number: f64,
+    significance: f64,
+    direction: RoundingDirection,
+) -> ExcelResult<f64> {
     if !number.is_finite() || !significance.is_finite() {
         return Err(ExcelError::Num);
     }
@@ -33,7 +37,11 @@ pub fn ceiling(number: f64, significance: f64) -> ExcelResult<f64> {
     if number.signum() * significance.signum() < 0.0 {
         return Err(ExcelError::Num);
     }
-    round_to_multiple(number, significance, RoundingDirection::TowardPositiveInfinity)
+    round_to_multiple(
+        number,
+        significance,
+        RoundingDirection::TowardPositiveInfinity,
+    )
 }
 
 /// FLOOR(number, significance)
@@ -41,7 +49,11 @@ pub fn floor(number: f64, significance: f64) -> ExcelResult<f64> {
     if number.signum() * significance.signum() < 0.0 {
         return Err(ExcelError::Num);
     }
-    round_to_multiple(number, significance, RoundingDirection::TowardNegativeInfinity)
+    round_to_multiple(
+        number,
+        significance,
+        RoundingDirection::TowardNegativeInfinity,
+    )
 }
 
 /// CEILING.MATH(number, [significance], [mode])
@@ -92,4 +104,3 @@ pub fn floor_precise(number: f64, significance: Option<f64>) -> ExcelResult<f64>
 pub fn iso_ceiling(number: f64, significance: Option<f64>) -> ExcelResult<f64> {
     ceiling_precise(number, significance)
 }
-

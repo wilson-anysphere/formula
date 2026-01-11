@@ -32,4 +32,3 @@ pub enum RowVisibility {
     Visible,
     Hidden,
 }
-

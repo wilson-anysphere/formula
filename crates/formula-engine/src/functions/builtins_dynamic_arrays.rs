@@ -387,7 +387,11 @@ fn sort_key(value: &Value) -> SortKeyValue {
         Value::Bool(b) => SortKeyValue::Bool(*b),
         Value::Blank => SortKeyValue::Blank,
         Value::Error(e) => SortKeyValue::Error(*e),
-        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => {
+        Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => {
             SortKeyValue::Error(ErrorKind::Value)
         }
     }
@@ -493,7 +497,11 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         Value::Text(s) if s.is_empty() => UniqueKeyCell::Blank,
         Value::Text(s) => UniqueKeyCell::Text(s.to_lowercase()),
         Value::Error(e) => UniqueKeyCell::Error(*e),
-        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => {
+        Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => {
             UniqueKeyCell::Error(ErrorKind::Value)
         }
     }

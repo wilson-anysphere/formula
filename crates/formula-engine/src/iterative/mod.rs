@@ -147,4 +147,3 @@ fn min_cell_key(scc: &[CellKey]) -> (usize, u32, u32) {
         .min()
         .unwrap_or((usize::MAX, u32::MAX, u32::MAX))
 }
-

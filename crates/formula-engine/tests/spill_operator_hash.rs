@@ -12,9 +12,13 @@ fn spill_operator_hash_expands_spill_range_in_functions() {
     engine.set_cell_formula("Sheet1", "C1", "=A1:A3").unwrap();
 
     // SUM should see the full spill range (C1:C3) when using the spill operator.
-    engine.set_cell_formula("Sheet1", "D1", "=SUM(C1#)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SUM(C1#)")
+        .unwrap();
     // Also ensure references from within a spill range resolve to the spill origin.
-    engine.set_cell_formula("Sheet1", "D2", "=SUM(C2#)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", "=SUM(C2#)")
+        .unwrap();
 
     engine.recalculate_single_threaded();
 
@@ -55,4 +59,3 @@ fn spill_operator_hash_on_non_spill_origin_returns_ref() {
         Value::Error(ErrorKind::Ref)
     );
 }
-

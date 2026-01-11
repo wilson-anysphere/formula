@@ -27,4 +27,3 @@ fn ln_log_exp_match_known_values() {
     let exp_1 = math::exp(1.0).unwrap();
     assert!((exp_1 - std::f64::consts::E).abs() < 1.0e-12);
 }
-

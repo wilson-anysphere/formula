@@ -91,21 +91,33 @@ fn scenario_manager_applies_scenarios_and_generates_summary_report_over_engine()
     assert!((b1.as_number().unwrap() - 4.0).abs() < 1e-9);
 
     let report = manager
-        .generate_summary_report(
-            &mut model,
-            vec![CellRef::from("B1")],
-            vec![low, high],
-        )
+        .generate_summary_report(&mut model, vec![CellRef::from("B1")], vec![low, high])
         .unwrap();
 
     let base = report.results.get("Base").unwrap();
     assert!((base.get(&CellRef::from("B1")).unwrap().as_number().unwrap() - 4.0).abs() < 1e-9);
 
     let low_row = report.results.get("Low").unwrap();
-    assert!((low_row.get(&CellRef::from("B1")).unwrap().as_number().unwrap() - 6.0).abs() < 1e-9);
+    assert!(
+        (low_row
+            .get(&CellRef::from("B1"))
+            .unwrap()
+            .as_number()
+            .unwrap()
+            - 6.0)
+            .abs()
+            < 1e-9
+    );
 
     let high_row = report.results.get("High").unwrap();
     assert!(
-        (high_row.get(&CellRef::from("B1")).unwrap().as_number().unwrap() - 16.0).abs() < 1e-9
+        (high_row
+            .get(&CellRef::from("B1"))
+            .unwrap()
+            .as_number()
+            .unwrap()
+            - 16.0)
+            .abs()
+            < 1e-9
     );
 }

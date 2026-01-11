@@ -64,7 +64,6 @@ impl SortKeyValue {
             _ => None,
         }
     }
-
 }
 
 #[derive(Debug)]
@@ -202,7 +201,10 @@ pub(crate) fn compute_row_permutation(
         old_to_new[old_index] = new_index;
     }
 
-    RowPermutation { new_to_old, old_to_new }
+    RowPermutation {
+        new_to_old,
+        old_to_new,
+    }
 }
 
 fn detect_header_row(
@@ -236,7 +238,9 @@ fn detect_header_row(
 
 fn detect_key_value(cell: &CellValue, key: &SortKey) -> SortKeyValue {
     match key.value_type {
-        SortValueType::Text => SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive)),
+        SortValueType::Text => {
+            SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive))
+        }
         SortValueType::Number => match coerce_number(cell) {
             Some(n) => SortKeyValue::Number(n),
             None => SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive)),
@@ -297,7 +301,11 @@ fn parse_number(text: &str) -> Option<f64> {
     }
     let negative = s.starts_with('(') && s.ends_with(')');
     if negative {
-        s = s.trim_start_matches('(').trim_end_matches(')').trim().to_string();
+        s = s
+            .trim_start_matches('(')
+            .trim_end_matches(')')
+            .trim()
+            .to_string();
     }
     let s = s.strip_prefix('$').unwrap_or(&s);
     let n: f64 = s.parse().ok()?;
@@ -393,7 +401,10 @@ mod tests {
     #[test]
     fn stable_multi_key_sort_preserves_row_integrity() {
         let mut data = range(vec![
-            vec![CellValue::Text("Name".into()), CellValue::Text("Score".into())],
+            vec![
+                CellValue::Text("Name".into()),
+                CellValue::Text("Score".into()),
+            ],
             vec![CellValue::Text("Alice".into()), CellValue::Number(10.0)],
             vec![CellValue::Text("Bob".into()), CellValue::Number(10.0)],
             vec![CellValue::Text("Charlie".into()), CellValue::Number(7.0)],

@@ -147,6 +147,9 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Blank => {}
                 Value::Text(_) => return Value::Error(ErrorKind::Value),
+                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
                 Value::Array(arr) => {
                     for v in arr.iter() {
                         match v {
@@ -168,7 +171,9 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -198,7 +203,9 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => {}
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
                     }
                 }
             }
@@ -230,7 +237,9 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -280,6 +289,9 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Blank => {}
                 Value::Text(_) => return Value::Error(ErrorKind::Value),
+                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
                 Value::Array(arr) => {
                     for v in arr.iter() {
                         match v {
@@ -300,7 +312,9 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -329,7 +343,9 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => {}
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
                     }
                 }
             }
@@ -360,7 +376,9 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }

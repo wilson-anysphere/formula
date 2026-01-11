@@ -24,7 +24,11 @@ pub fn timevalue(time_text: &str) -> ExcelResult<f64> {
     // Find the portion that looks like a time (contains ':') and preserve an
     // optional "AM"/"PM" suffix even when separated by whitespace.
     let parts: Vec<&str> = raw.split_whitespace().collect();
-    if let Some((idx, token)) = parts.iter().enumerate().find(|(_, part)| part.contains(':')) {
+    if let Some((idx, token)) = parts
+        .iter()
+        .enumerate()
+        .find(|(_, part)| part.contains(':'))
+    {
         if idx + 1 < parts.len() {
             let suffix = parts[idx + 1];
             if suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM") {
@@ -248,7 +252,11 @@ pub fn days360(start_date: i32, end_date: i32, method: bool, system: ExcelDateSy
 }
 
 /// WEEKDAY(serial_number, [return_type])
-pub fn weekday(serial_number: i32, return_type: Option<i32>, system: ExcelDateSystem) -> ExcelResult<i32> {
+pub fn weekday(
+    serial_number: i32,
+    return_type: Option<i32>,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
     // Validate serial number is representable as a date in this system.
     let _ = crate::date::serial_to_ymd(serial_number, system)?;
 

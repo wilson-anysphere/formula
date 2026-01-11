@@ -1,7 +1,12 @@
 use crate::error::{ExcelError, ExcelResult};
 
 /// SUBSTITUTE(text, old_text, new_text, [instance_num])
-pub fn substitute(text: &str, old_text: &str, new_text: &str, instance_num: Option<i32>) -> ExcelResult<String> {
+pub fn substitute(
+    text: &str,
+    old_text: &str,
+    new_text: &str,
+    instance_num: Option<i32>,
+) -> ExcelResult<String> {
     if old_text.is_empty() {
         return Ok(text.to_string());
     }
@@ -18,7 +23,8 @@ pub fn substitute(text: &str, old_text: &str, new_text: &str, instance_num: Opti
             for (idx, _) in text.match_indices(old_text) {
                 count += 1;
                 if count == n {
-                    let mut out = String::with_capacity(text.len() - old_text.len() + new_text.len());
+                    let mut out =
+                        String::with_capacity(text.len() - old_text.len() + new_text.len());
                     out.push_str(&text[..idx]);
                     out.push_str(new_text);
                     out.push_str(&text[idx + old_text.len()..]);
@@ -35,7 +41,12 @@ pub fn substitute(text: &str, old_text: &str, new_text: &str, instance_num: Opti
 }
 
 /// REPLACE(old_text, start_num, num_chars, new_text)
-pub fn replace(old_text: &str, start_num: i32, num_chars: i32, new_text: &str) -> ExcelResult<String> {
+pub fn replace(
+    old_text: &str,
+    start_num: i32,
+    num_chars: i32,
+    new_text: &str,
+) -> ExcelResult<String> {
     if start_num < 1 || num_chars < 0 {
         return Err(ExcelError::Value);
     }
@@ -67,4 +78,3 @@ fn char_pos_to_byte(s: &str, char_pos: usize) -> usize {
         .map(|(idx, _)| idx)
         .unwrap_or_else(|| s.len())
 }
-

@@ -116,12 +116,17 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
+                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
             },
             ArgValue::Reference(r) => {
                 let sheet_id = r.sheet_id;
@@ -136,7 +141,9 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => {}
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
                     }
                 }
             }
@@ -158,7 +165,9 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -220,12 +229,17 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
+                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
             },
             ArgValue::Reference(r) => {
                 let sheet_id = r.sheet_id;
@@ -243,7 +257,9 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => {}
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
                     }
                 }
             }
@@ -268,7 +284,9 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -312,7 +330,9 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -336,7 +356,9 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => {}
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
                     }
                 }
             }
@@ -357,7 +379,9 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -398,7 +422,9 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -422,7 +448,9 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => {}
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
                     }
                 }
             }
@@ -443,7 +471,9 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }

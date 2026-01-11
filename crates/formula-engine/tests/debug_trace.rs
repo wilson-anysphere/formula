@@ -8,9 +8,7 @@ fn slice(formula: &str, span: Span) -> &str {
 #[test]
 fn trace_spans_map_to_formula_and_values_match() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_formula("Sheet1", "A1", "=1+2*3")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=1+2*3").unwrap();
     engine.recalculate();
 
     let computed = engine.get_cell_value("Sheet1", "A1");
@@ -71,18 +69,12 @@ fn trace_preserves_reference_context_for_sum() {
 fn debug_trace_for_vlookup_includes_reference_arg_and_matches_result() {
     let mut engine = Engine::new();
     // Lookup key.
-    engine
-        .set_cell_value("Sheet1", "A1", "Key-123")
-        .unwrap();
+    engine.set_cell_value("Sheet1", "A1", "Key-123").unwrap();
 
     // Table: B1:C2
-    engine
-        .set_cell_value("Sheet1", "B1", "Key-123")
-        .unwrap();
+    engine.set_cell_value("Sheet1", "B1", "Key-123").unwrap();
     engine.set_cell_value("Sheet1", "C1", 19.99).unwrap();
-    engine
-        .set_cell_value("Sheet1", "B2", "Key-456")
-        .unwrap();
+    engine.set_cell_value("Sheet1", "B2", "Key-456").unwrap();
     engine.set_cell_value("Sheet1", "C2", 29.99).unwrap();
 
     engine
@@ -149,7 +141,9 @@ fn trace_preserves_reference_context_for_named_ranges() {
             NameDefinition::Reference("Sheet1!A1:A2".to_string()),
         )
         .unwrap();
-    engine.set_cell_formula("Sheet1", "B1", "=SUM(MyRange)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(MyRange)")
+        .unwrap();
     engine.recalculate();
 
     let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
@@ -186,7 +180,10 @@ fn debug_trace_supports_array_literals() {
     ));
 
     let Value::Array(arr) = dbg.value else {
-        panic!("expected Value::Array from debug evaluation, got {:?}", dbg.value);
+        panic!(
+            "expected Value::Array from debug evaluation, got {:?}",
+            dbg.value
+        );
     };
     assert_eq!(arr.rows, 2);
     assert_eq!(arr.cols, 2);

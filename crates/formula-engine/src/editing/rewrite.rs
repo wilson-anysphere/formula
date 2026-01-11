@@ -2,8 +2,8 @@ use std::cmp::{max, min};
 
 use crate::{
     parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellAddr, CellRef as AstCellRef,
-    ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr,
-    RowRef as AstRowRef, SerializeOptions, UnaryExpr,
+    ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr, RowRef as AstRowRef,
+    SerializeOptions, UnaryExpr,
 };
 
 const REF_ERROR: &str = "#REF!";
@@ -122,7 +122,11 @@ where
     }
 }
 
-fn rewrite_expr_for_structural_edit(expr: &Expr, ctx_sheet: &str, edit: &StructuralEdit) -> (Expr, bool) {
+fn rewrite_expr_for_structural_edit(
+    expr: &Expr,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> (Expr, bool) {
     match expr {
         Expr::CellRef(r) => rewrite_cell_ref_for_structural_edit(r, ctx_sheet, edit),
         Expr::RowRef(r) => rewrite_row_ref_for_structural_edit(r, ctx_sheet, edit),
@@ -131,9 +135,13 @@ fn rewrite_expr_for_structural_edit(expr: &Expr, ctx_sheet: &str, edit: &Structu
             if let Some(result) = rewrite_range_for_structural_edit(expr, b, ctx_sheet, edit) {
                 return result;
             }
-            rewrite_expr_children(expr, |child| rewrite_expr_for_structural_edit(child, ctx_sheet, edit))
+            rewrite_expr_children(expr, |child| {
+                rewrite_expr_for_structural_edit(child, ctx_sheet, edit)
+            })
         }
-        _ => rewrite_expr_children(expr, |child| rewrite_expr_for_structural_edit(child, ctx_sheet, edit)),
+        _ => rewrite_expr_children(expr, |child| {
+            rewrite_expr_for_structural_edit(child, ctx_sheet, edit)
+        }),
     }
 }
 
@@ -149,9 +157,13 @@ fn rewrite_expr_for_copy_delta(expr: &Expr, delta_row: i32, delta_col: i32) -> (
             if let Some(result) = rewrite_range_for_copy_delta(expr, b, delta_row, delta_col) {
                 return result;
             }
-            rewrite_expr_children(expr, |child| rewrite_expr_for_copy_delta(child, delta_row, delta_col))
+            rewrite_expr_children(expr, |child| {
+                rewrite_expr_for_copy_delta(child, delta_row, delta_col)
+            })
         }
-        _ => rewrite_expr_children(expr, |child| rewrite_expr_for_copy_delta(child, delta_row, delta_col)),
+        _ => rewrite_expr_children(expr, |child| {
+            rewrite_expr_for_copy_delta(child, delta_row, delta_col)
+        }),
     }
 }
 
@@ -162,9 +174,13 @@ fn rewrite_expr_for_range_map(expr: &Expr, ctx_sheet: &str, edit: &RangeMapEdit)
             if let Some(result) = rewrite_cell_range_for_range_map(expr, b, ctx_sheet, edit) {
                 return result;
             }
-            rewrite_expr_children(expr, |child| rewrite_expr_for_range_map(child, ctx_sheet, edit))
+            rewrite_expr_children(expr, |child| {
+                rewrite_expr_for_range_map(child, ctx_sheet, edit)
+            })
         }
-        _ => rewrite_expr_children(expr, |child| rewrite_expr_for_range_map(child, ctx_sheet, edit)),
+        _ => rewrite_expr_children(expr, |child| {
+            rewrite_expr_for_range_map(child, ctx_sheet, edit)
+        }),
     }
 }
 
@@ -347,7 +363,11 @@ fn rewrite_cell_ref_for_structural_edit(
     (expr_ref(new_ref), changed)
 }
 
-fn rewrite_row_ref_for_structural_edit(r: &AstRowRef, ctx_sheet: &str, edit: &StructuralEdit) -> (Expr, bool) {
+fn rewrite_row_ref_for_structural_edit(
+    r: &AstRowRef,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> (Expr, bool) {
     if r.workbook.is_some() {
         return (Expr::RowRef(r.clone()), false);
     }
@@ -368,7 +388,9 @@ fn rewrite_row_ref_for_structural_edit(r: &AstRowRef, ctx_sheet: &str, edit: &St
     };
 
     let new_row = match edit {
-        StructuralEdit::InsertRows { row: at, count, .. } => adjust_row_insert(row, *at, *count).unwrap_or(row),
+        StructuralEdit::InsertRows { row: at, count, .. } => {
+            adjust_row_insert(row, *at, *count).unwrap_or(row)
+        }
         StructuralEdit::DeleteRows { row: at, count, .. } => {
             let del_end = at.saturating_add(count.saturating_sub(1));
             match adjust_row_delete(row, *at, del_end, *count) {
@@ -392,7 +414,11 @@ fn rewrite_row_ref_for_structural_edit(r: &AstRowRef, ctx_sheet: &str, edit: &St
     (Expr::RowRef(new_ref), changed)
 }
 
-fn rewrite_col_ref_for_structural_edit(r: &AstColRef, ctx_sheet: &str, edit: &StructuralEdit) -> (Expr, bool) {
+fn rewrite_col_ref_for_structural_edit(
+    r: &AstColRef,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> (Expr, bool) {
     if r.workbook.is_some() {
         return (Expr::ColRef(r.clone()), false);
     }
@@ -413,7 +439,9 @@ fn rewrite_col_ref_for_structural_edit(r: &AstColRef, ctx_sheet: &str, edit: &St
     };
 
     let new_col = match edit {
-        StructuralEdit::InsertCols { col: at, count, .. } => adjust_col_insert(col, *at, *count).unwrap_or(col),
+        StructuralEdit::InsertCols { col: at, count, .. } => {
+            adjust_col_insert(col, *at, *count).unwrap_or(col)
+        }
         StructuralEdit::DeleteCols { col: at, count, .. } => {
             let del_end = at.saturating_add(count.saturating_sub(1));
             match adjust_col_delete(col, *at, del_end, *count) {
@@ -444,15 +472,15 @@ fn rewrite_range_for_structural_edit(
     edit: &StructuralEdit,
 ) -> Option<(Expr, bool)> {
     match (&*b.left, &*b.right) {
-        (Expr::CellRef(start), Expr::CellRef(end)) => {
-            Some(rewrite_cell_range_for_structural_edit(original, start, end, ctx_sheet, edit))
-        }
-        (Expr::RowRef(start), Expr::RowRef(end)) => {
-            Some(rewrite_row_range_for_structural_edit(original, start, end, ctx_sheet, edit))
-        }
-        (Expr::ColRef(start), Expr::ColRef(end)) => {
-            Some(rewrite_col_range_for_structural_edit(original, start, end, ctx_sheet, edit))
-        }
+        (Expr::CellRef(start), Expr::CellRef(end)) => Some(rewrite_cell_range_for_structural_edit(
+            original, start, end, ctx_sheet, edit,
+        )),
+        (Expr::RowRef(start), Expr::RowRef(end)) => Some(rewrite_row_range_for_structural_edit(
+            original, start, end, ctx_sheet, edit,
+        )),
+        (Expr::ColRef(start), Expr::ColRef(end)) => Some(rewrite_col_range_for_structural_edit(
+            original, start, end, ctx_sheet, edit,
+        )),
         _ => None,
     }
 }
@@ -508,7 +536,8 @@ fn rewrite_cell_range_for_structural_edit(
         }
         StructuralEdit::DeleteRows { row: at, count, .. } => {
             let del_end = at.saturating_add(count.saturating_sub(1));
-            let Some((new_sr, new_er)) = adjust_row_range_delete(sr, er, *at, del_end, *count) else {
+            let Some((new_sr, new_er)) = adjust_row_range_delete(sr, er, *at, del_end, *count)
+            else {
                 return (Expr::Error(REF_ERROR.to_string()), true);
             };
             sr = new_sr;
@@ -520,7 +549,8 @@ fn rewrite_cell_range_for_structural_edit(
         }
         StructuralEdit::DeleteCols { col: at, count, .. } => {
             let del_end = at.saturating_add(count.saturating_sub(1));
-            let Some((new_sc, new_ec)) = adjust_col_range_delete(sc, ec, *at, del_end, *count) else {
+            let Some((new_sc, new_ec)) = adjust_col_range_delete(sc, ec, *at, del_end, *count)
+            else {
                 return (Expr::Error(REF_ERROR.to_string()), true);
             };
             sc = new_sc;
@@ -612,7 +642,8 @@ fn rewrite_row_range_for_structural_edit(
         }
         StructuralEdit::DeleteRows { row: at, count, .. } => {
             let del_end = at.saturating_add(count.saturating_sub(1));
-            let Some((new_sr, new_er)) = adjust_row_range_delete(sr, er, *at, del_end, *count) else {
+            let Some((new_sr, new_er)) = adjust_row_range_delete(sr, er, *at, del_end, *count)
+            else {
                 return (Expr::Error(REF_ERROR.to_string()), true);
             };
             sr = new_sr;
@@ -688,7 +719,8 @@ fn rewrite_col_range_for_structural_edit(
         }
         StructuralEdit::DeleteCols { col: at, count, .. } => {
             let del_end = at.saturating_add(count.saturating_sub(1));
-            let Some((new_sc, new_ec)) = adjust_col_range_delete(sc, ec, *at, del_end, *count) else {
+            let Some((new_sc, new_ec)) = adjust_col_range_delete(sc, ec, *at, del_end, *count)
+            else {
                 return (Expr::Error(REF_ERROR.to_string()), true);
             };
             sc = new_sc;
@@ -730,12 +762,12 @@ fn rewrite_range_for_copy_delta(
         (Expr::CellRef(start), Expr::CellRef(end)) => Some(rewrite_cell_range_for_copy_delta(
             original, start, end, delta_row, delta_col,
         )),
-        (Expr::RowRef(start), Expr::RowRef(end)) => {
-            Some(rewrite_row_range_for_copy_delta(original, start, end, delta_row))
-        }
-        (Expr::ColRef(start), Expr::ColRef(end)) => {
-            Some(rewrite_col_range_for_copy_delta(original, start, end, delta_col))
-        }
+        (Expr::RowRef(start), Expr::RowRef(end)) => Some(rewrite_row_range_for_copy_delta(
+            original, start, end, delta_row,
+        )),
+        (Expr::ColRef(start), Expr::ColRef(end)) => Some(rewrite_col_range_for_copy_delta(
+            original, start, end, delta_col,
+        )),
         _ => None,
     }
 }
@@ -971,7 +1003,11 @@ fn rewrite_row_ref_for_copy_delta(r: &AstRowRef, delta_row: i32) -> (Expr, bool)
         return (Expr::RowRef(r.clone()), false);
     };
 
-    let new_row = if abs { row as i64 } else { row as i64 + delta_row as i64 };
+    let new_row = if abs {
+        row as i64
+    } else {
+        row as i64 + delta_row as i64
+    };
     if new_row < 0 {
         return (Expr::Error(REF_ERROR.to_string()), true);
     }
@@ -998,7 +1034,11 @@ fn rewrite_col_ref_for_copy_delta(r: &AstColRef, delta_col: i32) -> (Expr, bool)
         return (Expr::ColRef(r.clone()), false);
     };
 
-    let new_col = if abs { col as i64 } else { col as i64 + delta_col as i64 };
+    let new_col = if abs {
+        col as i64
+    } else {
+        col as i64 + delta_col as i64
+    };
     if new_col < 0 {
         return (Expr::Error(REF_ERROR.to_string()), true);
     }
@@ -1016,7 +1056,11 @@ fn rewrite_col_ref_for_copy_delta(r: &AstColRef, delta_col: i32) -> (Expr, bool)
     (Expr::ColRef(new_ref), changed)
 }
 
-fn rewrite_cell_ref_for_range_map(r: &AstCellRef, ctx_sheet: &str, edit: &RangeMapEdit) -> (Expr, bool) {
+fn rewrite_cell_ref_for_range_map(
+    r: &AstCellRef,
+    ctx_sheet: &str,
+    edit: &RangeMapEdit,
+) -> (Expr, bool) {
     if r.workbook.is_some() {
         return (expr_ref(r.clone()), false);
     }
@@ -1432,26 +1476,31 @@ mod tests {
 
     #[test]
     fn copy_delta_updates_row_and_column_ranges() {
-        let (out, changed) = rewrite_formula_for_copy_delta("=A:A", "Sheet1", CellAddr::new(0, 0), 0, 1);
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("=A:A", "Sheet1", CellAddr::new(0, 0), 0, 1);
         assert!(changed);
         assert_eq!(out, "=B:B");
 
-        let (out, changed) = rewrite_formula_for_copy_delta("=1:1", "Sheet1", CellAddr::new(0, 0), 1, 0);
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("=1:1", "Sheet1", CellAddr::new(0, 0), 1, 0);
         assert!(changed);
         assert_eq!(out, "=2:2");
     }
 
     #[test]
     fn copy_delta_turns_entire_range_into_ref_error_if_any_endpoint_underflows() {
-        let (out, changed) = rewrite_formula_for_copy_delta("=A1:B2", "Sheet1", CellAddr::new(0, 0), -1, 0);
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("=A1:B2", "Sheet1", CellAddr::new(0, 0), -1, 0);
         assert!(changed);
         assert_eq!(out, "=#REF!");
 
-        let (out, changed) = rewrite_formula_for_copy_delta("=1:2", "Sheet1", CellAddr::new(0, 0), -1, 0);
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("=1:2", "Sheet1", CellAddr::new(0, 0), -1, 0);
         assert!(changed);
         assert_eq!(out, "=#REF!");
 
-        let (out, changed) = rewrite_formula_for_copy_delta("=A:B", "Sheet1", CellAddr::new(0, 0), 0, -1);
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("=A:B", "Sheet1", CellAddr::new(0, 0), 0, -1);
         assert!(changed);
         assert_eq!(out, "=#REF!");
     }
@@ -1550,7 +1599,8 @@ mod tests {
 
     #[test]
     fn rewrite_preserves_leading_whitespace_before_equals() {
-        let (out, changed) = rewrite_formula_for_copy_delta("   =A1", "Sheet1", CellAddr::new(0, 0), 1, 0);
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("   =A1", "Sheet1", CellAddr::new(0, 0), 1, 0);
         assert!(changed);
         assert_eq!(out, "   =A2");
     }
@@ -1567,12 +1617,8 @@ mod tests {
             delta_col: -1,
             deleted_region: Some(GridRange::new(0, 1, 0, 1)), // delete B1
         };
-        let (out, changed) = rewrite_formula_for_range_map(
-            "=SUM(A1:C1)",
-            "Sheet1",
-            CellAddr::new(0, 0),
-            &edit,
-        );
+        let (out, changed) =
+            rewrite_formula_for_range_map("=SUM(A1:C1)", "Sheet1", CellAddr::new(0, 0), &edit);
         assert!(changed);
         assert_eq!(out, "=SUM((A1,B1))");
     }
@@ -1589,7 +1635,8 @@ mod tests {
         assert!(changed);
         assert_eq!(out, "=#REF!");
 
-        let (out, changed) = rewrite_formula_for_copy_delta("=A1#", "Sheet1", CellAddr::new(0, 0), 0, -1);
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("=A1#", "Sheet1", CellAddr::new(0, 0), 0, -1);
         assert!(changed);
         assert_eq!(out, "=#REF!");
 

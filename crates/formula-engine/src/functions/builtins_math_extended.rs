@@ -449,6 +449,9 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     Ok(n) => values.push(n),
                     Err(e) => return Value::Error(e),
                 },
+                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
                 Value::Array(arr) => {
                     for v in arr.iter() {
                         match v {
@@ -457,6 +460,8 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Bool(_)
                             | Value::Text(_)
                             | Value::Blank
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_)
                             | Value::Array(_)
                             | Value::Lambda(_)
                             | Value::Spill { .. } => {}
@@ -476,6 +481,8 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Bool(_)
                         | Value::Text(_)
                         | Value::Blank
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_)
                         | Value::Array(_)
                         | Value::Lambda(_)
                         | Value::Spill { .. } => {}
@@ -496,6 +503,8 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Bool(_)
                             | Value::Text(_)
                             | Value::Blank
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_)
                             | Value::Array(_)
                             | Value::Lambda(_)
                             | Value::Spill { .. } => {}

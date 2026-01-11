@@ -12,9 +12,7 @@ fn workbook_scoped_name_can_be_used_in_other_cells() {
         )
         .unwrap();
 
-    engine
-        .set_cell_formula("Sheet2", "B1", "=MyX*2")
-        .unwrap();
+    engine.set_cell_formula("Sheet2", "B1", "=MyX*2").unwrap();
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(20.0));

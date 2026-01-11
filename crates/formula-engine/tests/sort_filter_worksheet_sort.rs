@@ -1,4 +1,6 @@
-use formula_engine::sort_filter::{sort_worksheet_range, HeaderOption, SortKey, SortOrder, SortSpec, SortValueType};
+use formula_engine::sort_filter::{
+    sort_worksheet_range, HeaderOption, SortKey, SortOrder, SortSpec, SortValueType,
+};
 use formula_model::{CellRef, CellValue, Range, Worksheet};
 
 #[test]

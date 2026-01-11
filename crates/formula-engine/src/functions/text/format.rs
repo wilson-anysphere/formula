@@ -87,8 +87,13 @@ pub fn text(value: &Value, format_text: &str) -> Result<String, ErrorKind> {
         Value::Error(e) => Err(*e),
         Value::Text(s) => Ok(s.clone()),
         Value::Blank => Ok(String::new()),
-        Value::Bool(b) => Ok(if *b { "TRUE".to_string() } else { "FALSE".to_string() }),
+        Value::Bool(b) => Ok(if *b {
+            "TRUE".to_string()
+        } else {
+            "FALSE".to_string()
+        }),
         Value::Number(n) => format_number_with_pattern(*n, format_text),
+        Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
         Value::Array(arr) => text(&arr.top_left(), format_text),
         Value::Lambda(_) => Err(ErrorKind::Value),
         Value::Spill { .. } => Err(ErrorKind::Spill),

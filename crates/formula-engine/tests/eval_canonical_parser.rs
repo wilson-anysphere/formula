@@ -68,4 +68,3 @@ fn parses_pow_formulas_from_oracle_corpus() {
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(4.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(0.1));
 }
-

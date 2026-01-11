@@ -25,10 +25,10 @@ pub(crate) struct Criteria {
     pub(crate) rhs: CriteriaRhs,
 }
 
-    impl Criteria {
-        pub(crate) fn parse(input: &Value) -> Result<Self, ErrorKind> {
-            match input {
-                Value::Number(n) => Ok(Criteria {
+impl Criteria {
+    pub(crate) fn parse(input: &Value) -> Result<Self, ErrorKind> {
+        match input {
+            Value::Number(n) => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Number(*n),
             }),
@@ -40,14 +40,18 @@ pub(crate) struct Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Error(*e),
             }),
-                Value::Blank => Ok(Criteria {
-                    op: CriteriaOp::Eq,
-                    rhs: CriteriaRhs::Blank,
-                }),
-                Value::Text(s) => parse_criteria_string(s),
-                Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
-            }
+            Value::Blank => Ok(Criteria {
+                op: CriteriaOp::Eq,
+                rhs: CriteriaRhs::Blank,
+            }),
+            Value::Text(s) => parse_criteria_string(s),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         }
+    }
 
     pub(crate) fn matches(&self, value: &Value) -> bool {
         match &self.rhs {
@@ -89,10 +93,18 @@ pub(crate) struct Criteria {
                 match self.op {
                     CriteriaOp::Eq => wildcard_match(pattern, &value_text),
                     CriteriaOp::Ne => !wildcard_match(pattern, &value_text),
-                    CriteriaOp::Lt => value_text.to_ascii_uppercase() < pattern.to_ascii_uppercase(),
-                    CriteriaOp::Lte => value_text.to_ascii_uppercase() <= pattern.to_ascii_uppercase(),
-                    CriteriaOp::Gt => value_text.to_ascii_uppercase() > pattern.to_ascii_uppercase(),
-                    CriteriaOp::Gte => value_text.to_ascii_uppercase() >= pattern.to_ascii_uppercase(),
+                    CriteriaOp::Lt => {
+                        value_text.to_ascii_uppercase() < pattern.to_ascii_uppercase()
+                    }
+                    CriteriaOp::Lte => {
+                        value_text.to_ascii_uppercase() <= pattern.to_ascii_uppercase()
+                    }
+                    CriteriaOp::Gt => {
+                        value_text.to_ascii_uppercase() > pattern.to_ascii_uppercase()
+                    }
+                    CriteriaOp::Gte => {
+                        value_text.to_ascii_uppercase() >= pattern.to_ascii_uppercase()
+                    }
                 }
             }
         }
@@ -114,7 +126,10 @@ fn parse_criteria_string(raw: &str) -> Result<Criteria, ErrorKind> {
     }
 
     if let Some(err) = parse_error_kind(rhs_str) {
-        return Ok(Criteria { op, rhs: CriteriaRhs::Error(err) });
+        return Ok(Criteria {
+            op,
+            rhs: CriteriaRhs::Error(err),
+        });
     }
 
     if rhs_str.eq_ignore_ascii_case("TRUE") {
@@ -174,7 +189,12 @@ fn coerce_to_number(value: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
         Value::Text(s) => s.trim().parse::<f64>().ok(),
-        Value::Error(_) | Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => None,
+        Value::Error(_)
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => None,
     }
 }
 
@@ -192,7 +212,12 @@ fn coerce_to_bool(value: &Value) -> Option<bool> {
             }
         }
         Value::Blank => Some(false),
-        Value::Error(_) | Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => None,
+        Value::Error(_)
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => None,
     }
 }
 
@@ -209,6 +234,7 @@ fn coerce_to_text(value: &Value) -> String {
             }
         }
         Value::Error(e) => e.to_string(),
+        Value::Reference(_) | Value::ReferenceUnion(_) => ErrorKind::Value.to_string(),
         Value::Array(arr) => arr.top_left().to_string(),
         Value::Lambda(_) => "<LAMBDA>".to_string(),
         Value::Spill { .. } => ErrorKind::Spill.to_string(),

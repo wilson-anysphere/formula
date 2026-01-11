@@ -238,7 +238,6 @@ fn parse_columns_only(spec: &str) -> Option<StructuredColumns> {
 
     Some(cols)
 }
-
 fn parse_bracket_group_or_range(
     part: &str,
 ) -> Option<(Option<StructuredRefItem>, StructuredColumns)> {

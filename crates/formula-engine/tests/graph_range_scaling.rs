@@ -21,7 +21,10 @@ fn large_ranges_do_not_expand_into_per_cell_audit_edges() {
         vec![PrecedentNode::Range {
             sheet: 0,
             start: CellAddr { row: 0, col: 0 },
-            end: CellAddr { row: 19_999, col: 0 },
+            end: CellAddr {
+                row: 19_999,
+                col: 0
+            },
         }]
     );
 

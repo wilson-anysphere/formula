@@ -280,4 +280,3 @@ fn matches_criteria(v: f64, criteria: NumericCriteria) -> bool {
         CmpOp::Ge => v >= criteria.rhs,
     }
 }
-

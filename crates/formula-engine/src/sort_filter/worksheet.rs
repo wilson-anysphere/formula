@@ -1,11 +1,17 @@
 use crate::sort_filter::sort::{compute_header_rows, compute_row_permutation};
-use crate::sort_filter::{apply_autofilter, AutoFilter, CellValue, FilterResult, RowPermutation, SortSpec};
+use crate::sort_filter::{
+    apply_autofilter, AutoFilter, CellValue, FilterResult, RowPermutation, SortSpec,
+};
 use crate::{parse_formula, CellAddr, LocaleConfig, ParseOptions, SerializeOptions};
 use formula_model::{
     CellRef, CellValue as ModelCellValue, Outline, Range, RowProperties, SheetAutoFilter, Worksheet,
 };
 
-pub fn sort_worksheet_range(sheet: &mut Worksheet, range: Range, spec: &SortSpec) -> RowPermutation {
+pub fn sort_worksheet_range(
+    sheet: &mut Worksheet,
+    range: Range,
+    spec: &SortSpec,
+) -> RowPermutation {
     let row_count = range.height() as usize;
     if row_count <= 1 || spec.keys.is_empty() {
         return RowPermutation {
@@ -27,8 +33,12 @@ pub fn sort_worksheet_range(sheet: &mut Worksheet, range: Range, spec: &SortSpec
         model_cell_value_to_sort_value(&sheet.value(CellRef::new(row, col)))
     };
 
-    let header_rows = compute_header_rows(row_count, spec.header, &spec.keys, |r, c| cell_at(sheet, r, c));
-    let perm = compute_row_permutation(row_count, header_rows, &spec.keys, |r, c| cell_at(sheet, r, c));
+    let header_rows = compute_header_rows(row_count, spec.header, &spec.keys, |r, c| {
+        cell_at(sheet, r, c)
+    });
+    let perm = compute_row_permutation(row_count, header_rows, &spec.keys, |r, c| {
+        cell_at(sheet, r, c)
+    });
 
     // Nothing to permute (e.g. header-only range).
     if header_rows >= row_count {
@@ -108,7 +118,7 @@ pub fn apply_autofilter_to_outline(
             hidden_sheet_rows: Vec::new(),
         };
     };
- 
+
     let Ok(filter) = AutoFilter::try_from(filter) else {
         return FilterResult {
             visible_rows: vec![true; row_count],
@@ -141,7 +151,9 @@ pub fn apply_autofilter_to_outline(
     let result = apply_autofilter(&range_data, &filter);
 
     for hidden_row_0based in &result.hidden_sheet_rows {
-        outline.rows.set_filter_hidden((*hidden_row_0based as u32) + 1, true);
+        outline
+            .rows
+            .set_filter_hidden((*hidden_row_0based as u32) + 1, true);
     }
 
     result

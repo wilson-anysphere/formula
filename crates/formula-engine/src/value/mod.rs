@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::functions::Reference;
 use formula_model::CellRef;
 
 use crate::eval::CompiledExpr;
@@ -112,6 +113,13 @@ pub enum Value {
     Bool(bool),
     Blank,
     Error(ErrorKind),
+    /// Reference value returned by functions like OFFSET/INDIRECT.
+    ///
+    /// This variant is not intended to be stored in grid cells directly; the evaluator will
+    /// typically dereference it into a scalar or dynamic array result depending on context.
+    Reference(Reference),
+    /// Multi-area reference value (union) returned by reference-producing functions.
+    ReferenceUnion(Vec<Reference>),
     /// Dynamic array result.
     Array(Array),
     Lambda(Lambda),
@@ -120,7 +128,9 @@ pub enum Value {
     /// The engine generally resolves spill markers to the concrete spilled value
     /// when reading cell values; this variant is primarily used internally to
     /// track spill occupancy.
-    Spill { origin: CellRef },
+    Spill {
+        origin: CellRef,
+    },
 }
 
 impl Value {
@@ -135,7 +145,11 @@ impl Value {
             Value::Blank => Ok(0.0),
             Value::Text(s) => parse_number_from_text(s).ok_or(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 
@@ -163,7 +177,11 @@ impl Value {
                 Err(ErrorKind::Value)
             }
             Value::Error(e) => Err(*e),
-            Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 
@@ -174,7 +192,11 @@ impl Value {
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
             Value::Error(e) => Err(*e),
-            Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 }
@@ -234,6 +256,9 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
+            Value::Reference(_) | Value::ReferenceUnion(_) => {
+                f.write_str(ErrorKind::Value.as_code())
+            }
             Value::Array(arr) => write!(f, "{}", arr.top_left()),
             Value::Lambda(_) => f.write_str("<LAMBDA>"),
             Value::Spill { .. } => f.write_str(ErrorKind::Spill.as_code()),

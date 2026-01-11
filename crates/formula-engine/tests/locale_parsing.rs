@@ -80,17 +80,26 @@ fn canonicalize_and_localize_boolean_literals() {
     let de = "=WENN(WAHR;1;0)";
     let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
     assert_eq!(canon, "=IF(TRUE,1,0)");
-    assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), de);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
+        de
+    );
 
     let fr = "=SI(VRAI;1;0)";
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, "=IF(TRUE,1,0)");
-    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
+        fr
+    );
 
     let es = "=SI(VERDADERO;1;0)";
     let canon = locale::canonicalize_formula(es, &locale::ES_ES).unwrap();
     assert_eq!(canon, "=IF(TRUE,1,0)");
-    assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), es);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
+        es
+    );
 }
 
 #[test]
@@ -110,12 +119,18 @@ fn canonicalize_and_localize_error_literals() {
     let de = "=#WERT!";
     let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
     assert_eq!(canon, "=#VALUE!");
-    assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), de);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
+        de
+    );
 
     let fr = "=#VALEUR!";
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, "=#VALUE!");
-    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
+        fr
+    );
 }
 
 #[test]
@@ -126,9 +141,16 @@ fn engine_accepts_localized_formulas_and_persists_canonical() {
         .unwrap();
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(4.0));
-    assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=SUM(1.5,2.5)"));
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "A1"),
+        Some("=SUM(1.5,2.5)")
+    );
 
-    let displayed = locale::localize_formula(engine.get_cell_formula("Sheet1", "A1").unwrap(), &locale::DE_DE).unwrap();
+    let displayed = locale::localize_formula(
+        engine.get_cell_formula("Sheet1", "A1").unwrap(),
+        &locale::DE_DE,
+    )
+    .unwrap();
     assert_eq!(displayed, "=SUMME(1,5;2,5)");
 }
 
@@ -160,7 +182,10 @@ fn engine_accepts_localized_spilling_formulas() {
         .unwrap();
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=SEQUENCE(2,2)"));
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "A1"),
+        Some("=SEQUENCE(2,2)")
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.0));
@@ -171,6 +196,10 @@ fn engine_accepts_localized_spilling_formulas() {
         Some((parse_a1("A1").unwrap(), parse_a1("B2").unwrap()))
     );
 
-    let localized = locale::localize_formula(engine.get_cell_formula("Sheet1", "A1").unwrap(), &locale::DE_DE).unwrap();
+    let localized = locale::localize_formula(
+        engine.get_cell_formula("Sheet1", "A1").unwrap(),
+        &locale::DE_DE,
+    )
+    .unwrap();
     assert_eq!(localized, "=SEQUENZ(2;2)");
 }

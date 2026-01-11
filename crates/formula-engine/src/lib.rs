@@ -42,8 +42,8 @@ mod wasm_smoke;
 mod ast;
 pub mod parser;
 
-pub use ast::*;
 pub use crate::error::{ExcelError, ExcelResult};
+pub use ast::*;
 pub use editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
 };

@@ -28,7 +28,9 @@ fn engine_evaluates_spill_operator_against_spilled_ranges() {
     engine.set_cell_formula("Sheet1", "A1", "=D1:E2").unwrap();
     engine.set_cell_formula("Sheet1", "G1", "=A1#").unwrap();
     engine.set_cell_formula("Sheet1", "I1", "=B1#").unwrap();
-    engine.set_cell_formula("Sheet1", "C4", "=SUM(A1#)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C4", "=SUM(A1#)")
+        .unwrap();
 
     engine.recalculate();
 
@@ -68,7 +70,10 @@ fn engine_evaluates_spill_operator_against_spilled_ranges() {
     assert_eq!(engine.get_cell_value("Sheet1", "H2"), Value::Blank);
 
     // `B1` is no longer part of a spill; `B1#` should return `#REF!`.
-    assert_eq!(engine.get_cell_value("Sheet1", "I1"), Value::Error(formula_engine::ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "I1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "J1"), Value::Blank);
     assert_eq!(engine.get_cell_value("Sheet1", "I2"), Value::Blank);
     assert_eq!(engine.get_cell_value("Sheet1", "J2"), Value::Blank);

@@ -53,7 +53,10 @@ pub enum NumberComparison {
 pub enum DateComparison {
     After(NaiveDateTime),
     Before(NaiveDateTime),
-    Between { start: NaiveDateTime, end: NaiveDateTime },
+    Between {
+        start: NaiveDateTime,
+        end: NaiveDateTime,
+    },
     OnDate(NaiveDate),
     Today,
     Yesterday,
@@ -96,16 +99,21 @@ impl TryFrom<&model_af::SheetAutoFilter> for AutoFilter {
 
     fn try_from(value: &model_af::SheetAutoFilter) -> Result<Self, Self::Error> {
         let range = RangeRef {
-            start_row: usize::try_from(value.range.start.row).map_err(|_| ModelAutoFilterError::RangeOverflow)?,
-            start_col: usize::try_from(value.range.start.col).map_err(|_| ModelAutoFilterError::RangeOverflow)?,
-            end_row: usize::try_from(value.range.end.row).map_err(|_| ModelAutoFilterError::RangeOverflow)?,
-            end_col: usize::try_from(value.range.end.col).map_err(|_| ModelAutoFilterError::RangeOverflow)?,
+            start_row: usize::try_from(value.range.start.row)
+                .map_err(|_| ModelAutoFilterError::RangeOverflow)?,
+            start_col: usize::try_from(value.range.start.col)
+                .map_err(|_| ModelAutoFilterError::RangeOverflow)?,
+            end_row: usize::try_from(value.range.end.row)
+                .map_err(|_| ModelAutoFilterError::RangeOverflow)?,
+            end_col: usize::try_from(value.range.end.col)
+                .map_err(|_| ModelAutoFilterError::RangeOverflow)?,
         };
 
         let mut columns: BTreeMap<usize, ColumnFilter> = BTreeMap::new();
 
         for col in &value.filter_columns {
-            let col_id = usize::try_from(col.col_id).map_err(|_| ModelAutoFilterError::ColumnOverflow)?;
+            let col_id =
+                usize::try_from(col.col_id).map_err(|_| ModelAutoFilterError::ColumnOverflow)?;
 
             let criteria_src: Vec<model_af::FilterCriterion> = if !col.criteria.is_empty() {
                 col.criteria.clone()
@@ -117,7 +125,9 @@ impl TryFrom<&model_af::SheetAutoFilter> for AutoFilter {
                         if let Ok(n) = v.parse::<f64>() {
                             model_af::FilterCriterion::Equals(model_af::FilterValue::Number(n))
                         } else {
-                            model_af::FilterCriterion::Equals(model_af::FilterValue::Text(v.clone()))
+                            model_af::FilterCriterion::Equals(model_af::FilterValue::Text(
+                                v.clone(),
+                            ))
                         }
                     })
                     .collect()
@@ -150,7 +160,9 @@ fn model_criterion_to_engine(c: &model_af::FilterCriterion) -> Option<FilterCrit
     match c {
         model_af::FilterCriterion::Blanks => Some(FilterCriterion::Blanks),
         model_af::FilterCriterion::NonBlanks => Some(FilterCriterion::NonBlanks),
-        model_af::FilterCriterion::Equals(v) => Some(FilterCriterion::Equals(model_value_to_engine(v))),
+        model_af::FilterCriterion::Equals(v) => {
+            Some(FilterCriterion::Equals(model_value_to_engine(v)))
+        }
         model_af::FilterCriterion::TextMatch(m) => Some(FilterCriterion::TextMatch(TextMatch {
             kind: match m.kind {
                 model_af::TextMatchKind::Contains => TextMatchKind::Contains,
@@ -162,16 +174,24 @@ fn model_criterion_to_engine(c: &model_af::FilterCriterion) -> Option<FilterCrit
         })),
         model_af::FilterCriterion::Number(cmp) => Some(FilterCriterion::Number(match cmp {
             model_af::NumberComparison::GreaterThan(v) => NumberComparison::GreaterThan(*v),
-            model_af::NumberComparison::GreaterThanOrEqual(v) => NumberComparison::GreaterThanOrEqual(*v),
+            model_af::NumberComparison::GreaterThanOrEqual(v) => {
+                NumberComparison::GreaterThanOrEqual(*v)
+            }
             model_af::NumberComparison::LessThan(v) => NumberComparison::LessThan(*v),
             model_af::NumberComparison::LessThanOrEqual(v) => NumberComparison::LessThanOrEqual(*v),
-            model_af::NumberComparison::Between { min, max } => NumberComparison::Between { min: *min, max: *max },
+            model_af::NumberComparison::Between { min, max } => NumberComparison::Between {
+                min: *min,
+                max: *max,
+            },
             model_af::NumberComparison::NotEqual(v) => NumberComparison::NotEqual(*v),
         })),
         model_af::FilterCriterion::Date(cmp) => Some(FilterCriterion::Date(match cmp {
             model_af::DateComparison::After(dt) => DateComparison::After(*dt),
             model_af::DateComparison::Before(dt) => DateComparison::Before(*dt),
-            model_af::DateComparison::Between { start, end } => DateComparison::Between { start: *start, end: *end },
+            model_af::DateComparison::Between { start, end } => DateComparison::Between {
+                start: *start,
+                end: *end,
+            },
             model_af::DateComparison::OnDate(d) => DateComparison::OnDate(*d),
             model_af::DateComparison::Today => DateComparison::Today,
             model_af::DateComparison::Yesterday => DateComparison::Yesterday,
@@ -370,8 +390,9 @@ fn date_cmp(cell: &CellValue, cmp: &DateComparison) -> bool {
             .unwrap_or(false),
         DateComparison::After(dt) => coerce_datetime(cell).is_some_and(|v| v > *dt),
         DateComparison::Before(dt) => coerce_datetime(cell).is_some_and(|v| v < *dt),
-        DateComparison::Between { start, end } => coerce_datetime(cell)
-            .is_some_and(|v| v >= *start && v <= *end),
+        DateComparison::Between { start, end } => {
+            coerce_datetime(cell).is_some_and(|v| v >= *start && v <= *end)
+        }
     }
 }
 
@@ -562,8 +583,18 @@ mod tests {
         views.set_filter(FilterViewId("u1".into()), filter_a.clone());
         views.set_filter(FilterViewId("u2".into()), filter_b.clone());
 
-        let result1 = apply_autofilter(&data, views.get_filter(&FilterViewId("u1".into()), data.range).unwrap());
-        let result2 = apply_autofilter(&data, views.get_filter(&FilterViewId("u2".into()), data.range).unwrap());
+        let result1 = apply_autofilter(
+            &data,
+            views
+                .get_filter(&FilterViewId("u1".into()), data.range)
+                .unwrap(),
+        );
+        let result2 = apply_autofilter(
+            &data,
+            views
+                .get_filter(&FilterViewId("u2".into()), data.range)
+                .unwrap(),
+        );
 
         assert_eq!(result1.visible_rows, vec![true, true, false]);
         assert_eq!(result2.visible_rows, vec![true, false, true]);

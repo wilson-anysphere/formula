@@ -25,6 +25,7 @@ mod builtins_logical;
 mod builtins_lookup;
 mod builtins_math;
 mod builtins_math_extended;
+mod builtins_reference;
 mod builtins_text;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +54,7 @@ pub enum ValueType {
     Bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Reference {
     pub sheet_id: usize,
     pub start: CellAddr,
@@ -124,8 +125,18 @@ pub trait FunctionContext {
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
     fn iter_reference_cells(&self, reference: Reference)
         -> Box<dyn Iterator<Item = CellAddr> + '_>;
+    /// Records that `reference` was dereferenced during evaluation.
+    ///
+    /// Implementations may use this to build dynamic dependency sets. The default is a no-op so
+    /// callers that do not care about dependency tracing can ignore it.
+    fn record_reference(&self, _reference: Reference) {}
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc>;
     fn date_system(&self) -> ExcelDateSystem;
+    fn current_sheet_id(&self) -> usize;
+    fn current_cell_addr(&self) -> CellAddr;
+    fn resolve_sheet_name(&self, _name: &str) -> Option<usize> {
+        None
+    }
 
     /// Deterministic per-recalc random bits, scoped to the current cell evaluation.
     ///

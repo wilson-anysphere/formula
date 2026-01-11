@@ -7,10 +7,16 @@ fn sumif_supports_numeric_criteria() {
     let sum_range = vec![10.into(), 20.into(), 30.into(), 40.into()];
 
     let criteria = Value::from(">2");
-    assert_eq!(math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(), 70.0);
+    assert_eq!(
+        math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(),
+        70.0
+    );
 
     let criteria = Value::Number(2.0);
-    assert_eq!(math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(), 20.0);
+    assert_eq!(
+        math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(),
+        20.0
+    );
 }
 
 #[test]
@@ -25,16 +31,27 @@ fn sumif_supports_wildcards_and_blanks() {
     let sum_range = vec![1.into(), 2.into(), 3.into(), 4.into(), 5.into()];
 
     let criteria = Value::from("ap*");
-    assert_eq!(math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(), 4.0);
+    assert_eq!(
+        math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(),
+        4.0
+    );
 
     let criteria = Value::from("");
-    assert_eq!(math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(), 9.0);
+    assert_eq!(
+        math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(),
+        9.0
+    );
 }
 
 #[test]
 fn sumifs_requires_all_criteria_to_match() {
     let sum_range = vec![10.into(), 20.into(), 30.into(), 40.into()];
-    let range1 = vec![Value::from("A"), Value::from("A"), Value::from("B"), Value::from("B")];
+    let range1 = vec![
+        Value::from("A"),
+        Value::from("A"),
+        Value::from("B"),
+        Value::from("B"),
+    ];
     let range2 = vec![1.into(), 2.into(), 3.into(), 4.into()];
 
     let crit1 = Value::from("A");
@@ -49,7 +66,10 @@ fn sumifs_length_mismatch_is_value_error() {
     let range = vec![1.into()];
     let crit = Value::from("1");
     let criteria_pairs = [(&range[..], &crit)];
-    assert_eq!(math::sumifs(&sum_range, &criteria_pairs).unwrap_err(), ErrorKind::Value);
+    assert_eq!(
+        math::sumifs(&sum_range, &criteria_pairs).unwrap_err(),
+        ErrorKind::Value
+    );
 }
 
 #[test]

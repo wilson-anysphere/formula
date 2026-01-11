@@ -46,7 +46,10 @@ fn external_values_block_spills() {
     engine.set_cell_formula("Sheet1", "C1", "=A1:A3").unwrap();
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Spill));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Error(ErrorKind::Spill)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(99.0));
     assert!(engine.spill_range("Sheet1", "C1").is_none());
 }
@@ -64,7 +67,10 @@ fn spill_blocking_produces_spill_error() {
     engine.set_cell_value("Sheet1", "C2", 99.0).unwrap();
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Spill));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Error(ErrorKind::Spill)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(99.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C3"), Value::Blank);
     assert!(engine.spill_range("Sheet1", "C1").is_none());
@@ -82,13 +88,14 @@ fn spill_resolves_after_blocker_cleared() {
     // Block the spill, producing #SPILL! at the origin.
     engine.set_cell_value("Sheet1", "C2", 99.0).unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Spill));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Error(ErrorKind::Spill)
+    );
     assert!(engine.spill_range("Sheet1", "C1").is_none());
 
     // Clearing the blocker should allow the origin to spill again.
-    engine
-        .set_cell_value("Sheet1", "C2", Value::Blank)
-        .unwrap();
+    engine.set_cell_value("Sheet1", "C2", Value::Blank).unwrap();
     engine.recalculate_single_threaded();
 
     let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
@@ -115,7 +122,10 @@ fn spill_resolves_after_overlapping_spill_shrinks() {
     engine.recalculate_single_threaded();
 
     // The lower spill is blocked by the upper spill's occupied cells.
-    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Error(ErrorKind::Spill));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C2"),
+        Value::Error(ErrorKind::Spill)
+    );
     assert!(engine.spill_range("Sheet1", "C2").is_none());
 
     // Shrink the upper spill so the overlap is cleared; the blocked spill should now succeed.

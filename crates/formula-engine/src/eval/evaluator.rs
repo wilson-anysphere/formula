@@ -8,7 +8,7 @@ use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnR
 use crate::value::{Array, ErrorKind, Value};
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
@@ -32,9 +32,39 @@ impl RecalcContext {
     }
 }
 
+/// Dynamic-dependency trace captured during formula evaluation.
+///
+/// This records which references were actually dereferenced (directly or via functions). The
+/// engine uses this to update the dependency graph for formulas with dynamic reference behavior
+/// (e.g. INDIRECT/OFFSET).
+#[derive(Debug, Default, Clone)]
+pub struct DependencyTrace {
+    precedents: HashSet<FnReference>,
+}
+
+impl DependencyTrace {
+    pub fn record_reference(&mut self, reference: FnReference) {
+        self.precedents.insert(reference.normalized());
+    }
+
+    #[must_use]
+    pub fn precedents(&self) -> Vec<FnReference> {
+        let mut out: Vec<FnReference> = self.precedents.iter().copied().collect();
+        out.sort_by_key(|r| (r.sheet_id, r.start.row, r.start.col, r.end.row, r.end.col));
+        out
+    }
+}
+
 pub trait ValueResolver {
     fn sheet_exists(&self, sheet_id: usize) -> bool;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
+    /// Resolve a worksheet name to an internal sheet id.
+    ///
+    /// This is used by volatile reference functions like `INDIRECT` that parse sheet names
+    /// at runtime. Resolvers that do not support name-based sheet lookup can return `None`.
+    fn sheet_id(&self, _name: &str) -> Option<usize> {
+        None
+    }
     /// Iterates stored cells in `sheet_id`.
     ///
     /// For sparse backends, this should enumerate only populated addresses. Evaluators use this
@@ -110,6 +140,7 @@ pub struct Evaluator<'a, R: ValueResolver> {
     resolver: &'a R,
     ctx: EvalContext,
     recalc_ctx: &'a RecalcContext,
+    tracer: Option<&'a RefCell<DependencyTrace>>,
     name_stack: Rc<RefCell<Vec<(usize, String)>>>,
     lexical_scopes: Rc<RefCell<Vec<HashMap<String, Value>>>>,
     lambda_depth: Rc<Cell<u32>>,
@@ -143,6 +174,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             resolver,
             ctx,
             recalc_ctx,
+            tracer: None,
             name_stack: Rc::new(RefCell::new(Vec::new())),
             lexical_scopes: Rc::new(RefCell::new(Vec::new())),
             lambda_depth: Rc::new(Cell::new(0)),
@@ -156,6 +188,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             resolver: self.resolver,
             ctx,
             recalc_ctx: self.recalc_ctx,
+            tracer: self.tracer,
             name_stack: Rc::clone(&self.name_stack),
             lexical_scopes: Rc::clone(&self.lexical_scopes),
             lambda_depth: Rc::clone(&self.lambda_depth),
@@ -169,6 +202,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             resolver: self.resolver,
             ctx: self.ctx,
             recalc_ctx: self.recalc_ctx,
+            tracer: self.tracer,
             name_stack: Rc::clone(&self.name_stack),
             lexical_scopes: Rc::new(RefCell::new(scopes)),
             lambda_depth: Rc::clone(&self.lambda_depth),
@@ -204,6 +238,26 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             }
         }
         out
+    }
+
+    pub fn with_dependency_trace(mut self, trace: &'a RefCell<DependencyTrace>) -> Self {
+        self.tracer = Some(trace);
+        self
+    }
+
+    fn trace_reference(&self, reference: FnReference) {
+        let Some(trace) = self.tracer else {
+            return;
+        };
+        trace.borrow_mut().record_reference(reference);
+    }
+
+    fn trace_cell(&self, sheet_id: usize, addr: CellAddr) {
+        self.trace_reference(FnReference {
+            sheet_id,
+            start: addr,
+            end: addr,
+        });
     }
 
     /// Evaluate a compiled AST as a scalar formula result.
@@ -259,8 +313,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
-            Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref)
-            {
+            Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref) {
                 Some(ranges)
                     if !ranges.is_empty()
                         && ranges
@@ -347,7 +400,25 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 EvalValue::Scalar(out)
             }
             Expr::FunctionCall { name, args, .. } => {
-                EvalValue::Scalar(self.eval_function_call(name, args))
+                let value = self.eval_function_call(name, args);
+                match value {
+                    Value::Reference(r) => EvalValue::Reference(vec![ResolvedRange {
+                        sheet_id: r.sheet_id,
+                        start: r.start,
+                        end: r.end,
+                    }]),
+                    Value::ReferenceUnion(ranges) => EvalValue::Reference(
+                        ranges
+                            .into_iter()
+                            .map(|r| ResolvedRange {
+                                sheet_id: r.sheet_id,
+                                start: r.start,
+                                end: r.end,
+                            })
+                            .collect(),
+                    ),
+                    other => EvalValue::Scalar(other),
+                }
             }
             Expr::ImplicitIntersection(inner) => {
                 let v = self.eval_value(inner);
@@ -549,6 +620,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     fn deref_reference_scalar(&self, ranges: &[ResolvedRange]) -> Value {
         match ranges {
             [only] if only.is_single_cell() => {
+                self.trace_cell(only.sheet_id, only.start);
                 self.resolver.get_cell_value(only.sheet_id, only.start)
             }
             _ => {
@@ -569,9 +641,15 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
     fn deref_reference_dynamic_single(&self, range: ResolvedRange) -> Value {
         if range.is_single_cell() {
+            self.trace_cell(range.sheet_id, range.start);
             return self.resolver.get_cell_value(range.sheet_id, range.start);
         }
         let range = range.normalized();
+        self.trace_reference(FnReference {
+            sheet_id: range.sheet_id,
+            start: range.start,
+            end: range.end,
+        });
         let rows = (range.end.row - range.start.row + 1) as usize;
         let cols = (range.end.col - range.start.col + 1) as usize;
         let mut values = Vec::with_capacity(rows.saturating_mul(cols));
@@ -610,6 +688,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
     fn apply_implicit_intersection_single(&self, range: ResolvedRange) -> Value {
         if range.is_single_cell() {
+            self.trace_cell(range.sheet_id, range.start);
             return self.resolver.get_cell_value(range.sheet_id, range.start);
         }
 
@@ -619,25 +698,23 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         // 1D ranges intersect on the matching row/column.
         if range.start.col == range.end.col {
             if cur.row >= range.start.row && cur.row <= range.end.row {
-                return self.resolver.get_cell_value(
-                    range.sheet_id,
-                    CellAddr {
-                        row: cur.row,
-                        col: range.start.col,
-                    },
-                );
+                let addr = CellAddr {
+                    row: cur.row,
+                    col: range.start.col,
+                };
+                self.trace_cell(range.sheet_id, addr);
+                return self.resolver.get_cell_value(range.sheet_id, addr);
             }
             return Value::Error(ErrorKind::Value);
         }
         if range.start.row == range.end.row {
             if cur.col >= range.start.col && cur.col <= range.end.col {
-                return self.resolver.get_cell_value(
-                    range.sheet_id,
-                    CellAddr {
-                        row: range.start.row,
-                        col: cur.col,
-                    },
-                );
+                let addr = CellAddr {
+                    row: range.start.row,
+                    col: cur.col,
+                };
+                self.trace_cell(range.sheet_id, addr);
+                return self.resolver.get_cell_value(range.sheet_id, addr);
             }
             return Value::Error(ErrorKind::Value);
         }
@@ -648,6 +725,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             && cur.col >= range.start.col
             && cur.col <= range.end.col
         {
+            self.trace_cell(range.sheet_id, cur);
             return self.resolver.get_cell_value(range.sheet_id, cur);
         }
 
@@ -855,11 +933,16 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         &self,
         reference: FnReference,
     ) -> Box<dyn Iterator<Item = CellAddr> + '_> {
+        self.trace_reference(reference);
         if let Some(iter) = self.resolver.iter_sheet_cells(reference.sheet_id) {
             Box::new(iter.filter(move |addr| reference.contains(*addr)))
         } else {
             Box::new(reference.iter_cells())
         }
+    }
+
+    fn record_reference(&self, reference: FnReference) {
+        self.trace_reference(reference);
     }
 
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
@@ -880,6 +963,18 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn date_system(&self) -> ExcelDateSystem {
         self.date_system
+    }
+
+    fn current_sheet_id(&self) -> usize {
+        self.ctx.current_sheet
+    }
+
+    fn current_cell_addr(&self) -> CellAddr {
+        self.ctx.current_cell
+    }
+
+    fn resolve_sheet_name(&self, name: &str) -> Option<usize> {
+        self.resolver.sheet_id(name)
     }
 }
 
@@ -910,10 +1005,18 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     }
     if matches!(
         left,
-        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. }
+        Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. }
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
     ) || matches!(
         right,
-        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. }
+        Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. }
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
     ) {
         return Err(ErrorKind::Value);
     }
@@ -948,13 +1051,17 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (_, Value::Blank) => Ordering::Greater,
         // Errors are handled above.
         (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
-        // Arrays/spill markers/lambdas are rejected above.
+        // Arrays/spill markers/lambdas/references are rejected above.
         (Value::Array(_), _)
         | (_, Value::Array(_))
         | (Value::Lambda(_), _)
         | (_, Value::Lambda(_))
         | (Value::Spill { .. }, _)
-        | (_, Value::Spill { .. }) => Ordering::Equal,
+        | (_, Value::Spill { .. })
+        | (Value::Reference(_), _)
+        | (_, Value::Reference(_))
+        | (Value::ReferenceUnion(_), _)
+        | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
     })
 }
 

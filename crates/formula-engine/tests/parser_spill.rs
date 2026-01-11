@@ -1,12 +1,13 @@
-use formula_engine::{
-    parse_formula, Expr, ParseOptions, PostfixExpr, PostfixOp, SerializeOptions,
-};
+use formula_engine::{parse_formula, Expr, ParseOptions, PostfixExpr, PostfixOp, SerializeOptions};
 
 #[test]
 fn parses_spill_operator_on_cell_ref() {
     let ast = parse_formula("=A1#", ParseOptions::default()).unwrap();
     match ast.expr {
-        Expr::Postfix(PostfixExpr { op: PostfixOp::SpillRange, expr }) => {
+        Expr::Postfix(PostfixExpr {
+            op: PostfixOp::SpillRange,
+            expr,
+        }) => {
             assert!(matches!(*expr, Expr::CellRef(_)));
         }
         other => panic!("expected postfix spill expression, got {other:?}"),
@@ -33,7 +34,10 @@ fn roundtrip_preserves_spill_operator() {
 fn parses_structured_ref_with_trailing_spill_operator() {
     let ast = parse_formula("=Table1[[#All],[Col]]#", ParseOptions::default()).unwrap();
     match ast.expr {
-        Expr::Postfix(PostfixExpr { op: PostfixOp::SpillRange, expr }) => {
+        Expr::Postfix(PostfixExpr {
+            op: PostfixOp::SpillRange,
+            expr,
+        }) => {
             assert!(matches!(*expr, Expr::StructuredRef(_)));
         }
         other => panic!("expected postfix spill expression, got {other:?}"),

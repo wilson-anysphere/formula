@@ -8,7 +8,10 @@ fn xmatch_finds_case_insensitive_text() {
     let array = vec![Value::from("A"), Value::from("b"), Value::Number(1.0)];
     assert_eq!(lookup::xmatch(&Value::from("B"), &array).unwrap(), 2);
     assert_eq!(lookup::xmatch(&Value::Number(1.0), &array).unwrap(), 3);
-    assert_eq!(lookup::xmatch(&Value::from("missing"), &array).unwrap_err(), ErrorKind::NA);
+    assert_eq!(
+        lookup::xmatch(&Value::from("missing"), &array).unwrap_err(),
+        ErrorKind::NA
+    );
 }
 
 #[test]
@@ -44,7 +47,10 @@ fn xmatch_and_xlookup_work_in_formulas_and_accept_xlfn_prefix() {
     sheet.set("B3", 30.0);
 
     assert_eq!(sheet.eval("=XMATCH(\"B\", A1:A3)"), Value::Number(2.0));
-    assert_eq!(sheet.eval("=_xlfn.XMATCH(\"B\", A1:A3)"), Value::Number(2.0));
+    assert_eq!(
+        sheet.eval("=_xlfn.XMATCH(\"B\", A1:A3)"),
+        Value::Number(2.0)
+    );
 
     assert_eq!(
         sheet.eval("=XLOOKUP(\"B\", A1:A3, B1:B3)"),
@@ -79,8 +85,14 @@ fn vlookup_exact_match_and_errors() {
         sheet.eval("=VLOOKUP(2, A1:B3, 2, FALSE)"),
         Value::Text("b".to_string())
     );
-    assert_eq!(sheet.eval("=VLOOKUP(4, A1:B3, 2, FALSE)"), Value::Error(ErrorKind::NA));
-    assert_eq!(sheet.eval("=VLOOKUP(2, A1:B3, 3, FALSE)"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        sheet.eval("=VLOOKUP(4, A1:B3, 2, FALSE)"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        sheet.eval("=VLOOKUP(2, A1:B3, 3, FALSE)"),
+        Value::Error(ErrorKind::Ref)
+    );
 }
 
 #[test]
@@ -93,8 +105,14 @@ fn vlookup_approximate_match() {
     sheet.set("A3", 5.0);
     sheet.set("B3", Value::Text("c".to_string()));
 
-    assert_eq!(sheet.eval("=VLOOKUP(4, A1:B3, 2)"), Value::Text("b".to_string()));
-    assert_eq!(sheet.eval("=VLOOKUP(0, A1:B3, 2)"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        sheet.eval("=VLOOKUP(4, A1:B3, 2)"),
+        Value::Text("b".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=VLOOKUP(0, A1:B3, 2)"),
+        Value::Error(ErrorKind::NA)
+    );
 }
 
 #[test]
@@ -120,7 +138,10 @@ fn index_and_match() {
     sheet.set("B1", Value::Text("b".to_string()));
     sheet.set("C1", Value::Text("C".to_string()));
 
-    assert_eq!(sheet.eval("=INDEX(A1:C1,1,2)"), Value::Text("b".to_string()));
+    assert_eq!(
+        sheet.eval("=INDEX(A1:C1,1,2)"),
+        Value::Text("b".to_string())
+    );
     assert_eq!(sheet.eval("=MATCH(\"B\", A1:C1, 0)"), Value::Number(2.0));
 
     sheet.set("A2", 1.0);
@@ -134,7 +155,10 @@ fn index_and_match() {
     sheet.set("B4", 3.0);
     sheet.set("B5", 1.0);
     assert_eq!(sheet.eval("=MATCH(4, B2:B5, -1)"), Value::Number(2.0));
-    assert_eq!(sheet.eval("=MATCH(11, B2:B5, -1)"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        sheet.eval("=MATCH(11, B2:B5, -1)"),
+        Value::Error(ErrorKind::NA)
+    );
 }
 
 #[test]
@@ -158,7 +182,10 @@ fn getpivotdata_returns_values_from_tabular_pivot_output() {
     );
 
     // When no field/item pairs are provided, return the grand total.
-    assert_eq!(sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1)"), Value::Number(700.0));
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1)"),
+        Value::Number(700.0)
+    );
 }
 
 #[test]
@@ -207,7 +234,10 @@ fn getpivotdata_errors() {
     );
 
     // Field/item pairs must be complete.
-    assert_eq!(sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\")"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\")"),
+        Value::Error(ErrorKind::Value)
+    );
 
     // Unknown field -> #REF!
     assert_eq!(

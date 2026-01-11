@@ -178,7 +178,9 @@ fn main() -> Result<()> {
 
     let input_bytes = {
         let start = Instant::now();
-        match fs::read(&args.input).with_context(|| format!("read workbook {}", args.input.display())) {
+        match fs::read(&args.input)
+            .with_context(|| format!("read workbook {}", args.input.display()))
+        {
             Ok(bytes) => bytes,
             Err(err) => {
                 output
@@ -199,18 +201,15 @@ fn main() -> Result<()> {
                 .steps
                 .insert("load".to_string(), StepResult::failed(start, err));
             output.result.open_ok = false;
-            output.steps.insert(
-                "recalc".to_string(),
-                StepResult::skipped("open_failed"),
-            );
-            output.steps.insert(
-                "render".to_string(),
-                StepResult::skipped("open_failed"),
-            );
-            output.steps.insert(
-                "round_trip".to_string(),
-                StepResult::skipped("open_failed"),
-            );
+            output
+                .steps
+                .insert("recalc".to_string(), StepResult::skipped("open_failed"));
+            output
+                .steps
+                .insert("render".to_string(), StepResult::skipped("open_failed"));
+            output
+                .steps
+                .insert("round_trip".to_string(), StepResult::skipped("open_failed"));
             output
                 .steps
                 .insert("diff".to_string(), StepResult::skipped("open_failed"));
@@ -241,7 +240,9 @@ fn main() -> Result<()> {
                 .steps
                 .insert("round_trip".to_string(), StepResult::failed(start, err));
             output.result.round_trip_ok = false;
-            output.steps.insert("diff".to_string(), StepResult::skipped("round_trip_failed"));
+            output
+                .steps
+                .insert("diff".to_string(), StepResult::skipped("round_trip_failed"));
             output.steps.insert(
                 "recalc".to_string(),
                 StepResult::skipped("round_trip_failed"),
@@ -307,10 +308,9 @@ fn main() -> Result<()> {
         match recalc_against_cached(&doc) {
             Ok(Some(recalc)) => {
                 output.result.calculate_ok = Some(recalc.mismatch_count == 0);
-                output.steps.insert(
-                    "recalc".to_string(),
-                    StepResult::ok(start, &recalc),
-                );
+                output
+                    .steps
+                    .insert("recalc".to_string(), StepResult::ok(start, &recalc));
             }
             Ok(None) => {
                 output.steps.insert(
@@ -384,7 +384,9 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
     let report = xlsx_diff::diff_archives_with_options(
         &expected_archive,
         &actual_archive,
-        &xlsx_diff::DiffOptions { ignore_parts: ignore },
+        &xlsx_diff::DiffOptions {
+            ignore_parts: ignore,
+        },
     );
 
     let counts = DiffCounts {
@@ -554,7 +556,11 @@ fn recalc_against_cached(doc: &formula_xlsx::XlsxDocument) -> Result<Option<Reca
             let computed_value = engine.get_cell_value(&sheet.name, &addr);
 
             // Hash baseline vs computed in a stable, typed encoding.
-            hash_cell_value(&mut baseline_hasher, &addr, &normalize_model_value(baseline_value));
+            hash_cell_value(
+                &mut baseline_hasher,
+                &addr,
+                &normalize_model_value(baseline_value),
+            );
             hash_cell_value(
                 &mut computed_hasher,
                 &addr,
@@ -601,7 +607,10 @@ fn normalize_engine_value(value: &EngineValue) -> NormalizedValue {
         EngineValue::Bool(b) => NormalizedValue::Bool(*b),
         EngineValue::Text(s) => NormalizedValue::Text(s.clone()),
         EngineValue::Error(e) => NormalizedValue::Error(e.as_code().to_string()),
-        EngineValue::Array(_) | EngineValue::Spill { .. } => NormalizedValue::Blank,
+        EngineValue::Reference(_)
+        | EngineValue::ReferenceUnion(_)
+        | EngineValue::Array(_)
+        | EngineValue::Spill { .. } => NormalizedValue::Blank,
     }
 }
 
@@ -693,10 +702,9 @@ fn render_smoke(doc: &formula_xlsx::XlsxDocument) -> Result<RenderDetails> {
         .first()
         .context("workbook has no sheets")?;
 
-    let used = sheet.used_range().unwrap_or_else(|| formula_model::Range::new(
-        CellRef::new(0, 0),
-        CellRef::new(0, 0),
-    ));
+    let used = sheet
+        .used_range()
+        .unwrap_or_else(|| formula_model::Range::new(CellRef::new(0, 0), CellRef::new(0, 0)));
 
     let max_rows = 20u32;
     let max_cols = 10u32;

@@ -35,4 +35,3 @@ fn lookup_functions_accept_array_arguments_from_operator_expressions() {
     assert_eq!(engine.get_cell_value("Sheet1", "C5"), Value::Number(4.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C6"), Value::Number(5.0));
 }
-

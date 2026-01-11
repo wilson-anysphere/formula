@@ -226,7 +226,11 @@ fn n_value(v: &Value) -> Value {
         Value::Number(n) => Value::Number(*n),
         Value::Bool(b) => Value::Number(if *b { 1.0 } else { 0.0 }),
         Value::Blank | Value::Text(_) => Value::Number(0.0),
-        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Value::Error(ErrorKind::Value),
+        Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => Value::Error(ErrorKind::Value),
     }
 }
 
@@ -255,6 +259,8 @@ fn t_value(v: &Value) -> Value {
         Value::Number(_)
         | Value::Bool(_)
         | Value::Blank
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_)
         | Value::Array(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => {

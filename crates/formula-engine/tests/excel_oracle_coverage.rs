@@ -9,8 +9,8 @@ fn excel_oracle_function_calls_are_registered() {
     // new oracle cases don't silently regress to `#NAME?`.
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../../tests/compatibility/excel-oracle/cases.json");
-    let corpus_bytes = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let corpus_bytes =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
     let corpus: serde_json::Value =
         serde_json::from_str(&corpus_bytes).expect("parse excel oracle corpus JSON");
@@ -32,10 +32,7 @@ fn excel_oracle_function_calls_are_registered() {
 
     // The corpus intentionally includes `NO_SUCH_FUNCTION` to validate that unknown functions
     // still evaluate to `#NAME?`.
-    assert_eq!(
-        unknown,
-        BTreeSet::from(["NO_SUCH_FUNCTION".to_string()])
-    );
+    assert_eq!(unknown, BTreeSet::from(["NO_SUCH_FUNCTION".to_string()]));
 }
 
 fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTreeSet<String>) {

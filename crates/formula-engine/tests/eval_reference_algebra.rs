@@ -6,9 +6,7 @@ fn sum_full_sheet_range_is_sparse_and_marks_dirty_via_calc_graph() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
     engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
-    engine
-        .set_cell_value("Sheet1", "XFD1048576", 3.0)
-        .unwrap();
+    engine.set_cell_value("Sheet1", "XFD1048576", 3.0).unwrap();
 
     engine
         // Place the formula on a different sheet to avoid a circular reference: `A:XFD`
@@ -65,7 +63,9 @@ fn row_ranges_work() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
     engine.set_cell_value("Sheet1", "C1", 2.0).unwrap();
-    engine.set_cell_formula("Sheet1", "B2", "=SUM(1:1)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SUM(1:1)")
+        .unwrap();
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
 

@@ -8,10 +8,11 @@ mod worksheet;
 pub use a1::{parse_a1_range, to_a1_range, A1ParseError};
 pub use filter::{
     apply_autofilter, AutoFilter, ColumnFilter, DateComparison, FilterCriterion, FilterJoin,
-    FilterResult, FilterValue, FilterViewId, FilterViews, NumberComparison, TextMatch, TextMatchKind,
+    FilterResult, FilterValue, FilterViewId, FilterViews, NumberComparison, TextMatch,
+    TextMatchKind,
 };
 pub use sort::{sort_range, RowPermutation, SortKey, SortOrder, SortSpec, SortValueType};
 pub use types::{CellValue, HeaderOption, RangeData, RangeDataError, RangeRef};
 pub use visibility::{HiddenRows, RowVisibility};
-pub use worksheet::sort_worksheet_range;
 pub use worksheet::apply_autofilter_to_outline;
+pub use worksheet::sort_worksheet_range;

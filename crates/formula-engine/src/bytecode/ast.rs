@@ -213,7 +213,8 @@ impl<'a> Parser<'a> {
         }
 
         self.pos = end;
-        let s = std::str::from_utf8(&self.input[start..end]).map_err(|_| ParseError::InvalidNumber)?;
+        let s =
+            std::str::from_utf8(&self.input[start..end]).map_err(|_| ParseError::InvalidNumber)?;
         let v: f64 = s.parse().map_err(|_| ParseError::InvalidNumber)?;
         Ok(Expr::Literal(Value::Number(v)))
     }
@@ -421,4 +422,3 @@ fn col_letters_to_index(col: &str) -> Option<usize> {
     }
     Some(acc - 1)
 }
-

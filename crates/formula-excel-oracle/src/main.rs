@@ -78,7 +78,11 @@ enum EncodedValue {
     #[serde(rename = "b")]
     Bool { v: bool },
     #[serde(rename = "e")]
-    Error { v: String, #[serde(skip_serializing_if = "Option::is_none")] detail: Option<String> },
+    Error {
+        v: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
     #[serde(rename = "arr")]
     Array { rows: Vec<Vec<EncodedValue>> },
 }
@@ -97,7 +101,9 @@ impl From<Value> for EncodedValue {
         match value {
             Value::Blank => EncodedValue::Blank,
             Value::Number(v) if v.is_finite() => EncodedValue::Number { v },
-            Value::Number(v) => EncodedValue::engine_error(format!("non-finite numeric result: {v}")),
+            Value::Number(v) => {
+                EncodedValue::engine_error(format!("non-finite numeric result: {v}"))
+            }
             Value::Text(v) => EncodedValue::String { v },
             Value::Bool(v) => EncodedValue::Bool { v },
             Value::Error(kind) => EncodedValue::Error {
@@ -109,16 +115,14 @@ impl From<Value> for EncodedValue {
                 for r in 0..arr.rows {
                     let mut row = Vec::with_capacity(arr.cols);
                     for c in 0..arr.cols {
-                        row.push(
-                            arr.get(r, c)
-                                .cloned()
-                                .unwrap_or(Value::Blank)
-                                .into(),
-                        );
+                        row.push(arr.get(r, c).cloned().unwrap_or(Value::Blank).into());
                     }
                     rows.push(row);
                 }
                 EncodedValue::Array { rows }
+            }
+            Value::Reference(_) | Value::ReferenceUnion(_) => {
+                EncodedValue::engine_error("unexpected reference value")
             }
             Value::Spill { .. } => EncodedValue::Error {
                 v: "#SPILL!".to_string(),
@@ -201,7 +205,10 @@ fn coord_to_a1(row: u32, col: u32) -> String {
     format!("{}{}", col_to_name(col), row + 1)
 }
 
-fn range_to_a1(start: formula_engine::eval::CellAddr, end: formula_engine::eval::CellAddr) -> String {
+fn range_to_a1(
+    start: formula_engine::eval::CellAddr,
+    end: formula_engine::eval::CellAddr,
+) -> String {
     let start_a1 = coord_to_a1(start.row, start.col);
     let end_a1 = coord_to_a1(end.row, end.col);
     if start == end {
@@ -277,9 +284,7 @@ fn main() -> Result<()> {
         // Apply inputs first.
         for input in case.inputs.iter() {
             if let Some(formula) = &input.formula {
-                if let Err(err) =
-                    engine.set_cell_formula(&default_sheet, &input.cell, formula)
-                {
+                if let Err(err) = engine.set_cell_formula(&default_sheet, &input.cell, formula) {
                     case_error = Some(format!("set input formula failed: {err}"));
                     break;
                 }
@@ -312,8 +317,7 @@ fn main() -> Result<()> {
         }
 
         // Apply the formula under test.
-        if let Err(err) =
-            engine.set_cell_formula(&default_sheet, &case.output_cell, &case.formula)
+        if let Err(err) = engine.set_cell_formula(&default_sheet, &case.output_cell, &case.formula)
         {
             results.push(ResultEntry {
                 case_id: case.id,
@@ -347,6 +351,7 @@ fn main() -> Result<()> {
             }
             Value::Error(e) => e.as_code().to_string(),
             Value::Array(arr) => arr.top_left().to_string(),
+            Value::Reference(_) | Value::ReferenceUnion(_) => "#VALUE!".to_string(),
             Value::Spill { .. } => "#SPILL!".to_string(),
         };
 

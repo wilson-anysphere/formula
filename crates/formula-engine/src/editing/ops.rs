@@ -4,14 +4,42 @@ use formula_model::{CellRef, Range};
 /// High-level structural edit operation, intended to behave like Excel.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditOp {
-    InsertRows { sheet: String, row: u32, count: u32 },
-    DeleteRows { sheet: String, row: u32, count: u32 },
-    InsertCols { sheet: String, col: u32, count: u32 },
-    DeleteCols { sheet: String, col: u32, count: u32 },
-    InsertCellsShiftRight { sheet: String, range: Range },
-    InsertCellsShiftDown { sheet: String, range: Range },
-    DeleteCellsShiftLeft { sheet: String, range: Range },
-    DeleteCellsShiftUp { sheet: String, range: Range },
+    InsertRows {
+        sheet: String,
+        row: u32,
+        count: u32,
+    },
+    DeleteRows {
+        sheet: String,
+        row: u32,
+        count: u32,
+    },
+    InsertCols {
+        sheet: String,
+        col: u32,
+        count: u32,
+    },
+    DeleteCols {
+        sheet: String,
+        col: u32,
+        count: u32,
+    },
+    InsertCellsShiftRight {
+        sheet: String,
+        range: Range,
+    },
+    InsertCellsShiftDown {
+        sheet: String,
+        range: Range,
+    },
+    DeleteCellsShiftLeft {
+        sheet: String,
+        range: Range,
+    },
+    DeleteCellsShiftUp {
+        sheet: String,
+        range: Range,
+    },
     MoveRange {
         sheet: String,
         src: Range,
@@ -22,7 +50,11 @@ pub enum EditOp {
         src: Range,
         dst_top_left: CellRef,
     },
-    Fill { sheet: String, src: Range, dst: Range },
+    Fill {
+        sheet: String,
+        src: Range,
+        dst: Range,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,4 +101,3 @@ pub struct EditResult {
     pub moved_ranges: Vec<MovedRange>,
     pub formula_rewrites: Vec<FormulaRewrite>,
 }
-

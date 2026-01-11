@@ -1,7 +1,9 @@
 use crate::eval::CompiledExpr;
-use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference};
-use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::functions::lookup;
+use crate::functions::{
+    eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference,
+};
+use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
 use std::collections::HashMap;
 
@@ -547,14 +549,21 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     match getpivotdata_find_row(ctx, pivot_ref.sheet_id, &layout, &criteria) {
         Ok(row) => {
-            let addr = crate::eval::CellAddr { row, col: layout.data_col };
+            let addr = crate::eval::CellAddr {
+                row,
+                col: layout.data_col,
+            };
             ctx.get_cell_value(pivot_ref.sheet_id, addr)
         }
         Err(e) => Value::Error(e),
     }
 }
 
-fn find_pivot_layout(ctx: &dyn FunctionContext, pivot_ref: Reference, data_field: &str) -> Result<PivotLayout, ErrorKind> {
+fn find_pivot_layout(
+    ctx: &dyn FunctionContext,
+    pivot_ref: Reference,
+    data_field: &str,
+) -> Result<PivotLayout, ErrorKind> {
     // Heuristics (MVP, pivot-engine-compatible):
     //
     // 1) Starting from the provided pivot_table cell, scan upward for a header cell that
@@ -646,7 +655,13 @@ fn find_pivot_layout(ctx: &dyn FunctionContext, pivot_ref: Reference, data_field
     let first_data_row = header_row.saturating_add(1);
     let mut first_value_col: Option<u32> = None;
     for col in top_left_col..=data_col {
-        let below = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row: first_data_row, col });
+        let below = ctx.get_cell_value(
+            sheet_id,
+            crate::eval::CellAddr {
+                row: first_data_row,
+                col,
+            },
+        );
         if !matches!(below, Value::Text(_)) {
             first_value_col = Some(col);
             break;
@@ -666,7 +681,13 @@ fn find_pivot_layout(ctx: &dyn FunctionContext, pivot_ref: Reference, data_field
     // Collect value headers (base + optional grand total).
     let mut value_headers: Vec<String> = Vec::new();
     for col in first_value_col..=first_value_col.saturating_add(MAX_SCAN_COLS) {
-        let v = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row: header_row, col });
+        let v = ctx.get_cell_value(
+            sheet_id,
+            crate::eval::CellAddr {
+                row: header_row,
+                col,
+            },
+        );
         match v {
             Value::Text(s) if !s.is_empty() => value_headers.push(s),
             _ => break,
@@ -678,7 +699,9 @@ fn find_pivot_layout(ctx: &dyn FunctionContext, pivot_ref: Reference, data_field
 
     let base_headers: Vec<&str> = value_headers
         .iter()
-        .filter_map(|h| (!h.to_ascii_lowercase().starts_with("grand total - ")).then_some(h.as_str()))
+        .filter_map(|h| {
+            (!h.to_ascii_lowercase().starts_with("grand total - ")).then_some(h.as_str())
+        })
         .collect();
 
     if base_headers.len() != 1 {
@@ -706,7 +729,13 @@ fn find_pivot_layout(ctx: &dyn FunctionContext, pivot_ref: Reference, data_field
     // Row field headers are everything between top-left and the first value column.
     let mut row_fields = HashMap::new();
     for col in top_left_col..first_value_col {
-        let v = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row: header_row, col });
+        let v = ctx.get_cell_value(
+            sheet_id,
+            crate::eval::CellAddr {
+                row: header_row,
+                col,
+            },
+        );
         let name = match v {
             Value::Text(s) if !s.is_empty() => s,
             _ => return Err(ErrorKind::Ref),
@@ -722,7 +751,11 @@ fn find_pivot_layout(ctx: &dyn FunctionContext, pivot_ref: Reference, data_field
     })
 }
 
-fn getpivotdata_grand_total(ctx: &dyn FunctionContext, sheet_id: usize, layout: &PivotLayout) -> Value {
+fn getpivotdata_grand_total(
+    ctx: &dyn FunctionContext,
+    sheet_id: usize,
+    layout: &PivotLayout,
+) -> Value {
     const MAX_SCAN_ROWS: u32 = 10_000;
 
     for delta in 1..=MAX_SCAN_ROWS {
@@ -738,12 +771,30 @@ fn getpivotdata_grand_total(ctx: &dyn FunctionContext, sheet_id: usize, layout: 
             },
         );
         if matches!(label, Value::Text(ref s) if s.eq_ignore_ascii_case("Grand Total")) {
-            return ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col: layout.data_col });
+            return ctx.get_cell_value(
+                sheet_id,
+                crate::eval::CellAddr {
+                    row,
+                    col: layout.data_col,
+                },
+            );
         }
 
         // Stop scanning once we hit a fully blank row in the pivot area.
-        let first = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col: layout.top_left_col });
-        let value = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col: layout.data_col });
+        let first = ctx.get_cell_value(
+            sheet_id,
+            crate::eval::CellAddr {
+                row,
+                col: layout.top_left_col,
+            },
+        );
+        let value = ctx.get_cell_value(
+            sheet_id,
+            crate::eval::CellAddr {
+                row,
+                col: layout.data_col,
+            },
+        );
         if matches!(first, Value::Blank) && matches!(value, Value::Blank) {
             break;
         }
@@ -766,8 +817,20 @@ fn getpivotdata_find_row(
         let row = layout.header_row + delta;
 
         // Stop scanning once we hit a fully blank row in the pivot area.
-        let first = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col: layout.top_left_col });
-        let value = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col: layout.data_col });
+        let first = ctx.get_cell_value(
+            sheet_id,
+            crate::eval::CellAddr {
+                row,
+                col: layout.top_left_col,
+            },
+        );
+        let value = ctx.get_cell_value(
+            sheet_id,
+            crate::eval::CellAddr {
+                row,
+                col: layout.data_col,
+            },
+        );
         if matches!(first, Value::Blank) && matches!(value, Value::Blank) {
             break;
         }
@@ -819,10 +882,22 @@ fn pivot_item_matches(cell: &Value, item: &Value) -> Result<bool, ErrorKind> {
 fn flatten_1d(r: Reference) -> Option<Vec<crate::eval::CellAddr>> {
     if r.start.row == r.end.row {
         let cols = r.start.col..=r.end.col;
-        Some(cols.map(|col| crate::eval::CellAddr { row: r.start.row, col }).collect())
+        Some(
+            cols.map(|col| crate::eval::CellAddr {
+                row: r.start.row,
+                col,
+            })
+            .collect(),
+        )
     } else if r.start.col == r.end.col {
         let rows = r.start.row..=r.end.row;
-        Some(rows.map(|row| crate::eval::CellAddr { row, col: r.start.col }).collect())
+        Some(
+            rows.map(|row| crate::eval::CellAddr {
+                row,
+                col: r.start.col,
+            })
+            .collect(),
+        )
     } else {
         None
     }
@@ -860,10 +935,17 @@ fn approximate_match_values(lookup: &Value, values: &[Value], ascending: bool) -
     best
 }
 
-fn exact_match_in_first_col(ctx: &dyn FunctionContext, lookup: &Value, table: Reference) -> Option<u32> {
+fn exact_match_in_first_col(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: Reference,
+) -> Option<u32> {
     let rows = table.start.row..=table.end.row;
     for (idx, row) in rows.enumerate() {
-        let addr = crate::eval::CellAddr { row, col: table.start.col };
+        let addr = crate::eval::CellAddr {
+            row,
+            col: table.start.col,
+        };
         let key = ctx.get_cell_value(table.sheet_id, addr);
         if excel_eq(lookup, &key) {
             return Some(idx as u32);
@@ -882,10 +964,17 @@ fn exact_match_in_first_col_array(lookup: &Value, table: &Array) -> Option<u32> 
     None
 }
 
-fn exact_match_in_first_row(ctx: &dyn FunctionContext, lookup: &Value, table: Reference) -> Option<u32> {
+fn exact_match_in_first_row(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: Reference,
+) -> Option<u32> {
     let cols = table.start.col..=table.end.col;
     for (idx, col) in cols.enumerate() {
-        let addr = crate::eval::CellAddr { row: table.start.row, col };
+        let addr = crate::eval::CellAddr {
+            row: table.start.row,
+            col,
+        };
         let key = ctx.get_cell_value(table.sheet_id, addr);
         if excel_eq(lookup, &key) {
             return Some(idx as u32);
@@ -904,11 +993,18 @@ fn exact_match_in_first_row_array(lookup: &Value, table: &Array) -> Option<u32> 
     None
 }
 
-fn approximate_match_in_first_col(ctx: &dyn FunctionContext, lookup: &Value, table: Reference) -> Option<u32> {
+fn approximate_match_in_first_col(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: Reference,
+) -> Option<u32> {
     let mut best: Option<u32> = None;
     let rows = table.start.row..=table.end.row;
     for (idx, row) in rows.enumerate() {
-        let addr = crate::eval::CellAddr { row, col: table.start.col };
+        let addr = crate::eval::CellAddr {
+            row,
+            col: table.start.col,
+        };
         let key = ctx.get_cell_value(table.sheet_id, addr);
         if excel_le(&key, lookup)? {
             best = Some(idx as u32);
@@ -932,11 +1028,18 @@ fn approximate_match_in_first_col_array(lookup: &Value, table: &Array) -> Option
     best
 }
 
-fn approximate_match_in_first_row(ctx: &dyn FunctionContext, lookup: &Value, table: Reference) -> Option<u32> {
+fn approximate_match_in_first_row(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: Reference,
+) -> Option<u32> {
     let mut best: Option<u32> = None;
     let cols = table.start.col..=table.end.col;
     for (idx, col) in cols.enumerate() {
-        let addr = crate::eval::CellAddr { row: table.start.row, col };
+        let addr = crate::eval::CellAddr {
+            row: table.start.row,
+            col,
+        };
         let key = ctx.get_cell_value(table.sheet_id, addr);
         if excel_le(&key, lookup)? {
             best = Some(idx as u32);

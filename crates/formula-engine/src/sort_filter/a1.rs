@@ -83,7 +83,8 @@ fn parse_a1_cell(a1: &str) -> Result<(usize, usize), A1ParseError> {
         return Err(A1ParseError::Invalid(a1.to_string()));
     }
 
-    let col = column_letters_to_index(&col_part).ok_or_else(|| A1ParseError::Invalid(a1.to_string()))?;
+    let col =
+        column_letters_to_index(&col_part).ok_or_else(|| A1ParseError::Invalid(a1.to_string()))?;
     let row_1based: usize = row_part
         .parse()
         .map_err(|_| A1ParseError::Invalid(a1.to_string()))?;
@@ -170,4 +171,3 @@ mod tests {
         );
     }
 }
-

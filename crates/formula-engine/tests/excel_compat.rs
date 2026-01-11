@@ -73,4 +73,3 @@ fn structured_references_match_tables_and_columns_case_insensitively() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
 }
-

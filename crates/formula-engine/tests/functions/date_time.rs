@@ -19,7 +19,10 @@ fn timevalue_parses_common_formats() {
 fn datevalue_parses_iso_and_us_formats() {
     let system = ExcelDateSystem::EXCEL_1900;
     let expected = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
-    assert_eq!(date_time::datevalue("2020-01-01", system).unwrap(), expected);
+    assert_eq!(
+        date_time::datevalue("2020-01-01", system).unwrap(),
+        expected
+    );
     assert_eq!(date_time::datevalue("1/1/2020", system).unwrap(), expected);
 }
 

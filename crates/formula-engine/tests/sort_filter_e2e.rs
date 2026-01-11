@@ -1,6 +1,6 @@
 use formula_engine::sort_filter::{
-    apply_autofilter, AutoFilter, CellValue, ColumnFilter, FilterCriterion, FilterJoin, FilterValue,
-    RangeData, RangeRef,
+    apply_autofilter, AutoFilter, CellValue, ColumnFilter, FilterCriterion, FilterJoin,
+    FilterValue, RangeData, RangeRef,
 };
 use std::collections::BTreeMap;
 
@@ -55,4 +55,3 @@ fn filter_hides_rows_from_render_and_can_be_cleared() {
     let rendered = render_visible_rows(&data, &cleared.visible_rows);
     assert_eq!(rendered.len(), 3);
 }
-

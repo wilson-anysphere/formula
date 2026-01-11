@@ -10,7 +10,11 @@ pub fn value(text: &str) -> ExcelResult<f64> {
 }
 
 /// NUMBERVALUE(number_text, [decimal_separator], [group_separator])
-pub fn numbervalue(number_text: &str, decimal_separator: Option<char>, group_separator: Option<char>) -> ExcelResult<f64> {
+pub fn numbervalue(
+    number_text: &str,
+    decimal_separator: Option<char>,
+    group_separator: Option<char>,
+) -> ExcelResult<f64> {
     let decimal_separator = decimal_separator.unwrap_or('.');
     let group_separator = group_separator.unwrap_or(',');
 
@@ -21,7 +25,11 @@ pub fn numbervalue(number_text: &str, decimal_separator: Option<char>, group_sep
     parse_number_with_separators(number_text, decimal_separator, Some(group_separator))
 }
 
-fn parse_number_with_separators(text: &str, decimal_separator: char, group_separator: Option<char>) -> ExcelResult<f64> {
+fn parse_number_with_separators(
+    text: &str,
+    decimal_separator: char,
+    group_separator: Option<char>,
+) -> ExcelResult<f64> {
     let mut s = text.trim();
     if s.is_empty() {
         return Err(ExcelError::Value);

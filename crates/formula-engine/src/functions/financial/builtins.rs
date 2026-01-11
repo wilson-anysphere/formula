@@ -50,6 +50,7 @@ fn collect_npv_values_from_arg(
             Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }]),
             Value::Blank => Ok(vec![0.0]),
             Value::Text(s) => Ok(vec![s.trim().parse::<f64>().unwrap_or(0.0)]),
+            Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.rows.saturating_mul(arr.cols));
                 for v in arr.iter() {
@@ -61,7 +62,9 @@ fn collect_npv_values_from_arg(
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => out.push(0.0),
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => out.push(0.0),
                     }
                 }
                 Ok(out)
@@ -81,9 +84,9 @@ fn collect_npv_values_from_arg(
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Lambda(_)
-                    | Value::Spill { .. } => {
-                        out.push(0.0)
-                    }
+                    | Value::Spill { .. }
+                    | Value::Reference(_)
+                    | Value::ReferenceUnion(_) => out.push(0.0),
                 }
             }
             Ok(out)
@@ -101,7 +104,9 @@ fn collect_npv_values_from_arg(
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => out.push(0.0),
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => out.push(0.0),
                     }
                 }
             }
@@ -122,6 +127,7 @@ fn collect_irr_values_from_arg(
             Value::Error(e) => Err(e),
             Value::Number(n) => Ok(vec![n]),
             Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Lambda(_) => Ok(vec![0.0]),
+            Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.rows.saturating_mul(arr.cols));
                 for v in arr.iter() {
@@ -133,7 +139,9 @@ fn collect_irr_values_from_arg(
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => out.push(0.0),
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => out.push(0.0),
                     }
                 }
                 Ok(out)
@@ -152,9 +160,9 @@ fn collect_irr_values_from_arg(
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Lambda(_)
-                    | Value::Spill { .. } => {
-                        out.push(0.0)
-                    }
+                    | Value::Spill { .. }
+                    | Value::Reference(_)
+                    | Value::ReferenceUnion(_) => out.push(0.0),
                 }
             }
             Ok(out)
@@ -172,7 +180,9 @@ fn collect_irr_values_from_arg(
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Lambda(_)
-                        | Value::Spill { .. } => out.push(0.0),
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => out.push(0.0),
                     }
                 }
             }

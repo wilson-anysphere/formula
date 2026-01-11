@@ -1,7 +1,7 @@
 use super::ast::Expr;
 use super::grid::{Grid, GridMut};
-use super::{BytecodeCache, Program, Vm};
 use super::value::{CellCoord, Value};
+use super::{BytecodeCache, Program, Vm};
 use ahash::{AHashMap, AHashSet};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;

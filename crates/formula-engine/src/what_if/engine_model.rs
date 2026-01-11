@@ -84,6 +84,9 @@ impl<'a> EngineWhatIfModel<'a> {
             Value::Bool(v) => CellValue::Bool(v),
             Value::Blank => CellValue::Blank,
             Value::Error(e) => CellValue::Text(e.as_code().to_string()),
+            Value::Reference(_) | Value::ReferenceUnion(_) => {
+                CellValue::Text("#VALUE!".to_string())
+            }
             Value::Array(arr) => Self::map_from_engine_value(arr.top_left()),
             Value::Lambda(_) => CellValue::Text("#CALC!".to_string()),
             Value::Spill { .. } => CellValue::Text("#SPILL!".to_string()),

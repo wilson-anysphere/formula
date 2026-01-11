@@ -13,8 +13,7 @@ fn insert_row_updates_absolute_and_relative_a1_refs() {
     };
     let origin = CellAddr::new(2, 1);
 
-    let (out, changed) =
-        rewrite_formula_for_structural_edit("=$A$1+A1", "Sheet1", origin, &edit);
+    let (out, changed) = rewrite_formula_for_structural_edit("=$A$1+A1", "Sheet1", origin, &edit);
 
     assert!(changed);
     assert_eq!(out, "=$A$2+A2");
@@ -23,8 +22,7 @@ fn insert_row_updates_absolute_and_relative_a1_refs() {
 #[test]
 fn copy_range_delta_updates_relative_but_not_absolute_refs() {
     let origin = CellAddr::new(2, 2);
-    let (out, changed) =
-        rewrite_formula_for_copy_delta("=$A$1+A1", "Sheet1", origin, 1, 1);
+    let (out, changed) = rewrite_formula_for_copy_delta("=$A$1+A1", "Sheet1", origin, 1, 1);
 
     assert!(changed);
     assert_eq!(out, "=$A$1+B2");
@@ -101,7 +99,8 @@ fn delete_cols_creates_ref_errors_for_deleted_column_refs() {
     };
     let origin = CellAddr::new(0, 1);
 
-    let (out, changed) = rewrite_formula_for_structural_edit("=$A$1+A1+$A1+A$1", "Sheet1", origin, &edit);
+    let (out, changed) =
+        rewrite_formula_for_structural_edit("=$A$1+A1+$A1+A$1", "Sheet1", origin, &edit);
 
     assert!(changed);
     assert_eq!(out, "=#REF!+#REF!+#REF!+#REF!");

@@ -68,7 +68,9 @@ fn lotus_bug_serial_60_maps_to_feb_29_1900() {
 #[test]
 fn lotus_bug_can_be_disabled() {
     let mut sheet = TestSheet::new();
-    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: false });
+    sheet.set_date_system(ExcelDateSystem::Excel1900 {
+        lotus_compat: false,
+    });
     assert_number(&sheet.eval("=YEAR(60)"), 1900.0);
     assert_number(&sheet.eval("=MONTH(60)"), 3.0);
     assert_number(&sheet.eval("=DAY(60)"), 1.0);

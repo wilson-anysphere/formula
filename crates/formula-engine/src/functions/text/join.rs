@@ -1,7 +1,11 @@
 use crate::{ErrorKind, Value};
 
 /// TEXTJOIN(delimiter, ignore_empty, text1, [text2], ...)
-pub fn textjoin(delimiter: &str, ignore_empty: bool, values: &[Value]) -> Result<String, ErrorKind> {
+pub fn textjoin(
+    delimiter: &str,
+    ignore_empty: bool,
+    values: &[Value],
+) -> Result<String, ErrorKind> {
     let mut out = String::new();
     let mut first = true;
 
@@ -18,6 +22,7 @@ pub fn textjoin(delimiter: &str, ignore_empty: bool, values: &[Value]) -> Result
                 }
             }
             Value::Error(e) => return Err(*e),
+            Value::Reference(_) | Value::ReferenceUnion(_) => return Err(ErrorKind::Value),
             Value::Array(arr) => arr.top_left().to_string(),
             Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Spill { .. } => return Err(ErrorKind::Spill),

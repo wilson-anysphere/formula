@@ -34,4 +34,3 @@ pub fn proper(text: &str) -> String {
     }
     out
 }
-

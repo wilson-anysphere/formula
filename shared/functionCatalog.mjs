@@ -534,6 +534,17 @@ export default {
       ]
     },
     {
+      "name": "INDIRECT",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "volatile",
+      "return_type": "any",
+      "arg_types": [
+        "text",
+        "bool"
+      ]
+    },
+    {
       "name": "INT",
       "min_args": 1,
       "max_args": 1,
@@ -958,6 +969,20 @@ export default {
         "text",
         "text",
         "text"
+      ]
+    },
+    {
+      "name": "OFFSET",
+      "min_args": 3,
+      "max_args": 5,
+      "volatility": "volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "number",
+        "number",
+        "number"
       ]
     },
     {

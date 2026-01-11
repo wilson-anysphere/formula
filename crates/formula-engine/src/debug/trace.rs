@@ -1,7 +1,7 @@
+use crate::error::ExcelError;
 use crate::eval::{
     parse_a1, CellAddr, CompareOp, EvalContext, FormulaParseError, SheetReference, UnaryOp,
 };
-use crate::error::ExcelError;
 use crate::functions::{ArgValue as FnArgValue, FunctionContext};
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
@@ -21,8 +21,15 @@ impl Span {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TraceRef {
-    Cell { sheet: usize, addr: CellAddr },
-    Range { sheet: usize, start: CellAddr, end: CellAddr },
+    Cell {
+        sheet: usize,
+        addr: CellAddr,
+    },
+    Range {
+        sheet: usize,
+        start: CellAddr,
+        end: CellAddr,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,7 +82,9 @@ pub enum SpannedExprKind<S> {
     Bool(bool),
     Blank,
     Error(ErrorKind),
-    ArrayLiteral { rows: Vec<Vec<SpannedExpr<S>>> },
+    ArrayLiteral {
+        rows: Vec<Vec<SpannedExpr<S>>>,
+    },
     CellRef(crate::eval::CellRef<S>),
     RangeRef(crate::eval::RangeRef<S>),
     NameRef(crate::eval::NameRef<S>),
@@ -133,9 +142,7 @@ impl<S: Clone> SpannedExpr<S> {
                 sheet: f(&n.sheet),
                 name: n.name.clone(),
             }),
-            SpannedExprKind::Group(expr) => {
-                SpannedExprKind::Group(Box::new(expr.map_sheets(f)))
-            }
+            SpannedExprKind::Group(expr) => SpannedExprKind::Group(Box::new(expr.map_sheets(f))),
             SpannedExprKind::Unary { op, expr } => SpannedExprKind::Unary {
                 op: *op,
                 expr: Box::new(expr.map_sheets(f)),
@@ -491,9 +498,8 @@ impl<'a> Lexer<'a> {
     fn lex_hash_or_error(&mut self) -> Result<TokenKind, FormulaParseError> {
         // Spill-range operator is postfix (`A1#`), while error literals start with `#` (`#REF!`).
         let next = self.input[self.pos..].chars().nth(1);
-        let looks_like_error = next.is_some_and(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, '_' | '/' | '.' | '!' | '?')
-        });
+        let looks_like_error = next
+            .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '/' | '.' | '!' | '?'));
         if self.prev_can_spill && !looks_like_error {
             self.pos += 1;
             Ok(TokenKind::Hash)
@@ -821,10 +827,7 @@ impl ParserImpl {
         let name = match name_tok.kind {
             TokenKind::Ident(s) => {
                 let upper = s.to_ascii_uppercase();
-                upper
-                    .strip_prefix("_XLFN.")
-                    .unwrap_or(&upper)
-                    .to_string()
+                upper.strip_prefix("_XLFN.").unwrap_or(&upper).to_string()
             }
             other => {
                 return Err(FormulaParseError::Expected {
@@ -884,10 +887,15 @@ impl ParserImpl {
             }
         };
         match parse_a1(&addr_str) {
-            Ok(addr) => self.parse_cell_or_range(sheet, sheet_tok.span.start, addr, addr_tok.span.end),
+            Ok(addr) => {
+                self.parse_cell_or_range(sheet, sheet_tok.span.start, addr, addr_tok.span.end)
+            }
             Err(_) => Ok(SpannedExpr {
                 span: Span::new(sheet_tok.span.start, addr_tok.span.end),
-                kind: SpannedExprKind::NameRef(crate::eval::NameRef { sheet, name: addr_str }),
+                kind: SpannedExprKind::NameRef(crate::eval::NameRef {
+                    sheet,
+                    name: addr_str,
+                }),
             }),
         }
     }
@@ -925,7 +933,9 @@ impl ParserImpl {
     }
 
     fn peek(&self) -> &Token {
-        self.tokens.get(self.pos).unwrap_or_else(|| self.tokens.last().unwrap())
+        self.tokens
+            .get(self.pos)
+            .unwrap_or_else(|| self.tokens.last().unwrap())
     }
 
     fn peek_n(&self, n: usize) -> &Token {
@@ -1084,10 +1094,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 let row_count = rows.len();
                 let col_count = rows.first().map(|r| r.len()).unwrap_or(0);
 
-                if row_count == 0
-                    || col_count == 0
-                    || rows.iter().any(|r| r.len() != col_count)
-                {
+                if row_count == 0 || col_count == 0 || rows.iter().any(|r| r.len() != col_count) {
                     let value = Value::Error(ErrorKind::Value);
                     return (
                         EvalValue::Scalar(value.clone()),
@@ -1124,7 +1131,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     }
                 }
 
-                let value = Value::Array(crate::value::Array::new(row_count, col_count, out_values));
+                let value =
+                    Value::Array(crate::value::Array::new(row_count, col_count, out_values));
                 (
                     EvalValue::Scalar(value.clone()),
                     TraceNode {
@@ -1217,7 +1225,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         Some(crate::eval::ResolvedName::Constant(v)) => (
                             EvalValue::Scalar(v.clone()),
                             TraceNode {
-                                kind: TraceKind::NameRef { name: nref.name.clone() },
+                                kind: TraceKind::NameRef {
+                                    name: nref.name.clone(),
+                                },
                                 span: expr.span,
                                 value: v,
                                 reference: None,
@@ -1237,7 +1247,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 FnArgValue::Scalar(v) => (
                                     EvalValue::Scalar(v.clone()),
                                     TraceNode {
-                                        kind: TraceKind::NameRef { name: nref.name.clone() },
+                                        kind: TraceKind::NameRef {
+                                            name: nref.name.clone(),
+                                        },
                                         span: expr.span,
                                         value: v,
                                         reference: None,
@@ -1265,7 +1277,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                     (
                                         EvalValue::Reference(range),
                                         TraceNode {
-                                            kind: TraceKind::NameRef { name: nref.name.clone() },
+                                            kind: TraceKind::NameRef {
+                                                name: nref.name.clone(),
+                                            },
                                             span: expr.span,
                                             value: Value::Blank,
                                             reference,
@@ -1278,7 +1292,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                     (
                                         EvalValue::Scalar(value.clone()),
                                         TraceNode {
-                                            kind: TraceKind::NameRef { name: nref.name.clone() },
+                                            kind: TraceKind::NameRef {
+                                                name: nref.name.clone(),
+                                            },
                                             span: expr.span,
                                             value,
                                             reference: None,
@@ -1293,7 +1309,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             (
                                 EvalValue::Scalar(value.clone()),
                                 TraceNode {
-                                    kind: TraceKind::NameRef { name: nref.name.clone() },
+                                    kind: TraceKind::NameRef {
+                                        name: nref.name.clone(),
+                                    },
                                     span: expr.span,
                                     value,
                                     reference: None,
@@ -1308,7 +1326,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     (
                         EvalValue::Scalar(value.clone()),
                         TraceNode {
-                            kind: TraceKind::NameRef { name: nref.name.clone() },
+                            kind: TraceKind::NameRef {
+                                name: nref.name.clone(),
+                            },
                             span: expr.span,
                             value,
                             reference: None,
@@ -1347,12 +1367,27 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             let origin = self.resolver.spill_origin(sheet_id, addr).unwrap_or(addr);
                             match self.resolver.spill_range(sheet_id, origin) {
                                 Some((start, end)) => (
-                                    EvalValue::Reference(ResolvedRange { sheet_id, start, end }),
-                                    Some(TraceRef::Range { sheet: sheet_id, start, end }),
+                                    EvalValue::Reference(ResolvedRange {
+                                        sheet_id,
+                                        start,
+                                        end,
+                                    }),
+                                    Some(TraceRef::Range {
+                                        sheet: sheet_id,
+                                        start,
+                                        end,
+                                    }),
                                 ),
                                 None => (
-                                    EvalValue::Reference(ResolvedRange { sheet_id, start: origin, end: origin }),
-                                    Some(TraceRef::Cell { sheet: sheet_id, addr: origin }),
+                                    EvalValue::Reference(ResolvedRange {
+                                        sheet_id,
+                                        start: origin,
+                                        end: origin,
+                                    }),
+                                    Some(TraceRef::Cell {
+                                        sheet: sheet_id,
+                                        addr: origin,
+                                    }),
                                 ),
                             }
                         }
@@ -1379,15 +1414,13 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 let (v, child) = self.eval_scalar(inner);
                 let out = match v {
                     Value::Error(e) => Value::Error(e),
-                    other => {
-                        match coerce_to_number(&other) {
-                            Ok(n) => match op {
-                                UnaryOp::Plus => Value::Number(n),
-                                UnaryOp::Minus => Value::Number(-n),
-                            },
-                            Err(e) => Value::Error(e),
-                        }
-                    }
+                    other => match coerce_to_number(&other) {
+                        Ok(n) => match op {
+                            UnaryOp::Plus => Value::Number(n),
+                            UnaryOp::Minus => Value::Number(-n),
+                        },
+                        Err(e) => Value::Error(e),
+                    },
                 };
                 (
                     EvalValue::Scalar(out.clone()),
@@ -1592,9 +1625,13 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
 
         if range.start.col == range.end.col {
             if cur.row >= range.start.row && cur.row <= range.end.row {
-                return self
-                    .resolver
-                    .get_cell_value(range.sheet_id, CellAddr { row: cur.row, col: range.start.col });
+                return self.resolver.get_cell_value(
+                    range.sheet_id,
+                    CellAddr {
+                        row: cur.row,
+                        col: range.start.col,
+                    },
+                );
             }
             return Value::Error(ErrorKind::Value);
         }
@@ -1602,7 +1639,10 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             if cur.col >= range.start.col && cur.col <= range.end.col {
                 return self.resolver.get_cell_value(
                     range.sheet_id,
-                    CellAddr { row: range.start.row, col: cur.col },
+                    CellAddr {
+                        row: range.start.row,
+                        col: cur.col,
+                    },
                 );
             }
             return Value::Error(ErrorKind::Value);
@@ -1698,6 +1738,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             acc += n;
                         }
                     }
+                    Value::Reference(_) | Value::ReferenceUnion(_) => {
+                        return (Value::Error(ErrorKind::Value), traces);
+                    }
                     Value::Array(arr) => {
                         for v in arr.iter() {
                             match v {
@@ -1708,7 +1751,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 | Value::Blank
                                 | Value::Array(_)
                                 | Value::Lambda(_)
-                                | Value::Spill { .. } => {}
+                                | Value::Spill { .. }
+                                | Value::Reference(_)
+                                | Value::ReferenceUnion(_) => {}
                             }
                         }
                     }
@@ -1726,7 +1771,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Lambda(_)
-                            | Value::Spill { .. } => {}
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
                         }
                     }
                 }
@@ -1807,9 +1854,13 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     .map(|o| o == Ordering::Equal)
                     .unwrap_or(false);
                 if is_match {
-                    let result_addr = CellAddr { row, col: target_col };
+                    let result_addr = CellAddr {
+                        row,
+                        col: target_col,
+                    };
                     return (
-                        self.resolver.get_cell_value(table_range.sheet_id, result_addr),
+                        self.resolver
+                            .get_cell_value(table_range.sheet_id, result_addr),
                         traces,
                     );
                 }
@@ -1835,9 +1886,13 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 }
             }
             if let Some(row) = best_row {
-                let result_addr = CellAddr { row, col: target_col };
+                let result_addr = CellAddr {
+                    row,
+                    col: target_col,
+                };
                 (
-                    self.resolver.get_cell_value(table_range.sheet_id, result_addr),
+                    self.resolver
+                        .get_cell_value(table_range.sheet_id, result_addr),
                     traces,
                 )
             } else {
@@ -1862,7 +1917,11 @@ fn coerce_to_number(v: &Value) -> Result<f64, ErrorKind> {
         Value::Blank => Ok(0.0),
         Value::Text(s) => parse_number_from_text(s).ok_or(ErrorKind::Value),
         Value::Error(e) => Err(*e),
-        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. }
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
     }
 }
 
@@ -1885,7 +1944,11 @@ fn coerce_to_bool(v: &Value) -> Result<bool, ErrorKind> {
             Err(ErrorKind::Value)
         }
         Value::Error(e) => Err(*e),
-        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. }
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
     }
 }
 
@@ -1914,9 +1977,21 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
-    if matches!(left, Value::Array(_) | Value::Lambda(_) | Value::Spill { .. })
-        || matches!(right, Value::Array(_) | Value::Lambda(_) | Value::Spill { .. })
-    {
+    if matches!(
+        left,
+        Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. }
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
+    ) || matches!(
+        right,
+        Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. }
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
+    ) {
         return Err(ErrorKind::Value);
     }
 
@@ -1951,6 +2026,10 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         | (Value::Lambda(_), _)
         | (_, Value::Lambda(_))
         | (Value::Spill { .. }, _)
-        | (_, Value::Spill { .. }) => Ordering::Equal,
+        | (_, Value::Spill { .. })
+        | (Value::Reference(_), _)
+        | (_, Value::Reference(_))
+        | (Value::ReferenceUnion(_), _)
+        | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
     })
 }

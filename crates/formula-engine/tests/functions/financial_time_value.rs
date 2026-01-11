@@ -81,18 +81,14 @@ fn ipmt_type_beginning_first_period_is_zero() {
 
     let payment = pmt(rate_per_period, nper, pv_amount, None, Some(1.0)).unwrap();
 
-    let interest_first =
-        ipmt(rate_per_period, 1.0, nper, pv_amount, None, Some(1.0)).unwrap();
-    let principal_first =
-        ppmt(rate_per_period, 1.0, nper, pv_amount, None, Some(1.0)).unwrap();
+    let interest_first = ipmt(rate_per_period, 1.0, nper, pv_amount, None, Some(1.0)).unwrap();
+    let principal_first = ppmt(rate_per_period, 1.0, nper, pv_amount, None, Some(1.0)).unwrap();
 
     assert_close(interest_first, 0.0, 1e-12);
     assert_close(payment, principal_first, 1e-12);
 
     // Subsequent periods should still satisfy PMT = IPMT + PPMT.
-    let interest_second =
-        ipmt(rate_per_period, 2.0, nper, pv_amount, None, Some(1.0)).unwrap();
-    let principal_second =
-        ppmt(rate_per_period, 2.0, nper, pv_amount, None, Some(1.0)).unwrap();
+    let interest_second = ipmt(rate_per_period, 2.0, nper, pv_amount, None, Some(1.0)).unwrap();
+    let principal_second = ppmt(rate_per_period, 2.0, nper, pv_amount, None, Some(1.0)).unwrap();
     assert_close(payment, interest_second + principal_second, 1e-12);
 }

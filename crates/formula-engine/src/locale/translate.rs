@@ -13,7 +13,10 @@ use super::FormulaLocale;
 /// - en-US array separators (`,` columns, `;` rows)
 ///
 /// The input may include an optional leading `=`, which is preserved in the output.
-pub fn canonicalize_formula(formula: &str, locale: &FormulaLocale) -> Result<String, FormulaParseError> {
+pub fn canonicalize_formula(
+    formula: &str,
+    locale: &FormulaLocale,
+) -> Result<String, FormulaParseError> {
     translate_formula_with_style(formula, locale, Direction::ToCanonical, ReferenceStyle::A1)
 }
 
@@ -33,7 +36,10 @@ pub fn canonicalize_formula_with_style(
 /// Convert a canonical (English) formula into its locale-specific display form.
 ///
 /// The input may include an optional leading `=`, which is preserved in the output.
-pub fn localize_formula(formula: &str, locale: &FormulaLocale) -> Result<String, FormulaParseError> {
+pub fn localize_formula(
+    formula: &str,
+    locale: &FormulaLocale,
+) -> Result<String, FormulaParseError> {
     translate_formula_with_style(formula, locale, Direction::ToLocalized, ReferenceStyle::A1)
 }
 
@@ -54,7 +60,11 @@ enum Direction {
 }
 
 fn bool_literal(value: bool) -> &'static str {
-    if value { "TRUE" } else { "FALSE" }
+    if value {
+        "TRUE"
+    } else {
+        "FALSE"
+    }
 }
 
 fn translate_formula_with_style(
@@ -137,7 +147,9 @@ fn translate_formula_with_style(
             TokenKind::Boolean(value) => {
                 match dir {
                     Direction::ToCanonical => out.push_str(bool_literal(*value)),
-                    Direction::ToLocalized => out.push_str(locale.localized_boolean_literal(*value)),
+                    Direction::ToLocalized => {
+                        out.push_str(locale.localized_boolean_literal(*value))
+                    }
                 }
                 idx += 1;
             }
@@ -218,7 +230,10 @@ fn is_function_ident(tokens: &[Token], idx: usize) -> bool {
     }
 
     let mut j = idx + 1;
-    while matches!(tokens.get(j).map(|t| &t.kind), Some(TokenKind::Whitespace(_))) {
+    while matches!(
+        tokens.get(j).map(|t| &t.kind),
+        Some(TokenKind::Whitespace(_))
+    ) {
         j += 1;
     }
 
@@ -227,7 +242,10 @@ fn is_function_ident(tokens: &[Token], idx: usize) -> bool {
 
 fn next_non_trivia_kind<'a>(tokens: &'a [Token], idx: usize) -> Option<&'a TokenKind> {
     let mut j = idx + 1;
-    while matches!(tokens.get(j).map(|t| &t.kind), Some(TokenKind::Whitespace(_))) {
+    while matches!(
+        tokens.get(j).map(|t| &t.kind),
+        Some(TokenKind::Whitespace(_))
+    ) {
         j += 1;
     }
     tokens.get(j).map(|t| &t.kind)

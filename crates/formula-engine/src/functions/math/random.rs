@@ -62,4 +62,3 @@ pub fn randbetween(bottom: f64, top: f64) -> ExcelResult<i64> {
     let offset = (r * span as f64).floor() as i64;
     Ok(low + offset.min(span - 1))
 }
-

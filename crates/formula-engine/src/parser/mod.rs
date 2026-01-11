@@ -176,7 +176,9 @@ enum ParenContext {
     /// separators and array literal separators. For example, in `={SUM(1,2),3}` the comma inside
     /// `SUM(1,2)` should be lexed as a function argument separator, while the comma after the
     /// closing `)` should be lexed as an array column separator.
-    FunctionCall { brace_depth: usize },
+    FunctionCall {
+        brace_depth: usize,
+    },
     Group,
 }
 
@@ -288,10 +290,9 @@ impl<'a> Lexer<'a> {
                     //
                     // Treat `#` as a postfix operator only when it is *immediately* after an
                     // expression-like token (no intervening whitespace).
-                    let is_immediate = self
-                        .tokens
-                        .last()
-                        .is_some_and(|t| t.span.end == start && !matches!(t.kind, TokenKind::Whitespace(_)));
+                    let is_immediate = self.tokens.last().is_some_and(|t| {
+                        t.span.end == start && !matches!(t.kind, TokenKind::Whitespace(_))
+                    });
                     let is_postfix_spill = is_immediate
                         && matches!(
                             self.prev_sig,
@@ -341,7 +342,9 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     let is_func = matches!(self.prev_sig, Some(TokenKind::Ident(_)));
                     self.paren_stack.push(if is_func {
-                        ParenContext::FunctionCall { brace_depth: self.brace_depth }
+                        ParenContext::FunctionCall {
+                            brace_depth: self.brace_depth,
+                        }
                     } else {
                         ParenContext::Group
                     });
@@ -604,7 +607,10 @@ impl<'a> Lexer<'a> {
             }
 
             // Locale-specific grouping separators inside the integer portion of the literal.
-            if Some(ch) == self.locale.thousands_separator && !out.is_empty() && self.peek_next_is_digit() {
+            if Some(ch) == self.locale.thousands_separator
+                && !out.is_empty()
+                && self.peek_next_is_digit()
+            {
                 self.bump();
                 continue;
             }
@@ -1305,9 +1311,7 @@ impl<'a> Parser<'a> {
             | TokenKind::R1C1Row(_)
             | TokenKind::R1C1Col(_)
             | TokenKind::Ident(_)
-            | TokenKind::QuotedIdent(_) => {
-                self.parse_reference_or_name_or_func_best_effort()
-            }
+            | TokenKind::QuotedIdent(_) => self.parse_reference_or_name_or_func_best_effort(),
             TokenKind::ArgSep | TokenKind::RParen | TokenKind::Eof => Expr::Missing,
             _ => {
                 self.record_error(ParseError::new("Unexpected token", self.current_span()));
@@ -1669,9 +1673,7 @@ impl<'a> Parser<'a> {
             | TokenKind::R1C1Row(_)
             | TokenKind::R1C1Col(_)
             | TokenKind::Ident(_)
-            | TokenKind::QuotedIdent(_) => {
-                self.parse_reference_or_name_or_func()
-            }
+            | TokenKind::QuotedIdent(_) => self.parse_reference_or_name_or_func(),
             TokenKind::ArgSep => {
                 // Missing argument, caller decides how to handle.
                 Ok(Expr::Missing)
@@ -2051,7 +2053,10 @@ impl<'a> Parser<'a> {
                     // *outermost* bracket, treat a double ']]' as a literal ']' rather than the
                     // end of the structured ref.
                     if depth == 1
-                        && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::RBracket))
+                        && matches!(
+                            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                            Some(TokenKind::RBracket)
+                        )
                     {
                         self.next();
                         self.next();
