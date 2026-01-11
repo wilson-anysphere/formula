@@ -52,13 +52,30 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
           const formulaB1 = await engine.getCell("B1", "Sheet1");
           const formulaC1 = await engine.getCell("C1", "Sheet1");
 
+          // Verify sparse clear semantics: `null` inputs clear stored cells and are omitted from JSON.
+          await engine.newWorkbook();
+          await engine.setCell("A1", 1, "Sheet1");
+          await engine.setCell("A2", "=A1*2", "Sheet1");
+          await engine.recalculate();
+          const beforeClearJson = await engine.toJson();
+
+          await engine.setCell("A1", null, "Sheet1");
+          await engine.recalculate();
+          const afterClearA1 = await engine.getCell("A1", "Sheet1");
+          const afterClearA2 = await engine.getCell("A2", "Sheet1");
+          const afterClearJson = await engine.toJson();
+
           return {
             ok: true as const,
             basicA1,
             basicB1,
             formulaA1,
             formulaB1,
-            formulaC1
+            formulaC1,
+            beforeClearJson,
+            afterClearA1,
+            afterClearA2,
+            afterClearJson
           };
         } finally {
           engine.terminate();
@@ -84,4 +101,16 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
   // XLSX stores formulas without a leading "=", but the engine should expose the canonical input.
   expect(result.formulaC1.input).toBe("=A1+B1");
   expect(result.formulaC1.value).toBe(3);
+
+  const beforeClear = JSON.parse(result.beforeClearJson);
+  expect(beforeClear.sheets.Sheet1.cells).toHaveProperty("A1", 1);
+  expect(beforeClear.sheets.Sheet1.cells).toHaveProperty("A2", "=A1*2");
+
+  expect(result.afterClearA1.input).toBeNull();
+  expect(result.afterClearA1.value).toBeNull();
+  expect(result.afterClearA2.value).toBe(0);
+
+  const afterClear = JSON.parse(result.afterClearJson);
+  expect(afterClear.sheets.Sheet1.cells).not.toHaveProperty("A1");
+  expect(afterClear.sheets.Sheet1.cells).toHaveProperty("A2", "=A1*2");
 });
