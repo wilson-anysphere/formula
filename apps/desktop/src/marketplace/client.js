@@ -100,10 +100,14 @@ export class MarketplaceClient {
       const safeId = safePathComponent(id);
       const cacheBase = path.join(this.cacheDir, "extensions", safeId);
       const etag = response.headers.get("etag");
-      await atomicWriteJson(path.join(cacheBase, "index.json"), {
-        etag: etag || null,
-        body,
-      });
+      try {
+        await atomicWriteJson(path.join(cacheBase, "index.json"), {
+          etag: etag || null,
+          body,
+        });
+      } catch {
+        // Best-effort cache; failures should not break marketplace functionality.
+      }
     }
 
     return body;
@@ -199,8 +203,12 @@ export class MarketplaceClient {
         publisher: publisher || null,
       };
       const bytesPath = path.join(cacheBase, `${safePathComponent(computedSha)}.fextpkg`);
-      await atomicWriteFile(bytesPath, bytes);
-      await atomicWriteJson(path.join(cacheBase, "index.json"), entry);
+      try {
+        await atomicWriteFile(bytesPath, bytes);
+        await atomicWriteJson(path.join(cacheBase, "index.json"), entry);
+      } catch {
+        // Best-effort cache; failures should not break marketplace functionality.
+      }
     }
 
     return { bytes, signatureBase64, sha256: expectedSha, formatVersion, publisher };
