@@ -847,9 +847,14 @@ impl Storage {
             sheet.visibility = storage_sheet_visibility_to_model(&visibility_raw);
             sheet.xlsx_sheet_id = xlsx_sheet_id.and_then(|v| u32::try_from(v).ok());
             sheet.xlsx_rel_id = xlsx_rel_id;
-            sheet.frozen_rows = frozen_rows.max(0) as u32;
-            sheet.frozen_cols = frozen_cols.max(0) as u32;
-            sheet.zoom = zoom as f32;
+            sheet.frozen_rows = u32::try_from(frozen_rows).unwrap_or(0);
+            sheet.frozen_cols = u32::try_from(frozen_cols).unwrap_or(0);
+            let zoom_f32 = zoom as f32;
+            sheet.zoom = if zoom_f32.is_finite() && zoom_f32 > 0.0 {
+                zoom_f32
+            } else {
+                1.0
+            };
             sheet.view.pane.frozen_rows = sheet.frozen_rows;
             sheet.view.pane.frozen_cols = sheet.frozen_cols;
             sheet.view.zoom = sheet.zoom;
