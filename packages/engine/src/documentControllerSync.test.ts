@@ -62,6 +62,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     const engine = {
       loadWorkbookFromJson: vi.fn(async () => {}),
       setCell: vi.fn(async () => {}),
+      setCells: vi.fn(async () => {}),
       recalculate: vi.fn(async () => []),
     };
 
@@ -83,8 +84,8 @@ describe("DocumentController → engine workbook JSON exporter", () => {
       },
     ]);
 
-    expect(engine.setCell).toHaveBeenCalledTimes(1);
-    expect(engine.setCell).toHaveBeenCalledWith("A1", 1, "Sheet1");
+    expect(engine.setCells).toHaveBeenCalledTimes(1);
+    expect(engine.setCells).toHaveBeenCalledWith([{ address: "A1", value: 1, sheet: "Sheet1" }]);
     expect(engine.recalculate).toHaveBeenCalledTimes(1);
   });
 });

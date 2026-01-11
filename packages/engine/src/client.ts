@@ -19,6 +19,13 @@ export interface EngineClient {
    * overhead.
    */
   setCell(address: string, value: CellScalar, sheet?: string): Promise<void>;
+  /**
+   * Set multiple cells in a single RPC call.
+   *
+   * Useful when applying large delta batches (paste, imports) without creating
+   * per-cell promises.
+   */
+  setCells(updates: Array<{ address: string; value: CellScalar; sheet?: string }>, options?: RpcOptions): Promise<void>;
   setRange(
     range: string,
     values: CellScalar[][],
@@ -88,6 +95,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.getRange(range, sheet, rpcOptions)),
     setCell: async (address, value, sheet) =>
       await withEngine((connected) => connected.setCell(address, value, sheet)),
+    setCells: async (updates, rpcOptions) =>
+      await withEngine((connected) => connected.setCells(updates, rpcOptions)),
     setRange: async (range, values, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
     recalculate: async (sheet, rpcOptions) =>

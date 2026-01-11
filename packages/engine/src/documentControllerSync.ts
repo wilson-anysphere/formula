@@ -21,6 +21,9 @@ export type DocumentCellDelta = {
 export interface EngineSyncTarget {
   loadWorkbookFromJson: (json: string) => Promise<void> | void;
   setCell: (address: string, value: EngineCellScalar, sheet?: string) => Promise<void> | void;
+  setCells?: (
+    updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }>,
+  ) => Promise<void> | void;
   recalculate: (sheet?: string) => Promise<unknown> | unknown;
 }
 
@@ -121,7 +124,7 @@ export async function engineApplyDeltas(
   engine: EngineSyncTarget,
   deltas: readonly DocumentCellDelta[],
 ): Promise<void> {
-  const updates: Array<{ sheetId: string; address: string; input: EngineCellScalar }> = [];
+  const updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }> = [];
 
   for (const delta of deltas) {
     const beforeInput = cellStateToEngineInput(delta.before);
@@ -131,11 +134,15 @@ export async function engineApplyDeltas(
     if (beforeInput === afterInput) continue;
 
     const address = toA1(delta.row, delta.col);
-    updates.push({ sheetId: delta.sheetId, address, input: afterInput });
+    updates.push({ address, value: afterInput, sheet: delta.sheetId });
   }
 
   if (updates.length === 0) return;
 
-  await Promise.all(updates.map((u) => engine.setCell(u.address, u.input, u.sheetId)));
+  if (engine.setCells) {
+    await engine.setCells(updates);
+  } else {
+    await Promise.all(updates.map((u) => engine.setCell(u.address, u.value, u.sheet)));
+  }
   await engine.recalculate();
 }

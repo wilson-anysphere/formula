@@ -147,6 +147,17 @@ export class EngineWorker {
     await this.scheduleFlush();
   }
 
+  async setCells(
+    updates: Array<{ address: string; value: CellScalar; sheet?: string }>,
+    options?: RpcOptions
+  ): Promise<void> {
+    if (updates.length === 0) {
+      return;
+    }
+    await this.flush();
+    await this.invoke("setCells", { updates }, options);
+  }
+
   async setRange(
     range: string,
     values: CellScalar[][],
