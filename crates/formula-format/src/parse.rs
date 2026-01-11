@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::ColorOverride;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
     pub message: String,
@@ -46,6 +48,7 @@ impl Condition {
 struct Section {
     raw: String,
     condition: Option<Condition>,
+    color: Option<ColorOverride>,
 }
 
 /// Parsed Excel number format code split into `;`-delimited sections.
@@ -58,6 +61,7 @@ pub struct FormatCode {
 pub(crate) struct SelectedSection<'a> {
     pub pattern: &'a str,
     pub auto_negative_sign: bool,
+    pub color: Option<ColorOverride>,
 }
 
 impl FormatCode {
@@ -66,6 +70,7 @@ impl FormatCode {
             sections: vec![Section {
                 raw: "General".to_string(),
                 condition: None,
+                color: None,
             }],
         }
     }
@@ -79,9 +84,10 @@ impl FormatCode {
         Ok(Self { sections })
     }
 
-    pub(crate) fn text_section(&self) -> Option<&str> {
+    pub(crate) fn select_section_for_text(&self) -> (Option<&str>, Option<ColorOverride>) {
         if self.sections.len() >= 4 {
-            return Some(self.sections[3].raw.as_str());
+            let section = &self.sections[3];
+            return (Some(section.raw.as_str()), section.color);
         }
 
         // Excel's built-in Text format is `@` and has only one section.
@@ -90,7 +96,8 @@ impl FormatCode {
         self.sections
             .iter()
             .find(|s| contains_at_placeholder(&s.raw))
-            .map(|s| s.raw.as_str())
+            .map(|s| (Some(s.raw.as_str()), s.color))
+            .unwrap_or((None, None))
     }
 
     pub(crate) fn select_section_for_number(&self, v: f64) -> SelectedSection<'_> {
@@ -105,6 +112,7 @@ impl FormatCode {
                             return SelectedSection {
                                 pattern: section.raw.as_str(),
                                 auto_negative_sign: false,
+                                color: section.color,
                             };
                         }
                     }
@@ -119,6 +127,7 @@ impl FormatCode {
             return SelectedSection {
                 pattern: section.raw.as_str(),
                 auto_negative_sign: false,
+                color: section.color,
             };
         }
 
@@ -134,11 +143,13 @@ impl FormatCode {
                 SelectedSection {
                     pattern: self.sections[1].raw.as_str(),
                     auto_negative_sign: false,
+                    color: self.sections[1].color,
                 }
             } else {
                 SelectedSection {
                     pattern: self.sections[0].raw.as_str(),
                     auto_negative_sign: true,
+                    color: self.sections[0].color,
                 }
             }
         } else if v == 0.0 {
@@ -146,17 +157,20 @@ impl FormatCode {
                 SelectedSection {
                     pattern: self.sections[2].raw.as_str(),
                     auto_negative_sign: false,
+                    color: self.sections[2].color,
                 }
             } else {
                 SelectedSection {
                     pattern: self.sections[0].raw.as_str(),
                     auto_negative_sign: false,
+                    color: self.sections[0].color,
                 }
             }
         } else {
             SelectedSection {
                 pattern: self.sections[0].raw.as_str(),
                 auto_negative_sign: false,
+                color: self.sections[0].color,
             }
         }
     }
@@ -230,9 +244,9 @@ fn split_sections(code: &str) -> Vec<String> {
 }
 
 fn parse_section(input: &str) -> Result<Section, ParseError> {
-    let mut rest = input.trim().to_string();
+    let mut rest = input;
     let mut condition: Option<Condition> = None;
-    let mut leading_literal = String::new();
+    let mut color: Option<ColorOverride> = None;
 
     // Strip leading bracketed components like colors, locale tags, currencies,
     // and conditions. Conditions are of the form `[>=100]`.
@@ -252,8 +266,10 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
             break;
         }
 
-        if let Some(symbol) = currency_symbol_from_bracket(content) {
-            leading_literal.push_str(&symbol);
+        if color.is_none() {
+            if let Some(parsed) = parse_color_token(&lower) {
+                color = Some(parsed);
+            }
         }
 
         if condition.is_none() {
@@ -262,13 +278,14 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
             }
         }
 
-        rest = stripped[end + 1..].to_string();
-        rest = rest.trim_start().to_string();
+        rest = &stripped[end + 1..];
+        rest = rest.trim_start();
     }
 
     Ok(Section {
-        raw: format!("{leading_literal}{rest}"),
+        raw: input.to_string(),
         condition,
+        color,
     })
 }
 
@@ -293,14 +310,20 @@ fn parse_condition(content: &str) -> Option<Condition> {
     Some(Condition { op, rhs })
 }
 
-fn currency_symbol_from_bracket(content: &str) -> Option<String> {
-    // Currency/locale tags are encoded as `[$$-409]` where the currency symbol
-    // is between the first `$` and the optional `-` locale suffix.
-    let after = content.strip_prefix('$')?;
-    let symbol = after.split_once('-').map(|(s, _)| s).unwrap_or(after);
-    if symbol.is_empty() {
-        None
-    } else {
-        Some(symbol.to_string())
-    }
+fn parse_color_token(lower: &str) -> Option<ColorOverride> {
+    Some(match lower {
+        "black" => ColorOverride::Argb(0xFF000000),
+        "white" => ColorOverride::Argb(0xFFFFFFFF),
+        "red" => ColorOverride::Argb(0xFFFF0000),
+        "green" => ColorOverride::Argb(0xFF00FF00),
+        "blue" => ColorOverride::Argb(0xFF0000FF),
+        "cyan" => ColorOverride::Argb(0xFF00FFFF),
+        "magenta" => ColorOverride::Argb(0xFFFF00FF),
+        "yellow" => ColorOverride::Argb(0xFFFFFF00),
+        _ => {
+            let rest = lower.strip_prefix("color")?;
+            let idx: u8 = rest.trim().parse().ok()?;
+            ColorOverride::Indexed(idx)
+        }
+    })
 }

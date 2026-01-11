@@ -1,4 +1,5 @@
-use crate::FormatOptions;
+use crate::literal::RenderedText;
+use crate::{FormatOptions, LiteralLayoutOp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateSystem {
@@ -14,7 +15,8 @@ struct DateTimeParts {
     hour: u32,
     minute: u32,
     second: u32,
-    millis: u32,
+    subsecond_units: u32,
+    subsecond_digits: usize,
     // Used for elapsed time formats like `[h]:mm:ss`
     total_seconds: i64,
     // 0=Sunday..6=Saturday
@@ -23,10 +25,16 @@ struct DateTimeParts {
 
 pub(crate) fn looks_like_datetime(section: &str) -> bool {
     let mut in_quotes = false;
-    let mut prev: Option<char> = None;
+    let mut escape = false;
+    let mut has_m = false;
+    let mut has_numeric = false;
     let mut chars = section.chars().peekable();
 
     while let Some(ch) = chars.next() {
+        if escape {
+            escape = false;
+            continue;
+        }
         if in_quotes {
             if ch == '"' {
                 in_quotes = false;
@@ -36,10 +44,7 @@ pub(crate) fn looks_like_datetime(section: &str) -> bool {
 
         match ch {
             '"' => in_quotes = true,
-            '\\' => {
-                // Skip escaped char.
-                let _ = chars.next();
-            }
+            '\\' => escape = true,
             '[' => {
                 // Elapsed time: [h], [m], [s]
                 let mut content = String::new();
@@ -55,20 +60,8 @@ pub(crate) fn looks_like_datetime(section: &str) -> bool {
                 }
             }
             'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S' => return true,
-            'm' | 'M' => {
-                // `m` is ambiguous; treat it as datetime only if it is likely
-                // part of a date/time expression (e.g. next to y/d/h/s).
-                if let Some(p) = prev {
-                    if matches!(p, 'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S') {
-                        return true;
-                    }
-                }
-                if let Some(n) = chars.peek().copied() {
-                    if matches!(n, 'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S') {
-                        return true;
-                    }
-                }
-            }
+            'm' | 'M' => has_m = true,
+            '0' | '#' | '?' | '@' => has_numeric = true,
             'a' | 'A' => {
                 // AM/PM or A/P markers (case-insensitive).
                 let mut probe = String::new();
@@ -88,14 +81,15 @@ pub(crate) fn looks_like_datetime(section: &str) -> bool {
             }
             _ => {}
         }
-
-        prev = Some(ch);
     }
 
-    false
+    // If the format contains month tokens but no numeric placeholders, treat it as a date/time
+    // format (e.g. `mm` meaning "month"). If numeric placeholders are present, `m` is more likely
+    // a literal suffix (e.g. `0m`), so keep it as numeric.
+    has_m && !has_numeric
 }
 
-pub(crate) fn format_datetime(serial: f64, pattern: &str, options: &FormatOptions) -> String {
+pub(crate) fn format_datetime(serial: f64, pattern: &str, options: &FormatOptions) -> RenderedText {
     let mut tokens = tokenize(pattern);
     let has_ampm = tokens
         .iter()
@@ -112,7 +106,7 @@ pub(crate) fn format_datetime(serial: f64, pattern: &str, options: &FormatOption
         .unwrap_or(0);
 
     let Some(parts) = serial_to_parts(serial, options.date_system, frac_digits) else {
-        return "#####".to_string();
+        return RenderedText::new("#####".to_string());
     };
     render_tokens(&tokens, &parts, has_ampm, options)
 }
@@ -128,23 +122,26 @@ fn serial_to_parts(serial: f64, date_system: DateSystem, frac_second_digits: usi
 
     let mut days = serial.floor() as i64;
     let frac = serial - days as f64;
-    let step_ms = match frac_second_digits {
-        0 => 1000,
-        1 => 100,
-        2 => 10,
-        _ => 1,
+    let frac_second_digits = frac_second_digits.min(9);
+    let scale = if frac_second_digits == 0 {
+        1_i64
+    } else {
+        10_i64.pow(frac_second_digits as u32)
     };
-    let mut total_millis = ((frac * 86_400_000.0) / (step_ms as f64)).round() as i64 * step_ms;
 
-    if total_millis >= 86_400_000 {
-        total_millis = 0;
+    let mut total_units = (frac * 86_400.0 * scale as f64).round() as i64;
+    let day_units = 86_400_i64 * scale;
+    if total_units >= day_units {
+        total_units = 0;
         days += 1;
     }
 
-    let hour = (total_millis / 3_600_000) as u32;
-    let minute = ((total_millis % 3_600_000) / 60_000) as u32;
-    let second = ((total_millis % 60_000) / 1000) as u32;
-    let millis = (total_millis % 1000) as u32;
+    let seconds_total = total_units / scale;
+    let subsecond_units = (total_units % scale) as u32;
+
+    let hour = (seconds_total / 3_600) as u32;
+    let minute = ((seconds_total % 3_600) / 60) as u32;
+    let second = (seconds_total % 60) as u32;
 
     // Convert the date part.
     let (year, month, day, weekday) = match date_system {
@@ -159,8 +156,9 @@ fn serial_to_parts(serial: f64, date_system: DateSystem, frac_second_digits: usi
         hour,
         minute,
         second,
-        millis,
-        total_seconds: (days * 86_400) + (total_millis / 1000),
+        subsecond_units,
+        subsecond_digits: frac_second_digits,
+        total_seconds: (days * 86_400) + seconds_total,
         weekday,
     })
 }
@@ -224,11 +222,7 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
 
 fn weekday_from_days(days: i64) -> u32 {
     // 1970-01-01 was Thursday. Map 0=Sunday..6=Saturday.
-    let mut w = (days + 4).rem_euclid(7);
-    // rem_euclid returns 0..6; now 0=Thursday, shift to 0=Sunday.
-    // Thursday(0) -> 4, Friday(1)->5, Saturday(2)->6, Sunday(3)->0, ...
-    w = (w + 3).rem_euclid(7);
-    w as u32
+    (days + 4).rem_euclid(7) as u32
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,6 +243,8 @@ enum Token {
     ElapsedHours,
     ElapsedMinutes,
     ElapsedSeconds,
+    Underscore(char),
+    Fill(char),
 }
 
 fn tokenize(pattern: &str) -> Vec<Token> {
@@ -275,13 +271,20 @@ fn tokenize(pattern: &str) -> Vec<Token> {
                 }
             }
             '_' => {
-                // Skip next and emit a space.
-                let _ = chars.next();
-                literal_buf.push(' ');
+                if let Some(width_of) = chars.next() {
+                    flush_literal(&mut literal_buf, &mut tokens);
+                    tokens.push(Token::Underscore(width_of));
+                } else {
+                    literal_buf.push('_');
+                }
             }
             '*' => {
-                // Skip next char; fill is layout-only.
-                let _ = chars.next();
+                if let Some(fill_with) = chars.next() {
+                    flush_literal(&mut literal_buf, &mut tokens);
+                    tokens.push(Token::Fill(fill_with));
+                } else {
+                    literal_buf.push('*');
+                }
             }
             '/' => {
                 flush_literal(&mut literal_buf, &mut tokens);
@@ -306,10 +309,8 @@ fn tokenize(pattern: &str) -> Vec<Token> {
                     "m" | "mm" => tokens.push(Token::ElapsedMinutes),
                     "s" | "ss" => tokens.push(Token::ElapsedSeconds),
                     _ => {
-                        // Treat unknown brackets as literals (e.g. colors).
-                        literal_buf.push('[');
-                        literal_buf.push_str(&content);
-                        literal_buf.push(']');
+                        // Other bracket tokens (colors/locales/conditions) are meta tokens and do
+                        // not contribute to display text.
                     }
                 }
             }
@@ -440,7 +441,7 @@ fn disambiguate_minutes(tokens: &mut [Token]) {
 fn prev_non_literal(tokens: &[Token], idx: usize) -> Option<&Token> {
     for j in (0..idx).rev() {
         match &tokens[j] {
-            Token::Literal(_) | Token::DateSep | Token::TimeSep => continue,
+            Token::Literal(_) | Token::DateSep | Token::TimeSep | Token::Underscore(_) | Token::Fill(_) => continue,
             t => return Some(t),
         }
     }
@@ -450,15 +451,15 @@ fn prev_non_literal(tokens: &[Token], idx: usize) -> Option<&Token> {
 fn next_non_literal(tokens: &[Token], idx: usize) -> Option<&Token> {
     for j in idx + 1..tokens.len() {
         match &tokens[j] {
-            Token::Literal(_) | Token::DateSep | Token::TimeSep => continue,
+            Token::Literal(_) | Token::DateSep | Token::TimeSep | Token::Underscore(_) | Token::Fill(_) => continue,
             t => return Some(t),
         }
     }
     None
 }
 
-fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, options: &FormatOptions) -> String {
-    let mut out = String::new();
+fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, options: &FormatOptions) -> RenderedText {
+    let mut out = RenderedText::new(String::new());
 
     for token in tokens {
         match token {
@@ -484,13 +485,26 @@ fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, option
             Token::Second(count) => out.push_str(&format_two(parts.second, *count)),
             Token::FractionalSeconds(digits) => {
                 out.push('.');
-                out.push_str(&format_fractional_seconds(parts.millis, *digits));
+                out.push_str(&format_fractional_seconds(parts, *digits));
             }
             Token::AmPmLong => out.push_str(if parts.hour < 12 { "AM" } else { "PM" }),
             Token::AmPmShort => out.push_str(if parts.hour < 12 { "A" } else { "P" }),
             Token::ElapsedHours => out.push_str(&(parts.total_seconds / 3600).to_string()),
             Token::ElapsedMinutes => out.push_str(&(parts.total_seconds / 60).to_string()),
             Token::ElapsedSeconds => out.push_str(&parts.total_seconds.to_string()),
+            Token::Underscore(width_of) => {
+                out.push_layout_op(LiteralLayoutOp::Underscore {
+                    byte_index: out.text.len(),
+                    width_of: *width_of,
+                });
+                out.push(' ');
+            }
+            Token::Fill(fill_with) => {
+                out.push_layout_op(LiteralLayoutOp::Fill {
+                    byte_index: out.text.len(),
+                    fill_with: *fill_with,
+                });
+            }
             Token::MonthOrMinute(_) => unreachable!("month/minute disambiguation should run first"),
         }
     }
@@ -566,11 +580,18 @@ fn format_day(day: u32, weekday: u32, count: usize) -> String {
     }
 }
 
-fn format_fractional_seconds(millis: u32, digits: usize) -> String {
-    match digits {
-        0 => String::new(),
-        1 => format!("{}", millis / 100),
-        2 => format!("{:02}", millis / 10),
-        _ => format!("{:03}", millis),
+fn format_fractional_seconds(parts: &DateTimeParts, digits: usize) -> String {
+    if digits == 0 {
+        return String::new();
     }
+
+    let total_digits = parts.subsecond_digits;
+    if total_digits == 0 {
+        return "0".repeat(digits);
+    }
+
+    let digits = digits.min(total_digits);
+    let divisor = 10_u32.pow((total_digits - digits) as u32);
+    let value = parts.subsecond_units / divisor;
+    format!("{value:0digits$}", digits = digits)
 }

@@ -86,16 +86,76 @@ pub enum AlignmentHint {
     Right,
 }
 
+/// A color override derived from an Excel format code section token such as `[Red]` or `[Color10]`.
+///
+/// Format code colors are *not* part of the rendered display text; they are a rendering hint that
+/// the UI can apply as an override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorOverride {
+    /// 8-digit ARGB value (`0xAARRGGBB`).
+    Argb(u32),
+    /// Excel "indexed" palette entry (typically 1-56).
+    Indexed(u8),
+    /// Theme color (rare in format codes, but included for future compatibility).
+    Theme { index: u8, tint: i16 },
+}
+
+/// Layout hints for literal spacing/fill tokens in format codes.
+///
+/// Excel format codes can contain:
+/// - `_X` (underscore): reserve the width of the next character `X` (often used for accounting
+///   formats to align parentheses). In a text-only renderer we approximate this as a single space,
+///   but report an [`LiteralLayoutOp::Underscore`] so a UI can do better.
+/// - `*X` (asterisk fill): repeat `X` to fill the remaining cell width. This cannot be represented
+///   in a width-agnostic string, so we omit it from `text` and report an [`LiteralLayoutOp::Fill`]
+///   instead.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LiteralLayoutHint {
+    pub ops: Vec<LiteralLayoutOp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiteralLayoutOp {
+    /// The underscore token was rendered as a single space at `byte_index`.
+    Underscore { byte_index: usize, width_of: char },
+    /// A fill instruction should begin at `byte_index` by repeating `fill_with`.
+    Fill { byte_index: usize, fill_with: char },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormattedValue {
     pub text: String,
     pub alignment: AlignmentHint,
 }
 
+/// Full render result returned by [`render_value`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderResult {
+    pub text: String,
+    pub alignment: AlignmentHint,
+    pub color: Option<ColorOverride>,
+    pub layout_hint: Option<LiteralLayoutHint>,
+}
+
 /// Format a value using an Excel number format code.
 ///
 /// If `format_code` is `None` or empty, `"General"` is used.
 pub fn format_value(value: Value<'_>, format_code: Option<&str>, options: &FormatOptions) -> FormattedValue {
+    let rendered = render_value(value, format_code, options);
+    FormattedValue {
+        text: rendered.text,
+        alignment: rendered.alignment,
+    }
+}
+
+/// Render a value using an Excel number format code, returning additional render hints.
+///
+/// This is the preferred API for UI rendering because it surfaces:
+/// - color override tokens (`[Red]`, `[Color10]`, …)
+/// - underscore/fill layout hints used by accounting formats.
+///
+/// [`format_value`] remains available for callers that only need the rendered string.
+pub fn render_value(value: Value<'_>, format_code: Option<&str>, options: &FormatOptions) -> RenderResult {
     let code_str = format_code.unwrap_or("General");
     let code_str = if code_str.trim().is_empty() {
         "General"
@@ -105,43 +165,91 @@ pub fn format_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
 
     let code = FormatCode::parse(code_str).unwrap_or_else(|_| FormatCode::general());
 
-    let (text, alignment) = match value {
-        Value::Blank => (String::new(), AlignmentHint::Left),
-        Value::Error(err) => (err.to_string(), AlignmentHint::Center),
-        Value::Text(s) => (format_text(s, &code), AlignmentHint::Left),
+    match value {
+        Value::Blank => RenderResult {
+            text: String::new(),
+            alignment: AlignmentHint::Left,
+            color: None,
+            layout_hint: None,
+        },
+        Value::Error(err) => RenderResult {
+            text: err.to_string(),
+            alignment: AlignmentHint::Center,
+            color: None,
+            layout_hint: None,
+        },
+        Value::Text(s) => {
+            let (pattern, color) = code.select_section_for_text();
+            let rendered = if let Some(pattern) = pattern {
+                crate::literal::render_text_section(pattern, s)
+            } else {
+                crate::literal::RenderedText::new(s.to_string())
+            };
+            let layout_hint = rendered.layout_hint();
+            RenderResult {
+                text: rendered.text,
+                alignment: AlignmentHint::Left,
+                color,
+                layout_hint,
+            }
+        }
         Value::Bool(b) => {
             let s = if b { "TRUE" } else { "FALSE" };
-            (format_text(s, &code), AlignmentHint::Center)
+            let (pattern, color) = code.select_section_for_text();
+            let rendered = if let Some(pattern) = pattern {
+                crate::literal::render_text_section(pattern, s)
+            } else {
+                crate::literal::RenderedText::new(s.to_string())
+            };
+            let layout_hint = rendered.layout_hint();
+            RenderResult {
+                text: rendered.text,
+                alignment: AlignmentHint::Center,
+                color,
+                layout_hint,
+            }
         }
         Value::Number(n) => {
+            if !n.is_finite() {
+                // Excel does not have NaN/Infinity numeric values; treat them as #NUM!.
+                return RenderResult {
+                    text: "#NUM!".to_string(),
+                    alignment: AlignmentHint::Center,
+                    color: None,
+                    layout_hint: None,
+                };
+            }
+
             let section = code.select_section_for_number(n);
-            if section.pattern.trim().is_empty() {
-                (String::new(), AlignmentHint::Right)
-            } else if crate::datetime::looks_like_datetime(section.pattern) {
-                (
-                    crate::datetime::format_datetime(n, section.pattern, options),
-                    AlignmentHint::Right,
-                )
+            if crate::datetime::looks_like_datetime(section.pattern) {
+                let rendered = crate::datetime::format_datetime(n, section.pattern, options);
+                let layout_hint = rendered.layout_hint();
+                RenderResult {
+                    text: rendered.text,
+                    alignment: AlignmentHint::Right,
+                    color: section.color,
+                    layout_hint,
+                }
             } else {
-                let text =
-                    crate::number::format_number(n, section.pattern, section.auto_negative_sign, options);
+                let rendered = crate::number::format_number(
+                    n,
+                    section.pattern,
+                    section.auto_negative_sign,
+                    options,
+                );
                 let alignment = if crate::number::pattern_is_text(section.pattern) {
                     AlignmentHint::Left
                 } else {
                     AlignmentHint::Right
                 };
-                (text, alignment)
+                let layout_hint = rendered.layout_hint();
+                RenderResult {
+                    text: rendered.text,
+                    alignment,
+                    color: section.color,
+                    layout_hint,
+                }
             }
         }
-    };
-
-    FormattedValue { text, alignment }
-}
-
-fn format_text(text: &str, code: &FormatCode) -> String {
-    if let Some(section) = code.text_section() {
-        crate::literal::render_text_section(section, text)
-    } else {
-        text.to_string()
     }
 }

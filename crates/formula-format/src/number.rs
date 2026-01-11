@@ -10,13 +10,18 @@ pub(crate) fn pattern_is_text(pattern: &str) -> bool {
     first.is_none() && last.is_none()
 }
 
-pub(crate) fn format_number(value: f64, pattern: &str, auto_negative_sign: bool, options: &FormatOptions) -> String {
+pub(crate) fn format_number(
+    value: f64,
+    pattern: &str,
+    auto_negative_sign: bool,
+    options: &FormatOptions,
+) -> literal::RenderedText {
     if pattern.trim().eq_ignore_ascii_case("general") {
-        return format_general(value, options);
+        return literal::RenderedText::new(format_general(value, options));
     }
 
     if !value.is_finite() {
-        return value.to_string();
+        return literal::RenderedText::new(value.to_string());
     }
 
     // Text placeholder format (built-in 49) and related custom patterns:
@@ -61,44 +66,124 @@ pub(crate) fn format_number(value: f64, pattern: &str, auto_negative_sign: bool,
     // Scientific
     if let Some(spec) = parse_scientific(number_raw) {
         let out = format_scientific(v, &spec, options);
-        let mut s = format!("{prefix}{out}{suffix}");
+        let mut rendered = prefix;
+        rendered.push_str(&out);
+        rendered.extend(suffix);
         if value < 0.0 && auto_negative_sign {
-            s.insert(0, '-');
+            rendered.prepend_char('-');
         }
-        return s;
+        return rendered;
     }
 
     if let Some(spec) = parse_fraction(number_raw) {
         let out = format_fraction(v, &spec, options);
-        let mut s = format!("{prefix}{out}{suffix}");
+        let mut rendered = prefix;
+        rendered.push_str(&out);
+        rendered.extend(suffix);
         if value < 0.0 && auto_negative_sign {
-            s.insert(0, '-');
+            rendered.prepend_char('-');
         }
-        return s;
+        return rendered;
     }
 
     let spec = parse_fixed(number_raw);
     let out = format_fixed(v, &spec, options);
-    let mut s = format!("{prefix}{out}{suffix}");
+    let mut rendered = prefix;
+    rendered.push_str(&out);
+    rendered.extend(suffix);
     if value < 0.0 && auto_negative_sign {
-        s.insert(0, '-');
+        rendered.prepend_char('-');
     }
-    s
+    rendered
 }
 
 fn format_general(value: f64, options: &FormatOptions) -> String {
-    if value == 0.0 {
+    // Excel stores numbers with 15 significant digits. The rendering rules for General are:
+    // - Round to 15 significant digits
+    // - Use fixed-point for "reasonable" magnitudes, otherwise scientific
+    // - Trim insignificant trailing zeros
+    // - Avoid displaying negative zero
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let rounded = round_to_significant_digits(value, 15);
+    if rounded == 0.0 {
         return "0".to_string();
     }
 
-    let mut s = value.to_string();
-    if s.contains('e') {
-        s = s.replace('e', "E");
-    }
+    let abs = rounded.abs();
+    let exponent = abs.log10().floor() as i32;
+    // Empirically Excel switches to scientific notation outside this exponent window.
+    let use_scientific = abs >= 1e11 || abs < 1e-9;
+    let mut s = if use_scientific {
+        format_general_scientific(rounded, exponent)
+    } else {
+        format_general_decimal(rounded, exponent)
+    };
+
     if options.locale.decimal_sep != '.' {
         s = s.replace('.', &options.locale.decimal_sep.to_string());
     }
     s
+}
+
+fn round_to_significant_digits(value: f64, digits: i32) -> f64 {
+    if value == 0.0 {
+        return 0.0;
+    }
+    let abs = value.abs();
+    let exp = abs.log10().floor() as i32;
+    let scale = digits - 1 - exp;
+    let factor = 10_f64.powi(scale);
+    (value * factor).round() / factor
+}
+
+fn format_general_decimal(value: f64, exponent: i32) -> String {
+    // `exponent` is floor(log10(abs(value))).
+    // Render with enough fractional digits to preserve 15 significant digits, then trim.
+    let decimals = (15 - 1 - exponent).max(0) as usize;
+    let mut s = format!("{:.*}", decimals, value);
+    trim_trailing_zeros(&mut s);
+    s
+}
+
+fn format_general_scientific(value: f64, exponent: i32) -> String {
+    // Render mantissa with up to 15 significant digits and an exponent with at least 2 digits.
+    // Use `E` (upper) like Excel.
+    let mut exp = exponent;
+    let mut mantissa = value / 10_f64.powi(exp);
+    mantissa = round_to_significant_digits(mantissa, 15);
+
+    if mantissa.abs() >= 10.0 {
+        mantissa /= 10.0;
+        exp += 1;
+    }
+
+    let sign = if exp < 0 { '-' } else { '+' };
+    let exp_abs = exp.abs();
+    let exp_width = std::cmp::max(2, exp_abs.to_string().len());
+
+    let mut mantissa_str = format!("{:.14}", mantissa);
+    trim_trailing_zeros(&mut mantissa_str);
+
+    format!(
+        "{}E{}{:0width$}",
+        mantissa_str,
+        sign,
+        exp_abs,
+        width = exp_width
+    )
+}
+
+fn trim_trailing_zeros(s: &mut String) {
+    if let Some(dot) = s.find('.') {
+        while s.ends_with('0') {
+            s.pop();
+        }
+        if s.ends_with('.') && s.len() == dot + 1 {
+            s.pop();
+        }
+    }
 }
 
 fn scan_outside_quotes(s: &str, needle: char) -> (usize, Vec<usize>) {
@@ -182,13 +267,18 @@ fn find_placeholder_span(s: &str) -> (Option<usize>, Option<usize>) {
 
 #[derive(Debug, Clone)]
 struct FixedSpec {
-    min_int: usize,
-    int_placeholders: usize,
-    min_frac: usize,
-    max_frac: usize,
+    int_placeholders: Vec<PlaceholderKind>,
+    frac_placeholders: Vec<PlaceholderKind>,
     grouping: bool,
     scale_commas: usize,
     has_decimal_point: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaceholderKind {
+    Zero,
+    Hash,
+    Question,
 }
 
 fn parse_fixed(number_raw: &str) -> FixedSpec {
@@ -238,20 +328,27 @@ fn parse_fixed(number_raw: &str) -> FixedSpec {
     };
 
     let grouping = int_pat.contains(',');
-    let int_placeholders = int_pat.chars().filter(|c| matches!(c, '0' | '#' | '?')).count();
-    let min_int = int_pat.chars().filter(|c| *c == '0').count();
-    let max_frac = frac_pat.chars().filter(|c| matches!(c, '0' | '#' | '?')).count();
-    let min_frac = frac_pat.chars().filter(|c| *c == '0').count();
+    let int_placeholders = parse_placeholders(int_pat);
+    let frac_placeholders = parse_placeholders(frac_pat);
 
     FixedSpec {
-        min_int,
         int_placeholders,
-        min_frac,
-        max_frac,
+        frac_placeholders,
         grouping,
         scale_commas,
         has_decimal_point: decimal_pos.is_some(),
     }
+}
+
+fn parse_placeholders(pat: &str) -> Vec<PlaceholderKind> {
+    pat.chars()
+        .filter_map(|c| match c {
+            '0' => Some(PlaceholderKind::Zero),
+            '#' => Some(PlaceholderKind::Hash),
+            '?' => Some(PlaceholderKind::Question),
+            _ => None,
+        })
+        .collect()
 }
 
 fn format_fixed(mut value: f64, spec: &FixedSpec, options: &FormatOptions) -> String {
@@ -260,13 +357,15 @@ fn format_fixed(mut value: f64, spec: &FixedSpec, options: &FormatOptions) -> St
         value /= 1000.0;
     }
 
-    // Round to max fraction digits.
-    let rounded = round_to(value, spec.max_frac);
+    let max_frac = spec.frac_placeholders.len();
 
-    let (mut int_part, mut frac_part) = if spec.max_frac == 0 {
+    // Round to max fraction digits.
+    let rounded = round_to(value, max_frac);
+
+    let (int_digits, frac_digits) = if max_frac == 0 {
         (format!("{:.0}", rounded), String::new())
     } else {
-        let s = format!("{:.*}", spec.max_frac, rounded);
+        let s = format!("{:.*}", max_frac, rounded);
         let mut split = s.splitn(2, '.');
         (
             split.next().unwrap_or("").to_string(),
@@ -274,39 +373,31 @@ fn format_fixed(mut value: f64, spec: &FixedSpec, options: &FormatOptions) -> St
         )
     };
 
-    // Optional integer digits.
-    if spec.int_placeholders == 0 {
-        // No integer placeholders at all; unusual but legal.
-        int_part.clear();
-    } else if spec.min_int == 0 && int_part == "0" && value.abs() < 1.0 {
-        // Common optional-digit pattern: "#" should show blank for values < 1.
-        // (Excel behaviour for 0 is blank; for 0.5 it shows nothing before the decimal.)
-        int_part.clear();
-    }
+    let int_part = apply_int_placeholders(&int_digits, &spec.int_placeholders, value.abs() < 1.0);
+    let int_part = if spec.grouping && !int_part.trim().is_empty() {
+        // Grouping should ignore leading spaces produced by `?`.
+        group_thousands_with_padding(&int_part, options.locale.thousands_sep)
+    } else {
+        int_part
+    };
 
-    while int_part.len() < spec.min_int {
-        int_part.insert(0, '0');
-    }
-
-    if spec.grouping && !int_part.is_empty() {
-        int_part = group_thousands(&int_part, options.locale.thousands_sep);
-    }
-
-    if spec.max_frac > 0 {
-        while frac_part.len() > spec.min_frac && frac_part.ends_with('0') {
-            frac_part.pop();
-        }
-    }
+    let frac_part = apply_frac_placeholders(&frac_digits, &spec.frac_placeholders);
 
     let mut out = String::new();
     out.push_str(&int_part);
 
-    if spec.has_decimal_point && (spec.max_frac == 0 || !frac_part.is_empty()) {
-        out.push(options.locale.decimal_sep);
+    if spec.has_decimal_point {
+        let show_decimal = spec.frac_placeholders.is_empty()
+            || !frac_part.is_empty()
+            || spec
+                .frac_placeholders
+                .iter()
+                .any(|k| matches!(k, PlaceholderKind::Zero | PlaceholderKind::Question));
+        if show_decimal {
+            out.push(options.locale.decimal_sep);
+        }
     }
-    if !frac_part.is_empty() {
-        out.push_str(&frac_part);
-    }
+    out.push_str(&frac_part);
 
     out
 }
@@ -328,6 +419,130 @@ fn group_thousands(int_part: &str, sep: char) -> String {
         out.push(ch);
         if pos_from_end > 1 && pos_from_end % 3 == 1 {
             out.push(sep);
+        }
+    }
+    out
+}
+
+fn group_thousands_with_padding(int_part: &str, sep: char) -> String {
+    let trimmed = int_part.trim_start_matches(' ');
+    let pad_len = int_part.len() - trimmed.len();
+    let mut grouped = if trimmed.is_empty() {
+        String::new()
+    } else {
+        group_thousands(trimmed, sep)
+    };
+    if pad_len > 0 {
+        let mut out = String::with_capacity(pad_len + grouped.len());
+        for _ in 0..pad_len {
+            out.push(' ');
+        }
+        out.push_str(&grouped);
+        grouped = out;
+    }
+    grouped
+}
+
+fn apply_int_placeholders(digits: &str, placeholders: &[PlaceholderKind], is_less_than_one: bool) -> String {
+    if placeholders.is_empty() {
+        return String::new();
+    }
+
+    // For values < 1, Excel suppresses the leading "0" when the integer placeholders are optional.
+    // We treat the integer digits as empty in that case and let placeholders decide what to output.
+    let digits = if is_less_than_one && digits == "0" { "" } else { digits };
+
+    let digit_chars: Vec<char> = digits.chars().collect();
+    let placeholder_len = placeholders.len();
+
+    // Digits beyond the placeholder width are still displayed.
+    let extra = digit_chars.len().saturating_sub(placeholder_len);
+    let mut out = String::new();
+    for ch in digit_chars.iter().take(extra) {
+        out.push(*ch);
+    }
+
+    let tail_digits = &digit_chars[extra..];
+    let mut tail_out: Vec<char> = Vec::with_capacity(placeholder_len);
+    let mut digit_idx: i32 = tail_digits.len() as i32 - 1;
+
+    for kind in placeholders.iter().rev() {
+        let digit = if digit_idx >= 0 {
+            let c = tail_digits[digit_idx as usize];
+            digit_idx -= 1;
+            Some(c)
+        } else {
+            None
+        };
+
+        match kind {
+            PlaceholderKind::Zero => tail_out.push(digit.unwrap_or('0')),
+            PlaceholderKind::Hash => {
+                if let Some(c) = digit {
+                    tail_out.push(c);
+                }
+            }
+            PlaceholderKind::Question => {
+                if let Some(c) = digit {
+                    tail_out.push(c);
+                } else {
+                    tail_out.push(' ');
+                }
+            }
+        }
+    }
+
+    tail_out.reverse();
+    out.extend(tail_out);
+    out
+}
+
+fn apply_frac_placeholders(digits: &str, placeholders: &[PlaceholderKind]) -> String {
+    if placeholders.is_empty() {
+        return String::new();
+    }
+
+    let mut digit_chars: Vec<char> = digits.chars().collect();
+    while digit_chars.len() < placeholders.len() {
+        digit_chars.push('0');
+    }
+
+    // Determine how many trailing digits are insignificant zeros for optional placeholders.
+    let mut cut = digit_chars.len();
+    while cut > 0 {
+        let idx = cut - 1;
+        let kind = placeholders.get(idx).copied().unwrap_or(PlaceholderKind::Hash);
+        let digit = digit_chars[idx];
+        match kind {
+            PlaceholderKind::Zero => break,
+            PlaceholderKind::Hash => {
+                if digit == '0' {
+                    cut -= 1;
+                } else {
+                    break;
+                }
+            }
+            PlaceholderKind::Question => {
+                if digit == '0' {
+                    cut -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    let mut out = String::with_capacity(placeholders.len());
+    for (idx, kind) in placeholders.iter().enumerate() {
+        let digit = digit_chars.get(idx).copied().unwrap_or('0');
+        if idx >= cut {
+            match kind {
+                PlaceholderKind::Zero => out.push('0'),
+                PlaceholderKind::Hash => {}
+                PlaceholderKind::Question => out.push(' '),
+            }
+        } else {
+            out.push(digit);
         }
     }
     out
@@ -417,7 +632,8 @@ fn format_scientific(value: f64, spec: &ScientificSpec, options: &FormatOptions)
     let mut mantissa = value / pow;
 
     // Apply rounding to mantissa based on the mantissa spec.
-    mantissa = round_to(mantissa, spec.mantissa.max_frac);
+    let mantissa_frac = spec.mantissa.frac_placeholders.len();
+    mantissa = round_to(mantissa, mantissa_frac);
 
     // Rounding can bump mantissa to 10.0; normalize.
     let mut exp = exponent;
