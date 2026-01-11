@@ -880,7 +880,7 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
         _ => return Ok(false),
     };
 
-    let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U16)?;
+    let ws = parse_fmla_string_cached_value_offsets(payload)?;
     let raw = payload
         .get(ws.utf16_start..ws.utf16_end)
         .ok_or(Error::UnexpectedEof)?;
@@ -1309,7 +1309,7 @@ fn patch_fmla_string<W: io::Write>(
     //   [col: u32][style: u32]
     //   [cached value: XLWideString (cch + flags + utf16 + optional rich/phonetic blocks)]
     //   [cce: u32][rgce bytes...][extra...]
-    let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U16)?;
+    let ws = parse_fmla_string_cached_value_offsets(payload)?;
     let flags = ws.flags;
 
     let cce = read_u32(payload, ws.end)? as usize;
@@ -1369,8 +1369,19 @@ fn patch_fmla_string<W: io::Write>(
             ))
         })?
     } else {
-        // [cch:u32][flags:u16][utf16 bytes...]
-        6u32.checked_add(desired_str_len).ok_or(Error::UnexpectedEof)?
+        // [cch:u32][flags:u16][utf16 bytes...][optional rich/phonetic headers...]
+        //
+        // We preserve the original wide-string flags byte-for-byte. If the flags indicate
+        // rich-text runs or phonetic blocks, emit a minimal empty payload so the stream
+        // stays parseable even when we dropped the original formatting bytes.
+        let mut len = 6u32.checked_add(desired_str_len).ok_or(Error::UnexpectedEof)?;
+        if flags & FLAG_RICH != 0 {
+            len = len.checked_add(4).ok_or(Error::UnexpectedEof)?;
+        }
+        if flags & FLAG_PHONETIC != 0 {
+            len = len.checked_add(4).ok_or(Error::UnexpectedEof)?;
+        }
+        len
     };
 
     let new_rgce_len = u32::try_from(new_rgce.len()).map_err(|_| {
@@ -1399,15 +1410,51 @@ fn patch_fmla_string<W: io::Write>(
         let raw = payload.get(8..ws.end).ok_or(Error::UnexpectedEof)?;
         writer.write_raw(raw)?;
     } else {
-        let flags = flags & !(FLAG_RICH | FLAG_PHONETIC);
         writer.write_u32(desired_cch_u32)?;
         writer.write_u16(flags)?;
         writer.write_raw(&desired_utf16)?;
+        if flags & FLAG_RICH != 0 {
+            writer.write_u32(0)?; // cRun
+        }
+        if flags & FLAG_PHONETIC != 0 {
+            writer.write_u32(0)?; // cb
+        }
     }
     writer.write_u32(new_rgce_len)?;
     writer.write_raw(new_rgce)?;
     writer.write_raw(extra)?;
     Ok(())
+}
+
+fn parse_fmla_string_cached_value_offsets(payload: &[u8]) -> Result<WideStringOffsets, Error> {
+    // BrtFmlaString cached values are encoded using `XLWideString` with u16 flags, but some
+    // producers appear to set reserved bits that overlap with the rich/phonetic indicators
+    // without actually emitting those payload blocks. Be lenient: if parsing the optional
+    // blocks would leave us without enough bytes to read the formula fields (`cce`, `rgce`,
+    // trailing bytes), fall back to treating the cached string as having no rich/phonetic
+    // payload.
+    let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U16)?;
+    if ws.end.checked_add(4).filter(|&o| o <= payload.len()).is_some() {
+        return Ok(ws);
+    }
+
+    // Fallback to the simple layout: [cch:u32][flags:u16][utf16 chars...]
+    let cch = read_u32(payload, 8)? as usize;
+    let flags = read_u16(payload, 12)?;
+    let utf16_start = 14usize;
+    let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+    let utf16_end = utf16_start
+        .checked_add(utf16_len)
+        .ok_or(Error::UnexpectedEof)?;
+    payload.get(utf16_start..utf16_end).ok_or(Error::UnexpectedEof)?;
+
+    Ok(WideStringOffsets {
+        cch,
+        flags,
+        utf16_start,
+        utf16_end,
+        end: utf16_end,
+    })
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Result<u16, Error> {
