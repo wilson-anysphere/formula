@@ -8,7 +8,7 @@
     "dev": "node scripts/node-with-tsx.mjs --watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test": "node scripts/node-with-tsx.mjs --test test/*.test.ts",
+    "test": "node scripts/run-tests.mjs",
     "keyring:generate": "node scripts/node-with-tsx.mjs src/keyring-cli.ts generate",
     "keyring:rotate": "node scripts/node-with-tsx.mjs src/keyring-cli.ts rotate",
     "keyring:validate": "node scripts/node-with-tsx.mjs src/keyring-cli.ts validate",

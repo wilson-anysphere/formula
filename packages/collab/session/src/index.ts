@@ -19,6 +19,7 @@ import {
   type CellEncryptionKey,
   type CellPlaintext,
 } from "@formula/collab-encryption";
+import type { CollabPersistence, CollabPersistenceBinding } from "@formula/collab-persistence";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
 import {
@@ -273,12 +274,25 @@ export type CollabSessionProvider = {
 };
 
 export interface CollabSessionOptions {
+  /**
+   * Stable identifier for this document. Required when `persistence` is enabled
+   * and `connection` is not provided.
+   */
+  docId?: string;
   doc?: Y.Doc;
   /**
    * Convenience option to construct a y-websocket provider for this session.
    * When provided, `session.provider` will be a `WebsocketProvider` instance.
    */
   connection?: CollabSessionConnectionOptions;
+  /**
+   * Optional offline-first local persistence for this document.
+   *
+   * When combined with `connection`, CollabSession will ensure the persisted
+   * state is loaded before connecting the sync provider so offline edits are
+   * present when syncing.
+   */
+  persistence?: CollabPersistence;
   /**
    * Optional sync provider (e.g. y-websocket's WebsocketProvider). If provided,
    * we will use `provider.awareness` when constructing a PresenceManager.
@@ -511,6 +525,11 @@ export class CollabSession {
    */
   readonly cellValueConflictMonitor: CellConflictMonitor | null;
 
+  private readonly persistence: CollabPersistence | null;
+  private readonly persistenceDocId: string | null;
+  private persistenceBinding: CollabPersistenceBinding | null = null;
+  private readonly localPersistenceLoaded: Promise<void>;
+
   private permissions: SessionPermissions | null = null;
   private readonly defaultSheetId: string;
   private readonly encryption:
@@ -526,6 +545,7 @@ export class CollabSession {
   private readonly offlineAutoConnectAfterLoad: boolean;
   private readonly formulaConflictsIncludeValueConflicts: boolean;
   private isDestroyed = false;
+  private providerConnectScheduled = false;
 
   private ensureLocalCellMapForWrite(cellKey: string): void {
     const existingCell = getYMapCell(this.cells.get(cellKey));
@@ -570,11 +590,24 @@ export class CollabSession {
   }
 
   constructor(options: CollabSessionOptions = {}) {
-    // When connecting to a sync provider, use the provider document id as the
-    // Y.Doc guid to make encryption AAD stable across clients by default.
-    this.doc =
-      options.doc ??
-      new Y.Doc(options.connection?.docId ? { guid: options.connection.docId } : undefined);
+    const guid = options.connection?.docId ?? options.docId;
+    this.doc = options.doc ?? new Y.Doc(guid ? { guid } : undefined);
+
+    const persistence = options.persistence ?? null;
+    const persistenceDocId = persistence ? options.connection?.docId ?? options.docId : null;
+    if (persistence && !persistenceDocId) {
+      throw new Error(
+        "CollabSession persistence requires a stable docId (options.docId or options.connection.docId)"
+      );
+    }
+    this.persistence = persistence;
+    this.persistenceDocId = persistenceDocId;
+
+    this.localPersistenceLoaded = persistence
+      ? this.initLocalPersistence(persistenceDocId!, persistence)
+      : Promise.resolve();
+    // Avoid unhandled rejections when callers don't explicitly await persistence readiness.
+    if (persistence) void this.localPersistenceLoaded.catch(() => {});
 
     if (options.connection && options.provider) {
       throw new Error("CollabSession cannot be constructed with both `connection` and `provider` options");
@@ -588,17 +621,20 @@ export class CollabSession {
       offlineEnabled && options.connection ? (options.offline?.autoConnectAfterLoad ?? true) : false;
     this.offlineAutoConnectAfterLoad = offlineAutoConnectAfterLoad;
 
+    const delayProviderConnect = Boolean(
+      options.connection && (persistence || offlineAutoConnectAfterLoad)
+    );
     this.provider =
       options.provider ??
       (options.connection
         ? new WebsocketProvider(options.connection.wsUrl, options.connection.docId, this.doc, {
-             WebSocketPolyfill: options.connection.WebSocketPolyfill,
-             disableBc: options.connection.disableBc,
-             params: {
+            connect: !delayProviderConnect,
+            WebSocketPolyfill: options.connection.WebSocketPolyfill,
+            disableBc: options.connection.disableBc,
+            params: {
               ...(options.connection.params ?? {}),
               ...(options.connection.token !== undefined ? { token: options.connection.token } : {}),
             },
-            connect: offlineAutoConnectAfterLoad ? false : true,
           })
          : null);
     this.awareness = options.awareness ?? this.provider?.awareness ?? null;
@@ -633,19 +669,10 @@ export class CollabSession {
           // Consumers can observe the failure by awaiting `session.offline.whenLoaded()`.
         });
       }
+    }
 
-      if (offlineAutoConnectAfterLoad && this.provider?.connect) {
-        void state
-          .whenLoaded()
-          .catch(() => {
-            // Ignore offline load errors when auto-connecting. Callers can
-            // observe the rejection by awaiting `session.offline.whenLoaded()`.
-          })
-          .then(() => {
-            if (this.isDestroyed) return;
-            this.provider?.connect?.();
-          });
-      }
+    if (delayProviderConnect) {
+      this.scheduleProviderConnectAfterHydration();
     }
 
     const schemaAutoInit = options.schema?.autoInit ?? true;
@@ -696,6 +723,9 @@ export class CollabSession {
       const shouldWaitForOffline = this.offline != null;
       let offlineReady = !shouldWaitForOffline;
 
+      const shouldWaitForLocalPersistence = this.persistence != null;
+      let localPersistenceReady = !shouldWaitForLocalPersistence;
+
       let ensureDefaultSheetScheduled = false;
 
       const ensureSchema = (transaction?: Y.Transaction) => {
@@ -707,6 +737,7 @@ export class CollabSession {
         // spurious extra sheets.
         if (!providerSynced) return;
         if (!offlineReady) return;
+        if (!localPersistenceReady) return;
         if (this.ensuringSchema) return;
         this.ensuringSchema = true;
         try {
@@ -748,6 +779,20 @@ export class CollabSession {
         onOfflineLoaded = markOfflineReady;
         // Handle the case where offline finished loading before we registered the callback.
         if (this.offline!.isLoaded) markOfflineReady();
+      }
+
+      if (shouldWaitForLocalPersistence) {
+        void this.localPersistenceLoaded
+          .catch(() => {
+            // Ignore load errors; we'll still continue with schema init so online
+            // sessions remain usable.
+          })
+          .finally(() => {
+            if (this.isDestroyed) return;
+            if (localPersistenceReady) return;
+            localPersistenceReady = true;
+            ensureSchema();
+          });
       }
 
       // Keep the sheets array well-formed over time (e.g. remove duplicate ids).
@@ -853,6 +898,52 @@ export class CollabSession {
     }
   }
 
+  private async initLocalPersistence(docId: string, persistence: CollabPersistence): Promise<void> {
+    try {
+      await persistence.load(docId, this.doc);
+    } finally {
+      // Bind even if load fails so future edits still persist.
+      if (this.isDestroyed) return;
+      const binding = persistence.bind(docId, this.doc);
+      if (this.isDestroyed) {
+        void binding.destroy().catch(() => {});
+        return;
+      }
+      this.persistenceBinding = binding;
+    }
+  }
+
+  private scheduleProviderConnectAfterHydration(): void {
+    if (this.providerConnectScheduled) return;
+    const provider = this.provider;
+    if (!provider || typeof provider.connect !== "function") return;
+
+    this.providerConnectScheduled = true;
+
+    const gates: Promise<void>[] = [];
+    if (this.persistence) {
+      gates.push(
+        this.localPersistenceLoaded.catch(() => {
+          // Even if local persistence fails, allow the provider to connect so the
+          // session still works online.
+        })
+      );
+    }
+
+    if (this.offline && this.offlineAutoConnectAfterLoad && !this.offline.isLoaded) {
+      gates.push(
+        this.offline.whenLoaded().catch(() => {
+          // Ignore offline load errors. Callers can await `session.offline.whenLoaded()`.
+        })
+      );
+    }
+
+    void Promise.all(gates).finally(() => {
+      if (this.isDestroyed) return;
+      provider.connect?.();
+    });
+  }
+
   destroy(): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
@@ -870,22 +961,18 @@ export class CollabSession {
     this.presence?.destroy();
     this.offline?.destroy();
     this.provider?.destroy?.();
+    void this.persistenceBinding?.destroy().catch(() => {});
   }
 
   connect(): void {
     if (this.isDestroyed) return;
     if (!this.provider?.connect) return;
 
-    if (this.offline && this.offlineAutoConnectAfterLoad && !this.offline.isLoaded) {
-      void this.offline
-        .whenLoaded()
-        .catch(() => {
-          // Ignore offline load errors. Callers can await `session.offline.whenLoaded()`.
-        })
-        .then(() => {
-          if (this.isDestroyed) return;
-          this.provider?.connect?.();
-        });
+    if (
+      this.persistence ||
+      (this.offline && this.offlineAutoConnectAfterLoad && !this.offline.isLoaded)
+    ) {
+      this.scheduleProviderConnectAfterHydration();
       return;
     }
 
@@ -894,6 +981,21 @@ export class CollabSession {
 
   disconnect(): void {
     this.provider?.disconnect?.();
+  }
+
+  whenLocalPersistenceLoaded(): Promise<void> {
+    return this.localPersistenceLoaded;
+  }
+
+  async flushLocalPersistence(): Promise<void> {
+    const persistence = this.persistence;
+    const docId = this.persistenceDocId;
+    if (!persistence || !docId || typeof persistence.flush !== "function") return;
+
+    await this.localPersistenceLoaded.catch(() => {
+      // If load failed, flushing may still be useful for subsequent updates.
+    });
+    await persistence.flush(docId);
   }
 
   whenSynced(timeoutMs: number = 10_000): Promise<void> {

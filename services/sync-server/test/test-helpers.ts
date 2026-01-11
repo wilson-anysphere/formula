@@ -148,7 +148,15 @@ export async function startSyncServer(opts: {
     child = null;
     proc.kill("SIGTERM");
     await new Promise<void>((resolve) => {
-      proc.once("exit", () => resolve());
+      const timeout = setTimeout(() => {
+        proc.kill("SIGKILL");
+        resolve();
+      }, 10_000);
+      timeout.unref();
+      proc.once("exit", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
     });
   };
 

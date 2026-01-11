@@ -1,0 +1,37 @@
+import type * as Y from "yjs";
+
+export interface CollabPersistenceBinding {
+  destroy(): Promise<void>;
+}
+
+/**
+ * Local persistence for a Yjs document.
+ *
+ * Implementations should:
+ * - Apply any stored CRDT updates into the provided `Y.Doc` during `load()`.
+ * - Persist subsequent updates during `bind()`.
+ *
+ * `docId` must be stable across app restarts.
+ */
+export interface CollabPersistence {
+  /**
+   * Apply any persisted state into `doc`.
+   *
+   * Implementations should not clear existing document state; applying updates
+   * must merge with any in-memory edits.
+   */
+  load(docId: string, doc: Y.Doc): Promise<void>;
+  /**
+   * Begin persisting subsequent updates for `doc`.
+   */
+  bind(docId: string, doc: Y.Doc): CollabPersistenceBinding;
+  /**
+   * Wait until any pending persistence work for `docId` is durably written.
+   */
+  flush?(docId: string): Promise<void>;
+  /**
+   * Remove any persisted state for `docId`.
+   */
+  clear?(docId: string): Promise<void>;
+}
+
