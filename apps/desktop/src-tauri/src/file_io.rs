@@ -542,14 +542,10 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             let row_offset = row_offset as usize;
             let col_offset = col_offset as usize;
             for (row, col, formula) in formulas.cells() {
-                if formula.trim().is_empty() {
+                let normalized = formula_model::display_formula_text(formula);
+                if normalized.is_empty() {
                     continue;
                 }
-                let normalized = if formula.starts_with('=') {
-                    formula.to_string()
-                } else {
-                    format!("={formula}")
-                };
 
                 let row = row_offset + row;
                 let col = col_offset + col;
@@ -719,11 +715,17 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
             match cell.formula {
                 Some(formula) => match formula.text {
                     Some(formula) => {
-                        let normalized = if formula.starts_with('=') {
-                            formula
-                        } else {
-                            format!("={formula}")
-                        };
+                        let normalized = formula_model::display_formula_text(&formula);
+                        if normalized.is_empty() {
+                            // Treat empty formulas as blank/no-formula cells.
+                            if matches!(value, CellScalar::Empty) {
+                                return;
+                            }
+                            let mut c = Cell::from_literal(Some(value));
+                            c.number_format = number_format;
+                            sheet.set_cell(row, col, c);
+                            return;
+                        }
                         let mut c = Cell::from_formula(normalized);
                         c.computed_value = value;
                         c.number_format = number_format;
@@ -805,15 +807,10 @@ where
     let col_offset = col_offset as usize;
 
     for (row, col, formula) in formulas.cells() {
-        if formula.trim().is_empty() {
+        let normalized = formula_model::display_formula_text(formula);
+        if normalized.is_empty() {
             continue;
         }
-
-        let normalized = if formula.starts_with('=') {
-            formula.to_string()
-        } else {
-            format!("={formula}")
-        };
 
         out.insert((row_offset + row, col_offset + col), normalized);
     }
