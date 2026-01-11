@@ -1530,6 +1530,14 @@ impl Engine {
                     if cell.value != Value::Blank {
                         return Some(key);
                     }
+                } else if let Some(provider) = &self.external_value_provider {
+                    if let Some(sheet_name) = self.workbook.sheet_names.get(origin.sheet) {
+                        if let Some(v) = provider.get(sheet_name, addr) {
+                            if v != Value::Blank {
+                                return Some(key);
+                            }
+                        }
+                    }
                 }
 
                 // Blocked by another spill.

@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use formula_engine::eval::parse_a1;
-use formula_engine::{Engine, ErrorKind, Value};
+use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
 
 #[test]
 fn reference_spill_spills_values() {
@@ -21,6 +23,31 @@ fn reference_spill_spills_values() {
     let (origin_sheet, origin_addr) = engine.spill_origin("Sheet1", "C2").expect("spill origin");
     assert_eq!(origin_sheet, 0);
     assert_eq!(origin_addr, parse_a1("C1").unwrap());
+}
+
+#[test]
+fn external_values_block_spills() {
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: formula_engine::eval::CellAddr) -> Option<Value> {
+            if sheet == "Sheet1" && addr == parse_a1("C2").unwrap() {
+                return Some(Value::Number(99.0));
+            }
+            None
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=A1:A3").unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Spill));
+    assert!(engine.spill_range("Sheet1", "C1").is_none());
 }
 
 #[test]
