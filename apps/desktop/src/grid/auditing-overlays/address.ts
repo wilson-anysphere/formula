@@ -1,41 +1,33 @@
+import { colToName as colToNameA1, fromA1, toA1 } from "@formula/spreadsheet-frontend/a1";
+
 export type CellAddress = string;
 
 export function colToName(col: number): string {
-  let n = col + 1;
-  let out = "";
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    out = String.fromCharCode(65 + rem) + out;
-    n = Math.floor((n - 1) / 26);
-  }
-  return out;
+  if (!Number.isFinite(col) || col < 0) return "";
+  return colToNameA1(col);
 }
 
 export function nameToCol(name: string): number | null {
-  let acc = 0;
-  for (const raw of name) {
-    const c = raw.toUpperCase();
-    if (c < "A" || c > "Z") return null;
-    acc = acc * 26 + (c.charCodeAt(0) - 64);
+  try {
+    const { col0 } = fromA1(`${name}1`);
+    return col0;
+  } catch {
+    return null;
   }
-  return acc === 0 ? null : acc - 1;
 }
 
 export function parseCellAddress(addr: CellAddress): { row: number; col: number } | null {
   const noSheet = addr.includes("!") ? addr.split("!").slice(-1)[0] : addr;
-  const match = /^(\$?[A-Za-z]+)(\$?\d+)$/.exec(noSheet);
-  if (!match) return null;
-  const colName = match[1].replace("$", "");
-  const rowStr = match[2].replace("$", "");
-  const col = nameToCol(colName);
-  if (col == null) return null;
-  const rowNum = Number.parseInt(rowStr, 10);
-  if (!Number.isFinite(rowNum) || rowNum <= 0) return null;
-  return { row: rowNum - 1, col };
+  try {
+    const { row0, col0 } = fromA1(noSheet);
+    return { row: row0, col: col0 };
+  } catch {
+    return null;
+  }
 }
 
 export function formatCellAddress(row: number, col: number): CellAddress {
-  return `${colToName(col)}${row + 1}`;
+  return toA1(row, col);
 }
 
 export function expandRange(range: string): CellAddress[] {
@@ -58,4 +50,3 @@ export function expandRange(range: string): CellAddress[] {
   }
   return out;
 }
-
