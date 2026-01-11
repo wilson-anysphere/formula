@@ -582,28 +582,72 @@ s.sendmsg([b"hi"], [], 0, ("127.0.0.1", 9))
     let hits1271 = 0;
     let hits1272 = 0;
 
-    const server1272 = net.createServer((socket) => {
-      hits1272 += 1;
-      socket.end();
-    });
-    await new Promise<void>((resolve, reject) => {
-      server1272.listen(0, "127.0.0.2", () => resolve());
-      server1272.on("error", reject);
-    });
-    const addr1272 = server1272.address();
-    if (!addr1272 || typeof addr1272 === "string") {
-      server1272.close();
-      throw new Error("Failed to bind 127.0.0.2 server");
+    const listen = (server: net.Server, port: number, host: string) =>
+      new Promise<void>((resolve, reject) => {
+        const onError = (err: unknown) => {
+          server.off("listening", onListening);
+          reject(err);
+        };
+        const onListening = () => {
+          server.off("error", onError);
+          resolve();
+        };
+        server.once("error", onError);
+        server.listen(port, host, onListening);
+      });
+
+    const close = (server: net.Server | null) =>
+      new Promise<void>((resolve) => {
+        if (!server) return resolve();
+        server.close(() => resolve());
+      });
+
+    // `listen(0, "127.0.0.2")` chooses a port that's free on 127.0.0.2, but that
+    // port might already be in use on 127.0.0.1 (e.g. under Vitest parallelism).
+    // Retry until we find a port available on both loopback hosts.
+    let server1272: net.Server | null = null;
+    let server1271: net.Server | null = null;
+    let port = 0;
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      server1272 = net.createServer((socket) => {
+        hits1272 += 1;
+        socket.end();
+      });
+
+      try {
+        await listen(server1272, 0, "127.0.0.2");
+        const addr1272 = server1272.address();
+        if (!addr1272 || typeof addr1272 === "string") {
+          throw new Error("Failed to bind 127.0.0.2 server");
+        }
+
+        server1271 = net.createServer((socket) => {
+          hits1271 += 1;
+          socket.end();
+        });
+
+        await listen(server1271, addr1272.port, "127.0.0.1");
+        port = addr1272.port;
+        break;
+      } catch (err: any) {
+        await close(server1271);
+        await close(server1272);
+        server1271 = null;
+        server1272 = null;
+
+        if (err && typeof err === "object" && "code" in err && (err as any).code === "EADDRINUSE") {
+          continue;
+        }
+        throw err;
+      }
     }
 
-    const server1271 = net.createServer((socket) => {
-      hits1271 += 1;
-      socket.end();
-    });
-    await new Promise<void>((resolve, reject) => {
-      server1271.listen(addr1272.port, "127.0.0.1", () => resolve());
-      server1271.on("error", reject);
-    });
+    if (!server1272 || !server1271 || port === 0) {
+      await close(server1271);
+      await close(server1272);
+      throw new Error("Failed to bind paired 127.0.0.1/127.0.0.2 servers");
+    }
 
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({
@@ -622,18 +666,18 @@ def fake_getaddrinfo(host, port, *args, **kwargs):
 
 socket.getaddrinfo = fake_getaddrinfo
 
-sock = socket.create_connection(("127.0.0.1", ${addr1272.port}), timeout=1)
+sock = socket.create_connection(("127.0.0.1", ${port}), timeout=1)
 sock.close()
 `;
-
+ 
     try {
       await runtime.execute(script, {
         api: workbook,
         permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["127.0.0.1"] },
       });
     } finally {
-      await new Promise<void>((resolve) => server1271.close(() => resolve()));
-      await new Promise<void>((resolve) => server1272.close(() => resolve()));
+      await close(server1271);
+      await close(server1272);
     }
 
     expect(hits1271).toBeGreaterThan(0);
