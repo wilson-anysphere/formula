@@ -2,36 +2,13 @@ import { createEngineClient, type CellChange, type CellScalar } from "@formula/e
 import type { CellRange } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
 import { range0ToA1, toA1 } from "@formula/spreadsheet-frontend";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 
 import { EngineCellProvider } from "./EngineCellProvider";
+import { serializeGridToHtmlTable } from "./clipboard/html";
+import { parseTsvToGrid, serializeGridToTsv } from "./clipboard/tsv";
+import { isFormulaInput, parseCellScalarInput, scalarToDisplayString } from "./cellScalar";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
-
-function scalarToDisplayString(value: CellScalar): string {
-  if (value === null) return "";
-  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-  return String(value);
-}
-
-function parseFormulaBarInput(raw: string): CellScalar {
-  if (raw.startsWith("=") && raw.length > 1) return raw;
-
-  const trimmed = raw.trim();
-  if (trimmed === "") return null;
-
-  if (/^(true|false)$/i.test(trimmed)) return trimmed.toLowerCase() === "true";
-  if (/^null$/i.test(trimmed)) return null;
-
-  if (/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(trimmed)) {
-    return Number(trimmed);
-  }
-
-  return raw;
-}
-
-function isFormulaInput(value: CellScalar): value is string {
-  return typeof value === "string" && value.startsWith("=") && value.length > 1;
-}
 
 export function App() {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -67,6 +44,7 @@ function EngineDemoApp() {
   const headerColOffset = frozenCols > 0 ? 1 : 0;
 
   const gridApiRef = useRef<GridApi | null>(null);
+  const gridContainerRef = useRef<HTMLDivElement | null>(null);
   const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
 
   const activeAddress = (() => {
@@ -264,7 +242,7 @@ function EngineDemoApp() {
     const engine = engineRef.current;
     if (!engine || !provider || !activeAddress) return;
 
-    const nextValue = parseFormulaBarInput(draftRef.current);
+    const nextValue = parseCellScalarInput(draftRef.current);
     await engine.setCell(activeAddress, nextValue, activeSheet);
     const changes = await engine.recalculate(activeSheet);
 
@@ -284,6 +262,183 @@ function EngineDemoApp() {
   const onSelectionChange = (cell: { row: number; col: number } | null) => {
     if (isFormulaEditing) return;
     setActiveCell(cell);
+  };
+
+  const getCopyRange = (): CellRange | null => {
+    const api = gridApiRef.current;
+    if (!api) return null;
+
+    const range = api.getSelectionRange();
+    if (!range) {
+      const cell = api.getSelection();
+      if (!cell) return null;
+      if (cell.row < headerRowOffset || cell.col < headerColOffset) return null;
+      const startRow = Math.max(headerRowOffset, cell.row);
+      const startCol = Math.max(headerColOffset, cell.col);
+      return { startRow, endRow: startRow + 1, startCol, endCol: startCol + 1 };
+    }
+
+    const startRow = Math.max(headerRowOffset, range.startRow);
+    const startCol = Math.max(headerColOffset, range.startCol);
+    const endRow = Math.max(startRow, range.endRow);
+    const endCol = Math.max(startCol, range.endCol);
+
+    if (endRow <= startRow || endCol <= startCol) return null;
+
+    return { startRow, endRow, startCol, endCol };
+  };
+
+  const selectionRangeToStringGrid = (range: CellRange): string[][] => {
+    if (!provider) return [];
+
+    const rows: string[][] = [];
+
+    for (let row = range.startRow; row < range.endRow; row++) {
+      const outRow: string[] = [];
+      for (let col = range.startCol; col < range.endCol; col++) {
+        const cell = provider.getCell(row, col);
+        outRow.push(scalarToDisplayString((cell?.value ?? null) as CellScalar));
+      }
+      rows.push(outRow);
+    }
+
+    return rows;
+  };
+
+  const syncFormulaBar = async (address: string) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const token = ++cellSyncTokenRef.current;
+    try {
+      const cell = await engine.getCell(address, activeSheet);
+      if (cellSyncTokenRef.current !== token) return;
+      const inputText = scalarToDisplayString(cell.input as CellScalar);
+      rangeInsertionRef.current = null;
+      draftRef.current = inputText;
+      setDraft(inputText);
+      setActiveValue(cell.value as CellScalar);
+    } catch {
+      // Ignore selection reads while the engine is initializing/tearing down.
+    }
+  };
+
+  const handleGridCopy = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (!provider) return;
+    const range = getCopyRange();
+    if (!range) return;
+
+    // Web preview behavior: copy the displayed value grid (not formulas).
+    // This matches what the canvas grid currently renders and makes TSV/HTML
+    // interoperability predictable.
+    const grid = selectionRangeToStringGrid(range);
+    const tsv = serializeGridToTsv(grid);
+    const html = serializeGridToHtmlTable(grid);
+
+    event.clipboardData?.setData("text/plain", tsv);
+    event.clipboardData?.setData("text/html", html);
+    event.preventDefault();
+  };
+
+  const handleGridPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    if (!text) return;
+
+    const engine = engineRef.current;
+    const api = gridApiRef.current;
+    if (!engine || !provider || !api) return;
+
+    const selection = api.getSelection();
+    if (!selection) return;
+
+    const startRow0 = selection.row - headerRowOffset;
+    const startCol0 = selection.col - headerColOffset;
+    if (startRow0 < 0 || startCol0 < 0) return;
+
+    event.preventDefault();
+
+    void (async () => {
+      const grid = parseTsvToGrid(text);
+      const pasteRows = grid.length;
+      const pasteCols = Math.max(0, ...grid.map((row) => row.length));
+      if (pasteRows === 0 || pasteCols === 0) return;
+
+      const values: CellScalar[][] = [];
+      const directChanges: CellChange[] = [];
+
+      for (let r = 0; r < pasteRows; r++) {
+        const row = grid[r] ?? [];
+        const outRow: CellScalar[] = [];
+        for (let c = 0; c < pasteCols; c++) {
+          const raw = row[c] ?? "";
+          const value = parseCellScalarInput(raw);
+          outRow.push(value);
+
+          if (!isFormulaInput(value)) {
+            directChanges.push({ sheet: activeSheet, address: toA1(startRow0 + r, startCol0 + c), value });
+          }
+        }
+        values.push(outRow);
+      }
+
+      const rangeA1 = range0ToA1({
+        startRow0,
+        startCol0,
+        endRow0Exclusive: startRow0 + pasteRows,
+        endCol0Exclusive: startCol0 + pasteCols
+      });
+
+      await engine.setRange(rangeA1, values, activeSheet);
+      const changes = await engine.recalculate(activeSheet);
+      provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
+
+      api.setSelectionRange({
+        startRow: selection.row,
+        endRow: Math.min(rowCount, selection.row + pasteRows),
+        startCol: selection.col,
+        endCol: Math.min(colCount, selection.col + pasteCols)
+      });
+
+      await syncFormulaBar(toA1(startRow0, startCol0));
+    })();
+  };
+
+  const handleGridCut = (event: ClipboardEvent<HTMLDivElement>) => {
+    const range = getCopyRange();
+    if (!range) return;
+    handleGridCopy(event);
+    if (event.defaultPrevented) {
+      // Clear on the next tick; clipboard population must remain synchronous.
+      void (async () => {
+        const engine = engineRef.current;
+        if (!engine || !provider) return;
+
+        const startRow0 = range.startRow - headerRowOffset;
+        const startCol0 = range.startCol - headerColOffset;
+        const endRow0Exclusive = range.endRow - headerRowOffset;
+        const endCol0Exclusive = range.endCol - headerColOffset;
+        if (startRow0 < 0 || startCol0 < 0) return;
+        if (endRow0Exclusive <= startRow0 || endCol0Exclusive <= startCol0) return;
+
+        const clearRows = endRow0Exclusive - startRow0;
+        const clearCols = endCol0Exclusive - startCol0;
+
+        const values = Array.from({ length: clearRows }, () => Array.from({ length: clearCols }, () => null as CellScalar));
+        const rangeA1 = range0ToA1({ startRow0, startCol0, endRow0Exclusive, endCol0Exclusive });
+
+        await engine.setRange(rangeA1, values, activeSheet);
+        const changes = await engine.recalculate(activeSheet);
+
+        const directChanges: CellChange[] = [];
+        for (let r = 0; r < clearRows; r++) {
+          for (let c = 0; c < clearCols; c++) {
+            directChanges.push({ sheet: activeSheet, address: toA1(startRow0 + r, startCol0 + c), value: null });
+          }
+        }
+
+        provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
+        await syncFormulaBar(toA1(startRow0, startCol0));
+      })();
+    }
   };
 
   return (
@@ -418,7 +573,19 @@ function EngineDemoApp() {
         </div>
       </div>
 
-      <div data-testid="grid" style={{ marginTop: 16, height: 560 }}>
+      <div
+        ref={gridContainerRef}
+        data-testid="grid"
+        tabIndex={0}
+        onPointerDownCapture={() => {
+          if (isFormulaEditing) return;
+          gridContainerRef.current?.focus({ preventScroll: true });
+        }}
+        onCopy={handleGridCopy}
+        onCut={handleGridCut}
+        onPaste={handleGridPaste}
+        style={{ marginTop: 16, height: 560 }}
+      >
         {provider ? (
           <CanvasGrid
             provider={provider}
