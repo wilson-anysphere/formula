@@ -203,6 +203,74 @@ describe("SIEM export worker", () => {
     }
   });
 
+  it("orders exports by (created_at ASC, id ASC) when timestamps tie", async () => {
+    const orgId = crypto.randomUUID();
+    await insertOrg(db, orgId);
+
+    const t0 = new Date("2025-01-01T00:00:00.000Z");
+    const firstId = "11111111-1111-1111-1111-111111111111";
+    const secondId = "22222222-2222-2222-2222-222222222222";
+
+    // Insert out-of-order to ensure ordering comes from (created_at, id).
+    await insertAuditEvent({
+      db,
+      table: "audit_log",
+      id: secondId,
+      orgId,
+      createdAt: t0,
+      eventType: "test.tie.second"
+    });
+    await insertAuditEvent({
+      db,
+      table: "audit_log",
+      id: firstId,
+      orgId,
+      createdAt: t0,
+      eventType: "test.tie.first"
+    });
+
+    const siem = await startSiemServer();
+    try {
+      const config: SiemEndpointConfig = {
+        endpointUrl: siem.url,
+        format: "json",
+        batchSize: 1,
+        idempotencyKeyHeader: "Idempotency-Key",
+        retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 5, jitter: false }
+      };
+
+      const metrics = createMetrics();
+      const worker = new SiemExportWorker({
+        db,
+        configProvider: new StaticConfigProvider([{ orgId, config }]),
+        metrics,
+        logger: console,
+        pollIntervalMs: 0
+      });
+
+      await worker.tick();
+
+      expect(siem.requests).toHaveLength(2);
+
+      const batch1 = JSON.parse(siem.requests[0]!.body) as any[];
+      const batch2 = JSON.parse(siem.requests[1]!.body) as any[];
+      expect(batch1.map((e) => e.id)).toEqual([firstId]);
+      expect(batch2.map((e) => e.id)).toEqual([secondId]);
+
+      expect(siem.requests[0]!.headers["idempotency-key"]).toBe(idempotencyKeyFor([firstId]));
+      expect(siem.requests[1]!.headers["idempotency-key"]).toBe(idempotencyKeyFor([secondId]));
+
+      const state = await db.query("SELECT last_created_at, last_event_id FROM org_siem_export_state WHERE org_id = $1", [
+        orgId
+      ]);
+      expect(state.rowCount).toBe(1);
+      expect(new Date(state.rows[0].last_created_at).toISOString()).toBe(t0.toISOString());
+      expect(state.rows[0].last_event_id).toBe(secondId);
+    } finally {
+      await siem.close();
+    }
+  });
+
   it("strips __audit metadata from details and exports actor/correlation/resourceName", async () => {
     const orgId = crypto.randomUUID();
     await insertOrg(db, orgId);
