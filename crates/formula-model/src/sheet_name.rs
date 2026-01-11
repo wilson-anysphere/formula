@@ -1,6 +1,9 @@
 use core::fmt;
 
 /// Maximum worksheet name length enforced by Excel.
+///
+/// Excel stores sheet names as UTF-16 and enforces the 31-character limit in terms of UTF-16 code
+/// units. That means characters outside the BMP (e.g. many emoji) count as 2.
 pub const EXCEL_MAX_SHEET_NAME_LEN: usize = 31;
 
 /// Errors returned when validating worksheet names.
@@ -45,7 +48,7 @@ pub fn validate_sheet_name(name: &str) -> Result<(), SheetNameError> {
         return Err(SheetNameError::EmptyName);
     }
 
-    if name.chars().count() > EXCEL_MAX_SHEET_NAME_LEN {
+    if name.encode_utf16().count() > EXCEL_MAX_SHEET_NAME_LEN {
         return Err(SheetNameError::TooLong);
     }
 

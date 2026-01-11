@@ -36,6 +36,14 @@ fn length_boundaries_match_excel() {
 }
 
 #[test]
+fn length_limit_counts_utf16_code_units() {
+    // 🙂 is a non-BMP character, so it counts as 2 UTF-16 code units in Excel.
+    let mut workbook = Workbook::new();
+    let name = format!("{}🙂", "a".repeat(formula_model::EXCEL_MAX_SHEET_NAME_LEN - 1));
+    assert_eq!(workbook.add_sheet(name), Err(SheetNameError::TooLong));
+}
+
+#[test]
 fn rejects_blank_or_whitespace_only_names() {
     let mut workbook = Workbook::new();
     assert_eq!(workbook.add_sheet(""), Err(SheetNameError::EmptyName));
