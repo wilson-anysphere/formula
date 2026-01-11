@@ -1,6 +1,6 @@
 import { DEFAULT_SHEET_NAME } from "./a1.js";
 import type { CellAddress, RangeAddress } from "./a1.js";
-import type { SpreadsheetApi, CellEntry } from "./api.js";
+import type { CellEntry, CreateChartResult, CreateChartSpec, SpreadsheetApi } from "./api.js";
 import { cloneCell, isCellEmpty, type CellData, type CellFormat } from "./types.js";
 
 function cellKey(row: number, col: number): string {
@@ -69,6 +69,8 @@ class InMemorySheet {
 
 export class InMemoryWorkbook implements SpreadsheetApi {
   private readonly sheets = new Map<string, InMemorySheet>();
+  private nextChartId = 1;
+  private charts: Array<{ chart_id: string; spec: CreateChartSpec }> = [];
 
   constructor(sheetNames: string[] = [DEFAULT_SHEET_NAME]) {
     for (const name of sheetNames) {
@@ -85,6 +87,8 @@ export class InMemoryWorkbook implements SpreadsheetApi {
     for (const [name, sheet] of this.sheets.entries()) {
       next.sheets.set(name, sheet.clone());
     }
+    next.nextChartId = this.nextChartId;
+    next.charts = this.charts.map((chart) => ({ chart_id: chart.chart_id, spec: { ...chart.spec } }));
     return next;
   }
 
@@ -169,6 +173,20 @@ export class InMemoryWorkbook implements SpreadsheetApi {
     return count;
   }
 
+  /**
+   * In-memory implementation for `create_chart` tool tests and previews.
+   * The workbook does not attempt to render charts; it only records the specs.
+   */
+  createChart(spec: CreateChartSpec): CreateChartResult {
+    const chart_id = `chart_${this.nextChartId++}`;
+    this.charts.push({ chart_id, spec: { ...spec } });
+    return { chart_id };
+  }
+
+  listCharts(): Array<{ chart_id: string; spec: CreateChartSpec }> {
+    return this.charts.map((chart) => ({ chart_id: chart.chart_id, spec: { ...chart.spec } }));
+  }
+
   getLastUsedRow(sheet: string): number {
     return this.getOrCreateSheet(sheet).getLastUsedRow();
   }
@@ -181,4 +199,3 @@ export class InMemoryWorkbook implements SpreadsheetApi {
     return sheet;
   }
 }
-

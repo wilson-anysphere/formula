@@ -107,4 +107,27 @@ describe("PreviewEngine", () => {
     expect(preview.tool_results[0]?.ok).toBe(false);
     expect(preview.tool_results[0]?.error?.code).toBe("permission_denied");
   });
+
+  it("supports create_chart previews when the SpreadsheetApi exposes createChart", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const previewEngine = new PreviewEngine();
+
+    const preview = await previewEngine.generatePreview(
+      [
+        {
+          name: "create_chart",
+          parameters: {
+            chart_type: "bar",
+            data_range: "Sheet1!A1:B3",
+            title: "Sales"
+          }
+        }
+      ],
+      workbook
+    );
+
+    expect(preview.summary.total_changes).toBe(0);
+    expect(preview.requires_approval).toBe(false);
+    expect(preview.tool_results[0]?.ok).toBe(true);
+  });
 });
