@@ -54,3 +54,5 @@ export { compileMToQuery } from "./m/compiler.js";
 export { prettyPrintQueryToM } from "./m/pretty.js";
 
 export * from "./credentials/index.js";
+
+export * from "./values.js";
