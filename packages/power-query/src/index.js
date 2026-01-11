@@ -4,6 +4,7 @@ export { QueryEngine } from "./engine.js";
 export { applyOperation, compileRowFormula } from "./steps.js";
 export { valueKey } from "./valueKey.js";
 export { QueryFoldingEngine } from "./folding/sql.js";
+export { ODataFoldingEngine, buildODataUrl } from "./folding/odata.js";
 export { RefreshManager, QueryScheduler } from "./refresh.js";
 export { RefreshOrchestrator, computeQueryDependencies } from "./refreshGraph.js";
 export { InMemoryRefreshStateStore } from "./refreshStateStore.js";
