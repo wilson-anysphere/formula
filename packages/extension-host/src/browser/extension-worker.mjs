@@ -7,6 +7,7 @@ formulaApi.__setTransport({
 let workerData = null;
 let extensionModule = null;
 let activated = false;
+let activationPromise = null;
 
 let nextInternalRequestId = 1;
 const internalPending = new Map();
@@ -271,24 +272,34 @@ if (typeof globalThis.WebSocket === "function") {
 
 async function activateExtension() {
   if (activated) return;
+  if (activationPromise) return activationPromise;
   if (!workerData) throw new Error("Extension worker not initialized");
-  if (!extensionModule) {
-    extensionModule = await import(workerData.mainUrl);
+
+  activationPromise = (async () => {
+    if (!extensionModule) {
+      extensionModule = await import(workerData.mainUrl);
+    }
+
+    const activateFn = extensionModule.activate || extensionModule.default?.activate;
+    if (typeof activateFn !== "function") {
+      throw new Error(`Extension entrypoint does not export an activate() function`);
+    }
+
+    const context = {
+      extensionId: workerData.extensionId,
+      extensionPath: workerData.extensionPath,
+      subscriptions: []
+    };
+
+    await activateFn(context);
+    activated = true;
+  })();
+
+  try {
+    await activationPromise;
+  } finally {
+    if (!activated) activationPromise = null;
   }
-
-  const activateFn = extensionModule.activate || extensionModule.default?.activate;
-  if (typeof activateFn !== "function") {
-    throw new Error(`Extension entrypoint does not export an activate() function`);
-  }
-
-  const context = {
-    extensionId: workerData.extensionId,
-    extensionPath: workerData.extensionPath,
-    subscriptions: []
-  };
-
-  await activateFn(context);
-  activated = true;
 }
 
 self.addEventListener("message", async (event) => {

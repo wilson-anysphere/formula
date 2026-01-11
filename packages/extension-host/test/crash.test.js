@@ -40,9 +40,9 @@ test("crash: worker crash marks extension inactive and next command spawns a fre
         await formula.commands.registerCommand("test.ok", async () => "ok");
         await formula.commands.registerCommand("test.crash", async () => {
           // Trigger an unhandled exception on the worker event loop after responding.
-          setImmediate(() => {
-            throw new Error("boom");
-          });
+          setTimeout(() => {
+            Promise.reject(new Error("boom"));
+          }, 0);
           return "scheduled";
         });
       };
@@ -79,4 +79,3 @@ test("crash: worker crash marks extension inactive and next command spawns a fre
 
   assert.equal(await host.executeCommand("test.ok"), "ok");
 });
-
