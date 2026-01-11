@@ -23,7 +23,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
 
   static async create(options: SqliteAIAuditStoreOptions = {}): Promise<SqliteAIAuditStore> {
     const storage = options.storage ?? new InMemoryBinaryStorage();
-    const SQL = await initSqlJs(options.locateFile ? { locateFile: options.locateFile } : undefined);
+    const SQL = await initSqlJs({ locateFile: options.locateFile ?? locateSqlJsFile });
     const existing = await storage.load();
     const db = existing ? new SQL.Database(existing) : new SQL.Database();
     return new SqliteAIAuditStore(db, storage);
@@ -121,6 +121,21 @@ export class SqliteAIAuditStore implements AIAuditStore {
     const data = this.db.export() as Uint8Array;
     await this.storage.save(data);
   }
+}
+
+function locateSqlJsFile(file: string, prefix: string = ""): string {
+  try {
+    if (typeof import.meta.resolve === "function") {
+      const resolved = import.meta.resolve(`sql.js/dist/${file}`);
+      if (resolved) return resolved;
+    }
+  } catch {
+    // ignore
+  }
+
+  // Emscripten calls locateFile(path, prefix). When we can't fully resolve,
+  // preserve the default behaviour (prefix + path).
+  return prefix ? `${prefix}${file}` : file;
 }
 
 function normalizeTokenUsage(usage: TokenUsage | undefined): TokenUsage | undefined {
