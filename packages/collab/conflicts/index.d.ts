@@ -12,6 +12,17 @@ export interface FormulaConflict {
   remotePreview?: any;
 }
 
+export interface CellConflict {
+  id: string;
+  cell: { sheetId: string; row: number; col: number };
+  cellKey: string;
+  field: "value";
+  localValue: any;
+  remoteValue: any;
+  remoteUserId: string;
+  detectedAt: number;
+}
+
 export class FormulaConflictMonitor {
   constructor(opts: {
     doc: Y.Doc;
@@ -62,4 +73,20 @@ export class CellStructuralConflictMonitor {
   dispose(): void;
   listConflicts(): Array<CellStructuralConflict>;
   resolveConflict(conflictId: string, resolution: CellStructuralConflictResolution): boolean;
+}
+
+export class CellConflictMonitor {
+  constructor(opts: {
+    doc: Y.Doc;
+    localUserId: string;
+    cells?: Y.Map<any>;
+    origin?: object;
+    localOrigins?: Set<any>;
+    onConflict: (conflict: CellConflict) => void;
+  });
+
+  dispose(): void;
+  listConflicts(): Array<CellConflict>;
+  setLocalValue(cellKey: string, value: any): void;
+  resolveConflict(conflictId: string, chosenValue: any): boolean;
 }

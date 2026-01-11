@@ -3,8 +3,10 @@ import { WebsocketProvider } from "y-websocket";
 import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
 import {
+  CellConflictMonitor,
   CellStructuralConflictMonitor,
   FormulaConflictMonitor,
+  type CellConflict,
   type CellStructuralConflict,
   type FormulaConflict,
 } from "@formula/collab-conflicts";
@@ -158,6 +160,14 @@ export interface CollabSessionOptions {
     onConflict: (conflict: CellStructuralConflict) => void;
   };
   /**
+   * When enabled, the session monitors cell value updates for true conflicts
+   * (offline/concurrent same-cell edits) and surfaces them via `onConflict`.
+   */
+  cellValueConflicts?: {
+    localUserId: string;
+    onConflict: (conflict: CellConflict) => void;
+  };
+  /**
    * Optional end-to-end encryption configuration for protecting specific cells.
    *
    * When enabled, cell values/formulas are encrypted *before* they are written
@@ -256,6 +266,10 @@ export class CollabSession {
    * Structural cell conflict monitor. Only present when `options.cellConflicts` is provided.
    */
   readonly cellConflictMonitor: CellStructuralConflictMonitor | null;
+  /**
+   * Cell value conflict monitor. Only present when `options.cellValueConflicts` is provided.
+   */
+  readonly cellValueConflictMonitor: CellConflictMonitor | null;
 
   private permissions: SessionPermissions | null = null;
   private readonly defaultSheetId: string;
@@ -314,6 +328,7 @@ export class CollabSession {
     this.undo = null;
     this.formulaConflictMonitor = null;
     this.cellConflictMonitor = null;
+    this.cellValueConflictMonitor = null;
 
     if (schemaAutoInit) {
       const initSchema = () => {
@@ -394,6 +409,17 @@ export class CollabSession {
       });
     }
 
+    if (options.cellValueConflicts) {
+      this.cellValueConflictMonitor = new CellConflictMonitor({
+        doc: this.doc,
+        cells: this.cells,
+        localUserId: options.cellValueConflicts.localUserId,
+        origin: this.origin,
+        localOrigins: this.localOrigins,
+        onConflict: options.cellValueConflicts.onConflict,
+      });
+    }
+
     if (options.presence) {
       if (!this.awareness) {
         throw new Error("CollabSession presence requires an awareness instance (options.awareness or provider.awareness)");
@@ -407,6 +433,7 @@ export class CollabSession {
   destroy(): void {
     this.formulaConflictMonitor?.dispose();
     this.cellConflictMonitor?.dispose();
+    this.cellValueConflictMonitor?.dispose();
     this.presence?.destroy();
     this.provider?.destroy?.();
   }
@@ -578,6 +605,22 @@ export class CollabSession {
         ? (typeof this.encryption?.shouldEncryptCell === "function" ? this.encryption.shouldEncryptCell(parsed) : key != null)
         : false);
 
+    const cellValueMonitor = this.cellValueConflictMonitor;
+    if (cellValueMonitor && !shouldEncrypt) {
+      this.transactLocal(() => {
+        // Ensure we never write plaintext value updates into an encrypted cell
+        // (old clients could otherwise overwrite encrypted content).
+        let cellData = this.cells.get(cellKey);
+        let cell = getYMapCell(cellData);
+        if (cell && cell.get("enc") !== undefined) {
+          throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
+        }
+
+        cellValueMonitor.setLocalValue(cellKey, value ?? null);
+      });
+      return;
+    }
+
     let encryptedPayload = null;
     if (shouldEncrypt) {
       if (!key) throw new Error(`Missing encryption key for cell ${cellKey}`);
@@ -685,6 +728,8 @@ export class CollabSession {
         monitor.setLocalFormula(cellKey, formula ?? "");
         // We don't sync calculated values. Clearing `value` marks the cell dirty
         // for the local formula engine to recompute.
+        cellData = this.cells.get(cellKey);
+        cell = getYMapCell(cellData);
         if (!cell) {
           cell = new Y.Map();
           this.cells.set(cellKey, cell);

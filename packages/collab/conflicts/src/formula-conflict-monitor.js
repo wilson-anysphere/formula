@@ -37,8 +37,8 @@ export class FormulaConflictMonitor {
    * @param {Set<any>} [opts.localOrigins] Origins treated as local (for ignoring).
    * @param {(conflict: FormulaConflict) => void} opts.onConflict
    * @param {(ref: { sheetId: string, row: number, col: number }) => any} [opts.getCellValue]
-   * @param {number} [opts.concurrencyWindowMs] How long after a local write we still consider a remote overwrite "concurrent".
-   */
+    * @param {number} [opts.concurrencyWindowMs] Deprecated (ignored). Former wall-clock heuristic.
+    */
   constructor(opts) {
     this.doc = opts.doc;
     this.cells = opts.cells ?? this.doc.getMap("cells");
@@ -49,9 +49,8 @@ export class FormulaConflictMonitor {
 
     this.onConflict = opts.onConflict;
     this.getCellValue = opts.getCellValue ?? null;
-    this.concurrencyWindowMs = opts.concurrencyWindowMs ?? 2000;
 
-    /** @type {Map<string, { formula: string, at: number }>} */
+    /** @type {Map<string, { formula: string, itemId: { client: number, clock: number } | null }>} */
     this._lastLocalEditByCellKey = new Map();
 
     /** @type {Map<string, FormulaConflict>} */
@@ -80,6 +79,8 @@ export class FormulaConflictMonitor {
     const cell = this._ensureCell(cellKey);
     const nextFormula = formula.trim();
     const ts = Date.now();
+    const localClientId = this.doc.clientID;
+    const startClock = Y.getState(this.doc.store, localClientId);
 
     this.doc.transact(() => {
       if (nextFormula) {
@@ -92,7 +93,10 @@ export class FormulaConflictMonitor {
     }, this.origin);
 
     // Track locally so we can detect "remote overwrote my just-written formula".
-    this._lastLocalEditByCellKey.set(cellKey, { formula: nextFormula, at: ts });
+    this._lastLocalEditByCellKey.set(cellKey, {
+      formula: nextFormula,
+      itemId: nextFormula ? { client: localClientId, clock: startClock } : null
+    });
   }
 
   /**
@@ -131,13 +135,15 @@ export class FormulaConflictMonitor {
       const oldFormula = (change.oldValue ?? "").toString();
       const newFormula = (cellMap.get("formula") ?? "").toString();
       const remoteUserId = (cellMap.get("modifiedBy") ?? "").toString();
+      const newItemOriginId = getItemOriginId(cellMap, "formula");
 
       this._handleFormulaChange({
         cellKey,
         oldFormula,
         newFormula,
         remoteUserId,
-        origin: transaction.origin
+        origin: transaction.origin,
+        newItemOriginId
       });
     }
   }
@@ -149,9 +155,10 @@ export class FormulaConflictMonitor {
    * @param {string} input.newFormula
    * @param {string} input.remoteUserId
    * @param {any} input.origin
+    * @param {{ client: number, clock: number } | null} input.newItemOriginId
    */
   _handleFormulaChange(input) {
-    const { cellKey, oldFormula, newFormula, remoteUserId, origin } = input;
+    const { cellKey, oldFormula, newFormula, remoteUserId, origin, newItemOriginId } = input;
 
     const isLocal = this.localOrigins.has(origin);
 
@@ -165,8 +172,14 @@ export class FormulaConflictMonitor {
     // Did this remote update overwrite the last formula we wrote locally?
     if (!formulasRoughlyEqual(oldFormula, lastLocal.formula)) return;
 
-    // Concurrency heuristic: remote overwrite arrived soon after we wrote.
-    if (Date.now() - lastLocal.at > this.concurrencyWindowMs) return;
+    // Concurrency detection:
+    // If the remote writer was causally aware of our local formula write, the remote Yjs Item's
+    // `origin` will point at our local Item id (meaning this overwrite is sequential, not a
+    // concurrent/offline conflict).
+    if (lastLocal.itemId && idsEqual(newItemOriginId, lastLocal.itemId)) {
+      this._lastLocalEditByCellKey.delete(cellKey);
+      return;
+    }
 
     // We no longer consider that local edit "pending" for conflict detection.
     this._lastLocalEditByCellKey.delete(cellKey);
@@ -247,4 +260,34 @@ function formulasRoughlyEqual(a, b) {
 function normalizeFormulaText(formula) {
   const stripped = String(formula ?? "").trim().replace(/^\s*=\s*/, "");
   return stripped.replaceAll(/\s+/g, "").toUpperCase();
+}
+
+/**
+ * Extract the original `origin` id for the currently visible value of a Y.Map key.
+ *
+ * @param {Y.Map<any>} ymap
+ * @param {string} key
+ * @returns {{ client: number, clock: number } | null}
+ */
+function getItemOriginId(ymap, key) {
+  // Yjs stores key/value entries as internal `Item` structs accessible from `._map`.
+  // There is no public API for retrieving causal ids for map entries today.
+  // @ts-ignore - accessing Yjs internals
+  const item = ymap?._map?.get?.(key);
+  if (!item) return null;
+  const origin = item.origin;
+  if (!origin || typeof origin !== "object") return null;
+  const client = origin.client;
+  const clock = origin.clock;
+  if (typeof client !== "number" || typeof clock !== "number") return null;
+  return { client, clock };
+}
+
+/**
+ * @param {{ client: number, clock: number } | null | undefined} a
+ * @param {{ client: number, clock: number } | null | undefined} b
+ */
+function idsEqual(a, b) {
+  if (!a || !b) return false;
+  return a.client === b.client && a.clock === b.clock;
 }
