@@ -379,6 +379,30 @@ fn sortby_sorts_rows_and_columns() {
 }
 
 #[test]
+fn sortby_accepts_single_cell_sort_order_references() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 200.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 300.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 2.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "C1", -1.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "E1", "=SORTBY(A1:A3,B1:B3,C1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // Sort descending by B (3,2,1) => A values (200,300,100).
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(200.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(300.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(100.0));
+}
+
+#[test]
 fn sortby_disambiguates_optional_sort_order_args() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 100.0).unwrap();

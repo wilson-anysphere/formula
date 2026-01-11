@@ -259,10 +259,8 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let (order_is_blank, order_arg) = evaluated[idx].clone();
             let order_value = match order_arg {
                 ArgValue::Scalar(v) => v,
-                // References are always treated as `by_array` candidates above.
-                ArgValue::Reference(_) | ArgValue::ReferenceUnion(_) => {
-                    Value::Error(ErrorKind::Value)
-                }
+                ArgValue::Reference(r) => ctx.apply_implicit_intersection(r),
+                ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
             };
             if !order_is_blank {
                 desc = match sort_descending_from_value(&order_value) {
@@ -1216,7 +1214,8 @@ fn sort_descending_from_value(value: &Value) -> Result<bool, ErrorKind> {
 }
 
 fn arg_value_is_array_like(value: &ArgValue) -> bool {
-    matches!(value, ArgValue::Reference(_) | ArgValue::ReferenceUnion(_))
+    matches!(value, ArgValue::Reference(r) if !r.is_single_cell())
+        || matches!(value, ArgValue::ReferenceUnion(_))
         || matches!(value, ArgValue::Scalar(Value::Array(_)))
 }
 
