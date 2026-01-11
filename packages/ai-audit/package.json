@@ -10,7 +10,12 @@
       "default": "./src/index.ts"
     },
     "./browser": "./src/index.ts",
-    "./node": "./src/index.node.ts"
+    "./node": "./src/index.node.ts",
+    "./sqlite": {
+      "browser": "./src/sqlite.ts",
+      "node": "./src/sqlite.node.ts",
+      "default": "./src/sqlite.ts"
+    }
   },
   "dependencies": {
     "sql.js": "^1.13.0"

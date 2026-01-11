@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 
-import { LocalStorageBinaryStorage, SqliteAIAuditStore } from "@formula/ai-audit/browser";
+import { LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
+import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
 import type { AIAuditEntry } from "@formula/ai-audit/browser";
 
 class MemoryLocalStorage implements Storage {
