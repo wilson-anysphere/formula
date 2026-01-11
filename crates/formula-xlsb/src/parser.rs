@@ -433,10 +433,11 @@ pub(crate) fn parse_workbook<R: Read>(
                     visibility,
                 });
             }
-            biff12::NAME => {
+            id if is_defined_name_record(id) => {
+                let index = next_defined_name_index;
+                next_defined_name_index = next_defined_name_index.saturating_add(1);
                 if let Some(mut parsed) = parse_defined_name_record(rec.data) {
-                    parsed.index = next_defined_name_index;
-                    next_defined_name_index = next_defined_name_index.saturating_add(1);
+                    parsed.index = index;
                     defined_names.push(parsed);
                 }
             }
@@ -682,6 +683,56 @@ mod tests {
 
         let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
         assert_eq!(decoded, "Sheet2!A1");
+    }
+
+    #[test]
+    fn parse_workbook_populates_defined_names() {
+        let mut workbook_bin = Vec::new();
+
+        // Sheet1 (rId1).
+        let mut sheet1 = Vec::new();
+        sheet1.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet1.extend_from_slice(&1u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet1, "rId1");
+        write_utf16_string(&mut sheet1, "Sheet1");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet1);
+
+        // Sheet2 (rId2).
+        let mut sheet2 = Vec::new();
+        sheet2.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet2.extend_from_slice(&2u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet2, "rId2");
+        write_utf16_string(&mut sheet2, "Sheet2");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet2);
+
+        write_record(&mut workbook_bin, biff12::SHEETS_END, &[]);
+
+        // Defined names (record id 0x0018 / NAME).
+        // Index 1: workbook-scope "MyName".
+        let mut name1 = Vec::new();
+        name1.extend_from_slice(&0u16.to_le_bytes()); // flags
+        name1.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes()); // workbook scope sentinel
+        write_utf16_string(&mut name1, "MyName");
+        write_record(&mut workbook_bin, 0x0018, &name1);
+
+        // Index 2: sheet-scope "LocalName" on Sheet2 (0-based sheet index = 1).
+        let mut name2 = Vec::new();
+        name2.extend_from_slice(&0u16.to_le_bytes()); // flags
+        name2.extend_from_slice(&1u32.to_le_bytes()); // sheet index
+        write_utf16_string(&mut name2, "LocalName");
+        write_record(&mut workbook_bin, 0x0018, &name2);
+
+        let rels: HashMap<String, String> = HashMap::from([
+            ("rId1".to_string(), "worksheets/sheet1.bin".to_string()),
+            ("rId2".to_string(), "worksheets/sheet2.bin".to_string()),
+        ]);
+
+        let (_sheets, ctx, _props, _defined_names) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
+
+        assert_eq!(ctx.name_index("MyName", None), Some(1));
+        assert_eq!(ctx.name_index("LocalName", Some("Sheet2")), Some(2));
+        assert_eq!(ctx.name_index("LocalName", Some("Sheet1")), None);
     }
 
     #[test]
@@ -1784,6 +1835,48 @@ fn materialize_rgce(
                 out.extend_from_slice(&base[i..i + 7]);
                 i += 7;
             }
+            0x21 | 0x41 | 0x61 => {
+                // PtgFunc: [iftab: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 2)?);
+                i += 2;
+            }
+            0x22 | 0x42 | 0x62 => {
+                // PtgFuncVar: [argc: u8][iftab: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 3)?);
+                i += 3;
+            }
+            0x23 | 0x43 | 0x63 => {
+                // PtgName: [nameId: u32][reserved: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 6)?);
+                i += 6;
+            }
+            0x39 | 0x59 | 0x79 => {
+                // PtgNameX: [ixti: u16][nameIndex: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 4)?);
+                i += 4;
+            }
+            0x3A | 0x5A | 0x7A => {
+                // PtgRef3d: [ixti: u16][row: u32][col+flags: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 8)?);
+                i += 8;
+            }
+            0x3B | 0x5B | 0x7B => {
+                // PtgArea3d: [ixti: u16][r1: u32][r2: u32][c1+flags: u16][c2+flags: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 14)?);
+                i += 14;
+            }
+            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69 => {
+                // PtgMem*: [cce: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 2)?);
+                i += 2;
+            }
             0x19 => {
                 // PtgAttr: [grbit: u8][wAttr: u16]
                 //
@@ -1931,6 +2024,30 @@ fn materialize_rgce(
                 out.extend_from_slice(&c2_u16.to_le_bytes());
                 i += 12;
             }
+            0x2A | 0x4A | 0x6A => {
+                // PtgRefErr: [row: u32][col+flags: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 6)?);
+                i += 6;
+            }
+            0x2B | 0x4B | 0x6B => {
+                // PtgAreaErr: [r1: u32][r2: u32][c1+flags: u16][c2+flags: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 12)?);
+                i += 12;
+            }
+            0x3C | 0x5C | 0x7C => {
+                // PtgRefErr3d: [ixti: u16][row: u32][col+flags: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 8)?);
+                i += 8;
+            }
+            0x3D | 0x5D | 0x7D => {
+                // PtgAreaErr3d: [ixti: u16][r1: u32][r2: u32][c1+flags: u16][c2+flags: u16]
+                out.push(ptg);
+                out.extend_from_slice(base.get(i..i + 14)?);
+                i += 14;
+            }
             _ => return None,
         }
     }
@@ -1955,6 +2072,10 @@ fn normalize_sheet_target(target: &str) -> String {
     // Relationship targets are typically relative to `xl/`.
     let target = target.trim_start_matches('/');
     format!("xl/{}", target.replace('\\', "/"))
+}
+
+fn is_defined_name_record(id: u32) -> bool {
+    matches!(id, biff12::NAME | 0x0018)
 }
 
 fn is_supbook_record(id: u32) -> bool {
@@ -2195,28 +2316,67 @@ fn parse_defined_name_record(data: &[u8]) -> Option<DefinedName> {
     // - `itab` is the sheet scope: a negative `i32` indicates workbook scope, otherwise it's a
     //   0-based sheet index.
     // - Excel's BIFF `Name` flags use bit 0 as "hidden"; we preserve that here.
-    let mut rr = RecordReader::new(data);
-    let flags = rr.read_u32().ok()?;
-    let scope_raw = rr.read_u32().ok()?;
-    rr.read_u8().ok()?; // reserved / unused
+    if let Some(parsed) = (|| {
+        let mut rr = RecordReader::new(data);
+        let flags = rr.read_u32().ok()?;
+        let scope_raw = rr.read_u32().ok()?;
+        rr.read_u8().ok()?; // reserved / unused
 
-    let name = rr.read_utf16_string().ok()?;
-    let rgce_len = rr.read_u32().ok()? as usize;
-    let rgce = rr.read_slice(rgce_len).ok()?.to_vec();
-    let extra = rr.data[rr.offset..].to_vec();
+        let name = rr.read_utf16_string().ok()?;
+        let rgce_len = rr.read_u32().ok()? as usize;
+        let rgce = rr.read_slice(rgce_len).ok()?.to_vec();
+        let extra = rr.data[rr.offset..].to_vec();
 
-    Some(DefinedName {
+        Some(DefinedName {
+            index: 0, // patched by caller
+            name,
+            scope_sheet: scope_to_option(scope_raw),
+            hidden: (flags & 0x0001) != 0,
+            formula: Some(Formula {
+                rgce,
+                text: None,
+                flags: 0,
+                extra,
+                warnings: Vec::new(),
+            }),
+            comment: None,
+        })
+    })() {
+        return Some(parsed);
+    }
+
+    // Legacy / alternate layouts: best-effort parse of just the name + scope.
+    // We intentionally do not attempt to parse the `refersTo` formula for these.
+    let legacy = |name: String, scope_raw: u32, hidden: bool| DefinedName {
         index: 0, // patched by caller
         name,
         scope_sheet: scope_to_option(scope_raw),
-        hidden: (flags & 0x0001) != 0,
-        formula: Some(Formula {
-            rgce,
-            text: None,
-            flags: 0,
-            extra,
-            warnings: Vec::new(),
-        }),
+        hidden,
+        formula: None,
         comment: None,
-    })
+    };
+
+    // Layout A: [flags: u16][scope: u32][name: xlWideString]
+    {
+        let mut rr = RecordReader::new(data);
+        let flags = rr.read_u16().ok()?;
+        if let Ok(scope) = rr.read_u32() {
+            if let Ok(name) = rr.read_utf16_string() {
+                return Some(legacy(name, scope, (flags & 0x0001) != 0));
+            }
+        }
+    }
+
+    // Layout B: [flags: u16][scope: u16][name: xlWideString]
+    {
+        let mut rr = RecordReader::new(data);
+        let flags = rr.read_u16().ok()?;
+        if let Ok(scope) = rr.read_u16() {
+            if let Ok(name) = rr.read_utf16_string() {
+                return Some(legacy(name, scope as u32, (flags & 0x0001) != 0));
+            }
+        }
+    }
+
+    None
 }
