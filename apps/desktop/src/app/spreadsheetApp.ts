@@ -39,6 +39,153 @@ import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
 
+type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return typeof (value as { then?: unknown } | null)?.then === "function";
+}
+
+/**
+ * Tracks async engine work so tests can deterministically await "engine idle".
+ *
+ * This intentionally *does not* assume a specific engine implementation; it just
+ * aggregates promises representing:
+ *  - batched input syncing (e.g. worker `setCells`)
+ *  - recalculation
+ *  - applying computed CellChange[] into the app's computed-value cache
+ */
+class IdleTracker {
+  private readonly pending = new Set<Promise<unknown>>();
+  private waiters: Array<() => void> = [];
+  private error: unknown = null;
+  private resolveScheduled = false;
+
+  track(value: PromiseLike<unknown>): void {
+    const promise = Promise.resolve(value);
+    // Prevent unhandled rejection noise if no one is currently awaiting `whenIdle`.
+    promise.catch((err) => {
+      if (this.error == null) this.error = err;
+    });
+    this.pending.add(promise);
+    promise.finally(() => {
+      this.pending.delete(promise);
+      this.maybeResolve();
+    });
+  }
+
+  whenIdle(): Promise<void> {
+    if (this.pending.size === 0) {
+      return this.error == null ? Promise.resolve() : Promise.reject(this.error);
+    }
+
+    return new Promise((resolve, reject) => {
+      this.waiters.push(() => {
+        if (this.error == null) resolve();
+        else reject(this.error);
+      });
+    });
+  }
+
+  private maybeResolve(): void {
+    if (this.pending.size !== 0) return;
+    if (this.resolveScheduled) return;
+    this.resolveScheduled = true;
+
+    // Wait one microtask turn before resolving to allow follow-up work to be
+    // tracked (e.g. `.then(() => track(...))` attached after the original
+    // promise was tracked).
+    queueMicrotask(() => {
+      this.resolveScheduled = false;
+      if (this.pending.size !== 0) return;
+      const waiters = this.waiters;
+      this.waiters = [];
+      for (const resolve of waiters) resolve();
+    });
+  }
+}
+
+type EngineIntegration = {
+  applyChanges?: (changes: unknown) => unknown;
+  recalculate?: () => unknown;
+  beginBatch?: () => unknown;
+  endBatch?: () => unknown;
+};
+
+class IdleTrackingEngine {
+  recalcCount = 0;
+
+  constructor(
+    private readonly inner: EngineIntegration,
+    private readonly idle: IdleTracker,
+    private readonly onInputsChanged: (changes: unknown) => void,
+    private readonly onComputedChanges: (changes: unknown) => void | Promise<void>
+  ) {}
+
+  applyChanges(changes: unknown): void {
+    this.onInputsChanged(changes);
+    const result = this.inner.applyChanges?.(changes);
+    if (isThenable(result)) {
+      this.idle.track(result);
+    }
+  }
+
+  recalculate(): void {
+    this.recalcCount += 1;
+    const result = this.inner.recalculate?.();
+
+    if (isThenable(result)) {
+      const tracked = Promise.resolve(result).then((changes) => this.onComputedChanges(changes));
+      this.idle.track(tracked);
+      return;
+    }
+
+    // Some engines may return the changes synchronously.
+    if (result !== undefined) {
+      const applied = this.onComputedChanges(result);
+      if (isThenable(applied)) this.idle.track(applied);
+    }
+  }
+
+  beginBatch(): void {
+    const result = this.inner.beginBatch?.();
+    if (isThenable(result)) this.idle.track(result);
+  }
+
+  endBatch(): void {
+    const result = this.inner.endBatch?.();
+    if (isThenable(result)) this.idle.track(result);
+  }
+}
+
+type ChartSeriesDef = {
+  name?: string | null;
+  categories?: string | null;
+  values?: string | null;
+  xValues?: string | null;
+  yValues?: string | null;
+};
+
+type ChartDef = {
+  chartType: { kind: string; name?: string };
+  title?: string;
+  series: ChartSeriesDef[];
+  anchor: {
+    kind: string;
+    fromCol?: number;
+    fromRow?: number;
+    fromColOffEmu?: number;
+    fromRowOffEmu?: number;
+    toCol?: number;
+    toRow?: number;
+    toColOffEmu?: number;
+    toRowOffEmu?: number;
+    xEmu?: number;
+    yEmu?: number;
+    cxEmu?: number;
+    cyEmu?: number;
+  };
+};
+
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
   selectionRange: HTMLElement;
@@ -47,7 +194,15 @@ export interface SpreadsheetAppStatusElements {
 
 export class SpreadsheetApp {
   private sheetId = "Sheet1";
-  private readonly engine = new MockEngine();
+  private readonly idle = new IdleTracker();
+  private readonly computedValues = new Map<string, SpreadsheetValue>();
+  private uiReady = false;
+  private readonly engine = new IdleTrackingEngine(
+    new MockEngine(),
+    this.idle,
+    (changes) => this.invalidateComputedValues(changes),
+    (changes) => this.applyComputedChanges(changes)
+  );
   private readonly document = new DocumentController({ engine: this.engine });
   private readonly searchWorkbook = new DocumentWorkbookAdapter({ document: this.document });
   private limits: GridLimits;
@@ -280,6 +435,7 @@ export class SpreadsheetApp {
 
     // Initial layout + render.
     this.onResize();
+    this.uiReady = true;
   }
 
   destroy(): void {
@@ -317,6 +473,10 @@ export class SpreadsheetApp {
 
   focus(): void {
     this.root.focus();
+  }
+
+  whenIdle(): Promise<void> {
+    return this.idle.whenIdle();
   }
 
   getRecalcCount(): number {
@@ -419,7 +579,8 @@ export class SpreadsheetApp {
     }
   }
 
-  getCellValueA1(a1: string): string {
+  async getCellValueA1(a1: string): Promise<string> {
+    await this.whenIdle();
     const cell = parseA1(a1);
     return this.getCellDisplayValue(cell);
   }
@@ -1406,9 +1567,70 @@ export class SpreadsheetApp {
   }
 
   private getCellComputedValue(cell: CellCoord): SpreadsheetValue {
+    const cacheKey = this.computedKey(this.sheetId, cellToA1(cell));
+    if (this.computedValues.has(cacheKey)) {
+      return this.computedValues.get(cacheKey) ?? null;
+    }
+
     const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
     return this.computeCellValue(cell, memo, stack);
+  }
+
+  private computedKey(sheetId: string, address: string): string {
+    return `${sheetId}:${address.replaceAll("$", "").toUpperCase()}`;
+  }
+
+  private invalidateComputedValues(changes: unknown): void {
+    if (!Array.isArray(changes)) return;
+    for (const change of changes) {
+      const ref = change as EngineCellRef;
+      const sheetId = typeof ref.sheetId === "string" ? ref.sheetId : this.sheetId;
+      if (!Number.isInteger(ref.row) || !Number.isInteger(ref.col)) continue;
+      const address = cellToA1({ row: ref.row, col: ref.col });
+      this.computedValues.delete(this.computedKey(sheetId, address));
+    }
+  }
+
+  private applyComputedChanges(changes: unknown): void {
+    if (!Array.isArray(changes)) return;
+    let updated = false;
+
+    for (const change of changes) {
+      const ref = change as EngineCellRef;
+
+      let sheetId = typeof ref.sheet === "string" ? ref.sheet : undefined;
+      if (!sheetId && typeof ref.sheetId === "string") sheetId = ref.sheetId;
+      if (!sheetId) sheetId = this.sheetId;
+
+      let address = typeof ref.address === "string" ? ref.address : undefined;
+      if (!address && Number.isInteger(ref.row) && Number.isInteger(ref.col)) {
+        address = cellToA1({ row: ref.row, col: ref.col });
+      }
+      if (!address) continue;
+
+      // Support "Sheet1!A1" style addresses if a sheet name was embedded.
+      if (address.includes("!")) {
+        const [maybeSheet, cell] = address.split("!", 2);
+        if (maybeSheet && cell) {
+          sheetId = maybeSheet;
+          address = cell;
+        }
+      }
+
+      const value = ref.value;
+      if (value !== null && typeof value !== "number" && typeof value !== "string" && typeof value !== "boolean") {
+        continue;
+      }
+
+      this.computedValues.set(this.computedKey(sheetId, address), value);
+      updated = true;
+    }
+
+    if (updated) {
+      // Keep the status/formula bar in sync once computed values arrive.
+      if (this.uiReady) this.updateStatus();
+    }
   }
 
   private computeCellValue(
