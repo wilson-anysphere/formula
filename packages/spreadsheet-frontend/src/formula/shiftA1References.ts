@@ -22,7 +22,8 @@ function colNameToIndex(col: string): number {
  * - Does not parse R1C1 references
  * - May incorrectly treat named ranges that look like cell refs (e.g. `LOG10`)
  *   as cell references unless they are followed by `(`.
- * - Does not fully support escaped quotes in sheet names (Excel uses doubled `'`).
+ * - Sheet names are matched using a best-effort regex that supports Excel-style
+ *   escaped quotes (doubled `'`), but the formula is not fully parsed.
  */
 export function shiftA1References(formula: string, deltaRows: number, deltaCols: number): string {
   if ((deltaRows === 0 && deltaCols === 0) || formula.length === 0) return formula;
@@ -70,7 +71,7 @@ function shiftSegment(segment: string, deltaRows: number, deltaCols: number): st
   // We avoid matching tokens followed by `(` to reduce false-positives on
   // functions like `LOG10(`.
   const regex =
-    /(^|[^A-Za-z0-9_])((?:(?:'[^']+'|[A-Za-z0-9_]+)!)?)(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d*)(?!\d)(?!\s*\()/g;
+    /(^|[^A-Za-z0-9_])((?:(?:'(?:[^']|'')+'|[A-Za-z0-9_]+)!)?)(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d*)(?!\d)(?!\s*\()/g;
 
   return segment.replace(regex, (_match, prefix: string, sheetPrefix: string, colAbs: string, col: string, rowAbs: string, row: string) => {
     const col0 = colNameToIndex(col);

@@ -22,6 +22,7 @@ describe("shiftA1References", () => {
   it("shifts sheet-qualified references", () => {
     expect(shiftA1References("=Sheet1!A1+1", 2, 0)).toBe("=Sheet1!A3+1");
     expect(shiftA1References("='Sheet Name'!$A$1", 3, 2)).toBe("='Sheet Name'!$A$1");
+    expect(shiftA1References("='Sheet'' Name'!A1", 1, 0)).toBe("='Sheet'' Name'!A2");
   });
 
   it("does not shift inside double-quoted strings", () => {
@@ -32,4 +33,3 @@ describe("shiftA1References", () => {
     expect(shiftA1References("=LOG10(A1)", 1, 0)).toBe("=LOG10(A2)");
   });
 });
-
