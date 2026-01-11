@@ -235,19 +235,6 @@ export class ContextManager {
     const classificationRecords =
       dlp?.classificationRecords ?? dlp?.classificationStore?.list(dlp.documentId) ?? [];
 
-    const indexStats = await indexWorkbook({
-      workbook: params.workbook,
-      vectorStore,
-      embedder,
-      sampleRows: this.workbookRag.sampleRows,
-    });
-
-    const [queryVector] = await embedder.embedTexts([params.query]);
-    const hits = await vectorStore.query(queryVector, topK, {
-      workbookId: params.workbook.id,
-      filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
-    });
-
     /**
      * @param {any} rect
      */
@@ -271,6 +258,88 @@ export class ContextManager {
       return { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
     }
 
+    /**
+     * @param {string} text
+     */
+    function firstLine(text) {
+      const s = String(text ?? "");
+      const idx = s.indexOf("\n");
+      return idx === -1 ? s : s.slice(0, idx);
+    }
+
+    const indexStats = await indexWorkbook({
+      workbook: params.workbook,
+      vectorStore,
+      embedder,
+      sampleRows: this.workbookRag.sampleRows,
+      transform: dlp
+        ? (record) => {
+            const rawText = record.text ?? "";
+            const heuristic = classifyText(rawText);
+            const heuristicClassification = heuristicToPolicyClassification(heuristic);
+
+            // Fold in structured DLP classifications for the chunk's sheet + rect metadata.
+            let recordClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+            const range = rectToRange(record.metadata?.rect);
+            const sheetName = record.metadata?.sheetName;
+            if (range && sheetName) {
+              recordClassification = effectiveRangeClassification(
+                { documentId: dlp.documentId, sheetId: sheetName, range },
+                classificationRecords,
+              );
+            }
+
+            const classification = maxClassification(recordClassification, heuristicClassification);
+
+            const recordDecision = evaluatePolicy({
+              action: DLP_ACTION.AI_CLOUD_PROCESSING,
+              classification: recordClassification,
+              policy: dlp.policy,
+              options: { includeRestrictedContent },
+            });
+
+            const decision = evaluatePolicy({
+              action: DLP_ACTION.AI_CLOUD_PROCESSING,
+              classification,
+              policy: dlp.policy,
+              options: { includeRestrictedContent },
+            });
+
+            let safeText = rawText;
+            if (decision.decision !== DLP_DECISION.ALLOW) {
+              // If DLP redaction is required due to explicit document/sheet/range classification,
+              // redact the entire content; pattern-based redaction isn't sufficient in that case.
+              if (recordDecision.decision !== DLP_DECISION.ALLOW) {
+                safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+              } else {
+                safeText = this.redactor(rawText);
+              }
+              if (!includeRestrictedContent && classifyText(safeText).level === "sensitive") {
+                safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+              }
+            }
+
+            return {
+              text: safeText,
+              metadata: {
+                ...(record.metadata ?? {}),
+                // Store the heuristic classification computed on the *raw* chunk text so policy
+                // enforcement can still detect sensitive chunks even if `text` is redacted before
+                // embedding / persistence.
+                dlpHeuristic: heuristic,
+                text: safeText,
+              },
+            };
+          }
+        : undefined,
+    });
+
+    const [queryVector] = await embedder.embedTexts([params.query]);
+    const hits = await vectorStore.query(queryVector, topK, {
+      workbookId: params.workbook.id,
+      filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
+    });
+
     /** @type {{level: string, labels: string[]} } */
     let overallClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
     /** @type {ReturnType<typeof evaluatePolicy> | null} */
@@ -289,7 +358,7 @@ export class ContextManager {
       const text = meta.text ?? "";
       const raw = `${header}\n${text}`;
 
-      const heuristic = classifyText(raw);
+      const heuristic = meta.dlpHeuristic ?? classifyText(raw);
       const heuristicClassification = heuristicToPolicyClassification(heuristic);
 
       // If the caller provided structured cell/range classifications, fold those in using the
@@ -400,9 +469,6 @@ export class ContextManager {
         // redact the entire content. Pattern-based redaction is only safe when the
         // classification is derived solely from those patterns.
         if (recordDecision && recordDecision.decision !== DLP_DECISION.ALLOW) {
-          outText = this.redactor(`${header}\n[REDACTED]`);
-        } else if (outText === raw) {
-          // Ensure deterministic redaction even when the regex redactor has no effect.
           outText = this.redactor(`${header}\n[REDACTED]`);
         }
         redacted = true;

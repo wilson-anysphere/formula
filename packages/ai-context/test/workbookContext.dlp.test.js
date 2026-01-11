@@ -6,6 +6,25 @@ import { HashEmbedder, InMemoryVectorStore } from "../../ai-rag/src/index.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
+class CapturingEmbedder {
+  /**
+   * @param {{dimension: number}} opts
+   */
+  constructor(opts) {
+    this.dimension = opts.dimension;
+    /** @type {string[]} */
+    this.seen = [];
+  }
+
+  /**
+   * @param {string[]} texts
+   */
+  async embedTexts(texts) {
+    this.seen.push(...texts);
+    return texts.map(() => new Float32Array(this.dimension));
+  }
+}
+
 function makeSensitiveWorkbook() {
   return {
     id: "wb-dlp",
@@ -108,6 +127,57 @@ test("buildWorkbookContext: redacts sensitive workbook chunks when policy allows
   assert.equal(auditEvents[0].documentId, workbook.id);
   assert.equal(auditEvents[0].decision.decision, "redact");
   assert.equal(auditEvents[0].redactedChunkCount, 1);
+});
+
+test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
+  const workbook = makeSensitiveWorkbook();
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 500,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  await assert.rejects(() =>
+    cm.buildWorkbookContext({
+      workbook,
+      query: "contacts",
+      dlp: {
+        documentId: workbook.id,
+        policy: makePolicy({ redactDisallowed: false }),
+      },
+    })
+  );
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /alice@example\.com/);
+  assert.doesNotMatch(joined, /123-45-6789/);
+});
+
+test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when redacted", async () => {
+  const workbook = makeSensitiveWorkbook();
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  await cm.buildWorkbookContext({
+    workbook,
+    query: "contacts",
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ redactDisallowed: true }),
+    },
+  });
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /alice@example\.com/);
+  assert.doesNotMatch(joined, /123-45-6789/);
+  assert.match(joined, /\[REDACTED_(EMAIL|SSN)\]/);
 });
 
 test("buildWorkbookContext: structured Restricted classifications fully redact retrieved chunks", async () => {

@@ -19,6 +19,7 @@ export function approximateTokenCount(text) {
  *   vectorStore: any,
  *   embedder: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> },
  *   sampleRows?: number,
+ *   transform?: (record: { id: string, text: string, metadata: any }) => ({ text?: string, metadata?: any } | null | Promise<{ text?: string, metadata?: any } | null>)
  * }} params
  */
 export async function indexWorkbook(params) {
@@ -39,24 +40,50 @@ export async function indexWorkbook(params) {
   const toUpsert = [];
 
   for (const chunk of chunks) {
-    const text = chunkToText(chunk, { sampleRows });
-    const chunkHash = await contentHash(text);
-    currentIds.add(chunk.id);
+    const originalText = chunkToText(chunk, { sampleRows });
 
-    if (existingHashes.get(chunk.id) === chunkHash) continue;
-
-    toUpsert.push({
+    /** @type {{ id: string, text: string, metadata: any }} */
+    let record = {
       id: chunk.id,
-      text,
+      text: originalText,
       metadata: {
         workbookId: chunk.workbookId,
         sheetName: chunk.sheetName,
         kind: chunk.kind,
         title: chunk.title,
         rect: chunk.rect,
-        text,
+        text: originalText,
+      },
+    };
+
+    if (typeof params.transform === "function") {
+      const transformed = await params.transform(record);
+      if (!transformed) continue;
+
+      if (Object.prototype.hasOwnProperty.call(transformed, "text")) {
+        record.text = transformed.text ?? "";
+      }
+      if (Object.prototype.hasOwnProperty.call(transformed, "metadata")) {
+        record.metadata = transformed.metadata ?? record.metadata;
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(record.metadata ?? {}, "text")) {
+        record.metadata = { ...(record.metadata ?? {}), text: record.text };
+      }
+    }
+
+    const chunkHash = await contentHash(record.text);
+    currentIds.add(record.id);
+
+    if (existingHashes.get(record.id) === chunkHash) continue;
+
+    toUpsert.push({
+      id: record.id,
+      text: record.text,
+      metadata: {
+        ...(record.metadata ?? {}),
         contentHash: chunkHash,
-        tokenCount: approximateTokenCount(text),
+        tokenCount: approximateTokenCount(record.text),
       },
     });
   }
