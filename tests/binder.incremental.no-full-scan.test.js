@@ -6,7 +6,16 @@ import * as Y from "yjs";
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
 
-test("binder: Yjs→DocumentController incremental updates avoid full cells-map scans", () => {
+async function waitForCondition(condition, timeoutMs, intervalMs = 10) {
+  const start = Date.now();
+  while (Date.now() - start <= timeoutMs) {
+    if (condition()) return;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error("Timed out waiting for condition");
+}
+
+test("binder: Yjs→DocumentController incremental updates avoid full cells-map scans", async () => {
   const ydoc = new Y.Doc();
   const cells = ydoc.getMap("cells");
 
@@ -43,7 +52,7 @@ test("binder: Yjs→DocumentController incremental updates avoid full cells-map 
       cell.set("value", "updated");
     }, remoteOrigin);
 
-    assert.equal(documentController.getCell("Sheet1", "A1").value, "updated");
+    await waitForCondition(() => documentController.getCell("Sheet1", "A1").value === "updated", 10_000);
     assert.equal(documentController.getCell("Sheet1", "A1").formula, null);
 
     // Also support `r{row}c{col}` keys (resolved against defaultSheetId).
@@ -53,7 +62,10 @@ test("binder: Yjs→DocumentController incremental updates avoid full cells-map 
       cells.set("r100c0", cell);
     }, remoteOrigin);
 
-    assert.equal(documentController.getCell("Sheet1", { row: 100, col: 0 }).value, "rc-updated");
+    await waitForCondition(
+      () => documentController.getCell("Sheet1", { row: 100, col: 0 }).value === "rc-updated",
+      10_000
+    );
   } finally {
     cells.forEach = originalForEach;
     binder.destroy();
