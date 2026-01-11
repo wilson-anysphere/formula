@@ -1340,7 +1340,8 @@ export class QueryEngine {
     if (source.type === "database") {
       const connector = this.connectors.get("sql");
       if (!connector) throw new Error("Database source requires a SqlConnector");
-      const request = { connectionId: source.connectionId, connection: source.connection, sql: source.query };
+      const connectionId = resolveDatabaseConnectionId(source, connector);
+      const request = { connectionId: connectionId ?? undefined, connection: source.connection, sql: source.query };
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("sql", request, state);
@@ -1403,8 +1404,9 @@ export class QueryEngine {
     if (dialectName === "postgres") {
       normalizedSql = normalizePostgresPlaceholders(sql, params.length);
     }
-    const request = { connectionId: source.connectionId, connection: source.connection, sql: normalizedSql, params };
-    const signatureRequest = { connectionId: source.connectionId, connection: source.connection, sql: source.query };
+    const connectionId = resolveDatabaseConnectionId(source, connector);
+    const request = { connectionId: connectionId ?? undefined, connection: source.connection, sql: normalizedSql, params };
+    const signatureRequest = { connectionId: connectionId ?? undefined, connection: source.connection, sql: source.query };
     await this.assertPermission(connector.permissionKind, { source, request }, state);
     const credentials = await this.getCredentials("sql", request, state);
 

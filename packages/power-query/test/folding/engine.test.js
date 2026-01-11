@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { CacheManager } from "../../src/cache/cache.js";
+import { MemoryCacheStore } from "../../src/cache/memory.js";
 import { QueryEngine } from "../../src/engine.js";
 import { DataTable } from "../../src/table.js";
 import { SqlConnector } from "../../src/connectors/sql.js";
@@ -347,4 +349,49 @@ test("QueryEngine: schema discovery enables folding renameColumn/changeType with
   // Schema discovery should be cached within the engine instance.
   await engine.executeQuery(query, { queries: {} }, {});
   assert.equal(schemaCalls, 1);
+});
+
+test("QueryEngine: database credentials are requested once per execution when cache key generation runs", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  let permissionCount = 0;
+  let credentialCount = 0;
+
+  const engine = new QueryEngine({
+    cache,
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Value"],
+              [1],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+    onPermissionRequest: async () => {
+      permissionCount += 1;
+      return true;
+    },
+    onCredentialRequest: async () => {
+      credentialCount += 1;
+      return { credentialId: "cred-1" };
+    },
+  });
+
+  const query = {
+    id: "q_db_credential_cache",
+    name: "DB Credential Cache",
+    // No dialect: no folding. We want to validate that cache key generation (which requests credentials)
+    // shares the same credential result with the subsequent source execution in the same run.
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT 1" },
+    steps: [],
+  };
+
+  await engine.executeQueryWithMeta(query, { queries: {} }, {});
+  assert.equal(permissionCount, 1);
+  assert.equal(credentialCount, 1);
 });
