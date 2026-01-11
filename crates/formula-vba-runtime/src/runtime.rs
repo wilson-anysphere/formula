@@ -1195,6 +1195,7 @@ impl<'a> Executor<'a> {
             VbaObject::Range(range) => match member_lc.as_str() {
                 "value" | "value2" => self.set_range_value(*range, value),
                 "formula" => self.set_range_formula(*range, value),
+                "formular1c1" => self.set_range_formula(*range, value),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Range member `{member}`"
                 ))),
@@ -1939,6 +1940,78 @@ impl<'a> Executor<'a> {
                     };
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
                 }
+                "paste" | "pastespecial" => {
+                    // Best-effort: paste clipboard at the current selection/active cell.
+                    //
+                    // Excel's recorder frequently emits `ActiveSheet.Paste` after selecting the
+                    // destination cell. We treat this like a "paste all" (values+formulas).
+                    let dest = if args.is_empty() {
+                        if let Some(sel) = self.selection {
+                            if sel.sheet == sheet {
+                                sel
+                            } else if self.sheet.active_sheet() == sheet {
+                                let (r, c) = self.sheet.active_cell();
+                                VbaRangeRef {
+                                    sheet,
+                                    start_row: r,
+                                    start_col: c,
+                                    end_row: r,
+                                    end_col: c,
+                                }
+                            } else {
+                                VbaRangeRef {
+                                    sheet,
+                                    start_row: 1,
+                                    start_col: 1,
+                                    end_row: 1,
+                                    end_col: 1,
+                                }
+                            }
+                        } else if self.sheet.active_sheet() == sheet {
+                            let (r, c) = self.sheet.active_cell();
+                            VbaRangeRef {
+                                sheet,
+                                start_row: r,
+                                start_col: c,
+                                end_row: r,
+                                end_col: c,
+                            }
+                        } else {
+                            VbaRangeRef {
+                                sheet,
+                                start_row: 1,
+                                start_col: 1,
+                                end_row: 1,
+                                end_col: 1,
+                            }
+                        }
+                    } else {
+                        let dest_arg = arg_named_or_pos(args, "destination", 0).ok_or_else(|| {
+                            VbaError::Runtime("Paste() missing destination".to_string())
+                        })?;
+                        let dest_val = self.eval_expr(frame, &dest_arg.expr)?;
+                        let dest_obj = dest_val.as_object().ok_or_else(|| {
+                            VbaError::Runtime("Paste destination must be a Range".to_string())
+                        })?;
+                        let dest_range = {
+                            let borrowed = dest_obj.borrow();
+                            match &*borrowed {
+                                VbaObject::Range(r) => *r,
+                                _ => {
+                                    return Err(VbaError::Runtime(
+                                        "Paste destination must be a Range".to_string(),
+                                    ))
+                                }
+                            }
+                        };
+                        dest_range
+                    };
+
+                    if let Some(clip) = self.clipboard.clone() {
+                        self.paste_clipboard(&clip, dest, true)?;
+                    }
+                    Ok(VbaValue::Empty)
+                }
                 "activate" | "select" => {
                     self.sheet.set_active_sheet(sheet)?;
                     self.selection = None;
@@ -2000,7 +2073,9 @@ impl<'a> Executor<'a> {
                             }
                         }
                     } else {
-                        false
+                        // If Paste is omitted (but other args like Operation/SkipBlanks are
+                        // supplied), Excel defaults to xlPasteAll.
+                        true
                     };
                     if let Some(clip) = self.clipboard.clone() {
                         self.paste_clipboard(&clip, range, include_formulas)?;
@@ -2082,6 +2157,11 @@ impl<'a> Executor<'a> {
                             self.sheet.clear_cell_contents(range.sheet, r, c)?;
                         }
                     }
+                    Ok(VbaValue::Empty)
+                }
+                "clear" => {
+                    // `Clear` clears contents + formatting. We only model contents for now.
+                    self.call_object_method(frame, obj, "ClearContents", &[])?;
                     Ok(VbaValue::Empty)
                 }
                 _ => Err(VbaError::Runtime(format!(
@@ -2403,6 +2483,7 @@ impl<'a> Executor<'a> {
             VbaObject::Range(range) => match member_lc.as_str() {
                 "value" | "value2" => self.get_range_value(*range),
                 "formula" => self.get_range_formula(*range),
+                "formular1c1" => self.get_range_formula(*range),
                 "text" => Ok(self
                     .sheet
                     .get_cell_value(range.sheet, range.start_row, range.start_col)?
@@ -2643,7 +2724,6 @@ impl<'a> Executor<'a> {
                 self.sheet.clear_cell_contents(dest.sheet, tr, tc)?;
                 if include_formulas {
                     if let Some(formula) = formula {
-                        self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
                         self.sheet.set_cell_formula(dest.sheet, tr, tc, formula)?;
                     } else {
                         self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
@@ -2673,9 +2753,10 @@ impl<'a> Executor<'a> {
                 let tr = dest.start_row + dr;
                 let tc = dest.start_col + dc;
                 self.sheet.clear_cell_contents(dest.sheet, tr, tc)?;
-                self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
                 if let Some(formula) = formula {
                     self.sheet.set_cell_formula(dest.sheet, tr, tc, formula)?;
+                } else {
+                    self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
                 }
             }
         }
@@ -3097,7 +3178,7 @@ fn arg_named_or_pos<'a>(
 ) -> Option<&'a crate::ast::CallArg> {
     args.iter()
         .find(|a| a.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name)))
-        .or_else(|| args.get(pos))
+        .or_else(|| args.get(pos).filter(|a| a.name.is_none()))
 }
 
 fn expand_single_cell_destination(dest: VbaRangeRef, template: VbaRangeRef) -> VbaRangeRef {

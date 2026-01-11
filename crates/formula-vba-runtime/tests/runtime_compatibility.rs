@@ -321,6 +321,73 @@ End Sub
 }
 
 #[test]
+fn worksheet_paste_uses_clipboard_and_expands_destination() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1") = 1
+    Range("A2") = 2
+    Range("A1:A2").Copy
+    Range("C1").Select
+    ActiveSheet.Paste
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(wb.get_value_a1("Sheet1", "C1").unwrap(), VbaValue::Double(1.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "C2").unwrap(), VbaValue::Double(2.0));
+}
+
+#[test]
+fn range_formular1c1_is_an_alias_for_formula() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1").FormulaR1C1 = "=1+1"
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(
+        wb.get_formula_a1("Sheet1", "A1").unwrap(),
+        Some("=1+1".to_string())
+    );
+}
+
+#[test]
+fn paste_special_defaults_to_paste_all_when_paste_arg_is_omitted() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1").Copy
+    Range("B1").PasteSpecial Operation:=xlNone
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+    wb.set_formula_a1("Sheet1", "A1", "=1+1").unwrap();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(
+        wb.get_formula_a1("Sheet1", "B1").unwrap(),
+        Some("=1+1".to_string())
+    );
+}
+
+#[test]
 fn rows_and_columns_count_match_excel_limits() {
     let code = r#"
 Option Explicit
