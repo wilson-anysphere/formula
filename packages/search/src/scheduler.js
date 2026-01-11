@@ -20,15 +20,40 @@ export function throwIfAborted(signal) {
   if (signal?.aborted) throw createAbortError();
 }
 
+let messageChannelYield = null;
+
+function getMessageChannelYield() {
+  if (messageChannelYield) return messageChannelYield;
+  if (typeof globalThis.MessageChannel !== "function") return null;
+
+  const channel = new MessageChannel();
+  /** @type {Array<() => void>} */
+  const queue = [];
+  channel.port1.onmessage = () => {
+    const resolve = queue.shift();
+    if (resolve) resolve();
+  };
+
+  messageChannelYield = () =>
+    new Promise((resolve) => {
+      queue.push(resolve);
+      channel.port2.postMessage(0);
+    });
+
+  return messageChannelYield;
+}
+
 export function defaultYieldScheduler() {
-  return new Promise((resolve) => {
-    // Prefer setImmediate when available (Node) – it yields without clamping.
-    if (typeof setImmediate === "function") {
-      setImmediate(resolve);
-      return;
-    }
-    setTimeout(resolve, 0);
-  });
+  // Prefer setImmediate when available (Node) – it yields without clamping.
+  if (typeof setImmediate === "function") {
+    return new Promise((resolve) => setImmediate(resolve));
+  }
+
+  // MessageChannel yields without setTimeout clamping in browsers.
+  const yieldViaMessageChannel = getMessageChannelYield();
+  if (yieldViaMessageChannel) return yieldViaMessageChannel();
+
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /**
@@ -69,4 +94,3 @@ export function createTimeSlicer({
     },
   };
 }
-
