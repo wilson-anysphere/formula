@@ -2,6 +2,7 @@
   "name": "@formula/collab-permissions",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts"
 }
-
