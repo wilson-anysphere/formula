@@ -229,6 +229,79 @@ describe("API e2e: audit ingestion + streaming", () => {
     expect(stored.rows[0]!.created_at).toBeTruthy();
   });
 
+  it("exports audit events in json/cef/leef without exposing __audit metadata", async () => {
+    const register = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "audit-export-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "Export Org"
+      }
+    });
+    expect(register.statusCode).toBe(200);
+    const cookie = extractCookie(register.headers["set-cookie"]);
+    const registerBody = register.json() as any;
+    const orgId = registerBody.organization.id as string;
+
+    const ingest = await app.inject({
+      method: "POST",
+      url: `/orgs/${orgId}/audit`,
+      remoteAddress: "203.0.113.5",
+      headers: {
+        cookie,
+        "user-agent": "UnitTest/1.0"
+      },
+      payload: {
+        eventType: "client.export_test",
+        success: true,
+        details: { token: "super-secret", nested: { password: "p@ssw0rd" } }
+      }
+    });
+    expect(ingest.statusCode).toBe(202);
+    const eventId = (ingest.json() as any).id as string;
+
+    const exportJson = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgId}/audit/export?eventType=client.export_test&format=json`,
+      headers: { cookie }
+    });
+    expect(exportJson.statusCode).toBe(200);
+    expect(exportJson.headers["content-type"]).toContain("application/json");
+    const jsonEvents = JSON.parse(exportJson.body) as any[];
+    const exportedJson = jsonEvents.find((e) => e.id === eventId);
+    expect(exportedJson).toBeTruthy();
+    expect(exportedJson.details).toMatchObject({ token: "[REDACTED]", nested: { password: "[REDACTED]" } });
+    expect(exportedJson.details).not.toHaveProperty("__audit");
+
+    const exportCef = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgId}/audit/export?eventType=client.export_test&format=cef`,
+      headers: { cookie }
+    });
+    expect(exportCef.statusCode).toBe(200);
+    expect(exportCef.headers["content-type"]).toContain("text/plain");
+    expect(exportCef.body).toContain("CEF:0|");
+    expect(exportCef.body).toContain('"token":"[REDACTED]"');
+    expect(exportCef.body).not.toContain("__audit");
+    expect(exportCef.body).not.toContain("super-secret");
+    expect(exportCef.body).not.toContain("p@ssw0rd");
+
+    const exportLeef = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgId}/audit/export?eventType=client.export_test&format=leef`,
+      headers: { cookie }
+    });
+    expect(exportLeef.statusCode).toBe(200);
+    expect(exportLeef.headers["content-type"]).toContain("text/plain");
+    expect(exportLeef.body).toContain("LEEF:2.0|");
+    expect(exportLeef.body).toContain('"token":"[REDACTED]"');
+    expect(exportLeef.body).not.toContain("__audit");
+    expect(exportLeef.body).not.toContain("super-secret");
+    expect(exportLeef.body).not.toContain("p@ssw0rd");
+  });
+
   it(
     "streams audit events over SSE (admin-only) with redaction",
     async () => {
