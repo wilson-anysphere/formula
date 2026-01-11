@@ -7114,6 +7114,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
+name = "xlsb-diff"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "formula-xlsb",
+ "pretty_assertions",
+ "roxmltree",
+ "tempfile",
+ "walkdir",
+ "xlsx-diff",
+ "zip 2.4.2",
+]
+
+[[package]]
 name = "xlsx-diff"
 version = "0.1.0"
 dependencies = [
