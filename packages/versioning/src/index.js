@@ -8,6 +8,7 @@ export { VersionManager } from "./versioning/versionManager.js";
 export { createYjsSpreadsheetDocAdapter } from "./yjs/yjsSpreadsheetDocAdapter.js";
 export { sheetStateFromYjsDoc, sheetStateFromYjsSnapshot } from "./yjs/sheetState.js";
 export { diffYjsSnapshots } from "./yjs/diffSnapshots.js";
+export { diffYjsWorkbookSnapshots } from "./yjs/diffWorkbookSnapshots.js";
 export { diffYjsVersionAgainstCurrent, diffYjsVersions } from "./yjs/versionHistory.js";
 export { sheetStateFromDocumentSnapshot } from "./document/sheetState.js";
 export { diffDocumentSnapshots } from "./document/diffSnapshots.js";
