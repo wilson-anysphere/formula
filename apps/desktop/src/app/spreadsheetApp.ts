@@ -272,6 +272,7 @@ export class SpreadsheetApp {
   private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
   private formulaEditCell: CellCoord | null = null;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
+  private showFormulas = false;
 
   private dragState: { pointerId: number; mode: "normal" | "formula" } | null = null;
 
@@ -800,6 +801,31 @@ export class SpreadsheetApp {
     return this.getCellDisplayValue(cell);
   }
 
+  async getCellDisplayValueA1(a1: string): Promise<string> {
+    return this.getCellValueA1(a1);
+  }
+
+  async getCellDisplayTextForRenderA1(a1: string): Promise<string> {
+    await this.whenIdle();
+    const cell = parseA1(a1);
+    const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+    if (!state) return "";
+
+    if (state.formula != null) {
+      if (this.showFormulas) return state.formula;
+      const computed = this.getCellComputedValue(cell);
+      return computed == null ? "" : String(computed);
+    }
+
+    if (isRichTextValue(state.value)) return state.value.text;
+    if (state.value != null) return String(state.value);
+    return "";
+  }
+
+  getLastSelectionDrawn(): unknown {
+    return this.selectionRenderer.getLastDebug();
+  }
+
   toggleCommentsPanel(): void {
     this.commentsPanelVisible = !this.commentsPanelVisible;
     this.commentsPanel.style.display = this.commentsPanelVisible ? "flex" : "none";
@@ -1141,6 +1167,7 @@ export class SpreadsheetApp {
     const fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
     const fontSizePx = 14;
     const defaultTextColor = resolveCssVar("--text-primary", { fallback: "CanvasText" });
+    const errorTextColor = resolveCssVar("--error", { fallback: defaultTextColor });
 
     for (let visualRow = 0; visualRow < rows; visualRow++) {
       const row = this.visibleRows[visualRow]!;
@@ -1152,13 +1179,27 @@ export class SpreadsheetApp {
         };
         if (!state) continue;
 
-        const rich = isRichTextValue(state.value)
-          ? state.value
-          : state.formula != null
-            ? { text: state.formula, runs: [] }
-            : state.value != null
-              ? { text: String(state.value), runs: [] }
-              : null;
+        let rich: { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> } | null =
+          null;
+        let color = defaultTextColor;
+
+        if (state.formula != null) {
+          if (this.showFormulas) {
+            rich = { text: state.formula, runs: [] };
+          } else {
+            const computed = this.getCellComputedValue({ row, col });
+            if (computed != null) {
+              rich = { text: String(computed), runs: [] };
+              if (typeof computed === "string" && computed.startsWith("#")) {
+                color = errorTextColor;
+              }
+            }
+          }
+        } else if (isRichTextValue(state.value)) {
+          rich = state.value;
+        } else if (state.value != null) {
+          rich = { text: String(state.value), runs: [] };
+        }
 
         if (!rich || rich.text === "") continue;
 
@@ -1177,7 +1218,7 @@ export class SpreadsheetApp {
             verticalAlign: "middle",
             fontFamily,
             fontSizePx,
-            color: defaultTextColor
+            color
           }
         );
       }
@@ -1284,7 +1325,9 @@ export class SpreadsheetApp {
 
   private renderSelection(): void {
     this.selectionRenderer.render(this.selectionCtx, this.selection, {
-      getCellRect: (cell) => this.getCellRect(cell)
+      getCellRect: (cell) => this.getCellRect(cell),
+      visibleRows: this.visibleRows,
+      visibleCols: this.visibleCols,
     });
 
     // If scrolling/resizing happened during editing, keep the editor aligned.
@@ -1321,7 +1364,29 @@ export class SpreadsheetApp {
 
   private onWindowKeyDown(e: KeyboardEvent): void {
     if (e.defaultPrevented) return;
+    if (this.handleShowFormulasShortcut(e)) return;
     this.handleUndoRedoShortcut(e);
+  }
+
+  private handleShowFormulasShortcut(e: KeyboardEvent): boolean {
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary) return false;
+    if (e.code !== "Backquote") return false;
+
+    // Only trigger when *not* actively editing text.
+    if (this.editor.isOpen()) return false;
+    if (this.formulaBar?.isEditing()) return false;
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
+    }
+
+    e.preventDefault();
+    this.showFormulas = !this.showFormulas;
+    this.refresh();
+    return true;
   }
 
   private handleUndoRedoShortcut(e: KeyboardEvent): boolean {
@@ -1667,6 +1732,7 @@ export class SpreadsheetApp {
     }
 
     if (this.handleUndoRedoShortcut(e)) return;
+    if (this.handleShowFormulasShortcut(e)) return;
 
     // Editing
     if (e.key === "F2") {
@@ -1896,7 +1962,7 @@ export class SpreadsheetApp {
         cellAddress: `${this.sheetId}!${key}`,
       });
     } else if (state?.value != null) {
-      value = state.value as SpreadsheetValue;
+      value = isRichTextValue(state.value) ? state.value.text : (state.value as SpreadsheetValue);
     } else {
       value = null;
     }
@@ -1968,13 +2034,35 @@ export class SpreadsheetApp {
     const startCol = Math.min(this.referencePreview.start.col, this.referencePreview.end.col);
     const endCol = Math.max(this.referencePreview.start.col, this.referencePreview.end.col);
 
-    const startRect = this.getCellRect({ row: startRow, col: startCol });
-    const endRect = this.getCellRect({ row: endRow, col: endCol });
+    // Clip preview rendering to the visible viewport so dragging a range that
+    // extends offscreen doesn't crash (and still provides visual feedback).
+    const visibleStartRow = this.visibleRows.find((row) => row >= startRow && row <= endRow) ?? null;
+    const visibleEndRow = (() => {
+      for (let i = this.visibleRows.length - 1; i >= 0; i -= 1) {
+        const row = this.visibleRows[i]!;
+        if (row >= startRow && row <= endRow) return row;
+      }
+      return null;
+    })();
+    const visibleStartCol = this.visibleCols.find((col) => col >= startCol && col <= endCol) ?? null;
+    const visibleEndCol = (() => {
+      for (let i = this.visibleCols.length - 1; i >= 0; i -= 1) {
+        const col = this.visibleCols[i]!;
+        if (col >= startCol && col <= endCol) return col;
+      }
+      return null;
+    })();
+    if (visibleStartRow == null || visibleEndRow == null || visibleStartCol == null || visibleEndCol == null) return;
+
+    const startRect = this.getCellRect({ row: visibleStartRow, col: visibleStartCol });
+    const endRect = this.getCellRect({ row: visibleEndRow, col: visibleEndCol });
+    if (!startRect || !endRect) return;
 
     const x = startRect.x;
     const y = startRect.y;
     const width = endRect.x + endRect.width - startRect.x;
     const height = endRect.y + endRect.height - startRect.y;
+    if (width <= 0 || height <= 0) return;
 
     ctx.save();
     ctx.strokeStyle = resolveCssVar("--warning", { fallback: "CanvasText" });

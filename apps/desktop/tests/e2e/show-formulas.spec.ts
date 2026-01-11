@@ -1,0 +1,77 @@
+import { expect, test } from "@playwright/test";
+
+async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+}
+
+async function toggleShowFormulas(page: import("@playwright/test").Page): Promise<void> {
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.down(modifier);
+  await page.keyboard.press("Backquote");
+  await page.keyboard.up(modifier);
+}
+
+test.describe("show formulas", () => {
+  test("renders computed values by default and toggles formula text via Ctrl/Cmd+`", async ({ page }) => {
+    await page.goto("/");
+
+    // Seed A1=1 and A2=2.
+    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await page.keyboard.press("F2");
+    const cellEditor = page.locator("textarea.cell-editor");
+    await cellEditor.fill("1");
+    await page.keyboard.press("Enter"); // commits and moves to A2
+    await waitForIdle(page);
+
+    await page.keyboard.press("F2");
+    await cellEditor.fill("2");
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+
+    // Create C1 = SUM(A1:A2).
+    await page.click("#grid", { position: { x: 260, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+    await page.keyboard.press("F2");
+    await cellEditor.fill("=SUM(A1:A2)");
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+
+    const computedValue = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayValueA1("C1"));
+    expect(computedValue).toBe("3");
+
+    const defaultRenderText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    expect(defaultRenderText).toBe("3");
+
+    await toggleShowFormulas(page);
+    const formulaRenderText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    expect(formulaRenderText).toBe("=SUM(A1:A2)");
+
+    await toggleShowFormulas(page);
+    const toggledBackText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    expect(toggledBackText).toBe("3");
+  });
+
+  test("selection renderer keeps drawing ranges when endpoints are offscreen", async ({ page }) => {
+    await page.goto("/");
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.selectRange({
+        range: {
+          startRow: 0,
+          startCol: 0,
+          endRow: 500,
+          endCol: 100,
+        },
+      });
+    });
+
+    const drawn = await page.evaluate(() => (window as any).__formulaApp.getLastSelectionDrawn());
+    expect(drawn).toBeTruthy();
+    expect(drawn.ranges.length).toBeGreaterThan(0);
+    expect(drawn.ranges[0].rect.width).toBeGreaterThan(0);
+    expect(drawn.ranges[0].rect.height).toBeGreaterThan(0);
+  });
+});
+
