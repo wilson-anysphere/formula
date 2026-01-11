@@ -3,7 +3,7 @@ use crate::functions::array_lift;
 use crate::functions::math::criteria::Criteria;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{ErrorKind, Value};
+use crate::value::{Array, ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
 
@@ -720,6 +720,354 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     Value::Number(count as f64)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "SUMIF",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Any],
+        implementation: sumif_fn,
+    }
+}
+
+fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let criteria_range = match Range2D::try_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+
+    let criteria_value = eval_scalar_arg(ctx, &args[1]);
+    if let Value::Error(e) = criteria_value {
+        return Value::Error(e);
+    }
+    let criteria = match Criteria::parse_with_date_system(&criteria_value, ctx.date_system()) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
+    };
+
+    let sum_range = if args.len() >= 3 {
+        Some(match Range2D::try_from_arg(ctx.eval_arg(&args[2])) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        })
+    } else {
+        None
+    };
+
+    let (rows, cols) = criteria_range.shape();
+    if let Some(ref sum_range) = sum_range {
+        let (sum_rows, sum_cols) = sum_range.shape();
+        if rows != sum_rows || cols != sum_cols {
+            return Value::Error(ErrorKind::Value);
+        }
+    }
+
+    let mut sum = 0.0;
+    for row in 0..rows {
+        for col in 0..cols {
+            let crit_val = criteria_range.get(ctx, row, col);
+            if !criteria.matches(&crit_val) {
+                continue;
+            }
+
+            let sum_val = match &sum_range {
+                Some(r) => r.get(ctx, row, col),
+                None => crit_val,
+            };
+
+            match sum_val {
+                Value::Number(n) => sum += n,
+                Value::Error(e) => return Value::Error(e),
+                _ => {}
+            }
+        }
+    }
+
+    Value::Number(sum)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "SUMIFS",
+        min_args: 3,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: sumifs_fn,
+    }
+}
+
+fn sumifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let sum_range = match Range2D::try_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    let (rows, cols) = sum_range.shape();
+
+    let mut criteria_ranges = Vec::new();
+    let mut criteria = Vec::new();
+
+    for pair in args[1..].chunks_exact(2) {
+        let range = match Range2D::try_from_arg(ctx.eval_arg(&pair[0])) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
+        let (r_rows, r_cols) = range.shape();
+        if r_rows != rows || r_cols != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit_value = eval_scalar_arg(ctx, &pair[1]);
+        if let Value::Error(e) = crit_value {
+            return Value::Error(e);
+        }
+        let crit = match Criteria::parse_with_date_system(&crit_value, ctx.date_system()) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        criteria_ranges.push(range);
+        criteria.push(crit);
+    }
+
+    let mut sum = 0.0;
+    for row in 0..rows {
+        for col in 0..cols {
+            let mut matches = true;
+            for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                let v = range.get(ctx, row, col);
+                if !crit.matches(&v) {
+                    matches = false;
+                    break;
+                }
+            }
+            if !matches {
+                continue;
+            }
+
+            match sum_range.get(ctx, row, col) {
+                Value::Number(n) => sum += n,
+                Value::Error(e) => return Value::Error(e),
+                _ => {}
+            }
+        }
+    }
+
+    Value::Number(sum)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "AVERAGEIF",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Any],
+        implementation: averageif_fn,
+    }
+}
+
+fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let criteria_range = match Range2D::try_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+
+    let criteria_value = eval_scalar_arg(ctx, &args[1]);
+    if let Value::Error(e) = criteria_value {
+        return Value::Error(e);
+    }
+    let criteria = match Criteria::parse_with_date_system(&criteria_value, ctx.date_system()) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
+    };
+
+    let average_range = if args.len() >= 3 {
+        Some(match Range2D::try_from_arg(ctx.eval_arg(&args[2])) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        })
+    } else {
+        None
+    };
+
+    let (rows, cols) = criteria_range.shape();
+    if let Some(ref average_range) = average_range {
+        let (avg_rows, avg_cols) = average_range.shape();
+        if rows != avg_rows || cols != avg_cols {
+            return Value::Error(ErrorKind::Value);
+        }
+    }
+
+    let mut sum = 0.0;
+    let mut count = 0u64;
+    for row in 0..rows {
+        for col in 0..cols {
+            let crit_val = criteria_range.get(ctx, row, col);
+            if !criteria.matches(&crit_val) {
+                continue;
+            }
+
+            let avg_val = match &average_range {
+                Some(r) => r.get(ctx, row, col),
+                None => crit_val,
+            };
+
+            match avg_val {
+                Value::Number(n) => {
+                    sum += n;
+                    count += 1;
+                }
+                Value::Error(e) => return Value::Error(e),
+                _ => {}
+            }
+        }
+    }
+
+    if count == 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    Value::Number(sum / count as f64)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "AVERAGEIFS",
+        min_args: 3,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: averageifs_fn,
+    }
+}
+
+fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let average_range = match Range2D::try_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    let (rows, cols) = average_range.shape();
+
+    let mut criteria_ranges = Vec::new();
+    let mut criteria = Vec::new();
+
+    for pair in args[1..].chunks_exact(2) {
+        let range = match Range2D::try_from_arg(ctx.eval_arg(&pair[0])) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
+        let (r_rows, r_cols) = range.shape();
+        if r_rows != rows || r_cols != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit_value = eval_scalar_arg(ctx, &pair[1]);
+        if let Value::Error(e) = crit_value {
+            return Value::Error(e);
+        }
+        let crit = match Criteria::parse_with_date_system(&crit_value, ctx.date_system()) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        criteria_ranges.push(range);
+        criteria.push(crit);
+    }
+
+    let mut sum = 0.0;
+    let mut count = 0u64;
+    for row in 0..rows {
+        for col in 0..cols {
+            let mut matches = true;
+            for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                let v = range.get(ctx, row, col);
+                if !crit.matches(&v) {
+                    matches = false;
+                    break;
+                }
+            }
+            if !matches {
+                continue;
+            }
+
+            match average_range.get(ctx, row, col) {
+                Value::Number(n) => {
+                    sum += n;
+                    count += 1;
+                }
+                Value::Error(e) => return Value::Error(e),
+                _ => {}
+            }
+        }
+    }
+
+    if count == 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    Value::Number(sum / count as f64)
+}
+
+#[derive(Clone)]
+enum Range2D {
+    Reference(crate::functions::Reference),
+    Array(Array),
+}
+
+impl Range2D {
+    fn try_from_arg(arg: ArgValue) -> Result<Self, ErrorKind> {
+        match arg {
+            ArgValue::Reference(r) => Ok(Self::Reference(r.normalized())),
+            ArgValue::Scalar(Value::Array(arr)) => Ok(Self::Array(arr)),
+            ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => Err(ErrorKind::Value),
+        }
+    }
+
+    fn shape(&self) -> (usize, usize) {
+        match self {
+            Range2D::Reference(r) => {
+                let rows = (r.end.row - r.start.row + 1) as usize;
+                let cols = (r.end.col - r.start.col + 1) as usize;
+                (rows, cols)
+            }
+            Range2D::Array(arr) => (arr.rows, arr.cols),
+        }
+    }
+
+    fn get(&self, ctx: &dyn FunctionContext, row: usize, col: usize) -> Value {
+        match self {
+            Range2D::Reference(r) => {
+                let addr = crate::eval::CellAddr {
+                    row: r.start.row + row as u32,
+                    col: r.start.col + col as u32,
+                };
+                ctx.get_cell_value(&r.sheet_id, addr)
+            }
+            Range2D::Array(arr) => arr.get(row, col).cloned().unwrap_or(Value::Blank),
+        }
+    }
 }
 
 inventory::submit! {
