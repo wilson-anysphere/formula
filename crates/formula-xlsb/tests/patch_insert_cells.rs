@@ -139,3 +139,32 @@ fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
     assert_eq!(end_row, 0);
     assert_eq!(end_col, 10);
 }
+
+#[test]
+fn patch_sheet_bin_does_not_materialize_missing_blank_cells() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+
+    let bytes = builder.build_bytes();
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("insert-blank-noop-input.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let sheet_bin = read_zip_part(&input_path, &sheet_part);
+
+    let patched_sheet_bin = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 5,
+            col: 3,
+            new_value: CellValue::Blank,
+            new_formula: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin");
+
+    assert_eq!(patched_sheet_bin, sheet_bin);
+}

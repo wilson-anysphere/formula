@@ -538,6 +538,10 @@ fn advance_insert_cursor(ordered: &[usize], applied: &[bool], cursor: &mut usize
     }
 }
 
+fn insertion_is_noop(edit: &CellEdit) -> bool {
+    edit.new_formula.is_none() && matches!(edit.new_value, CellValue::Blank)
+}
+
 fn flush_missing_rows_before<W: io::Write>(
     writer: &mut Biff12Writer<W>,
     edits: &[CellEdit],
@@ -562,6 +566,47 @@ fn flush_missing_rows_before<W: io::Write>(
         }
 
         let row = edit.row;
+        // If the row doesn't exist in the stream and all pending edits for this row are
+        // "clear" operations, treat them as no-ops and avoid materializing an empty row.
+        let mut should_write_row = false;
+        {
+            let mut scan = *cursor;
+            while scan < ordered.len() {
+                let idx = ordered[scan];
+                if applied[idx] {
+                    scan += 1;
+                    continue;
+                }
+                let edit = &edits[idx];
+                if edit.row != row {
+                    break;
+                }
+                if !insertion_is_noop(edit) {
+                    should_write_row = true;
+                    break;
+                }
+                scan += 1;
+            }
+        }
+
+        if !should_write_row {
+            while *cursor < ordered.len() {
+                let idx = ordered[*cursor];
+                if applied[idx] {
+                    *cursor += 1;
+                    continue;
+                }
+                let edit = &edits[idx];
+                if edit.row != row {
+                    break;
+                }
+                applied[idx] = true;
+                *cursor += 1;
+            }
+            advance_insert_cursor(ordered, applied, cursor);
+            continue;
+        }
+
         writer.write_record(biff12::ROW, &row.to_le_bytes())?;
 
         while *cursor < ordered.len() {
@@ -573,6 +618,12 @@ fn flush_missing_rows_before<W: io::Write>(
             let edit = &edits[idx];
             if edit.row != row {
                 break;
+            }
+
+            if insertion_is_noop(edit) {
+                applied[idx] = true;
+                *cursor += 1;
+                continue;
             }
 
             write_new_cell_record(writer, edit.col, edit)?;
@@ -613,6 +664,13 @@ fn flush_missing_cells_before<W: io::Write>(
             break;
         }
 
+        if insertion_is_noop(edit) {
+            applied[idx] = true;
+            *cursor += 1;
+            advance_insert_cursor(ordered, applied, cursor);
+            continue;
+        }
+
         write_new_cell_record(writer, edit.col, edit)?;
         applied[idx] = true;
         if !matches!(edit.new_value, CellValue::Blank) {
@@ -648,6 +706,13 @@ fn flush_remaining_cells_in_row<W: io::Write>(
             break;
         }
 
+        if insertion_is_noop(edit) {
+            applied[idx] = true;
+            *cursor += 1;
+            advance_insert_cursor(ordered, applied, cursor);
+            continue;
+        }
+
         write_new_cell_record(writer, edit.col, edit)?;
         applied[idx] = true;
         if !matches!(edit.new_value, CellValue::Blank) {
@@ -678,6 +743,45 @@ fn flush_remaining_rows<W: io::Write>(
         }
 
         let row = edits[idx].row;
+        let mut should_write_row = false;
+        {
+            let mut scan = *cursor;
+            while scan < ordered.len() {
+                let idx = ordered[scan];
+                if applied[idx] {
+                    scan += 1;
+                    continue;
+                }
+                let edit = &edits[idx];
+                if edit.row != row {
+                    break;
+                }
+                if !insertion_is_noop(edit) {
+                    should_write_row = true;
+                    break;
+                }
+                scan += 1;
+            }
+        }
+
+        if !should_write_row {
+            while *cursor < ordered.len() {
+                let idx = ordered[*cursor];
+                if applied[idx] {
+                    *cursor += 1;
+                    continue;
+                }
+                let edit = &edits[idx];
+                if edit.row != row {
+                    break;
+                }
+                applied[idx] = true;
+                *cursor += 1;
+            }
+            advance_insert_cursor(ordered, applied, cursor);
+            continue;
+        }
+
         writer.write_record(biff12::ROW, &row.to_le_bytes())?;
 
         while *cursor < ordered.len() {
@@ -690,6 +794,12 @@ fn flush_remaining_rows<W: io::Write>(
             let edit = &edits[idx];
             if edit.row != row {
                 break;
+            }
+
+            if insertion_is_noop(edit) {
+                applied[idx] = true;
+                *cursor += 1;
+                continue;
             }
 
             write_new_cell_record(writer, edit.col, edit)?;
