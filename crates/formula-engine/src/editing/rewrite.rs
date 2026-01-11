@@ -2,21 +2,47 @@ use std::cmp::{max, min};
 
 use crate::{
     parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellAddr, CellRef as AstCellRef,
-    ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr, SheetRef,
-    RowRef as AstRowRef, SerializeOptions, UnaryExpr,
+    ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr, RowRef as AstRowRef,
+    SerializeOptions, SheetRef, UnaryExpr,
 };
 
 const REF_ERROR: &str = "#REF!";
 
-fn sheet_name(sheet: &Option<SheetRef>) -> Option<&str> {
-    match sheet.as_ref()? {
-        SheetRef::Sheet(name) => Some(name),
-        SheetRef::SheetRange { .. } => None,
-    }
-}
+fn sheet_ref_applies_for_sheet_edit<F>(
+    sheet: Option<&SheetRef>,
+    ctx_sheet: &str,
+    edit_sheet: &str,
+    resolve_sheet_id: &mut F,
+) -> bool
+where
+    F: FnMut(&str) -> Option<usize>,
+{
+    match sheet {
+        None => ctx_sheet.eq_ignore_ascii_case(edit_sheet),
+        Some(SheetRef::Sheet(name)) => name.eq_ignore_ascii_case(edit_sheet),
+        Some(SheetRef::SheetRange { start, end }) => {
+            if start.eq_ignore_ascii_case(edit_sheet) || end.eq_ignore_ascii_case(edit_sheet) {
+                return true;
+            }
 
-fn has_sheet_range(sheet: &Option<SheetRef>) -> bool {
-    matches!(sheet.as_ref(), Some(SheetRef::SheetRange { .. }))
+            let Some(start_id) = resolve_sheet_id(start) else {
+                return false;
+            };
+            let Some(end_id) = resolve_sheet_id(end) else {
+                return false;
+            };
+            let Some(edit_id) = resolve_sheet_id(edit_sheet) else {
+                return false;
+            };
+
+            let (lo, hi) = if start_id <= end_id {
+                (start_id, end_id)
+            } else {
+                (end_id, start_id)
+            };
+            edit_id >= lo && edit_id <= hi
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,8 +95,20 @@ pub fn rewrite_formula_for_structural_edit(
     cell_origin: CellAddr,
     edit: &StructuralEdit,
 ) -> (String, bool) {
+    rewrite_formula_for_structural_edit_with_resolver(formula, ctx_sheet, cell_origin, edit, |_| {
+        None
+    })
+}
+
+pub fn rewrite_formula_for_structural_edit_with_resolver(
+    formula: &str,
+    ctx_sheet: &str,
+    cell_origin: CellAddr,
+    edit: &StructuralEdit,
+    mut resolve_sheet_id: impl FnMut(&str) -> Option<usize>,
+) -> (String, bool) {
     rewrite_formula_via_ast(formula, cell_origin, |expr| {
-        rewrite_expr_for_structural_edit(expr, ctx_sheet, edit)
+        rewrite_expr_for_structural_edit(expr, ctx_sheet, edit, &mut resolve_sheet_id)
     })
 }
 
@@ -92,8 +130,18 @@ pub fn rewrite_formula_for_range_map(
     cell_origin: CellAddr,
     edit: &RangeMapEdit,
 ) -> (String, bool) {
+    rewrite_formula_for_range_map_with_resolver(formula, ctx_sheet, cell_origin, edit, |_| None)
+}
+
+pub fn rewrite_formula_for_range_map_with_resolver(
+    formula: &str,
+    ctx_sheet: &str,
+    cell_origin: CellAddr,
+    edit: &RangeMapEdit,
+    mut resolve_sheet_id: impl FnMut(&str) -> Option<usize>,
+) -> (String, bool) {
     rewrite_formula_via_ast(formula, cell_origin, |expr| {
-        rewrite_expr_for_range_map(expr, ctx_sheet, edit)
+        rewrite_expr_for_range_map(expr, ctx_sheet, edit, &mut resolve_sheet_id)
     })
 }
 
@@ -137,21 +185,30 @@ fn rewrite_expr_for_structural_edit(
     expr: &Expr,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     match expr {
-        Expr::CellRef(r) => rewrite_cell_ref_for_structural_edit(r, ctx_sheet, edit),
-        Expr::RowRef(r) => rewrite_row_ref_for_structural_edit(r, ctx_sheet, edit),
-        Expr::ColRef(r) => rewrite_col_ref_for_structural_edit(r, ctx_sheet, edit),
+        Expr::CellRef(r) => {
+            rewrite_cell_ref_for_structural_edit(r, ctx_sheet, edit, resolve_sheet_id)
+        }
+        Expr::RowRef(r) => {
+            rewrite_row_ref_for_structural_edit(r, ctx_sheet, edit, resolve_sheet_id)
+        }
+        Expr::ColRef(r) => {
+            rewrite_col_ref_for_structural_edit(r, ctx_sheet, edit, resolve_sheet_id)
+        }
         Expr::Binary(b) if b.op == BinaryOp::Range => {
-            if let Some(result) = rewrite_range_for_structural_edit(expr, b, ctx_sheet, edit) {
+            if let Some(result) =
+                rewrite_range_for_structural_edit(expr, b, ctx_sheet, edit, resolve_sheet_id)
+            {
                 return result;
             }
             rewrite_expr_children(expr, |child| {
-                rewrite_expr_for_structural_edit(child, ctx_sheet, edit)
+                rewrite_expr_for_structural_edit(child, ctx_sheet, edit, resolve_sheet_id)
             })
         }
         _ => rewrite_expr_children(expr, |child| {
-            rewrite_expr_for_structural_edit(child, ctx_sheet, edit)
+            rewrite_expr_for_structural_edit(child, ctx_sheet, edit, resolve_sheet_id)
         }),
     }
 }
@@ -178,19 +235,26 @@ fn rewrite_expr_for_copy_delta(expr: &Expr, delta_row: i32, delta_col: i32) -> (
     }
 }
 
-fn rewrite_expr_for_range_map(expr: &Expr, ctx_sheet: &str, edit: &RangeMapEdit) -> (Expr, bool) {
+fn rewrite_expr_for_range_map(
+    expr: &Expr,
+    ctx_sheet: &str,
+    edit: &RangeMapEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
+) -> (Expr, bool) {
     match expr {
-        Expr::CellRef(r) => rewrite_cell_ref_for_range_map(r, ctx_sheet, edit),
+        Expr::CellRef(r) => rewrite_cell_ref_for_range_map(r, ctx_sheet, edit, resolve_sheet_id),
         Expr::Binary(b) if b.op == BinaryOp::Range => {
-            if let Some(result) = rewrite_cell_range_for_range_map(expr, b, ctx_sheet, edit) {
+            if let Some(result) =
+                rewrite_cell_range_for_range_map(expr, b, ctx_sheet, edit, resolve_sheet_id)
+            {
                 return result;
             }
             rewrite_expr_children(expr, |child| {
-                rewrite_expr_for_range_map(child, ctx_sheet, edit)
+                rewrite_expr_for_range_map(child, ctx_sheet, edit, resolve_sheet_id)
             })
         }
         _ => rewrite_expr_children(expr, |child| {
-            rewrite_expr_for_range_map(child, ctx_sheet, edit)
+            rewrite_expr_for_range_map(child, ctx_sheet, edit, resolve_sheet_id)
         }),
     }
 }
@@ -308,22 +372,20 @@ fn rewrite_cell_ref_for_structural_edit(
     r: &AstCellRef,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     if r.workbook.is_some() {
         return (expr_ref(r.clone()), false);
     }
-    if has_sheet_range(&r.sheet) {
-        return (expr_ref(r.clone()), false);
-    }
-
-    let target_sheet = sheet_name(&r.sheet).unwrap_or(ctx_sheet);
-    let applies = match edit {
+    let edit_sheet = match edit {
         StructuralEdit::InsertRows { sheet, .. }
         | StructuralEdit::DeleteRows { sheet, .. }
         | StructuralEdit::InsertCols { sheet, .. }
-        | StructuralEdit::DeleteCols { sheet, .. } => target_sheet.eq_ignore_ascii_case(sheet),
+        | StructuralEdit::DeleteCols { sheet, .. } => sheet.as_str(),
     };
-    if !applies {
+
+    if !sheet_ref_applies_for_sheet_edit(r.sheet.as_ref(), ctx_sheet, edit_sheet, resolve_sheet_id)
+    {
         return (expr_ref(r.clone()), false);
     }
 
@@ -381,22 +443,20 @@ fn rewrite_row_ref_for_structural_edit(
     r: &AstRowRef,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     if r.workbook.is_some() {
         return (Expr::RowRef(r.clone()), false);
     }
-    if has_sheet_range(&r.sheet) {
-        return (Expr::RowRef(r.clone()), false);
-    }
-
-    let target_sheet = sheet_name(&r.sheet).unwrap_or(ctx_sheet);
-    let applies = match edit {
+    let edit_sheet = match edit {
         StructuralEdit::InsertRows { sheet, .. } | StructuralEdit::DeleteRows { sheet, .. } => {
-            target_sheet.eq_ignore_ascii_case(sheet)
+            sheet.as_str()
         }
-        _ => false,
+        _ => return (Expr::RowRef(r.clone()), false),
     };
-    if !applies {
+
+    if !sheet_ref_applies_for_sheet_edit(r.sheet.as_ref(), ctx_sheet, edit_sheet, resolve_sheet_id)
+    {
         return (Expr::RowRef(r.clone()), false);
     }
 
@@ -435,22 +495,20 @@ fn rewrite_col_ref_for_structural_edit(
     r: &AstColRef,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     if r.workbook.is_some() {
         return (Expr::ColRef(r.clone()), false);
     }
-    if has_sheet_range(&r.sheet) {
-        return (Expr::ColRef(r.clone()), false);
-    }
-
-    let target_sheet = sheet_name(&r.sheet).unwrap_or(ctx_sheet);
-    let applies = match edit {
+    let edit_sheet = match edit {
         StructuralEdit::InsertCols { sheet, .. } | StructuralEdit::DeleteCols { sheet, .. } => {
-            target_sheet.eq_ignore_ascii_case(sheet)
+            sheet.as_str()
         }
-        _ => false,
+        _ => return (Expr::ColRef(r.clone()), false),
     };
-    if !applies {
+
+    if !sheet_ref_applies_for_sheet_edit(r.sheet.as_ref(), ctx_sheet, edit_sheet, resolve_sheet_id)
+    {
         return (Expr::ColRef(r.clone()), false);
     }
 
@@ -490,16 +548,32 @@ fn rewrite_range_for_structural_edit(
     b: &BinaryExpr,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Option<(Expr, bool)> {
     match (&*b.left, &*b.right) {
         (Expr::CellRef(start), Expr::CellRef(end)) => Some(rewrite_cell_range_for_structural_edit(
-            original, start, end, ctx_sheet, edit,
+            original,
+            start,
+            end,
+            ctx_sheet,
+            edit,
+            resolve_sheet_id,
         )),
         (Expr::RowRef(start), Expr::RowRef(end)) => Some(rewrite_row_range_for_structural_edit(
-            original, start, end, ctx_sheet, edit,
+            original,
+            start,
+            end,
+            ctx_sheet,
+            edit,
+            resolve_sheet_id,
         )),
         (Expr::ColRef(start), Expr::ColRef(end)) => Some(rewrite_col_range_for_structural_edit(
-            original, start, end, ctx_sheet, edit,
+            original,
+            start,
+            end,
+            ctx_sheet,
+            edit,
+            resolve_sheet_id,
         )),
         _ => None,
     }
@@ -511,24 +585,19 @@ fn rewrite_cell_range_for_structural_edit(
     end: &AstCellRef,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     if start.workbook.is_some() || end.workbook.is_some() {
         return (original.clone(), false);
     }
-    if has_sheet_range(&start.sheet) || has_sheet_range(&end.sheet) {
-        return (original.clone(), false);
-    }
-
-    let target_sheet = sheet_name(&start.sheet)
-        .or_else(|| sheet_name(&end.sheet))
-        .unwrap_or(ctx_sheet);
-    let applies = match edit {
+    let edit_sheet = match edit {
         StructuralEdit::InsertRows { sheet, .. }
         | StructuralEdit::DeleteRows { sheet, .. }
         | StructuralEdit::InsertCols { sheet, .. }
-        | StructuralEdit::DeleteCols { sheet, .. } => target_sheet.eq_ignore_ascii_case(sheet),
+        | StructuralEdit::DeleteCols { sheet, .. } => sheet.as_str(),
     };
-    if !applies {
+    let sheet_ref = start.sheet.as_ref().or(end.sheet.as_ref());
+    if !sheet_ref_applies_for_sheet_edit(sheet_ref, ctx_sheet, edit_sheet, resolve_sheet_id) {
         return (original.clone(), false);
     }
 
@@ -625,25 +694,19 @@ fn rewrite_row_range_for_structural_edit(
     end: &AstRowRef,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     if start.workbook.is_some() || end.workbook.is_some() {
         return (original.clone(), false);
     }
-    if has_sheet_range(&start.sheet) || has_sheet_range(&end.sheet) {
-        return (original.clone(), false);
-    }
-
-    let target_sheet = sheet_name(&start.sheet)
-        .or_else(|| sheet_name(&end.sheet))
-        .unwrap_or(ctx_sheet);
-
-    let applies = match edit {
+    let edit_sheet = match edit {
         StructuralEdit::InsertRows { sheet, .. } | StructuralEdit::DeleteRows { sheet, .. } => {
-            target_sheet.eq_ignore_ascii_case(sheet)
+            sheet.as_str()
         }
-        _ => false,
+        _ => return (original.clone(), false),
     };
-    if !applies {
+    let sheet_ref = start.sheet.as_ref().or(end.sheet.as_ref());
+    if !sheet_ref_applies_for_sheet_edit(sheet_ref, ctx_sheet, edit_sheet, resolve_sheet_id) {
         return (original.clone(), false);
     }
 
@@ -703,25 +766,19 @@ fn rewrite_col_range_for_structural_edit(
     end: &AstColRef,
     ctx_sheet: &str,
     edit: &StructuralEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     if start.workbook.is_some() || end.workbook.is_some() {
         return (original.clone(), false);
     }
-    if has_sheet_range(&start.sheet) || has_sheet_range(&end.sheet) {
-        return (original.clone(), false);
-    }
-
-    let target_sheet = sheet_name(&start.sheet)
-        .or_else(|| sheet_name(&end.sheet))
-        .unwrap_or(ctx_sheet);
-
-    let applies = match edit {
+    let edit_sheet = match edit {
         StructuralEdit::InsertCols { sheet, .. } | StructuralEdit::DeleteCols { sheet, .. } => {
-            target_sheet.eq_ignore_ascii_case(sheet)
+            sheet.as_str()
         }
-        _ => false,
+        _ => return (original.clone(), false),
     };
-    if !applies {
+    let sheet_ref = start.sheet.as_ref().or(end.sheet.as_ref());
+    if !sheet_ref_applies_for_sheet_edit(sheet_ref, ctx_sheet, edit_sheet, resolve_sheet_id) {
         return (original.clone(), false);
     }
 
@@ -1083,16 +1140,13 @@ fn rewrite_cell_ref_for_range_map(
     r: &AstCellRef,
     ctx_sheet: &str,
     edit: &RangeMapEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     if r.workbook.is_some() {
         return (expr_ref(r.clone()), false);
     }
-    if has_sheet_range(&r.sheet) {
-        return (expr_ref(r.clone()), false);
-    }
-
-    let target_sheet = sheet_name(&r.sheet).unwrap_or(ctx_sheet);
-    if !target_sheet.eq_ignore_ascii_case(&edit.sheet) {
+    if !sheet_ref_applies_for_sheet_edit(r.sheet.as_ref(), ctx_sheet, &edit.sheet, resolve_sheet_id)
+    {
         return (expr_ref(r.clone()), false);
     }
 
@@ -1141,6 +1195,7 @@ fn rewrite_cell_range_for_range_map(
     b: &BinaryExpr,
     ctx_sheet: &str,
     edit: &RangeMapEdit,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Option<(Expr, bool)> {
     let Expr::CellRef(start) = b.left.as_ref() else {
         return None;
@@ -1152,14 +1207,8 @@ fn rewrite_cell_range_for_range_map(
     if start.workbook.is_some() || end.workbook.is_some() {
         return Some((original.clone(), false));
     }
-    if has_sheet_range(&start.sheet) || has_sheet_range(&end.sheet) {
-        return Some((original.clone(), false));
-    }
-
-    let target_sheet = sheet_name(&start.sheet)
-        .or_else(|| sheet_name(&end.sheet))
-        .unwrap_or(ctx_sheet);
-    if !target_sheet.eq_ignore_ascii_case(&edit.sheet) {
+    let sheet_ref = start.sheet.as_ref().or(end.sheet.as_ref());
+    if !sheet_ref_applies_for_sheet_edit(sheet_ref, ctx_sheet, &edit.sheet, resolve_sheet_id) {
         return Some((original.clone(), false));
     }
 

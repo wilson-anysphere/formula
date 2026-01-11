@@ -2,8 +2,8 @@ use crate::bytecode;
 use crate::calc_settings::{CalcSettings, CalculationMode};
 use crate::date::ExcelDateSystem;
 use crate::editing::rewrite::{
-    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map,
-    rewrite_formula_for_structural_edit, GridRange, RangeMapEdit, StructuralEdit,
+    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map_with_resolver,
+    rewrite_formula_for_structural_edit_with_resolver, GridRange, RangeMapEdit, StructuralEdit,
 };
 use crate::editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
@@ -444,7 +444,10 @@ impl Engine {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
             return Ok(());
         };
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         let cell_id = cell_id_from_key(key);
 
         self.clear_spill_for_cell(key);
@@ -695,13 +698,14 @@ impl Engine {
         let deps = CellDeps::new(calc_vec).volatile(volatile);
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
-        let compiled_formula = match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe) {
-            Some(program) => CompiledFormula::Bytecode(BytecodeFormula {
-                ast: compiled.clone(),
-                program,
-            }),
-            None => CompiledFormula::Ast(compiled),
-        };
+        let compiled_formula =
+            match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe) {
+                Some(program) => CompiledFormula::Bytecode(BytecodeFormula {
+                    ast: compiled.clone(),
+                    program,
+                }),
+                None => CompiledFormula::Ast(compiled),
+            };
 
         let cell = self.workbook.get_or_create_cell_mut(key);
         cell.formula = Some(formula.to_string());
@@ -1433,12 +1437,13 @@ impl Engine {
                                     };
                                     match compiled {
                                         CompiledFormula::Ast(expr) => {
-                                            let evaluator = crate::eval::Evaluator::new_with_date_system(
-                                                &snapshot,
-                                                ctx,
-                                                recalc_ctx,
-                                                date_system,
-                                            );
+                                            let evaluator =
+                                                crate::eval::Evaluator::new_with_date_system(
+                                                    &snapshot,
+                                                    ctx,
+                                                    recalc_ctx,
+                                                    date_system,
+                                                );
                                             (*k, evaluator.eval_formula(expr))
                                         }
                                         CompiledFormula::Bytecode(bc) => {
@@ -1735,19 +1740,19 @@ impl Engine {
                 self.circular_references.insert(k);
             }
 
-                if !self.calc_settings.iterative.enabled {
-                    for &k in &scc {
-                        let v = Value::Number(0.0);
-                        self.apply_eval_result(
-                            k,
-                            v,
-                            &mut snapshot,
-                            &mut spill_dirty_roots,
-                            value_changes.as_deref_mut(),
-                        );
-                    }
-                    continue;
+            if !self.calc_settings.iterative.enabled {
+                for &k in &scc {
+                    let v = Value::Number(0.0);
+                    self.apply_eval_result(
+                        k,
+                        v,
+                        &mut snapshot,
+                        &mut spill_dirty_roots,
+                        value_changes.as_deref_mut(),
+                    );
                 }
+                continue;
+            }
 
             let max_iters = max(1, self.calc_settings.iterative.max_iterations) as usize;
             let tol = self.calc_settings.iterative.max_change.max(0.0);
@@ -1828,7 +1833,8 @@ impl Engine {
                             let before =
                                 snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
                             snapshot.values.remove(&cleared_key);
-                            let after = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
+                            let after =
+                                snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
                             changes.record(cleared_key, before, after);
                         } else {
                             snapshot.values.remove(&cleared_key);
@@ -1907,8 +1913,8 @@ impl Engine {
                                 };
                                 if let Some(v) = array.get(r, c).cloned() {
                                     if let Some(changes) = value_changes.as_deref_mut() {
-                                        let before =
-                                            snapshot.get_cell_value(spill_key.sheet, spill_key.addr);
+                                        let before = snapshot
+                                            .get_cell_value(spill_key.sheet, spill_key.addr);
                                         changes.record(spill_key, before, v.clone());
                                     }
                                     snapshot.values.insert(spill_key, v);
@@ -1950,14 +1956,7 @@ impl Engine {
                     return;
                 }
 
-                self.apply_new_spill(
-                    key,
-                    end,
-                    array,
-                    snapshot,
-                    spill_dirty_roots,
-                    value_changes,
-                );
+                self.apply_new_spill(key, end, array, snapshot, spill_dirty_roots, value_changes);
             }
             other => {
                 let cleared = self.clear_spill_for_origin(key);
@@ -2229,7 +2228,8 @@ impl Engine {
             col: key.addr.col as i32,
         };
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
-        let expr = bytecode::lower_canonical_expr(expr, origin_ast, key.sheet, &mut resolve_sheet).ok()?;
+        let expr =
+            bytecode::lower_canonical_expr(expr, origin_ast, key.sheet, &mut resolve_sheet).ok()?;
         if !bytecode_expr_is_eligible(&expr) {
             return None;
         }
@@ -3203,6 +3203,11 @@ fn rewrite_all_formulas_structural(
     sheet_names: &HashMap<SheetId, String>,
     edit: StructuralEdit,
 ) -> Vec<FormulaRewrite> {
+    let mut sheet_ids: HashMap<String, SheetId> = HashMap::new();
+    for (sheet_id, name) in sheet_names {
+        sheet_ids.insert(name.to_ascii_lowercase(), *sheet_id);
+    }
+
     let mut rewrites = Vec::new();
     for (sheet_id, sheet) in workbook.sheets.iter_mut().enumerate() {
         let Some(ctx_sheet) = sheet_names.get(&sheet_id) else {
@@ -3213,8 +3218,13 @@ fn rewrite_all_formulas_structural(
                 continue;
             };
             let origin = crate::CellAddr::new(addr.row, addr.col);
-            let (new_formula, changed) =
-                rewrite_formula_for_structural_edit(formula, ctx_sheet, origin, &edit);
+            let (new_formula, changed) = rewrite_formula_for_structural_edit_with_resolver(
+                formula,
+                ctx_sheet,
+                origin,
+                &edit,
+                |name| sheet_ids.get(&name.to_ascii_lowercase()).copied(),
+            );
             if changed {
                 rewrites.push(FormulaRewrite {
                     sheet: ctx_sheet.clone(),
@@ -3234,6 +3244,11 @@ fn rewrite_all_formulas_range_map(
     sheet_names: &HashMap<SheetId, String>,
     edit: &RangeMapEdit,
 ) -> Vec<FormulaRewrite> {
+    let mut sheet_ids: HashMap<String, SheetId> = HashMap::new();
+    for (sheet_id, name) in sheet_names {
+        sheet_ids.insert(name.to_ascii_lowercase(), *sheet_id);
+    }
+
     let mut rewrites = Vec::new();
     for (sheet_id, sheet) in workbook.sheets.iter_mut().enumerate() {
         let Some(ctx_sheet) = sheet_names.get(&sheet_id) else {
@@ -3244,8 +3259,13 @@ fn rewrite_all_formulas_range_map(
                 continue;
             };
             let origin = crate::CellAddr::new(addr.row, addr.col);
-            let (new_formula, changed) =
-                rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
+            let (new_formula, changed) = rewrite_formula_for_range_map_with_resolver(
+                formula,
+                ctx_sheet,
+                origin,
+                edit,
+                |name| sheet_ids.get(&name.to_ascii_lowercase()).copied(),
+            );
             if changed {
                 rewrites.push(FormulaRewrite {
                     sheet: ctx_sheet.clone(),
@@ -4130,10 +4150,7 @@ fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::Cel
     }
 }
 
-fn bytecode_expr_is_eligible_inner(
-    expr: &bytecode::Expr,
-    allow_range: bool,
-) -> bool {
+fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> bool {
     match expr {
         bytecode::Expr::Literal(v) => match v {
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
@@ -4175,15 +4192,18 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 {
                     return false;
                 }
-                (matches!(args[0], bytecode::Expr::RangeRef(_)) || matches!(args[0], bytecode::Expr::CellRef(_)))
+                (matches!(args[0], bytecode::Expr::RangeRef(_))
+                    || matches!(args[0], bytecode::Expr::CellRef(_)))
                     && bytecode_expr_is_eligible_inner(&args[1], false)
             }
             bytecode::ast::Function::SumProduct => {
                 if args.len() != 2 {
                     return false;
                 }
-                (matches!(args[0], bytecode::Expr::RangeRef(_)) || matches!(args[0], bytecode::Expr::CellRef(_)))
-                    && (matches!(args[1], bytecode::Expr::RangeRef(_)) || matches!(args[1], bytecode::Expr::CellRef(_)))
+                (matches!(args[0], bytecode::Expr::RangeRef(_))
+                    || matches!(args[0], bytecode::Expr::CellRef(_)))
+                    && (matches!(args[1], bytecode::Expr::RangeRef(_))
+                        || matches!(args[1], bytecode::Expr::CellRef(_)))
             }
             bytecode::ast::Function::Abs
             | bytecode::ast::Function::Int
@@ -4367,7 +4387,10 @@ fn walk_expr_flags(
                                 visiting_names,
                                 lexical_scopes,
                             );
-                            lexical_scopes.last_mut().expect("pushed scope").insert(name_key);
+                            lexical_scopes
+                                .last_mut()
+                                .expect("pushed scope")
+                                .insert(name_key);
                         }
 
                         walk_expr_flags(
@@ -4532,10 +4555,12 @@ fn analyze_calc_precedents(
 
 fn spill_range_target_cell(expr: &CompiledExpr, current_cell: CellKey) -> Option<CellKey> {
     match expr {
-        Expr::CellRef(r) => resolve_single_sheet(&r.sheet, current_cell.sheet).map(|sheet| CellKey {
-            sheet,
-            addr: r.addr,
-        }),
+        Expr::CellRef(r) => {
+            resolve_single_sheet(&r.sheet, current_cell.sheet).map(|sheet| CellKey {
+                sheet,
+                addr: r.addr,
+            })
+        }
         Expr::ImplicitIntersection(inner) | Expr::SpillRange(inner) => {
             spill_range_target_cell(inner, current_cell)
         }
@@ -4748,7 +4773,10 @@ fn walk_calc_expr(
                                 visiting_names,
                                 lexical_scopes,
                             );
-                            lexical_scopes.last_mut().expect("pushed scope").insert(name_key);
+                            lexical_scopes
+                                .last_mut()
+                                .expect("pushed scope")
+                                .insert(name_key);
                         }
 
                         walk_calc_expr(
@@ -4959,13 +4987,23 @@ fn rewrite_defined_name_structural(
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
-            let (new_formula, changed) =
-                rewrite_formula_for_structural_edit(formula, ctx_sheet, origin, edit);
+            let (new_formula, changed) = rewrite_formula_for_structural_edit_with_resolver(
+                formula,
+                ctx_sheet,
+                origin,
+                edit,
+                |name| engine.workbook.sheet_id(name),
+            );
             (NameDefinition::Reference(new_formula), changed)
         }
         NameDefinition::Formula(formula) => {
-            let (new_formula, changed) =
-                rewrite_formula_for_structural_edit(formula, ctx_sheet, origin, edit);
+            let (new_formula, changed) = rewrite_formula_for_structural_edit_with_resolver(
+                formula,
+                ctx_sheet,
+                origin,
+                edit,
+                |name| engine.workbook.sheet_id(name),
+            );
             (NameDefinition::Formula(new_formula), changed)
         }
     };
@@ -5001,13 +5039,23 @@ fn rewrite_defined_name_range_map(
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
-            let (new_formula, changed) =
-                rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
+            let (new_formula, changed) = rewrite_formula_for_range_map_with_resolver(
+                formula,
+                ctx_sheet,
+                origin,
+                edit,
+                |name| engine.workbook.sheet_id(name),
+            );
             (NameDefinition::Reference(new_formula), changed)
         }
         NameDefinition::Formula(formula) => {
-            let (new_formula, changed) =
-                rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
+            let (new_formula, changed) = rewrite_formula_for_range_map_with_resolver(
+                formula,
+                ctx_sheet,
+                origin,
+                edit,
+                |name| engine.workbook.sheet_id(name),
+            );
             (NameDefinition::Formula(new_formula), changed)
         }
     };
@@ -5051,7 +5099,10 @@ mod tests {
             .cells
             .get(&addr)
             .expect("cell stored");
-        assert!(cell.thread_safe, "LET/LAMBDA should be safe for parallel evaluation");
+        assert!(
+            cell.thread_safe,
+            "LET/LAMBDA should be safe for parallel evaluation"
+        );
     }
 
     #[test]
@@ -5071,7 +5122,10 @@ mod tests {
             .cells
             .get(&addr)
             .expect("cell stored");
-        assert!(cell.thread_safe, "higher-order lambda calls should be parallel-safe");
+        assert!(
+            cell.thread_safe,
+            "higher-order lambda calls should be parallel-safe"
+        );
 
         engine.recalculate_single_threaded();
         assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
@@ -5208,9 +5262,7 @@ mod tests {
     fn recalculate_with_value_changes_tracks_scalar_formula_updates() {
         let mut engine = Engine::new();
         engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
-        engine
-            .set_cell_formula("Sheet1", "A1", "=A2*2")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "A1", "=A2*2").unwrap();
 
         let changes = engine.recalculate_with_value_changes(RecalcMode::SingleThreaded);
         assert_eq!(
