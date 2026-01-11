@@ -94,6 +94,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         panelId,
         body,
         <AIChatPanelContainer
+          key={workbookId ?? "default"}
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
           workbookId={workbookId}
@@ -109,6 +110,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         panelId,
         body,
         <QueryEditorPanelContainer
+          key={workbookId ?? "default"}
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
           workbookId={workbookId}
@@ -158,7 +160,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
     if (panelId === PanelIds.VBA_MIGRATE) {
       makeBodyFillAvailableHeight(body);
-      renderReactPanel(panelId, body, <VbaMigratePanel workbookId={workbookId} />);
+      renderReactPanel(panelId, body, <VbaMigratePanel key={workbookId ?? "default"} workbookId={workbookId} />);
       return;
     }
 
