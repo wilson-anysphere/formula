@@ -29,7 +29,7 @@ struct ChartFixtureModel {
 }
 
 fn usage() -> &'static str {
-    "dump_chart_models <path.xlsx> [--out-dir <dir>] [--print-parts]\n\
+    "dump_chart_models <path.xlsx|dir> [--out-dir <dir>] [--print-parts]\n\
 \n\
 Writes one JSON file per extracted chart under:\n\
   <out-dir>/<workbook-stem>/chart<N>.json\n\
@@ -72,21 +72,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let xlsx_path = xlsx_path.ok_or_else(|| format!("missing <path.xlsx>\n\n{}", usage()))?;
+    let xlsx_path = xlsx_path.ok_or_else(|| format!("missing <path.xlsx|dir>\n\n{}", usage()))?;
+    let inputs = if xlsx_path.is_dir() {
+        collect_xlsx_files(&xlsx_path)?
+    } else {
+        vec![xlsx_path]
+    };
+
+    for xlsx_path in inputs {
+        dump_one(&xlsx_path, &out_dir, print_parts)?;
+    }
+
+    Ok(())
+}
+
+fn dump_one(xlsx_path: &Path, out_dir: &Path, print_parts: bool) -> Result<(), Box<dyn Error>> {
     let workbook_stem = xlsx_path
         .file_stem()
         .and_then(|s| s.to_str())
         .ok_or("invalid xlsx path (missing file stem)")?
         .to_string();
 
-    let bytes = fs::read(&xlsx_path)?;
+    let bytes = fs::read(xlsx_path)?;
     let pkg = XlsxPackage::from_bytes(&bytes)?;
     let charts = pkg.extract_chart_objects()?;
 
     if print_parts {
+        eprintln!("workbook: {}", xlsx_path.display());
         for (idx, chart) in charts.iter().enumerate() {
             eprintln!(
-                "chart[{idx}]: sheet={:?} drawing_part={} chart_part={} chart_ex_part={:?} style_part={:?} colors_part={:?}",
+                "  chart[{idx}]: sheet={:?} drawing_part={} chart_part={} chart_ex_part={:?} style_part={:?} colors_part={:?}",
                 chart.sheet_name,
                 chart.drawing_part,
                 chart.parts.chart.path,
@@ -131,4 +146,14 @@ fn recreate_dir(path: &Path) -> std::io::Result<()> {
         Err(err) => return Err(err),
     }
     fs::create_dir_all(path)
+}
+
+fn collect_xlsx_files(dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut out: Vec<PathBuf> = fs::read_dir(dir)?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|s| s.to_str()) == Some("xlsx"))
+        .collect();
+    out.sort();
+    Ok(out)
 }
