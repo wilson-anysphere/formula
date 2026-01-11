@@ -24,7 +24,7 @@ import { RefreshManager } from "./refresh.js";
  */
 
 /**
- * @typedef {"manual" | "interval" | "on-open"} RefreshReason
+ * @typedef {"manual" | "interval" | "on-open" | "cron"} RefreshReason
  */
 
 /**
