@@ -379,29 +379,24 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       const sampledCells = Math.min(providedCells, this.maxInputCells);
       const rangeRef = (arg as any).__rangeRef;
       const rangeClassification =
-        typeof rangeRef === "string" && rangeRef.trim()
-          ? this.classificationForCellRef(rangeRef, null, records, defaultSheetId)
-          : null;
+        typeof rangeRef === "string" && rangeRef.trim() ? this.classificationForCellRef(rangeRef, null, records, defaultSheetId) : undefined;
       const items: ClassifiedItem[] = [];
 
       for (let i = 0; i < sampledCells; i += 1) {
         const entry = (arg as any[])[i];
         if (isProvenanceCellValue(entry)) {
-          let classification = this.classificationForCellRef(entry.__cellRef, entry.value, records, defaultSheetId);
-          if (rangeClassification) classification = maxClassification(classification, rangeClassification);
+          const classification = this.classificationForCellRef(entry.__cellRef, entry.value, records, defaultSheetId);
           items.push({
             value: entry.value,
             classification,
           });
         } else {
           const value = entry as SpreadsheetValue;
-          let classification = this.classifyForDlp(value);
-          if (rangeClassification) classification = maxClassification(classification, rangeClassification);
-          items.push({ value, classification });
+          items.push({ value, classification: this.classifyForDlp(value) });
         }
       }
 
-      return { kind: "range", items, totalCells, sampledCells, truncated: totalCells > sampledCells };
+      return { kind: "range", items, totalCells, sampledCells, truncated: totalCells > sampledCells, rangeClassification };
     }
 
     if (isProvenanceCellValue(arg)) {
@@ -426,6 +421,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       totalCells: 1,
       sampledCells: 1,
       truncated: false,
+      rangeClassification: undefined,
     };
   }
 
@@ -517,7 +513,13 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     for (const item of prompt.items) {
       selectionClassification = maxClassification(selectionClassification, item.classification);
     }
+    if (prompt.rangeClassification) {
+      selectionClassification = maxClassification(selectionClassification, prompt.rangeClassification);
+    }
     for (const arg of inputs) {
+      if (arg.rangeClassification) {
+        selectionClassification = maxClassification(selectionClassification, arg.rangeClassification);
+      }
       for (const item of arg.items) {
         selectionClassification = maxClassification(selectionClassification, item.classification);
       }
@@ -592,6 +594,7 @@ type ClassifiedArg = {
   totalCells: number;
   sampledCells: number;
   truncated: boolean;
+  rangeClassification?: any;
 };
 
 function buildMessages(params: { functionName: string; prompt: string; inputs: unknown; maxPromptChars?: number }): LLMMessage[] {

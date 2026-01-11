@@ -403,6 +403,53 @@ describe("AiCellFunctionEngine", () => {
     expect(userMessage).not.toContain("secret payload");
   });
 
+  it("DLP redacts only disallowed cells within a mixed-classification range", async () => {
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const policy = createDefaultOrgPolicy();
+    const documentId = "unit-test-doc";
+    const storage = createMemoryStorage();
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      documentId,
+      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] },
+    );
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      dlp: {
+        policy,
+        documentId,
+        classificationStore,
+        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
+      },
+    });
+
+    const pending = evaluateFormula(
+      '=AI("summarize", A1:A2)',
+      (ref) => (ref === "A1" ? "secret payload" : ref === "A2" ? "public payload" : null),
+      {
+        ai: engine,
+        cellAddress: "Sheet1!B1",
+      },
+    );
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).toContain("public payload");
+    expect(userMessage).not.toContain("secret payload");
+  });
+
   it("propagates spreadsheet error codes from referenced cells", () => {
     const llmClient = { chat: vi.fn() };
     const engine = new AiCellFunctionEngine({
