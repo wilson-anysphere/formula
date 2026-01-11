@@ -20,69 +20,40 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
   const configuredRoots = opts.roots ?? null;
 
   /**
-   * Best-effort kind detection for non-default roots when restoring snapshots.
-   *
-   * Note: after `Y.applyUpdate` into a fresh doc, root types can exist as a
-   * generic `AbstractType` until a constructor is chosen via `getMap/getArray`.
-   * For roots with content we can infer Map vs Array vs Text by inspecting the
-   * internal state.
-   *
-   * @param {Y.Doc} snapshotDoc
-   * @param {string} name
-   * @returns {"map" | "array" | "text" | null}
+   * @param {unknown} value
+   * @returns {RootTypeSpec["kind"] | null}
    */
-  function detectSnapshotRootKind(snapshotDoc, name) {
-    const placeholder = snapshotDoc.share.get(name);
-    if (!placeholder) return null;
-    if (placeholder instanceof Y.Map) return "map";
-    if (placeholder instanceof Y.Array) return "array";
-    if (placeholder instanceof Y.Text) return "text";
+  function rootKindFromValue(value) {
+    if (value instanceof Y.Map) return "map";
+    if (value instanceof Y.Array) return "array";
+    if (value instanceof Y.Text) return "text";
 
-    const hasStart = placeholder?._start != null;
-    const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-
-    if (mapSize > 0) return "map";
-    if (hasStart) {
-      // Distinguish Y.Text from Y.Array: Text content is represented using
-      // ContentString/ContentFormat/ContentEmbed nodes (e.g. `{ str }`,
-      // `{ key, value }`, or `{ embed }`).
-      const content = placeholder?._start?.content;
-      if (content && typeof content === "object") {
-        if ("str" in content) return "text";
-        if ("key" in content && "value" in content) return "text";
-        if ("embed" in content) return "text";
+    // When applying a snapshot update into a doc that hasn't instantiated a
+    // root type (via getMap/getArray/getText), Yjs represents that root as a
+    // generic `AbstractType` placeholder. Infer the intended kind from the
+    // placeholder's internal structure.
+    if (value instanceof Y.AbstractType) {
+      if (value._map instanceof Map && value._map.size > 0) {
+        return "map";
       }
-      return "array";
+
+      if (value._start) {
+        let item = value._start;
+        for (let i = 0; item && i < 1000; i += 1) {
+          if (!item.deleted) {
+            const content = item.content;
+            if (content && typeof content === "object") {
+              if ("str" in content) return "text";
+              if ("key" in content && "value" in content) return "text";
+              if ("embed" in content) return "text";
+            }
+            return "array";
+          }
+          item = item.right;
+        }
+      }
     }
     return null;
-  }
-
-  /** @returns {RootTypeSpec[]} */
-  function resolveRoots() {
-    if (configuredRoots) return configuredRoots;
-
-    // Default spreadsheet roots. We seed these so the adapter works even if a
-    // doc hasn't touched all root types yet.
-    /** @type {Map<string, RootTypeSpec>} */
-    const roots = new Map([
-      ["sheets", { name: "sheets", kind: "array" }],
-      ["cells", { name: "cells", kind: "map" }],
-      ["metadata", { name: "metadata", kind: "map" }],
-      ["namedRanges", { name: "namedRanges", kind: "map" }],
-    ]);
-
-    // Add any other root types already defined in this doc. Note that Yjs root
-    // types are schema-defined: you must know whether a key is an Array or Map.
-    // We can safely restore additional roots that are already instantiated in
-    // the current doc (e.g. comments).
-    for (const [name, value] of doc.share.entries()) {
-      if (roots.has(name)) continue;
-      if (value instanceof Y.Map) roots.set(name, { name, kind: "map" });
-      else if (value instanceof Y.Array) roots.set(name, { name, kind: "array" });
-      else if (value instanceof Y.Text) roots.set(name, { name, kind: "text" });
-    }
-
-    return Array.from(roots.values());
   }
 
   return {
@@ -96,27 +67,68 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
       const restored = new Y.Doc();
       Y.applyUpdate(restored, snapshot);
 
-      const roots = resolveRoots();
+      /** @type {Map<string, { kind: RootTypeSpec["kind"], source: string }>} */
+      const roots = new Map();
 
-      // Best-effort: if the snapshot contains additional root types that haven't
-      // been instantiated in the current doc yet, add them so restoration
-      // doesn't silently drop data (e.g. comments, rich-text notes, etc).
-      if (!configuredRoots) {
-        const names = new Set(roots.map((root) => root.name));
-        for (const name of restored.share.keys()) {
-          if (names.has(name)) continue;
-          const kind = detectSnapshotRootKind(restored, name);
-          if (!kind) continue;
-          roots.push({ name, kind });
-          names.add(name);
+      /**
+       * @param {string} name
+       * @param {RootTypeSpec["kind"]} kind
+       * @param {string} source
+       */
+      function addRoot(name, kind, source) {
+        const existing = roots.get(name);
+        if (!existing) {
+          roots.set(name, { kind, source });
+          return;
+        }
+        if (existing.kind !== kind) {
+          throw new Error(
+            `Yjs root schema mismatch for "${name}": ${existing.source} is "${existing.kind}" but ${source} is "${kind}"`,
+          );
         }
       }
 
+      if (configuredRoots) {
+        for (const root of configuredRoots) {
+          addRoot(root.name, root.kind, "configured roots");
+        }
+      } else {
+        // Default spreadsheet roots. We seed these so the adapter works even if a
+        // doc hasn't touched all root types yet.
+        addRoot("sheets", "array", "default roots");
+        addRoot("cells", "map", "default roots");
+        addRoot("metadata", "map", "default roots");
+        addRoot("namedRanges", "map", "default roots");
+      }
+
+      // Include any other root types already instantiated in either the current
+      // doc or the snapshot doc so restoring doesn't silently drop data.
+      for (const [name, value] of doc.share.entries()) {
+        const kind = rootKindFromValue(value);
+        if (!kind) {
+          throw new Error(
+            `Unsupported Yjs root type for "${name}" in current doc: ${value?.constructor?.name ?? typeof value}`,
+          );
+        }
+        addRoot(name, kind, "current doc");
+      }
+
+      for (const [name, value] of restored.share.entries()) {
+        const kind = rootKindFromValue(value);
+        if (!kind) {
+          throw new Error(
+            `Unsupported Yjs root type for "${name}" in snapshot: ${value?.constructor?.name ?? typeof value}`,
+          );
+        }
+        addRoot(name, kind, "snapshot");
+      }
+
       doc.transact(() => {
-        for (const root of roots) {
-          if (root.kind === "map") {
-            const target = doc.getMap(root.name);
-            const source = restored.getMap(root.name);
+        for (const [name, { kind }] of roots.entries()) {
+          if (kind === "map") {
+            const target = doc.getMap(name);
+            const source = restored.getMap(name);
+      
 
             for (const key of Array.from(target.keys())) {
               target.delete(key);
@@ -128,9 +140,9 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             continue;
           }
 
-          if (root.kind === "array") {
-            const target = doc.getArray(root.name);
-            const source = restored.getArray(root.name);
+          if (kind === "array") {
+            const target = doc.getArray(name);
+            const source = restored.getArray(name);
 
             if (target.length > 0) {
               target.delete(0, target.length);
@@ -142,9 +154,9 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             continue;
           }
 
-          if (root.kind === "text") {
-            const target = doc.getText(root.name);
-            const source = restored.getText(root.name);
+          if (kind === "text") {
+            const target = doc.getText(name);
+            const source = restored.getText(name);
             if (target.length > 0) target.delete(0, target.length);
             target.applyDelta(structuredClone(source.toDelta()));
             continue;
