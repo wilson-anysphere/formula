@@ -177,6 +177,31 @@ socket.socket()
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Import of 'socket' is not permitted/);
   });
 
+  it("blocks network access even if a script tries to use sys.modules for socket (network=none)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    // Regression guard: the sandbox should not pre-import `socket` under network=none.
+    // If it is present in sys.modules for any reason, network operations should still
+    // be blocked.
+    const script = `
+import sys
+
+sock_mod = sys.modules.get("socket")
+if sock_mod is None:
+    import socket as sock_mod
+
+s = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_DGRAM)
+s.sendto(b"hi", ("127.0.0.1", 9))
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/not permitted/i);
+  });
+
   it("allows network access to allowlisted hosts (native allowlist sandbox)", async () => {
     const server = http.createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "text/plain" });

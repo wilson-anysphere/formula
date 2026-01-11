@@ -24,6 +24,7 @@ _SOCKET_THREAD_LOCAL = threading.local()
 _ORIGINAL_SOCKET_CREATE_CONNECTION = None
 _ORIGINAL_SOCKET_CONNECT = None
 _ORIGINAL_SOCKET_CONNECT_EX = None
+_ORIGINAL_SOCKET_SENDTO = None
 
 try:  # pragma: no cover - environment dependent
     _IMPORT_ALLOWLIST_ROOTS = tuple(
@@ -270,9 +271,19 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     global _ORIGINAL_SOCKET_CREATE_CONNECTION
     global _ORIGINAL_SOCKET_CONNECT
     global _ORIGINAL_SOCKET_CONNECT_EX
+    global _ORIGINAL_SOCKET_SENDTO
 
     try:
-        import socket  # type: ignore
+        import sys
+
+        socket = sys.modules.get("socket")
+        if socket is None:
+            # Avoid importing `socket` when `network="none"` so scripts cannot
+            # bypass the import hook by grabbing a pre-imported module from
+            # sys.modules (e.g. to call `socket.socket.sendto`).
+            if network == "none":
+                return
+            import socket as socket  # type: ignore
     except Exception:
         return
 
@@ -282,6 +293,8 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
         _ORIGINAL_SOCKET_CONNECT = getattr(socket.socket, "connect", None)
     if _ORIGINAL_SOCKET_CONNECT_EX is None:
         _ORIGINAL_SOCKET_CONNECT_EX = getattr(socket.socket, "connect_ex", None)
+    if _ORIGINAL_SOCKET_SENDTO is None:
+        _ORIGINAL_SOCKET_SENDTO = getattr(socket.socket, "sendto", None)
 
     # Restore first so apply_sandbox() can both tighten and loosen restrictions.
     if _ORIGINAL_SOCKET_CREATE_CONNECTION is not None:
@@ -297,6 +310,11 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     if _ORIGINAL_SOCKET_CONNECT_EX is not None:
         try:
             socket.socket.connect_ex = _ORIGINAL_SOCKET_CONNECT_EX  # type: ignore[assignment]
+        except Exception:
+            pass
+    if _ORIGINAL_SOCKET_SENDTO is not None:
+        try:
+            socket.socket.sendto = _ORIGINAL_SOCKET_SENDTO  # type: ignore[assignment]
         except Exception:
             pass
 
@@ -327,6 +345,19 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
         enforce_hostname(_extract_hostname(address))
         return _ORIGINAL_SOCKET_CONNECT_EX(self, address)  # type: ignore[misc]
 
+    def guarded_sendto(self, data, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # Signature: sendto(bytes[, flags], address)
+        address = None
+        if "address" in kwargs:
+            address = kwargs.get("address")
+        elif len(args) == 1:
+            address = args[0]
+        elif len(args) >= 2:
+            address = args[1]
+
+        enforce_hostname(_extract_hostname(address))
+        return _ORIGINAL_SOCKET_SENDTO(self, data, *args, **kwargs)  # type: ignore[misc]
+
     def guarded_create_connection(address, *args, **kwargs):  # type: ignore[no-untyped-def]
         enforce_hostname(_extract_hostname(address))
 
@@ -349,6 +380,11 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     if _ORIGINAL_SOCKET_CONNECT_EX is not None:
         try:
             socket.socket.connect_ex = guarded_connect_ex  # type: ignore[assignment]
+        except Exception:
+            pass
+    if _ORIGINAL_SOCKET_SENDTO is not None:
+        try:
+            socket.socket.sendto = guarded_sendto  # type: ignore[assignment]
         except Exception:
             pass
 
