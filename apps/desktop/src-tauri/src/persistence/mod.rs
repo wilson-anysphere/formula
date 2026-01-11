@@ -3,13 +3,15 @@ mod workbook_state;
 pub use workbook_state::{PersistentWorkbookState, WorkbookPersistenceLocation};
 pub use workbook_state::{open_memory_manager, open_storage};
 
-use crate::file_io::{Sheet as AppSheet, Workbook as AppWorkbook};
+use crate::file_io::{
+    DefinedName as AppDefinedName, Sheet as AppSheet, Table as AppTable, Workbook as AppWorkbook,
+};
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use directories::ProjectDirs;
 use formula_model::{
     display_formula_text, normalize_formula_text, Cell as ModelCell, CellRef,
-    CellValue as ModelCellValue, Workbook as ModelWorkbook,
+    CellValue as ModelCellValue, DefinedNameScope, Workbook as ModelWorkbook,
 };
 use sha2::{Digest, Sha256};
 use std::io::Cursor;
@@ -79,8 +81,49 @@ pub fn workbook_from_model(model: &ModelWorkbook) -> anyhow::Result<AppWorkbook>
     workbook.sheets = model
         .sheets
         .iter()
-        .map(sheet_from_model)
+        .map(|sheet| sheet_from_model(sheet, &model.styles))
         .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let sheet_names_by_id: std::collections::HashMap<formula_model::WorksheetId, String> = model
+        .sheets
+        .iter()
+        .map(|sheet| (sheet.id, sheet.name.clone()))
+        .collect();
+
+    workbook.defined_names = model
+        .defined_names
+        .iter()
+        .map(|dn| {
+            let sheet_id = match dn.scope {
+                DefinedNameScope::Workbook => None,
+                DefinedNameScope::Sheet(id) => sheet_names_by_id.get(&id).cloned(),
+            };
+
+            AppDefinedName {
+                name: dn.name.clone(),
+                refers_to: dn.refers_to.clone(),
+                sheet_id,
+                hidden: dn.hidden,
+            }
+        })
+        .collect();
+
+    workbook.tables = model
+        .sheets
+        .iter()
+        .flat_map(|sheet| {
+            let sheet_id = sheet.name.clone();
+            sheet.tables.iter().map(move |table| AppTable {
+                name: table.display_name.clone(),
+                sheet_id: sheet_id.clone(),
+                start_row: table.range.start.row as usize,
+                start_col: table.range.start.col as usize,
+                end_row: table.range.end.row as usize,
+                end_col: table.range.end.col as usize,
+                columns: table.columns.iter().map(|c| c.name.clone()).collect(),
+            })
+        })
+        .collect();
 
     workbook.ensure_sheet_ids();
     for sheet in &mut workbook.sheets {
@@ -90,12 +133,18 @@ pub fn workbook_from_model(model: &ModelWorkbook) -> anyhow::Result<AppWorkbook>
     Ok(workbook)
 }
 
-fn sheet_from_model(sheet: &formula_model::Worksheet) -> anyhow::Result<AppSheet> {
+fn sheet_from_model(
+    sheet: &formula_model::Worksheet,
+    style_table: &formula_model::StyleTable,
+) -> anyhow::Result<AppSheet> {
     let mut out = AppSheet::new(sheet.name.clone(), sheet.name.clone());
 
     for (cell_ref, cell) in sheet.iter_cells() {
         let row = cell_ref.row as usize;
         let col = cell_ref.col as usize;
+        let number_format = style_table
+            .get(cell.style_id)
+            .and_then(|s| s.number_format.clone());
 
         let cached_value = model_value_to_scalar(&cell.value);
         if let Some(formula) = cell.formula.as_deref() {
@@ -105,6 +154,7 @@ fn sheet_from_model(sheet: &formula_model::Worksheet) -> anyhow::Result<AppSheet
             let normalized = display_formula_text(formula);
             let mut c = Cell::from_formula(normalized);
             c.computed_value = cached_value;
+            c.number_format = number_format;
             out.set_cell(row, col, c);
             continue;
         }
@@ -113,7 +163,9 @@ fn sheet_from_model(sheet: &formula_model::Worksheet) -> anyhow::Result<AppSheet
             continue;
         }
 
-        out.set_cell(row, col, Cell::from_literal(Some(cached_value)));
+        let mut c = Cell::from_literal(Some(cached_value));
+        c.number_format = number_format;
+        out.set_cell(row, col, c);
     }
 
     Ok(out)

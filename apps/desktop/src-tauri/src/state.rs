@@ -499,6 +499,19 @@ impl AppState {
             recovered.theme_palette = workbook.theme_palette.clone();
             recovered.print_settings = workbook.print_settings.clone();
             recovered.original_print_settings = workbook.original_print_settings.clone();
+            recovered.defined_names = workbook.defined_names.clone();
+            recovered.tables = workbook.tables.clone();
+
+            // Keep columnar-backed sheet data from the freshly loaded workbook (e.g. CSV imports).
+            for recovered_sheet in &mut recovered.sheets {
+                if let Some(src) = workbook
+                    .sheets
+                    .iter()
+                    .find(|s| s.name.eq_ignore_ascii_case(&recovered_sheet.name))
+                {
+                    recovered_sheet.columnar = src.columnar.clone();
+                }
+            }
 
             let sheet_metas = storage
                 .list_sheets(existing_meta.id)
