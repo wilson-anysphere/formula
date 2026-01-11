@@ -36,8 +36,8 @@ impl XlsxPackage {
                 continue;
             }
 
-            if part.starts_with("xl/media/") {
-                if let Some(ext) = part.rsplit('.').next() {
+            if let Some((_, ext)) = part.rsplit_once('.') {
+                if source_defaults.contains_key(ext) {
                     needed_defaults.insert(ext);
                 }
             }
@@ -115,4 +115,3 @@ fn parse_content_types(
 
     Ok((defaults, overrides))
 }
-

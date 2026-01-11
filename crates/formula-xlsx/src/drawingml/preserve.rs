@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use roxmltree::Document;
 
-use crate::path::rels_for_part;
+use crate::path::{rels_for_part, resolve_target};
+use crate::preserve::opc_graph::collect_transitive_related_parts;
 use crate::preserve::rels_merge::{ensure_rels_has_relationships, RelationshipStub};
 use crate::preserve::sheet_match::{match_sheet_by_name_or_index, workbook_sheet_parts};
 use crate::relationships::parse_relationships;
@@ -55,20 +56,27 @@ impl XlsxPackage {
             .ok_or_else(|| ChartExtractionError::MissingPart("[Content_Types].xml".to_string()))?
             .to_vec();
 
-        let mut parts = BTreeMap::new();
-        for (name, bytes) in self.parts() {
-            if name.starts_with("xl/drawings/")
-                || name.starts_with("xl/charts/")
-                || name.starts_with("xl/media/")
-            {
-                parts.insert(name.to_string(), bytes.to_vec());
-            }
-        }
-
         let sheets = workbook_sheet_parts(self)?;
+        let mut root_parts: BTreeSet<String> = BTreeSet::new();
         let mut sheet_drawings: BTreeMap<String, PreservedSheetDrawings> = BTreeMap::new();
 
         for sheet in sheets {
+            let sheet_rels_part = rels_for_part(&sheet.part_name);
+            let rels = self
+                .part(&sheet_rels_part)
+                .map(|xml| parse_relationships(xml, &sheet_rels_part))
+                .transpose()?
+                .unwrap_or_default();
+
+            for rel in &rels {
+                let resolved = resolve_target(&sheet.part_name, &rel.target);
+                if is_drawing_adjacent_relationship(rel.type_.as_str(), &resolved)
+                    && self.part(&resolved).is_some()
+                {
+                    root_parts.insert(resolved);
+                }
+            }
+
             let Some(sheet_xml) = self.part(&sheet.part_name) else {
                 continue;
             };
@@ -77,11 +85,6 @@ impl XlsxPackage {
                 continue;
             }
 
-            let sheet_rels_part = rels_for_part(&sheet.part_name);
-            let Some(sheet_rels_xml) = self.part(&sheet_rels_part) else {
-                continue;
-            };
-            let rels = parse_relationships(sheet_rels_xml, &sheet_rels_part)?;
             let rel_map: HashMap<_, _> = rels.into_iter().map(|r| (r.id.clone(), r)).collect();
 
             let mut drawings = Vec::new();
@@ -107,6 +110,8 @@ impl XlsxPackage {
                 },
             );
         }
+
+        let parts = collect_transitive_related_parts(self, root_parts.into_iter())?;
 
         Ok(PreservedDrawingParts {
             content_types_xml,
@@ -178,6 +183,24 @@ impl XlsxPackage {
 
         Ok(())
     }
+}
+
+fn is_drawing_adjacent_relationship(rel_type: &str, resolved_target: &str) -> bool {
+    if rel_type == DRAWING_REL_TYPE {
+        return true;
+    }
+
+    const PREFIXES: &[&str] = &[
+        "xl/drawings/",
+        "xl/charts/",
+        "xl/media/",
+        "xl/embeddings/",
+        "xl/ctrlProps/",
+        "xl/activeX/",
+        "xl/diagrams/",
+    ];
+
+    PREFIXES.iter().any(|prefix| resolved_target.starts_with(prefix))
 }
 
 fn extract_sheet_drawing_rids(
