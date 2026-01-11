@@ -161,7 +161,9 @@ export class ExtensionManager {
 
     const computedPackageSha256 = sha256Hex(download.bytes);
     if (download.sha256 && download.sha256 !== computedPackageSha256) {
-      throw new Error("Marketplace download sha256 does not match downloaded bytes");
+      // Treat a sha256 mismatch as a signature verification failure: both indicate the downloaded
+      // package bytes cannot be trusted (tampering/corruption).
+      throw new Error("Extension signature verification failed (sha256 mismatch)");
     }
 
     if (hasPublisherKeySet && download.publisherKeyId) {

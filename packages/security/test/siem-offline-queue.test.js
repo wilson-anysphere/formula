@@ -38,7 +38,9 @@ test("NodeFsOfflineAuditQueue redacts before persistence and rotates segments", 
   const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-"));
   const queue = new NodeFsOfflineAuditQueue({
     dirPath: dir,
-    maxSegmentBytes: 200,
+    // Must be larger than a single serialized audit event so we can observe an
+    // `.open.jsonl` segment before rotation.
+    maxSegmentBytes: 300,
     flushBatchSize: 2,
     redactionOptions: {},
   });
@@ -117,7 +119,8 @@ test("NodeFsOfflineAuditQueue enforces maxBytes backpressure", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-capacity-"));
   const queue = new NodeFsOfflineAuditQueue({
     dirPath: dir,
-    maxBytes: 450,
+    // Allow two events to enqueue, then reject the third.
+    maxBytes: 700,
     maxSegmentBytes: 1024 * 1024,
   });
 
@@ -473,7 +476,8 @@ test("IndexedDbOfflineAuditQueue enforces maxBytes backpressure", async () => {
   globalThis.IDBKeyRange = IDBKeyRange;
 
   const dbName = `siem-idb-cap-${randomUUID()}`;
-  const queue = new IndexedDbOfflineAuditQueue({ dbName, maxBytes: 200 });
+  // Allow one event to enqueue, then reject the next.
+  const queue = new IndexedDbOfflineAuditQueue({ dbName, maxBytes: 300 });
 
   await queue.enqueue(makeEvent({ secret: "a" }));
   await assert.rejects(queue.enqueue(makeEvent({ secret: "b" })), (error) => error?.code === "EQUEUEFULL");

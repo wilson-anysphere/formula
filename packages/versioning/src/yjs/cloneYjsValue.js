@@ -42,27 +42,34 @@ function isYText(value) {
  * so we recreate equivalent content in the target doc.
  *
  * @param {any} value
+ * @param {{ Map?: typeof Y.Map, Array?: typeof Y.Array, Text?: typeof Y.Text }} [ctors]
  * @returns {any}
  */
-export function cloneYjsValue(value) {
+export function cloneYjsValue(value, ctors = {}) {
+  const MapCtor = ctors.Map ?? Y.Map;
+  const ArrayCtor = ctors.Array ?? Y.Array;
+  const TextCtor = ctors.Text ?? Y.Text;
+
+  const normalizedCtors = ctors.Map && ctors.Array && ctors.Text ? ctors : { Map: MapCtor, Array: ArrayCtor, Text: TextCtor };
+
   if (isYMap(value)) {
-    const out = new Y.Map();
+    const out = new MapCtor();
     value.forEach((v, k) => {
-      out.set(k, cloneYjsValue(v));
+      out.set(k, cloneYjsValue(v, normalizedCtors));
     });
     return out;
   }
 
   if (isYArray(value)) {
-    const out = new Y.Array();
+    const out = new ArrayCtor();
     for (const item of value.toArray()) {
-      out.push([cloneYjsValue(item)]);
+      out.push([cloneYjsValue(item, normalizedCtors)]);
     }
     return out;
   }
 
   if (isYText(value)) {
-    const out = new Y.Text();
+    const out = new TextCtor();
     // Preserve formatting by cloning the Y.Text delta instead of just its plain string.
     // Note: it's safe to call `applyDelta` on an un-integrated Y.Text, but you
     // must integrate it into a Y.Doc before reading it (toString/toDelta).

@@ -131,6 +131,35 @@ function defaultGetConnectionIdentity(connection) {
     // Prefer a stable string identifier instead of hashing the entire object.
     // @ts-ignore - runtime inspection
     if (typeof connection.id === "string" && connection.id) return connection.id;
+
+    // Some callers (including the built-in M language compiler) produce plain
+    // connection descriptors without a stable id. Provide a conservative identity
+    // for a few known shapes so folding/caching work out of the box while still
+    // avoiding opaque driver handles.
+    const proto = Object.getPrototypeOf(connection);
+    const isPlainObject = proto === Object.prototype || proto === null;
+    if (isPlainObject) {
+      // @ts-ignore - runtime inspection
+      if (typeof connection.name === "string" && connection.name) return connection.name;
+
+      // M language: Sql.Database(server, database)
+      // @ts-ignore - runtime inspection
+      if (connection.kind === "sql" && typeof connection.server === "string" && typeof connection.database === "string") {
+        // Hashing happens upstream (when the identity is not a string), so we can
+        // safely return a JSON value here.
+        // @ts-ignore - runtime inspection
+        return { kind: "sql", server: connection.server, database: connection.database };
+      }
+
+      // M language: Odbc.Query(connectionString, sql)
+      // @ts-ignore - runtime inspection
+      if (connection.kind === "odbc" && typeof connection.connectionString === "string") {
+        // Note: the connection string may include sensitive info; it is hashed by
+        // the engine/connector when deriving a final connectionId string.
+        // @ts-ignore - runtime inspection
+        return { kind: "odbc", connectionString: connection.connectionString };
+      }
+    }
   }
 
   return null;

@@ -437,11 +437,31 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
       }
 
       doc.transact((transaction) => {
+        // When the target doc comes from a different Yjs module instance (e.g. CJS vs ESM),
+        // we must construct cloned values using the target instance's constructors. Otherwise
+        // `target.set(key, value)` throws ("Unexpected content type").
+        //
+        // Derive the constructors from roots that exist in (or will be created on) the target
+        // document during this restore.
+        /** @type {typeof Y.Map | null} */
+        let mapCtor = null;
+        /** @type {typeof Y.Array | null} */
+        let arrayCtor = null;
+        /** @type {typeof Y.Text | null} */
+        let textCtor = null;
+        for (const [name, { kind }] of roots.entries()) {
+          if (kind === "map" && !mapCtor) mapCtor = getMapRoot(doc, name).constructor;
+          if (kind === "array" && !arrayCtor) arrayCtor = getArrayRoot(doc, name).constructor;
+          if (kind === "text" && !textCtor) textCtor = getTextRoot(doc, name).constructor;
+          if (mapCtor && arrayCtor && textCtor) break;
+        }
+        const cloneCtors = { Map: mapCtor ?? Y.Map, Array: arrayCtor ?? Y.Array, Text: textCtor ?? Y.Text };
+
         for (const [name, { kind }] of roots.entries()) {
           if (kind === "map") {
             const target = getMapRoot(doc, name);
             const source = getMapRoot(restored, name);
-       
+
 
             for (const key of Array.from(target.keys())) {
               target.delete(key);
@@ -453,7 +473,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             }
 
             source.forEach((value, key) => {
-              target.set(key, cloneYjsValue(value));
+              target.set(key, cloneYjsValue(value, cloneCtors));
             });
 
             // Special-case: comments historically existed as a list (Array) but
@@ -466,7 +486,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
                 const id = coerceString(item.get("id"));
                 if (!id) continue;
                 if (target.has(id)) continue;
-                target.set(id, cloneYjsValue(item));
+                target.set(id, cloneYjsValue(item, cloneCtors));
               }
             }
             continue;
@@ -485,7 +505,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             }
 
             for (const value of source.toArray()) {
-              target.push([cloneYjsValue(value)]);
+              target.push([cloneYjsValue(value, cloneCtors)]);
             }
             continue;
           }

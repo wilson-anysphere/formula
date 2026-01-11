@@ -292,6 +292,63 @@ test("QueryEngine: folds merge into a single SQL query when both sides are folda
   ]);
 });
 
+test("QueryEngine: folds merge when connections are deep-equal (M-style descriptors) without a custom identity hook", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined }[]} */
+  const calls = [];
+
+  const engine = new QueryEngine({
+    connectors: {
+      // No explicit `getConnectionIdentity` -> should rely on SqlConnector default
+      // identity for M-style `{ kind: "sql", server, database }` descriptors.
+      sql: new SqlConnector({
+        querySql: async (_connection, sql, options) => {
+          calls.push({ sql, params: options?.params });
+          return DataTable.fromGrid(
+            [
+              ["Id", "Region", "Target"],
+              [1, "East", 10],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  // Deep-equal but not referentially equal.
+  const leftConn = { kind: "sql", server: "server1", database: "db1" };
+  const rightConn = { kind: "sql", server: "server1", database: "db1" };
+
+  const right = {
+    id: "q_right_m_identity",
+    name: "Targets",
+    source: { type: "database", connection: rightConn, query: "SELECT * FROM targets" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left_m_identity",
+    name: "Sales",
+    source: { type: "database", connection: leftConn, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region"] } },
+      {
+        id: "l2",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_right_m_identity", joinType: "left", leftKey: "Id", rightKey: "Id" },
+      },
+    ],
+  };
+
+  const result = await engine.executeQuery(left, { queries: { q_right_m_identity: right } }, {});
+  assert.equal(calls.length, 1, "expected a single SQL roundtrip when merge folds");
+  assert.match(calls[0].sql, /\bJOIN\b/);
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Region", "Target"],
+    [1, "East", 10],
+  ]);
+});
+
 test("QueryEngine: schema discovery enables folding merge without explicit projections", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined }[]} */
   const calls = [];
