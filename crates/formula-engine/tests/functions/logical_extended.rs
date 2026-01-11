@@ -65,6 +65,45 @@ fn choose_spills_and_truncates_index() {
 }
 
 #[test]
+fn choose_broadcasts_1x1_index_arrays_to_array_results() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CHOOSE({1}, {10,20}, {30,40})");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_number(&sheet.get("B1"), 20.0);
+}
+
+#[test]
+fn choose_selects_array_choices_elementwise() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CHOOSE({1,2}, {10,20}, {30,40})");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_number(&sheet.get("B1"), 40.0);
+}
+
+#[test]
+fn choose_ignores_unselected_choice_shape_mismatches() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CHOOSE({1,1}, {10,20}, {30,40,50})");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_number(&sheet.get("B1"), 20.0);
+}
+
+#[test]
+fn choose_returns_value_error_for_incompatible_choice_shapes() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=CHOOSE({1,2}, {10,20}, {30,40,50})"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
 fn choose_ignores_errors_in_unselected_branches_per_element() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=CHOOSE({1,2}, 1, 1/0)");
@@ -90,4 +129,3 @@ fn xor_handles_scalar_vs_range_semantics() {
     assert_eq!(sheet.eval("=XOR(A5, TRUE)"), Value::Error(ErrorKind::Div0));
     assert_eq!(sheet.eval("=XOR({TRUE,FALSE,TRUE})"), Value::Bool(false));
 }
-

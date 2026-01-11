@@ -29,7 +29,13 @@ fn choose_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     match index_value {
         Value::Error(e) => Value::Error(e),
-        Value::Array(arr) => choose_array(ctx, &arr, choices),
+        Value::Array(arr) => {
+            if arr.rows == 1 && arr.cols == 1 {
+                choose_scalar(ctx, arr.top_left(), choices)
+            } else {
+                choose_array(ctx, &arr, choices)
+            }
+        }
         other => choose_scalar(ctx, other, choices),
     }
 }
@@ -132,26 +138,47 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
         return Value::ReferenceUnion(ranges);
     }
 
+    let shape = array_lift::Shape {
+        rows: indices.rows,
+        cols: indices.cols,
+    };
+
+    let mut evaluated_values: HashMap<usize, Value> = HashMap::with_capacity(evaluated.len());
+    for (idx, arg) in evaluated {
+        let value = choose_value_from_arg(ctx, arg);
+        if !array_lift::broadcast_compatible(&value, shape) {
+            return Value::Error(ErrorKind::Value);
+        }
+        evaluated_values.insert(idx, value);
+    }
+
     let mut out_values: Vec<Value> = Vec::with_capacity(indices.values.len());
-    for idx in normalized {
+    for (pos, idx) in normalized.into_iter().enumerate() {
         match idx {
             Err(e) => out_values.push(Value::Error(e)),
             Ok(idx) => {
-                let Some(arg) = evaluated.get(&idx) else {
+                let Some(value) = evaluated_values.get(&idx) else {
                     out_values.push(Value::Error(ErrorKind::Value));
                     continue;
                 };
-                out_values.push(arg_value_to_scalar(ctx, arg));
+                let selected = array_lift::element_at(value, shape, pos);
+                out_values.push(selected.clone());
             }
         }
     }
 
-    Value::Array(Array::new(indices.rows, indices.cols, out_values))
+    Value::Array(Array::new(shape.rows, shape.cols, out_values))
 }
 
-fn arg_value_to_scalar(ctx: &dyn FunctionContext, arg: &ArgValue) -> Value {
-    match arg.clone() {
-        ArgValue::Scalar(v) => scalarize_value(v),
+fn choose_value_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
+    match arg {
+        ArgValue::Scalar(v) => match v {
+            Value::Lambda(_)
+            | Value::Spill { .. }
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
+            other => other,
+        },
         ArgValue::Reference(r) => {
             if r.is_single_cell() {
                 ctx.get_cell_value(r.sheet_id, r.start)
@@ -160,22 +187,6 @@ fn arg_value_to_scalar(ctx: &dyn FunctionContext, arg: &ArgValue) -> Value {
             }
         }
         ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
-    }
-}
-
-fn scalarize_value(value: Value) -> Value {
-    match value {
-        Value::Array(arr) => {
-            if arr.rows == 1 && arr.cols == 1 {
-                arr.top_left()
-            } else {
-                Value::Error(ErrorKind::Value)
-            }
-        }
-        Value::Lambda(_) | Value::Spill { .. } | Value::Reference(_) | Value::ReferenceUnion(_) => {
-            Value::Error(ErrorKind::Value)
-        }
-        other => other,
     }
 }
 
