@@ -262,7 +262,7 @@ export class QueryFoldingEngine {
       }
       case "groupBy": {
         const groupCols = operation.groupColumns.map((c) => `t.${quoteIdentifier(c)}`).join(", ");
-        const aggSql = operation.aggregations.map((agg) => aggregationToSql(agg, quoteIdentifier)).join(", ");
+        const aggSql = operation.aggregations.map((agg) => aggregationToSql(agg, dialect)).join(", ");
         const selectList = [groupCols, aggSql].filter(Boolean).join(", ");
 
         // We intentionally introduce a constant grouping key when groupColumns is
@@ -452,19 +452,21 @@ function sortSpecsToSql(dialect, specs) {
 
 /**
  * @param {Aggregation} agg
- * @param {(identifier: string) => string} quoteIdentifier
+ * @param {SqlDialect} dialect
  * @returns {string}
  */
-function aggregationToSql(agg, quoteIdentifier) {
+function aggregationToSql(agg, dialect) {
+  const quoteIdentifier = dialect.quoteIdentifier;
   const alias = quoteIdentifier(agg.as ?? `${agg.op} of ${agg.column}`);
   const col = `t.${quoteIdentifier(agg.column)}`;
+  const numeric = safeCastNumberToSql(dialect, col) ?? col;
   switch (agg.op) {
     case "sum":
-      return `COALESCE(SUM(${col}), 0) AS ${alias}`;
+      return `COALESCE(SUM(${numeric}), 0) AS ${alias}`;
     case "count":
       return `COUNT(*) AS ${alias}`;
     case "average":
-      return `AVG(${col}) AS ${alias}`;
+      return `AVG(${numeric}) AS ${alias}`;
     case "min":
       return `MIN(${col}) AS ${alias}`;
     case "max":
