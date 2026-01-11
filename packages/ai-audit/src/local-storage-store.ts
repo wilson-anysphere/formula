@@ -16,6 +16,7 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
   readonly key: string;
   readonly maxEntries: number;
   private readonly memoryFallback: AIAuditEntry[] = [];
+  private localStorageUnavailable: boolean = false;
 
   constructor(options: LocalStorageAIAuditStoreOptions = {}) {
     this.key = options.key ?? "formula_ai_audit_log_entries";
@@ -39,7 +40,7 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
   }
 
   private loadEntries(): AIAuditEntry[] {
-    const storage = getLocalStorageOrNull();
+    const storage = this.getLocalStorage();
     if (!storage) return this.memoryFallback.slice();
 
     try {
@@ -50,12 +51,13 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
     } catch {
       // localStorage can throw in some environments (e.g. Node webstorage without a file,
       // Safari private mode). Fall back to in-memory storage.
+      this.localStorageUnavailable = true;
       return this.memoryFallback.slice();
     }
   }
 
   private saveEntries(entries: AIAuditEntry[]): void {
-    const storage = getLocalStorageOrNull();
+    const storage = this.getLocalStorage();
     if (!storage) {
       this.memoryFallback.length = 0;
       this.memoryFallback.push(...entries);
@@ -66,9 +68,15 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
       storage.setItem(this.key, JSON.stringify(entries));
     } catch {
       // If persistence fails, at least keep the latest entries in memory.
+      this.localStorageUnavailable = true;
       this.memoryFallback.length = 0;
       this.memoryFallback.push(...entries);
     }
+  }
+
+  private getLocalStorage(): Storage | null {
+    if (this.localStorageUnavailable) return null;
+    return getLocalStorageOrNull();
   }
 }
 
