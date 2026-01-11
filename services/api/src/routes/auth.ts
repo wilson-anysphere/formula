@@ -590,6 +590,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       const enabled = Boolean(status.rows[0]?.mfa_totp_enabled);
 
       let usedRecoveryCodeId: string | null = null;
+      let error: "mfa_required" | "invalid_code" | null = null;
       if (enabled) {
         const totpCode = challenge.data.code?.trim();
         const recoveryCode = challenge.data.recoveryCode?.trim();
@@ -597,14 +598,14 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         if (totpCode) {
           const existingSecret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, request.user!.id);
           if (!existingSecret || !verifyTotpCode(existingSecret, totpCode)) {
-            return { ok: false, usedRecoveryCodeId: null };
+            return { ok: false, error: "invalid_code", usedRecoveryCodeId: null };
           }
         } else if (recoveryCode) {
           const consumedId = await consumeRecoveryCode(client, request.user!.id, recoveryCode);
-          if (!consumedId) return { ok: false, usedRecoveryCodeId: null };
+          if (!consumedId) return { ok: false, error: "invalid_code", usedRecoveryCodeId: null };
           usedRecoveryCodeId = consumedId;
         } else {
-          return { ok: false, usedRecoveryCodeId: null };
+          return { ok: false, error: "mfa_required", usedRecoveryCodeId: null };
         }
       }
 
@@ -613,10 +614,13 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         request.user!.id
       ]);
       await deleteUnusedRecoveryCodes(client, request.user!.id);
-      return { ok: true, usedRecoveryCodeId };
+      return { ok: true, error, usedRecoveryCodeId };
     });
 
-    if (!txResult.ok) return reply.code(403).send({ error: "mfa_required" });
+    if (!txResult.ok) {
+      if (txResult.error === "mfa_required") return reply.code(403).send({ error: "mfa_required" });
+      return reply.code(400).send({ error: "invalid_code" });
+    }
 
     if (txResult.usedRecoveryCodeId) {
       await writeAuditEvent(

@@ -306,6 +306,20 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     expect(resetWithoutChallenge.statusCode).toBe(403);
     expect((resetWithoutChallenge.json() as any).error).toBe("mfa_required");
 
+    const validResetCode = authenticator.generate(secret);
+    const lastDigit = validResetCode.slice(-1);
+    const wrongDigit = ((Number.parseInt(lastDigit, 10) + 1) % 10).toString();
+    const wrongResetCode = validResetCode.slice(0, -1) + wrongDigit;
+
+    const resetWithWrongCode = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/setup",
+      headers: { cookie },
+      payload: { code: wrongResetCode }
+    });
+    expect(resetWithWrongCode.statusCode).toBe(400);
+    expect((resetWithWrongCode.json() as any).error).toBe("invalid_code");
+
     const recoveryCode = recoveryCodes[0]!;
     const resetWithRecovery = await app.inject({
       method: "POST",
