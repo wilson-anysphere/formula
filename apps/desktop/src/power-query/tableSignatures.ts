@@ -41,6 +41,21 @@ function containsCell(rectangle: TableRectangle, cell: { row: number; col: numbe
   );
 }
 
+function cellContentsEqual(before: any, after: any): boolean {
+  const beforeValue = before?.value ?? null;
+  const afterValue = after?.value ?? null;
+
+  const valuesEqual =
+    beforeValue === afterValue ||
+    (beforeValue != null &&
+      afterValue != null &&
+      typeof beforeValue === "object" &&
+      typeof afterValue === "object" &&
+      JSON.stringify(beforeValue) === JSON.stringify(afterValue));
+
+  return valuesEqual && (before?.formula ?? null) === (after?.formula ?? null);
+}
+
 /**
  * In-memory registry of workbook table definitions + versions.
  *
@@ -154,6 +169,12 @@ export class TableSignatureRegistry {
     const bumped = new Set<string>();
 
     for (const delta of deltas) {
+      // Ignore format-only changes so table signatures reflect the cell values/formulas
+      // Power Query reads (not cosmetic formatting edits).
+      const before = (delta as any)?.before;
+      const after = (delta as any)?.after;
+      if (before && after && cellContentsEqual(before, after)) continue;
+
       const sheetId = typeof (delta as any)?.sheetId === "string" ? String((delta as any).sheetId) : "";
       if (!sheetId) continue;
       const row = Number((delta as any).row);

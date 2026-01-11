@@ -44,6 +44,10 @@ test("table signatures bump version when document edits touch the table rectangl
     "expected getTableSignature to resolve table names case-insensitively",
   );
 
+  // Cosmetic formatting edits should not invalidate table-source query caches.
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  assert.equal(context.getTableSignature?.("Table1"), initial);
+
   // Outside the rectangle -> no bump.
   doc.setCellValue("Sheet1", "C1", 1);
   assert.equal(context.getTableSignature?.("Table1"), initial);
