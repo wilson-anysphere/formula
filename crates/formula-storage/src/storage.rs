@@ -229,6 +229,7 @@ impl Storage {
         let encrypted_bytes = encrypt_sqlite_bytes(&sqlite_bytes, &keyring)?;
 
         atomic_write(&ctx.path, &encrypted_bytes)?;
+        cleanup_sqlite_sidecar_files(&ctx.path)?;
         Ok(())
     }
 
@@ -1242,4 +1243,18 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             _ => Err(err.error),
         },
     }
+}
+
+fn cleanup_sqlite_sidecar_files(path: &Path) -> std::io::Result<()> {
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut sidecar = path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        let sidecar_path = PathBuf::from(sidecar);
+        match fs::remove_file(&sidecar_path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }

@@ -47,6 +47,7 @@ impl AutoSaveManager {
 
         let handle = tokio::spawn(async move {
             let mut pending: Vec<CellChange> = Vec::new();
+            let mut needs_persist = false;
             // Track the last *successful* save so that a transient SQLite error
             // doesn't postpone future flush attempts indefinitely.
             let mut last_successful_save = Instant::now();
@@ -61,7 +62,7 @@ impl AutoSaveManager {
 
                                 let now = Instant::now();
                                 if now.duration_since(last_successful_save) >= config.max_delay {
-                                    match flush_pending(&storage, &mut pending, &save_count_task) {
+                                    match flush_pending(&storage, &mut pending, &mut needs_persist, &save_count_task) {
                                         Ok(()) => {
                                             last_successful_save = Instant::now();
                                             next_flush = None;
@@ -76,7 +77,12 @@ impl AutoSaveManager {
                                 }
                             }
                             Some(Command::Flush(reply)) => {
-                                let result = flush_pending(&storage, &mut pending, &save_count_task);
+                                let result = flush_pending(
+                                    &storage,
+                                    &mut pending,
+                                    &mut needs_persist,
+                                    &save_count_task,
+                                );
                                 if result.is_ok() {
                                     last_successful_save = Instant::now();
                                     next_flush = None;
@@ -87,12 +93,22 @@ impl AutoSaveManager {
                                 let _ = reply.send(result);
                             }
                             Some(Command::Shutdown(reply)) => {
-                                let result = flush_pending(&storage, &mut pending, &save_count_task);
+                                let result = flush_pending(
+                                    &storage,
+                                    &mut pending,
+                                    &mut needs_persist,
+                                    &save_count_task,
+                                );
                                 let _ = reply.send(result);
                                 break;
                             }
                             None => {
-                                let _ = flush_pending(&storage, &mut pending, &save_count_task);
+                                let _ = flush_pending(
+                                    &storage,
+                                    &mut pending,
+                                    &mut needs_persist,
+                                    &save_count_task,
+                                );
                                 break;
                             }
                         }
@@ -102,7 +118,7 @@ impl AutoSaveManager {
                             tokio::time::sleep_until(deadline).await;
                         }
                     }, if next_flush.is_some() => {
-                        match flush_pending(&storage, &mut pending, &save_count_task) {
+                        match flush_pending(&storage, &mut pending, &mut needs_persist, &save_count_task) {
                             Ok(()) => {
                                 last_successful_save = Instant::now();
                                 next_flush = None;
@@ -152,19 +168,29 @@ impl AutoSaveManager {
 fn flush_pending(
     storage: &Storage,
     pending: &mut Vec<CellChange>,
+    needs_persist: &mut bool,
     save_count: &AtomicUsize,
 ) -> StorageResult<()> {
-    if pending.is_empty() {
+    if pending.is_empty() && !*needs_persist {
         return Ok(());
     }
 
-    let changes = std::mem::take(pending);
-    let result = storage.apply_cell_changes(&changes);
-    if result.is_ok() {
-        save_count.fetch_add(1, Ordering::Relaxed);
-    } else {
-        // If we failed, restore pending so we can retry on the next flush.
-        *pending = changes;
+    if !pending.is_empty() {
+        let changes = std::mem::take(pending);
+        let result = storage.apply_cell_changes(&changes);
+        if let Err(err) = result {
+            // If we failed, restore pending so we can retry on the next flush.
+            *pending = changes;
+            return Err(err);
+        }
+        *needs_persist = true;
     }
-    result
+
+    if *needs_persist {
+        storage.persist()?;
+        *needs_persist = false;
+        save_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    Ok(())
 }

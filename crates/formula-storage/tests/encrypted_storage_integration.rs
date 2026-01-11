@@ -2,8 +2,9 @@ use formula_storage::encryption::is_encrypted_container;
 use formula_storage::{
     CellChange, CellData, CellRange, CellValue, InMemoryKeyProvider, KeyProvider, Storage,
 };
-use formula_storage::{EncryptionError, storage::StorageError};
+use formula_storage::{AutoSaveConfig, AutoSaveManager, EncryptionError, storage::StorageError};
 use std::sync::Arc;
+use std::time::Duration;
 use tempfile::tempdir;
 
 #[test]
@@ -139,6 +140,80 @@ fn encrypted_open_with_wrong_key_fails() {
         StorageError::Encryption(EncryptionError::Aead) => {}
         other => panic!("unexpected error: {other:?}"),
     }
+}
+
+#[test]
+fn encrypted_persist_removes_sqlite_sidecars() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("workbook.formula");
+    let key_provider = Arc::new(InMemoryKeyProvider::default());
+
+    // Simulate leftover SQLite sidecar files that could contain plaintext.
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = format!("{}{}", path.display(), suffix);
+        std::fs::write(sidecar, b"plaintext").expect("write sidecar");
+    }
+
+    let storage = Storage::open_encrypted_path(&path, key_provider).expect("open encrypted");
+    storage
+        .create_workbook("Book1", None)
+        .expect("create workbook");
+    storage.persist().expect("persist");
+
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = format!("{}{}", path.display(), suffix);
+        assert!(
+            !std::path::Path::new(&sidecar).exists(),
+            "expected sidecar {sidecar} to be removed"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn encrypted_autosave_persists_to_disk() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("workbook.formula");
+    let key_provider = Arc::new(InMemoryKeyProvider::default());
+
+    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let workbook = storage
+        .create_workbook("Book1", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet1", 0, None)
+        .expect("create sheet");
+
+    let autosave = AutoSaveManager::spawn(
+        storage.clone(),
+        AutoSaveConfig {
+            save_delay: Duration::from_millis(50),
+            max_delay: Duration::from_millis(200),
+        },
+    );
+
+    autosave.record_change(CellChange {
+        sheet_id: sheet.id,
+        row: 0,
+        col: 0,
+        data: CellData {
+            value: CellValue::Number(42.0),
+            formula: None,
+            style: None,
+        },
+        user_id: None,
+    });
+
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    autosave.flush().await.expect("flush");
+    autosave.shutdown().await.expect("shutdown");
+
+    let reopened = Storage::open_encrypted_path(&path, key_provider).expect("reopen encrypted");
+    let cells = reopened
+        .load_cells_in_range(sheet.id, CellRange::new(0, 5, 0, 5))
+        .expect("load cells");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].0, (0, 0));
+    assert_eq!(cells[0].1.value, CellValue::Number(42.0));
 }
 
 #[test]
