@@ -213,18 +213,27 @@ impl MemoryManager {
         let mut cells = HashMap::new();
         let mut missing = Vec::new();
 
-        let add_cells_in_viewport =
-            |page_cells: &HashMap<(i64, i64), CellSnapshot>, cells: &mut HashMap<(i64, i64), CellSnapshot>| {
-                for (&(row, col), snapshot) in page_cells {
-                    if row >= viewport.row_start
-                        && row <= viewport.row_end
-                        && col >= viewport.col_start
-                        && col <= viewport.col_end
-                    {
+        let add_cells_in_viewport = |key: PageKey,
+                                    page_cells: &HashMap<(i64, i64), CellSnapshot>,
+                                    cells: &mut HashMap<(i64, i64), CellSnapshot>| {
+            let page_range = self.page_range(key);
+            let row_start = viewport.row_start.max(page_range.row_start);
+            let row_end = viewport.row_end.min(page_range.row_end);
+            let col_start = viewport.col_start.max(page_range.col_start);
+            let col_end = viewport.col_end.min(page_range.col_end);
+
+            if row_start > row_end || col_start > col_end {
+                return;
+            }
+
+            for row in row_start..=row_end {
+                for col in col_start..=col_end {
+                    if let Some(snapshot) = page_cells.get(&(row, col)) {
                         cells.insert((row, col), snapshot.clone());
                     }
                 }
-            };
+            }
+        };
 
         {
             let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
@@ -233,7 +242,7 @@ impl MemoryManager {
             for key in &page_keys {
                 if let Some(page) = inner.pages.get(key) {
                     hit_pages = hit_pages.saturating_add(1);
-                    add_cells_in_viewport(&page.cells, &mut cells);
+                    add_cells_in_viewport(*key, &page.cells, &mut cells);
                 } else {
                     missed_pages = missed_pages.saturating_add(1);
                     missing.push(*key);
@@ -257,7 +266,7 @@ impl MemoryManager {
             self.insert_page_locked(&mut inner, key, page)?;
 
             if let Some(page) = inner.pages.get(&key) {
-                add_cells_in_viewport(&page.cells, &mut cells);
+                add_cells_in_viewport(key, &page.cells, &mut cells);
             }
         }
 
