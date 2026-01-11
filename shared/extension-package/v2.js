@@ -360,6 +360,7 @@ function readExtensionPackageV2(packageBytes) {
   };
 
   const payloadFiles = new Map();
+  const payloadFilesFolded = new Set();
 
   let entriesSeen = 0;
   for (const entry of iterateTarEntries(packageBytes)) {
@@ -412,8 +413,13 @@ function readExtensionPackageV2(packageBytes) {
         throw new Error(`Invalid extension package: too many files (>${MAX_PACKAGE_FILES})`);
       }
       const relPath = normalizePath(name.slice("files/".length));
+      const folded = relPath.toLowerCase();
+      if (payloadFilesFolded.has(folded)) {
+        throw new Error(`Invalid extension package: duplicate file path (case-insensitive): ${relPath}`);
+      }
       if (payloadFiles.has(relPath)) throw new Error(`Duplicate file in package: ${relPath}`);
       payloadFiles.set(relPath, entry.data);
+      payloadFilesFolded.add(folded);
       continue;
     }
 

@@ -32,6 +32,33 @@ function manifestsMatch(a, b) {
   return canonicalJsonString(a) === canonicalJsonString(b);
 }
 
+function normalizePath(relPath) {
+  const normalized = String(relPath).replace(/\\/g, "/");
+  if (normalized.startsWith("/") || normalized.includes("\0")) {
+    throw new Error(`Invalid path in extension package: ${relPath}`);
+  }
+  const parts = normalized.split("/");
+  if (parts.some((p) => p === "" || p === "." || p === "..")) {
+    throw new Error(`Invalid path in extension package: ${relPath}`);
+  }
+  if (parts.some((p) => p.includes(":"))) {
+    throw new Error(`Invalid path in extension package: ${relPath}`);
+  }
+  const windowsReservedRe = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+  for (const part of parts) {
+    if (/[<>:"|?*]/.test(part)) {
+      throw new Error(`Invalid path in extension package: ${relPath}`);
+    }
+    if (part.endsWith(" ") || part.endsWith(".")) {
+      throw new Error(`Invalid path in extension package: ${relPath}`);
+    }
+    if (windowsReservedRe.test(part)) {
+      throw new Error(`Invalid path in extension package: ${relPath}`);
+    }
+  }
+  return parts.join("/");
+}
+
 async function walkFiles(rootDir) {
   const results = [];
 
@@ -110,10 +137,23 @@ function readExtensionPackageV1(packageBytes) {
     throw new Error("Invalid extension package contents");
   }
 
+  const seenFoldedPaths = new Set();
   const packageJsonEntry =
-    parsed.files.find((f) => typeof f?.path === "string" && f.path.replace(/\\/g, "/") === "package.json") || null;
+    parsed.files.find((f) => typeof f?.path === "string" && normalizePath(f.path) === "package.json") || null;
   if (!packageJsonEntry?.dataBase64 || typeof packageJsonEntry.dataBase64 !== "string") {
     throw new Error("Invalid extension package: missing package.json file");
+  }
+
+  for (const file of parsed.files) {
+    if (!file?.path || typeof file.path !== "string") {
+      throw new Error("Invalid file entry in extension package");
+    }
+    const normalizedPath = normalizePath(file.path);
+    const folded = normalizedPath.toLowerCase();
+    if (seenFoldedPaths.has(folded)) {
+      throw new Error(`Invalid extension package: duplicate file path (case-insensitive): ${normalizedPath}`);
+    }
+    seenFoldedPaths.add(folded);
   }
 
   let packageJson = null;
@@ -133,29 +173,7 @@ function readExtensionPackageV1(packageBytes) {
 }
 
 function safeJoin(baseDir, relPath) {
-  const normalized = String(relPath).replace(/\\/g, "/");
-  if (normalized.startsWith("/") || normalized.includes("\0")) {
-    throw new Error(`Invalid path in extension package: ${relPath}`);
-  }
-  const parts = normalized.split("/");
-  if (parts.some((p) => p === "" || p === "." || p === "..")) {
-    throw new Error(`Invalid path in extension package: ${relPath}`);
-  }
-  if (parts.some((p) => p.includes(":"))) {
-    throw new Error(`Invalid path in extension package: ${relPath}`);
-  }
-  const windowsReservedRe = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
-  for (const part of parts) {
-    if (/[<>:"|?*]/.test(part)) {
-      throw new Error(`Invalid path in extension package: ${relPath}`);
-    }
-    if (part.endsWith(" ") || part.endsWith(".")) {
-      throw new Error(`Invalid path in extension package: ${relPath}`);
-    }
-    if (windowsReservedRe.test(part)) {
-      throw new Error(`Invalid path in extension package: ${relPath}`);
-    }
-  }
+  const normalized = normalizePath(relPath);
   const full = path.join(baseDir, normalized);
   const relative = path.relative(baseDir, full);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {

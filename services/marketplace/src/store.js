@@ -644,6 +644,7 @@ class MarketplaceStore {
       if (bundle.files.length > MAX_FILES) throw new Error("Extension package contains too many files");
 
       const seen = new Set();
+      const seenFolded = new Set();
       let packageJsonBytes = null;
       for (const file of bundle.files) {
         if (!file?.path || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
@@ -656,6 +657,11 @@ class MarketplaceStore {
         const normalizedPath = file.path.replace(/\\/g, "/");
         if (seen.has(normalizedPath)) throw new Error(`Duplicate file in extension package: ${normalizedPath}`);
         seen.add(normalizedPath);
+        const folded = normalizedPath.toLowerCase();
+        if (seenFolded.has(folded)) {
+          throw new Error(`Duplicate file path in extension package (case-insensitive): ${normalizedPath}`);
+        }
+        seenFolded.add(folded);
 
         const bytes = Buffer.from(file.dataBase64, "base64");
         if (bytes.length > MAX_SINGLE_FILE_BYTES) {

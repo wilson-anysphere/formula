@@ -373,6 +373,17 @@ test("v2 rejects Windows-invalid characters in path segments", () => {
   assert.throws(() => readExtensionPackageV2(archive), /invalid path/i);
 });
 
+test("v2 rejects case-insensitive duplicate paths", () => {
+  const archive = createTarArchive([
+    { name: "manifest.json", data: canonicalJsonBytes({}) },
+    { name: "checksums.json", data: canonicalJsonBytes({ algorithm: "sha256", files: {} }) },
+    { name: "signature.json", data: canonicalJsonBytes({ algorithm: "ed25519", formatVersion: 2, signatureBase64: "" }) },
+    { name: "files/README.md", data: Buffer.from("a") },
+    { name: "files/readme.md", data: Buffer.from("b") },
+  ]);
+  assert.throws(() => readExtensionPackageV2(archive), /case-insensitive/i);
+});
+
 test("v2 rejects checksums.json with too many entries", () => {
   const manifest = {
     name: "temp-ext",
