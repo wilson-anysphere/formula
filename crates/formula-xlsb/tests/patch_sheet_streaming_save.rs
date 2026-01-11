@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use formula_xlsb::{CellEdit, CellValue, XlsbWorkbook};
+use formula_xlsb::rgce::{encode_rgce_with_context, CellCoord};
 
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
@@ -114,4 +115,70 @@ fn save_with_cell_edits_streaming_is_lossless_for_noop_edit() {
         "expected no OPC part diffs for no-op streaming edit, got:\n{}",
         format_report(&report)
     );
+}
+
+#[test]
+fn save_with_cell_edits_streaming_can_patch_formula_rgcb_bytes() {
+    let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
+
+    let encoded_123 =
+        encode_rgce_with_context("=SUM({1,2,3})", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert!(
+        !encoded_123.rgcb.is_empty(),
+        "expected array formula encoding to produce rgcb bytes"
+    );
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("ArrayRgcb");
+    builder.set_cell_formula_num(0, 0, 6.0, encoded_123.rgce.clone(), encoded_123.rgcb.clone());
+
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let fixture_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&fixture_path, builder.build_bytes()).expect("write xlsb fixture");
+
+    let wb = XlsbWorkbook::open(&fixture_path).expect("open xlsb fixture");
+
+    let encoded_45 =
+        encode_rgce_with_context("=SUM({4,5})", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert_eq!(
+        encoded_45.rgce, encoded_123.rgce,
+        "expected SUM(array) formulas to share rgce so only rgcb changes"
+    );
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(9.0),
+        new_formula: None,
+        new_rgcb: Some(encoded_45.rgcb.clone()),
+        shared_string_index: None,
+    }];
+
+    let in_memory_path = tmpdir.path().join("patched_in_memory_rgcb.xlsb");
+    let streaming_path = tmpdir.path().join("patched_streaming_rgcb.xlsb");
+
+    wb.save_with_cell_edits(&in_memory_path, 0, &edits)
+        .expect("save_with_cell_edits");
+    wb.save_with_cell_edits_streaming(&streaming_path, 0, &edits)
+        .expect("save_with_cell_edits_streaming");
+
+    let report =
+        xlsx_diff::diff_workbooks(&in_memory_path, &streaming_path).expect("diff workbooks");
+    assert!(
+        report.is_empty(),
+        "expected no OPC part diffs between in-memory and streaming rgcb edits, got:\n{}",
+        format_report(&report)
+    );
+
+    let wb2 = XlsbWorkbook::open(&streaming_path).expect("open patched xlsb");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let cell = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(cell.value, CellValue::Number(9.0));
+    let formula = cell.formula.as_ref().expect("formula metadata");
+    assert_eq!(formula.extra, encoded_45.rgcb);
+    assert_eq!(formula.text.as_deref(), Some("SUM({4,5})"));
 }
