@@ -4,6 +4,7 @@ const zlib = require("node:zlib");
 
 const PACKAGE_FORMAT = "formula-extension-package";
 const PACKAGE_FORMAT_VERSION = 1;
+const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
 
 async function walkFiles(rootDir) {
   const results = [];
@@ -64,7 +65,15 @@ async function createExtensionPackageV1(extensionDir) {
 }
 
 function readExtensionPackageV1(packageBytes) {
-  const jsonBytes = zlib.gunzipSync(packageBytes);
+  let jsonBytes;
+  try {
+    jsonBytes = zlib.gunzipSync(packageBytes, { maxOutputLength: MAX_UNCOMPRESSED_BYTES });
+  } catch (error) {
+    if (error && error.code === "ERR_BUFFER_TOO_LARGE") {
+      throw new Error("Extension package exceeds maximum uncompressed size");
+    }
+    throw error;
+  }
   const parsed = JSON.parse(jsonBytes.toString("utf8"));
 
   if (parsed?.format !== PACKAGE_FORMAT || parsed?.formatVersion !== PACKAGE_FORMAT_VERSION) {
