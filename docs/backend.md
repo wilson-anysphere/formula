@@ -32,7 +32,14 @@ If you already have something running on these ports, you can override the publi
 API_PORT=3001 SYNC_WS_PORT=1235 POSTGRES_PORT=5433 docker-compose up --build
 ```
 
+Defaults are:
+
+- `API_PORT=3000`
+- `SYNC_WS_PORT=1234`
+- `POSTGRES_PORT=5432`
+
 The examples below also read `SYNC_WS_PORT` (default `1234`) so they keep working if you override ports.
+If you override `API_PORT`, update the `http://localhost:3000/...` URLs below accordingly.
 
 ## Token configuration (API ↔ sync-server)
 
