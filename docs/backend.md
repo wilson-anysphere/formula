@@ -35,7 +35,13 @@ The API automatically runs SQL migrations on startup.
 - development secrets for `SYNC_TOKEN_SECRET` / `SECRET_STORE_KEY` unless overridden
 
 The production API Docker image sets `NODE_ENV=production`, and the API will **fail fast**
-on insecure defaults (for example `COOKIE_SECURE!=true` or known dev secrets).
+on insecure defaults (for example `COOKIE_SECURE!=true` or known dev secrets). In particular,
+production requires:
+
+- `COOKIE_SECURE=true`
+- `SYNC_TOKEN_SECRET` set to a non-dev value
+- `SECRET_STORE_KEY` set to a non-dev value
+- `LOCAL_KMS_MASTER_KEY` set to a non-dev value
 
 ### CORS
 
