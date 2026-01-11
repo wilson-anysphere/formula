@@ -1,12 +1,44 @@
-import { writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import { rowColToA1 } from "./a1.js";
+/**
+ * This module is used in both Node (CLI/tests) and browser environments
+ * (desktop/webview). Keep Node builtins behind dynamic imports so bundlers don't
+ * choke on `node:*` specifiers.
+ */
 
-const execFileAsync = promisify(execFile);
+function isNodeRuntime() {
+  // Treat jsdom/webview environments as "browser" even though they execute inside
+  // a Node process, because `child_process` is not available in the real target
+  // runtime (Tauri webview).
+  return typeof window === "undefined" && typeof process !== "undefined" && !!process.versions?.node;
+}
+
+let nodeDepsPromise = null;
+
+async function loadNodeDeps() {
+  if (nodeDepsPromise) return nodeDepsPromise;
+  nodeDepsPromise = (async () => {
+    const fs = await import(/* @vite-ignore */ "node:fs");
+    const os = await import(/* @vite-ignore */ "node:os");
+    const path = await import(/* @vite-ignore */ "node:path");
+    const child = await import(/* @vite-ignore */ "node:child_process");
+    const util = await import(/* @vite-ignore */ "node:util");
+    const execFileAsync = util.promisify(child.execFile);
+    return {
+      writeFileSync: fs.writeFileSync,
+      tmpdir: os.tmpdir,
+      join: path.join,
+      execFileAsync
+    };
+  })();
+  return nodeDepsPromise;
+}
+
+function browserSafeErrorMessage(error) {
+  if (!error) return "Unknown error";
+  if (error instanceof Error && typeof error.message === "string") return error.message;
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string
+  return String(error);
+}
 
 function stripMarkdownCodeFences(text) {
   const trimmed = String(text || "").trim();
@@ -100,28 +132,59 @@ export async function postProcessGeneratedCode({ code, target }) {
 export async function validateGeneratedCodeCompiles({ code, target }) {
   if (target === "python") {
     // Validate via `py_compile` so we catch indentation/syntax errors deterministically.
-    const tmpDir = os.tmpdir();
-    const filePath = path.join(tmpDir, `vba-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.py`);
-    writeFileSync(filePath, code, "utf8");
-    try {
-      await execFileAsync("python", ["-m", "py_compile", filePath]);
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: error?.stderr?.toString?.() ?? error?.message ?? String(error) };
+    if (isNodeRuntime()) {
+      const { writeFileSync, tmpdir, join, execFileAsync } = await loadNodeDeps();
+      const tmpDir = tmpdir();
+      const filePath = join(tmpDir, `vba-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.py`);
+      writeFileSync(filePath, code, "utf8");
+      try {
+        await execFileAsync("python", ["-m", "py_compile", filePath]);
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error?.stderr?.toString?.() ?? browserSafeErrorMessage(error) };
+      }
     }
+
+    // Browser/webview environments do not ship with `python` available, so the
+    // compile check is best-effort. We still run post-processing to normalize
+    // common artifacts, but skip the external compiler step.
+    return { ok: true, skipped: true };
   }
 
   if (target === "typescript") {
     // We intentionally restrict generated code to TS that is also valid JS/ESM.
-    // Use Node's parser (`node --check`) to validate module syntax deterministically.
-    const tmpDir = os.tmpdir();
-    const filePath = path.join(tmpDir, `vba-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
-    writeFileSync(filePath, code, "utf8");
+    // In Node we use `node --check`; in browsers we fall back to a lightweight
+    // parse of the generated script body.
+    if (isNodeRuntime()) {
+      const { writeFileSync, tmpdir, join, execFileAsync } = await loadNodeDeps();
+      const tmpDir = tmpdir();
+      const filePath = join(tmpDir, `vba-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
+      writeFileSync(filePath, code, "utf8");
+      try {
+        await execFileAsync("node", ["--check", filePath]);
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error?.stderr?.toString?.() ?? browserSafeErrorMessage(error) };
+      }
+    }
+
+    // In browser contexts we cannot rely on Node's parser. Instead, strip ESM
+    // export syntax (which `new Function` cannot parse) and ask the JS engine to
+    // parse the remainder. This catches the common syntax errors without
+    // executing the generated code.
     try {
-      await execFileAsync("node", ["--check", filePath]);
+      const script = String(code || "")
+        // `export default async function main...` -> `async function main...`
+        .replace(/^\s*export\s+default\s+/m, "")
+        // `export { foo }` -> removed
+        .replace(/^\s*export\s+\{[^}]*\}\s*;?\s*$/gm, "")
+        // `export const foo = ...` -> `const foo = ...`
+        .replace(/^\s*export\s+(?=(const|let|var|function|async|class)\b)/gm, "");
+      // eslint-disable-next-line no-new-func
+      new Function(script);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: error?.stderr?.toString?.() ?? error?.message ?? String(error) };
+      return { ok: false, error: browserSafeErrorMessage(error) };
     }
   }
 

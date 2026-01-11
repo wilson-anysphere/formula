@@ -6,6 +6,7 @@ import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
 import { QueryEditorPanelContainer } from "./query-editor/QueryEditorPanelContainer.js";
 import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
+import { VbaMigratePanel } from "./vba-migrate/index.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 
 export interface PanelBodyRendererOptions {
@@ -145,7 +146,8 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     }
 
     if (panelId === PanelIds.VBA_MIGRATE) {
-      body.textContent = "VBA migration tools will appear here.";
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(panelId, body, <VbaMigratePanel workbookId={options.workbookId} />);
       return;
     }
 
