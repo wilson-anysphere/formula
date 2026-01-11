@@ -115,6 +115,11 @@ impl Workbook {
                 }
                 let coord =
                     parse_a1(&address).map_err(|_| WorkbookError::InvalidAddress(address))?;
+                // `null` is the JS protocol's "empty cell" marker. Treat explicit `null`
+                // entries as absent so the workbook stays sparse.
+                if input.is_null() {
+                    continue;
+                }
                 sheet.cells.insert(coord, Cell::new(input));
             }
             wb.sheets.insert(sheet_name, sheet);
@@ -143,6 +148,11 @@ impl Workbook {
         for (sheet_name, sheet) in &self.sheets {
             let mut cells = HashMap::new();
             for (coord, cell) in &sheet.cells {
+                // Ensure we never serialize explicit `null` cells; empty cells are omitted
+                // from the sparse workbook representation.
+                if cell.input.is_null() {
+                    continue;
+                }
                 cells.insert(format_a1(*coord), &cell.input);
             }
             sheets.insert(sheet_name.as_str(), SheetJson { cells });
@@ -182,6 +192,13 @@ impl Workbook {
         if !is_scalar_json(&input) {
             return Err(WorkbookError::InvalidCellValue(address.to_string()));
         }
+
+        // `null` is the JS protocol's "empty cell" marker. Clearing should remove the
+        // stored entry (sparse semantics) rather than storing an explicit blank.
+        if input.is_null() {
+            return self.clear_cell(address, sheet);
+        }
+
         let sheet_name = sheet.unwrap_or(DEFAULT_SHEET);
         let coord = parse_a1(address).map_err(|_| WorkbookError::InvalidAddress(address.into()))?;
         let sheet = self
@@ -189,6 +206,17 @@ impl Workbook {
             .entry(sheet_name.to_string())
             .or_insert_with(Sheet::default);
         sheet.cells.insert(coord, Cell::new(input));
+        Ok(())
+    }
+
+    pub fn clear_cell(&mut self, address: &str, sheet: Option<&str>) -> Result<(), WorkbookError> {
+        let sheet_name = sheet.unwrap_or(DEFAULT_SHEET);
+        let coord = parse_a1(address).map_err(|_| WorkbookError::InvalidAddress(address.into()))?;
+        let sheet = self
+            .sheets
+            .entry(sheet_name.to_string())
+            .or_insert_with(Sheet::default);
+        sheet.cells.remove(&coord);
         Ok(())
     }
 
@@ -1681,5 +1709,24 @@ mod tests {
 
         let cell = wb.get_cell("A2", None).unwrap();
         assert_eq!(cell.value, json!(2.0));
+    }
+
+    #[test]
+    fn null_inputs_clear_cells_and_are_omitted_from_json() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!(1), None).unwrap();
+        wb.set_cell("A2", json!("=A1*2"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(2.0));
+
+        wb.set_cell("A1", JsonValue::Null, None).unwrap();
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(0.0));
+
+        let exported = wb.to_json_str().unwrap();
+        let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
+        let cells = parsed["sheets"][DEFAULT_SHEET]["cells"].as_object().unwrap();
+        assert!(!cells.contains_key("A1"));
     }
 }

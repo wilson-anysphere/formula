@@ -1786,6 +1786,7 @@ dependencies = [
  "formula-engine",
  "formula-model",
  "formula-xlsx",
+ "js-sys",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

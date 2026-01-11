@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_core::{CellChange, CellData, DEFAULT_SHEET};
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
-use formula_model::{display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range};
+use formula_model::{
+    display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range,
+};
+use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use wasm_bindgen::prelude::*;
@@ -197,6 +200,21 @@ impl WorkbookState {
             .get_mut(&sheet)
             .expect("sheet just ensured must exist");
 
+        // `null` represents an empty cell in the JS protocol. Preserve sparse semantics by
+        // removing the stored entry instead of storing an explicit blank.
+        if input.is_null() {
+            self.engine
+                .clear_cell(&sheet, &address)
+                .map_err(|err| js_err(err.to_string()))?;
+
+            sheet_cells.remove(&address);
+
+            let key = FormulaCellKey::new(sheet.clone(), cell_ref);
+            self.formula_cells.remove(&key);
+            self.last_formula_values.remove(&key);
+            return Ok(());
+        }
+
         if is_formula_input(&input) {
             let raw = input.as_str().expect("formula input must be string");
             let canonical = raw.trim_start().to_string();
@@ -292,6 +310,42 @@ impl WorkbookState {
     }
 }
 
+fn json_scalar_to_js(value: &JsonValue) -> JsValue {
+    match value {
+        JsonValue::Null => JsValue::NULL,
+        JsonValue::Bool(b) => JsValue::from_bool(*b),
+        JsonValue::Number(n) => n
+            .as_f64()
+            .map(JsValue::from_f64)
+            .unwrap_or(JsValue::NULL),
+        JsonValue::String(s) => JsValue::from_str(s),
+        // The engine protocol only supports scalars; fall back to `null` for any
+        // unexpected values to avoid surfacing `undefined`.
+        _ => JsValue::NULL,
+    }
+}
+
+fn object_set(obj: &Object, key: &str, value: &JsValue) -> Result<(), JsValue> {
+    Reflect::set(obj, &JsValue::from_str(key), value).map(|_| ())
+}
+
+fn cell_data_to_js(cell: &CellData) -> Result<JsValue, JsValue> {
+    let obj = Object::new();
+    object_set(&obj, "sheet", &JsValue::from_str(&cell.sheet))?;
+    object_set(&obj, "address", &JsValue::from_str(&cell.address))?;
+    object_set(&obj, "input", &json_scalar_to_js(&cell.input))?;
+    object_set(&obj, "value", &json_scalar_to_js(&cell.value))?;
+    Ok(obj.into())
+}
+
+fn cell_change_to_js(change: &CellChange) -> Result<JsValue, JsValue> {
+    let obj = Object::new();
+    object_set(&obj, "sheet", &JsValue::from_str(&change.sheet))?;
+    object_set(&obj, "address", &JsValue::from_str(&change.address))?;
+    object_set(&obj, "value", &json_scalar_to_js(&change.value))?;
+    Ok(obj.into())
+}
+
 #[wasm_bindgen]
 pub struct WasmWorkbook {
     inner: WorkbookState,
@@ -332,6 +386,10 @@ impl WasmWorkbook {
             for (address, input) in sheet.cells {
                 if !is_scalar_json(&input) {
                     return Err(js_err(format!("invalid cell value: {address}")));
+                }
+                if input.is_null() {
+                    // `null` cells are treated as absent (sparse semantics).
+                    continue;
                 }
                 wb.set_cell_internal(&sheet_name, &address, input)?;
             }
@@ -461,21 +519,38 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "toJson")]
     pub fn to_json(&self) -> Result<String, JsValue> {
         #[derive(Serialize)]
-        struct WorkbookJson<'a> {
-            sheets: &'a BTreeMap<String, BTreeMap<String, JsonValue>>,
+        struct WorkbookJson {
+            sheets: BTreeMap<String, SheetJson>,
         }
 
-        serde_json::to_string(&WorkbookJson {
-            sheets: &self.inner.sheets,
-        })
-        .map_err(|err| js_err(format!("invalid workbook json: {}", err)))
+        #[derive(Serialize)]
+        struct SheetJson {
+            cells: BTreeMap<String, JsonValue>,
+        }
+
+        let mut sheets = BTreeMap::new();
+        for (sheet_name, cells) in &self.inner.sheets {
+            let mut out_cells = BTreeMap::new();
+            for (address, input) in cells {
+                // Ensure we never serialize explicit `null` cells; empty cells are
+                // omitted from the sparse workbook representation.
+                if input.is_null() {
+                    continue;
+                }
+                out_cells.insert(address.clone(), input.clone());
+            }
+            sheets.insert(sheet_name.clone(), SheetJson { cells: out_cells });
+        }
+
+        serde_json::to_string(&WorkbookJson { sheets })
+            .map_err(|err| js_err(format!("invalid workbook json: {}", err)))
     }
 
     #[wasm_bindgen(js_name = "getCell")]
     pub fn get_cell(&self, address: String, sheet: Option<String>) -> Result<JsValue, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         let cell = self.inner.get_cell_data(sheet, &address)?;
-        serde_wasm_bindgen::to_value(&cell).map_err(|err| js_err(err.to_string()))
+        cell_data_to_js(&cell)
     }
 
     #[wasm_bindgen(js_name = "setCell")]
@@ -485,9 +560,12 @@ impl WasmWorkbook {
         input: JsValue,
         sheet: Option<String>,
     ) -> Result<(), JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        if input.is_null() {
+            return self.inner.set_cell_internal(sheet, &address, JsonValue::Null);
+        }
         let input: JsonValue =
             serde_wasm_bindgen::from_value(input).map_err(|err| js_err(err.to_string()))?;
-        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         self.inner.set_cell_internal(sheet, &address, input)
     }
 
@@ -497,17 +575,18 @@ impl WasmWorkbook {
         let sheet = self.inner.require_sheet(sheet)?.to_string();
         let range = WorkbookState::parse_range(&range)?;
 
-        let mut rows: Vec<Vec<CellData>> = Vec::new();
+        let outer = Array::new();
         for row in range.start.row..=range.end.row {
-            let mut cols = Vec::new();
+            let inner = Array::new();
             for col in range.start.col..=range.end.col {
                 let addr = CellRef::new(row, col).to_a1();
-                cols.push(self.inner.get_cell_data(&sheet, &addr)?);
+                let cell = self.inner.get_cell_data(&sheet, &addr)?;
+                inner.push(&cell_data_to_js(&cell)?);
             }
-            rows.push(cols);
+            outer.push(&inner);
         }
 
-        serde_wasm_bindgen::to_value(&rows).map_err(|err| js_err(err.to_string()))
+        Ok(outer.into())
     }
 
     #[wasm_bindgen(js_name = "setRange")]
@@ -546,7 +625,11 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "recalculate")]
     pub fn recalculate(&mut self, sheet: Option<String>) -> Result<JsValue, JsValue> {
         let changes = self.inner.recalculate_internal(sheet.as_deref())?;
-        serde_wasm_bindgen::to_value(&changes).map_err(|err| js_err(err.to_string()))
+        let out = Array::new();
+        for change in changes {
+            out.push(&cell_change_to_js(&change)?);
+        }
+        Ok(out.into())
     }
 
     #[wasm_bindgen(js_name = "defaultSheetName")]
