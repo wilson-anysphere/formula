@@ -6,7 +6,7 @@ import { authenticateApiKey } from "../auth/apiKeys";
 import { generateTotpSecret, buildOtpAuthUrl, verifyTotpCode } from "../auth/mfa";
 import { oidcCallback, oidcStart } from "../auth/oidc/oidc";
 import { hashPassword, verifyPassword } from "../auth/password";
-import { samlCallback, samlStart } from "../auth/saml/saml";
+import { samlCallback, samlMetadata, samlStart } from "../auth/saml/saml";
 import { createSession, lookupSessionByToken, revokeSession } from "../auth/sessions";
 import { withTransaction } from "../db/tx";
 import { TokenBucketRateLimiter, sha256Hex } from "../http/rateLimit";
@@ -572,6 +572,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     { preHandler: samlRateLimitByIp("/auth/saml/:orgId/:provider/start") },
     samlStart
   );
+  app.get("/auth/saml/:orgId/:provider/metadata", samlMetadata);
   app.post(
     "/auth/saml/:orgId/:provider/callback",
     { preHandler: samlRateLimitByIp("/auth/saml/:orgId/:provider/callback") },

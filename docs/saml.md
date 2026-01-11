@@ -57,6 +57,12 @@ with `details: { type: "saml", providerId }`.
 
 Redirects the browser to the IdP `entryPoint` with a `SAMLRequest` query param.
 
+### SP metadata
+
+`GET /auth/saml/:orgId/:provider/metadata`
+
+Returns SP metadata XML (EntityID + ACS URL) for the configured provider.
+
 ### Callback (ACS)
 
 `POST /auth/saml/:orgId/:provider/callback`

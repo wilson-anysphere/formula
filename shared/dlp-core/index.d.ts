@@ -14,6 +14,8 @@ export interface Classification {
   labels: string[];
 }
 
+export const DEFAULT_CLASSIFICATION: Readonly<Classification>;
+
 export interface DlpRuleBase {
   maxAllowed: ClassificationLevel | null;
 }

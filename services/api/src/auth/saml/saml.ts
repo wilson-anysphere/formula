@@ -443,6 +443,40 @@ export async function samlStart(request: FastifyRequest, reply: FastifyReply): P
   reply.redirect(url);
 }
 
+export async function samlMetadata(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const params = request.params as { orgId: string; provider: string };
+  const orgId = params.orgId;
+  const providerId = params.provider;
+
+  const provider = await loadOrgProvider(request, orgId, providerId);
+  if (!provider) {
+    reply.code(404).send({ error: "provider_not_found" });
+    return;
+  }
+
+  const baseUrl = extractPublicBaseUrl(request);
+  if (!baseUrl) {
+    reply.code(500).send({ error: "public_base_url_required" });
+    return;
+  }
+
+  const callbackUrl = `${baseUrl}/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`;
+
+  const saml = buildSaml({
+    entryPoint: provider.entryPoint,
+    issuer: provider.issuer,
+    callbackUrl,
+    idpCertPem: provider.idpCertPem,
+    wantAssertionsSigned: provider.wantAssertionsSigned,
+    wantResponseSigned: provider.wantResponseSigned,
+    cacheProvider: createSamlRequestCacheProvider(request.server.db)
+  });
+
+  const xml = saml.generateServiceProviderMetadata(null, null);
+  reply.header("content-type", "application/xml; charset=utf-8");
+  reply.send(xml);
+}
+
 const CallbackBody = z
   .object({
     SAMLResponse: z.string().min(1),
