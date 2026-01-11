@@ -257,7 +257,13 @@ export class DesktopPowerQueryRefreshOrchestrator {
    */
   refresh(queryId: string, reason: DesktopPowerQueryRefreshReason = "manual"): DesktopPowerQueryRefreshHandle {
     const handle = this.refreshAll([queryId], reason);
-    const promise = handle.promise.then((results) => results?.[queryId]);
+    const promise = handle.promise.then((results) => {
+      const result = results?.[queryId];
+      if (!result) {
+        throw new Error(`Missing refresh result for query '${queryId}'`);
+      }
+      return result;
+    });
     promise.catch(() => {});
     return { id: handle.sessionId, sessionId: handle.sessionId, queryId, promise, cancel: handle.cancel };
   }
