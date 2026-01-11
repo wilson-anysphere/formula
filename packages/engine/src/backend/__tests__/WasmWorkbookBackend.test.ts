@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineClient } from "../../client";
-import { colToName, toA1, toA1Range } from "../a1";
+import { colToName, fromA1, toA1, toA1Range } from "../a1";
 import { normalizeFormulaText } from "../formula";
 import { WasmWorkbookBackend } from "../WasmWorkbookBackend";
 
@@ -27,6 +27,12 @@ describe("A1 helpers", () => {
   it("formats an A1 range (collapsing to a single cell when needed)", () => {
     expect(toA1Range(0, 0, 0, 0)).toBe("A1");
     expect(toA1Range(0, 0, 1, 1)).toBe("A1:B2");
+  });
+
+  it("parses A1 addresses into 0-based row/col coords", () => {
+    expect(fromA1("A1")).toEqual({ row0: 0, col0: 0 });
+    expect(fromA1("B2")).toEqual({ row0: 1, col0: 1 });
+    expect(fromA1("$AA$10")).toEqual({ row0: 9, col0: 26 });
   });
 });
 
@@ -144,5 +150,76 @@ describe("WasmWorkbookBackend", () => {
     });
     expect(backend.getWorkbookInfo()).toEqual(info);
     expect(await backend.getSheetUsedRange("Sheet1")).toBeNull();
+  });
+
+  it("loads workbooks from raw xlsx bytes, triggers a full recalc, and seeds used ranges", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const workbookJson = JSON.stringify({
+      sheets: {
+        Sheet1: {
+          cells: {
+            A1: 1,
+            B2: 2,
+            C3: "=A1+B2",
+          },
+        },
+        Sheet2: {
+          cells: {
+            D4: "Hello",
+          },
+        },
+        Empty: { cells: {} },
+      },
+    });
+
+    const engine: EngineClient = {
+      init: vi.fn(async () => {}),
+      newWorkbook: vi.fn(async () => {}),
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      loadWorkbookFromXlsxBytes: vi.fn(async () => {}),
+      toJson: vi.fn(async () => workbookJson),
+      getCell: vi.fn(async () => ({ sheet: "Sheet1", address: "A1", input: null, value: null })),
+      getRange: vi.fn(async () => []),
+      setCell: vi.fn(async () => {}),
+      setCells: vi.fn(async () => {}),
+      setRange: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+      terminate: vi.fn(),
+    };
+
+    const backend = new WasmWorkbookBackend(engine);
+    const info = await backend.openWorkbookFromBytes(bytes);
+
+    expect(engine.loadWorkbookFromXlsxBytes).toHaveBeenCalledTimes(1);
+    expect(engine.loadWorkbookFromXlsxBytes).toHaveBeenCalledWith(bytes);
+
+    expect(engine.recalculate).toHaveBeenCalledTimes(1);
+    expect(engine.recalculate).toHaveBeenCalledWith();
+
+    expect(info).toEqual({
+      path: null,
+      origin_path: null,
+      sheets: [
+        { id: "Sheet1", name: "Sheet1" },
+        { id: "Sheet2", name: "Sheet2" },
+        { id: "Empty", name: "Empty" },
+      ],
+    });
+
+    expect(await backend.getSheetUsedRange("Sheet1")).toEqual({
+      start_row: 0,
+      start_col: 0,
+      end_row: 2,
+      end_col: 2,
+    });
+
+    expect(await backend.getSheetUsedRange("Sheet2")).toEqual({
+      start_row: 3,
+      start_col: 3,
+      end_row: 3,
+      end_col: 3,
+    });
+
+    expect(await backend.getSheetUsedRange("Empty")).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import type { EngineClient } from "../client";
 import type { CellScalar } from "../protocol";
-import { toA1, toA1Range } from "./a1";
+import { fromA1, toA1, toA1Range } from "./a1";
 import { isFormulaInput, normalizeFormulaText } from "./formula";
 import type { RangeCellEdit, RangeData, SheetInfo, SheetUsedRange, WorkbookBackend, WorkbookInfo } from "./workbookBackend";
 
@@ -44,6 +44,10 @@ function updateUsedRange(map: Map<string, UsedRangeState>, sheetId: string, row:
   existing.end_col = Math.max(existing.end_col, col);
 }
 
+type EngineWorkbookJson = {
+  sheets?: Record<string, { cells?: Record<string, unknown> }>;
+};
+
 export class WasmWorkbookBackend implements WorkbookBackend {
   private readonly usedRanges = new Map<string, UsedRangeState>();
   private workbookInfo: WorkbookInfo | null = null;
@@ -68,12 +72,38 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     await this.engine.loadWorkbookFromXlsxBytes(bytes);
     await this.engine.recalculate();
 
+    const json = await this.engine.toJson();
+    let parsed: EngineWorkbookJson | null = null;
+    try {
+      parsed = JSON.parse(json) as EngineWorkbookJson;
+    } catch {
+      parsed = null;
+    }
+
     this.usedRanges.clear();
+
+    const sheetIds = parsed?.sheets && typeof parsed.sheets === "object" ? Object.keys(parsed.sheets) : [];
+    for (const sheetId of sheetIds) {
+      const cells = parsed?.sheets?.[sheetId]?.cells;
+      if (!cells || typeof cells !== "object") continue;
+
+      for (const address of Object.keys(cells)) {
+        try {
+          const { row0, col0 } = fromA1(address);
+          updateUsedRange(this.usedRanges, sheetId, row0, col0);
+        } catch {
+          // Ignore invalid A1 keys; used range tracking is best-effort for imported workbooks.
+        }
+      }
+    }
+
+    const sheets: SheetInfo[] =
+      sheetIds.length > 0 ? sheetIds.map((id) => ({ id, name: id })) : [DEFAULT_SHEET];
 
     const info: WorkbookInfo = {
       path: null,
       origin_path: null,
-      sheets: [DEFAULT_SHEET],
+      sheets,
     };
     this.workbookInfo = info;
     return info;
