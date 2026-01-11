@@ -1694,6 +1694,7 @@ version = "0.1.0"
 name = "formula-io"
 version = "0.1.0"
 dependencies = [
+ "formula-format",
  "formula-model",
  "formula-xls",
  "formula-xlsb",

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
 formula-xlsx = { path = "../formula-xlsx" }
 formula-xls = { path = "../formula-xls" }

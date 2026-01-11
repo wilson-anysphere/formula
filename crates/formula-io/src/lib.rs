@@ -169,9 +169,12 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
         DateSystem::Excel1900
     };
 
-    // Best-effort style mapping: XLSB cell records reference an XF index. We only
-    // preserve number formats for now (fonts/fills/etc are not yet exposed by
-    // `formula-xlsb::Styles`).
+    // Best-effort style mapping: XLSB cell records reference an XF index.
+    //
+    // We preserve number formats for now (fonts/fills/etc are not yet exposed by
+    // `formula-xlsb::Styles`). When a built-in `numFmtId` is used, prefer a
+    // `__builtin_numFmtId:<id>` placeholder for ids that would otherwise be
+    // canonicalized to a *different* built-in id when exporting as XLSX.
     let mut xf_to_style_id: Vec<u32> = Vec::with_capacity(wb.styles().len());
     for xf_idx in 0..wb.styles().len() {
         if xf_idx == 0 {
@@ -182,8 +185,37 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
             .styles()
             .get(xf_idx as u32)
             .expect("xf index within wb.styles().len()");
-        let style_id = info
-            .number_format
+        let number_format = match info.number_format.as_deref() {
+            Some(fmt) if fmt.starts_with("__builtin_numFmtId:") => Some(fmt.to_string()),
+            Some(fmt) => {
+                if let Some(builtin) = formula_format::builtin_format_code(info.num_fmt_id) {
+                    // Guard against (rare) custom formats that reuse a built-in id.
+                    if fmt == builtin {
+                        let canonical = formula_format::builtin_format_id(builtin);
+                        if canonical == Some(info.num_fmt_id) {
+                            Some(builtin.to_string())
+                        } else {
+                            Some(format!("__builtin_numFmtId:{}", info.num_fmt_id))
+                        }
+                    } else {
+                        Some(fmt.to_string())
+                    }
+                } else {
+                    Some(fmt.to_string())
+                }
+            }
+            None => {
+                // If we don't know the code but the id is in the reserved built-in range,
+                // preserve it for round-trip.
+                if info.num_fmt_id != 0 && info.num_fmt_id < 164 {
+                    Some(format!("__builtin_numFmtId:{}", info.num_fmt_id))
+                } else {
+                    None
+                }
+            }
+        };
+
+        let style_id = number_format
             .as_ref()
             .map(|fmt| {
                 out.intern_style(Style {
@@ -241,7 +273,7 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
 #[cfg(test)]
 mod tests {
     use super::xlsb_to_model_workbook;
-    use formula_model::CellRef;
+    use formula_model::{CellRef, DateSystem};
     use std::path::Path;
 
     #[test]
@@ -262,5 +294,17 @@ mod tests {
             "formula should be stored without leading '=' (got {formula:?})"
         );
         assert_eq!(formula, "B1*2");
+    }
+
+    #[test]
+    fn xlsb_to_model_preserves_date_system() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../formula-xlsb/tests/fixtures/date1904.xlsb"
+        ));
+
+        let wb = crate::xlsb::XlsbWorkbook::open(fixture_path).expect("open xlsb fixture");
+        let model = xlsb_to_model_workbook(&wb).expect("convert to model");
+        assert_eq!(model.date_system, DateSystem::Excel1904);
     }
 }
