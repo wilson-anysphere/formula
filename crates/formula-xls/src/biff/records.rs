@@ -3,6 +3,17 @@ use std::borrow::Cow;
 /// BIFF `CONTINUE` record id.
 pub(crate) const RECORD_CONTINUE: u16 = 0x003C;
 
+/// Read a single physical BIFF record at `offset`.
+pub(crate) fn read_biff_record(workbook_stream: &[u8], offset: usize) -> Option<(u16, &[u8])> {
+    let header = workbook_stream.get(offset..offset + 4)?;
+    let record_id = u16::from_le_bytes([header[0], header[1]]);
+    let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+    let data_start = offset + 4;
+    let data_end = data_start.checked_add(len)?;
+    let data = workbook_stream.get(data_start..data_end)?;
+    Some((record_id, data))
+}
+
 /// A logical BIFF record. Some BIFF record types may be split across one or more
 /// physical `CONTINUE` records; those fragments are concatenated into `data`.
 ///
@@ -77,7 +88,7 @@ impl<'a> LogicalBiffRecordIter<'a> {
     }
 
     fn read_next_physical(&self, offset: usize) -> Option<(u16, &'a [u8])> {
-        super::read_biff_record(self.workbook_stream, offset)
+        read_biff_record(self.workbook_stream, offset)
     }
 }
 
@@ -149,7 +160,7 @@ impl<'a> Iterator for LogicalBiffRecordIter<'a> {
                     self.offset = self.workbook_stream.len();
                     return Some(Err("BIFF record offset overflow".to_string()));
                 }
-            }
+            };
         }
 
         self.offset = next_offset;
@@ -161,3 +172,57 @@ impl<'a> Iterator for LogicalBiffRecordIter<'a> {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + payload.len());
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    #[test]
+    fn coalesces_continues_for_allowed_record_ids() {
+        let stream = [
+            record(0x00AA, &[1, 2]),
+            record(RECORD_CONTINUE, &[3]),
+            record(RECORD_CONTINUE, &[4, 5]),
+            record(0x00BB, &[9]),
+        ]
+        .concat();
+
+        let allows = |id: u16| id == 0x00AA;
+        let mut iter = LogicalBiffRecordIter::new(&stream, allows);
+
+        let first = iter.next().unwrap().unwrap();
+        assert_eq!(first.record_id, 0x00AA);
+        assert_eq!(first.data.as_ref(), &[1, 2, 3, 4, 5]);
+        assert_eq!(first.fragment_sizes, vec![2, 1, 2]);
+
+        let second = iter.next().unwrap().unwrap();
+        assert_eq!(second.record_id, 0x00BB);
+        assert_eq!(second.data.as_ref(), &[9]);
+        assert_eq!(second.fragment_sizes, vec![1]);
+
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn does_not_coalesce_when_continuation_is_disallowed() {
+        let stream = [record(0x00AA, &[1, 2]), record(RECORD_CONTINUE, &[3])].concat();
+        let mut iter = LogicalBiffRecordIter::new(&stream, |_| false);
+
+        let first = iter.next().unwrap().unwrap();
+        assert_eq!(first.data.as_ref(), &[1, 2]);
+
+        // CONTINUE becomes its own logical record when the parent doesn't allow continuation.
+        let second = iter.next().unwrap().unwrap();
+        assert_eq!(second.record_id, RECORD_CONTINUE);
+        assert_eq!(second.data.as_ref(), &[3]);
+    }
+}
+
