@@ -298,6 +298,10 @@ const sheets = {
     return rpcCall("sheets", "getSheet", [String(name)]);
   },
 
+  async activateSheet(name) {
+    return rpcCall("sheets", "activateSheet", [String(name)]);
+  },
+
   async createSheet(name) {
     return rpcCall("sheets", "createSheet", [String(name)]);
   },

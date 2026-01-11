@@ -52,6 +52,7 @@ export namespace workbook {
 export namespace sheets {
   function getActiveSheet(): Promise<Sheet>;
   function getSheet(name: string): Promise<Sheet | undefined>;
+  function activateSheet(name: string): Promise<Sheet>;
   function createSheet(name: string): Promise<Sheet>;
   function renameSheet(oldName: string, newName: string): Promise<void>;
   function deleteSheet(name: string): Promise<void>;

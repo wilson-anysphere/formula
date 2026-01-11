@@ -380,6 +380,69 @@ test("events: sheets.createSheet emits sheetActivated with stable payload", asyn
   assert.deepEqual(result.evt, { sheet: result.sheet });
 });
 
+test("api surface: sheets.activateSheet switches active sheet and emits sheetActivated", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sheet-activate-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "sheetExt.activate";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "sheet-activate-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Sheet Activate" }] },
+      permissions: ["ui.commands", "sheets.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          await formula.sheets.createSheet("Data");
+
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.events.onSheetActivated((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+
+          const sheet = await formula.sheets.activateSheet("Sheet1");
+          const evt = await eventPromise;
+          const active = await formula.sheets.getActiveSheet();
+          return { sheet, evt, active };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, {
+    sheet: { id: "sheet1", name: "Sheet1" },
+    evt: { sheet: { id: "sheet1", name: "Sheet1" } },
+    active: { id: "sheet1", name: "Sheet1" }
+  });
+});
+
 test("api surface: workbook.openWorkbook emits workbookOpened with stable payload", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-open-"));
   const extDir = path.join(dir, "ext");

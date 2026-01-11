@@ -25,6 +25,7 @@ const API_PERMISSIONS = {
   "cells.setRange": ["cells.write"],
 
   "sheets.getSheet": ["sheets.manage"],
+  "sheets.activateSheet": ["sheets.manage"],
   "sheets.createSheet": ["sheets.manage"],
   "sheets.renameSheet": ["sheets.manage"],
   "sheets.deleteSheet": ["sheets.manage"],
@@ -753,6 +754,8 @@ class ExtensionHost {
         return this._spreadsheet.getActiveSheet?.() ?? { id: "sheet1", name: "Sheet1" };
       case "sheets.getSheet":
         return this._spreadsheet.getSheet(args[0]);
+      case "sheets.activateSheet":
+        return this._spreadsheet.activateSheet(args[0]);
       case "sheets.createSheet":
         return this._spreadsheet.createSheet(args[0]);
       case "sheets.renameSheet":
