@@ -140,6 +140,7 @@ export class SelectionRenderer {
   ) {
     const rect = metrics.getCellRect(cell);
     if (!rect) return;
+    if (rect.width <= 0 || rect.height <= 0) return;
 
     ctx.save();
     ctx.strokeStyle = style.activeBorderColor;

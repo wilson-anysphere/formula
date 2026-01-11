@@ -2090,15 +2090,23 @@ export class SpreadsheetApp {
   }
 
   private getCellRect(cell: CellCoord) {
-    const visualRow = this.rowToVisual.get(cell.row);
-    const visualCol = this.colToVisual.get(cell.col);
-    if (visualRow === undefined || visualCol === undefined) return null;
+    if (cell.row < 0 || cell.row >= this.limits.maxRows) return null;
+    if (cell.col < 0 || cell.col >= this.limits.maxCols) return null;
+
+    const rowDirect = this.rowToVisual.get(cell.row);
+    const colDirect = this.colToVisual.get(cell.col);
+
+    // Even when the outline hides rows/cols, downstream overlays still need a
+    // stable coordinate space. Hidden rows/cols collapse to zero size and share
+    // the same origin as the next visible row/col.
+    const visualRow = rowDirect ?? this.lowerBound(this.rowIndexByVisual, cell.row);
+    const visualCol = colDirect ?? this.lowerBound(this.colIndexByVisual, cell.col);
 
     return {
       x: this.rowHeaderWidth + visualCol * this.cellWidth - this.scrollX,
       y: this.colHeaderHeight + visualRow * this.cellHeight - this.scrollY,
-      width: this.cellWidth,
-      height: this.cellHeight
+      width: colDirect == null ? 0 : this.cellWidth,
+      height: rowDirect == null ? 0 : this.cellHeight
     };
   }
 
