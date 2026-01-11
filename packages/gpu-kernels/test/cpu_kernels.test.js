@@ -91,3 +91,12 @@ test("cpu: histogram handles infinite min/max without producing NaN bins", async
   const bins = await cpu.histogram(values, { min: Number.NEGATIVE_INFINITY, max: 1, bins: 2 });
   assert.deepEqual(Array.from(bins), [3, 2]);
 });
+
+test("cpu: histogram clamps overflowed bin computations to last bin", async () => {
+  const cpu = new CpuBackend();
+  const min = 0;
+  const max = 1e-320; // so small that bins/(max-min) overflows to Infinity
+  const values = new Float64Array([0, max / 2]);
+  const bins = await cpu.histogram(values, { min, max, bins: 2 });
+  assert.deepEqual(Array.from(bins), [1, 1]);
+});

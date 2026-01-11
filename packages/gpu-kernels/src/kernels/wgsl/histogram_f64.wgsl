@@ -43,6 +43,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
     // (v - min) * inv_bin_width can become NaN (Infinity * 0).
     if (isNan(scaled)) {
       bin_i = 0;
+    } else if (isInf(scaled)) {
+      bin_i = select(0, i32(params.bin_count) - 1, scaled > 0.0);
     } else {
       bin_i = i32(scaled);
     }
