@@ -5,7 +5,7 @@ const { validateExtensionManifest, ManifestError } = require("../src/manifest");
 
 test("manifest validation: required fields", () => {
   assert.throws(
-    () => validateExtensionManifest({ version: "1.0.0" }, { engineVersion: "1.0.0" }),
+    () => validateExtensionManifest({ version: "1.0.0" }, { engineVersion: "1.0.0", enforceEngine: true }),
     ManifestError
   );
 });
@@ -21,7 +21,7 @@ test("manifest validation: invalid semver version rejected", () => {
           main: "./dist/extension.js",
           engines: { formula: "^1.0.0" }
         },
-        { engineVersion: "1.0.0" }
+        { engineVersion: "1.0.0", enforceEngine: true }
       ),
     /Invalid version/
   );
@@ -38,7 +38,7 @@ test("manifest validation: engine mismatch rejected", () => {
           main: "./dist/extension.js",
           engines: { formula: "^1.0.0" }
         },
-        { engineVersion: "2.0.0" }
+        { engineVersion: "2.0.0", enforceEngine: true }
       ),
     /engine mismatch/
   );
@@ -57,7 +57,7 @@ test("manifest validation: activation event must reference contributed command",
           activationEvents: ["onCommand:missing.command"],
           contributes: { commands: [] }
         },
-        { engineVersion: "1.0.0" }
+        { engineVersion: "1.0.0", enforceEngine: true }
       ),
     /unknown command/
   );
@@ -75,7 +75,7 @@ test("manifest validation: invalid permission rejected", () => {
           engines: { formula: "^1.0.0" },
           permissions: ["totally.not.real"]
         },
-        { engineVersion: "1.0.0" }
+        { engineVersion: "1.0.0", enforceEngine: true }
       ),
     /Invalid permission/
   );
@@ -102,7 +102,7 @@ test("manifest validation: configuration must declare typed properties", () => {
             }
           }
         },
-        { engineVersion: "1.0.0" }
+        { engineVersion: "1.0.0", enforceEngine: true }
       ),
     /contributes\.configuration\.properties\.x\.setting\.type/
   );
@@ -120,7 +120,7 @@ test("manifest validation: module/browser entrypoints must be strings when prese
           module: { not: "a string" },
           engines: { formula: "^1.0.0" }
         },
-        { engineVersion: "1.0.0" }
+        { engineVersion: "1.0.0", enforceEngine: true }
       ),
     /module must be a string/
   );
@@ -136,7 +136,7 @@ test("manifest validation: module/browser entrypoints must be strings when prese
           browser: { not: "a string" },
           engines: { formula: "^1.0.0" }
         },
-        { engineVersion: "1.0.0" }
+        { engineVersion: "1.0.0", enforceEngine: true }
       ),
     /browser must be a string/
   );

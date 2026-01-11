@@ -172,6 +172,30 @@ The desktop app wires marketplace installs into the Node extension host runtime:
 }
 ```
 
+### Manifest validation + entrypoints
+
+Formula validates extension manifests using **one shared validator** across:
+
+- the **Node/desktop extension host**
+- the **browser extension host**
+- **marketplace publish-time** checks
+
+This means the marketplace rejects extension packages whose manifests would be rejected at runtime
+(e.g. invalid permissions, malformed `contributes` blocks, or `activationEvents` that reference
+unknown commands/panels/custom functions).
+
+Entrypoint fields:
+
+- `main` (**required**) — CommonJS entrypoint used by the Node/desktop extension host. The file must
+  exist in the published package.
+- `browser` (optional) — browser-first entrypoint (ESM). If present, the file must exist in the
+  published package.
+- `module` (optional) — module entrypoint (ESM). If present, the file must exist in the published
+  package.
+
+The browser extension host loads `browser` → `module` → `main` (first defined wins). The Node
+extension host always uses `main`.
+
 ---
 
 ## Extension API
@@ -987,26 +1011,11 @@ class ExtensionPublisher {
   }
   
   private validateManifest(manifest: ExtensionManifest): void {
-    const required = ["name", "version", "publisher", "main", "engines"];
-    for (const field of required) {
-      if (!manifest[field]) {
-        throw new Error(`Missing required field: ${field}`);
-      }
-    }
-    
-    // Validate version format
-    if (!semver.valid(manifest.version)) {
-      throw new Error(`Invalid version: ${manifest.version}`);
-    }
-    
-    // Validate permissions
-    if (manifest.permissions) {
-      for (const perm of manifest.permissions) {
-        if (!VALID_PERMISSIONS.includes(perm)) {
-          throw new Error(`Invalid permission: ${perm}`);
-        }
-      }
-    }
+    // Publishing uses the same core manifest validation rules as the extension hosts.
+    //
+    // Note: clients enforce `engines.formula` compatibility at runtime; marketplace publish-time
+    // validation checks the manifest structure but does not gate on a specific engine version.
+    validateExtensionManifest(manifest, { enforceEngine: false });
   }
 }
 ```

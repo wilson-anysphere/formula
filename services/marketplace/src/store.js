@@ -9,7 +9,8 @@ const {
   detectExtensionPackageFormatVersion,
   verifyExtensionPackageV2,
 } = require("../../../shared/extension-package");
-const { compareSemver, isValidSemver, maxSemver } = require("../../../shared/semver");
+const { validateExtensionManifest } = require("../../../shared/extension-manifest");
+const { compareSemver, maxSemver } = require("../../../shared/semver");
 
 const { SqliteFileDb } = require("./db/sqlite");
 
@@ -209,31 +210,18 @@ async function readExtensionPackageSafe(packageBytes, { maxUncompressedBytes }) 
 function validateManifest(manifest) {
   if (!manifest || typeof manifest !== "object") throw new Error("Manifest must be an object");
 
-  const required = ["name", "publisher", "version", "main"];
-  for (const field of required) {
-    if (!manifest[field] || typeof manifest[field] !== "string") {
-      throw new Error(`Manifest missing required string field: ${field}`);
-    }
+  const validated = validateExtensionManifest(manifest, { enforceEngine: false });
+
+  if (!NAME_RE.test(validated.name)) {
+    throw new Error(`Invalid extension name "${validated.name}" (expected ${NAME_RE})`);
   }
 
-  if (!NAME_RE.test(manifest.name)) {
-    throw new Error(`Invalid extension name "${manifest.name}" (expected ${NAME_RE})`);
+  if (!NAME_RE.test(validated.publisher)) {
+    throw new Error(`Invalid publisher "${validated.publisher}" (expected ${NAME_RE})`);
   }
 
-  if (!NAME_RE.test(manifest.publisher)) {
-    throw new Error(`Invalid publisher "${manifest.publisher}" (expected ${NAME_RE})`);
-  }
-
-  if (!isValidSemver(manifest.version)) {
-    throw new Error(`Invalid version "${manifest.version}" (expected semver)`);
-  }
-
-  if (!manifest.engines || typeof manifest.engines !== "object" || typeof manifest.engines.formula !== "string") {
-    throw new Error("Manifest missing required engines.formula string field");
-  }
-
-  const categories = normalizeStringArray(manifest.categories);
-  const tags = normalizeStringArray(manifest.tags);
+  const categories = normalizeStringArray(validated.categories);
+  const tags = normalizeStringArray(validated.tags);
 
   if (categories.length > 5) throw new Error("Manifest categories must have at most 5 entries");
   if (tags.length > 10) throw new Error("Manifest tags must have at most 10 entries");
@@ -245,7 +233,7 @@ function validateManifest(manifest) {
     if (t.length > 32) throw new Error("Manifest tag entries must be <= 32 characters");
   }
 
-  return true;
+  return validated;
 }
 
 function isAllowedFilePath(filePath) {
@@ -308,15 +296,39 @@ function normalizeManifestFilePath(filePath) {
 }
 
 function validateEntrypoint(manifest, fileRecords) {
+  const files = new Set((fileRecords || []).map((f) => String(f?.path || "")));
+
   const main = normalizeManifestFilePath(manifest?.main);
   if (!main) throw new Error("Manifest main entrypoint is required");
   if (!isAllowedFilePath(main)) {
     throw new Error(`Manifest main entrypoint must be an allowed file type (got ${manifest.main})`);
   }
-
-  const files = new Set((fileRecords || []).map((f) => String(f?.path || "")));
   if (!files.has(main)) {
     throw new Error(`Manifest main entrypoint is missing from extension package: ${manifest.main}`);
+  }
+
+  const moduleRaw = manifest?.module;
+  if (moduleRaw !== undefined && moduleRaw !== null) {
+    const moduleEntry = normalizeManifestFilePath(moduleRaw);
+    if (!moduleEntry) throw new Error("Manifest module entrypoint must be a non-empty string");
+    if (!isAllowedFilePath(moduleEntry)) {
+      throw new Error(`Manifest module entrypoint must be an allowed file type (got ${moduleRaw})`);
+    }
+    if (!files.has(moduleEntry)) {
+      throw new Error(`Manifest module entrypoint is missing from extension package: ${moduleRaw}`);
+    }
+  }
+
+  const browserRaw = manifest?.browser;
+  if (browserRaw !== undefined && browserRaw !== null) {
+    const browserEntry = normalizeManifestFilePath(browserRaw);
+    if (!browserEntry) throw new Error("Manifest browser entrypoint must be a non-empty string");
+    if (!isAllowedFilePath(browserEntry)) {
+      throw new Error(`Manifest browser entrypoint must be an allowed file type (got ${browserRaw})`);
+    }
+    if (!files.has(browserEntry)) {
+      throw new Error(`Manifest browser entrypoint is missing from extension package: ${browserRaw}`);
+    }
   }
 }
 
@@ -640,7 +652,6 @@ class MarketplaceStore {
 
       const bundle = await readExtensionPackageSafe(packageBytes, { maxUncompressedBytes: MAX_UNCOMPRESSED_BYTES });
       manifest = bundle.manifest;
-      validateManifest(manifest);
 
       if (bundle.files.length > MAX_FILES) throw new Error("Extension package contains too many files");
 
@@ -725,7 +736,7 @@ class MarketplaceStore {
       throw new Error(`Unsupported extension package formatVersion: ${formatVersion}`);
     }
 
-    validateManifest(manifest);
+    manifest = validateManifest(manifest);
     validateEntrypoint(manifest, fileRecords);
 
     if (manifest.publisher !== publisher) {

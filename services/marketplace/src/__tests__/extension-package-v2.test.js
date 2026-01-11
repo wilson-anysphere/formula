@@ -509,3 +509,143 @@ test("marketplace store rejects packages with missing manifest.main entrypoint",
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("marketplace store rejects manifests with invalid permission strings", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-invalid-perm-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const { dir, manifest } = await createTempExtensionDir();
+
+  try {
+    const keys = generateEd25519KeyPair();
+
+    const packageJsonPath = path.join(dir, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    packageJson.permissions = ["totally.not.real"];
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
+    const store = new MarketplaceStore({ dataDir });
+    await store.init();
+    await store.registerPublisher({
+      publisher: manifest.publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+
+    await assert.rejects(
+      () =>
+        store.publishExtension({
+          publisher: manifest.publisher,
+          packageBytes: pkgBytes,
+          signatureBase64: null,
+        }),
+      /invalid permission/i
+    );
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("marketplace store rejects manifests with activationEvents referencing unknown contributions", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-invalid-activation-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const { dir, manifest } = await createTempExtensionDir();
+
+  try {
+    const keys = generateEd25519KeyPair();
+
+    const packageJsonPath = path.join(dir, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    packageJson.activationEvents = ["onCommand:missing.command"];
+    packageJson.contributes = { commands: [] };
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
+    const store = new MarketplaceStore({ dataDir });
+    await store.init();
+    await store.registerPublisher({
+      publisher: manifest.publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+
+    await assert.rejects(
+      () =>
+        store.publishExtension({
+          publisher: manifest.publisher,
+          packageBytes: pkgBytes,
+          signatureBase64: null,
+        }),
+      /unknown command/i
+    );
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("marketplace store rejects manifests with browser entrypoints missing from the package", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-missing-browser-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const { dir, manifest } = await createTempExtensionDir();
+
+  try {
+    const keys = generateEd25519KeyPair();
+
+    // Create a package where manifest.browser points at a file that's not included.
+    const packageJsonPath = path.join(dir, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    packageJson.browser = "./dist/missing-browser.js";
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
+    const store = new MarketplaceStore({ dataDir });
+    await store.init();
+    await store.registerPublisher({
+      publisher: manifest.publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+
+    await assert.rejects(
+      () =>
+        store.publishExtension({
+          publisher: manifest.publisher,
+          packageBytes: pkgBytes,
+          signatureBase64: null,
+        }),
+      /browser entrypoint is missing/i
+    );
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

@@ -5,6 +5,7 @@ const { pathToFileURL } = require("node:url");
 
 const nodeHostPkg = require("../src");
 const nodeManifestPkg = require("../src/manifest");
+const sharedManifestPkg = require("../../../shared/extension-manifest");
 
 test("browser host parity: API_PERMISSIONS matches Node ExtensionHost", async () => {
   const browserModuleUrl = pathToFileURL(
@@ -22,15 +23,17 @@ test("browser host parity: API_PERMISSIONS matches Node ExtensionHost", async ()
   }
 });
 
-test("browser host parity: manifest VALID_PERMISSIONS matches Node", async () => {
+test("browser host parity: manifest validation is shared (no drift)", async () => {
   const browserManifestUrl = pathToFileURL(
     path.join(__dirname, "..", "src", "browser", "manifest.mjs")
   ).href;
   const browserManifestPkg = await import(browserManifestUrl);
 
-  const nodePerms = [...nodeManifestPkg.VALID_PERMISSIONS].sort();
-  const browserPerms = [...browserManifestPkg.VALID_PERMISSIONS].sort();
+  assert.strictEqual(nodeManifestPkg.VALID_PERMISSIONS, sharedManifestPkg.VALID_PERMISSIONS);
+  assert.strictEqual(nodeManifestPkg.validateExtensionManifest, sharedManifestPkg.validateExtensionManifest);
+  assert.strictEqual(nodeManifestPkg.ManifestError, sharedManifestPkg.ManifestError);
 
-  assert.deepEqual(browserPerms, nodePerms);
+  assert.strictEqual(browserManifestPkg.VALID_PERMISSIONS, sharedManifestPkg.VALID_PERMISSIONS);
+  assert.strictEqual(browserManifestPkg.validateExtensionManifest, sharedManifestPkg.validateExtensionManifest);
+  assert.strictEqual(browserManifestPkg.ManifestError, sharedManifestPkg.ManifestError);
 });
-

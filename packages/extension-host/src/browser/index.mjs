@@ -426,7 +426,10 @@ class BrowserExtensionHost {
     }
 
     const parsed = await response.json();
-    const manifest = validateExtensionManifest(parsed, { engineVersion: this._engineVersion });
+    const manifest = validateExtensionManifest(parsed, {
+      engineVersion: this._engineVersion,
+      enforceEngine: true
+    });
     const extensionId = `${manifest.publisher}.${manifest.name}`;
 
     const baseUrl = new URL("./", resolvedUrl);

@@ -171,7 +171,10 @@ class ExtensionHost {
     const manifestPath = path.join(extensionPath, "package.json");
     const raw = await fs.readFile(manifestPath, "utf8");
     const parsed = JSON.parse(raw);
-    const manifest = validateExtensionManifest(parsed, { engineVersion: this._engineVersion });
+    const manifest = validateExtensionManifest(parsed, {
+      engineVersion: this._engineVersion,
+      enforceEngine: true
+    });
 
     const extensionId = `${manifest.publisher}.${manifest.name}`;
 
