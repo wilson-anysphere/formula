@@ -81,6 +81,7 @@ On success, Formula:
 1. Validates response/assertion signatures, issuer/audience, and time conditions.
     - If the IdP includes `InResponseTo`, Formula validates it against a short-lived request cache and consumes it (replay protection).
     - If the assertion includes a `SubjectConfirmationData Recipient`, Formula requires it to match the ACS URL.
+    - If the response includes a `Destination` attribute, Formula requires it to match the ACS URL.
 2. Extracts identity via `attributeMapping` and normalizes email.
 3. Links the identity in `user_identities` (`provider = providerId`, `subject = NameID`, `org_id = orgId`).
 4. Provisions the user + org membership if needed.

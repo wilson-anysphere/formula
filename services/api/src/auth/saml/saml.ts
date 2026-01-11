@@ -344,6 +344,27 @@ function assertionRecipientsMatch(profile: Record<string, unknown>, callbackUrl:
   return !sawRecipient;
 }
 
+function responseDestinationMatches(profile: Record<string, unknown>, callbackUrl: string): boolean {
+  const getSamlResponseXml = (profile as any).getSamlResponseXml;
+  if (typeof getSamlResponseXml !== "function") return true;
+
+  let xml: string;
+  try {
+    xml = String(getSamlResponseXml.call(profile));
+  } catch {
+    return true;
+  }
+
+  if (!xml) return true;
+
+  // Validate the Destination attribute on the top-level Response when present.
+  // When only the Assertion is signed, Destination is not covered by the XML
+  // signature, so we must treat it as untrusted input.
+  const match = xml.match(/<\s*(?:[A-Za-z0-9_]+:)?Response\b[^>]*\bDestination\s*=\s*"([^"]+)"/);
+  if (!match) return true;
+  return match[1] === callbackUrl;
+}
+
 function samlIndicatesMfa(profile: Record<string, unknown>): boolean {
   const candidates = [
     profile.authnContextClassRef,
@@ -662,6 +683,10 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
 
     if (!assertionRecipientsMatch(profile, callbackUrl)) {
       throw new Error("SAML assertion recipient mismatch");
+    }
+
+    if (!responseDestinationMatches(profile, callbackUrl)) {
+      throw new Error("SAML response destination mismatch");
     }
   } catch (err) {
     request.server.metrics.authFailuresTotal.inc({ reason: "invalid_saml_response" });

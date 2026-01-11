@@ -109,6 +109,7 @@ function signAssertion(xml: string, assertionId: string): string {
 
 function buildSignedSamlResponse(options: {
   callbackUrl: string;
+  destinationUrl?: string;
   audience: string;
   inResponseTo?: string;
   nameId: string;
@@ -123,13 +124,14 @@ function buildSignedSamlResponse(options: {
   const notOnOrAfter = new Date(now.getTime() + 5 * 60_000).toISOString();
 
   const inResponseTo = options.inResponseTo ? ` InResponseTo="${options.inResponseTo}"` : "";
+  const destination = options.destinationUrl ?? options.callbackUrl;
   const xml = `<?xml version="1.0"?>
 <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
                 xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                 ID="${responseId}"
                 Version="2.0"
                 IssueInstant="${issueInstant}"${inResponseTo}
-                Destination="${options.callbackUrl}">
+                Destination="${destination}">
   <saml:Issuer>https://idp.example.test/metadata</saml:Issuer>
   <samlp:Status>
     <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
@@ -485,6 +487,33 @@ describe("SAML SSO", () => {
       });
       expect(issuerCallback.statusCode).toBe(401);
       expect((issuerCallback.json() as any).error).toBe("invalid_saml_response");
+
+      // Destination is outside the signed assertion for many IdPs. If present, it must match our ACS URL.
+      const destinationStart = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+      expect(destinationStart.statusCode).toBe(302);
+      const destinationUrl = new URL(destinationStart.headers.location as string);
+      const destinationRequestId = extractAuthnRequestId(destinationUrl.searchParams.get("SAMLRequest")!);
+      const destinationRelayState = destinationUrl.searchParams.get("RelayState");
+      expect(destinationRelayState).toBeTruthy();
+
+      const destinationResponse = buildSignedSamlResponse({
+        callbackUrl,
+        destinationUrl: "http://evil.example.test/callback",
+        audience: "http://sp.example.test/metadata",
+        inResponseTo: destinationRequestId,
+        nameId: "saml-subject-123",
+        email: "saml-user@example.com",
+        name: "SAML User"
+      });
+
+      const destinationCallback = await app.inject({
+        method: "POST",
+        url: `/auth/saml/${orgId}/test/callback`,
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({ SAMLResponse: destinationResponse, RelayState: destinationRelayState! }).toString()
+      });
+      expect(destinationCallback.statusCode).toBe(401);
+      expect((destinationCallback.json() as any).error).toBe("invalid_saml_response");
     } finally {
       await app.close();
       await db.end();
