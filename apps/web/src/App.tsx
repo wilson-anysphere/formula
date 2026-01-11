@@ -427,9 +427,9 @@ function EngineDemoApp() {
   const handleGridPaste = (event: ClipboardEvent<HTMLDivElement>) => {
     if (editingCell) return;
     const clipboardPlain =
-      event.clipboardData?.getData("text/plain") ??
-      event.clipboardData?.getData("text/tab-separated-values") ??
-      event.clipboardData?.getData("text/tsv") ??
+      event.clipboardData?.getData("text/plain") ||
+      event.clipboardData?.getData("text/tab-separated-values") ||
+      event.clipboardData?.getData("text/tsv") ||
       "";
     const clipboardHtml = event.clipboardData?.getData("text/html") ?? "";
     const internal = internalClipboardRef.current;
