@@ -1570,6 +1570,10 @@ impl AppState {
             .as_ref()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
         self.engine = FormulaEngine::new();
+        self.engine.set_date_system(match workbook.date_system {
+            formula_model::DateSystem::Excel1900 => formula_engine::date::ExcelDateSystem::EXCEL_1900,
+            formula_model::DateSystem::Excel1904 => formula_engine::date::ExcelDateSystem::Excel1904,
+        });
         for sheet in &workbook.sheets {
             self.engine.ensure_sheet(&sheet.name);
         }
@@ -2129,6 +2133,49 @@ mod tests {
         let b1_after = state.get_cell(&sheet_id, 0, 1).unwrap();
         assert_eq!(b1_after.value, CellScalar::Number(11.0));
         assert!(state.has_unsaved_changes());
+    }
+
+    #[test]
+    fn xlsx_1904_date_system_propagates_to_engine_and_roundtrips() {
+        use formula_xlsx::XlsxPackage;
+
+        let fixture_path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/metadata/date-system-1904.xlsx"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read 1904 date system xlsx");
+        assert_eq!(workbook.date_system, formula_model::DateSystem::Excel1904);
+        assert_eq!(workbook.sheets.len(), 1);
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        assert_eq!(
+            state.engine.date_system(),
+            formula_engine::date::ExcelDateSystem::Excel1904
+        );
+
+        state
+            .set_cell(&sheet_id, 0, 0, None, Some("=DATE(1904,1,1)".to_string()))
+            .expect("set formula cell");
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("get cell");
+        assert_eq!(cell.value, CellScalar::Number(0.0));
+
+        let tmp_dir = tempfile::tempdir().expect("temp dir");
+        let xlsx_path = tmp_dir.path().join("roundtrip.xlsx");
+        let workbook_to_save = state.get_workbook().expect("workbook").clone();
+        let bytes = write_xlsx_blocking(&xlsx_path, &workbook_to_save).expect("write xlsx");
+
+        let pkg = XlsxPackage::from_bytes(bytes.as_ref()).expect("parse saved xlsx");
+        let workbook_xml = std::str::from_utf8(
+            pkg.part("xl/workbook.xml")
+                .expect("saved workbook should contain xl/workbook.xml"),
+        )
+        .expect("workbook.xml should be utf-8");
+        assert!(
+            workbook_xml.contains("date1904=\"1\""),
+            "expected date1904=\"1\" in workbook.xml, got:\n{workbook_xml}"
+        );
     }
 
     #[test]

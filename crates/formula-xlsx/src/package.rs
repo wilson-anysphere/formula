@@ -15,7 +15,7 @@ use crate::sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
     WorkbookSheetInfo,
 };
-use crate::RecalcPolicy;
+use crate::{DateSystem, RecalcPolicy};
 use crate::theme::{parse_theme_palette, ThemePalette};
 use formula_model::{CellRef, CellValue, SheetVisibility, StyleTable, TabColor};
 
@@ -387,6 +387,21 @@ impl XlsxPackage {
         parse_workbook_sheets(&workbook_xml)
     }
 
+    /// Set the workbook date system (`workbookPr/@date1904`) inside `xl/workbook.xml`.
+    ///
+    /// This is required for correct serial date interpretation when opening the workbook in Excel
+    /// and for aligning formula evaluation semantics (1900 vs 1904) during round-trip edits.
+    pub fn set_workbook_date_system(&mut self, date_system: DateSystem) -> Result<(), XlsxError> {
+        let workbook_xml = self
+            .parts
+            .get("xl/workbook.xml")
+            .cloned()
+            .ok_or_else(|| XlsxError::MissingPart("xl/workbook.xml".to_string()))?;
+        let updated = workbook_xml_set_date_system(&workbook_xml, date_system)?;
+        self.parts.insert("xl/workbook.xml".to_string(), updated);
+        Ok(())
+    }
+
     /// Rewrite the `<sheets>` list in `xl/workbook.xml` to match `sheets`.
     pub fn set_workbook_sheets(&mut self, sheets: &[WorkbookSheetInfo]) -> Result<(), XlsxError> {
         let workbook_xml = self
@@ -479,6 +494,85 @@ impl XlsxPackage {
 
         Ok(())
     }
+}
+
+fn workbook_xml_set_date_system(
+    workbook_xml: &[u8],
+    date_system: DateSystem,
+) -> Result<Vec<u8>, XlsxError> {
+    let has_workbook_pr = workbook_xml
+        .windows(b"workbookPr".len())
+        .any(|w| w == b"workbookPr");
+
+    let mut reader = XmlReader::from_reader(workbook_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(workbook_xml.len() + 64));
+
+    let mut buf = Vec::new();
+    let mut skipping_workbook_pr = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"workbook" => {
+                writer.write_event(Event::Start(e.to_owned()))?;
+                if date_system == DateSystem::V1904 && !has_workbook_pr {
+                    let mut wb_pr = BytesStart::new("workbookPr");
+                    wb_pr.push_attribute(("date1904", "1"));
+                    writer.write_event(Event::Empty(wb_pr))?;
+                }
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"workbookPr" => {
+                writer.write_event(Event::Empty(patched_workbook_pr(e, date_system)?))?;
+            }
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"workbookPr" => {
+                skipping_workbook_pr = true;
+                writer.write_event(Event::Empty(patched_workbook_pr(e, date_system)?))?;
+            }
+            Event::End(ref e)
+                if skipping_workbook_pr && local_name(e.name().as_ref()) == b"workbookPr" =>
+            {
+                skipping_workbook_pr = false;
+            }
+            Event::Eof => break,
+            ev if skipping_workbook_pr => drop(ev),
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn patched_workbook_pr(e: &BytesStart<'_>, date_system: DateSystem) -> Result<BytesStart<'static>, XlsxError> {
+    let name = e.name();
+    let mut wb_pr =
+        BytesStart::new(std::str::from_utf8(name.as_ref()).unwrap_or("workbookPr"));
+    let mut had_date1904 = false;
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"date1904" {
+            had_date1904 = true;
+            continue;
+        }
+        wb_pr.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+    }
+
+    match date_system {
+        DateSystem::V1900 => {
+            if had_date1904 {
+                wb_pr.push_attribute(("date1904", "0"));
+            }
+        }
+        DateSystem::V1904 => wb_pr.push_attribute(("date1904", "1")),
+    }
+
+    Ok(wb_pr.into_owned())
+}
+
+fn local_name(name: &[u8]) -> &[u8] {
+    name.rsplit(|&b| b == b':').next().unwrap_or(name)
 }
 
 fn remove_relationship_type(xml: &[u8], rel_type: &str) -> Result<Vec<u8>, XlsxError> {

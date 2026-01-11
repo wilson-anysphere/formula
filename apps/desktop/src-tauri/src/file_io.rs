@@ -5,6 +5,7 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 use formula_model::{
     import::{import_csv_to_columnar_table, CsvOptions},
     CellValue as ModelCellValue,
+    DateSystem as WorkbookDateSystem,
 };
 use formula_xlsb::{CellValue as XlsbCellValue, XlsbWorkbook};
 use formula_xlsx::drawingml::PreservedDrawingParts;
@@ -196,6 +197,8 @@ pub struct Workbook {
     /// sheet ordinal position in the workbook when a sheet is renamed in-app.
     pub preserved_pivot_parts: Option<PreservedPivotParts>,
     pub theme_palette: Option<formula_xlsx::theme::ThemePalette>,
+    /// Excel workbook date system (1900 vs 1904) used to interpret serial dates.
+    pub date_system: WorkbookDateSystem,
     pub sheets: Vec<Sheet>,
     pub print_settings: WorkbookPrintSettings,
     pub(crate) original_print_settings: WorkbookPrintSettings,
@@ -219,6 +222,7 @@ impl Workbook {
             preserved_drawing_parts: None,
             preserved_pivot_parts: None,
             theme_palette: None,
+            date_system: WorkbookDateSystem::Excel1900,
             sheets: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
             original_print_settings: WorkbookPrintSettings::default(),
@@ -336,6 +340,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             preserved_drawing_parts: None,
             preserved_pivot_parts: None,
             theme_palette: None,
+            date_system: document.workbook.date_system,
             sheets: Vec::new(),
             print_settings: print_settings.clone(),
             original_print_settings: print_settings,
@@ -394,6 +399,8 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
         theme_palette: None,
+        // Calamine doesn't surface workbook date system metadata; default to Excel 1900.
+        date_system: WorkbookDateSystem::Excel1900,
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -552,6 +559,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
         theme_palette: None,
+        date_system: WorkbookDateSystem::Excel1900,
         sheets: vec![sheet],
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -576,6 +584,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
         theme_palette: None,
+        date_system: WorkbookDateSystem::Excel1900,
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -752,6 +761,10 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
+    let xlsx_date_system = match workbook.date_system {
+        WorkbookDateSystem::Excel1900 => formula_xlsx::DateSystem::V1900,
+        WorkbookDateSystem::Excel1904 => formula_xlsx::DateSystem::V1904,
+    };
 
     if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
         let print_settings_changed = workbook.print_settings != workbook.original_print_settings;
@@ -818,6 +831,13 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
         if wants_drop_vba {
             pkg.remove_vba_project().context("remove VBA parts for .xlsx")?;
+        }
+
+        if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
+            && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
+        {
+            pkg.set_workbook_date_system(xlsx_date_system)
+                .context("set workbook date system")?;
         }
 
         let mut bytes = pkg
@@ -910,9 +930,25 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .context("apply preserved pivot parts")?;
         }
 
+        if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
+            && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
+        {
+            pkg.set_workbook_date_system(xlsx_date_system)
+                .context("set workbook date system")?;
+        }
+
         bytes = pkg
             .write_to_bytes()
             .context("repack workbook package with preserved parts")?;
+    } else if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
+        && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
+    {
+        let mut pkg = XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
+        pkg.set_workbook_date_system(xlsx_date_system)
+            .context("set workbook date system")?;
+        bytes = pkg
+            .write_to_bytes()
+            .context("repack workbook package with date system")?;
     }
 
     if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {

@@ -504,8 +504,7 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let pivot_ref = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => r.normalized(),
-        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
-        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
 
     // Remaining args must be (field, item) pairs.
