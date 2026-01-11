@@ -23,6 +23,80 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(controller.getCell("Sheet1", "A1").value).toBe(99);
   });
 
+  it("roundtrips supported formatting between ai-tools CellFormat and DocumentController styles", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    const beforeStyleTableSize = controller.styleTable.size;
+
+    const result = await executor.execute({
+      name: "apply_formatting",
+      parameters: {
+        range: "A1",
+        format: {
+          bold: true,
+          italic: true,
+          font_size: 14,
+          font_color: "#FF00FF00",
+          background_color: "#FFFFFF00",
+          number_format: "$#,##0.00",
+          horizontal_align: "center"
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("apply_formatting");
+    if (!result.ok || result.tool !== "apply_formatting") throw new Error("Unexpected tool result");
+    expect(result.data?.formatted_cells).toBe(1);
+
+    const cellState = controller.getCell("Sheet1", "A1");
+    expect(cellState.styleId).toBeGreaterThan(0);
+    expect(controller.styleTable.size).toBeGreaterThan(beforeStyleTableSize);
+
+    const style = controller.styleTable.get(cellState.styleId);
+    expect(style.font?.bold).toBe(true);
+    expect(style.font?.italic).toBe(true);
+    expect(style.font?.size).toBe(14);
+    expect(style.font?.color).toBe("#FF00FF00");
+    expect(style.fill?.pattern).toBe("solid");
+    expect(style.fill?.fgColor).toBe("#FFFFFF00");
+    expect(style.numberFormat).toBe("$#,##0.00");
+    expect(style.alignment?.horizontal).toBe("center");
+
+    const roundTrip = api.getCell({ sheet: "Sheet1", row: 1, col: 1 });
+    expect(roundTrip.format).toEqual({
+      bold: true,
+      italic: true,
+      font_size: 14,
+      font_color: "#FF00FF00",
+      background_color: "#FFFFFF00",
+      number_format: "$#,##0.00",
+      horizontal_align: "center"
+    });
+  });
+
+  it("filters out cells that are empty per ai-tools semantics (no value, formula, or supported format)", () => {
+    const controller = new DocumentController();
+    controller.setRangeFormat(
+      "Sheet1",
+      "A1",
+      { border: { left: { style: "thin", color: "#FF000000" } } },
+      { label: "Border only" }
+    );
+
+    const state = controller.getCell("Sheet1", "A1");
+    expect(state.value).toBeNull();
+    expect(state.formula).toBeNull();
+    expect(state.styleId).toBeGreaterThan(0);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    expect(api.listNonEmptyCells("Sheet1")).toEqual([]);
+  });
+
   it("supports PreviewEngine diffing without mutating the live controller", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 10);
@@ -49,5 +123,49 @@ describe("DocumentControllerSpreadsheetApi", () => {
 
     // Sanity check: tool call references normalize to Sheet1.
     expect(preview.changes[0]?.cell).toBe("Sheet1!A1");
+  });
+
+  it("detects formatting-only changes in PreviewEngine diffs", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 10);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const previewEngine = new PreviewEngine({ approval_cell_threshold: 0 });
+
+    const preview = await previewEngine.generatePreview(
+      [
+        {
+          name: "apply_formatting",
+          parameters: { range: "A1", format: { bold: true } }
+        }
+      ],
+      api,
+      { default_sheet: "Sheet1" }
+    );
+
+    expect(preview.summary.total_changes).toBe(1);
+    expect(preview.summary.modifies).toBe(1);
+    expect(preview.requires_approval).toBe(true);
+    expect(preview.changes[0]?.cell).toBe("Sheet1!A1");
+
+    // Ensure the preview simulation didn't mutate the live controller.
+    expect(controller.getCell("Sheet1", "A1").styleId).toBe(0);
+  });
+
+  it("normalizes formulas to include leading '=' when reading through the adapter", async () => {
+    const controller = new DocumentController();
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "A1", value: "SUM(B1:B3)", is_formula: true }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(controller.getCell("Sheet1", "A1").formula).toBe("SUM(B1:B3)");
+
+    const cell = api.getCell({ sheet: "Sheet1", row: 1, col: 1 });
+    expect(cell.formula).toBe("=SUM(B1:B3)");
   });
 });

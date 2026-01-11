@@ -2,13 +2,92 @@ import { DocumentController } from "../../document/documentController.js";
 
 import type { CellAddress, RangeAddress } from "../../../../../packages/ai-tools/src/spreadsheet/a1.js";
 import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
-import type { CellData, CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.js";
+import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.js";
 
-function toCellData(cellState: any): CellData {
+type DocumentControllerStyle = Record<string, any>;
+
+function normalizeFormula(raw: string): string {
+  const trimmed = raw.trimStart();
+  if (!trimmed) return "=";
+  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+}
+
+function styleToCellFormat(style: DocumentControllerStyle | null | undefined): CellFormat | undefined {
+  if (!style || typeof style !== "object") return undefined;
+
+  const out: CellFormat = {};
+
+  const font = style.font;
+  if (font && typeof font === "object") {
+    if (typeof font.bold === "boolean") out.bold = font.bold;
+    if (typeof font.italic === "boolean") out.italic = font.italic;
+    if (typeof font.size === "number") out.font_size = font.size;
+    if (typeof font.color === "string") out.font_color = font.color;
+  }
+
+  const fill = style.fill;
+  if (fill && typeof fill === "object") {
+    if (typeof fill.fgColor === "string") out.background_color = fill.fgColor;
+  }
+
+  if (typeof style.numberFormat === "string") out.number_format = style.numberFormat;
+
+  const alignment = style.alignment;
+  if (alignment && typeof alignment === "object") {
+    const horizontal = alignment.horizontal;
+    if (horizontal === "left" || horizontal === "center" || horizontal === "right") {
+      out.horizontal_align = horizontal;
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function cellFormatToStylePatch(format: Partial<CellFormat> | null | undefined): DocumentControllerStyle | null {
+  if (!format) return null;
+
+  /** @type {DocumentControllerStyle} */
+  const patch: DocumentControllerStyle = {};
+
+  const setFont = (key: string, value: unknown) => {
+    patch.font ??= {};
+    patch.font[key] = value;
+  };
+
+  if (typeof format.bold === "boolean") setFont("bold", format.bold);
+  if (typeof format.italic === "boolean") setFont("italic", format.italic);
+  if (typeof format.font_size === "number") setFont("size", format.font_size);
+  if (typeof format.font_color === "string") setFont("color", format.font_color);
+
+  if (typeof format.background_color === "string") {
+    patch.fill = { pattern: "solid", fgColor: format.background_color };
+  }
+
+  if (typeof format.number_format === "string") {
+    patch.numberFormat = format.number_format;
+  }
+
+  if (format.horizontal_align === "left" || format.horizontal_align === "center" || format.horizontal_align === "right") {
+    patch.alignment ??= {};
+    patch.alignment.horizontal = format.horizontal_align;
+  }
+
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function toCellData(controller: DocumentController, cellState: any): CellData {
+  const styleId = typeof cellState?.styleId === "number" ? cellState.styleId : 0;
+  const style = styleId === 0 ? null : controller.styleTable.get(styleId);
+  const format = styleToCellFormat(style);
+
+  const rawFormula = cellState?.formula;
+  const normalizedFormula =
+    rawFormula == null || rawFormula === "" ? undefined : normalizeFormula(String(rawFormula));
+
   return {
-    value: cellState?.value ?? null,
-    ...(cellState?.formula ? { formula: String(cellState.formula) } : {}),
-    ...(cellState?.format ? { format: cellState.format as CellFormat } : {})
+    value: normalizedFormula ? null : (cellState?.value ?? null),
+    ...(normalizedFormula ? { formula: normalizedFormula } : {}),
+    ...(format ? { format } : {})
   };
 }
 
@@ -48,9 +127,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   listSheets(): string[] {
-    const sheets = (this.controller as any).model?.sheets;
-    if (!sheets || typeof sheets.keys !== "function") return ["Sheet1"];
-    const ids = Array.from(sheets.keys());
+    const ids = this.controller.getSheetIds();
     // DocumentController creates sheets lazily; expose the default sheet name so
     // downstream consumers (RAG context, etc) can still reason about "Sheet1"
     // even before any edits.
@@ -61,16 +138,18 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const sheets = (this.controller as any).model?.sheets;
     if (!sheets || typeof sheets.get !== "function") return [];
 
-    const sheetIds = sheet ? [sheet] : Array.from(sheets.keys());
+    const sheetIds = sheet ? [sheet] : this.controller.getSheetIds();
     const entries: CellEntry[] = [];
     for (const sheetId of sheetIds) {
       const sheetModel = sheets.get(sheetId);
       if (!sheetModel) continue;
       for (const [key, state] of sheetModel.cells?.entries?.() ?? []) {
         const { row, col } = parseRowColKey(key);
+        const cell = toCellData(this.controller, state);
+        if (isCellEmpty(cell)) continue;
         entries.push({
           address: { sheet: sheetId, row: row + 1, col: col + 1 },
-          cell: toCellData(state)
+          cell
         });
       }
     }
@@ -79,7 +158,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
   getCell(address: CellAddress): CellData {
     const state = this.controller.getCell(address.sheet, toControllerCoord(address));
-    return toCellData(state);
+    return toCellData(this.controller, state);
   }
 
   setCell(address: CellAddress, cell: CellData): void {
@@ -91,9 +170,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     }
 
     if (cell.format && Object.keys(cell.format).length > 0) {
-      this.controller.setRangeFormat(address.sheet, { start: coord, end: coord }, cell.format as any, {
-        label: "AI apply_formatting"
-      });
+      const patch = cellFormatToStylePatch(cell.format);
+      if (patch) {
+        this.controller.setRangeFormat(address.sheet, { start: coord, end: coord }, patch, {
+          label: "AI apply_formatting"
+        });
+      }
     }
   }
 
@@ -117,10 +199,13 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   applyFormatting(range: RangeAddress, format: Partial<CellFormat>): number {
-    this.controller.setRangeFormat(range.sheet, toControllerRange(range), format as any, { label: "AI apply_formatting" });
+    const patch = cellFormatToStylePatch(format);
+    if (patch) {
+      this.controller.setRangeFormat(range.sheet, toControllerRange(range), patch, { label: "AI apply_formatting" });
+    }
     const rows = range.endRow - range.startRow + 1;
     const cols = range.endCol - range.startCol + 1;
-    return rows * cols;
+    return patch ? rows * cols : 0;
   }
 
   getLastUsedRow(sheet: string): number {
