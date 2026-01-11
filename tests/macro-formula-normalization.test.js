@@ -14,7 +14,7 @@ test("macro recorder normalizes DocumentController formulas to include '=' prefi
   recorder.start();
 
   workbook.setSelection("Sheet1", "A1");
-  // Simulate UI behavior (SpreadsheetApp) which stores formulas without a leading "=".
+  // DocumentController accepts formula bodies without a leading "=" and canonicalizes them.
   controller.setCellFormula("Sheet1", "A1", "A1+B1");
 
   const actions = recorder.stop();
@@ -33,7 +33,7 @@ test("macro recorder normalizes DocumentController formulas to include '=' prefi
   assert.equal(result.error, undefined, result.error?.message);
 
   const cell = freshController.getCell("Sheet1", "A1");
-  assert.equal(cell.formula, "A1+B1");
+  assert.equal(cell.formula, "=A1+B1");
   assert.equal(cell.value, null);
 
   workbook.dispose();

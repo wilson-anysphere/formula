@@ -41,7 +41,7 @@ test("macro recorder generates runnable TypeScript that replays formula edits ag
   assert.deepEqual(freshWorkbook.getSelection(), { sheetName: "Sheet1", address: "C1" });
 
   const cell = freshController.getCell("Sheet1", "C1");
-  assert.equal(cell.formula, "A1+B1");
+  assert.equal(cell.formula, "=A1+B1");
   assert.equal(cell.value, null);
 
   workbook.dispose();
