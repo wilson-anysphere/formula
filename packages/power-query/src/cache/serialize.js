@@ -33,6 +33,14 @@ function serializeCell(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return { [TYPE_KEY]: "date", value: value.toISOString() };
   }
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    // JSON does not support NaN/Infinity; tag them so roundtrips preserve values.
+    return { [TYPE_KEY]: "number", value: String(value) };
+  }
+  if (typeof value === "bigint") {
+    // JSON.stringify throws on bigint; preserve it as a tagged string.
+    return { [TYPE_KEY]: "bigint", value: value.toString() };
+  }
   return value;
 }
 
@@ -46,6 +54,29 @@ function deserializeCell(value) {
     if (value[TYPE_KEY] === "date" && typeof value.value === "string") {
       const parsed = new Date(value.value);
       if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    // @ts-ignore - runtime
+    if (value[TYPE_KEY] === "number" && typeof value.value === "string") {
+      switch (value.value) {
+        case "NaN":
+          return Number.NaN;
+        case "Infinity":
+          return Number.POSITIVE_INFINITY;
+        case "-Infinity":
+          return Number.NEGATIVE_INFINITY;
+        default: {
+          const parsed = Number(value.value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+      }
+    }
+    // @ts-ignore - runtime
+    if (value[TYPE_KEY] === "bigint" && typeof value.value === "string") {
+      try {
+        return BigInt(value.value);
+      } catch {
+        return value;
+      }
     }
   }
   return value;

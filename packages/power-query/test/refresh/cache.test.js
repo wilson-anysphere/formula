@@ -512,6 +512,62 @@ test("FileSystemCacheStore: persists DataTable cache entries and preserves Date 
   }
 });
 
+test("FileSystemCacheStore: DataTable cache preserves BigInt and non-finite numbers", async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-data-special-"));
+
+  try {
+    const query = {
+      id: "q_range_special_numbers_fs_cache",
+      name: "Range special numbers fs cache",
+      source: {
+        type: "range",
+        range: {
+          hasHeaders: true,
+          values: [
+            ["id", "value", "big"],
+            [1, Number.POSITIVE_INFINITY, 9007199254740993n],
+            [2, Number.NaN, -9007199254740993n],
+            [3, Number.NEGATIVE_INFINITY, 0n],
+          ],
+        },
+      },
+      steps: [],
+    };
+
+    const firstEngine = new QueryEngine({
+      cache: new CacheManager({ store: new FileSystemCacheStore({ directory: cacheDir }) }),
+    });
+
+    const first = await firstEngine.executeQueryWithMeta(query, {}, {});
+    assert.equal(first.meta.cache?.hit, false);
+    const firstGrid = first.table.toGrid();
+    assert.equal(firstGrid[1][1], Number.POSITIVE_INFINITY);
+    assert.ok(Number.isNaN(firstGrid[2][1]));
+    assert.equal(firstGrid[3][1], Number.NEGATIVE_INFINITY);
+    assert.equal(typeof firstGrid[1][2], "bigint");
+
+    const files = await readdir(cacheDir);
+    assert.ok(files.some((name) => name.endsWith(".json")));
+
+    const secondEngine = new QueryEngine({
+      cache: new CacheManager({ store: new FileSystemCacheStore({ directory: cacheDir }) }),
+    });
+
+    const second = await secondEngine.executeQueryWithMeta(query, {}, {});
+    assert.equal(second.meta.cache?.hit, true);
+    const secondGrid = second.table.toGrid();
+    assert.equal(secondGrid[1][1], Number.POSITIVE_INFINITY);
+    assert.ok(Number.isNaN(secondGrid[2][1]));
+    assert.equal(secondGrid[3][1], Number.NEGATIVE_INFINITY);
+    assert.equal(secondGrid[1][2], 9007199254740993n);
+    assert.equal(secondGrid[2][2], -9007199254740993n);
+    assert.equal(secondGrid[3][2], 0n);
+    assert.deepEqual(secondGrid, firstGrid);
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
 test("IndexedDBCacheStore: caches Arrow-backed Parquet results without re-reading the source", async () => {
   const dbName = `pq-cache-idb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const store1 = new IndexedDBCacheStore({ dbName });
