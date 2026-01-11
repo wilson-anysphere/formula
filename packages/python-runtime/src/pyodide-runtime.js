@@ -87,6 +87,16 @@ export class PyodideRuntime {
 
     // Main-thread Pyodide cannot be fully unloaded, but dropping references lets
     // callers re-initialize and allows GC to reclaim JS-side state.
+    if (this.pyodide) {
+      // The main-thread bridge stores the active spreadsheet API on the Pyodide
+      // instance so it can be swapped without re-registering modules. Clear it
+      // here to avoid retaining host references after the runtime is destroyed.
+      try {
+        setFormulaBridgeApi(this.pyodide, null);
+      } catch {
+        // ignore
+      }
+    }
     this.pyodide = null;
     this._interruptView = null;
     this._mainThreadReady = false;
