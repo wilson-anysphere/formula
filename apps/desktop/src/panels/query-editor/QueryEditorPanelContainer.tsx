@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Query } from "../../../../../packages/power-query/src/model.js";
 import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
@@ -162,6 +162,7 @@ export function QueryEditorPanelContainer(props: Props) {
       onSuccessfulRun: (queryId, completedAtMs) => {
         // Best-effort: keep the scheduled refresh state store timestamps in sync with
         // dependency-aware refreshAll sessions.
+        if (!refreshManager.queries.has(queryId)) return;
         (refreshManager as any).manager?.recordSuccessfulRun?.(queryId, completedAtMs);
       },
     });
@@ -181,6 +182,8 @@ export function QueryEditorPanelContainer(props: Props) {
   const [activeLoad, setActiveLoad] = useState<{ jobId: string; controller: AbortController } | null>(null);
   const [activeRefresh, setActiveRefresh] = useState<{ jobId: string; cancel: () => void; applying: boolean } | null>(null);
   const [activeRefreshAll, setActiveRefreshAll] = useState<{ sessionId: string; cancel: () => void } | null>(null);
+
+  const demoGraphRef = useRef<{ ids: string[]; queries: Query[] } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,6 +228,15 @@ export function QueryEditorPanelContainer(props: Props) {
     return () => refreshOrchestrator.unregisterQuery(query.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshOrchestrator, query]);
+
+  useEffect(() => {
+    return () => {
+      for (const q of demoGraphRef.current?.queries ?? []) {
+        refreshOrchestrator.unregisterQuery(q.id);
+      }
+      demoGraphRef.current = null;
+    };
+  }, [refreshOrchestrator]);
 
   useEffect(() => {
     if (typeof localStorage === "undefined") return;
@@ -305,6 +317,68 @@ export function QueryEditorPanelContainer(props: Props) {
 
   function activeSheetId(): string {
     return props.getActiveSheetId?.() ?? doc?.getSheetIds?.()?.[0] ?? "Sheet1";
+  }
+
+  function ensureDemoGraph(): string[] {
+    if (demoGraphRef.current) return demoGraphRef.current.ids;
+
+    const sheetId = activeSheetId();
+    const baseId = "__demo_base";
+    const refId = "__demo_ref";
+    const opsId = "__demo_ops";
+
+    const queries: Query[] = [
+      {
+        id: baseId,
+        name: "Demo Base",
+        source: {
+          type: "range",
+          range: {
+            values: [
+              ["Key", "Val"],
+              [1, "a"],
+              [2, "b"],
+            ],
+            hasHeaders: true,
+          },
+        },
+        steps: [],
+        refreshPolicy: { type: "manual" },
+      },
+      {
+        id: refId,
+        name: "Demo Ref",
+        source: { type: "query", queryId: baseId },
+        steps: [],
+        destination: { sheetId, start: { row: 0, col: 8 }, includeHeader: true, clearExisting: true },
+        refreshPolicy: { type: "manual" },
+      },
+      {
+        id: opsId,
+        name: "Demo Ops",
+        source: {
+          type: "range",
+          range: {
+            values: [
+              ["Key", "Left"],
+              [1, "x"],
+              [3, "y"],
+            ],
+            hasHeaders: true,
+          },
+        },
+        steps: [
+          { id: "demo_merge", name: "Merge", operation: { type: "merge", rightQuery: baseId, joinType: "left", leftKey: "Key", rightKey: "Key" } },
+          { id: "demo_append", name: "Append", operation: { type: "append", queries: [baseId, refId] } },
+        ],
+        destination: { sheetId, start: { row: 0, col: 12 }, includeHeader: true, clearExisting: true },
+        refreshPolicy: { type: "manual" },
+      },
+    ];
+
+    for (const q of queries) refreshOrchestrator.registerQuery(q);
+    demoGraphRef.current = { ids: [refId, opsId], queries };
+    return demoGraphRef.current.ids;
   }
 
   function cancelActiveLoad(): void {
@@ -492,6 +566,18 @@ export function QueryEditorPanelContainer(props: Props) {
     }
   }
 
+  function refreshDemoGraph(): void {
+    setActionError(null);
+    try {
+      const ids = ensureDemoGraph();
+      const handle = refreshOrchestrator.refreshAll(ids);
+      setActiveRefreshAll({ sessionId: handle.sessionId, cancel: handle.cancel });
+      handle.promise.finally(() => setActiveRefreshAll(null)).catch(() => {});
+    } catch (err: any) {
+      setActionError(err?.message ?? String(err));
+    }
+  }
+
   return (
     <div style={{ flex: 1, minHeight: 0 }}>
       {engineError ? (
@@ -540,6 +626,9 @@ export function QueryEditorPanelContainer(props: Props) {
         ) : null}
         <button type="button" onClick={refreshAll}>
           Refresh all (graph)
+        </button>
+        <button type="button" onClick={refreshDemoGraph}>
+          Refresh demo graph
         </button>
         {activeRefreshAll ? (
           <button type="button" onClick={activeRefreshAll.cancel}>
