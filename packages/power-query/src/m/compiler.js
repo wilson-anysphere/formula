@@ -1294,6 +1294,20 @@ function compileJoinKind(ctx, expr) {
   }
   const value = evaluateConstant(ctx, expr);
   if (value == null) return "inner";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    switch (Math.trunc(value)) {
+      case 0:
+        return "inner";
+      case 1:
+        return "left";
+      case 2:
+        return "right";
+      case 3:
+        return "full";
+      default:
+        break;
+    }
+  }
   if (typeof value === "string") {
     const lower = value.toLowerCase();
     if (lower === "inner") return "inner";
