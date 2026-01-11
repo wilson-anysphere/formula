@@ -291,7 +291,6 @@ describe("API e2e: auth + RBAC + sync token", () => {
         headers: { cookie: viewerCookie },
         payload: { email: "third@example.com", role: "viewer" }
       });
-
       expect(forbiddenInvite.statusCode).toBe(403);
     },
     20_000

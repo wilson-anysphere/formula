@@ -3,7 +3,7 @@ import { loadConfig } from "./config";
 import { createPool } from "./db/pool";
 import { runMigrations } from "./db/migrations";
 import { cleanupOidcAuthStates } from "./auth/oidc/oidc";
-import { cleanupSamlAuthStates, cleanupSamlRequestCache } from "./auth/saml/saml";
+import { cleanupSamlAssertionReplays, cleanupSamlAuthStates, cleanupSamlRequestCache } from "./auth/saml/saml";
 import { initOpenTelemetry } from "./observability/otel";
 import { runRetentionSweep } from "./retention";
 import { DbSiemConfigProvider } from "./siem/configProvider";
@@ -117,6 +117,11 @@ async function main(): Promise<void> {
       const samlRequestCacheDeleted = await cleanupSamlRequestCache(pool);
       if (samlRequestCacheDeleted > 0) {
         app.log.debug({ deleted: samlRequestCacheDeleted }, "saml_request_cache_cleanup");
+      }
+
+      const samlAssertionReplayDeleted = await cleanupSamlAssertionReplays(pool);
+      if (samlAssertionReplayDeleted > 0) {
+        app.log.debug({ deleted: samlAssertionReplayDeleted }, "saml_assertion_replay_cleanup");
       }
     };
 

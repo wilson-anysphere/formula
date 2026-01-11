@@ -12,8 +12,8 @@ import { createSession } from "../sessions";
 type OrgSamlProviderRow = {
   org_id: string;
   provider_id: string;
-  entry_point: string;
-  issuer: string;
+  idp_entry_point: string;
+  sp_entity_id: string;
   idp_issuer: string | null;
   idp_cert_pem: string;
   want_assertions_signed: boolean;
@@ -35,11 +35,12 @@ type SamlAuthStateRow = {
 };
 
 type AttributeMapping = {
-  email: string;
-  name: string;
+  email?: string;
+  name?: string;
   groups?: string;
 };
 
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 type RequestCacheRow = { value: string; created_at: Date };
@@ -55,6 +56,12 @@ export async function cleanupSamlAuthStates(db: Queryable): Promise<number> {
 export async function cleanupSamlRequestCache(db: Queryable): Promise<number> {
   const cutoff = new Date(Date.now() - AUTH_STATE_TTL_MS);
   const res = await db.query("DELETE FROM saml_request_cache WHERE created_at < $1", [cutoff]);
+  return typeof res?.rowCount === "number" ? res.rowCount : 0;
+}
+
+export async function cleanupSamlAssertionReplays(db: Queryable): Promise<number> {
+  const now = new Date();
+  const res = await db.query("DELETE FROM saml_assertion_replays WHERE expires_at < $1", [now]);
   return typeof res?.rowCount === "number" ? res.rowCount : 0;
 }
 
@@ -107,10 +114,6 @@ function createSamlRequestCacheProvider(db: Queryable): CacheProvider {
   };
 }
 
-function isProd(): boolean {
-  return process.env.NODE_ENV === "production";
-}
-
 function parseStringArray(value: unknown): string[] {
   if (!value) return [];
   if (Array.isArray(value)) return value.filter((v) => typeof v === "string");
@@ -125,27 +128,25 @@ function parseStringArray(value: unknown): string[] {
   return [];
 }
 
-function parseAttributeMapping(value: unknown): AttributeMapping | null {
-  if (!value) return null;
+function parseAttributeMapping(value: unknown): AttributeMapping {
+  if (!value) return {};
 
   let obj: unknown = value;
   if (typeof value === "string") {
     try {
       obj = JSON.parse(value) as unknown;
     } catch {
-      return null;
+      return {};
     }
   }
 
-  if (!obj || typeof obj !== "object") return null;
+  if (!obj || typeof obj !== "object") return {};
   const record = obj as Record<string, unknown>;
-  const email = typeof record.email === "string" ? record.email.trim() : null;
-  const name = typeof record.name === "string" ? record.name.trim() : null;
-  const groupsRaw = typeof record.groups === "string" ? record.groups.trim() : undefined;
-  const groups = groupsRaw && groupsRaw.length > 0 ? groupsRaw : undefined;
-  if (!email || email.length === 0) return null;
-  if (!name || name.length === 0) return null;
-  return { email, name, groups };
+  const mapping: AttributeMapping = {};
+  if (typeof record.email === "string" && record.email.trim().length > 0) mapping.email = record.email.trim();
+  if (typeof record.name === "string" && record.name.trim().length > 0) mapping.name = record.name.trim();
+  if (typeof record.groups === "string" && record.groups.trim().length > 0) mapping.groups = record.groups.trim();
+  return mapping;
 }
 
 function isValidProviderId(value: string): boolean {
@@ -156,24 +157,83 @@ function isValidOrgId(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
-function extractPublicBaseUrl(request: FastifyRequest): string | null {
-  const configured = request.server.config.publicBaseUrl;
-  if (configured && configured.trim().length > 0) {
+function extractHost(request: FastifyRequest): string {
+  // Only trust forwarded headers when the API is configured to trust the proxy.
+  const trustProxy = Boolean(request.server.config.trustProxy);
+  const xfHost = trustProxy ? request.headers["x-forwarded-host"] : undefined;
+  const hostValue =
+    typeof xfHost === "string" && xfHost.length > 0
+      ? xfHost.split(",")[0]!.trim()
+      : typeof request.headers.host === "string"
+        ? request.headers.host
+        : "localhost";
+  return hostValue.length > 0 ? hostValue : "localhost";
+}
+
+function extractProto(request: FastifyRequest): string {
+  // Only trust forwarded headers when the API is configured to trust the proxy.
+  const trustProxy = Boolean(request.server.config.trustProxy);
+  const xfProto = trustProxy ? request.headers["x-forwarded-proto"] : undefined;
+  const proto =
+    typeof xfProto === "string" && xfProto.length > 0 ? xfProto.split(",")[0]!.trim() : request.protocol;
+  return proto === "https" ? "https" : "http";
+}
+
+function isHostAllowed(host: string, allowlist: string[]): boolean {
+  let parsedHost: URL;
+  try {
+    parsedHost = new URL(`http://${host}`);
+  } catch {
+    return false;
+  }
+
+  const hostLower = parsedHost.host.toLowerCase();
+  const hostnameLower = parsedHost.hostname.toLowerCase();
+
+  for (const entry of allowlist) {
+    const trimmed = entry.trim().toLowerCase();
+    if (!trimmed) continue;
+
     try {
-      const url = new URL(configured);
-      if (isProd() && url.protocol !== "https:") return null;
-      return url.toString().replace(/\/+$/, "");
+      const parsedEntry = new URL(`http://${trimmed}`);
+      // If the entry has an explicit port, require an exact host match.
+      if (parsedEntry.port) {
+        if (parsedEntry.host.toLowerCase() === hostLower) return true;
+        continue;
+      }
+      // Otherwise treat it as a hostname allowlist entry (port-agnostic).
+      if (parsedEntry.hostname.toLowerCase() === hostnameLower) return true;
     } catch {
-      return null;
+      if (trimmed === hostnameLower) return true;
     }
   }
 
-  if (isProd()) return null;
+  return false;
+}
 
-  const host = typeof request.headers.host === "string" && request.headers.host.length > 0 ? request.headers.host : null;
-  if (!host) return null;
-  const proto = request.protocol === "https" ? "https" : "http";
-  return `${proto}://${host}`.replace(/\/+$/, "");
+function externalBaseUrl(request: FastifyRequest): string {
+  const configured = request.server.config.publicBaseUrl;
+  if (typeof configured === "string" && configured.length > 0) return configured;
+
+  if (!request.server.config.trustProxy) {
+    throw new Error("PUBLIC_BASE_URL is required when trustProxy is disabled");
+  }
+
+  const host = extractHost(request);
+  if (!isHostAllowed(host, request.server.config.publicBaseUrlHostAllowlist)) {
+    throw new Error("Untrusted host for SAML callback URL");
+  }
+
+  return `${extractProto(request)}://${host}`;
+}
+
+function buildRedirectUri(baseUrl: string, pathname: string): string {
+  const base = new URL(baseUrl);
+  base.search = "";
+  base.hash = "";
+  if (!base.pathname.endsWith("/")) base.pathname = `${base.pathname}/`;
+  const relative = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+  return new URL(relative, base).toString();
 }
 
 async function loadOrgSettings(
@@ -198,7 +258,7 @@ async function loadOrgProvider(
   providerId: string
 ): Promise<{
   entryPoint: string;
-  issuer: string;
+  spEntityId: string;
   idpIssuer: string | null;
   idpCertPem: string;
   wantAssertionsSigned: boolean;
@@ -208,7 +268,7 @@ async function loadOrgProvider(
 } | null> {
   const res = await request.server.db.query<OrgSamlProviderRow>(
     `
-      SELECT org_id, provider_id, entry_point, issuer, idp_issuer, idp_cert_pem,
+      SELECT org_id, provider_id, idp_entry_point, sp_entity_id, idp_issuer, idp_cert_pem,
              want_assertions_signed, want_response_signed, attribute_mapping, enabled
       FROM org_saml_providers
       WHERE org_id = $1 AND provider_id = $2
@@ -218,23 +278,21 @@ async function loadOrgProvider(
   );
   if (res.rowCount !== 1) return null;
   const row = res.rows[0] as OrgSamlProviderRow;
-  const mapping = parseAttributeMapping(row.attribute_mapping);
-  if (!mapping) return null;
   return {
-    entryPoint: String(row.entry_point),
-    issuer: String(row.issuer),
+    entryPoint: String(row.idp_entry_point),
+    spEntityId: String(row.sp_entity_id),
     idpIssuer: row.idp_issuer ? String(row.idp_issuer) : null,
     idpCertPem: String(row.idp_cert_pem),
     wantAssertionsSigned: Boolean(row.want_assertions_signed),
     wantResponseSigned: Boolean(row.want_response_signed),
-    attributeMapping: mapping,
+    attributeMapping: parseAttributeMapping(row.attribute_mapping),
     enabled: Boolean(row.enabled)
   };
 }
 
 function buildSaml(options: {
   entryPoint: string;
-  issuer: string;
+  spEntityId: string;
   callbackUrl: string;
   idpCertPem: string;
   wantAssertionsSigned: boolean;
@@ -247,17 +305,14 @@ function buildSaml(options: {
 
   return new SAML({
     entryPoint: options.entryPoint,
-    issuer: options.issuer,
+    issuer: options.spEntityId,
     callbackUrl: options.callbackUrl,
     // Audience must match the SP issuer for most IdPs.
-    audience: options.issuer,
+    audience: options.spEntityId,
     idpCert,
     wantAssertionsSigned: options.wantAssertionsSigned,
     wantAuthnResponseSigned: options.wantResponseSigned,
-    // Allow small clock skew for NotBefore/NotOnOrAfter checks.
-    acceptedClockSkewMs: 5 * 60 * 1000,
-    // Validate (and consume) InResponseTo when the IdP includes it so assertions
-    // cannot be replayed against a fresh RelayState.
+    acceptedClockSkewMs: CLOCK_SKEW_MS,
     validateInResponseTo: ValidateInResponseTo.ifPresent,
     requestIdExpirationPeriodMs: AUTH_STATE_TTL_MS,
     cacheProvider: options.cacheProvider
@@ -285,17 +340,11 @@ function extractAttribute(profile: Record<string, unknown>, key: string): string
   return null;
 }
 
-function extractAttributeValues(profile: Record<string, unknown>, key: string): string[] {
-  const raw = profile[key] ?? (profile.attributes && (profile.attributes as any)[key]);
-  if (!raw) return [];
-  if (typeof raw === "string") return raw.trim().length > 0 ? [raw.trim()] : [];
-  if (Array.isArray(raw)) return raw.filter((v) => typeof v === "string" && v.trim().length > 0).map((v) => v.trim());
-  return [];
-}
-
-function extractEmail(profile: Record<string, unknown>, mapping: AttributeMapping): string | null {
-  const attr = extractAttribute(profile, mapping.email);
-  if (attr && attr.includes("@")) return attr.trim().toLowerCase();
+function extractEmail(profile: Record<string, unknown>, mapping: AttributeMapping, subject: string | null): string | null {
+  if (mapping.email) {
+    const attr = extractAttribute(profile, mapping.email);
+    if (attr && attr.includes("@")) return attr.trim().toLowerCase();
+  }
 
   // Some IdPs use common attribute names; fallback to the most common ones.
   const fallbacks = [profile.email, profile.mail, profile.upn];
@@ -303,15 +352,26 @@ function extractEmail(profile: Record<string, unknown>, mapping: AttributeMappin
     const found = firstStringValue(value);
     if (found && found.includes("@")) return found.trim().toLowerCase();
   }
+
+  if (subject && subject.includes("@")) return subject.trim().toLowerCase();
+
   return null;
 }
 
-function extractName(profile: Record<string, unknown>, mapping: AttributeMapping, email: string): string {
-  const attr = extractAttribute(profile, mapping.name);
-  if (attr) return attr.trim();
+function extractName(profile: Record<string, unknown>, mapping: AttributeMapping, email: string, subject: string): string {
+  if (mapping.name) {
+    const attr = extractAttribute(profile, mapping.name);
+    if (attr) return attr.trim();
+  }
 
   const displayName = firstStringValue(profile.displayName ?? profile.cn ?? profile.name);
   if (displayName) return displayName.trim();
+
+  // Some IdPs send a stable opaque NameID; avoid showing it in the UI if it isn't email-like.
+  if (subject.includes("@")) {
+    const local = subject.split("@")[0];
+    if (local && local.length > 0) return local;
+  }
 
   const local = email.split("@")[0];
   return local && local.length > 0 ? local : "User";
@@ -373,32 +433,45 @@ function responseDestinationMatches(profile: Record<string, unknown>, callbackUr
   return match[1] === callbackUrl;
 }
 
-function samlIndicatesMfa(profile: Record<string, unknown>): boolean {
-  const candidates = [
-    profile.authnContextClassRef,
-    profile.authnContextClassRefValue,
-    profile.authnContext,
-    profile.authnContextClass
-  ];
+function extractAuthnContextClassRefs(profile: Record<string, unknown>): string[] {
+  const refs: string[] = [];
+  const candidates = [profile.authnContextClassRef, profile.authnContextClassRefValue, profile.authnContext];
+
+  for (const candidate of candidates) {
+    const value = firstStringValue(candidate);
+    if (value) refs.push(value);
+  }
 
   const getAssertionXml = (profile as any).getAssertionXml;
   if (typeof getAssertionXml === "function") {
     try {
-      candidates.push(getAssertionXml.call(profile));
+      const xml = String(getAssertionXml.call(profile));
+      const regex =
+        /<\s*(?:[A-Za-z0-9_]+:)?AuthnContextClassRef\b[^>]*>([^<]+)<\s*\/\s*(?:[A-Za-z0-9_]+:)?AuthnContextClassRef\s*>/gi;
+      for (const match of xml.matchAll(regex)) {
+        const ref = match[1]?.trim();
+        if (ref) refs.push(ref);
+      }
     } catch {
       // ignore
     }
   }
 
-  for (const candidate of candidates) {
-    const value = firstStringValue(candidate);
-    if (!value) continue;
-    const normalized = value.toLowerCase();
-    if (normalized.includes("mfa")) return true;
-    if (normalized.includes("otp")) return true;
-    if (normalized.includes("totp")) return true;
-    if (normalized.includes("timesynctoken")) return true;
+  return Array.from(new Set(refs));
+}
+
+function samlIndicatesMfa(profile: Record<string, unknown>): boolean {
+  for (const ref of extractAuthnContextClassRefs(profile)) {
+    const normalized = ref.trim().toLowerCase();
+    if (!normalized) continue;
+    // Conservative rules: accept only known MFA AuthnContextClassRef values.
     if (normalized.includes("refeds.org/profile/mfa")) return true;
+    if (normalized.includes("timesynctoken")) return true;
+    if (normalized.includes("smartcard")) return true;
+    if (normalized.includes("twofactor")) return true;
+    if (normalized.includes("totp")) return true;
+    if (normalized.includes("otp")) return true;
+    if (normalized.includes("mfa")) return true;
   }
   return false;
 }
@@ -441,6 +514,121 @@ async function writeSamlFailureAudit(options: {
   }
 }
 
+class SamlValidationError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message?: string) {
+    super(message ?? code);
+    this.code = code;
+  }
+}
+
+function decodeSamlXml(base64: string): string {
+  let xml: string;
+  try {
+    xml = Buffer.from(base64, "base64").toString("utf8");
+  } catch {
+    throw new SamlValidationError("invalid_response", "SAMLResponse was not valid base64");
+  }
+
+  if (!xml || xml.trim().length === 0) {
+    throw new SamlValidationError("invalid_response", "SAMLResponse decoded to an empty document");
+  }
+
+  return xml;
+}
+
+function preflightSamlResponseXml(xml: string): void {
+  const lower = xml.toLowerCase();
+  if (lower.includes("<!doctype") || lower.includes("<!entity")) {
+    throw new SamlValidationError("invalid_response", "SAMLResponse contains a forbidden DOCTYPE/ENTITY");
+  }
+
+  // Defense-in-depth against signature wrapping: reject responses with multiple assertions.
+  const assertionCount = (xml.match(/<\s*(?:[A-Za-z0-9_]+:)?Assertion\b/g) ?? []).length;
+  if (assertionCount !== 1) {
+    throw new SamlValidationError("invalid_response", `expected exactly 1 Assertion (got ${assertionCount})`);
+  }
+}
+
+function extractAssertionId(xml: string): string | null {
+  const match = xml.match(/<\s*(?:[A-Za-z0-9_]+:)?Assertion\b[^>]*\bID\s*=\s*"([^"]+)"/);
+  if (!match) return null;
+  const value = match[1]?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+function parseSamlTimeMs(value: string | null): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function extractAssertionExpiryMs(xml: string): number | null {
+  const conditions = xml.match(/<\s*(?:[A-Za-z0-9_]+:)?Conditions\b[^>]*\bNotOnOrAfter\s*=\s*"([^"]+)"/);
+  const expiry = parseSamlTimeMs(conditions?.[1] ?? null);
+  if (expiry !== null) return expiry;
+
+  const subjectExpiry = xml.match(
+    /<\s*(?:[A-Za-z0-9_]+:)?SubjectConfirmationData\b[^>]*\bNotOnOrAfter\s*=\s*"([^"]+)"/
+  );
+  return parseSamlTimeMs(subjectExpiry?.[1] ?? null);
+}
+
+function extractAssertionNotBeforeMs(xml: string): number | null {
+  const conditions = xml.match(/<\s*(?:[A-Za-z0-9_]+:)?Conditions\b[^>]*\bNotBefore\s*=\s*"([^"]+)"/);
+  const notBefore = parseSamlTimeMs(conditions?.[1] ?? null);
+  if (notBefore !== null) return notBefore;
+
+  const subjectNotBefore = xml.match(/<\s*(?:[A-Za-z0-9_]+:)?SubjectConfirmationData\b[^>]*\bNotBefore\s*=\s*"([^"]+)"/);
+  return parseSamlTimeMs(subjectNotBefore?.[1] ?? null);
+}
+
+function classifyTimestampValidation(xml: string): SamlValidationError | null {
+  const now = Date.now();
+
+  const notBefore = extractAssertionNotBeforeMs(xml);
+  if (notBefore !== null && now + CLOCK_SKEW_MS < notBefore) {
+    return new SamlValidationError("assertion_not_yet_valid", "SAML assertion not yet valid");
+  }
+
+  const expiry = extractAssertionExpiryMs(xml);
+  if (expiry !== null && now - CLOCK_SKEW_MS >= expiry) {
+    return new SamlValidationError("assertion_expired", "SAML assertion expired");
+  }
+
+  return null;
+}
+
+function mapSamlValidationError(err: unknown): SamlValidationError {
+  if (err instanceof SamlValidationError) return err;
+
+  const message = err instanceof Error ? err.message : undefined;
+  if (!message) return new SamlValidationError("invalid_saml_response");
+
+  const lower = message.toLowerCase();
+  if (lower.includes("signature") || lower.includes("digest")) {
+    return new SamlValidationError("invalid_signature", message);
+  }
+  if (lower.includes("audience")) {
+    return new SamlValidationError("invalid_audience", message);
+  }
+  if (lower.includes("expired") || lower.includes("notonorafter")) {
+    return new SamlValidationError("assertion_expired", message);
+  }
+  if (lower.includes("notbefore") || lower.includes("not yet valid")) {
+    return new SamlValidationError("assertion_not_yet_valid", message);
+  }
+  if (lower.includes("no valid subject confirmation")) {
+    return new SamlValidationError("assertion_expired", message);
+  }
+  if (lower.includes("inresponseto")) {
+    return new SamlValidationError("invalid_in_response_to", message);
+  }
+
+  return new SamlValidationError("invalid_saml_response", message);
+}
+
 export async function samlStart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const params = request.params as { orgId: string; provider: string };
   const orgId = params.orgId;
@@ -459,6 +647,10 @@ export async function samlStart(request: FastifyRequest, reply: FastifyReply): P
     reply.code(403).send({ error: "provider_disabled" });
     return;
   }
+  if (!provider.idpIssuer) {
+    reply.code(500).send({ error: "provider_not_configured" });
+    return;
+  }
 
   const settings = await loadOrgSettings(request, orgId);
   if (!settings) {
@@ -470,18 +662,22 @@ export async function samlStart(request: FastifyRequest, reply: FastifyReply): P
     return;
   }
 
-  const baseUrl = extractPublicBaseUrl(request);
-  if (!baseUrl) {
-    reply.code(500).send({ error: "public_base_url_required" });
+  let callbackUrl: string;
+  try {
+    callbackUrl = buildRedirectUri(
+      externalBaseUrl(request),
+      `/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`
+    );
+  } catch (err) {
+    request.server.log.warn({ err }, "saml_callback_url_base_url_invalid");
+    reply.code(500).send({ error: "saml_not_configured" });
     return;
   }
-
-  const callbackUrl = `${baseUrl}/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`;
 
   const cacheProvider = createSamlRequestCacheProvider(request.server.db);
   const saml = buildSaml({
     entryPoint: provider.entryPoint,
-    issuer: provider.issuer,
+    spEntityId: provider.spEntityId,
     callbackUrl,
     idpCertPem: provider.idpCertPem,
     wantAssertionsSigned: provider.wantAssertionsSigned,
@@ -544,18 +740,26 @@ export async function samlMetadata(request: FastifyRequest, reply: FastifyReply)
     reply.code(404).send({ error: "provider_not_found" });
     return;
   }
-
-  const baseUrl = extractPublicBaseUrl(request);
-  if (!baseUrl) {
-    reply.code(500).send({ error: "public_base_url_required" });
+  if (!provider.idpIssuer) {
+    reply.code(500).send({ error: "provider_not_configured" });
     return;
   }
 
-  const callbackUrl = `${baseUrl}/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`;
+  let callbackUrl: string;
+  try {
+    callbackUrl = buildRedirectUri(
+      externalBaseUrl(request),
+      `/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`
+    );
+  } catch (err) {
+    request.server.log.warn({ err }, "saml_metadata_base_url_invalid");
+    reply.code(500).send({ error: "saml_not_configured" });
+    return;
+  }
 
   const saml = buildSaml({
     entryPoint: provider.entryPoint,
-    issuer: provider.issuer,
+    spEntityId: provider.spEntityId,
     callbackUrl,
     idpCertPem: provider.idpCertPem,
     wantAssertionsSigned: provider.wantAssertionsSigned,
@@ -631,6 +835,10 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
     reply.code(403).send({ error: "provider_disabled" });
     return;
   }
+  if (!provider.idpIssuer) {
+    reply.code(500).send({ error: "provider_not_configured" });
+    return;
+  }
 
   const settings = await loadOrgSettings(request, orgId);
   if (!settings) {
@@ -642,23 +850,50 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
     return;
   }
 
-  const baseUrl = extractPublicBaseUrl(request);
-  if (!baseUrl) {
-    reply.code(500).send({ error: "public_base_url_required" });
+  let callbackUrl: string;
+  try {
+    callbackUrl = buildRedirectUri(
+      externalBaseUrl(request),
+      `/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`
+    );
+  } catch (err) {
+    request.server.log.warn({ err }, "saml_callback_base_url_invalid");
+    reply.code(500).send({ error: "saml_not_configured" });
     return;
   }
-  const callbackUrl = `${baseUrl}/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`;
 
   const cacheProvider = createSamlRequestCacheProvider(request.server.db);
   const saml = buildSaml({
     entryPoint: provider.entryPoint,
-    issuer: provider.issuer,
+    spEntityId: provider.spEntityId,
     callbackUrl,
     idpCertPem: provider.idpCertPem,
     wantAssertionsSigned: provider.wantAssertionsSigned,
     wantResponseSigned: provider.wantResponseSigned,
     cacheProvider
   });
+
+  let decodedXml: string;
+  try {
+    decodedXml = decodeSamlXml(parsed.data.SAMLResponse);
+    preflightSamlResponseXml(decodedXml);
+  } catch (err) {
+    let validation = mapSamlValidationError(err);
+    if (validation.code === "invalid_saml_response") {
+      const timestamp = classifyTimestampValidation(decodedXml);
+      if (timestamp) validation = timestamp;
+    }
+    request.server.metrics.authFailuresTotal.inc({ reason: validation.code });
+    await writeSamlFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: validation.code,
+      errorMessage: validation.message
+    });
+    reply.code(401).send({ error: validation.code });
+    return;
+  }
 
   let profile: Record<string, unknown>;
   try {
@@ -669,7 +904,7 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
 
     const result = await saml.validatePostResponseAsync(container);
     if (!result.profile || typeof result.profile !== "object") {
-      throw new Error("SAML response missing profile");
+      throw new SamlValidationError("invalid_saml_response", "SAML response missing profile");
     }
     profile = result.profile as unknown as Record<string, unknown>;
 
@@ -682,30 +917,32 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
       }
     }
 
-    if (provider.idpIssuer) {
-      const issuer = firstStringValue((profile as any).issuer);
-      if (!issuer || issuer !== provider.idpIssuer) {
-        throw new Error(`SAML issuer mismatch (expected ${provider.idpIssuer}, got ${issuer ?? "missing"})`);
-      }
+    const issuer = firstStringValue((profile as any).issuer);
+    if (!issuer || issuer !== provider.idpIssuer) {
+      throw new SamlValidationError(
+        "invalid_issuer",
+        `SAML issuer mismatch (expected ${provider.idpIssuer}, got ${issuer ?? "missing"})`
+      );
     }
 
     if (!assertionRecipientsMatch(profile, callbackUrl)) {
-      throw new Error("SAML assertion recipient mismatch");
+      throw new SamlValidationError("invalid_recipient", "SAML assertion recipient mismatch");
     }
 
     if (!responseDestinationMatches(profile, callbackUrl)) {
-      throw new Error("SAML response destination mismatch");
+      throw new SamlValidationError("invalid_destination", "SAML response destination mismatch");
     }
   } catch (err) {
-    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_saml_response" });
+    const validation = mapSamlValidationError(err);
+    request.server.metrics.authFailuresTotal.inc({ reason: validation.code });
     await writeSamlFailureAudit({
       request,
       orgId,
       providerId,
-      errorCode: "invalid_saml_response",
-      errorMessage: err instanceof Error ? err.message : undefined
+      errorCode: validation.code,
+      errorMessage: validation.message
     });
-    reply.code(401).send({ error: "invalid_saml_response" });
+    reply.code(401).send({ error: validation.code });
     return;
   }
 
@@ -717,8 +954,8 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
     return;
   }
 
-  const email = extractEmail(profile, provider.attributeMapping);
-  if (!email) {
+  const email = extractEmail(profile, provider.attributeMapping, subject);
+  if (!email || !z.string().email().safeParse(email).success) {
     request.server.metrics.authFailuresTotal.inc({ reason: "invalid_claims" });
     await writeSamlFailureAudit({ request, orgId, providerId, errorCode: "invalid_claims" });
     reply.code(401).send({ error: "invalid_claims" });
@@ -739,10 +976,39 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
     return;
   }
 
-  const name = extractName(profile, provider.attributeMapping, email);
+  const assertionId = extractAssertionId(decodedXml);
+  if (!assertionId) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_saml_response" });
+    await writeSamlFailureAudit({ request, orgId, providerId, userEmail: email, errorCode: "invalid_saml_response" });
+    reply.code(401).send({ error: "invalid_saml_response" });
+    return;
+  }
 
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + request.server.config.sessionTtlSeconds * 1000);
+  const assertionExpiry = extractAssertionExpiryMs(decodedXml);
+  const expiresAtForReplay = new Date(
+    assertionExpiry !== null && Number.isFinite(assertionExpiry) ? assertionExpiry : Date.now() + AUTH_STATE_TTL_MS
+  );
+  try {
+    await request.server.db.query(
+      `
+        INSERT INTO saml_assertion_replays (assertion_id, org_id, provider_id, expires_at)
+        VALUES ($1, $2, $3, $4)
+      `,
+      [assertionId, orgId, providerId, expiresAtForReplay]
+    );
+  } catch (err) {
+    const code = (err as any)?.code as string | undefined;
+    if (code !== "23505") throw err;
+    request.server.metrics.authFailuresTotal.inc({ reason: "replay_detected" });
+    await writeSamlFailureAudit({ request, orgId, providerId, userEmail: email, errorCode: "replay_detected" });
+    reply.code(401).send({ error: "replay_detected" });
+    return;
+  }
+
+  const name = extractName(profile, provider.attributeMapping, email, subject);
+  const expiresAt = new Date(Date.now() + request.server.config.sessionTtlSeconds * 1000);
+
+  const providerKey = `saml:${providerId}`;
 
   const { userId, sessionId, token } = await withTransaction(request.server.db, async (client) => {
     const existingIdentity = await client.query<{ user_id: string }>(
@@ -752,7 +1018,7 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
         WHERE org_id = $1 AND provider = $2 AND subject = $3
         LIMIT 1
       `,
-      [orgId, providerId, subject]
+      [orgId, providerKey, subject]
     );
 
     let userId: string;
@@ -765,7 +1031,7 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
           SET email = $4
           WHERE org_id = $1 AND provider = $2 AND subject = $3
         `,
-        [orgId, providerId, subject, email]
+        [orgId, providerKey, subject, email]
       );
     } else {
       const existingUser = await client.query<{ id: string }>("SELECT id FROM users WHERE email = $1 LIMIT 1", [email]);
@@ -783,7 +1049,7 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
           ON CONFLICT (org_id, provider, subject)
           DO UPDATE SET email = EXCLUDED.email
         `,
-        [userId, providerId, subject, email, orgId]
+        [userId, providerKey, subject, email, orgId]
       );
     }
 

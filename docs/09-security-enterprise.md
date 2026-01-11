@@ -128,6 +128,61 @@ class SSOAuthenticator {
 }
 ```
 
+### SAML 2.0 SSO (cloud backend implementation)
+
+`services/api` implements **per-organization** SAML configuration and a hardened Assertion Consumer Service (ACS) flow.
+
+#### Configuration (per organization)
+
+Stored in `org_saml_providers` and managed via org-admin APIs:
+
+- `GET /orgs/:orgId/saml-providers`
+- `PUT /orgs/:orgId/saml-providers/:providerId`
+- `DELETE /orgs/:orgId/saml-providers/:providerId`
+
+Each provider stores:
+
+- `idp_entry_point` (SSO URL)
+- `idp_issuer`
+- `idp_cert_pem` (X.509 PEM used to verify XML signatures)
+- `sp_entity_id` (Audience + AuthnRequest Issuer)
+- optional `attribute_mapping` (`email`, `name`, `groups`)
+
+Configuration changes emit audit events:
+
+- `org.saml_provider.created`
+- `org.saml_provider.updated`
+- `org.saml_provider.deleted`
+
+#### Login endpoints
+
+- `GET /auth/saml/:orgId/:provider/start` — builds a SAML `AuthnRequest` and redirects to the IdP (Redirect binding).
+- `POST /auth/saml/:orgId/:provider/callback` — ACS endpoint (POST binding). On success, issues the standard session cookie.
+
+`user_identities.provider` is namespaced as `saml:<providerId>` to avoid collisions with other identity types (e.g. OIDC).
+
+#### Assertion validation (defense-in-depth)
+
+The ACS handler validates:
+
+- XML signature on the **Assertion** or the **Response** (must be present)
+- issuer (`idp_issuer`)
+- audience (`sp_entity_id`)
+- destination/recipient (ACS URL)
+- `NotBefore` / `NotOnOrAfter` windows with clock skew
+- `InResponseTo` tracking via server-side request cache + TTL
+- replay prevention via assertion ID cache + TTL
+
+Additionally:
+
+- external entities are rejected (`<!DOCTYPE` / `<!ENTITY`)
+- signature wrapping is mitigated by rejecting responses that contain multiple Assertion elements
+
+#### MFA alignment
+
+When `org_settings.require_mfa = true`, SAML logins are accepted only when the assertion’s `AuthnContextClassRef`
+indicates MFA (conservative matching on common MFA/“multipleauthn” context values). Otherwise the login is rejected and audited.
+
 ### Session Management
 
 ```typescript

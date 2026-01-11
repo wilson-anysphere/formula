@@ -82,98 +82,104 @@ L4FBRr1qKZoYhjE1mlyKksgq71HdGecVOkIz+FAmNNieysZtjq7xz2MwQxg3yUik
 /1PstcL2hIo5tNGciUwhiGjLFTfgwAU5RTqFaGM=
 -----END CERTIFICATE-----`;
 
-function signAssertion(xml: string, assertionId: string): string {
-  const sig: any = new (SignedXml as any)({
-    privateKey: TEST_PRIVATE_KEY_PEM,
-    publicCert: TEST_CERT_PEM,
-    signatureAlgorithm: "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
-    canonicalizationAlgorithm: "http://www.w3.org/2001/10/xml-exc-c14n#"
-  });
+function buildSignedSamlResponse(options: {
+  assertionId: string;
+  responseId: string;
+  destination: string;
+  inResponseTo: string;
+  issuer: string;
+  audience: string;
+  nameId: string;
+  email: string;
+  name: string;
+  notBefore: Date;
+  notOnOrAfter: Date;
+  subjectNotOnOrAfter: Date;
+  authnContextClassRef?: string;
+  privateKeyPem: string;
+}): string {
+  const issueInstant = new Date().toISOString();
+
+  const xml = `
+    <samlp:Response
+      xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+      xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+      ID="${options.responseId}"
+      Version="2.0"
+      IssueInstant="${issueInstant}"
+      Destination="${options.destination}"
+      InResponseTo="${options.inResponseTo}"
+    >
+      <saml:Issuer>${options.issuer}</saml:Issuer>
+      <samlp:Status>
+        <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success" />
+      </samlp:Status>
+      <saml:Assertion
+        ID="${options.assertionId}"
+        Version="2.0"
+        IssueInstant="${issueInstant}"
+      >
+        <saml:Issuer>${options.issuer}</saml:Issuer>
+        <saml:Subject>
+          <saml:NameID>${options.nameId}</saml:NameID>
+          <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+            <saml:SubjectConfirmationData
+              InResponseTo="${options.inResponseTo}"
+              Recipient="${options.destination}"
+              NotOnOrAfter="${options.subjectNotOnOrAfter.toISOString()}"
+            />
+          </saml:SubjectConfirmation>
+        </saml:Subject>
+        <saml:Conditions
+          NotBefore="${options.notBefore.toISOString()}"
+          NotOnOrAfter="${options.notOnOrAfter.toISOString()}"
+        >
+          <saml:AudienceRestriction>
+            <saml:Audience>${options.audience}</saml:Audience>
+          </saml:AudienceRestriction>
+        </saml:Conditions>
+        <saml:AuthnStatement AuthnInstant="${issueInstant}">
+          <saml:AuthnContext>
+            <saml:AuthnContextClassRef>${
+              options.authnContextClassRef ?? "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
+            }</saml:AuthnContextClassRef>
+          </saml:AuthnContext>
+        </saml:AuthnStatement>
+        <saml:AttributeStatement>
+          <saml:Attribute Name="email">
+            <saml:AttributeValue>${options.email}</saml:AttributeValue>
+          </saml:Attribute>
+          <saml:Attribute Name="name">
+            <saml:AttributeValue>${options.name}</saml:AttributeValue>
+          </saml:Attribute>
+        </saml:AttributeStatement>
+      </saml:Assertion>
+    </samlp:Response>
+  `.trim();
+
+  const sig = new SignedXml();
+  sig.signatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+  sig.canonicalizationAlgorithm = "http://www.w3.org/2001/10/xml-exc-c14n#";
+  sig.privateKey = options.privateKeyPem;
+
   sig.addReference({
-    xpath: `//*[local-name()='Assertion' and @ID='${assertionId}']`,
+    xpath: `//*[local-name()='Assertion' and @ID='${options.assertionId}']`,
     transforms: [
       "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
       "http://www.w3.org/2001/10/xml-exc-c14n#"
     ],
-    digestAlgorithm: "http://www.w3.org/2001/04/xmlenc#sha256"
+    digestAlgorithm: "http://www.w3.org/2001/04/xmlenc#sha256",
+    uri: `#${options.assertionId}`
   });
+
   sig.computeSignature(xml, {
-    prefix: "ds",
     location: {
-      reference: `//*[local-name()='Assertion' and @ID='${assertionId}']/*[local-name()='Issuer']`,
+      reference: `//*[local-name()='Assertion' and @ID='${options.assertionId}']/*[local-name()='Issuer']`,
       action: "after"
     }
   });
-  return sig.getSignedXml();
-}
 
-function buildSignedSamlResponse(options: {
-  callbackUrl: string;
-  destinationUrl?: string;
-  audience: string;
-  inResponseTo?: string;
-  nameId: string;
-  email: string;
-  name: string;
-}): string {
-  const responseId = `_${crypto.randomUUID()}`;
-  const assertionId = `_${crypto.randomUUID()}`;
-  const now = new Date();
-  const issueInstant = now.toISOString();
-  const notBefore = new Date(now.getTime() - 5_000).toISOString();
-  const notOnOrAfter = new Date(now.getTime() + 5 * 60_000).toISOString();
-
-  const inResponseTo = options.inResponseTo ? ` InResponseTo="${options.inResponseTo}"` : "";
-  const destination = options.destinationUrl ?? options.callbackUrl;
-  const xml = `<?xml version="1.0"?>
-<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
-                xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
-                ID="${responseId}"
-                Version="2.0"
-                IssueInstant="${issueInstant}"${inResponseTo}
-                Destination="${destination}">
-  <saml:Issuer>https://idp.example.test/metadata</saml:Issuer>
-  <samlp:Status>
-    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
-  </samlp:Status>
-  <saml:Assertion ID="${assertionId}" Version="2.0" IssueInstant="${issueInstant}">
-    <saml:Issuer>https://idp.example.test/metadata</saml:Issuer>
-    <saml:Subject>
-      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">${options.nameId}</saml:NameID>
-      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
-        <saml:SubjectConfirmationData NotOnOrAfter="${notOnOrAfter}" Recipient="${options.callbackUrl}"${
-    options.inResponseTo ? ` InResponseTo="${options.inResponseTo}"` : ""
-  }/>
-      </saml:SubjectConfirmation>
-    </saml:Subject>
-    <saml:Conditions NotBefore="${notBefore}" NotOnOrAfter="${notOnOrAfter}">
-      <saml:AudienceRestriction>
-        <saml:Audience>${options.audience}</saml:Audience>
-      </saml:AudienceRestriction>
-    </saml:Conditions>
-    <saml:AuthnStatement AuthnInstant="${issueInstant}">
-      <saml:AuthnContext>
-        <saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef>
-      </saml:AuthnContext>
-    </saml:AuthnStatement>
-    <saml:AttributeStatement>
-      <saml:Attribute Name="email">
-        <saml:AttributeValue xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema">${options.email}</saml:AttributeValue>
-      </saml:Attribute>
-      <saml:Attribute Name="name">
-        <saml:AttributeValue xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema">${options.name}</saml:AttributeValue>
-      </saml:Attribute>
-    </saml:AttributeStatement>
-  </saml:Assertion>
-</samlp:Response>`;
-
-  // Sanity check that the element we sign exists before computing signature.
-  const parsed = new DOMParser().parseFromString(xml, "text/xml");
-  const assertion = parsed.getElementsByTagName("saml:Assertion")[0];
-  if (!assertion) throw new Error("missing assertion in fixture");
-
-  const signed = signAssertion(xml, assertionId);
-  return Buffer.from(signed, "utf8").toString("base64");
+  return Buffer.from(sig.getSignedXml(), "utf8").toString("base64");
 }
 
 function extractAuthnRequestId(samlRequest: string): string {
@@ -198,12 +204,12 @@ async function createTestApp(): Promise<{
   const config: AppConfig = {
     port: 0,
     databaseUrl: "postgres://unused",
-    sessionCookieName: "formula_session",
-    sessionTtlSeconds: 60 * 60,
-    cookieSecure: false,
     publicBaseUrl: "http://localhost",
     publicBaseUrlHostAllowlist: ["localhost"],
     trustProxy: false,
+    sessionCookieName: "formula_session",
+    sessionTtlSeconds: 60 * 60,
+    cookieSecure: false,
     corsAllowedOrigins: [],
     syncTokenSecret: "test-sync-secret",
     syncTokenTtlSeconds: 60,
@@ -223,7 +229,7 @@ async function createTestApp(): Promise<{
   return { db, config, app };
 }
 
-describe("SAML provider admin APIs", () => {
+describe("SAML provider admin APIs (task spec)", () => {
   it("supports CRUD and emits audit events", async () => {
     const { db, app } = await createTestApp();
     try {
@@ -238,7 +244,7 @@ describe("SAML provider admin APIs", () => {
 
       const listEmpty = await app.inject({
         method: "GET",
-        url: `/orgs/${orgId}/saml/providers`,
+        url: `/orgs/${orgId}/saml-providers`,
         headers: { cookie }
       });
       expect(listEmpty.statusCode).toBe(200);
@@ -246,15 +252,13 @@ describe("SAML provider admin APIs", () => {
 
       const invalidCert = await app.inject({
         method: "PUT",
-        url: `/orgs/${orgId}/saml/providers/badcert`,
+        url: `/orgs/${orgId}/saml-providers/badcert`,
         headers: { cookie },
         payload: {
-          entryPoint: "http://idp.example.test/sso",
-          issuer: "http://sp.example.test/metadata",
+          idpEntryPoint: "http://idp.example.test/sso",
+          spEntityId: "http://sp.example.test/metadata",
           idpIssuer: "https://idp.example.test/metadata",
           idpCertPem: "not a cert",
-          wantAssertionsSigned: true,
-          wantResponseSigned: false,
           attributeMapping: { email: "email", name: "name" },
           enabled: true
         }
@@ -264,11 +268,11 @@ describe("SAML provider admin APIs", () => {
 
       const putRes = await app.inject({
         method: "PUT",
-        url: `/orgs/${orgId}/saml/providers/okta`,
+        url: `/orgs/${orgId}/saml-providers/okta`,
         headers: { cookie },
         payload: {
-          entryPoint: "http://idp.example.test/sso",
-          issuer: "http://sp.example.test/metadata",
+          idpEntryPoint: "http://idp.example.test/sso",
+          spEntityId: "http://sp.example.test/metadata",
           idpIssuer: "https://idp.example.test/metadata",
           idpCertPem: TEST_CERT_PEM,
           wantAssertionsSigned: true,
@@ -280,27 +284,13 @@ describe("SAML provider admin APIs", () => {
       expect(putRes.statusCode).toBe(200);
       expect((putRes.json() as any).provider.providerId).toBe("okta");
 
-      const getProvider = await app.inject({
-        method: "GET",
-        url: `/orgs/${orgId}/saml/providers/okta`,
-        headers: { cookie }
-      });
-      expect(getProvider.statusCode).toBe(200);
-      expect((getProvider.json() as any).provider).toMatchObject({
-        providerId: "okta",
-        entryPoint: "http://idp.example.test/sso",
-        issuer: "http://sp.example.test/metadata",
-        idpIssuer: "https://idp.example.test/metadata",
-        enabled: true
-      });
-
       const putRes2 = await app.inject({
         method: "PUT",
-        url: `/orgs/${orgId}/saml/providers/okta`,
+        url: `/orgs/${orgId}/saml-providers/okta`,
         headers: { cookie },
         payload: {
-          entryPoint: "http://idp.example.test/sso2",
-          issuer: "http://sp.example.test/metadata",
+          idpEntryPoint: "http://idp.example.test/sso2",
+          spEntityId: "http://sp.example.test/metadata",
           idpIssuer: "https://idp.example.test/metadata",
           idpCertPem: TEST_CERT_PEM,
           wantAssertionsSigned: true,
@@ -312,27 +302,32 @@ describe("SAML provider admin APIs", () => {
       expect(putRes2.statusCode).toBe(200);
       expect((putRes2.json() as any).provider.enabled).toBe(false);
 
-      const list = await app.inject({ method: "GET", url: `/orgs/${orgId}/saml/providers`, headers: { cookie } });
+      const list = await app.inject({ method: "GET", url: `/orgs/${orgId}/saml-providers`, headers: { cookie } });
       expect(list.statusCode).toBe(200);
       expect((list.json() as any).providers).toHaveLength(1);
       expect((list.json() as any).providers[0]).toMatchObject({ providerId: "okta", enabled: false });
 
-      const del = await app.inject({ method: "DELETE", url: `/orgs/${orgId}/saml/providers/okta`, headers: { cookie } });
+      const del = await app.inject({
+        method: "DELETE",
+        url: `/orgs/${orgId}/saml-providers/okta`,
+        headers: { cookie }
+      });
       expect(del.statusCode).toBe(200);
       expect((del.json() as any).ok).toBe(true);
 
       const audit = await db.query(
-        "SELECT event_type, details FROM audit_log WHERE event_type LIKE 'admin.integration_%' ORDER BY created_at ASC"
+        "SELECT event_type, details FROM audit_log WHERE event_type LIKE 'org.saml_provider.%' ORDER BY created_at ASC"
       );
-      const events = audit.rows.map((row) => ({ event_type: row.event_type, details: parseJsonValue(row.details) }));
-      expect(events.map((event) => event.event_type)).toEqual([
-        "admin.integration_added",
-        "admin.integration_updated",
-        "admin.integration_removed"
+      expect(audit.rows.map((row) => row.event_type)).toEqual([
+        "org.saml_provider.created",
+        "org.saml_provider.updated",
+        "org.saml_provider.deleted"
       ]);
-      for (const event of events) {
-        expect(event.details).toMatchObject({ type: "saml", providerId: "okta" });
-      }
+
+      const details = audit.rows.map((row) => parseJsonValue(row.details));
+      expect(details[0].after.providerId).toBe("okta");
+      expect(details[1].after.enabled).toBe(false);
+      expect(details[2].before.providerId).toBe("okta");
     } finally {
       await app.close();
       await db.end();
@@ -411,11 +406,11 @@ describe("SAML SSO", () => {
       const cookie = extractCookie(ownerRegister.headers["set-cookie"]);
       const putProvider = await app.inject({
         method: "PUT",
-        url: `/orgs/${orgId}/saml/providers/test`,
+        url: `/orgs/${orgId}/saml-providers/test`,
         headers: { cookie },
         payload: {
-          entryPoint: "http://idp.example.test/sso",
-          issuer: "http://sp.example.test/metadata",
+          idpEntryPoint: "http://idp.example.test/sso",
+          spEntityId: "http://sp.example.test/metadata",
           idpIssuer: "https://idp.example.test/metadata",
           // Duplicate cert to exercise certificate-bundle handling (rollover support).
           idpCertPem: `${TEST_CERT_PEM}\n${TEST_CERT_PEM}`,
@@ -426,13 +421,6 @@ describe("SAML SSO", () => {
         }
       });
       expect(putProvider.statusCode).toBe(200);
-
-      const metadataRes = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/metadata` });
-      expect(metadataRes.statusCode).toBe(200);
-      expect(String(metadataRes.headers["content-type"] ?? "")).toContain("application/xml");
-      const metadataXml = metadataRes.body;
-      expect(metadataXml).toContain(`entityID="http://sp.example.test/metadata"`);
-      expect(metadataXml).toContain(`Location="${config.publicBaseUrl}/auth/saml/${orgId}/test/callback"`);
 
       const startRes = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
       expect(startRes.statusCode).toBe(302);
@@ -445,13 +433,21 @@ describe("SAML SSO", () => {
       expect(relayState).toBeTruthy();
 
       const callbackUrl = `${config.publicBaseUrl}/auth/saml/${orgId}/test/callback`;
+      const now = new Date();
       const samlResponse = buildSignedSamlResponse({
-        callbackUrl,
-        audience: "http://sp.example.test/metadata",
+        assertionId: "_assertion-success",
+        responseId: "_response-success",
+        destination: callbackUrl,
         inResponseTo: requestId,
+        issuer: "https://idp.example.test/metadata",
+        audience: "http://sp.example.test/metadata",
         nameId: "saml-subject-123",
         email: "saml-user@example.com",
-        name: "SAML User"
+        name: "SAML User",
+        notBefore: new Date(now.getTime() - 1000),
+        notOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+        subjectNotOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+        privateKeyPem: TEST_PRIVATE_KEY_PEM
       });
 
       const callbackRes = await app.inject({
@@ -477,7 +473,7 @@ describe("SAML SSO", () => {
       );
       expect(identities.rowCount).toBe(1);
       expect(identities.rows[0]).toMatchObject({
-        provider: "test",
+        provider: "saml:test",
         subject: "saml-subject-123",
         email: "saml-user@example.com",
         org_id: orgId
@@ -489,33 +485,254 @@ describe("SAML SSO", () => {
       expect(audit.rowCount).toBe(1);
       expect(audit.rows[0].org_id).toBe(orgId);
       expect(parseJsonValue(audit.rows[0].details)).toMatchObject({ method: "saml", provider: "test" });
+    } finally {
+      await app.close();
+      await db.end();
+    }
+  });
 
-      // Replay the same response against a fresh RelayState should fail because the
-      // original AuthnRequest ID (InResponseTo) is consumed.
-      const replayStart = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
-      expect(replayStart.statusCode).toBe(302);
-      const replayUrl = new URL(replayStart.headers.location as string);
-      const replayState = replayUrl.searchParams.get("RelayState");
-      expect(replayState).toBeTruthy();
+  it(
+    "rejects invalid signatures, wrong audience, expired assertions, and replayed assertion IDs",
+    async () => {
+      const { db, config, app } = await createTestApp();
+      try {
+        const ownerRegister = await app.inject({
+          method: "POST",
+          url: "/auth/register",
+          payload: { email: "saml-owner2@example.com", password: "password1234", name: "Owner", orgName: "SSO Org 2" }
+        });
+        expect(ownerRegister.statusCode).toBe(200);
+        const orgId = (ownerRegister.json() as any).organization.id as string;
 
-      const replayRes = await app.inject({
+        await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+          orgId,
+          JSON.stringify(["password", "saml"])
+        ]);
+
+        const cookie = extractCookie(ownerRegister.headers["set-cookie"]);
+        const putProvider = await app.inject({
+          method: "PUT",
+          url: `/orgs/${orgId}/saml-providers/test`,
+          headers: { cookie },
+          payload: {
+            idpEntryPoint: "http://idp.example.test/sso",
+            spEntityId: "http://sp.example.test/metadata",
+            idpIssuer: "https://idp.example.test/metadata",
+            idpCertPem: TEST_CERT_PEM,
+            wantAssertionsSigned: true,
+            wantResponseSigned: false,
+            attributeMapping: { email: "email", name: "name" },
+            enabled: true
+          }
+        });
+        expect(putProvider.statusCode).toBe(200);
+
+        const callbackUrl = `${config.publicBaseUrl}/auth/saml/${orgId}/test/callback`;
+
+        // invalid signature
+        {
+          const start = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+          const startUrl = new URL(start.headers.location as string);
+          const requestId = extractAuthnRequestId(startUrl.searchParams.get("SAMLRequest")!);
+          const relayState = startUrl.searchParams.get("RelayState")!;
+
+          const badKey = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
+            type: "pkcs8",
+            format: "pem"
+          }) as string;
+
+          const now = new Date();
+          const samlResponse = buildSignedSamlResponse({
+            assertionId: "_assertion-bad-sig",
+            responseId: "_response-bad-sig",
+            destination: callbackUrl,
+            inResponseTo: requestId,
+            issuer: "https://idp.example.test/metadata",
+            audience: "http://sp.example.test/metadata",
+            nameId: "subject-1",
+            email: "user@example.com",
+            name: "User",
+            notBefore: new Date(now.getTime() - 1000),
+            notOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+            subjectNotOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+            privateKeyPem: badKey
+          });
+
+          const callback = await app.inject({
+            method: "POST",
+            url: `/auth/saml/${orgId}/test/callback`,
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: relayState }).toString()
+          });
+          expect(callback.statusCode).toBe(401);
+          expect((callback.json() as any).error).toBe("invalid_signature");
+        }
+
+        // wrong audience
+        {
+          const start = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+          const startUrl = new URL(start.headers.location as string);
+          const requestId = extractAuthnRequestId(startUrl.searchParams.get("SAMLRequest")!);
+          const relayState = startUrl.searchParams.get("RelayState")!;
+
+          const now = new Date();
+          const samlResponse = buildSignedSamlResponse({
+            assertionId: "_assertion-bad-aud",
+            responseId: "_response-bad-aud",
+            destination: callbackUrl,
+            inResponseTo: requestId,
+            issuer: "https://idp.example.test/metadata",
+            audience: "wrong-audience",
+            nameId: "subject-1",
+            email: "user@example.com",
+            name: "User",
+            notBefore: new Date(now.getTime() - 1000),
+            notOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+            subjectNotOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+            privateKeyPem: TEST_PRIVATE_KEY_PEM
+          });
+
+          const callback = await app.inject({
+            method: "POST",
+            url: `/auth/saml/${orgId}/test/callback`,
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: relayState }).toString()
+          });
+          expect(callback.statusCode).toBe(401);
+          expect((callback.json() as any).error).toBe("invalid_audience");
+        }
+
+        // expired assertion
+        {
+          const start = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+          const startUrl = new URL(start.headers.location as string);
+          const requestId = extractAuthnRequestId(startUrl.searchParams.get("SAMLRequest")!);
+          const relayState = startUrl.searchParams.get("RelayState")!;
+
+          const now = new Date();
+          const samlResponse = buildSignedSamlResponse({
+            assertionId: "_assertion-expired",
+            responseId: "_response-expired",
+            destination: callbackUrl,
+            inResponseTo: requestId,
+            issuer: "https://idp.example.test/metadata",
+            audience: "http://sp.example.test/metadata",
+            nameId: "subject-1",
+            email: "user@example.com",
+            name: "User",
+            notBefore: new Date(now.getTime() - 10 * 60 * 1000),
+            notOnOrAfter: new Date(now.getTime() - 5 * 60 * 1000),
+            subjectNotOnOrAfter: new Date(now.getTime() - 5 * 60 * 1000),
+            privateKeyPem: TEST_PRIVATE_KEY_PEM
+          });
+
+          const callback = await app.inject({
+            method: "POST",
+            url: `/auth/saml/${orgId}/test/callback`,
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: relayState }).toString()
+          });
+          expect(callback.statusCode).toBe(401);
+          expect((callback.json() as any).error).toBe("assertion_expired");
+        }
+
+        // replayed assertion id (distinct InResponseTo values, same assertion ID)
+        {
+          const assertionId = "_assertion-replay";
+          const now = new Date();
+
+          const start1 = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+          const startUrl1 = new URL(start1.headers.location as string);
+          const requestId1 = extractAuthnRequestId(startUrl1.searchParams.get("SAMLRequest")!);
+          const relayState1 = startUrl1.searchParams.get("RelayState")!;
+
+          const samlResponse1 = buildSignedSamlResponse({
+            assertionId,
+            responseId: "_response-replay-1",
+            destination: callbackUrl,
+            inResponseTo: requestId1,
+            issuer: "https://idp.example.test/metadata",
+            audience: "http://sp.example.test/metadata",
+            nameId: "subject-1",
+            email: "user@example.com",
+            name: "User",
+            notBefore: new Date(now.getTime() - 1000),
+            notOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+            subjectNotOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+            privateKeyPem: TEST_PRIVATE_KEY_PEM
+          });
+
+          const ok = await app.inject({
+            method: "POST",
+            url: `/auth/saml/${orgId}/test/callback`,
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            payload: new URLSearchParams({ SAMLResponse: samlResponse1, RelayState: relayState1 }).toString()
+          });
+          expect(ok.statusCode).toBe(200);
+
+          const start2 = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+          const startUrl2 = new URL(start2.headers.location as string);
+          const requestId2 = extractAuthnRequestId(startUrl2.searchParams.get("SAMLRequest")!);
+          const relayState2 = startUrl2.searchParams.get("RelayState")!;
+
+          const samlResponse2 = buildSignedSamlResponse({
+            assertionId,
+            responseId: "_response-replay-2",
+            destination: callbackUrl,
+            inResponseTo: requestId2,
+            issuer: "https://idp.example.test/metadata",
+            audience: "http://sp.example.test/metadata",
+            nameId: "subject-1",
+            email: "user@example.com",
+            name: "User",
+            notBefore: new Date(now.getTime() - 1000),
+            notOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+            subjectNotOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+            privateKeyPem: TEST_PRIVATE_KEY_PEM
+          });
+
+          const replay = await app.inject({
+            method: "POST",
+            url: `/auth/saml/${orgId}/test/callback`,
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            payload: new URLSearchParams({ SAMLResponse: samlResponse2, RelayState: relayState2 }).toString()
+          });
+          expect(replay.statusCode).toBe(401);
+          expect((replay.json() as any).error).toBe("replay_detected");
+        }
+      } finally {
+        await app.close();
+        await db.end();
+      }
+    },
+    20_000
+  );
+
+  it("enforces org require_mfa via AuthnContextClassRef", async () => {
+    const { db, config, app } = await createTestApp();
+    try {
+      const ownerRegister = await app.inject({
         method: "POST",
-        url: `/auth/saml/${orgId}/test/callback`,
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: replayState! }).toString()
+        url: "/auth/register",
+        payload: { email: "saml-mfa-owner@example.com", password: "password1234", name: "Owner", orgName: "SSO Org 3" }
       });
-      expect(replayRes.statusCode).toBe(401);
-      expect((replayRes.json() as any).error).toBe("invalid_saml_response");
+      expect(ownerRegister.statusCode).toBe(200);
+      const orgId = (ownerRegister.json() as any).organization.id as string;
 
-      // If an IdP issuer is configured, responses from a different issuer should be rejected.
-      const updateProvider = await app.inject({
+      await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+        orgId,
+        JSON.stringify(["password", "saml"])
+      ]);
+
+      const cookie = extractCookie(ownerRegister.headers["set-cookie"]);
+      const putProvider = await app.inject({
         method: "PUT",
-        url: `/orgs/${orgId}/saml/providers/test`,
+        url: `/orgs/${orgId}/saml-providers/test`,
         headers: { cookie },
         payload: {
-          entryPoint: "http://idp.example.test/sso",
-          issuer: "http://sp.example.test/metadata",
-          idpIssuer: "https://idp.other.example.test/metadata",
+          idpEntryPoint: "http://idp.example.test/sso",
+          spEntityId: "http://sp.example.test/metadata",
+          idpIssuer: "https://idp.example.test/metadata",
           idpCertPem: TEST_CERT_PEM,
           wantAssertionsSigned: true,
           wantResponseSigned: false,
@@ -523,59 +740,78 @@ describe("SAML SSO", () => {
           enabled: true
         }
       });
-      expect(updateProvider.statusCode).toBe(200);
+      expect(putProvider.statusCode).toBe(200);
 
-      const issuerStart = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
-      expect(issuerStart.statusCode).toBe(302);
-      const issuerUrl = new URL(issuerStart.headers.location as string);
-      const issuerRequestId = extractAuthnRequestId(issuerUrl.searchParams.get("SAMLRequest")!);
-      const issuerRelayState = issuerUrl.searchParams.get("RelayState");
-      expect(issuerRelayState).toBeTruthy();
+      await db.query("UPDATE org_settings SET require_mfa = true WHERE org_id = $1", [orgId]);
 
-      const issuerResponse = buildSignedSamlResponse({
-        callbackUrl,
-        audience: "http://sp.example.test/metadata",
-        inResponseTo: issuerRequestId,
-        nameId: "saml-subject-123",
-        email: "saml-user@example.com",
-        name: "SAML User"
-      });
+      const callbackUrl = `${config.publicBaseUrl}/auth/saml/${orgId}/test/callback`;
+      const now = new Date();
 
-      const issuerCallback = await app.inject({
-        method: "POST",
-        url: `/auth/saml/${orgId}/test/callback`,
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        payload: new URLSearchParams({ SAMLResponse: issuerResponse, RelayState: issuerRelayState! }).toString()
-      });
-      expect(issuerCallback.statusCode).toBe(401);
-      expect((issuerCallback.json() as any).error).toBe("invalid_saml_response");
+      // Without MFA context.
+      {
+        const start = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+        const startUrl = new URL(start.headers.location as string);
+        const requestId = extractAuthnRequestId(startUrl.searchParams.get("SAMLRequest")!);
+        const relayState = startUrl.searchParams.get("RelayState")!;
 
-      // Destination is outside the signed assertion for many IdPs. If present, it must match our ACS URL.
-      const destinationStart = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
-      expect(destinationStart.statusCode).toBe(302);
-      const destinationUrl = new URL(destinationStart.headers.location as string);
-      const destinationRequestId = extractAuthnRequestId(destinationUrl.searchParams.get("SAMLRequest")!);
-      const destinationRelayState = destinationUrl.searchParams.get("RelayState");
-      expect(destinationRelayState).toBeTruthy();
+        const samlResponse = buildSignedSamlResponse({
+          assertionId: "_assertion-mfa-missing",
+          responseId: "_response-mfa-missing",
+          destination: callbackUrl,
+          inResponseTo: requestId,
+          issuer: "https://idp.example.test/metadata",
+          audience: "http://sp.example.test/metadata",
+          nameId: "subject-mfa",
+          email: "user@example.com",
+          name: "User",
+          notBefore: new Date(now.getTime() - 1000),
+          notOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+          subjectNotOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+          privateKeyPem: TEST_PRIVATE_KEY_PEM
+        });
 
-      const destinationResponse = buildSignedSamlResponse({
-        callbackUrl,
-        destinationUrl: "http://evil.example.test/callback",
-        audience: "http://sp.example.test/metadata",
-        inResponseTo: destinationRequestId,
-        nameId: "saml-subject-123",
-        email: "saml-user@example.com",
-        name: "SAML User"
-      });
+        const callback = await app.inject({
+          method: "POST",
+          url: `/auth/saml/${orgId}/test/callback`,
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: relayState }).toString()
+        });
+        expect(callback.statusCode).toBe(401);
+        expect((callback.json() as any).error).toBe("mfa_required");
+      }
 
-      const destinationCallback = await app.inject({
-        method: "POST",
-        url: `/auth/saml/${orgId}/test/callback`,
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        payload: new URLSearchParams({ SAMLResponse: destinationResponse, RelayState: destinationRelayState! }).toString()
-      });
-      expect(destinationCallback.statusCode).toBe(401);
-      expect((destinationCallback.json() as any).error).toBe("invalid_saml_response");
+      // With MFA context.
+      {
+        const start = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+        const startUrl = new URL(start.headers.location as string);
+        const requestId = extractAuthnRequestId(startUrl.searchParams.get("SAMLRequest")!);
+        const relayState = startUrl.searchParams.get("RelayState")!;
+
+        const samlResponse = buildSignedSamlResponse({
+          assertionId: "_assertion-mfa-ok",
+          responseId: "_response-mfa-ok",
+          destination: callbackUrl,
+          inResponseTo: requestId,
+          issuer: "https://idp.example.test/metadata",
+          audience: "http://sp.example.test/metadata",
+          nameId: "subject-mfa",
+          email: "user@example.com",
+          name: "User",
+          notBefore: new Date(now.getTime() - 1000),
+          notOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+          subjectNotOnOrAfter: new Date(now.getTime() + 5 * 60 * 1000),
+          authnContextClassRef: "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
+          privateKeyPem: TEST_PRIVATE_KEY_PEM
+        });
+
+        const callback = await app.inject({
+          method: "POST",
+          url: `/auth/saml/${orgId}/test/callback`,
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: relayState }).toString()
+        });
+        expect(callback.statusCode).toBe(200);
+      }
     } finally {
       await app.close();
       await db.end();

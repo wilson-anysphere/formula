@@ -12,15 +12,15 @@ SAML providers are stored in `org_saml_providers` and managed through org-admin 
 ### Fields
 
 - `providerId` (path param): A short identifier for the IdP configuration (e.g. `okta`, `azuread`).
-- `entryPoint`: IdP SSO URL (must be a valid URL; **HTTPS required in production**).
-- `issuer`: Service Provider issuer / Entity ID. This is also used as the SAML **audience** when validating assertions. (Can be a URL or URN; if it’s a URL, HTTPS is required in production.)
-- `idpIssuer` (optional): Expected IdP EntityID / Issuer. When set, Formula rejects assertions whose `<saml:Issuer>` does not match. (Can be a URL or URN; if it’s a URL, HTTPS is required in production.)
+- `idpEntryPoint` (legacy: `entryPoint`): IdP SSO URL (must be a valid URL; **HTTPS required in production**).
+- `spEntityId` (legacy: `issuer`): Service Provider issuer / Entity ID. This is also used as the SAML **audience** when validating assertions. (Can be a URL or URN; if it’s a URL, HTTPS is required in production.)
+- `idpIssuer`: Expected IdP EntityID / Issuer. Formula rejects assertions whose `<saml:Issuer>` does not match. (Can be a URL or URN; if it’s a URL, HTTPS is required in production.)
 - `idpCertPem`: IdP signing certificate in PEM format (the public cert used to validate XML signatures).
 - `wantAssertionsSigned`: Require `<Assertion>` signatures (default `true`).
-- `wantResponseSigned`: Require `<Response>` signatures (default `true`).
+- `wantResponseSigned`: Require `<Response>` signatures (default `false`).
 - `attributeMapping`: Attribute names used to extract user identity:
-  - `email` (required): attribute containing the user email.
-  - `name` (required): attribute containing the display name.
+  - `email` (optional): attribute containing the user email.
+  - `name` (optional): attribute containing the display name.
   - `groups` (optional): attribute containing groups (currently not persisted).
 - `enabled`: Whether this provider can be used for login.
 
@@ -44,6 +44,12 @@ To support IdP signing certificate rotation, `idpCertPem` may contain multiple P
 
 All endpoints require an authenticated **org admin**.
 
+- Primary (task spec):
+- `GET /orgs/:orgId/saml-providers`
+- `PUT /orgs/:orgId/saml-providers/:providerId`
+- `DELETE /orgs/:orgId/saml-providers/:providerId`
+
+- Legacy aliases:
 - `GET /orgs/:orgId/saml/providers`
 - `GET /orgs/:orgId/saml/providers/:providerId`
 - `PUT /orgs/:orgId/saml/providers/:providerId`
@@ -51,11 +57,9 @@ All endpoints require an authenticated **org admin**.
 
 Changes emit audit events:
 
-- `admin.integration_added`
-- `admin.integration_updated`
-- `admin.integration_removed`
-
-with `details: { type: "saml", providerId }`.
+- `org.saml_provider.created`
+- `org.saml_provider.updated`
+- `org.saml_provider.deleted`
 
 ## Login flow
 
@@ -63,7 +67,7 @@ with `details: { type: "saml", providerId }`.
 
 `GET /auth/saml/:orgId/:provider/start`
 
-Redirects the browser to the IdP `entryPoint` with a `SAMLRequest` query param.
+Redirects the browser to the IdP `idpEntryPoint` (legacy: `entryPoint`) with a `SAMLRequest` query param.
 
 ### SP metadata
 
@@ -86,8 +90,9 @@ On success, Formula:
     - If the IdP includes `InResponseTo`, Formula validates it against a short-lived request cache and consumes it (replay protection).
     - If the assertion includes a `SubjectConfirmationData Recipient`, Formula requires it to match the ACS URL.
     - If the response includes a `Destination` attribute, Formula requires it to match the ACS URL.
+    - Formula caches Assertion IDs after signature verification to prevent replay (`saml_assertion_replays`).
 2. Extracts identity via `attributeMapping` and normalizes email.
-3. Links the identity in `user_identities` (`provider = providerId`, `subject = NameID`, `org_id = orgId`).
+3. Links the identity in `user_identities` (`provider = saml:<providerId>`, `subject = NameID`, `org_id = orgId`).
 4. Provisions the user + org membership if needed.
 5. Issues a session cookie and writes an `auth.login` audit event (`details: { method: "saml", provider }`).
 
