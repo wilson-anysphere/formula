@@ -936,6 +936,7 @@ export function createSyncServer(
     // periodic pings (30s) and receives pongs, which lets us refresh `lastSeenMs`
     // even for read-only sessions with no Yjs updates.
     ws.on("pong", () => {
+      if (!shouldPersist(docName)) return;
       void retentionManager?.markSeen(persistedName);
     });
 
@@ -978,7 +979,9 @@ export function createSyncServer(
       return;
     }
 
-    void retentionManager?.markSeen(persistedName);
+    if (shouldPersist(docName)) {
+      void retentionManager?.markSeen(persistedName);
+    }
 
     installYwsSecurity(ws, { docName, auth: authCtx, logger });
     setupWSConnection(ws, req, { gc: config.gc });
