@@ -21,6 +21,8 @@ Authorization: Bearer <token>
 
 - Clients may send `If-None-Match: <etag>` to receive `304 Not Modified` with an empty body.
 - For package downloads, the `ETag` is the package sha256.
+- Responses are served with `Cache-Control: public, max-age=0, must-revalidate` so intermediaries may cache
+  but must revalidate via `ETag` before reuse.
 
 ## Endpoints
 
@@ -89,4 +91,3 @@ Downloads raw package bytes.
 **Client integrity requirement**
 
 Clients should compute sha256 over the downloaded bytes and reject the download if it does not match `X-Package-Sha256`.
-

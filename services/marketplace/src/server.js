@@ -3,6 +3,8 @@ const crypto = require("node:crypto");
 
 const { MarketplaceStore } = require("./store");
 
+const CACHE_CONTROL_REVALIDATE = "public, max-age=0, must-revalidate";
+
 class HttpError extends Error {
   constructor(statusCode, message) {
     super(message);
@@ -308,12 +310,12 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         const etag = `"${sha256Hex(`${ext.id}|${ext.updatedAt || ""}`)}"`;
         if (etagMatches(req.headers["if-none-match"], etag)) {
           statusCode = 304;
-          res.writeHead(304, { ETag: etag });
+          res.writeHead(304, { ETag: etag, "Cache-Control": CACHE_CONTROL_REVALIDATE });
           res.end();
           return;
         }
         statusCode = 200;
-        return sendJson(res, 200, ext, { ETag: etag });
+        return sendJson(res, 200, ext, { ETag: etag, "Cache-Control": CACHE_CONTROL_REVALIDATE });
       }
 
       if (
@@ -345,6 +347,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           statusCode = 304;
           res.writeHead(304, {
             ETag: etag,
+            "Cache-Control": CACHE_CONTROL_REVALIDATE,
             "X-Package-Signature": pkgMeta.signatureBase64,
             "X-Package-Sha256": pkgMeta.sha256,
             "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
@@ -365,6 +368,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           "Content-Type": "application/vnd.formula.extension-package",
           "Content-Length": pkg.bytes.length,
           ETag: etag,
+          "Cache-Control": CACHE_CONTROL_REVALIDATE,
           "X-Package-Signature": pkg.signatureBase64,
           "X-Package-Sha256": pkg.sha256,
           "X-Package-Format-Version": String(pkg.formatVersion ?? 1),
@@ -405,7 +409,25 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           });
         }
 
-        const { bytes: packageBytes } = await readBinaryBody(req, { limitBytes: 20 * 1024 * 1024 });
+        const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+        const declaredLength = Number(req.headers["content-length"] || "0");
+        if (Number.isFinite(declaredLength) && declaredLength > MAX_UPLOAD_BYTES) {
+          statusCode = 413;
+          return sendJson(res, 413, { error: "Request body too large" });
+        }
+
+        const { bytes: packageBytes, sha256 } = await readBinaryBody(req, { limitBytes: MAX_UPLOAD_BYTES });
+        const expectedShaHeader = req.headers["x-package-sha256"];
+        const expectedSha256 =
+          typeof expectedShaHeader === "string"
+            ? expectedShaHeader
+            : Array.isArray(expectedShaHeader)
+              ? expectedShaHeader[0] || null
+              : null;
+        if (expectedSha256 && String(expectedSha256).toLowerCase() !== sha256) {
+          statusCode = 400;
+          return sendJson(res, 400, { error: "X-Package-Sha256 does not match uploaded bytes" });
+        }
         const isV1 = packageBytes.length >= 2 && packageBytes[0] === 0x1f && packageBytes[1] === 0x8b;
         const signatureHeader = req.headers["x-package-signature"];
         const signatureBase64 =
