@@ -78,6 +78,54 @@ function hasDuplicateStrings(input) {
 }
 
 /**
+ * Extract a minimal set of OData query options from a URL.
+ *
+ * This allows `OData.Feed("...?$top=10")` style usage to participate in folding
+ * without losing the user-supplied options.
+ *
+ * @param {string} url
+ * @returns {ODataQueryOptions}
+ */
+function parseQueryOptionsFromUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return {};
+  }
+
+  const params = parsed.searchParams;
+  /** @type {ODataQueryOptions} */
+  const out = {};
+
+  const selectRaw = params.get("$select");
+  if (typeof selectRaw === "string" && selectRaw.trim() !== "") {
+    out.select = selectRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+
+  const filterRaw = params.get("$filter");
+  if (typeof filterRaw === "string" && filterRaw.trim() !== "") {
+    out.filter = filterRaw;
+  }
+
+  const orderbyRaw = params.get("$orderby");
+  if (typeof orderbyRaw === "string" && orderbyRaw.trim() !== "") {
+    out.orderby = orderbyRaw;
+  }
+
+  const topRaw = params.get("$top");
+  if (typeof topRaw === "string" && topRaw.trim() !== "") {
+    const parsedTop = Number.parseInt(topRaw, 10);
+    if (Number.isFinite(parsedTop)) out.top = Math.max(0, parsedTop);
+  }
+
+  return out;
+}
+
+/**
  * Build a URL with OData query options appended.
  *
  * Note: We intentionally keep `$` unescaped in parameter names because that's
@@ -431,7 +479,7 @@ export class ODataFoldingEngine {
     }
 
     /** @type {ODataQueryOptions} */
-    let current = {};
+    let current = parseQueryOptionsFromUrl(query.source.url);
     /** @type {QueryStep[]} */
     const localSteps = [];
     /** @type {ODataFoldingExplainStep[]} */

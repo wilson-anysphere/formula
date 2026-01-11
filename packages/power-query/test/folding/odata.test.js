@@ -156,3 +156,36 @@ test("buildODataUrl: preserves existing query options when not overridden", () =
     "https://example.com/odata/Products?foo=bar&$top=2",
   );
 });
+
+test("OData folding: respects $top embedded in the source URL", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_base_top",
+    name: "OData base $top",
+    source: { type: "odata", url: "https://example.com/odata/Products?$top=5" },
+    steps: [{ id: "s1", name: "Take", operation: { type: "take", count: 10 } }],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  // take(10) should not expand past the base URL's $top=5.
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$top=5");
+});
+
+test("OData folding: combines source URL $filter with folded filterRows", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_base_filter",
+    name: "OData base $filter",
+    source: { type: "odata", url: "https://example.com/odata/Products?$filter=Price%20gt%2020" },
+    steps: [
+      { id: "s1", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Price", operator: "greaterThan", value: 30 } } },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  assert.ok(explained.plan.url.includes("$filter="));
+  assert.ok(explained.plan.url.includes("Price%20gt%2020"));
+  assert.ok(explained.plan.url.includes("Price%20gt%2030"));
+});
