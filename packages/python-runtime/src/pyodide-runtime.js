@@ -89,6 +89,7 @@ export class PyodideRuntime {
     this.pyodide = null;
     this._interruptView = null;
     this._mainThreadReady = false;
+    this._executeQueue = Promise.resolve();
     this.backendMode = null;
     this.initialized = false;
   }
