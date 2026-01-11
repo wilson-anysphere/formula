@@ -12,7 +12,7 @@ use encoding_rs::{
     WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257, WINDOWS_1258,
     WINDOWS_874,
 };
-use formula_model::{CellRef, ColProperties, DateSystem, RowProperties};
+use formula_model::{CellRef, ColProperties, DateSystem, RowProperties, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
 #[derive(Debug, Default)]
 pub(crate) struct SheetRowColProperties {
@@ -429,6 +429,9 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
     let mut offset = start;
 
     let mut maybe_insert = |row: u32, col: u32, xf: u16| {
+        if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+            return;
+        }
         if let Some(mask) = xf_is_interesting {
             let idx = xf as usize;
             if idx >= mask.len() || !mask[idx] {
@@ -794,6 +797,133 @@ mod tests {
         assert_eq!(xfs.get(&CellRef::new(1, 2)).copied(), Some(12));
         assert_eq!(xfs.get(&CellRef::new(2, 1)).copied(), Some(20));
         assert_eq!(xfs.get(&CellRef::new(2, 2)).copied(), Some(21));
+    }
+
+    #[test]
+    fn parses_number_record_ixfe() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&1u16.to_le_bytes()); // row
+        data.extend_from_slice(&2u16.to_le_bytes()); // col
+        data.extend_from_slice(&7u16.to_le_bytes()); // xf
+        data.extend_from_slice(&0f64.to_le_bytes()); // value
+
+        let stream = [record(0x0203, &data), record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(1, 2)).copied(), Some(7));
+    }
+
+    #[test]
+    fn parses_rk_record_ixfe() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_le_bytes()); // row
+        data.extend_from_slice(&4u16.to_le_bytes()); // col
+        data.extend_from_slice(&9u16.to_le_bytes()); // xf
+        data.extend_from_slice(&0u32.to_le_bytes()); // rk
+
+        let stream = [record(0x027E, &data), record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(3, 4)).copied(), Some(9));
+    }
+
+    #[test]
+    fn parses_blank_record_ixfe() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&10u16.to_le_bytes()); // row
+        data.extend_from_slice(&3u16.to_le_bytes()); // col
+        data.extend_from_slice(&2u16.to_le_bytes()); // xf
+
+        let stream = [record(0x0201, &data), record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(10, 3)).copied(), Some(2));
+    }
+
+    #[test]
+    fn parses_labelsst_record_ixfe() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u16.to_le_bytes()); // row
+        data.extend_from_slice(&0u16.to_le_bytes()); // col
+        data.extend_from_slice(&55u16.to_le_bytes()); // xf
+        data.extend_from_slice(&123u32.to_le_bytes()); // sst index
+
+        let stream = [record(0x00FD, &data), record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(55));
+    }
+
+    #[test]
+    fn parses_label_record_ixfe() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_le_bytes()); // row
+        data.extend_from_slice(&1u16.to_le_bytes()); // col
+        data.extend_from_slice(&77u16.to_le_bytes()); // xf
+        data.extend_from_slice(&0u16.to_le_bytes()); // cch (placeholder)
+
+        let stream = [record(0x0204, &data), record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(2, 1)).copied(), Some(77));
+    }
+
+    #[test]
+    fn parses_boolerr_record_ixfe() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&9u16.to_le_bytes()); // row
+        data.extend_from_slice(&8u16.to_le_bytes()); // col
+        data.extend_from_slice(&5u16.to_le_bytes()); // xf
+        data.push(1); // value
+        data.push(0); // fErr
+
+        let stream = [record(0x0205, &data), record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(9, 8)).copied(), Some(5));
+    }
+
+    #[test]
+    fn parses_formula_record_ixfe() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&4u16.to_le_bytes()); // row
+        data.extend_from_slice(&4u16.to_le_bytes()); // col
+        data.extend_from_slice(&6u16.to_le_bytes()); // xf
+        data.extend_from_slice(&[0u8; 14]); // rest of FORMULA record (dummy)
+
+        let stream = [record(0x0006, &data), record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(4, 4)).copied(), Some(6));
+    }
+
+    #[test]
+    fn prefers_last_record_for_duplicate_cells() {
+        let blank = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&0u16.to_le_bytes()); // row
+            data.extend_from_slice(&0u16.to_le_bytes()); // col
+            data.extend_from_slice(&1u16.to_le_bytes()); // xf
+            record(0x0201, &data)
+        };
+
+        let number = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&0u16.to_le_bytes()); // row
+            data.extend_from_slice(&0u16.to_le_bytes()); // col
+            data.extend_from_slice(&2u16.to_le_bytes()); // xf
+            data.extend_from_slice(&0f64.to_le_bytes());
+            record(0x0203, &data)
+        };
+
+        let stream = [blank, number, record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(2));
+    }
+
+    #[test]
+    fn skips_out_of_bounds_cells() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u16.to_le_bytes()); // row
+        data.extend_from_slice(&(EXCEL_MAX_COLS as u16).to_le_bytes()); // col (out of bounds)
+        data.extend_from_slice(&1u16.to_le_bytes()); // xf
+
+        let stream = [record(0x0201, &data), record(0x000A, &[])].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert!(xfs.is_empty());
     }
 
     #[test]

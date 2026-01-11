@@ -521,3 +521,47 @@ fn apply_row_col_properties(
         }
     }
 }
+
+/// Read the BIFF per-cell XF indices for every worksheet substream in a legacy `.xls` workbook.
+///
+/// The returned map is keyed by sheet name (as stored in the workbook global stream) and then by
+/// absolute 0-based `(row, col)` coordinates.
+///
+/// This is intentionally style-only: it does *not* attempt to parse cell values or formulas.
+pub fn read_cell_xfs_from_xls(
+    path: impl AsRef<Path>,
+) -> Result<HashMap<String, HashMap<(u32, u32), u16>>, String> {
+    let workbook_stream = biff::read_workbook_stream_from_xls(path.as_ref())?;
+    let biff_version = biff::detect_biff_version(&workbook_stream);
+    let sheets = biff::parse_biff_bound_sheets(&workbook_stream, biff_version)?;
+
+    let mut out = HashMap::new();
+    for (sheet_name, offset) in sheets {
+        if offset >= workbook_stream.len() {
+            return Err(format!(
+                "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
+            ));
+        }
+
+        let xfs = parse_biff_sheet_cell_xfs(&workbook_stream, offset)?;
+        out.insert(sheet_name, xfs);
+    }
+
+    Ok(out)
+}
+
+/// Parse a BIFF worksheet substream starting at `start` and return a mapping from cell coordinates
+/// to the XF index (`ixfe`) referenced by the last record encountered for that cell.
+///
+/// Excel treats later records as overwriting earlier ones; we mirror that behaviour by always
+/// preferring the last record seen for a given `(row, col)` key.
+pub fn parse_biff_sheet_cell_xfs(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<HashMap<(u32, u32), u16>, String> {
+    let xfs = biff::parse_biff_sheet_cell_xf_indices_filtered(workbook_stream, start, None)?;
+    Ok(xfs
+        .into_iter()
+        .map(|(cell_ref, xf)| ((cell_ref.row, cell_ref.col), xf))
+        .collect())
+}
