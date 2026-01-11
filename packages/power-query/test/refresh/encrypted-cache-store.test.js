@@ -122,6 +122,59 @@ test("EncryptedFileSystemCacheStore: stores Arrow IPC payloads in an encrypted .
   }
 });
 
+test("EncryptedFileSystemCacheStore: enableEncryption migrates Arrow IPC .bin blobs", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-arrow-migrate-"));
+  try {
+    const keychainProvider = new InMemoryKeychainProvider();
+
+    const adapter = new ArrowTableAdapter(
+      arrowTableFromColumns({
+        id: new Int32Array([1, 2]),
+        name: ["Alice", "Bob"],
+      }),
+    );
+
+    const cacheValue = { version: 2, table: serializeAnyTable(adapter), meta: null };
+
+    /** @type {import("../../src/cache/cache.js").CacheEntry} */
+    const entry = { value: cacheValue, createdAtMs: 1, expiresAtMs: null };
+    const key = "cache-key-arrow-migrate";
+
+    const store = new EncryptedFileSystemCacheStore({
+      directory: dir,
+      encryption: { enabled: false, keychainProvider },
+    });
+    await store.set(key, entry);
+
+    const hash = fnv1a64(key);
+    const jsonPath = path.join(dir, `${hash}.json`);
+    const binPath = path.join(dir, `${hash}.bin`);
+
+    const jsonBytes = await fs.readFile(jsonPath);
+    const binBytes = await fs.readFile(binPath);
+    assert.equal(isEncryptedFileBytes(jsonBytes), false);
+    assert.equal(isEncryptedFileBytes(binBytes), false);
+
+    await store.enableEncryption();
+
+    const jsonBytes2 = await fs.readFile(jsonPath);
+    const binBytes2 = await fs.readFile(binPath);
+    assert.equal(isEncryptedFileBytes(jsonBytes2), true);
+    assert.equal(isEncryptedFileBytes(binBytes2), true);
+
+    const reloaded = new EncryptedFileSystemCacheStore({
+      directory: dir,
+      encryption: { enabled: true, keychainProvider },
+    });
+    const loaded = await reloaded.get(key);
+    assert.ok(loaded);
+    assert.ok(loaded.value?.table?.bytes instanceof Uint8Array);
+    assert.deepEqual(deserializeAnyTable(loaded.value.table).toGrid(), adapter.toGrid());
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("QueryEngine: caches Arrow-backed Parquet results using EncryptedFileSystemCacheStore", async () => {
   const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-engine-"));
   try {
