@@ -2127,6 +2127,7 @@ class MarketplaceStore {
 
       const versionsStmt = db.prepare(
         `SELECT v.version, v.sha256, v.uploaded_at, v.yanked, v.readme,
+                v.signing_key_id, v.format_version,
                 s.status AS scan_status
          FROM extension_versions v
          LEFT JOIN package_scans s ON s.extension_id = v.extension_id AND s.version = v.version
@@ -2151,6 +2152,9 @@ class MarketplaceStore {
           sha256: String(v.sha256),
           uploadedAt: String(v.uploaded_at),
           yanked,
+          scanStatus: scanStatusRaw || "unknown",
+          signingKeyId: v.signing_key_id ? String(v.signing_key_id) : null,
+          formatVersion: Number(v.format_version || 1),
         });
         versionMeta[ver] = { readme: String(v.readme || "") };
         if (!yanked && !blockedByScan) unyanked.push(ver);

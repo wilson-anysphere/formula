@@ -25,6 +25,9 @@ export interface MarketplaceExtensionVersion {
   sha256: string;
   uploadedAt: string;
   yanked: boolean;
+  scanStatus?: string;
+  signingKeyId?: string | null;
+  formatVersion?: number;
 }
 
 export interface MarketplacePublisherKey {
