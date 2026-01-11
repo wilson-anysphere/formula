@@ -393,6 +393,23 @@ test("NodeFsOfflineAuditQueue removes stale cursor tmp files during flush", asyn
   assert.ok(!files.some((name) => name.endsWith(".tmp")), `expected tmp files to be removed, got: ${files.join(", ")}`);
 });
 
+test("NodeFsOfflineAuditQueue removes dangling open lock files without matching segments", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-lock-cleanup-"));
+  const queue = new NodeFsOfflineAuditQueue({ dirPath: dir, orphanOpenSegmentStaleMs: 0 });
+  await queue.ensureDir();
+
+  const segmentsDir = path.join(dir, "segments");
+  const lockName = `segment-${Date.now()}-dangling.open.lock`;
+  await writeFile(path.join(segmentsDir, lockName), JSON.stringify({ pid: 999999, createdAt: Date.now() }), "utf8");
+
+  await sleep(5);
+  const exporter = { async sendBatch() {} };
+  await queue.flushToExporter(exporter);
+
+  const files = await listFiles(segmentsDir);
+  assert.ok(!files.includes(lockName), `expected dangling lock to be removed, got: ${files.join(", ")}`);
+});
+
 test("IndexedDbOfflineAuditQueue redacts before persistence and flushes batches", async () => {
   globalThis.indexedDB = indexedDB;
   globalThis.IDBKeyRange = IDBKeyRange;

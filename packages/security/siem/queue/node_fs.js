@@ -473,6 +473,70 @@ export class NodeFsOfflineAuditQueue {
     if (deleted) await syncDir(this.segmentsDir);
   }
 
+  async _gcOpenLockFiles() {
+    let entries;
+    try {
+      entries = await readdir(this.segmentsDir, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw error;
+    }
+
+    const segmentStateByBaseName = new Map();
+    const lockEntries = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (entry.name.endsWith(".open.lock")) {
+        lockEntries.push(entry.name);
+        continue;
+      }
+
+      const parsed = parseSegmentFileName(entry.name);
+      if (!parsed) continue;
+      segmentStateByBaseName.set(parsed.baseName, parsed.state);
+    }
+
+    let deleted = false;
+    for (const fileName of lockEntries) {
+      const baseName = fileName.slice(0, -".open.lock".length);
+      const state = segmentStateByBaseName.get(baseName);
+
+      // Keep locks for active open segments; they are needed for orphan detection.
+      if (state === SEGMENT_STATES.OPEN) continue;
+
+      const fullPath = path.join(this.segmentsDir, fileName);
+
+      if (state && state !== SEGMENT_STATES.OPEN) {
+        await safeUnlink(fullPath);
+        deleted = true;
+        continue;
+      }
+
+      const payload = await safeReadJson(fullPath);
+      const pid = Number(payload?.pid);
+      const pidDead = Number.isFinite(pid) && pid > 0 ? !isPidAlive(pid) : false;
+      if (pidDead) {
+        await safeUnlink(fullPath);
+        deleted = true;
+        continue;
+      }
+
+      try {
+        const info = await stat(fullPath);
+        if (Date.now() - info.mtimeMs > this.orphanOpenSegmentStaleMs) {
+          await safeUnlink(fullPath);
+          deleted = true;
+        }
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+    }
+
+    if (deleted) await syncDir(this.segmentsDir);
+  }
+
   async _isOpenSegmentOrphan(segment) {
     const lock = await safeReadJson(segment.lockPath);
     const lockedPid = Number(lock?.pid);
@@ -504,6 +568,7 @@ export class NodeFsOfflineAuditQueue {
       await acquireFlushLock(this.lockPath);
       try {
         await this._gcTmpFiles();
+        await this._gcOpenLockFiles();
         await this._gcAckedSegments();
 
         let sent = 0;
