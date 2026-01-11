@@ -6,6 +6,7 @@ use formula_model::{
     import::{import_csv_to_columnar_table, CsvOptions},
     CellValue as ModelCellValue,
     DateSystem as WorkbookDateSystem,
+    WorksheetId,
 };
 use formula_xlsb::{CellValue as XlsbCellValue, XlsbWorkbook};
 use formula_xlsx::drawingml::PreservedDrawingParts;
@@ -33,6 +34,27 @@ pub struct Sheet {
     pub(crate) cells: HashMap<(usize, usize), Cell>,
     pub(crate) dirty_cells: HashSet<(usize, usize)>,
     pub(crate) columnar: Option<Arc<ColumnarTable>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DefinedName {
+    pub name: String,
+    /// Definition formula stored **without** leading '='.
+    pub refers_to: String,
+    /// Sheet id when the name is sheet-scoped; `None` for workbook-scoped names.
+    pub sheet_id: Option<String>,
+    pub hidden: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct Table {
+    pub name: String,
+    pub sheet_id: String,
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+    pub columns: Vec<String>,
 }
 
 impl Sheet {
@@ -199,6 +221,10 @@ pub struct Workbook {
     pub theme_palette: Option<formula_xlsx::theme::ThemePalette>,
     /// Excel workbook date system (1900 vs 1904) used to interpret serial dates.
     pub date_system: WorkbookDateSystem,
+    /// Workbook-level defined names (named ranges / constants / formulas).
+    pub defined_names: Vec<DefinedName>,
+    /// Excel tables (structured ranges) across all worksheets.
+    pub tables: Vec<Table>,
     pub sheets: Vec<Sheet>,
     pub print_settings: WorkbookPrintSettings,
     pub(crate) original_print_settings: WorkbookPrintSettings,
@@ -223,6 +249,8 @@ impl Workbook {
             preserved_pivot_parts: None,
             theme_palette: None,
             date_system: WorkbookDateSystem::Excel1900,
+            defined_names: Vec::new(),
+            tables: Vec::new(),
             sheets: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
             original_print_settings: WorkbookPrintSettings::default(),
@@ -341,6 +369,8 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             preserved_pivot_parts: None,
             theme_palette: None,
             date_system: document.workbook.date_system,
+            defined_names: Vec::new(),
+            tables: Vec::new(),
             sheets: Vec::new(),
             print_settings: print_settings.clone(),
             original_print_settings: print_settings,
@@ -379,6 +409,52 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             .map(formula_model_sheet_to_app_sheet)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
+        let sheet_names_by_id: HashMap<WorksheetId, String> = document
+            .workbook
+            .sheets
+            .iter()
+            .map(|sheet| (sheet.id, sheet.name.clone()))
+            .collect();
+
+        out.defined_names = document
+            .workbook
+            .defined_names
+            .iter()
+            .map(|dn| {
+                let sheet_id = match dn.scope {
+                    formula_model::names::DefinedNameScope::Workbook => None,
+                    formula_model::names::DefinedNameScope::Sheet(id) => {
+                        sheet_names_by_id.get(&id).cloned()
+                    }
+                };
+
+                DefinedName {
+                    name: dn.name.clone(),
+                    refers_to: dn.refers_to.clone(),
+                    sheet_id,
+                    hidden: dn.hidden,
+                }
+            })
+            .collect();
+
+        out.tables = document
+            .workbook
+            .sheets
+            .iter()
+            .flat_map(|sheet| {
+                let sheet_id = sheet.name.clone();
+                sheet.tables.iter().map(move |table| Table {
+                    name: table.display_name.clone(),
+                    sheet_id: sheet_id.clone(),
+                    start_row: table.range.start.row as usize,
+                    start_col: table.range.start.col as usize,
+                    end_row: table.range.end.row as usize,
+                    end_col: table.range.end.col as usize,
+                    columns: table.columns.iter().map(|c| c.name.clone()).collect(),
+                })
+            })
+            .collect();
+
         out.ensure_sheet_ids();
         for sheet in &mut out.sheets {
             sheet.clear_dirty_cells();
@@ -401,6 +477,8 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         theme_palette: None,
         // Calamine doesn't surface workbook date system metadata; default to Excel 1900.
         date_system: WorkbookDateSystem::Excel1900,
+        defined_names: Vec::new(),
+        tables: Vec::new(),
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -560,6 +638,8 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         preserved_pivot_parts: None,
         theme_palette: None,
         date_system: WorkbookDateSystem::Excel1900,
+        defined_names: Vec::new(),
+        tables: Vec::new(),
         sheets: vec![sheet],
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -585,6 +665,8 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         preserved_pivot_parts: None,
         theme_palette: None,
         date_system: WorkbookDateSystem::Excel1900,
+        defined_names: Vec::new(),
+        tables: Vec::new(),
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -1673,6 +1755,42 @@ mod tests {
             written.sheets[0].get_cell(0, 1).computed_value,
             CellScalar::Number(7.0)
         );
+    }
+
+    #[test]
+    fn read_xlsx_populates_defined_names() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/metadata/defined-names.xlsx"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read defined-names fixture workbook");
+        assert!(
+            workbook.defined_names.iter().any(|n| n.name == "ZedName"),
+            "expected defined name ZedName, got: {:?}",
+            workbook
+                .defined_names
+                .iter()
+                .map(|n| n.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            workbook.defined_names.iter().any(|n| n.name == "MyRange"),
+            "expected defined name MyRange, got: {:?}",
+            workbook
+                .defined_names
+                .iter()
+                .map(|n| n.name.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        let zed = workbook
+            .defined_names
+            .iter()
+            .find(|n| n.name == "ZedName")
+            .expect("ZedName exists");
+        assert_eq!(zed.refers_to, "Sheet1!$B$1");
+        assert!(zed.sheet_id.is_none(), "expected ZedName to be workbook-scoped");
     }
 
     #[test]

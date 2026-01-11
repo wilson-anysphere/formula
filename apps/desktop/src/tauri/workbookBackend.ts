@@ -48,6 +48,22 @@ export type WorkbookThemePalette = {
   followedHlink: string;
 };
 
+export type DefinedNameInfo = {
+  name: string;
+  refers_to: string;
+  sheet_id: string | null;
+};
+
+export type TableInfo = {
+  name: string;
+  sheet_id: string;
+  start_row: number;
+  start_col: number;
+  end_row: number;
+  end_col: number;
+  columns: string[];
+};
+
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 function getTauriInvoke(): TauriInvoke {
@@ -78,6 +94,16 @@ export class TauriWorkbookBackend {
   async getWorkbookThemePalette(): Promise<WorkbookThemePalette | null> {
     const palette = await this.invoke("get_workbook_theme_palette");
     return (palette as WorkbookThemePalette | null) ?? null;
+  }
+
+  async listDefinedNames(): Promise<DefinedNameInfo[]> {
+    const payload = await this.invoke("list_defined_names");
+    return (payload as DefinedNameInfo[]) ?? [];
+  }
+
+  async listTables(): Promise<TableInfo[]> {
+    const payload = await this.invoke("list_tables");
+    return (payload as TableInfo[]) ?? [];
   }
 
   async saveWorkbook(path?: string): Promise<void> {

@@ -691,6 +691,10 @@ export class SpreadsheetApp {
     return this.document;
   }
 
+  getSearchWorkbook(): DocumentWorkbookAdapter {
+    return this.searchWorkbook;
+  }
+
   getCurrentSheetId(): string {
     return this.sheetId;
   }

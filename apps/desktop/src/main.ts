@@ -12,13 +12,13 @@ import { renderMacroRunner, TauriMacroBackend, WebMacroBackend, type MacroRunReq
 import { applyMacroCellUpdates } from "./macros/applyUpdates";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
-import { DocumentWorkbookAdapter } from "./search/documentWorkbookAdapter.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend, type WorkbookInfo } from "./tauri/workbookBackend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
+import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
 
 const workbookSheetNames = new Map<string, string>();
 
@@ -649,7 +649,7 @@ if (
   renderLayout();
 }
 
-const workbook = new DocumentWorkbookAdapter({ document: app.getDocument() });
+const workbook = app.getSearchWorkbook();
 
 const findReplaceController = new FindReplaceController({
   workbook,
@@ -872,6 +872,63 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
   await app.restoreDocumentState(snapshot);
+
+  // Refresh workbook metadata (defined names + tables) used by the name box and
+  // AI completion. This is separate from the cell snapshot that populates the
+  // DocumentController.
+  workbook.names.clear();
+  workbook.tables.clear();
+  const sheetIdByName = new Map<string, string>();
+  for (const [id, name] of workbookSheetNames.entries()) {
+    sheetIdByName.set(name, id);
+  }
+
+  const [definedNames, tables] = await Promise.all([
+    tauriBackend.listDefinedNames().catch(() => []),
+    tauriBackend.listTables().catch(() => []),
+  ]);
+
+  for (const entry of definedNames) {
+    const name = typeof (entry as any)?.name === "string" ? String((entry as any).name) : "";
+    const refersTo =
+      typeof (entry as any)?.refers_to === "string" ? String((entry as any).refers_to) : "";
+    if (!name || !refersTo) continue;
+
+    const { sheetName: explicitSheetName, ref } = splitSheetQualifier(refersTo);
+    const sheetIdFromRef = explicitSheetName ? sheetIdByName.get(explicitSheetName) ?? explicitSheetName : null;
+    const sheetIdFromScope =
+      typeof (entry as any)?.sheet_id === "string" ? String((entry as any).sheet_id) : null;
+    const sheetName = sheetIdFromRef ?? sheetIdFromScope;
+    if (!sheetName) continue;
+
+    let range: { startRow: number; endRow: number; startCol: number; endCol: number } | null = null;
+    try {
+      range = parseA1Range(ref);
+    } catch {
+      range = null;
+    }
+    if (!range) continue;
+
+    workbook.defineName(name, { sheetName, range });
+  }
+
+  for (const table of tables) {
+    const name = typeof (table as any)?.name === "string" ? String((table as any).name) : "";
+    const sheetName =
+      typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
+    const columns = Array.isArray((table as any)?.columns) ? (table as any).columns.map(String) : [];
+    if (!name || !sheetName || columns.length === 0) continue;
+
+    workbook.addTable({
+      name,
+      sheetName,
+      startRow: Number((table as any).start_row) || 0,
+      startCol: Number((table as any).start_col) || 0,
+      endRow: Number((table as any).end_row) || 0,
+      endCol: Number((table as any).end_col) || 0,
+      columns,
+    });
+  }
 
   // Update chart series colors to reflect the workbook's theme palette (if available).
   try {

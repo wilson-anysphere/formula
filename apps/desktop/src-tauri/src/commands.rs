@@ -117,6 +117,24 @@ pub struct WorkbookInfo {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DefinedNameInfo {
+    pub name: String,
+    pub refers_to: String,
+    pub sheet_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TableInfo {
+    pub name: String,
+    pub sheet_id: String,
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+    pub columns: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SheetUsedRange {
     pub start_row: usize,
     pub end_row: usize,
@@ -378,6 +396,53 @@ pub fn get_workbook_theme_palette(
     let state = state.inner().lock().unwrap();
     let workbook = state.get_workbook().map_err(app_error)?;
     Ok(workbook_theme_palette(workbook))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn list_defined_names(state: State<'_, SharedAppState>) -> Result<Vec<DefinedNameInfo>, String> {
+    let state = state.inner().lock().unwrap();
+    let workbook = state.get_workbook().map_err(app_error)?;
+
+    let names = workbook
+        .defined_names
+        .iter()
+        .filter(|n| !n.hidden)
+        .filter(|n| !n.name.trim().is_empty())
+        .filter(|n| !n.name.to_ascii_lowercase().starts_with("_xlnm."))
+        .map(|n| DefinedNameInfo {
+            name: n.name.clone(),
+            refers_to: n.refers_to.clone(),
+            sheet_id: n.sheet_id.clone(),
+        })
+        .collect();
+
+    Ok(names)
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn list_tables(state: State<'_, SharedAppState>) -> Result<Vec<TableInfo>, String> {
+    let state = state.inner().lock().unwrap();
+    let workbook = state.get_workbook().map_err(app_error)?;
+
+    let tables = workbook
+        .tables
+        .iter()
+        .filter(|t| !t.name.trim().is_empty())
+        .filter(|t| !t.columns.is_empty())
+        .map(|t| TableInfo {
+            name: t.name.clone(),
+            sheet_id: t.sheet_id.clone(),
+            start_row: t.start_row,
+            start_col: t.start_col,
+            end_row: t.end_row,
+            end_col: t.end_col,
+            columns: t.columns.clone(),
+        })
+        .collect();
+
+    Ok(tables)
 }
 
 #[cfg(feature = "desktop")]
