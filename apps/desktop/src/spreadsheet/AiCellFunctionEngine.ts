@@ -162,12 +162,16 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       defaultSheetId,
     });
 
+    // AI prompts are authored directly in formulas, so we can safely inspect a bit more text
+    // for heuristic DLP classification than we allow for arbitrary cell values.
+    const literalMaxChars = Math.max(this.maxCellChars, MAX_PROMPT_CHARS);
+
     const { selectionClassification, references } = computeSelectionClassification({
       documentId: this.workbookId,
       args: params.args,
       provenance: alignedProvenance,
       defaultSheetId,
-      maxCellChars: this.maxCellChars,
+      maxCellChars: literalMaxChars,
       classificationRecords: dlp.classificationRecords,
     });
 
@@ -188,6 +192,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       policy: dlp.policy,
       classificationRecords: dlp.classificationRecords,
       maxCellChars: this.maxCellChars,
+      maxLiteralChars: literalMaxChars,
     });
 
     const promptHash = hashText(prompt);
@@ -671,6 +676,7 @@ function preparePromptAndInputs(params: {
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
   maxCellChars: number;
+  maxLiteralChars: number;
 }): {
   prompt: string;
   inputs: unknown;
@@ -693,6 +699,7 @@ function preparePromptAndInputs(params: {
     policy: params.policy,
     classificationRecords: params.classificationRecords,
     maxCellChars: params.maxCellChars,
+    maxLiteralChars: params.maxLiteralChars,
   });
   redactedCount += promptResult.redactedCount;
 
@@ -711,6 +718,7 @@ function preparePromptAndInputs(params: {
       policy: params.policy,
       classificationRecords: params.classificationRecords,
       maxCellChars: params.maxCellChars,
+      maxLiteralChars: params.maxLiteralChars,
     }),
   );
 
@@ -741,6 +749,7 @@ function compactArgForPrompt(params: {
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
   maxCellChars: number;
+  maxLiteralChars: number;
 }): { value: unknown; compaction: unknown; redactedCount: number } {
   if (Array.isArray(params.value)) {
     return compactArrayForPrompt({
@@ -768,6 +777,7 @@ function compactArgForPrompt(params: {
     policy: params.policy,
     classificationRecords: params.classificationRecords,
     maxCellChars: params.maxCellChars,
+    maxLiteralChars: params.maxLiteralChars,
   });
 }
 
@@ -814,6 +824,7 @@ function compactScalarForPrompt(params: {
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
   maxCellChars: number;
+  maxLiteralChars: number;
 }): { value: string; compaction: unknown; redactedCount: number } {
   let classification = { ...DEFAULT_CLASSIFICATION };
 
@@ -826,7 +837,7 @@ function compactScalarForPrompt(params: {
       classificationRecords: params.classificationRecords,
     });
   } else {
-    classification = heuristicClassifyValue(params.value as any, params.maxCellChars);
+    classification = heuristicClassifyValue(params.value as any, params.maxLiteralChars);
   }
 
   const decision = evaluatePolicy({
@@ -841,7 +852,7 @@ function compactScalarForPrompt(params: {
   }
 
   return {
-    value: formatScalar(params.value, { maxChars: params.maxCellChars }),
+    value: formatScalar(params.value, { maxChars: hasRefs ? params.maxCellChars : params.maxLiteralChars }),
     compaction: { kind: "scalar", redacted: false },
     redactedCount: 0,
   };
