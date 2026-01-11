@@ -398,7 +398,12 @@ export class QueryFoldingEngine {
           ...rightOut.map(({ source, out }) => `r.${quoteIdentifier(source)} AS ${quoteIdentifier(out)}`),
         ].join(", ");
 
-        const mergedSql = `SELECT ${selectList} FROM (${state.fragment.sql}) AS l ${join} (${rightState.fragment.sql}) AS r ON l.${quoteIdentifier(operation.leftKey)} = r.${quoteIdentifier(operation.rightKey)}`;
+        const on = nullSafeEqualsSql(
+          dialect,
+          `l.${quoteIdentifier(operation.leftKey)}`,
+          `r.${quoteIdentifier(operation.rightKey)}`,
+        );
+        const mergedSql = `SELECT ${selectList} FROM (${state.fragment.sql}) AS l ${join} (${rightState.fragment.sql}) AS r ON ${on}`;
         return {
           fragment: { sql: mergedSql, params: [...state.fragment.params, ...rightState.fragment.params] },
           columns: [...leftCols, ...rightOut.map((c) => c.out)],
@@ -534,6 +539,31 @@ function joinTypeToSql(dialect, joinType) {
       /** @type {never} */
       const exhausted = joinType;
       throw new Error(`Unsupported joinType '${exhausted}'`);
+    }
+  }
+}
+
+/**
+ * Join key comparison that matches the local engine semantics: `null` values
+ * compare equal when joining/merging.
+ *
+ * @param {SqlDialect} dialect
+ * @param {string} leftExpr
+ * @param {string} rightExpr
+ * @returns {string}
+ */
+function nullSafeEqualsSql(dialect, leftExpr, rightExpr) {
+  switch (dialect.name) {
+    case "postgres":
+      return `${leftExpr} IS NOT DISTINCT FROM ${rightExpr}`;
+    case "mysql":
+      return `${leftExpr} <=> ${rightExpr}`;
+    case "sqlite":
+      return `${leftExpr} IS ${rightExpr}`;
+    default: {
+      /** @type {never} */
+      const exhausted = dialect.name;
+      throw new Error(`Unsupported dialect '${exhausted}'`);
     }
   }
 }

@@ -198,7 +198,7 @@ test("compile: folds merge (join) when both sides fully fold to SQL", () => {
   const plan = folding.compile(left, { queries: { q_right: right } });
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT l."Id" AS "Id", l."Region" AS "Region", l."Sales" AS "Sales", r."Target" AS "Target" FROM (SELECT t."Id", t."Region", t."Sales" FROM (SELECT * FROM sales) AS t) AS l LEFT JOIN (SELECT t."Id", t."Target" FROM (SELECT * FROM targets) AS t) AS r ON l."Id" = r."Id"',
+    sql: 'SELECT l."Id" AS "Id", l."Region" AS "Region", l."Sales" AS "Sales", r."Target" AS "Target" FROM (SELECT t."Id", t."Region", t."Sales" FROM (SELECT * FROM sales) AS t) AS l LEFT JOIN (SELECT t."Id", t."Target" FROM (SELECT * FROM targets) AS t) AS r ON l."Id" IS NOT DISTINCT FROM r."Id"',
     params: [],
   });
 });
