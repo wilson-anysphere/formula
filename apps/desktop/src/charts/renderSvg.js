@@ -157,7 +157,8 @@ function renderBarLineSvg({ width, height, title, kind, series }) {
 
 function renderPieSvg({ width, height, title, series }) {
   const values = series[0]?.values?.map((v) => (typeof v === "number" ? v : Number(v))).filter(Number.isFinite) ?? [];
-  const labels = series[0]?.categories?.map((v) => String(v ?? "")) ?? [];
+  const labelsRaw = series[0]?.categories?.map((v) => String(v ?? "")) ?? [];
+  const labels = labelsRaw.length ? labelsRaw : values.map((_, i) => String(i + 1));
   const total = values.reduce((a, b) => a + b, 0);
 
   if (total <= 0) {

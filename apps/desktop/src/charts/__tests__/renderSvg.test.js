@@ -72,6 +72,28 @@ test("renders pie chart svg", () => {
   assert.match(svg, /<path/);
 });
 
+test("renders pie chart svg with fallback labels when categories are missing", () => {
+  const provider = createMatrixRangeProvider({
+    Sheet1: [
+      ["Value"],
+      [2],
+      [4],
+      [3],
+      [5],
+    ],
+  });
+
+  const chart = {
+    chartType: { kind: "pie" },
+    title: "Example Chart",
+    series: [{ values: "Sheet1!$A$2:$A$5" }],
+  };
+
+  const svg = renderChartSvg(chart, provider, { width: 320, height: 200 });
+  assert.match(svg, /<path/);
+  assert.match(svg, /1, 2, 3, 4/);
+});
+
 test("renders scatter chart svg", () => {
   const provider = createMatrixRangeProvider({
     Sheet1: [
