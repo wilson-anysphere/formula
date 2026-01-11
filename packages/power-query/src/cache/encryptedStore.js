@@ -34,8 +34,12 @@ const ENVELOPE_V2 = 2;
 const ENVELOPE_WRITE_VERSION = ENVELOPE_V2;
 
 const VALUE_MAGIC = /** @type {const} */ ([0x50, 0x51, 0x43, 0x56]); // "PQCV"
-const VALUE_VERSION = 1;
+const VALUE_V1 = 1;
+const VALUE_V2 = 2;
+const VALUE_WRITE_VERSION = VALUE_V2;
 const TYPE_KEY = "__pq_cache_type";
+const TAG_KEY = "__pq_cache_tag";
+const TAG_VERSION = 1;
 
 function isPlainObject(value) {
   return value != null && typeof value === "object" && /** @type {any} */ (value).constructor === Object;
@@ -133,7 +137,7 @@ function readUint32LE(view, offset) {
 function encodeValueBytes(value) {
   /** @type {Uint8Array[]} */
   const bins = [];
-  const encodedForJson = encodeForJson(value, bins, new WeakSet());
+  const encodedForJson = encodeForJson(value, bins, new WeakSet(), VALUE_WRITE_VERSION);
   const jsonBytes = utf8Encode(JSON.stringify(encodedForJson));
 
   let totalLen = 4 + 1 + 4 + jsonBytes.byteLength + 4;
@@ -141,7 +145,7 @@ function encodeValueBytes(value) {
 
   const out = new Uint8Array(totalLen);
   out.set(VALUE_MAGIC, 0);
-  out[4] = VALUE_VERSION;
+  out[4] = VALUE_WRITE_VERSION;
 
   let offset = 5;
   writeUint32LE(out, offset, jsonBytes.byteLength);
@@ -182,7 +186,7 @@ function decodeValueBytes(bytes) {
   }
 
   const version = bytes[4];
-  if (version !== VALUE_VERSION) {
+  if (version !== VALUE_V1 && version !== VALUE_V2) {
     throw new Error(`Unsupported cache plaintext version '${version}'`);
   }
 
@@ -221,16 +225,17 @@ function decodeValueBytes(bytes) {
     offset += binLen;
   }
 
-  return decodeFromJson(parsed, bins);
+  return decodeFromJson(parsed, bins, version);
 }
 
 /**
  * @param {unknown} value
  * @param {Uint8Array[]} bins
  * @param {WeakSet<object>} seen
+ * @param {number} version
  * @returns {unknown}
  */
-function encodeForJson(value, bins, seen) {
+function encodeForJson(value, bins, seen, version) {
   if (value === null) return null;
 
   const type = typeof value;
@@ -238,47 +243,54 @@ function encodeForJson(value, bins, seen) {
 
   if (type === "number") {
     if (Number.isFinite(value)) return value;
-    return { [TYPE_KEY]: "number", value: String(value) };
+    return { ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null), [TYPE_KEY]: "number", value: String(value) };
   }
 
   if (type === "bigint") {
-    return { [TYPE_KEY]: "bigint", value: value.toString() };
+    return { ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null), [TYPE_KEY]: "bigint", value: value.toString() };
   }
 
   if (type === "undefined") {
-    return { [TYPE_KEY]: "undefined" };
+    return { ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null), [TYPE_KEY]: "undefined" };
   }
 
   if (value instanceof Date) {
-    if (!Number.isNaN(value.getTime())) return { [TYPE_KEY]: "date", value: value.toISOString() };
-    return { [TYPE_KEY]: "date", value: null };
+    if (!Number.isNaN(value.getTime())) {
+      return { ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null), [TYPE_KEY]: "date", value: value.toISOString() };
+    }
+    return { ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null), [TYPE_KEY]: "date", value: null };
   }
 
   if (value instanceof Uint8Array) {
     const idx = bins.push(value) - 1;
-    return { [TYPE_KEY]: "u8", i: idx };
+    return { ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null), [TYPE_KEY]: "u8", i: idx };
   }
 
   if (value instanceof ArrayBuffer) {
     const idx = bins.push(new Uint8Array(value)) - 1;
-    return { [TYPE_KEY]: "u8", i: idx };
+    return { ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null), [TYPE_KEY]: "u8", i: idx };
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => encodeForJson(item, bins, seen));
+    return value.map((item) => encodeForJson(item, bins, seen, version));
   }
 
   if (value instanceof Map) {
     return {
+      ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null),
       [TYPE_KEY]: "map",
-      entries: Array.from(value.entries()).map(([k, v]) => [encodeForJson(k, bins, seen), encodeForJson(v, bins, seen)]),
+      entries: Array.from(value.entries()).map(([k, v]) => [
+        encodeForJson(k, bins, seen, version),
+        encodeForJson(v, bins, seen, version),
+      ]),
     };
   }
 
   if (value instanceof Set) {
     return {
+      ...(version === VALUE_V2 ? { [TAG_KEY]: TAG_VERSION } : null),
       [TYPE_KEY]: "set",
-      entries: Array.from(value.values()).map((v) => encodeForJson(v, bins, seen)),
+      entries: Array.from(value.values()).map((v) => encodeForJson(v, bins, seen, version)),
     };
   }
 
@@ -292,7 +304,7 @@ function encodeForJson(value, bins, seen) {
     const keys = Object.keys(obj).sort();
     for (const key of keys) {
       // @ts-ignore - runtime indexing
-      out[key] = encodeForJson(obj[key], bins, seen);
+      out[key] = encodeForJson(obj[key], bins, seen, version);
     }
     seen.delete(obj);
     return out;
@@ -304,15 +316,24 @@ function encodeForJson(value, bins, seen) {
 /**
  * @param {unknown} value
  * @param {Uint8Array[]} bins
+ * @param {number} version
  * @returns {unknown}
  */
-function decodeFromJson(value, bins) {
+function decodeFromJson(value, bins, version) {
   if (Array.isArray(value)) {
-    return value.map((item) => decodeFromJson(item, bins));
+    return value.map((item) => decodeFromJson(item, bins, version));
   }
 
   if (value && typeof value === "object") {
-    if (!Array.isArray(value) && TYPE_KEY in value) {
+    if (
+      !Array.isArray(value) &&
+      TYPE_KEY in value &&
+      (version === VALUE_V1 ||
+        // v2 tags include an additional marker field to avoid accidental collisions
+        // when user values contain `__pq_cache_type` as a plain string key.
+        // @ts-ignore - runtime
+        value[TAG_KEY] === TAG_VERSION)
+    ) {
       // @ts-ignore - runtime
       const type = value[TYPE_KEY];
 
@@ -357,7 +378,7 @@ function decodeFromJson(value, bins) {
         const out = new Map();
         for (const entry of value.entries) {
           if (!Array.isArray(entry) || entry.length !== 2) continue;
-          out.set(decodeFromJson(entry[0], bins), decodeFromJson(entry[1], bins));
+          out.set(decodeFromJson(entry[0], bins, version), decodeFromJson(entry[1], bins, version));
         }
         return out;
       }
@@ -365,7 +386,7 @@ function decodeFromJson(value, bins) {
       if (type === "set" && Array.isArray(value.entries)) {
         const out = new Set();
         for (const entry of value.entries) {
-          out.add(decodeFromJson(entry, bins));
+          out.add(decodeFromJson(entry, bins, version));
         }
         return out;
       }
@@ -373,7 +394,7 @@ function decodeFromJson(value, bins) {
 
     for (const [k, v] of Object.entries(value)) {
       // @ts-ignore - runtime indexing
-      value[k] = decodeFromJson(v, bins);
+      value[k] = decodeFromJson(v, bins, version);
     }
   }
 

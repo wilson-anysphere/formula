@@ -88,6 +88,44 @@ test("EncryptedCacheStore: roundtrips structured values and does not store plain
   assert.equal(Buffer.from(ciphertext).includes(Buffer.from(secret)), false);
 });
 
+test("EncryptedCacheStore: preserves Dates, BigInt, non-finite numbers, undefined, Map, and Set", async () => {
+  const underlying = new MemoryCacheStore();
+  const crypto = createTestCryptoProvider();
+  const store = new EncryptedCacheStore({ store: underlying, crypto, storeId: "unit-test" });
+
+  const value = {
+    date: new Date("2024-01-01T00:00:00.000Z"),
+    big: 9007199254740993n,
+    posInf: Number.POSITIVE_INFINITY,
+    negInf: Number.NEGATIVE_INFINITY,
+    nan: Number.NaN,
+    undef: undefined,
+    map: new Map([
+      ["a", 1],
+      ["b", 2],
+    ]),
+    set: new Set(["x", "y"]),
+  };
+
+  await store.set("k1", { value, createdAtMs: 0, expiresAtMs: null });
+  const loaded = await store.get("k1");
+  assert.ok(loaded);
+  assert.deepEqual(loaded.value, value);
+});
+
+test("EncryptedCacheStore: avoids __pq_cache_type collisions for user values", async () => {
+  const underlying = new MemoryCacheStore();
+  const crypto = createTestCryptoProvider();
+  const store = new EncryptedCacheStore({ store: underlying, crypto, storeId: "unit-test" });
+
+  const value = { __pq_cache_type: "u8", i: 123, note: "user data" };
+  await store.set("k1", { value, createdAtMs: 0, expiresAtMs: null });
+
+  const loaded = await store.get("k1");
+  assert.ok(loaded);
+  assert.deepEqual(loaded.value, value);
+});
+
 test("EncryptedCacheStore: corrupt ciphertext is treated as a miss and deleted", async () => {
   const underlying = new MemoryCacheStore();
   const crypto = createTestCryptoProvider();
