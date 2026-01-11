@@ -1,6 +1,7 @@
 import type { Query, RefreshPolicy } from "../../../../packages/power-query/src/model.js";
 import type { QueryExecutionContext, QueryEngine } from "../../../../packages/power-query/src/engine.js";
 import { RefreshManager } from "../../../../packages/power-query/src/refresh.js";
+import { RefreshOrchestrator } from "../../../../packages/power-query/src/refreshGraph.js";
 
 import type { DocumentController } from "../document/documentController.js";
 
@@ -54,6 +55,27 @@ class RefreshingEngine {
     this.engine = engine;
   }
 
+  createSession(options?: { now?: () => number }) {
+    // Backwards compatibility: `QueryEngine.createSession` was introduced for shared
+    // refresh sessions. Fall back to local caches when an older engine is used.
+    // (The desktop app normally uses a modern `QueryEngine`.)
+    return typeof (this.engine as any).createSession === "function"
+      ? (this.engine as any).createSession(options)
+      : { credentialCache: new Map(), permissionCache: new Map(), now: options?.now };
+  }
+
+  executeQueryWithMetaInSession(query: Query, context: QueryExecutionContext, options: any, session: any) {
+    const nextOptions = {
+      ...(options ?? {}),
+      cache: { ...(options?.cache ?? {}), mode: "refresh" as const },
+    };
+
+    if (typeof (this.engine as any).executeQueryWithMetaInSession === "function") {
+      return (this.engine as any).executeQueryWithMetaInSession(query, context, nextOptions, session);
+    }
+    return this.engine.executeQueryWithMeta(query, context, nextOptions);
+  }
+
   executeQueryWithMeta(query: Query, context: QueryExecutionContext, options: any) {
     const nextOptions = {
       ...(options ?? {}),
@@ -83,6 +105,7 @@ export class DesktopPowerQueryRefreshManager {
   applyControllers = new Map<string, AbortController>();
 
   manager: RefreshManager;
+  orchestrator: RefreshOrchestrator;
 
   constructor(options: DesktopPowerQueryRefreshOptions) {
     this.doc = options.document;
@@ -98,7 +121,20 @@ export class DesktopPowerQueryRefreshManager {
       stateStore: options.stateStore as any,
     });
 
+    this.orchestrator = new RefreshOrchestrator({
+      engine: engine as any,
+      getContext: options.getContext,
+      concurrency: options.concurrency,
+    });
+
     this.manager.onEvent((evt: any) => {
+      this.emitter.emit(evt);
+      if (evt?.type === "completed") {
+        void this.applyCompletedJob(evt);
+      }
+    });
+
+    this.orchestrator.onEvent((evt: any) => {
       this.emitter.emit(evt);
       if (evt?.type === "completed") {
         void this.applyCompletedJob(evt);
@@ -113,11 +149,13 @@ export class DesktopPowerQueryRefreshManager {
   registerQuery(query: Query, policy: RefreshPolicy = query.refreshPolicy ?? { type: "manual" }) {
     this.queries.set(query.id, query);
     this.manager.registerQuery(query, policy);
+    this.orchestrator.registerQuery(query);
   }
 
   unregisterQuery(queryId: string) {
     this.queries.delete(queryId);
     this.manager.unregisterQuery(queryId);
+    this.orchestrator.unregisterQuery(queryId);
   }
 
   triggerOnOpen(queryId?: string) {
@@ -131,6 +169,21 @@ export class DesktopPowerQueryRefreshManager {
       cancel: () => {
         handle.cancel();
         this.applyControllers.get(handle.id)?.abort();
+      },
+    };
+  }
+
+  refreshAll(queryIds?: string[], reason: any = "manual") {
+    const handle = this.orchestrator.refreshAll(queryIds, reason);
+    const sessionPrefix = `${handle.sessionId}:`;
+
+    return {
+      ...handle,
+      cancel: () => {
+        handle.cancel();
+        for (const [jobId, controller] of this.applyControllers) {
+          if (jobId.startsWith(sessionPrefix)) controller.abort();
+        }
       },
     };
   }

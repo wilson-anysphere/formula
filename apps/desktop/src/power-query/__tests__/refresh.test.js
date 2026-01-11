@@ -7,6 +7,7 @@ import { DocumentController } from "../../document/documentController.js";
 import { MockEngine } from "../../document/engine.js";
 
 import { DesktopPowerQueryRefreshManager } from "../refresh.ts";
+import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
 
 function makeMeta(queryId, table) {
   return {
@@ -36,6 +37,34 @@ class StaticEngine {
       throw err;
     }
     return { table: this.table, meta: makeMeta(query.id, this.table) };
+  }
+}
+
+class OrderedEngine {
+  constructor(resultsById) {
+    this.resultsById = resultsById;
+    this.calls = [];
+  }
+
+  createSession() {
+    return { credentialCache: new Map(), permissionCache: new Map() };
+  }
+
+  async executeQueryWithMetaInSession(query, _context, options) {
+    return this.executeQueryWithMeta(query, _context, options);
+  }
+
+  async executeQueryWithMeta(query, _context, options) {
+    this.calls.push(query.id);
+    options?.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey: "k" });
+    if (options?.signal?.aborted) {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+    const table = this.resultsById[query.id];
+    if (!table) throw new Error(`Missing table for ${query.id}`);
+    return { table, meta: makeMeta(query.id, table) };
   }
 }
 
@@ -75,6 +104,88 @@ test("DesktopPowerQueryRefreshManager persists refresh state when a stateStore i
   assert.equal(loadCalls, 1);
   assert.ok(savedState);
   assert.ok(savedState[query.id]);
+
+  mgr.dispose();
+});
+
+test("DesktopPowerQueryRefreshManager refreshAll respects dependencies and applies refreshed outputs", async () => {
+  const tableA = DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
+  const tableB = DataTable.fromGrid([["B"], [2]], { hasHeaders: true, inferTypes: true });
+  const engine = new OrderedEngine({ A: tableA, B: tableB });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 2, batchSize: 1 });
+
+  const qA = {
+    id: "A",
+    name: "A",
+    source: { type: "range", range: { values: [["x"], [1]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  };
+
+  const qB = {
+    id: "B",
+    name: "B",
+    source: { type: "query", queryId: "A" },
+    steps: [],
+    destination: { sheetId: "Sheet2", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  };
+
+  mgr.registerQuery(qA);
+  mgr.registerQuery(qB);
+
+  const applied = new Set();
+  const appliedPromise = new Promise((resolve, reject) => {
+    const unsub = mgr.onEvent((evt) => {
+      if (evt.type === "apply:error") {
+        unsub();
+        reject(evt.error);
+      }
+      if (evt.type === "apply:completed") {
+        applied.add(evt.queryId);
+        if (applied.has("A") && applied.has("B")) {
+          unsub();
+          resolve(undefined);
+        }
+      }
+    });
+  });
+
+  const handle = mgr.refreshAll(["B"]);
+  await handle.promise;
+  await appliedPromise;
+
+  assert.deepEqual(engine.calls, ["A", "B"]);
+
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, "A");
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, 1);
+  assert.equal(doc.getCell("Sheet2", { row: 0, col: 0 }).value, "B");
+  assert.equal(doc.getCell("Sheet2", { row: 1, col: 0 }).value, 2);
+
+  mgr.dispose();
+});
+
+test("DesktopPowerQueryRefreshManager refreshAll shares credential prompts across the session", async () => {
+  let credentialRequests = 0;
+  const engine = new QueryEngine({
+    fileAdapter: { readText: async () => "Value\n1\n" },
+    onCredentialRequest: async () => {
+      credentialRequests += 1;
+      return { token: "ok" };
+    },
+  });
+
+  const doc = new DocumentController({ engine: new MockEngine() });
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 2, batchSize: 1 });
+
+  mgr.registerQuery({ id: "Q1", name: "Q1", source: { type: "csv", path: "file.csv" }, steps: [], refreshPolicy: { type: "manual" } });
+  mgr.registerQuery({ id: "Q2", name: "Q2", source: { type: "csv", path: "file.csv" }, steps: [], refreshPolicy: { type: "manual" } });
+
+  await mgr.refreshAll(["Q1", "Q2"]).promise;
+  assert.equal(credentialRequests, 1);
 
   mgr.dispose();
 });
