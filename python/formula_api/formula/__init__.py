@@ -172,9 +172,19 @@ class Range:
             self.from_dataframe(val)
             return
 
-        if self._ref.is_single_cell and isinstance(val, str) and val.startswith("="):
-            self.formula = val
-            return
+        if self._ref.is_single_cell and isinstance(val, str):
+            # Match DocumentController's string input semantics:
+            # - Leading apostrophe escapes literal text.
+            # - Leading whitespace is ignored when detecting formulas ("=..."), but
+            #   a bare "=" is treated as a literal value.
+            if val.startswith("'"):
+                self._bridge.set_cell_value(self._ref.__dict__, val[1:])
+                return
+
+            trimmed = val.lstrip()
+            if trimmed.startswith("=") and len(trimmed) > 1:
+                self.formula = trimmed
+                return
 
         if self._ref.is_single_cell and not isinstance(val, (list, tuple)):
             self._bridge.set_cell_value(self._ref.__dict__, val)
@@ -215,10 +225,22 @@ class Range:
         return self._bridge.get_cell_formula(self._ref.__dict__)
 
     @formula.setter
-    def formula(self, val: str) -> None:
+    def formula(self, val: Optional[str]) -> None:
         if not self._ref.is_single_cell:
             raise ValueError("Range.formula is only available for a single cell range")
-        self._bridge.set_cell_formula(self._ref.__dict__, val)
+        if val is None:
+            # Clear both value and formula (preserving formatting), matching
+            # DocumentController.setCellFormula(..., null).
+            self._bridge.set_cell_value(self._ref.__dict__, None)
+            return
+
+        trimmed = str(val).lstrip()
+        if trimmed == "":
+            self._bridge.set_cell_value(self._ref.__dict__, None)
+            return
+
+        normalized = trimmed if trimmed.startswith("=") else f"={trimmed}"
+        self._bridge.set_cell_formula(self._ref.__dict__, normalized)
 
     @property
     def format(self) -> Any:

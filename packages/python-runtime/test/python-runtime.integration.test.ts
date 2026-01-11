@@ -32,6 +32,65 @@ sheet["A2"] = "=A1*2"
     expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 1, col: 0 })).toBe(84);
   });
 
+  it("normalizes single-cell string input like DocumentController (apostrophe escape)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import formula
+
+sheet = formula.active_sheet
+sheet["A1"] = "'=1+1"
+`;
+
+    await runtime.execute(script, { api: workbook });
+
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 0, col: 0 })).toBe("=1+1");
+    expect(
+      workbook.get_cell_formula({
+        range: { sheet_id: workbook.activeSheetId, start_row: 0, start_col: 0, end_row: 0, end_col: 0 },
+      }),
+    ).toBeNull();
+  });
+
+  it("treats trimStart strings beginning with '=' as formulas, but keeps a bare '=' literal", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import formula
+
+sheet = formula.active_sheet
+sheet["A1"] = 1
+sheet["A2"] = " =A1*2"
+sheet["A3"] = "="
+`;
+
+    await runtime.execute(script, { api: workbook });
+
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 1, col: 0 })).toBe(2);
+    expect(
+      workbook.get_cell_formula({
+        range: { sheet_id: workbook.activeSheetId, start_row: 1, start_col: 0, end_row: 1, end_col: 0 },
+      }),
+    ).toBe("=A1*2");
+
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 2, col: 0 })).toBe("=");
+    expect(
+      workbook.get_cell_formula({
+        range: { sheet_id: workbook.activeSheetId, start_row: 2, start_col: 0, end_row: 2, end_col: 0 },
+      }),
+    ).toBeNull();
+  });
+
   it("returns captured stderr output (print)", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({
