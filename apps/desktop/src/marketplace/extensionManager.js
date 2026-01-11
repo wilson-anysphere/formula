@@ -218,6 +218,20 @@ export class ExtensionManager {
         ? verified.formatVersion
         : formatVersion;
 
+    let expectedFilesSha256 = null;
+    if (expectedFiles.length > 0) {
+      expectedFilesSha256 = sha256Hex(Buffer.from(JSON.stringify(expectedFiles), "utf8"));
+      const headerFilesSha256 =
+        download.filesSha256 && typeof download.filesSha256 === "string" ? download.filesSha256.trim().toLowerCase() : null;
+      if (headerFilesSha256 && /^[0-9a-f]{64}$/.test(headerFilesSha256) && headerFilesSha256 !== expectedFilesSha256) {
+        // Defense-in-depth: the package is already signature-verified, but a mismatch here indicates
+        // the marketplace's recorded file inventory doesn't match the signed payload we extracted.
+        throw new Error("Extension signature verification failed (files sha256 mismatch)");
+      }
+    }
+
+    const scanStatus = download.scanStatus && typeof download.scanStatus === "string" ? download.scanStatus : null;
+
     const state = await this._loadState();
     state.installed[id] = {
       id,
@@ -226,6 +240,8 @@ export class ExtensionManager {
       formatVersion: verifiedFormatVersion,
       packageSha256: computedPackageSha256,
       signatureBase64,
+      scanStatus,
+      filesSha256: expectedFilesSha256,
       files: expectedFiles,
     };
     await this._saveState(state);

@@ -55,6 +55,21 @@ const DB_VERSION = 1;
 const STORE_INSTALLED = "installed";
 const STORE_PACKAGES = "packages";
 
+function isSha256Hex(value: string): boolean {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value.trim());
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle?.digest) {
+    throw new Error("WebExtensionManager requires crypto.subtle.digest() to verify downloads");
+  }
+  const hash = new Uint8Array(await subtle.digest("SHA-256", bytes));
+  let out = "";
+  for (const b of hash) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
 function compareSemver(a: string, b: string): number {
   // Minimal semver compare (major.minor.patch[-prerelease]) to avoid pulling in a dependency.
   const semverRe =
@@ -379,6 +394,15 @@ export class WebExtensionManager {
 
     if (download.signatureBase64 && download.signatureBase64 !== verified.signatureBase64) {
       throw new Error("Marketplace signature header does not match package signature");
+    }
+
+    const headerFilesSha256 = download.filesSha256 ? String(download.filesSha256).trim().toLowerCase() : null;
+    if (headerFilesSha256 && isSha256Hex(headerFilesSha256)) {
+      const filesJson = JSON.stringify(verified.files || []);
+      const computedFilesSha = await sha256Hex(new TextEncoder().encode(filesJson));
+      if (computedFilesSha !== headerFilesSha256) {
+        throw new Error("Marketplace files sha256 header does not match verified package contents");
+      }
     }
 
     const installedAt = new Date().toISOString();
