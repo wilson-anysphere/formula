@@ -489,4 +489,37 @@ mod tests {
             ]]
         );
     }
+
+    #[test]
+    fn parses_text_node_and_wrapped_value_forms() {
+        let xml = r##"
+            <pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <r>
+                <m></m>
+                <b>1</b>
+                <b>false</b>
+                <e>#DIV/0!</e>
+                <n><v>42</v></n>
+                <s><v>Hello</v></s>
+                <x><v>3</v></x>
+              </r>
+            </pivotCacheRecords>
+        "##;
+
+        let mut reader = PivotCacheRecordsReader::new(xml.as_bytes());
+        let records = reader.parse_all_records();
+
+        assert_eq!(
+            records,
+            vec![vec![
+                PivotCacheValue::Missing,
+                PivotCacheValue::Bool(true),
+                PivotCacheValue::Bool(false),
+                PivotCacheValue::Error("#DIV/0!".to_string()),
+                PivotCacheValue::Number(42.0),
+                PivotCacheValue::String("Hello".to_string()),
+                PivotCacheValue::Index(3),
+            ]]
+        );
+    }
 }
