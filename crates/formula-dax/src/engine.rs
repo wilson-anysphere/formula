@@ -841,12 +841,8 @@ impl DaxEngine {
             })?;
 
         if filter.is_empty() {
-            if let Some(values) = table_ref.dictionary_values(idx) {
-                let mut out: HashSet<Value> = values.into_iter().collect();
-                if table_ref.stats_has_blank(idx).unwrap_or(false) {
-                    out.insert(Value::Blank);
-                }
-                return Ok(out);
+            if let Some(values) = table_ref.distinct_values_filtered(idx, None) {
+                return Ok(values.into_iter().collect());
             }
         }
 

@@ -266,136 +266,221 @@ impl ColumnarTableBackend {
             _ => None,
         }
     }
-}
 
-impl TableBackend for ColumnarTableBackend {
-    fn columns(&self) -> &[String] {
-        &self.columns
+    fn is_dax_numeric_column(column_type: formula_columnar::ColumnType) -> bool {
+        matches!(
+            column_type,
+            formula_columnar::ColumnType::Number
+                | formula_columnar::ColumnType::DateTime
+                | formula_columnar::ColumnType::Currency { .. }
+                | formula_columnar::ColumnType::Percentage { .. }
+        )
     }
 
-    fn row_count(&self) -> usize {
-        self.table.row_count()
-    }
+    fn group_by_aggregations_query(
+        &self,
+        group_by: &[usize],
+        aggs: &[AggregationSpec],
+    ) -> Option<Vec<Vec<Value>>> {
+        use formula_columnar::{AggOp, AggSpec};
+        use std::collections::HashMap;
 
-    fn column_index(&self, column: &str) -> Option<usize> {
-        self.column_index.get(column).copied()
-    }
-
-    fn value_by_idx(&self, row: usize, idx: usize) -> Option<Value> {
-        if row >= self.table.row_count() || idx >= self.table.column_count() {
-            return None;
-        }
-        let value = self.table.get_cell(row, idx);
-        Some(Self::dax_from_columnar(value))
-    }
-
-    fn stats_sum(&self, idx: usize) -> Option<f64> {
-        self.table.scan().stats(idx)?.sum
-    }
-
-    fn stats_non_blank_count(&self, idx: usize) -> Option<usize> {
-        let stats = self.table.scan().stats(idx)?;
-        let non_blank = self.table.row_count().saturating_sub(stats.null_count as usize);
-        Some(non_blank)
-    }
-
-    fn stats_min(&self, idx: usize) -> Option<Value> {
-        let stats = self.table.scan().stats(idx)?;
-        Some(Self::dax_from_columnar(stats.min.clone()?))
-    }
-
-    fn stats_max(&self, idx: usize) -> Option<Value> {
-        let stats = self.table.scan().stats(idx)?;
-        Some(Self::dax_from_columnar(stats.max.clone()?))
-    }
-
-    fn stats_distinct_count(&self, idx: usize) -> Option<u64> {
-        Some(self.table.scan().stats(idx)?.distinct_count)
-    }
-
-    fn stats_has_blank(&self, idx: usize) -> Option<bool> {
-        let stats = self.table.scan().stats(idx)?;
-        Some(stats.null_count > 0)
-    }
-
-    fn dictionary_values(&self, idx: usize) -> Option<Vec<Value>> {
-        let dict = self.table.dictionary(idx)?;
-        Some(dict.iter().cloned().map(Value::from).collect())
-    }
-
-    fn filter_eq(&self, idx: usize, value: &Value) -> Option<Vec<usize>> {
-        match value {
-            Value::Text(s) => Some(self.table.scan().filter_eq_string(idx, s.as_ref())),
-            _ => None,
-        }
-    }
-
-    fn distinct_values_filtered(&self, idx: usize, rows: Option<&[usize]>) -> Option<Vec<Value>> {
-        use std::collections::HashSet;
-
-        let row_count = self.table.row_count();
-        if idx >= self.table.column_count() {
+        let key_len = group_by.len();
+        if key_len == 0 {
             return None;
         }
 
-        if rows.is_none() {
-            if let Some(values) = self.dictionary_values(idx) {
-                let mut out: Vec<Value> = values;
-                if self.stats_has_blank(idx).unwrap_or(false) {
-                    out.push(Value::Blank);
-                }
-                return Some(out);
-            }
+        #[derive(Clone, Debug)]
+        enum Plan {
+            Direct { col: usize },
+            Average { sum_col: usize, count_col: usize },
+            DistinctCount { column: usize },
+            Constant(Value),
         }
 
-        let mut seen: HashSet<Value> = HashSet::new();
-        let mut out = Vec::new();
+        let schema = self.table.schema();
 
-        const CHUNK_ROWS: usize = 65_536;
-        let mut push_value = |value: Value| {
-            if seen.insert(value.clone()) {
-                out.push(value);
+        let mut planned: Vec<AggSpec> = Vec::new();
+        let mut planned_pos: HashMap<(AggOp, Option<usize>), usize> = HashMap::new();
+
+        let mut ensure = |op: AggOp, column: Option<usize>| -> usize {
+            if let Some(&pos) = planned_pos.get(&(op, column)) {
+                return key_len + pos;
             }
+            let pos = planned.len();
+            planned.push(AggSpec { op, column, name: None });
+            planned_pos.insert((op, column), pos);
+            key_len + pos
         };
 
-        match rows {
-            None => {
-                let mut start = 0;
-                while start < row_count {
-                    let end = (start + CHUNK_ROWS).min(row_count);
-                    let range = self.table.get_range(start, end, idx, idx + 1);
-                    for v in range.columns.get(0).into_iter().flatten() {
-                        push_value(Self::dax_from_columnar(v.clone()));
-                    }
-                    start = end;
-                }
-            }
-            Some(rows) => {
-                let mut pos = 0;
-                while pos < rows.len() {
-                    let row = rows[pos];
-                    let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
-                    let chunk_end = (chunk_start + CHUNK_ROWS).min(row_count);
-                    let range = self.table.get_range(chunk_start, chunk_end, idx, idx + 1);
-                    while pos < rows.len() {
-                        let row = rows[pos];
-                        if row >= chunk_end {
-                            break;
+        let mut plans: Vec<Plan> = Vec::with_capacity(aggs.len());
+        for spec in aggs {
+            let plan = match spec.kind {
+                AggregationKind::CountRows => Plan::Direct {
+                    col: ensure(AggOp::Count, None),
+                },
+                AggregationKind::Sum => {
+                    let col_idx = spec.column_idx?;
+                    let column_type = schema.get(col_idx)?.column_type;
+                    if Self::is_dax_numeric_column(column_type) {
+                        Plan::Direct {
+                            col: ensure(AggOp::SumF64, Some(col_idx)),
                         }
-                        let in_chunk = row - chunk_start;
-                        if let Some(v) = range.columns.get(0).and_then(|c| c.get(in_chunk)) {
-                            push_value(Self::dax_from_columnar(v.clone()));
-                        }
-                        pos += 1;
+                    } else {
+                        Plan::Constant(Value::Blank)
                     }
                 }
+                AggregationKind::Min => {
+                    let col_idx = spec.column_idx?;
+                    let column_type = schema.get(col_idx)?.column_type;
+                    if Self::is_dax_numeric_column(column_type) {
+                        Plan::Direct {
+                            col: ensure(AggOp::Min, Some(col_idx)),
+                        }
+                    } else {
+                        Plan::Constant(Value::Blank)
+                    }
+                }
+                AggregationKind::Max => {
+                    let col_idx = spec.column_idx?;
+                    let column_type = schema.get(col_idx)?.column_type;
+                    if Self::is_dax_numeric_column(column_type) {
+                        Plan::Direct {
+                            col: ensure(AggOp::Max, Some(col_idx)),
+                        }
+                    } else {
+                        Plan::Constant(Value::Blank)
+                    }
+                }
+                AggregationKind::Average => {
+                    let col_idx = spec.column_idx?;
+                    let column_type = schema.get(col_idx)?.column_type;
+                    if Self::is_dax_numeric_column(column_type) {
+                        Plan::Average {
+                            sum_col: ensure(AggOp::SumF64, Some(col_idx)),
+                            count_col: ensure(AggOp::Count, Some(col_idx)),
+                        }
+                    } else {
+                        Plan::Constant(Value::Blank)
+                    }
+                }
+                AggregationKind::DistinctCount => {
+                    let col_idx = spec.column_idx?;
+                    if group_by.contains(&col_idx) {
+                        // The column is constant within each group.
+                        Plan::Constant(Value::from(1))
+                    } else {
+                        Plan::DistinctCount { column: col_idx }
+                    }
+                }
+            };
+            plans.push(plan);
+        }
+
+        let grouped = self.table.group_by(group_by, &planned).ok()?;
+        let grouped_cols = grouped.to_values();
+        let group_count = grouped.row_count();
+
+        let mut group_keys: Vec<Vec<Value>> = Vec::with_capacity(group_count);
+        let mut group_index: HashMap<Vec<Value>, usize> = HashMap::with_capacity(group_count);
+        for row in 0..group_count {
+            let mut key: Vec<Value> = Vec::with_capacity(key_len);
+            for col in 0..key_len {
+                let value = grouped_cols
+                    .get(col)
+                    .and_then(|c| c.get(row))
+                    .cloned()
+                    .unwrap_or(formula_columnar::Value::Null);
+                key.push(Self::dax_from_columnar(value));
             }
+            group_index.insert(key.clone(), row);
+            group_keys.push(key);
+        }
+
+        let mut distinct_counts: HashMap<usize, Vec<i64>> = HashMap::new();
+        for plan in &plans {
+            let &Plan::DistinctCount { column } = plan else {
+                continue;
+            };
+            if distinct_counts.contains_key(&column) {
+                continue;
+            }
+
+            let mut keys_plus = group_by.to_vec();
+            keys_plus.push(column);
+            let distinct = self.table.group_by(&keys_plus, &[]).ok()?;
+            let distinct_cols = distinct.to_values();
+            let distinct_rows = distinct.row_count();
+
+            let mut counts = vec![0i64; group_count];
+            let mut key_buf: Vec<Value> = Vec::with_capacity(key_len);
+            for row in 0..distinct_rows {
+                key_buf.clear();
+                for col in 0..key_len {
+                    let value = distinct_cols
+                        .get(col)
+                        .and_then(|c| c.get(row))
+                        .cloned()
+                        .unwrap_or(formula_columnar::Value::Null);
+                    key_buf.push(Self::dax_from_columnar(value));
+                }
+                if let Some(&idx) = group_index.get(key_buf.as_slice()) {
+                    counts[idx] += 1;
+                }
+            }
+            distinct_counts.insert(column, counts);
+        }
+
+        let mut out: Vec<Vec<Value>> = Vec::with_capacity(group_count);
+        for row_idx in 0..group_count {
+            let mut row = group_keys[row_idx].clone();
+            for plan in &plans {
+                let value = match plan {
+                    Plan::Direct { col } => {
+                        let col = *col;
+                        let v = grouped_cols
+                            .get(col)
+                            .and_then(|c| c.get(row_idx))
+                            .cloned()
+                            .unwrap_or(formula_columnar::Value::Null);
+                        Self::dax_from_columnar(v)
+                    }
+                    Plan::Average { sum_col, count_col } => {
+                        let sum_col = *sum_col;
+                        let count_col = *count_col;
+                        let sum = grouped_cols
+                            .get(sum_col)
+                            .and_then(|c| c.get(row_idx))
+                            .and_then(Self::numeric_from_columnar);
+                        let count = grouped_cols
+                            .get(count_col)
+                            .and_then(|c| c.get(row_idx))
+                            .and_then(Self::numeric_from_columnar)
+                            .unwrap_or(0.0);
+                        if count == 0.0 {
+                            Value::Blank
+                        } else if let Some(sum) = sum {
+                            Value::from(sum / count)
+                        } else {
+                            Value::Blank
+                        }
+                    }
+                    Plan::DistinctCount { column } => {
+                        let column = *column;
+                        let counts = distinct_counts.get(&column)?;
+                        Value::from(counts.get(row_idx).copied().unwrap_or(0))
+                    }
+                    Plan::Constant(v) => v.clone(),
+                };
+                row.push(value);
+            }
+            out.push(row);
         }
 
         Some(out)
     }
 
-    fn group_by_aggregations(
+    fn group_by_aggregations_scan(
         &self,
         group_by: &[usize],
         aggs: &[AggregationSpec],
@@ -405,16 +490,6 @@ impl TableBackend for ColumnarTableBackend {
         use std::collections::HashSet;
 
         let row_count = self.table.row_count();
-        if group_by.is_empty() {
-            return None;
-        }
-        if group_by
-            .iter()
-            .chain(aggs.iter().filter_map(|a| a.column_idx.as_ref()))
-            .any(|idx| *idx >= self.table.column_count())
-        {
-            return None;
-        }
 
         #[derive(Clone)]
         enum AggState {
@@ -602,6 +677,171 @@ impl TableBackend for ColumnarTableBackend {
             out.push(row);
         }
         Some(out)
+    }
+}
+
+impl TableBackend for ColumnarTableBackend {
+    fn columns(&self) -> &[String] {
+        &self.columns
+    }
+
+    fn row_count(&self) -> usize {
+        self.table.row_count()
+    }
+
+    fn column_index(&self, column: &str) -> Option<usize> {
+        self.column_index.get(column).copied()
+    }
+
+    fn value_by_idx(&self, row: usize, idx: usize) -> Option<Value> {
+        if row >= self.table.row_count() || idx >= self.table.column_count() {
+            return None;
+        }
+        let value = self.table.get_cell(row, idx);
+        Some(Self::dax_from_columnar(value))
+    }
+
+    fn stats_sum(&self, idx: usize) -> Option<f64> {
+        self.table.scan().stats(idx)?.sum
+    }
+
+    fn stats_non_blank_count(&self, idx: usize) -> Option<usize> {
+        let stats = self.table.scan().stats(idx)?;
+        let non_blank = self.table.row_count().saturating_sub(stats.null_count as usize);
+        Some(non_blank)
+    }
+
+    fn stats_min(&self, idx: usize) -> Option<Value> {
+        let stats = self.table.scan().stats(idx)?;
+        Some(Self::dax_from_columnar(stats.min.clone()?))
+    }
+
+    fn stats_max(&self, idx: usize) -> Option<Value> {
+        let stats = self.table.scan().stats(idx)?;
+        Some(Self::dax_from_columnar(stats.max.clone()?))
+    }
+
+    fn stats_distinct_count(&self, idx: usize) -> Option<u64> {
+        Some(self.table.scan().stats(idx)?.distinct_count)
+    }
+
+    fn stats_has_blank(&self, idx: usize) -> Option<bool> {
+        let stats = self.table.scan().stats(idx)?;
+        Some(stats.null_count > 0)
+    }
+
+    fn dictionary_values(&self, idx: usize) -> Option<Vec<Value>> {
+        let dict = self.table.dictionary(idx)?;
+        Some(dict.iter().cloned().map(Value::from).collect())
+    }
+
+    fn filter_eq(&self, idx: usize, value: &Value) -> Option<Vec<usize>> {
+        match value {
+            Value::Text(s) => Some(self.table.scan().filter_eq_string(idx, s.as_ref())),
+            _ => None,
+        }
+    }
+
+    fn distinct_values_filtered(&self, idx: usize, rows: Option<&[usize]>) -> Option<Vec<Value>> {
+        use std::collections::HashSet;
+
+        let row_count = self.table.row_count();
+        if idx >= self.table.column_count() {
+            return None;
+        }
+
+        if rows.is_none() {
+            if let Some(values) = self.dictionary_values(idx) {
+                let mut out: Vec<Value> = values;
+                if self.stats_has_blank(idx).unwrap_or(false) {
+                    out.push(Value::Blank);
+                }
+                return Some(out);
+            }
+
+            if let Ok(result) = self.table.group_by(&[idx], &[]) {
+                let values = result.to_values();
+                let mut out = Vec::with_capacity(result.row_count());
+                if let Some(col) = values.get(0) {
+                    for v in col {
+                        out.push(Self::dax_from_columnar(v.clone()));
+                    }
+                }
+                return Some(out);
+            }
+        }
+
+        let mut seen: HashSet<Value> = HashSet::new();
+        let mut out = Vec::new();
+
+        const CHUNK_ROWS: usize = 65_536;
+        let mut push_value = |value: Value| {
+            if seen.insert(value.clone()) {
+                out.push(value);
+            }
+        };
+
+        match rows {
+            None => {
+                let mut start = 0;
+                while start < row_count {
+                    let end = (start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(start, end, idx, idx + 1);
+                    for v in range.columns.get(0).into_iter().flatten() {
+                        push_value(Self::dax_from_columnar(v.clone()));
+                    }
+                    start = end;
+                }
+            }
+            Some(rows) => {
+                let mut pos = 0;
+                while pos < rows.len() {
+                    let row = rows[pos];
+                    let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
+                    let chunk_end = (chunk_start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(chunk_start, chunk_end, idx, idx + 1);
+                    while pos < rows.len() {
+                        let row = rows[pos];
+                        if row >= chunk_end {
+                            break;
+                        }
+                        let in_chunk = row - chunk_start;
+                        if let Some(v) = range.columns.get(0).and_then(|c| c.get(in_chunk)) {
+                            push_value(Self::dax_from_columnar(v.clone()));
+                        }
+                        pos += 1;
+                    }
+                }
+            }
+        }
+
+        Some(out)
+    }
+
+    fn group_by_aggregations(
+        &self,
+        group_by: &[usize],
+        aggs: &[AggregationSpec],
+        rows: Option<&[usize]>,
+    ) -> Option<Vec<Vec<Value>>> {
+        if group_by.is_empty() {
+            return None;
+        }
+        if group_by
+            .iter()
+            .chain(aggs.iter().filter_map(|a| a.column_idx.as_ref()))
+            .any(|idx| *idx >= self.table.column_count())
+        {
+            return None;
+        }
+
+        if rows.is_none() {
+            if let Some(out) = self.group_by_aggregations_query(group_by, aggs) {
+                return Some(out);
+            }
+        }
+
+        self.group_by_aggregations_scan(group_by, aggs, rows)
     }
 
     fn filter_in(&self, idx: usize, values: &[Value]) -> Option<Vec<usize>> {
