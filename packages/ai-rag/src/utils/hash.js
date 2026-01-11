@@ -1,9 +1,16 @@
+const encoder = new TextEncoder();
+
 /**
+ * Fast, deterministic content hash intended for incremental indexing cache keys.
+ *
+ * Uses WebCrypto SHA-256 when available; falls back to FNV-1a 64-bit for
+ * environments without WebCrypto.
+ *
  * @param {string} text
- * @returns {Promise<string>} lowercase hex sha256 digest
+ * @returns {Promise<string>} lowercase hex digest
  */
-export async function sha256Hex(text) {
-  const bytes = new TextEncoder().encode(text);
+export async function contentHash(text) {
+  const bytes = encoder.encode(String(text));
   const subtle = globalThis.crypto?.subtle;
   if (subtle) {
     const digest = await subtle.digest("SHA-256", bytes);
@@ -12,6 +19,14 @@ export async function sha256Hex(text) {
 
   // Extremely small fallback for environments without WebCrypto.
   return fnv1a64Hex(bytes);
+}
+
+/**
+ * @param {string} text
+ * @returns {Promise<string>} lowercase hex digest
+ */
+export async function sha256Hex(text) {
+  return contentHash(text);
 }
 
 /**

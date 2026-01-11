@@ -28,10 +28,10 @@ test("indexWorkbook is incremental (unchanged chunks are skipped)", async () => 
   const store = new InMemoryVectorStore({ dimension: 128 });
 
   const first = await indexWorkbook({ workbook, vectorStore: store, embedder });
-  assert.ok(first.upserted > 0);
+  assert.equal(first.upserted, first.totalChunks);
+  assert.equal(first.totalChunks, 1);
 
   const second = await indexWorkbook({ workbook, vectorStore: store, embedder });
   assert.equal(second.upserted, 0);
   assert.equal(second.deleted, 0);
 });
-

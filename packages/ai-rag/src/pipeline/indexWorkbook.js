@@ -1,4 +1,4 @@
-import { sha256Hex } from "../utils/hash.js";
+import { contentHash } from "../utils/hash.js";
 import { chunkWorkbook } from "../workbook/chunkWorkbook.js";
 import { chunkToText } from "../workbook/chunkToText.js";
 
@@ -40,10 +40,10 @@ export async function indexWorkbook(params) {
 
   for (const chunk of chunks) {
     const text = chunkToText(chunk, { sampleRows });
-    const contentHash = await sha256Hex(text);
+    const chunkHash = await contentHash(text);
     currentIds.add(chunk.id);
 
-    if (existingHashes.get(chunk.id) === contentHash) continue;
+    if (existingHashes.get(chunk.id) === chunkHash) continue;
 
     toUpsert.push({
       id: chunk.id,
@@ -55,7 +55,7 @@ export async function indexWorkbook(params) {
         title: chunk.title,
         rect: chunk.rect,
         text,
-        contentHash,
+        contentHash: chunkHash,
         tokenCount: approximateTokenCount(text),
       },
     });
