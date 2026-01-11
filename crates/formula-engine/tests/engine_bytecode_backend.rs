@@ -60,11 +60,13 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
             &self,
             _ctx: EvalContext,
             _sref: &formula_engine::structured_refs::StructuredRef,
-        ) -> Option<(
-            usize,
-            formula_engine::eval::CellAddr,
-            formula_engine::eval::CellAddr,
-        )> {
+        ) -> Option<
+            Vec<(
+                usize,
+                formula_engine::eval::CellAddr,
+                formula_engine::eval::CellAddr,
+            )>,
+        > {
             None
         }
     }
@@ -140,7 +142,9 @@ fn bytecode_backend_respects_external_value_provider() {
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(Arc::new(Provider)));
-    engine.set_cell_formula("Sheet1", "B1", "=SUM(A1:A3)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(A1:A3)")
+        .unwrap();
 
     engine.recalculate_single_threaded();
 

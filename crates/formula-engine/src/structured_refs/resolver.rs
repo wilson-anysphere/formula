@@ -8,7 +8,10 @@ fn addr_to_model(addr: CellAddr) -> CellRef {
 }
 
 fn model_to_addr(cell: CellRef) -> CellAddr {
-    CellAddr { row: cell.row, col: cell.col }
+    CellAddr {
+        row: cell.row,
+        col: cell.col,
+    }
 }
 
 fn column_index_ci(table: &Table, name: &str) -> Option<u32> {
@@ -45,7 +48,8 @@ fn normalize_column_interval(start_idx: u32, end_idx: u32) -> (u32, u32) {
 fn column_interval_ci(table: &Table, col: &StructuredColumn) -> Result<(u32, u32), String> {
     match col {
         StructuredColumn::Single(name) => {
-            let idx = column_index_ci(table, name).ok_or_else(|| format!("unknown column '{name}'"))?;
+            let idx =
+                column_index_ci(table, name).ok_or_else(|| format!("unknown column '{name}'"))?;
             Ok((idx, idx))
         }
         StructuredColumn::Range { start, end } => {
@@ -58,11 +62,16 @@ fn column_interval_ci(table: &Table, col: &StructuredColumn) -> Result<(u32, u32
     }
 }
 
-fn column_intervals_ci(table: &Table, columns: &StructuredColumns) -> Result<Vec<(u32, u32)>, String> {
+fn column_intervals_ci(
+    table: &Table,
+    columns: &StructuredColumns,
+) -> Result<Vec<(u32, u32)>, String> {
     match columns {
         StructuredColumns::All => Ok(Vec::new()),
-        StructuredColumns::Single(name) => column_interval_ci(table, &StructuredColumn::Single(name.clone()))
-            .map(|interval| vec![interval]),
+        StructuredColumns::Single(name) => {
+            column_interval_ci(table, &StructuredColumn::Single(name.clone()))
+                .map(|interval| vec![interval])
+        }
         StructuredColumns::Range { start, end } => column_interval_ci(
             table,
             &StructuredColumn::Range {
@@ -151,7 +160,9 @@ fn find_table<'a>(
     let table = tables
         .iter()
         .find(|t| t.range.contains(origin_cell_model))
-        .ok_or_else(|| "structured reference without table name used outside of a table".to_string())?;
+        .ok_or_else(|| {
+            "structured reference without table name used outside of a table".to_string()
+        })?;
 
     Ok((origin_sheet, table))
 }
@@ -198,7 +209,10 @@ fn resolve_this_row(
                 row,
                 col: table.range.start.col,
             },
-            CellAddr { row, col: table.range.end.col },
+            CellAddr {
+                row,
+                col: table.range.end.col,
+            },
         )]),
         _ => {
             let intervals = merge_column_intervals(column_intervals_ci(table, columns)?);
@@ -275,7 +289,7 @@ mod tests {
             panic!("expected a single resolved range");
         };
         assert_eq!(*sheet_id, 0);
-        assert_eq!(start, CellAddr { row: 1, col: 1 });
-        assert_eq!(end, CellAddr { row: 2, col: 1 });
+        assert_eq!(*start, CellAddr { row: 1, col: 1 });
+        assert_eq!(*end, CellAddr { row: 2, col: 1 });
     }
 }

@@ -1,5 +1,7 @@
 use formula_engine::eval::{CellAddr, Expr, Parser};
-use formula_engine::structured_refs::{resolve_structured_ref, StructuredColumn, StructuredColumns};
+use formula_engine::structured_refs::{
+    resolve_structured_ref, StructuredColumn, StructuredColumns,
+};
 use formula_engine::{Engine, Value};
 use formula_model::table::TableColumn;
 use formula_model::{Range, Table};
@@ -71,39 +73,19 @@ fn setup_engine_with_table() -> Engine {
     engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
 
     // Header row.
-    engine
-        .set_cell_value("Sheet1", "A1", "Col1")
-        .expect("A1");
-    engine
-        .set_cell_value("Sheet1", "B1", "Col2")
-        .expect("B1");
-    engine
-        .set_cell_value("Sheet1", "C1", "Col3")
-        .expect("C1");
-    engine
-        .set_cell_value("Sheet1", "D1", "Col4")
-        .expect("D1");
+    engine.set_cell_value("Sheet1", "A1", "Col1").expect("A1");
+    engine.set_cell_value("Sheet1", "B1", "Col2").expect("B1");
+    engine.set_cell_value("Sheet1", "C1", "Col3").expect("C1");
+    engine.set_cell_value("Sheet1", "D1", "Col4").expect("D1");
 
     // Data rows.
-    engine
-        .set_cell_value("Sheet1", "A2", 1.0_f64)
-        .expect("A2");
-    engine
-        .set_cell_value("Sheet1", "A3", 2.0_f64)
-        .expect("A3");
-    engine
-        .set_cell_value("Sheet1", "A4", 3.0_f64)
-        .expect("A4");
+    engine.set_cell_value("Sheet1", "A2", 1.0_f64).expect("A2");
+    engine.set_cell_value("Sheet1", "A3", 2.0_f64).expect("A3");
+    engine.set_cell_value("Sheet1", "A4", 3.0_f64).expect("A4");
 
-    engine
-        .set_cell_value("Sheet1", "B2", 10.0_f64)
-        .expect("B2");
-    engine
-        .set_cell_value("Sheet1", "B3", 20.0_f64)
-        .expect("B3");
-    engine
-        .set_cell_value("Sheet1", "B4", 30.0_f64)
-        .expect("B4");
+    engine.set_cell_value("Sheet1", "B2", 10.0_f64).expect("B2");
+    engine.set_cell_value("Sheet1", "B3", 20.0_f64).expect("B3");
+    engine.set_cell_value("Sheet1", "B4", 30.0_f64).expect("B4");
 
     engine
         .set_cell_value("Sheet1", "C2", 100.0_f64)
@@ -131,12 +113,13 @@ fn resolves_table_name_case_insensitively() {
         panic!("expected structured ref argument");
     };
 
-    let ranges = resolve_structured_ref(&tables_by_sheet, 0, CellAddr { row: 0, col: 0 }, sref).unwrap();
+    let ranges =
+        resolve_structured_ref(&tables_by_sheet, 0, CellAddr { row: 0, col: 0 }, sref).unwrap();
     let [(_sheet, start, end)] = ranges.as_slice() else {
         panic!("expected a single resolved range");
     };
-    assert_eq!(start, CellAddr { row: 1, col: 0 });
-    assert_eq!(end, CellAddr { row: 2, col: 0 });
+    assert_eq!(*start, CellAddr { row: 1, col: 0 });
+    assert_eq!(*end, CellAddr { row: 2, col: 0 });
 }
 
 #[test]
