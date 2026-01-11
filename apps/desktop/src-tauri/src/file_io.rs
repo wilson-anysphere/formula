@@ -1794,6 +1794,57 @@ mod tests {
     }
 
     #[test]
+    fn read_xlsx_populates_tables() {
+        let mut model = formula_model::Workbook::new();
+        let sheet_id = model.add_sheet("Sheet1").unwrap();
+
+        let table = formula_model::Table {
+            id: 1,
+            name: "Table1".to_string(),
+            display_name: "Table1".to_string(),
+            range: formula_model::Range::from_a1("A1:B3").unwrap(),
+            header_row_count: 1,
+            totals_row_count: 0,
+            columns: vec![
+                formula_model::TableColumn {
+                    id: 1,
+                    name: "Amount".to_string(),
+                    formula: None,
+                    totals_formula: None,
+                },
+                formula_model::TableColumn {
+                    id: 2,
+                    name: "Category".to_string(),
+                    formula: None,
+                    totals_formula: None,
+                },
+            ],
+            style: None,
+            auto_filter: None,
+            relationship_id: None,
+            part_path: None,
+        };
+
+        model.add_table(sheet_id, table).unwrap();
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("tables.xlsx");
+        formula_xlsx::write_workbook(&model, &out_path).expect("write workbook with table");
+
+        let workbook = read_xlsx_blocking(&out_path).expect("read workbook back");
+        assert_eq!(workbook.tables.len(), 1);
+
+        let t = &workbook.tables[0];
+        assert_eq!(t.name, "Table1");
+        assert_eq!(t.sheet_id, "Sheet1");
+        assert_eq!(t.start_row, 0);
+        assert_eq!(t.start_col, 0);
+        assert_eq!(t.end_row, 2);
+        assert_eq!(t.end_col, 1);
+        assert_eq!(t.columns, vec!["Amount".to_string(), "Category".to_string()]);
+    }
+
+    #[test]
     fn cell_edit_preserves_defined_names() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),

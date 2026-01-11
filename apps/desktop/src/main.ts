@@ -895,8 +895,8 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
     const { sheetName: explicitSheetName, ref } = splitSheetQualifier(refersTo);
     const sheetIdFromRef = explicitSheetName ? sheetIdByName.get(explicitSheetName) ?? explicitSheetName : null;
-    const sheetIdFromScope =
-      typeof (entry as any)?.sheet_id === "string" ? String((entry as any).sheet_id) : null;
+    const rawScopeSheet = typeof (entry as any)?.sheet_id === "string" ? String((entry as any).sheet_id) : null;
+    const sheetIdFromScope = rawScopeSheet ? sheetIdByName.get(rawScopeSheet) ?? rawScopeSheet : null;
     const sheetName = sheetIdFromRef ?? sheetIdFromScope;
     if (!sheetName) continue;
 
@@ -913,8 +913,8 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   for (const table of tables) {
     const name = typeof (table as any)?.name === "string" ? String((table as any).name) : "";
-    const sheetName =
-      typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
+    const rawSheetName = typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
+    const sheetName = rawSheetName ? sheetIdByName.get(rawSheetName) ?? rawSheetName : "";
     const columns = Array.isArray((table as any)?.columns) ? (table as any).columns.map(String) : [];
     if (!name || !sheetName || columns.length === 0) continue;
 
