@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PreviewEngine } from "../src/preview/preview-engine.js";
 import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 import { parseA1Cell } from "../src/spreadsheet/a1.js";
 
 describe("PreviewEngine", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("flags large edits for approval and truncates change list", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const previewEngine = new PreviewEngine({ max_preview_changes: 20, approval_cell_threshold: 100 });
