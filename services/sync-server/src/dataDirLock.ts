@@ -98,12 +98,24 @@ export async function acquireDataDirLock(dataDir: string): Promise<DataDirLockHa
     if (code !== "EEXIST") throw err;
 
     const existingLock = await readExistingLock(lockPath);
+    const host =
+      existingLock && typeof existingLock === "object" && "host" in existingLock
+        ? (existingLock as { host?: unknown }).host
+        : undefined;
+    const existingHost =
+      typeof host === "string" && host.trim().length > 0 ? host.trim() : undefined;
+
     const existingPid =
       existingLock && typeof existingLock === "object" && "pid" in existingLock
         ? (existingLock as { pid?: unknown }).pid
         : undefined;
 
-    if (isFiniteNumber(existingPid) && !isPidRunning(existingPid)) {
+    // Stale-lock cleanup is only safe when the lock was created on this host.
+    // If the data dir is on a shared filesystem across machines, a lock from a
+    // different host may still be active even if its PID doesn't exist locally.
+    const sameHost = existingHost === undefined || existingHost === os.hostname();
+
+    if (isFiniteNumber(existingPid) && sameHost && !isPidRunning(existingPid)) {
       // Stale lock: previous process crashed without cleaning up.
       await fs.unlink(lockPath);
 
@@ -130,10 +142,6 @@ export async function acquireDataDirLock(dataDir: string): Promise<DataDirLockHa
       }
     }
 
-    const host =
-      existingLock && typeof existingLock === "object" && "host" in existingLock
-        ? (existingLock as { host?: unknown }).host
-        : undefined;
     const startedAtMs =
       existingLock && typeof existingLock === "object" && "startedAtMs" in existingLock
         ? (existingLock as { startedAtMs?: unknown }).startedAtMs
@@ -143,7 +151,7 @@ export async function acquireDataDirLock(dataDir: string): Promise<DataDirLockHa
 
     const details = [
       isFiniteNumber(existingPid) ? `pid=${existingPid}` : undefined,
-      typeof host === "string" && host.length > 0 ? `host=${host}` : undefined,
+      existingHost ? `host=${existingHost}` : undefined,
       startedAt ? `startedAt=${startedAt}` : undefined,
     ]
       .filter(Boolean)
@@ -156,6 +164,9 @@ export async function acquireDataDirLock(dataDir: string): Promise<DataDirLockHa
         details
           ? `It appears another sync-server is running (${details}).`
           : `Another sync-server may already be running.`,
+        !sameHost && existingHost
+          ? `Lock was created on a different host (${existingHost}). Stale lock cleanup is local-only; stop the other host and delete the lock file manually.`
+          : undefined,
         `Stop the other process or choose a different SYNC_SERVER_DATA_DIR.`,
         `If you are sure no other sync-server is using this directory, delete the lock file manually.`,
       ].join(" "),

@@ -91,6 +91,7 @@ Defaults:
 
 - WebSocket: `ws://127.0.0.1:1234/<documentId>?token=<token>`
 - Health: `http://127.0.0.1:1234/healthz`
+- Ready: `http://127.0.0.1:1234/readyz`
 
 Persistence is stored under `SYNC_SERVER_DATA_DIR` (defaults to `./.sync-server-data/`).
 
@@ -98,7 +99,7 @@ The sync server is **single-writer per data directory**. On startup it creates a
 
 - `${SYNC_SERVER_DATA_DIR}/.sync-server.lock`
 
-If the lock file already exists, the server will refuse to start to avoid on-disk corruption. If the server crashes and leaves a stale lock file behind, delete it manually after confirming no other `sync-server` process is using that directory. (You can disable locking with `SYNC_SERVER_DISABLE_DATA_DIR_LOCK=true`, but this is not recommended outside of testing.)
+If the lock file already exists, the server will refuse to start to avoid on-disk corruption. If the server crashes and leaves a stale lock file behind, delete it manually after confirming no other `sync-server` process is using that directory. Note: stale-lock cleanup is **host-local**; if `SYNC_SERVER_DATA_DIR` is shared across machines, a lock from another host will not be auto-removed—stop the other instance and delete the lock file manually. (You can disable locking with `SYNC_SERVER_DISABLE_DATA_DIR_LOCK=true`, but this is not recommended outside of testing.)
 
 You can switch persistence backends:
 

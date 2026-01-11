@@ -749,6 +749,21 @@ export function createSyncServer(
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/readyz") {
+        if (!dataDirLock) {
+          sendJson(res, 503, {
+            status: "not_ready",
+            reason: config.disableDataDirLock
+              ? "data_dir_lock_disabled"
+              : "data_dir_lock_not_acquired",
+          });
+          return;
+        }
+
+        sendJson(res, 200, { status: "ok" });
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/internal/retention/sweep") {
         req.resume();
 
@@ -1055,7 +1070,31 @@ export function createSyncServer(
 
       try {
         await initPersistence();
+        await new Promise<void>((resolve, reject) => {
+          const onError = (err: unknown) => {
+            server.off("error", onError);
+            reject(err);
+          };
+          server.once("error", onError);
+          server.listen(config.port, config.host, () => {
+            server.off("error", onError);
+            resolve();
+          });
+        });
       } catch (err) {
+        if (persistenceCleanup) {
+          try {
+            await persistenceCleanup();
+          } catch (cleanupErr) {
+            logger.warn(
+              { err: cleanupErr },
+              "startup_persistence_cleanup_failed_after_error"
+            );
+          } finally {
+            persistenceCleanup = null;
+          }
+        }
+
         if (dataDirLock) {
           try {
             await dataDirLock.release();
@@ -1065,9 +1104,6 @@ export function createSyncServer(
         }
         throw err;
       }
-      await new Promise<void>((resolve) => {
-        server.listen(config.port, config.host, () => resolve());
-      });
       const addr = server.address() as AddressInfo | null;
       const port = addr?.port ?? config.port;
       logger.info(

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -942,5 +942,73 @@ test("refuses to start a second server using the same data directory", async (t)
       combinedLogs.includes("acquire") ||
       combinedLogs.includes("lock"),
     `expected lock acquisition error in logs.\nstdout:\n${stdout2}\nstderr:\n${stderr2}`
+  );
+});
+
+test("does not treat lock from another host as stale", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-lock-host-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const lockPath = path.join(dataDir, ".sync-server.lock");
+  await writeFile(
+    lockPath,
+    `${JSON.stringify({
+      pid: process.pid + 10_000_000,
+      startedAtMs: Date.now(),
+      host: "definitely-not-this-host",
+    })}\n`
+  );
+
+  const port = await getAvailablePort();
+
+  const serviceDir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    ".."
+  );
+  const entry = path.join(serviceDir, "src", "index.ts");
+
+  let stdout = "";
+  let stderr = "";
+  const child = spawn(process.execPath, ["--import", "tsx", entry], {
+    cwd: serviceDir,
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      LOG_LEVEL: "silent",
+      SYNC_SERVER_HOST: "127.0.0.1",
+      SYNC_SERVER_PORT: String(port),
+      SYNC_SERVER_DATA_DIR: dataDir,
+      SYNC_SERVER_AUTH_TOKEN: "test-token",
+      SYNC_SERVER_JWT_SECRET: "",
+      SYNC_SERVER_JWT_AUDIENCE: "",
+      SYNC_SERVER_JWT_ISSUER: "",
+      SYNC_SERVER_PERSISTENCE_BACKEND: "file",
+      SYNC_SERVER_PERSIST_COMPACT_AFTER_UPDATES: "10",
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  child.stdout?.on("data", (d) => {
+    stdout += d.toString();
+    stdout = stdout.slice(-10_000);
+  });
+  child.stderr?.on("data", (d) => {
+    stderr += d.toString();
+    stderr = stderr.slice(-10_000);
+  });
+
+  const exit = await waitForProcessExit(child, 5_000);
+  assert.notEqual(exit.code, 0);
+
+  const combinedLogs = `${stdout}\n${stderr}`.toLowerCase();
+  assert.ok(
+    combinedLogs.includes(".sync-server.lock") ||
+      combinedLogs.includes("data directory lock") ||
+      combinedLogs.includes("lock was created on a different host") ||
+      combinedLogs.includes("lock"),
+    `expected lock acquisition error in logs.\nstdout:\n${stdout}\nstderr:\n${stderr}`
   );
 });
