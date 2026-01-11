@@ -49,9 +49,64 @@ export interface AIChatPanelContainerProps {
 }
 
 export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
-  const [tab, setTab] = useState<"chat" | "agent">("chat");
   const [apiKey, setApiKey] = useState<string | null>(() => loadApiKeyFromRuntime());
   const [draftKey, setDraftKey] = useState("");
+
+  if (!apiKey) {
+    return (
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ fontWeight: 600 }}>AI chat setup</div>
+        <div style={{ fontSize: 12, opacity: 0.8 }}>
+          Enter an OpenAI API key to enable chat. It will be stored in localStorage as <code>{API_KEY_STORAGE_KEY}</code>.
+        </div>
+        <input
+          value={draftKey}
+          placeholder="sk-..."
+          onChange={(e) => setDraftKey(e.target.value)}
+          style={{ padding: 8, fontFamily: "monospace" }}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            style={{ padding: "8px 12px" }}
+            onClick={() => {
+              const next = draftKey.trim();
+              if (!next) return;
+              try {
+                globalThis.localStorage?.setItem(API_KEY_STORAGE_KEY, next);
+              } catch {
+                // ignore
+              }
+              setDraftKey("");
+              setApiKey(next);
+            }}
+          >
+            Save key
+          </button>
+          <button
+            type="button"
+            style={{ padding: "8px 12px" }}
+            onClick={() => {
+              setDraftKey("");
+              try {
+                globalThis.localStorage?.removeItem(API_KEY_STORAGE_KEY);
+              } catch {
+                // ignore
+              }
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <AIChatPanelRuntime {...props} apiKey={apiKey} />;
+}
+
+function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string }) {
+  const [tab, setTab] = useState<"chat" | "agent">("chat");
 
   const sessionId = useRef<string>(generateSessionId());
   const llmHistory = useRef<LLMMessage[] | undefined>(undefined);
@@ -91,56 +146,7 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
     };
   }, []);
 
-  if (!apiKey) {
-    return (
-      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ fontWeight: 600 }}>AI chat setup</div>
-        <div style={{ fontSize: 12, opacity: 0.8 }}>
-          Enter an OpenAI API key to enable chat. It will be stored in localStorage as <code>{API_KEY_STORAGE_KEY}</code>.
-        </div>
-        <input
-          value={draftKey}
-          placeholder="sk-..."
-          onChange={(e) => setDraftKey(e.target.value)}
-          style={{ padding: 8, fontFamily: "monospace" }}
-        />
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            style={{ padding: "8px 12px" }}
-            onClick={() => {
-              const next = draftKey.trim();
-              if (!next) return;
-              try {
-                globalThis.localStorage?.setItem(API_KEY_STORAGE_KEY, next);
-              } catch {
-                // ignore
-              }
-              setApiKey(next);
-            }}
-          >
-            Save key
-          </button>
-          <button
-            type="button"
-            style={{ padding: "8px 12px" }}
-            onClick={() => {
-              setDraftKey("");
-              try {
-                globalThis.localStorage?.removeItem(API_KEY_STORAGE_KEY);
-              } catch {
-                // ignore
-              }
-            }}
-          >
-            Clear
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const client = useMemo(() => new OpenAIClient({ apiKey }), [apiKey]);
+  const client = useMemo(() => new OpenAIClient({ apiKey: props.apiKey }), [props.apiKey]);
 
   const workbookId = props.workbookId ?? "local-workbook";
   const auditStore = useMemo(() => new LocalStorageAIAuditStore(), []);
