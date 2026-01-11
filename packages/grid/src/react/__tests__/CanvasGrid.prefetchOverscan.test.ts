@@ -8,6 +8,14 @@ import type { CellRange } from "../../model/CellProvider";
 import { CanvasGrid } from "../CanvasGrid";
 import type { GridApi } from "../CanvasGrid";
 
+function restoreActEnvironment(previous: unknown): void {
+  if (previous === undefined) {
+    Reflect.deleteProperty(globalThis as any, "IS_REACT_ACT_ENVIRONMENT");
+    return;
+  }
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previous;
+}
+
 describe("CanvasGrid prefetch overscan", () => {
   it("prefetches beyond the visible viewport by the configured overscan", async () => {
     const previousActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
@@ -117,7 +125,114 @@ describe("CanvasGrid prefetch overscan", () => {
     boundingRect.mockRestore();
     getContext.mockRestore();
     vi.unstubAllGlobals();
-    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+    restoreActEnvironment(previousActEnvironment);
+  });
+
+  it("clamps overscanned prefetch range to grid bounds", async () => {
+    const previousActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const prefetch = vi.fn<(range: CellRange) => void>();
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe(_target: Element): void {}
+        unobserve(_target: Element): void {}
+        disconnect(): void {}
+      }
+    );
+
+    vi.stubGlobal("requestAnimationFrame", vi.fn((_cb: FrameRequestCallback) => 0));
+
+    const viewportWidth = 50;
+    const viewportHeight = 40;
+
+    const overscanRows = 2;
+    const overscanCols = 3;
+
+    const rowHeight = 10;
+    const colWidth = 10;
+
+    const rowCount = 10;
+    const colCount = 10;
+
+    const boundingRect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(
+        () =>
+          ({
+            width: viewportWidth,
+            height: viewportHeight,
+            top: 0,
+            left: 0,
+            right: viewportWidth,
+            bottom: viewportHeight,
+            x: 0,
+            y: 0,
+            toJSON: () => ({})
+          }) as DOMRect
+      );
+
+    const ctxStub: Partial<CanvasRenderingContext2D> = {
+      setTransform: vi.fn(),
+      measureText: (text: string) =>
+        ({
+          width: text.length * 6,
+          actualBoundingBoxAscent: 8,
+          actualBoundingBoxDescent: 2
+        }) as TextMetrics
+    };
+
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .mockImplementation(() => ctxStub as any);
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    const apiRef = React.createRef<GridApi>();
+
+    await act(async () => {
+      root.render(
+        React.createElement(CanvasGrid, {
+          provider: {
+            getCell: () => null,
+            prefetch
+          },
+          rowCount,
+          colCount,
+          defaultRowHeight: rowHeight,
+          defaultColWidth: colWidth,
+          prefetchOverscanRows: overscanRows,
+          prefetchOverscanCols: overscanCols,
+          apiRef
+        })
+      );
+    });
+
+    // Scroll to the bottom-right corner (max scroll).
+    apiRef.current?.scrollTo(50, 60);
+
+    const lastCall = prefetch.mock.calls.at(-1)?.[0];
+    expect(lastCall).toEqual({
+      startRow: 4,
+      endRow: rowCount,
+      startCol: 2,
+      endCol: colCount
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+
+    boundingRect.mockRestore();
+    getContext.mockRestore();
+    vi.unstubAllGlobals();
+    restoreActEnvironment(previousActEnvironment);
   });
 
   it("dedupes prefetch calls when the prefetched range does not change", async () => {
@@ -220,6 +335,6 @@ describe("CanvasGrid prefetch overscan", () => {
     boundingRect.mockRestore();
     getContext.mockRestore();
     vi.unstubAllGlobals();
-    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+    restoreActEnvironment(previousActEnvironment);
   });
 });
