@@ -499,15 +499,7 @@ export class QueryFoldingEngine {
       }
     }
 
-    if (
-      merge.comparer != null &&
-      (typeof merge.comparer !== "object" ||
-        Array.isArray(merge.comparer) ||
-        // @ts-ignore - runtime inspection
-        merge.comparer.caseSensitive !== true)
-    ) {
-      return null;
-    }
+    if (!isSqlFoldableJoinComparer(merge.comparer)) return null;
 
     const join = joinTypeToSql(dialect, merge.joinType);
     if (!join) return null;
@@ -1028,15 +1020,7 @@ export class QueryFoldingEngine {
         const joinMode = operation.joinMode ?? "flat";
         if (joinMode !== "flat") return null;
 
-        if (
-          operation.comparer != null &&
-          (typeof operation.comparer !== "object" ||
-            Array.isArray(operation.comparer) ||
-            // @ts-ignore - runtime inspection
-            operation.comparer.caseSensitive !== true)
-        ) {
-          return null;
-        }
+        if (!isSqlFoldableJoinComparer(operation.comparer)) return null;
 
         const leftKeys =
           Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
@@ -1258,15 +1242,7 @@ export class QueryFoldingEngine {
         const joinMode = operation.joinMode ?? "flat";
         if (joinMode !== "flat") return "unsupported_join_mode";
 
-        if (
-          operation.comparer != null &&
-          (typeof operation.comparer !== "object" ||
-            Array.isArray(operation.comparer) ||
-            // @ts-ignore - runtime inspection
-            operation.comparer.caseSensitive !== true)
-        ) {
-          return "unsupported_comparer";
-        }
+        if (!isSqlFoldableJoinComparer(operation.comparer)) return "unsupported_comparer";
 
         const leftKeys =
           Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
@@ -1443,6 +1419,26 @@ function connectionsMatch(left, right) {
   // If only one side has an identity, be conservative and only allow folding
   // when both sides share the same (referentially equal) connection handle.
   return left.connection === right.connection;
+}
+
+/**
+ * `Table.Join` / `Table.NestedJoin` support passing a comparer to override how
+ * join keys are compared. SQL folding is conservative and only supports the
+ * default comparer semantics.
+ *
+ * @param {unknown} comparer
+ * @returns {boolean}
+ */
+function isSqlFoldableJoinComparer(comparer) {
+  if (comparer == null) return true;
+  if (!comparer || typeof comparer !== "object" || Array.isArray(comparer)) return false;
+  // @ts-ignore - runtime inspection
+  const name = typeof comparer.comparer === "string" ? comparer.comparer.toLowerCase() : "";
+  // @ts-ignore - runtime inspection
+  const caseSensitive = comparer.caseSensitive;
+  if (name !== "ordinal") return false;
+  if (caseSensitive === false) return false;
+  return true;
 }
 
 /**

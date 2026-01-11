@@ -596,6 +596,57 @@ in
   ]);
 });
 
+test("m_language execution: Table.Join ordinal comparer record is case sensitive", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Name"},
+    {1, "Alice"}
+  })
+in
+  Source
+`,
+    { id: "q_left_case_sensitive", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Name", "Score"},
+    {"alice", 10}
+  })
+in
+  Source
+`,
+    { id: "q_right_case_sensitive", name: "Right" },
+  );
+
+  const joinQuery = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_case_sensitive"),
+  Right = Query.Reference("q_right_case_sensitive"),
+  #"Merged Queries" = Table.Join(Left, {"Name"}, Right, {"Name"}, JoinKind.Inner, null, [comparer = "ordinal"])
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_case_sensitive", name: "Join Case Sensitive" },
+  );
+
+  assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+  assert.equal(joinQuery.steps[0]?.operation.comparer?.caseSensitive, true);
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(
+    joinQuery,
+    { queries: { q_left_case_sensitive: left, q_right_case_sensitive: right } },
+    {},
+  );
+  assert.deepEqual(result.toGrid(), [["Id", "Name", "Score"]]);
+});
+
 test("m_language execution: Table.Join supports multi-key joins (nulls compare equal)", async () => {
   const left = compileMToQuery(
     `

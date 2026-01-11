@@ -1319,8 +1319,16 @@ function isComparerExpr(ctx, expr) {
   }
   try {
     const value = evaluateConstant(ctx, expr);
-    if (Array.isArray(value)) return value.some((v) => v && typeof v === "object" && !Array.isArray(v) && "caseSensitive" in v);
-    return value && typeof value === "object" && !Array.isArray(value) && "caseSensitive" in value;
+    if (Array.isArray(value)) {
+      return value.some(
+        (v) =>
+          v &&
+          typeof v === "object" &&
+          !Array.isArray(v) &&
+          ("caseSensitive" in v || "comparer" in v || "Comparer" in v),
+      );
+    }
+    return value && typeof value === "object" && !Array.isArray(value) && ("caseSensitive" in value || "comparer" in value || "Comparer" in value);
   } catch {
     return false;
   }
@@ -1335,35 +1343,63 @@ function compileComparer(ctx, expr) {
   const raw = evaluateConstant(ctx, expr);
   if (raw == null) return null;
 
-  let value = raw;
+  /**
+   * @param {unknown} input
+   * @returns {{ comparer: string; caseSensitive: boolean } | null}
+   */
+  const parseComparer = (input) => {
+    if (input == null) return null;
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
+    }
+
+    /** @type {Record<string, unknown>} */
+    const record = /** @type {any} */ (input);
+    let comparerName = null;
+    /** @type {boolean | undefined} */
+    let caseSensitive;
+
+    for (const [k, v] of Object.entries(record)) {
+      const key = k.toLowerCase();
+      if (key === "comparer") comparerName = typeof v === "string" ? v : String(v);
+      if (key === "casesensitive") caseSensitive = Boolean(v);
+    }
+
+    if (typeof comparerName !== "string") {
+      ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
+    }
+
+    const normalized = comparerName.trim().toLowerCase();
+    if (normalized === "ordinal") {
+      if (caseSensitive === false) ctx.error(expr, "Comparer.Ordinal must be case sensitive");
+      return { comparer: "ordinal", caseSensitive: true };
+    }
+    if (normalized === "ordinalignorecase") {
+      if (caseSensitive === true) ctx.error(expr, "Comparer.OrdinalIgnoreCase must be case insensitive");
+      return { comparer: "ordinalIgnoreCase", caseSensitive: false };
+    }
+
+    ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
+  };
+
   if (Array.isArray(raw)) {
-    const first = raw.find((v) => v != null);
-    if (first == null) return null;
+    /** @type {{ comparer: string; caseSensitive: boolean } | null} */
+    let first = null;
     for (const entry of raw) {
-      if (entry == null) continue;
-      if (
-        typeof entry !== "object" ||
-        Array.isArray(entry) ||
-        typeof first !== "object" ||
-        Array.isArray(first) ||
-        /** @type {any} */ (entry).comparer !== /** @type {any} */ (first).comparer ||
-        Boolean(/** @type {any} */ (entry).caseSensitive) !== Boolean(/** @type {any} */ (first).caseSensitive)
-      ) {
+      const parsed = parseComparer(entry);
+      if (!parsed) continue;
+      if (!first) {
+        first = parsed;
+        continue;
+      }
+      if (parsed.comparer !== first.comparer || parsed.caseSensitive !== first.caseSensitive) {
         ctx.error(expr, "Unsupported join comparer list (all comparers must match in this subset)");
       }
     }
-    value = first;
+    return first;
   }
 
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    /** @type {any} */
-    const record = value;
-    if (typeof record.comparer === "string") {
-      return { comparer: record.comparer, caseSensitive: Boolean(record.caseSensitive) };
-    }
-  }
-
-  ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
+  return parseComparer(raw);
 }
 
 /**

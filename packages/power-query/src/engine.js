@@ -2435,12 +2435,17 @@ export class QueryEngine {
     const leftKeyIdx = leftKeys.map((key) => left.getColumnIndex(key));
     const rightKeyIdx = rightKeys.map((key) => right.getColumnIndex(key));
 
+    const comparerName =
+      op.comparer && typeof op.comparer === "object" && !Array.isArray(op.comparer)
+        ? // @ts-ignore - runtime inspection
+          String(op.comparer.comparer ?? "").toLowerCase()
+        : "";
     const caseInsensitiveComparer =
       op.comparer &&
       typeof op.comparer === "object" &&
       !Array.isArray(op.comparer) &&
       // @ts-ignore - runtime inspection
-      op.comparer.caseSensitive === false;
+      (op.comparer.caseSensitive === false || comparerName === "ordinalignorecase");
 
     /**
      * @param {unknown} value
