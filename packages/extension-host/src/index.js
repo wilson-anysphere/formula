@@ -186,6 +186,17 @@ class ExtensionHost {
     if (!stat.isFile()) {
       throw new Error(`Extension entrypoint is not a file: ${manifest.main}`);
     }
+
+    // Prevent symlink escapes: the entrypoint path may be lexically inside the extension folder
+    // but still point elsewhere when resolved via realpath.
+    const extensionRootReal = await fs.realpath(extensionRoot).catch(() => extensionRoot);
+    const mainPathReal = await fs.realpath(mainPath).catch(() => mainPath);
+    const relativeReal = path.relative(extensionRootReal, mainPathReal);
+    if (relativeReal === "" || relativeReal === ".." || relativeReal.startsWith(".." + path.sep) || path.isAbsolute(relativeReal)) {
+      throw new Error(
+        `Extension entrypoint must resolve inside extension folder: '${manifest.main}' resolved to '${mainPath}' (realpath '${mainPathReal}')`
+      );
+    }
     const extension = {
       id: extensionId,
       path: extensionPath,

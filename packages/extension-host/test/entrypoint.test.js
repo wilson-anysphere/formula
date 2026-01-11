@@ -73,3 +73,50 @@ test("loadExtension rejects missing entrypoint files", async (t) => {
   await assert.rejects(() => host.loadExtension(extDir), /entrypoint not found/i);
 });
 
+test("loadExtension rejects entrypoints that escape via symlink", async (t) => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-entrypoint-symlink-"));
+  t.after(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  const extDir = path.join(tmp, "ext");
+  const distDir = path.join(extDir, "dist");
+  await fs.mkdir(distDir, { recursive: true });
+
+  const outsidePath = path.join(tmp, "outside.js");
+  await fs.writeFile(outsidePath, "module.exports.activate = async () => {};\n", "utf8");
+
+  const entrypointPath = path.join(distDir, "extension.js");
+  try {
+    await fs.symlink(outsidePath, entrypointPath, process.platform === "win32" ? "file" : undefined);
+  } catch (error) {
+    const code = error && typeof error === "object" ? error.code : null;
+    if (code === "EPERM" || code === "EACCES" || code === "ENOSYS") {
+      t.skip(`Symlinks not supported in this environment (${code})`);
+      return;
+    }
+    throw error;
+  }
+
+  await writeJson(path.join(extDir, "package.json"), {
+    name: "symlink",
+    version: "1.0.0",
+    publisher: "evil",
+    main: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    permissions: []
+  });
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(tmp, "permissions.json"),
+    extensionStoragePath: path.join(tmp, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await assert.rejects(() => host.loadExtension(extDir), /resolve inside extension folder/i);
+});
