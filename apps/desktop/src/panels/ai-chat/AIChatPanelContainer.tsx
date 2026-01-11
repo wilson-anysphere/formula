@@ -204,6 +204,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
 
   const [agentGoal, setAgentGoal] = useState("");
   const [agentConstraints, setAgentConstraints] = useState("");
+  const [agentContinueOnDenied, setAgentContinueOnDenied] = useState(false);
   const [agentEvents, setAgentEvents] = useState<AgentProgressEvent[]>([]);
   const [agentResult, setAgentResult] = useState<AgentTaskResult | null>(null);
   const [agentRunning, setAgentRunning] = useState(false);
@@ -251,6 +252,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
         createChart: props.createChart,
         onProgress: (event) => setAgentEvents((prev) => [...prev, event]),
         onApprovalRequired: onApprovalRequired as any,
+        continueOnApprovalDenied: agentContinueOnDenied,
         maxIterations: 20,
         maxDurationMs: 5 * 60 * 1000,
         signal: controller.signal,
@@ -267,6 +269,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
   }, [
     agentConstraints,
     agentGoal,
+    agentContinueOnDenied,
     agentRunning,
     auditStore,
     client,
@@ -334,6 +337,15 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
                 Cancel
               </button>
             </div>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, opacity: agentRunning ? 0.6 : 1 }}>
+              <input
+                type="checkbox"
+                checked={agentContinueOnDenied}
+                onChange={(e) => setAgentContinueOnDenied(e.target.checked)}
+                disabled={agentRunning}
+              />
+              Continue running if I deny an approval (agent will re-plan)
+            </label>
             <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, minHeight: 0, flex: 1, overflow: "auto" }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Steps</div>
               {agentEvents.length === 0 ? (
