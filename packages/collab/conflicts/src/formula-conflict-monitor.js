@@ -461,14 +461,7 @@ export class FormulaConflictMonitor {
     // Symmetric content conflict:
     // local formula write vs remote value write, where the remote value wins and
     // clears the formula (formula=null marker) while also writing a literal value.
-    if (
-      this.includeValueConflicts &&
-      hasValueChange &&
-      lastContent?.kind === "formula" &&
-      lastContent.formula &&
-      !remoteFormula &&
-      currentValue !== null
-    ) {
+    if (this.includeValueConflicts && hasValueChange && lastContent?.kind === "formula" && !remoteFormula && currentValue !== null) {
       const cell = cellRefFromKey(cellKey);
       const conflict = /** @type {FormulaConflict} */ ({
         id: crypto.randomUUID(),
@@ -564,7 +557,7 @@ export class FormulaConflictMonitor {
     // formula insert, leaving both `formula` and `value` present.
     if (this.includeValueConflicts) {
       const lastContent = this._lastLocalContentEditByCellKey.get(cellKey);
-      if (lastContent?.kind === "formula" && lastContent.formula && valuesDeeplyEqual(oldValue, null) && newValue !== null) {
+      if (lastContent?.kind === "formula" && valuesDeeplyEqual(oldValue, null) && newValue !== null) {
         // Sequential delete: remote explicitly deleted the exact item we wrote.
         if (action === "delete" && idsEqual(itemId, lastContent.valueItemId)) {
           this._lastLocalContentEditByCellKey.delete(cellKey);

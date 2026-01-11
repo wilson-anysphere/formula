@@ -352,6 +352,37 @@ test("legacy value writes that do not create a formula marker still surface a co
   assert.equal(getValue(bobCells, "s:0:0"), "bob");
 });
 
+test("concurrent formula clear vs value edit surfaces a content conflict", () => {
+  // Value writer has higher clientID and wins both formula/value null markers.
+  const alice = createClient("alice", { clientID: 1, mode: "formula+value" });
+  const bob = createClient("bob", { clientID: 2, mode: "formula+value" });
+
+  // Establish a shared base formula.
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  syncDocs(alice.doc, bob.doc);
+
+  // Offline concurrent edits: alice clears the formula, bob writes a value.
+  alice.monitor.setLocalFormula("s:0:0", "");
+  bob.monitor.setLocalValue("s:0:0", "bob");
+  syncDocs(alice.doc, bob.doc);
+
+  const conflict = alice.conflicts.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict on alice");
+  assert.equal(conflict.local.type, "formula");
+  assert.equal(conflict.local.formula.trim(), "");
+  assert.equal(conflict.remote.type, "value");
+  assert.equal(conflict.remote.value, "bob");
+
+  // Resolve by keeping the local clear (should clear the value).
+  assert.ok(alice.monitor.resolveConflict(conflict.id, conflict.local));
+  syncDocs(alice.doc, bob.doc);
+
+  assert.equal(getFormula(alice.cells, "s:0:0"), "");
+  assert.equal(getFormula(bob.cells, "s:0:0"), "");
+  assert.equal(getValue(alice.cells, "s:0:0"), null);
+  assert.equal(getValue(bob.cells, "s:0:0"), null);
+});
+
 test("sequential value -> formula edits do not surface a content conflict", () => {
   const alice = createClient("alice", { mode: "formula+value" });
   const bob = createClient("bob", { mode: "formula+value" });
