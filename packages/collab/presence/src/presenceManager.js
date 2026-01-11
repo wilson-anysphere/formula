@@ -86,6 +86,9 @@ export class PresenceManager {
     this.now = now;
     this.staleAfterMs =
       typeof staleAfterMs === "number" && Number.isFinite(staleAfterMs) && staleAfterMs >= 0 ? staleAfterMs : null;
+    this._setTimeout = setTimeoutFn ?? globalThis.setTimeout;
+    this._clearTimeout = clearTimeoutFn ?? globalThis.clearTimeout;
+    this._staleEvictionTimeoutId = null;
     this._listeners = new Set();
     this._awarenessChangeHandler = (change) => {
       const localClientId = this.awareness.clientID;
@@ -123,10 +126,46 @@ export class PresenceManager {
     this.awareness.setLocalStateField("presence", serializePresenceState(this.localPresence));
   }
 
+  _clearStaleEvictionTimer() {
+    if (this._staleEvictionTimeoutId === null) return;
+    this._clearTimeout(this._staleEvictionTimeoutId);
+    this._staleEvictionTimeoutId = null;
+  }
+
+  _scheduleStaleEviction(presences) {
+    this._clearStaleEvictionTimer();
+
+    if (this._listeners.size === 0) return;
+    if (this.staleAfterMs === null) return;
+    if (!Array.isArray(presences) || presences.length === 0) return;
+
+    const now = this.now();
+    let nextEvictAt = Infinity;
+
+    for (const presence of presences) {
+      const lastActive = presence?.lastActive;
+      if (typeof lastActive !== "number" || !Number.isFinite(lastActive)) continue;
+      const evictAt = lastActive + this.staleAfterMs + 1;
+      if (evictAt < nextEvictAt) nextEvictAt = evictAt;
+    }
+
+    if (!Number.isFinite(nextEvictAt)) return;
+
+    const delayMs = Math.max(0, nextEvictAt - now);
+    if (typeof this._setTimeout !== "function") return;
+
+    this._staleEvictionTimeoutId = this._setTimeout(() => {
+      this._staleEvictionTimeoutId = null;
+      this._notify();
+    }, delayMs);
+    this._staleEvictionTimeoutId?.unref?.();
+  }
+
   _notify() {
     if (this._listeners.size === 0) return;
     const presences = this.getRemotePresences();
     for (const listener of this._listeners) listener(presences);
+    this._scheduleStaleEviction(presences);
   }
 
   /**
@@ -147,7 +186,9 @@ export class PresenceManager {
       this._awarenessListenerAttached = true;
     }
 
-    listener(this.getRemotePresences());
+    const presences = this.getRemotePresences();
+    listener(presences);
+    this._scheduleStaleEviction(presences);
 
     return () => {
       this._listeners.delete(listener);
@@ -156,11 +197,13 @@ export class PresenceManager {
         this.awareness.off("change", this._awarenessChangeHandler);
       }
       this._awarenessListenerAttached = false;
+      this._clearStaleEvictionTimer();
     };
   }
 
   destroy() {
     this._broadcastThrottled?.cancel?.();
+    this._clearStaleEvictionTimer();
     if (this._awarenessListenerAttached && typeof this.awareness.off === "function") {
       this.awareness.off("change", this._awarenessChangeHandler);
       this._awarenessListenerAttached = false;

@@ -3,6 +3,43 @@ import test from "node:test";
 
 import { InMemoryAwarenessHub, PresenceManager, serializePresenceState } from "../index.js";
 
+class FakeScheduler {
+  constructor() {
+    this.nowMs = 0;
+    this._tasks = [];
+    this._nextId = 1;
+  }
+
+  now() {
+    return this.nowMs;
+  }
+
+  setTimeout(cb, delayMs) {
+    const id = this._nextId++;
+    this._tasks.push({ id, runAt: this.nowMs + delayMs, cb });
+    this._tasks.sort((a, b) => a.runAt - b.runAt);
+    return id;
+  }
+
+  clearTimeout(id) {
+    this._tasks = this._tasks.filter((task) => task.id !== id);
+  }
+
+  advance(ms) {
+    this.nowMs += ms;
+    this._runDue();
+  }
+
+  _runDue() {
+    while (true) {
+      const task = this._tasks[0];
+      if (!task || task.runAt > this.nowMs) return;
+      this._tasks.shift();
+      task.cb();
+    }
+  }
+}
+
 test("PresenceManager evicts stale remote presences via staleAfterMs", () => {
   const hub = new InMemoryAwarenessHub();
   const awarenessA = hub.createAwareness(1);
@@ -33,6 +70,45 @@ test("PresenceManager evicts stale remote presences via staleAfterMs", () => {
 
   presenceB.setCursor({ row: 1, col: 1 });
   assert.equal(presenceA.getRemotePresences().length, 1);
+});
+
+test("PresenceManager.subscribe evicts stale remote presences without remote awareness updates", () => {
+  const scheduler = new FakeScheduler();
+  const hub = new InMemoryAwarenessHub();
+  const awarenessA = hub.createAwareness(1);
+  const awarenessB = hub.createAwareness(2);
+
+  const presenceA = new PresenceManager(awarenessA, {
+    user: { id: "u1", name: "Ada", color: "#ff2d55" },
+    activeSheet: "Sheet1",
+    throttleMs: 0,
+    staleAfterMs: 100,
+    now: () => scheduler.now(),
+    setTimeout: scheduler.setTimeout.bind(scheduler),
+    clearTimeout: scheduler.clearTimeout.bind(scheduler),
+  });
+
+  new PresenceManager(awarenessB, {
+    user: { id: "u2", name: "Grace", color: "#4c8bf5" },
+    activeSheet: "Sheet1",
+    throttleMs: 0,
+    now: () => scheduler.now(),
+    setTimeout: scheduler.setTimeout.bind(scheduler),
+    clearTimeout: scheduler.clearTimeout.bind(scheduler),
+  });
+
+  /** @type {string[][]} */
+  const updates = [];
+  const unsubscribe = presenceA.subscribe((presences) => {
+    updates.push(presences.map((presence) => presence.id));
+  });
+
+  assert.deepEqual(updates, [["u2"]]);
+
+  scheduler.advance(101);
+  assert.deepEqual(updates, [["u2"], []]);
+
+  unsubscribe();
 });
 
 test("PresenceManager.getRemotePresences can include users on other sheets", () => {
@@ -123,4 +199,3 @@ test("PresenceManager.getRemotePresences returns results in a stable order", () 
   ]);
   assert.deepEqual(toKey(second), toKey(first));
 });
-

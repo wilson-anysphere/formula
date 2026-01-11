@@ -22,6 +22,7 @@ export interface SessionPresenceOptions {
   user: { id: string; name: string; color: string };
   activeSheet: string;
   throttleMs?: number;
+  staleAfterMs?: number;
   now?: () => number;
   setTimeout?: typeof setTimeout;
   clearTimeout?: typeof clearTimeout;
