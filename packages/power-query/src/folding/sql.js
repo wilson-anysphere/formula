@@ -706,14 +706,19 @@ export class QueryFoldingEngine {
       }
       case "addColumn": {
         if (state.columns && state.columns.includes(operation.name)) return "invalid_projection";
-        const exprSql = compileFormulaToSql(operation.formula, {
-          alias: "t",
-          quoteIdentifier: ctx.dialect.quoteIdentifier,
-          params: state.fragment.params.slice(),
-          dialect: ctx.dialect,
-          knownColumns: state.columns,
-        });
-        if (!exprSql) return "unsafe_formula";
+        try {
+          const expr = parseFormula(operation.formula);
+          // Only used to validate that the expression is foldable; the actual SQL
+          // compilation happens in `applySqlStep`.
+          compileExprToSql(expr, {
+            alias: "t",
+            quoteIdentifier: ctx.dialect.quoteIdentifier,
+            dialect: ctx.dialect,
+            knownColumns: state.columns,
+          });
+        } catch {
+          return "unsafe_formula";
+        }
         return "unsupported_op";
       }
       case "take": {
