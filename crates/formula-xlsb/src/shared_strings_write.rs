@@ -15,9 +15,9 @@ struct RecordRange {
 /// Shared strings (`xl/sharedStrings.bin`) patcher that preserves existing records byte-for-byte.
 ///
 /// The shared string table is a BIFF12 record stream containing:
-/// - `BrtSST` (`0x019F`) header with `[totalCount:u32][uniqueCount:u32]`
+/// - `BrtSST` (`0x009F`) header with `[totalCount:u32][uniqueCount:u32]`
 /// - `BrtSI` (`0x0013`) entries
-/// - `BrtSSTEnd` (`0x01A0`)
+/// - `BrtSSTEnd` (`0x00A0`)
 ///
 /// This patcher supports interning *plain* strings (no rich text runs / phonetic data) by:
 /// - reusing an existing `BrtSI` entry when the plain text matches

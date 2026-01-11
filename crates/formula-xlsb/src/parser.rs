@@ -25,14 +25,14 @@ pub(crate) mod biff12 {
     // Workbook defined names (named ranges / constants / formulas).
     pub const NAME: u32 = 0x0027;
 
-    pub const SHEETS_END: u32 = 0x0190;
-    pub const SHEET: u32 = 0x019C;
+    pub const SHEETS_END: u32 = 0x0090;
+    pub const SHEET: u32 = 0x009C;
 
-    pub const WORKSHEET: u32 = 0x0181;
-    pub const WORKSHEET_END: u32 = 0x0182;
-    pub const SHEETDATA: u32 = 0x0191;
-    pub const SHEETDATA_END: u32 = 0x0192;
-    pub const DIMENSION: u32 = 0x0194;
+    pub const WORKSHEET: u32 = 0x0081;
+    pub const WORKSHEET_END: u32 = 0x0082;
+    pub const SHEETDATA: u32 = 0x0091;
+    pub const SHEETDATA_END: u32 = 0x0092;
+    pub const DIMENSION: u32 = 0x0094;
 
     pub const ROW: u32 = 0x0000;
     pub const BLANK: u32 = 0x0001;
@@ -48,14 +48,10 @@ pub(crate) mod biff12 {
     pub const FORMULA_BOOLERR: u32 = 0x000B;
 
     // Shared formula definition (MS-XLSB BrtShrFmla).
-    //
-    // NOTE: Record IDs are decoded by `Biff12Reader::read_record()` in the same
-    // way as the rest of this file (continuation bits are preserved), hence the
-    // literal value here follows that convention.
     pub const SHR_FMLA: u32 = 0x0010;
 
-    pub const SST: u32 = 0x019F;
-    pub const SST_END: u32 = 0x01A0;
+    pub const SST: u32 = 0x009F;
+    pub const SST_END: u32 = 0x00A0;
     pub const SI: u32 = 0x0013;
 }
 
@@ -643,7 +639,7 @@ mod tests {
         let mut supbook = Vec::new();
         supbook.extend_from_slice(&2u16.to_le_bytes()); // ctab
         write_utf16_string(&mut supbook, "Sheet1");
-        write_record(&mut workbook_bin, 0x01AE, &supbook);
+        write_record(&mut workbook_bin, 0x00AE, &supbook);
 
         // ExternSheet table mapping ixti 0 -> Sheet1, ixti 1 -> Sheet2.
         let mut extern_sheet = Vec::new();
@@ -2177,8 +2173,8 @@ fn is_defined_name_record(id: u32) -> bool {
 fn is_supbook_record(id: u32) -> bool {
     matches!(
         id,
-        // BIFF8 `SupBook`
-        0x01AE
+        // BIFF8 `SupBook`. In XLSB this appears as a BIFF12 record id.
+        0x00AE
             // Common BIFF12 candidates observed in the wild (keep parsing robust across writers).
             | 0x0162
             | 0x0161
@@ -2186,7 +2182,7 @@ fn is_supbook_record(id: u32) -> bool {
 }
 
 fn is_end_supbook_record(id: u32) -> bool {
-    matches!(id, 0x0163 | 0x01AF)
+    matches!(id, 0x0163 | 0x00AF)
 }
 
 fn is_extern_sheet_record(id: u32) -> bool {

@@ -15,8 +15,8 @@ fn preserves_unknown_reserved_num_fmt_ids_as_placeholders() {
     //
     // XLSB allows these ids to appear without an explicit format code, so we preserve the id via
     // `__builtin_numFmtId:<id>` so downstream converters can round-trip it.
-    const BEGIN_CELL_XFS: u32 = 0x02A2;
-    const END_CELL_XFS: u32 = 0x02A3;
+    const BEGIN_CELL_XFS: u32 = 0x0122;
+    const END_CELL_XFS: u32 = 0x0123;
     const BRT_XF: u32 = 0x002F;
 
     let mut bytes = Vec::new();

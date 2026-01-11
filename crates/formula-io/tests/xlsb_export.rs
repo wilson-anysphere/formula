@@ -291,7 +291,7 @@ fn patch_workbook_bin_set_first_sheet_visibility(
     workbook_bin: &[u8],
     visibility_state: u32,
 ) -> Vec<u8> {
-    const SHEET_RECORD_ID: u32 = 0x019C;
+    const SHEET_RECORD_ID: u32 = 0x009C;
     const SHEET_STATE_MASK: u32 = 0x0003;
 
     let mut out = workbook_bin.to_vec();

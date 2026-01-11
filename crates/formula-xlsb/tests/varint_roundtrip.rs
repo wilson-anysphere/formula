@@ -10,34 +10,11 @@ use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 
 fn is_encodable_record_id(id: u32) -> bool {
-    let bytes = id.to_le_bytes();
-    let mut idx = 0usize;
-    while idx < bytes.len() && (bytes[idx] & 0x80) != 0 {
-        idx += 1;
-    }
-    if idx >= bytes.len() {
-        return false;
-    }
-    bytes[idx + 1..].iter().all(|&b| b == 0)
+    id <= 0x0FFF_FFFF
 }
 
 fn valid_record_id() -> impl Strategy<Value = u32> {
-    // BIFF12 record IDs are encoded as a little-endian sequence of bytes, terminated by the
-    // first byte with MSB=0. This means only a subset of `u32` values are representable.
-    prop_oneof![
-        // 1-byte ID: MSB must be 0.
-        (0u8..=0x7F).prop_map(|b0| b0 as u32),
-        // 2-byte ID: first byte MSB=1, second byte MSB=0.
-        (0x80u8..=0xFF, 0u8..=0x7F).prop_map(|(b0, b1)| (b0 as u32) | ((b1 as u32) << 8)),
-        // 3-byte ID: first two bytes MSB=1, third byte MSB=0.
-        (0x80u8..=0xFF, 0x80u8..=0xFF, 0u8..=0x7F)
-            .prop_map(|(b0, b1, b2)| (b0 as u32) | ((b1 as u32) << 8) | ((b2 as u32) << 16)),
-        // 4-byte ID: first three bytes MSB=1, last byte MSB=0 and restricted to keep the value
-        // within 0..=0x1FFF_FFFF.
-        (0x80u8..=0xFF, 0x80u8..=0xFF, 0x80u8..=0xFF, 0u8..=0x1F).prop_map(|(b0, b1, b2, b3)| {
-            (b0 as u32) | ((b1 as u32) << 8) | ((b2 as u32) << 16) | ((b3 as u32) << 24)
-        }),
-    ]
+    0u32..=0x0FFF_FFFF
 }
 
 #[test]
@@ -46,14 +23,15 @@ fn record_id_vectors_lock_in_encoding() {
         (0x00, &[0x00]),
         (0x01, &[0x01]),
         (0x7F, &[0x7F]),
-        (0x80, &[0x80, 0x00]),
-        (0x81, &[0x81, 0x00]),
-        (0xFF, &[0xFF, 0x00]),
-        // Taken from `simple.xlsb` (`xl/workbook.bin` begins with BrtBeginBook = 0x0183).
-        (0x0183, &[0x83, 0x01]),
-        (0x019C, &[0x9C, 0x01]),
-        (0x3FFF, &[0xFF, 0x3F]),
-        (0x1FFF_FFFF, &[0xFF, 0xFF, 0xFF, 0x1F]),
+        (0x80, &[0x80, 0x01]),
+        (0x81, &[0x81, 0x01]),
+        (0xFF, &[0xFF, 0x01]),
+        // Taken from `simple.xlsb` (`xl/workbook.bin` begins with BrtBeginBook = 0x0083).
+        (0x0083, &[0x83, 0x01]),
+        (0x009C, &[0x9C, 0x01]),
+        (0x3FFF, &[0xFF, 0x7F]),
+        (0x4000, &[0x80, 0x80, 0x01]),
+        (0x0FFF_FFFF, &[0xFF, 0xFF, 0xFF, 0x7F]),
     ];
 
     for (id, expected) in vectors {

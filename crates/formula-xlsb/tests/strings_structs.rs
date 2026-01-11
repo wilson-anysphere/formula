@@ -3,11 +3,17 @@ use pretty_assertions::assert_eq;
 use std::io::{Cursor, Write};
 
 fn encode_biff12_id(id: u32) -> Vec<u8> {
+    // BIFF12 record ids use the same 7-bit varint encoding as record lengths.
     let mut out = Vec::new();
-    for i in 0..4 {
-        let byte = ((id >> (8 * i)) & 0xFF) as u8;
+    let mut value = id;
+    loop {
+        let mut byte = (value & 0x7F) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
         out.push(byte);
-        if byte & 0x80 == 0 {
+        if value == 0 {
             break;
         }
     }
@@ -98,8 +104,8 @@ fn build_minimal_xlsb(sheet_bin: &[u8]) -> Vec<u8> {
     sheet_rec.extend_from_slice(&encode_utf16_string("Sheet1"));
 
     let workbook_bin = [
-        biff12_record(0x019C, &sheet_rec),
-        biff12_record(0x0190, &[]),
+        biff12_record(0x009C, &sheet_rec),
+        biff12_record(0x0090, &[]),
     ]
     .concat();
 
@@ -128,9 +134,9 @@ fn build_minimal_xlsb(sheet_bin: &[u8]) -> Vec<u8> {
 #[test]
 fn parses_inline_and_formula_strings_with_rich_and_phonetic_extras() {
     // Sheet record ids (subset):
-    // - BrtDimension  0x0194
-    // - BrtBeginSheetData 0x0191
-    // - BrtEndSheetData   0x0192
+    // - BrtDimension  0x0094
+    // - BrtBeginSheetData 0x0091
+    // - BrtEndSheetData   0x0092
     // - BrtRow       0x0000
     // - BrtCellSt    0x0006
     // - BrtFmlaString 0x0008
@@ -142,9 +148,9 @@ fn parses_inline_and_formula_strings_with_rich_and_phonetic_extras() {
     dim.extend_from_slice(&0u32.to_le_bytes());
     dim.extend_from_slice(&0u32.to_le_bytes());
     dim.extend_from_slice(&2u32.to_le_bytes());
-    sheet_bin.extend_from_slice(&biff12_record(0x0194, &dim));
+    sheet_bin.extend_from_slice(&biff12_record(0x0094, &dim));
 
-    sheet_bin.extend_from_slice(&biff12_record(0x0191, &[])); // BrtBeginSheetData
+    sheet_bin.extend_from_slice(&biff12_record(0x0091, &[])); // BrtBeginSheetData
 
     // Row 0.
     sheet_bin.extend_from_slice(&biff12_record(0x0000, &0u32.to_le_bytes()));
@@ -182,7 +188,7 @@ fn parses_inline_and_formula_strings_with_rich_and_phonetic_extras() {
     fmla_pho.extend_from_slice(&[0x1D, 0x01]); // rgce: PtgBool TRUE
     sheet_bin.extend_from_slice(&biff12_record(0x0008, &fmla_pho));
 
-    sheet_bin.extend_from_slice(&biff12_record(0x0192, &[])); // BrtEndSheetData
+    sheet_bin.extend_from_slice(&biff12_record(0x0092, &[])); // BrtEndSheetData
 
     let xlsb_bytes = build_minimal_xlsb(&sheet_bin);
     let tmp = tempfile::NamedTempFile::new().expect("temp file");

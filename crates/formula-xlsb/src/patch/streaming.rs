@@ -450,7 +450,7 @@ fn read_record_id_raw<R: Read>(r: &mut R) -> Result<Option<(u32, Vec<u8>)>, Erro
 
         let byte = buf[0];
         raw.push(byte);
-        v |= (byte as u32) << (8 * i);
+        v |= ((byte & 0x7F) as u32) << (7 * i);
         if byte & 0x80 == 0 {
             return Ok(Some((v, raw)));
         }

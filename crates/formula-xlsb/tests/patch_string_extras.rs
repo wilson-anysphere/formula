@@ -3,11 +3,17 @@ use pretty_assertions::assert_eq;
 use std::io::Cursor;
 
 fn encode_biff12_id(id: u32) -> Vec<u8> {
+    // BIFF12 record ids use the same 7-bit varint encoding as record lengths.
     let mut out = Vec::new();
-    for i in 0..4 {
-        let byte = ((id >> (8 * i)) & 0xFF) as u8;
+    let mut value = id;
+    loop {
+        let mut byte = (value & 0x7F) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
         out.push(byte);
-        if byte & 0x80 == 0 {
+        if value == 0 {
             break;
         }
     }
@@ -75,13 +81,13 @@ fn encode_xl_wide_string(
 
 fn build_sheet_bin() -> (Vec<u8>, String, Vec<u8>, String, Vec<u8>, String, Vec<u8>) {
     // Record ids (subset):
-    // - BrtBeginSheetData 0x0191
-    // - BrtEndSheetData   0x0192
+    // - BrtBeginSheetData 0x0091
+    // - BrtEndSheetData   0x0092
     // - BrtRow            0x0000
     // - BrtCellSt         0x0006
     // - BrtFmlaString     0x0008
-    const SHEETDATA: u32 = 0x0191;
-    const SHEETDATA_END: u32 = 0x0192;
+    const SHEETDATA: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
     const ROW: u32 = 0x0000;
     const CELL_ST: u32 = 0x0006;
     const FORMULA_STRING: u32 = 0x0008;

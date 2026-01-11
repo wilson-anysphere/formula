@@ -1671,8 +1671,8 @@ mod tests {
         target_row: u32,
         target_col: u32,
     ) -> Option<(u32, Vec<u8>)> {
-        const SHEETDATA: u32 = 0x0191;
-        const SHEETDATA_END: u32 = 0x0192;
+        const SHEETDATA: u32 = 0x0091;
+        const SHEETDATA_END: u32 = 0x0092;
         const ROW: u32 = 0x0000;
 
         let mut cursor = Cursor::new(sheet_bin);

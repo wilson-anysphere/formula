@@ -42,10 +42,10 @@ impl Styles {
     /// built-ins more accurately.
     pub fn parse_with_locale(styles_bin: &[u8], locale: Locale) -> Result<Self, Error> {
         // Record ids (BIFF12 / MS-XLSB).
-        const BEGIN_FMTS: u32 = 0x0298;
-        const END_FMTS: u32 = 0x0299;
-        const BEGIN_CELL_XFS: u32 = 0x02A2;
-        const END_CELL_XFS: u32 = 0x02A3;
+        const BEGIN_FMTS: u32 = 0x0118;
+        const END_FMTS: u32 = 0x0119;
+        const BEGIN_CELL_XFS: u32 = 0x0122;
+        const END_CELL_XFS: u32 = 0x0123;
 
         let mut reader = Biff12Reader::new(Cursor::new(styles_bin));
         let mut buf = Vec::new();

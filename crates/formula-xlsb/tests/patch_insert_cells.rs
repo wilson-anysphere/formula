@@ -27,8 +27,8 @@ fn dim_end_row_col(dim: &formula_xlsb::Dimension) -> (u32, u32) {
 }
 
 fn move_dimension_record_to_end(sheet_bin: &[u8]) -> Vec<u8> {
-    const DIMENSION: u32 = 0x0194;
-    const WORKSHEET_END: u32 = 0x0182;
+    const DIMENSION: u32 = 0x0094;
+    const WORKSHEET_END: u32 = 0x0082;
 
     let mut cursor = Cursor::new(sheet_bin);
     let mut ranges: Vec<(u32, usize, usize)> = Vec::new();
@@ -76,7 +76,7 @@ fn move_dimension_record_to_end(sheet_bin: &[u8]) -> Vec<u8> {
 }
 
 fn read_dimension_bounds(sheet_bin: &[u8]) -> Option<(u32, u32, u32, u32)> {
-    const DIMENSION: u32 = 0x0194;
+    const DIMENSION: u32 = 0x0094;
 
     let mut cursor = Cursor::new(sheet_bin);
     loop {
@@ -95,8 +95,8 @@ fn read_dimension_bounds(sheet_bin: &[u8]) -> Option<(u32, u32, u32, u32)> {
 }
 
 fn sheet_has_cell(sheet_bin: &[u8], target_row: u32, target_col: u32) -> bool {
-    const SHEETDATA: u32 = 0x0191;
-    const SHEETDATA_END: u32 = 0x0192;
+    const SHEETDATA: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
     const ROW: u32 = 0x0000;
 
     let mut cursor = Cursor::new(sheet_bin);

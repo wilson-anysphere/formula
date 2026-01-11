@@ -32,8 +32,8 @@ fn read_zip_part(path: &str, part_path: &str) -> Vec<u8> {
 }
 
 fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Option<(u32, Vec<u8>)> {
-    const SHEETDATA: u32 = 0x0191;
-    const SHEETDATA_END: u32 = 0x0192;
+    const SHEETDATA: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
     const ROW: u32 = 0x0000;
 
     let mut cursor = Cursor::new(sheet_bin);
@@ -82,9 +82,9 @@ struct SharedStringsInfo {
 }
 
 fn read_shared_strings_info(shared_strings_bin: &[u8]) -> SharedStringsInfo {
-    const SST: u32 = 0x019F;
+    const SST: u32 = 0x009F;
     const SI: u32 = 0x0013;
-    const SST_END: u32 = 0x01A0;
+    const SST_END: u32 = 0x00A0;
 
     let mut cursor = Cursor::new(shared_strings_bin);
     let mut total_count = None;

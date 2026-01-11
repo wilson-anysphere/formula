@@ -4,9 +4,9 @@ use std::path::Path;
 use formula_xlsb::{biff12_varint, patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 
-const WORKSHEET: u32 = 0x0181;
-const SHEETDATA: u32 = 0x0191;
-const SHEETDATA_END: u32 = 0x0192;
+const WORKSHEET: u32 = 0x0081;
+const SHEETDATA: u32 = 0x0091;
+const SHEETDATA_END: u32 = 0x0092;
 const ROW: u32 = 0x0000;
 const FORMULA_STRING: u32 = 0x0008;
 const FORMULA_FLOAT: u32 = 0x0009;

@@ -336,18 +336,18 @@ fn build_workbook_rels_xml(has_shared_strings: bool) -> String {
 
 // Record IDs copied from MS-XLSB / our parser constants. (Not re-exported from the crate.)
 mod biff12 {
-    pub const BEGIN_BOOK: u32 = 0x0183;
-    pub const END_BOOK: u32 = 0x0184;
-    pub const BEGIN_SHEETS: u32 = 0x018F;
+    pub const BEGIN_BOOK: u32 = 0x0083;
+    pub const END_BOOK: u32 = 0x0084;
+    pub const BEGIN_SHEETS: u32 = 0x008F;
 
-    pub const SHEETS_END: u32 = 0x0190;
-    pub const SHEET: u32 = 0x019C;
+    pub const SHEETS_END: u32 = 0x0090;
+    pub const SHEET: u32 = 0x009C;
 
-    pub const WORKSHEET: u32 = 0x0181;
-    pub const WORKSHEET_END: u32 = 0x0182;
-    pub const SHEETDATA: u32 = 0x0191;
-    pub const SHEETDATA_END: u32 = 0x0192;
-    pub const DIMENSION: u32 = 0x0194;
+    pub const WORKSHEET: u32 = 0x0081;
+    pub const WORKSHEET_END: u32 = 0x0082;
+    pub const SHEETDATA: u32 = 0x0091;
+    pub const SHEETDATA_END: u32 = 0x0092;
+    pub const DIMENSION: u32 = 0x0094;
 
     pub const ROW: u32 = 0x0000;
     pub const BLANK: u32 = 0x0001;
@@ -362,8 +362,8 @@ mod biff12 {
     pub const FORMULA_BOOL: u32 = 0x000A;
     pub const FORMULA_BOOLERR: u32 = 0x000B;
 
-    pub const SST: u32 = 0x019F;
-    pub const SST_END: u32 = 0x01A0;
+    pub const SST: u32 = 0x009F;
+    pub const SST_END: u32 = 0x00A0;
     pub const SI: u32 = 0x0013;
 
     // Stylesheet records are intentionally omitted from fixtures. `formula-xlsb` does not parse
