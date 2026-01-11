@@ -259,6 +259,12 @@ function enhanceSheet(sheet) {
   const obj = { ...sheet };
 
   return attachNonEnumerableMethods(obj, {
+    async getRange(ref) {
+      return rpcCall("cells", "getRange", [`${obj.name}!${String(ref)}`]);
+    },
+    async setRange(ref, values) {
+      await rpcCall("cells", "setRange", [`${obj.name}!${String(ref)}`, values]);
+    },
     async activate() {
       const updated = await rpcCall("sheets", "activateSheet", [obj.name]);
       if (updated && typeof updated === "object") {

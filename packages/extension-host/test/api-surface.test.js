@@ -73,6 +73,65 @@ test("api surface: cells.getRange/setRange roundtrip uses A1 refs and serializes
   assert.equal(host.spreadsheet.getCell(1, 1), 4);
 });
 
+test("api surface: cells.getRange/setRange support sheet-qualified A1 refs", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-range-sheet-qualified-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "rangeExt.sheetQualified";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "range-sheet-qualified-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Range Sheet Qualified" }] },
+      permissions: ["ui.commands", "cells.read", "cells.write", "sheets.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          // Create a second sheet; createSheet activates it.
+          const sheet = await formula.sheets.createSheet("Data");
+          const activeBefore = await formula.sheets.getActiveSheet();
+
+          await formula.cells.setRange("Sheet1!A1:A1", [[42]]);
+          const sheet1 = await formula.cells.getRange("Sheet1!A1:A1");
+          const data = await formula.cells.getRange("Data!A1:A1");
+          const activeAfter = await formula.sheets.getActiveSheet();
+
+          return { sheet, activeBefore, activeAfter, sheet1, data };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+  const result = await host.executeCommand(commandId);
+
+  assert.deepEqual(result.activeBefore, result.sheet);
+  assert.deepEqual(result.activeAfter, result.sheet);
+  assert.deepEqual(result.sheet1.values, [[42]]);
+  assert.deepEqual(result.data.values, [[null]]);
+});
+
 test("permissions: cells.getRange requires cells.read", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-range-perm-read-"));
   const extDir = path.join(dir, "ext");
@@ -247,6 +306,8 @@ test("api surface: sheet objects include activate/rename helpers", async (t) => 
         )}, async () => {
           const sheet = await formula.sheets.createSheet("Data");
           const hasMethods = {
+            getRange: typeof sheet.getRange === "function",
+            setRange: typeof sheet.setRange === "function",
             activate: typeof sheet.activate === "function",
             rename: typeof sheet.rename === "function"
           };
@@ -274,7 +335,7 @@ test("api surface: sheet objects include activate/rename helpers", async (t) => 
   await host.loadExtension(extDir);
 
   const result = await host.executeCommand(commandId);
-  assert.deepEqual(result.hasMethods, { activate: true, rename: true });
+  assert.deepEqual(result.hasMethods, { getRange: true, setRange: true, activate: true, rename: true });
   assert.equal(result.sheet.name, "Data2");
   assert.deepEqual(result.active, result.sheet);
 });

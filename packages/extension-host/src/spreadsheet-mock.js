@@ -25,13 +25,28 @@ function parseA1CellRef(ref) {
   return { row, col };
 }
 
+function parseSheetPrefix(raw) {
+  const str = String(raw ?? "");
+  const bang = str.indexOf("!");
+  if (bang === -1) return { sheetName: null, a1Ref: str };
+  const sheetPart = str.slice(0, bang).trim();
+  const rest = str.slice(bang + 1);
+  if (sheetPart.length === 0) throw new Error(`Invalid sheet-qualified reference: ${raw}`);
+  if (sheetPart.startsWith("'") && sheetPart.endsWith("'") && sheetPart.length >= 2) {
+    const unquoted = sheetPart.slice(1, -1).replace(/''/g, "'");
+    return { sheetName: unquoted, a1Ref: rest };
+  }
+  return { sheetName: sheetPart, a1Ref: rest };
+}
+
 function parseA1RangeRef(ref) {
-  const raw = String(ref ?? "");
-  const parts = raw.split(":");
+  const { sheetName, a1Ref } = parseSheetPrefix(ref);
+  const parts = String(a1Ref ?? "").split(":");
   if (parts.length > 2) throw new Error(`Invalid A1 range reference: ${ref}`);
   const start = parseA1CellRef(parts[0]);
   const end = parts.length === 2 ? parseA1CellRef(parts[1]) : start;
   return {
+    sheetName,
     startRow: Math.min(start.row, end.row),
     startCol: Math.min(start.col, end.col),
     endRow: Math.max(start.row, end.row),
@@ -72,6 +87,13 @@ class InMemorySpreadsheet {
 
   listSheets() {
     return this._sheets.map((sheet) => ({ id: sheet.id, name: sheet.name }));
+  }
+
+  _getSheetRecordByName(name) {
+    const sheetName = String(name);
+    const sheet = this._sheets.find((s) => s.name === sheetName);
+    if (!sheet) throw new Error(`Unknown sheet: ${sheetName}`);
+    return sheet;
   }
 
   getSheet(name) {
@@ -188,11 +210,21 @@ class InMemorySpreadsheet {
     return sheet.cells.has(key) ? sheet.cells.get(key) : null;
   }
 
-  setCell(row, col, value) {
-    const sheet = this._getActiveSheetRecord();
+  _getCellFromSheet(sheet, row, col) {
+    const key = cellKey(row, col);
+    return sheet.cells.has(key) ? sheet.cells.get(key) : null;
+  }
+
+  _setCellInSheet(sheet, row, col, value, { emitCellChanged = true } = {}) {
     sheet.cells.set(cellKey(row, col), value);
+    if (!emitCellChanged) return;
     const payload = { row, col, value };
     for (const listener of this._cellListeners) listener(payload);
+  }
+
+  setCell(row, col, value) {
+    const sheet = this._getActiveSheetRecord();
+    this._setCellInSheet(sheet, row, col, value, { emitCellChanged: true });
   }
 
   onCellChanged(callback) {
@@ -201,20 +233,25 @@ class InMemorySpreadsheet {
   }
 
   getRange(ref) {
-    const { startRow, startCol, endRow, endCol } = parseA1RangeRef(ref);
+    const { sheetName, startRow, startCol, endRow, endCol } = parseA1RangeRef(ref);
+    const sheet =
+      sheetName == null ? this._getActiveSheetRecord() : this._getSheetRecordByName(sheetName);
     return {
       startRow,
       startCol,
       endRow,
       endCol,
-      values: this.getRangeValues(startRow, startCol, endRow, endCol)
+      values: this.getRangeValues(startRow, startCol, endRow, endCol, sheet)
     };
   }
 
   setRange(ref, values) {
-    const { startRow, startCol, endRow, endCol } = parseA1RangeRef(ref);
+    const { sheetName, startRow, startCol, endRow, endCol } = parseA1RangeRef(ref);
+    const sheet =
+      sheetName == null ? this._getActiveSheetRecord() : this._getSheetRecordByName(sheetName);
     const expectedRows = endRow - startRow + 1;
     const expectedCols = endCol - startCol + 1;
+    const emitCellChanged = sheet.id === this._activeSheetId;
 
     if (!Array.isArray(values) || values.length !== expectedRows) {
       throw new Error(
@@ -230,17 +267,17 @@ class InMemorySpreadsheet {
         );
       }
       for (let c = 0; c < expectedCols; c++) {
-        this.setCell(startRow + r, startCol + c, rowValues[c]);
+        this._setCellInSheet(sheet, startRow + r, startCol + c, rowValues[c], { emitCellChanged });
       }
     }
   }
 
-  getRangeValues(startRow, startCol, endRow, endCol) {
+  getRangeValues(startRow, startCol, endRow, endCol, sheet = this._getActiveSheetRecord()) {
     const rows = [];
     for (let r = startRow; r <= endRow; r++) {
       const cols = [];
       for (let c = startCol; c <= endCol; c++) {
-        cols.push(this.getCell(r, c));
+        cols.push(this._getCellFromSheet(sheet, r, c));
       }
       rows.push(cols);
     }

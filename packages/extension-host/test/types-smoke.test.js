@@ -17,6 +17,8 @@ test("extension-api types file exports the expected surface", async () => {
     "export namespace sheets",
     "function createSheet(name: string): Promise<Sheet>;",
     "function deleteSheet(name: string): Promise<void>;",
+    "getRange(ref: string): Promise<Range>;",
+    "setRange(ref: string, values: CellValue[][]): Promise<void>;",
     "export namespace events",
     "function onSheetActivated",
     "function onWorkbookOpened",

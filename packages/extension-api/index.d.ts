@@ -26,6 +26,8 @@ export interface Workbook {
 export interface Sheet {
   readonly id: string;
   readonly name: string;
+  getRange(ref: string): Promise<Range>;
+  setRange(ref: string, values: CellValue[][]): Promise<void>;
   activate(): Promise<Sheet>;
   rename(name: string): Promise<Sheet>;
 }
