@@ -1790,7 +1790,7 @@ fn materialize_rgce(
 
         match ptg {
             // Fixed-width / no-payload tokens we already support elsewhere.
-            0x03..=0x16 => out.push(ptg),
+            0x03..=0x16 | 0x2F => out.push(ptg),
             0x17 => {
                 // PtgStr: [cch: u16][utf16 chars...]
                 if i + 2 > base.len() {
@@ -1871,7 +1871,8 @@ fn materialize_rgce(
                 out.extend_from_slice(base.get(i..i + 14)?);
                 i += 14;
             }
-            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69 => {
+            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
+            | 0x2E | 0x4E | 0x6E => {
                 // PtgMem*: [cce: u16]
                 out.push(ptg);
                 out.extend_from_slice(base.get(i..i + 2)?);
