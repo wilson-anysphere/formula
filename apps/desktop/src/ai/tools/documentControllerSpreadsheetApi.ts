@@ -1,5 +1,7 @@
 import { DocumentController } from "../../document/documentController.js";
 
+import { normalizeFormulaTextOpt } from "@formula/engine";
+
 import type { CellAddress, RangeAddress } from "../../../../../packages/ai-tools/src/spreadsheet/a1.js";
 import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.js";
@@ -33,10 +35,10 @@ function cellValuesEqual(left: any, right: any): boolean {
   return false;
 }
 
-function normalizeFormula(raw: string): string {
-  const trimmed = raw.trimStart();
-  if (!trimmed) return "=";
-  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+function normalizeFormula(raw: unknown): string | undefined {
+  if (raw == null) return undefined;
+  const normalized = normalizeFormulaTextOpt(String(raw));
+  return normalized === null ? undefined : normalized;
 }
 
 function styleToCellFormat(style: DocumentControllerStyle | null | undefined): CellFormat | undefined {
@@ -227,8 +229,7 @@ function toCellData(controller: DocumentController, cellState: any): CellData {
   const format = styleToCellFormat(style);
 
   const rawFormula = cellState?.formula;
-  const normalizedFormula =
-    rawFormula == null || rawFormula === "" ? undefined : normalizeFormula(String(rawFormula));
+  const normalizedFormula = normalizeFormula(rawFormula);
 
   const value = normalizedFormula ? null : cloneCellValue(cellState?.value ?? null);
 
@@ -263,8 +264,7 @@ function parseSemanticDiffCellKey(key: string): { row: number; col: number } {
 
 function toCellDataFromExportedCell(exportedCell: any): CellData {
   const rawFormula = exportedCell?.formula;
-  const normalizedFormula =
-    rawFormula == null || rawFormula === "" ? undefined : normalizeFormula(String(rawFormula));
+  const normalizedFormula = normalizeFormula(rawFormula);
 
   const format = styleToCellFormat(exportedCell?.format ?? null);
   const value = normalizedFormula ? null : cloneCellValue(exportedCell?.value ?? null);
@@ -326,7 +326,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   setCell(address: CellAddress, cell: CellData): void {
     const coord = toControllerCoord(address);
     const beforeCell = this.getCell(address);
-    const desiredFormula = cell.formula ? normalizeFormula(String(cell.formula)) : undefined;
+    const desiredFormula = normalizeFormula(cell.formula);
     const desiredValue = desiredFormula ? null : (cell.value ?? null);
     const shouldUpdateContent =
       !cellValuesEqual(beforeCell.value, desiredValue) || (beforeCell.formula ?? undefined) !== desiredFormula;
@@ -337,8 +337,8 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
     this.controller.beginBatch({ label: "AI write_cell" });
     try {
-      if (shouldUpdateContent && cell.formula) {
-        this.controller.setCellFormula(address.sheet, coord, cell.formula, { label: "AI write_cell" });
+      if (shouldUpdateContent && desiredFormula) {
+        this.controller.setCellFormula(address.sheet, coord, desiredFormula, { label: "AI write_cell" });
       } else if (shouldUpdateContent) {
         this.controller.setCellValue(address.sheet, coord, cell.value ?? null, { label: "AI write_cell" });
       }

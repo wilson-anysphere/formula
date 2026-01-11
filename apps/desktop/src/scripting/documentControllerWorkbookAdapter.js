@@ -32,10 +32,12 @@ function hasOwn(obj, key) {
 }
 
 function normalizeFormulaText(formula) {
-  if (typeof formula !== "string") return formula;
-  const trimmed = formula.trimStart();
-  if (trimmed.startsWith("=")) return formula;
-  return `=${formula}`;
+  if (typeof formula !== "string") return null;
+  const trimmed = formula.trim();
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = strippedLeading.trim();
+  if (stripped === "") return null;
+  return `=${stripped}`;
 }
 
 function cellInputFromState(state) {

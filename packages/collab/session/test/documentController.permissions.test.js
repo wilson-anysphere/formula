@@ -236,3 +236,26 @@ test("CollabSession↔DocumentController binder encrypts protected cells and dec
   docA.destroy();
   docB.destroy();
 });
+
+test("CollabSession↔DocumentController binder normalizes formula text (trimming + bare '=')", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc });
+  session.setPermissions({ role: "editor", userId: "u-a", rangeRestrictions: [] });
+
+  const dc = new DocumentController();
+  const binder = await bindCollabSessionToDocumentController({ session, documentController: dc });
+
+  await session.setCellFormula("Sheet1:0:0", "=  SUM(A1:A3)  ");
+  await waitForCondition(() => dc.getCell("Sheet1", "A1").formula === "=SUM(A1:A3)");
+
+  // A bare "=" (or whitespace-only formula) is treated as empty and clears the cell.
+  await session.setCellFormula("Sheet1:0:1", "=");
+  await waitForCondition(() => {
+    const cell = dc.getCell("Sheet1", "B1");
+    return cell.formula == null && cell.value == null;
+  });
+
+  binder.destroy();
+  session.destroy();
+  doc.destroy();
+});

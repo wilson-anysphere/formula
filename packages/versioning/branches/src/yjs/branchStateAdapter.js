@@ -98,9 +98,11 @@ function coerceString(value) {
  */
 function normalizeFormula(value) {
   if (value == null) return null;
-  const trimmed = String(value).trimStart();
-  if (trimmed === "") return null;
-  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+  const trimmed = String(value).trim();
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = strippedLeading.trim();
+  if (stripped === "") return null;
+  return `=${stripped}`;
 }
 
 /**

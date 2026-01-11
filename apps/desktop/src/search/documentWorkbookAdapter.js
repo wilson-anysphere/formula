@@ -12,9 +12,11 @@ function parseCellKey(key) {
 
 function normalizeFormula(formula) {
   if (formula == null) return null;
-  const text = String(formula);
-  if (text === "") return "";
-  return text.startsWith("=") ? text : `=${text}`;
+  const trimmed = String(formula).trim();
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = strippedLeading.trim();
+  if (stripped === "") return null;
+  return `=${stripped}`;
 }
 
 /**
