@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { parquetToArrowTable } from "@formula/data-io";
+import { arrowTableFromColumns, arrowTableToParquet, parquetToArrowTable } from "@formula/data-io";
 
 import { DocumentController } from "../../../document/documentController.js";
 import { MockEngine } from "../../../document/engine.js";
@@ -18,8 +18,9 @@ const FIXTURE_URL = new URL(
 
 let parquetAvailable = true;
 try {
-  await import("apache-arrow");
-  await import("parquet-wasm/esm");
+  // Validate Parquet support is actually usable via the data-io helpers (pnpm workspaces
+  // don't necessarily hoist `apache-arrow`/`parquet-wasm` to the repo root).
+  await arrowTableToParquet(arrowTableFromColumns({ __probe: new Int32Array([1]) }));
 } catch {
   parquetAvailable = false;
 }
