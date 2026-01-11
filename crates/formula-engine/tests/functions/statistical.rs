@@ -9,6 +9,17 @@ fn stdev_s_matches_known_value() {
 }
 
 #[test]
+fn legacy_stat_functions_are_accepted_as_aliases() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=STDEV({1,2,3})"), 1.0);
+    assert_number(&sheet.eval("=VAR({1,2,3})"), 1.0);
+    assert_number(&sheet.eval("=MODE({1,2,2,3})"), 2.0);
+    assert_number(&sheet.eval("=PERCENTILE({0,10},0.5)"), 5.0);
+    assert_number(&sheet.eval("=QUARTILE({0,10},2)"), 5.0);
+    assert_number(&sheet.eval("=RANK(3,{1,3,5})"), 2.0);
+}
+
+#[test]
 fn var_p_all_equal_is_zero() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=VAR.P({2,2,2})"), 0.0);
@@ -38,6 +49,17 @@ fn mode_sngl_returns_most_frequent_value() {
 fn mode_sngl_returns_na_when_no_duplicates() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=MODE.SNGL({1,2,3})"), Value::Error(ErrorKind::NA));
+}
+
+#[test]
+fn mode_mult_spills_multiple_modes() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("Z1", "=MODE.MULT({1,1,2,2,3})");
+    sheet.recalc();
+
+    assert_eq!(sheet.get("Z1"), Value::Number(1.0));
+    assert_eq!(sheet.get("Z2"), Value::Number(2.0));
+    assert_eq!(sheet.get("Z3"), Value::Blank);
 }
 
 #[test]
@@ -74,6 +96,19 @@ fn percentile_inc_interpolates_between_points() {
 }
 
 #[test]
+fn percentile_exc_errors_outside_open_interval() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=PERCENTILE.EXC({0,10},0)"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval("=PERCENTILE.EXC({0,10},1)"),
+        Value::Error(ErrorKind::Num)
+    );
+}
+
+#[test]
 fn correl_matches_perfect_positive_relationship() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=CORREL({1,2,3},{1,2,3})"), 1.0);
@@ -92,4 +127,3 @@ fn var_s_ignores_text_and_logicals_in_references() {
     // As direct scalar arguments, numeric text/bools are coerced.
     assert_number(&sheet.eval(r#"=VAR.S(1,"2",TRUE)"#), 1.0 / 3.0);
 }
-

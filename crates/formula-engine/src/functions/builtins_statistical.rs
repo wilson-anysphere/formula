@@ -4,7 +4,7 @@ use crate::eval::CompiledExpr;
 use crate::functions::statistical::{RankMethod, RankOrder};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{ErrorKind, Value};
+use crate::value::{Array, ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
 
@@ -239,6 +239,20 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "STDEV",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: stdev_s_fn,
+    }
+}
+
 fn stdev_s_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let values = match collect_numbers(ctx, args) {
         Ok(v) => v,
@@ -253,6 +267,20 @@ fn stdev_s_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 inventory::submit! {
     FunctionSpec {
         name: "STDEV.P",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: stdev_p_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "STDEVP",
         min_args: 1,
         max_args: VAR_ARGS,
         volatility: Volatility::NonVolatile,
@@ -289,6 +317,20 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "VAR",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: var_s_fn,
+    }
+}
+
 fn var_s_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let values = match collect_numbers(ctx, args) {
         Ok(v) => v,
@@ -303,6 +345,20 @@ fn var_s_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 inventory::submit! {
     FunctionSpec {
         name: "VAR.P",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: var_p_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "VARP",
         min_args: 1,
         max_args: VAR_ARGS,
         volatility: Volatility::NonVolatile,
@@ -364,6 +420,20 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "MODE",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: mode_sngl_fn,
+    }
+}
+
 fn mode_sngl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let values = match collect_numbers(ctx, args) {
         Ok(v) => v,
@@ -373,6 +443,35 @@ fn mode_sngl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "MODE.MULT",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: mode_mult_fn,
+    }
+}
+
+fn mode_mult_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let modes = match crate::functions::statistical::mode_mult(&values) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let array_values: Vec<Value> = modes.into_iter().map(Value::Number).collect();
+    Value::Array(Array::new(array_values.len(), 1, array_values))
 }
 
 inventory::submit! {
@@ -457,6 +556,20 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "RANK",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Any, ValueType::Number],
+        implementation: rank_eq_fn,
+    }
+}
+
 fn rank_eq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     rank_impl(ctx, args, RankMethod::Eq)
 }
@@ -523,6 +636,20 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "PERCENTILE",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number],
+        implementation: percentile_inc_fn,
+    }
+}
+
 fn percentile_inc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut values = Vec::new();
     if let Err(e) = push_numbers_from_arg(ctx, &mut values, ctx.eval_arg(&args[0])) {
@@ -542,7 +669,52 @@ fn percentile_inc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value 
 
 inventory::submit! {
     FunctionSpec {
+        name: "PERCENTILE.EXC",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number],
+        implementation: percentile_exc_fn,
+    }
+}
+
+fn percentile_exc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let mut values = Vec::new();
+    if let Err(e) = push_numbers_from_arg(ctx, &mut values, ctx.eval_arg(&args[0])) {
+        return Value::Error(e);
+    }
+
+    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    match crate::functions::statistical::percentile_exc(&values, k) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "QUARTILE.INC",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number],
+        implementation: quartile_inc_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "QUARTILE",
         min_args: 2,
         max_args: 2,
         volatility: Volatility::NonVolatile,
@@ -566,6 +738,37 @@ fn quartile_inc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     match crate::functions::statistical::quartile_inc(&values, quart) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "QUARTILE.EXC",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number],
+        implementation: quartile_exc_fn,
+    }
+}
+
+fn quartile_exc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let mut values = Vec::new();
+    if let Err(e) = push_numbers_from_arg(ctx, &mut values, ctx.eval_arg(&args[0])) {
+        return Value::Error(e);
+    }
+
+    let quart = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    match crate::functions::statistical::quartile_exc(&values, quart) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }
@@ -599,6 +802,20 @@ fn correl_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 inventory::submit! {
     FunctionSpec {
         name: "COVARIANCE.S",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: covariance_s_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COVAR",
         min_args: 2,
         max_args: 2,
         volatility: Volatility::NonVolatile,
@@ -645,4 +862,3 @@ fn covariance_p_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => Value::Error(e),
     }
 }
-

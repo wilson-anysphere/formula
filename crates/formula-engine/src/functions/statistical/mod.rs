@@ -138,6 +138,56 @@ pub fn mode_sngl(values: &[f64]) -> Result<f64, ErrorKind> {
     }
 }
 
+pub fn mode_mult(values: &[f64]) -> Result<Vec<f64>, ErrorKind> {
+    if values.is_empty() {
+        return Err(ErrorKind::NA);
+    }
+    let mut sorted = values.to_vec();
+    sort_numbers(&mut sorted);
+
+    let mut best_count = 1usize;
+    let mut modes: Vec<f64> = Vec::new();
+
+    let mut current_value = sorted[0];
+    let mut current_count = 1usize;
+
+    for &x in sorted.iter().skip(1) {
+        if x == current_value {
+            current_count += 1;
+            continue;
+        }
+
+        match current_count.cmp(&best_count) {
+            Ordering::Greater => {
+                best_count = current_count;
+                modes.clear();
+                modes.push(current_value);
+            }
+            Ordering::Equal if current_count == best_count => modes.push(current_value),
+            _ => {}
+        }
+
+        current_value = x;
+        current_count = 1;
+    }
+
+    match current_count.cmp(&best_count) {
+        Ordering::Greater => {
+            best_count = current_count;
+            modes.clear();
+            modes.push(current_value);
+        }
+        Ordering::Equal if current_count == best_count => modes.push(current_value),
+        _ => {}
+    }
+
+    if best_count < 2 {
+        return Err(ErrorKind::NA);
+    }
+
+    Ok(modes)
+}
+
 pub fn large(values: &[f64], k: usize) -> Result<f64, ErrorKind> {
     if k == 0 || k > values.len() {
         return Err(ErrorKind::Num);
@@ -183,6 +233,37 @@ pub fn percentile_inc(values: &[f64], k: f64) -> Result<f64, ErrorKind> {
     Ok(base + frac * (next - base))
 }
 
+pub fn percentile_exc(values: &[f64], k: f64) -> Result<f64, ErrorKind> {
+    if !(0.0 < k && k < 1.0) {
+        return Err(ErrorKind::Num);
+    }
+    if values.is_empty() {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut sorted = values.to_vec();
+    sort_numbers(&mut sorted);
+
+    let n = sorted.len() as f64;
+    let pos = k * (n + 1.0);
+    if pos < 1.0 || pos > n {
+        return Err(ErrorKind::Num);
+    }
+
+    let idx = pos.floor() as usize; // 1-based
+    let frac = pos - (idx as f64);
+    if frac == 0.0 {
+        return Ok(sorted[idx - 1]);
+    }
+
+    // pos is strictly within (1, n) when frac != 0.
+    let lo = idx - 1;
+    let hi = idx;
+    let base = sorted[lo];
+    let next = sorted[hi];
+    Ok(base + frac * (next - base))
+}
+
 pub fn quartile_inc(values: &[f64], quart: i64) -> Result<f64, ErrorKind> {
     let k = match quart {
         0 => 0.0,
@@ -193,6 +274,16 @@ pub fn quartile_inc(values: &[f64], quart: i64) -> Result<f64, ErrorKind> {
         _ => return Err(ErrorKind::Num),
     };
     percentile_inc(values, k)
+}
+
+pub fn quartile_exc(values: &[f64], quart: i64) -> Result<f64, ErrorKind> {
+    let k = match quart {
+        1 => 0.25,
+        2 => 0.5,
+        3 => 0.75,
+        _ => return Err(ErrorKind::Num),
+    };
+    percentile_exc(values, k)
 }
 
 pub fn rank(number: f64, values: &[f64], order: RankOrder, method: RankMethod) -> Result<f64, ErrorKind> {
@@ -359,4 +450,3 @@ pub fn correl(xs: &[f64], ys: &[f64]) -> Result<f64, ErrorKind> {
     }
     Ok(out)
 }
-

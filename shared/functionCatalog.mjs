@@ -330,6 +330,17 @@ export default {
       ]
     },
     {
+      "name": "COVAR",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "COVARIANCE.P",
       "min_args": 2,
       "max_args": 2,
@@ -1050,6 +1061,26 @@ export default {
       ]
     },
     {
+      "name": "MODE",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "MODE.MULT",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "MODE.SNGL",
       "min_args": 1,
       "max_args": 255,
@@ -1198,6 +1229,28 @@ export default {
       ]
     },
     {
+      "name": "PERCENTILE",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number"
+      ]
+    },
+    {
+      "name": "PERCENTILE.EXC",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number"
+      ]
+    },
+    {
       "name": "PERCENTILE.INC",
       "min_args": 2,
       "max_args": 2,
@@ -1278,6 +1331,28 @@ export default {
       ]
     },
     {
+      "name": "QUARTILE",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number"
+      ]
+    },
+    {
+      "name": "QUARTILE.EXC",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number"
+      ]
+    },
+    {
       "name": "QUARTILE.INC",
       "min_args": 2,
       "max_args": 2,
@@ -1318,6 +1393,18 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number",
+        "number"
+      ]
+    },
+    {
+      "name": "RANK",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any",
         "number"
       ]
     },
@@ -1572,6 +1659,16 @@ export default {
       ]
     },
     {
+      "name": "STDEV",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "STDEV.P",
       "min_args": 1,
       "max_args": 255,
@@ -1583,6 +1680,16 @@ export default {
     },
     {
       "name": "STDEV.S",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "STDEVP",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
@@ -1861,6 +1968,16 @@ export default {
       ]
     },
     {
+      "name": "VAR",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "VAR.P",
       "min_args": 1,
       "max_args": 255,
@@ -1872,6 +1989,16 @@ export default {
     },
     {
       "name": "VAR.S",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "VARP",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
