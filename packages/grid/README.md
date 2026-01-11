@@ -128,8 +128,11 @@ Notable helpers:
 
 - `scrollToCell(row, col, { align, padding })` keeps a cell in view.
 - `getCellRect(row, col)` returns a viewport-space rect.
+  - Coordinates are relative to the top-left of the grid viewport (the canvases). To position an overlay in page coordinates, add the grid element’s `getBoundingClientRect().left/top`.
   - If the cell is part of a merged range, this returns the merged bounds when possible.
   - If a merge crosses frozen boundaries (frozen vs scrollable quadrants), the merged bounds cannot be represented as a single viewport rect; in that case this falls back to the merged anchor cell rect.
+- `getViewportState()` returns the current scroll/viewport metrics (useful for overlay positioning without extra DOM reads).
+- `getFillHandleRect()` returns the active selection fill-handle rect (also in viewport coordinates).
 - Multi-range selection helpers: `setSelectionRanges`, `getSelectionRanges`, `getActiveSelectionRangeIndex`.
 
 ## Merged cells
