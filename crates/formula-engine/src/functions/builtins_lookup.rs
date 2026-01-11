@@ -1330,10 +1330,60 @@ fn approximate_match_1d(
     best
 }
 
+fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(b);
+    }
+
+    a.chars()
+        .flat_map(|c| c.to_uppercase())
+        .eq(b.chars().flat_map(|c| c.to_uppercase()))
+}
+
+fn cmp_ascii_case_insensitive(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut a_iter = a.as_bytes().iter();
+    let mut b_iter = b.as_bytes().iter();
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(&ac), Some(&bc)) => {
+                let ac = ac.to_ascii_uppercase();
+                let bc = bc.to_ascii_uppercase();
+                match ac.cmp(&bc) {
+                    std::cmp::Ordering::Equal => continue,
+                    ord => return ord,
+                }
+            }
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (None, None) => return std::cmp::Ordering::Equal,
+        }
+    }
+}
+
+fn cmp_case_insensitive(a: &str, b: &str) -> std::cmp::Ordering {
+    if a.is_ascii() && b.is_ascii() {
+        return cmp_ascii_case_insensitive(a, b);
+    }
+
+    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
+    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
+                std::cmp::Ordering::Equal => continue,
+                ord => return ord,
+            },
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (None, None) => return std::cmp::Ordering::Equal,
+        }
+    }
+}
+
 fn excel_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x == y,
-        (Value::Text(x), Value::Text(y)) => x.eq_ignore_ascii_case(y),
+        (Value::Text(x), Value::Text(y)) => text_eq_case_insensitive(x, y),
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Blank, Value::Blank) => true,
         (Value::Error(x), Value::Error(y)) => x == y,
@@ -1357,7 +1407,7 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             std::cmp::Ordering::Greater => Some(1),
         },
         (Value::Text(x), Value::Text(y)) => {
-            let ord = x.to_ascii_lowercase().cmp(&y.to_ascii_lowercase());
+            let ord = cmp_case_insensitive(x, y);
             Some(match ord {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
