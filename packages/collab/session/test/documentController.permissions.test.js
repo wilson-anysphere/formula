@@ -74,8 +74,10 @@ test("CollabSession↔DocumentController binder masks unreadable remote values/f
   const binderA = bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
   const binderB = bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
 
-  sessionA.setCellValue("Sheet1:0:0", "super secret");
-  sessionA.setCellFormula("Sheet1:0:1", "=TOP_SECRET()");
+  // Perform edits via DocumentController (typical UI path) so we exercise
+  // DocumentController→Yjs propagation as well.
+  dcA.setCellValue("Sheet1", "A1", "super secret");
+  dcA.setCellFormula("Sheet1", "B1", "=TOP_SECRET()");
 
   await waitForCondition(() => {
     const cellA = dcA.getCell("Sheet1", "A1");
