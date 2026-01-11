@@ -5,6 +5,13 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
+# Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
+# when many agents build concurrently. Preserve any user/CI override.
+if [ -z "${CARGO_HOME:-}" ]; then
+  export CARGO_HOME="$ROOT_DIR/target/cargo-home"
+fi
+mkdir -p "$CARGO_HOME"
+
 REPORT_DIR="${REPORT_DIR:-security-report}"
 ALLOWLIST_CARGO="security/allowlist/cargo-audit.txt"
 ALLOWLIST_NODE="security/allowlist/node-audit.txt"
