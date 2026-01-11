@@ -63,6 +63,23 @@ test("CacheManager: hit/miss, TTL, manual invalidation", async () => {
   assert.equal(await cache.get("k1"), null);
 });
 
+test("CacheManager: TTL expiration tolerates store delete failures", async () => {
+  let now = 0;
+
+  /** @type {import("../../src/cache/cache.js").CacheStore} */
+  const store = {
+    get: async () => ({ value: { ok: true }, createdAtMs: 0, expiresAtMs: 1 }),
+    delete: async () => {
+      throw new Error("boom");
+    },
+    set: async () => {},
+  };
+
+  const cache = new CacheManager({ store, now: () => now });
+  now = 2;
+  assert.equal(await cache.get("k1"), null);
+});
+
 test("deserializeAnyTable: rejects Arrow payloads with mismatched column metadata", { skip: !arrowAvailable }, () => {
   const table = arrowTableFromColumns({ id: [1], name: ["Alice"] });
   const bytes = arrowTableToIPC(table);

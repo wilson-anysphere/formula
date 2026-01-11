@@ -49,7 +49,12 @@ export class CacheManager {
     const entry = await this.store.get(key);
     if (!entry) return null;
     if (entry.expiresAtMs != null && entry.expiresAtMs <= this.now()) {
-      await this.store.delete(key);
+      // Cache eviction is best-effort; treat delete failures as a miss.
+      try {
+        await this.store.delete(key);
+      } catch {
+        // ignore
+      }
       return null;
     }
     return entry;
