@@ -81,7 +81,7 @@ export function formatCellDisplayText(value: CellData["value"]): string {
   return String(value);
 }
 
-function resolveCellTextColor(value: CellData["value"], explicitColor: string | undefined): string {
+export function resolveCellTextColor(value: CellData["value"], explicitColor: string | undefined): string {
   if (explicitColor !== undefined) return explicitColor;
   if (typeof value === "string" && value.startsWith("#")) return DEFAULT_ERROR_TEXT_COLOR;
   return "#111111";
