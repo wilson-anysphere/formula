@@ -700,7 +700,7 @@ function EngineDemoApp() {
   return (
     <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ margin: 0 }}>Formula (Web Preview)</h1>
-      <p style={{ marginTop: 8, color: "#475569" }}>
+      <p style={{ marginTop: 8, color: "var(--formula-grid-cell-text, #475569)", opacity: 0.75 }}>
         Engine: <strong data-testid="engine-status">{engineStatus}</strong>
       </p>
 
@@ -760,7 +760,7 @@ function EngineDemoApp() {
       </label>
 
       <div style={{ marginTop: 16 }}>
-        <label style={{ display: "block", fontSize: 12, color: "#64748b" }} htmlFor="formula-input">
+        <label style={{ display: "block", fontSize: 12, color: "var(--formula-grid-cell-text, #64748b)", opacity: 0.75 }} htmlFor="formula-input">
           Formula
         </label>
         <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
@@ -769,7 +769,7 @@ function EngineDemoApp() {
               width: 64,
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
               fontSize: 12,
-              color: "#0f172a"
+              color: "var(--formula-grid-header-text, #0f172a)"
             }}
             data-testid="active-address"
           >
@@ -817,13 +817,13 @@ function EngineDemoApp() {
             style={{
               flex: 1,
               padding: "8px 10px",
-              border: "1px solid #cbd5e1",
+              border: "1px solid var(--formula-grid-line, #cbd5e1)",
               borderRadius: 6,
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
               fontSize: 14
             }}
           />
-          <div style={{ minWidth: 120, fontSize: 12, color: "#475569" }}>
+          <div style={{ minWidth: 120, fontSize: 12, color: "var(--formula-grid-cell-text, #475569)", opacity: 0.75 }}>
             Value: <span data-testid="formula-bar-value">{scalarToDisplayString(activeValue)}</span>
           </div>
         </div>
@@ -901,7 +901,7 @@ function PerfGridApp(): React.ReactElement {
   return (
     <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ margin: 0 }}>Formula (Web Preview)</h1>
-      <p style={{ marginTop: 8, color: "#475569" }}>
+      <p style={{ marginTop: 8, color: "var(--formula-grid-cell-text, #475569)", opacity: 0.75 }}>
         Engine: <strong data-testid="engine-status">ready (mock)</strong>
       </p>
 

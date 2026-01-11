@@ -82,13 +82,13 @@ export function CellEditorOverlay(props: {
         height: rect.height,
         boxSizing: "border-box",
         zIndex: 10,
-        border: "2px solid #0e65eb",
+        border: "2px solid var(--formula-grid-selection-border, #0e65eb)",
         borderRadius: 2,
         padding: "0 6px",
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
         fontSize: 13,
-        background: "#ffffff",
-        color: "#0f172a"
+        background: "var(--formula-grid-bg, #ffffff)",
+        color: "var(--formula-grid-cell-text, #0f172a)"
       }}
     />
   );
