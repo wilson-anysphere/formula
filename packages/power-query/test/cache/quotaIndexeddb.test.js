@@ -124,3 +124,29 @@ test(
   }
   },
 );
+
+test(
+  "IndexedDBCacheStore quotas: evicts least-recently-used when maxBytes is exceeded",
+  { skip: !indexedDbAvailable },
+  async () => {
+    let now = 0;
+    const dbName = `pq-cache-idb-quota-bytes-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const store = new IndexedDBCacheStore({ dbName, now: () => now });
+    const cache = new CacheManager({ store, now: () => now, limits: { maxBytes: 6_000 } });
+
+    const large = { bytes: new Uint8Array(4_096).fill(1) };
+    const large2 = { bytes: new Uint8Array(4_096).fill(2) };
+
+    try {
+      now = 0;
+      await cache.set("k1", large);
+      now = 1;
+      await cache.set("k2", large2);
+
+      assert.equal(await cache.get("k1"), null, "oldest entry should be evicted to satisfy maxBytes");
+      assert.deepEqual(await cache.get("k2"), large2);
+    } finally {
+      await closeAndDelete(store, dbName);
+    }
+  },
+);

@@ -79,3 +79,53 @@ test("FileSystemCacheStore quotas: eviction order respects lastAccessMs (LRU)", 
   }
 });
 
+test("FileSystemCacheStore quotas: evicts least-recently-used when maxBytes is exceeded", async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-quota-fs-bytes-"));
+  let now = 0;
+
+  try {
+    const store = new FileSystemCacheStore({ directory: cacheDir, now: () => now });
+    const cache = new CacheManager({ store, now: () => now, limits: { maxBytes: 6_000 } });
+
+    const large = { bytes: new Uint8Array(4_096).fill(1) };
+    const large2 = { bytes: new Uint8Array(4_096).fill(2) };
+
+    now = 0;
+    await cache.set("k1", large);
+    now = 1;
+    await cache.set("k2", large2);
+
+    assert.equal(await cache.get("k1"), null, "oldest entry should be evicted to satisfy maxBytes");
+    assert.deepEqual(await cache.get("k2"), large2);
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
+test("FileSystemCacheStore quotas: expired entries are removed before LRU eviction", async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-quota-fs-expiry-"));
+  let now = 0;
+
+  try {
+    const store = new FileSystemCacheStore({ directory: cacheDir, now: () => now });
+    const cache = new CacheManager({ store, now: () => now, limits: { maxEntries: 2 } });
+
+    now = 0;
+    await cache.set("k1", makeArrowCacheValue(1), { ttlMs: 5 }); // expires at t=5
+    now = 1;
+    await cache.set("k2", makeArrowCacheValue(2));
+
+    // Touch k1 so it would not be the LRU entry, then let it expire.
+    now = 4;
+    assert.deepEqual(await cache.get("k1"), makeArrowCacheValue(1));
+
+    now = 6;
+    await cache.set("k3", makeArrowCacheValue(3));
+
+    assert.equal(await cache.get("k1"), null, "expired entries should be removed preferentially");
+    assert.deepEqual(await cache.get("k2"), makeArrowCacheValue(2));
+    assert.deepEqual(await cache.get("k3"), makeArrowCacheValue(3));
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
