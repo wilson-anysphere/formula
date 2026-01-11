@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Cursor, Read, Write};
 use tempfile::tempdir;
-use zip::ZipArchive;
 use xlsx_diff::DiffReport;
+use zip::ZipArchive;
 
 fn insert_before_closing_tag(mut xml: String, closing_tag: &str, insert: &str) -> String {
     let idx = xml
@@ -40,11 +40,7 @@ fn build_fixture_with_calc_chain_custom(base_bytes: &[u8], calc_chain_part: &str
     let content_types_insert = format!(
         "  <Override PartName=\"{content_types_part_name}\" ContentType=\"application/vnd.ms-excel.calcChain\"/>\n"
     );
-    let content_types = insert_before_closing_tag(
-        content_types,
-        "</Types>",
-        &content_types_insert,
-    );
+    let content_types = insert_before_closing_tag(content_types, "</Types>", &content_types_insert);
     parts.insert(
         "[Content_Types].xml".to_string(),
         content_types.into_bytes(),
@@ -55,11 +51,8 @@ fn build_fixture_with_calc_chain_custom(base_bytes: &[u8], calc_chain_part: &str
     let workbook_rels_insert = format!(
         "  <Relationship Id=\"rId4\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain\" Target=\"{workbook_rels_target}\"/>\n"
     );
-    let workbook_rels = insert_before_closing_tag(
-        workbook_rels,
-        "</Relationships>",
-        &workbook_rels_insert,
-    );
+    let workbook_rels =
+        insert_before_closing_tag(workbook_rels, "</Relationships>", &workbook_rels_insert);
     parts.insert(
         "xl/_rels/workbook.bin.rels".to_string(),
         workbook_rels.into_bytes(),
@@ -82,6 +75,71 @@ fn build_fixture_with_calc_chain_custom(base_bytes: &[u8], calc_chain_part: &str
 
 fn build_fixture_with_calc_chain(base_bytes: &[u8]) -> Vec<u8> {
     build_fixture_with_calc_chain_custom(base_bytes, "xl/calcChain.bin")
+}
+
+fn insert_calc_prop_record(workbook_bin: &[u8], flags: u16, extra: &[u8]) -> Vec<u8> {
+    let mut cursor = Cursor::new(workbook_bin);
+    let Some(_id) = biff12_varint::read_record_id(&mut cursor).expect("read record id") else {
+        panic!("workbook.bin missing first record");
+    };
+    let Some(len) = biff12_varint::read_record_len(&mut cursor).expect("read record len") else {
+        panic!("workbook.bin missing first record length");
+    };
+    let insert_at = (cursor.position() as usize)
+        .checked_add(len as usize)
+        .expect("insert position overflow");
+    assert!(
+        insert_at <= workbook_bin.len(),
+        "workbook.bin first record overruns buffer"
+    );
+
+    let mut payload = Vec::with_capacity(6 + extra.len());
+    payload.extend_from_slice(&0u32.to_le_bytes()); // calcId
+    payload.extend_from_slice(&flags.to_le_bytes());
+    payload.extend_from_slice(extra);
+
+    let mut record = Vec::new();
+    biff12_varint::write_record_id(&mut record, 0x009A).expect("write calcProp record id");
+    biff12_varint::write_record_len(&mut record, payload.len() as u32)
+        .expect("write calcProp record len");
+    record.extend_from_slice(&payload);
+
+    let mut out = Vec::with_capacity(workbook_bin.len() + record.len());
+    out.extend_from_slice(&workbook_bin[..insert_at]);
+    out.extend_from_slice(&record);
+    out.extend_from_slice(&workbook_bin[insert_at..]);
+    out
+}
+
+fn replace_zip_part(zip_bytes: &[u8], part_name: &str, new_bytes: Vec<u8>) -> Vec<u8> {
+    let mut zip = ZipArchive::new(Cursor::new(zip_bytes)).expect("open base zip");
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i).expect("read zip entry");
+        if !file.is_file() {
+            continue;
+        }
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).expect("read part bytes");
+        parts.insert(file.name().to_string(), buf);
+    }
+
+    parts.insert(part_name.to_string(), new_bytes);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip_out = zip::ZipWriter::new(cursor);
+    let options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for (name, bytes) in parts {
+        zip_out
+            .start_file(name, options)
+            .expect("write part header");
+        zip_out.write_all(&bytes).expect("write part bytes");
+    }
+
+    zip_out.finish().expect("finish zip").into_inner()
 }
 
 fn read_record_id(buf: &[u8]) -> Option<(u32, usize)> {
@@ -244,6 +302,65 @@ fn edited_save_removes_calc_chain_and_references() {
 }
 
 #[test]
+fn edited_save_sets_full_calc_on_load_when_calc_prop_present() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let base_bytes = std::fs::read(fixture_path).expect("read fixture");
+
+    // Start from a calcChain fixture and inject a BrtCalcProp record with fullCalcOnLoad=0.
+    let with_calc_chain = build_fixture_with_calc_chain(&base_bytes);
+    let mut zip_in =
+        ZipArchive::new(Cursor::new(&with_calc_chain)).expect("open calcChain fixture zip");
+    let mut workbook_bin = Vec::new();
+    zip_in
+        .by_name("xl/workbook.bin")
+        .expect("read workbook.bin")
+        .read_to_end(&mut workbook_bin)
+        .expect("read workbook.bin bytes");
+
+    // Calc mode = Auto (1), fullCalcOnLoad bit (0x0004) is initially off.
+    let workbook_bin = insert_calc_prop_record(&workbook_bin, 0x0001, b"\xAA\x55");
+    let with_calc_chain = replace_zip_part(&with_calc_chain, "xl/workbook.bin", workbook_bin);
+
+    let dir = tempdir().expect("tempdir");
+    let input_path = dir.path().join("with_calc_chain.xlsb");
+    let output_path = dir.path().join("edited.xlsb");
+    std::fs::write(&input_path, with_calc_chain).expect("write input");
+
+    let wb = XlsbWorkbook::open_with_options(&input_path, OpenOptions::default()).expect("open");
+    assert_eq!(
+        wb.workbook_properties().full_calc_on_load,
+        Some(false),
+        "fixture should start with fullCalcOnLoad=0"
+    );
+
+    // Edit a worksheet cell, triggering calcChain invalidation + calcProp patch.
+    let mut zip_in =
+        ZipArchive::new(File::open(&input_path).expect("open input zip")).expect("read input zip");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let mut sheet_bytes = Vec::new();
+    zip_in
+        .by_name(&sheet_part)
+        .expect("read sheet part")
+        .read_to_end(&mut sheet_bytes)
+        .expect("read sheet bytes");
+    let edited_sheet = tweak_first_float_cell(&sheet_bytes);
+
+    let mut overrides = HashMap::new();
+    overrides.insert(sheet_part, edited_sheet);
+
+    wb.save_with_part_overrides(&output_path, &overrides)
+        .expect("save with part overrides");
+
+    let out_wb =
+        XlsbWorkbook::open_with_options(&output_path, OpenOptions::default()).expect("open output");
+    assert_eq!(
+        out_wb.workbook_properties().full_calc_on_load,
+        Some(true),
+        "edited save should set fullCalcOnLoad=1 when calcProp record exists"
+    );
+}
+
+#[test]
 fn edited_save_removes_calc_chain_with_weird_casing() {
     let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
     let base_bytes = std::fs::read(fixture_path).expect("read fixture");
@@ -401,10 +518,7 @@ fn edited_save_changes_only_expected_parts() {
     let actual_parts: std::collections::BTreeSet<String> =
         report.differences.iter().map(|d| d.part.clone()).collect();
 
-    let unexpected: Vec<_> = actual_parts
-        .difference(&expected_parts)
-        .cloned()
-        .collect();
+    let unexpected: Vec<_> = actual_parts.difference(&expected_parts).cloned().collect();
 
     assert!(
         unexpected.is_empty(),

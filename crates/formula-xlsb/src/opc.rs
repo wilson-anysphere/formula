@@ -1,7 +1,8 @@
+use crate::biff12_varint;
 use crate::parser::Error as ParseError;
 use crate::parser::{
-    parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook, Cell, CellValue, SheetData,
-    SheetMeta, WorkbookProperties,
+    biff12, parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook, Cell, CellValue,
+    SheetData, SheetMeta, WorkbookProperties,
 };
 use crate::patch::{patch_sheet_bin, CellEdit};
 use crate::styles::Styles;
@@ -386,10 +387,15 @@ impl XlsbWorkbook {
         // Compute updated plumbing parts if we need to invalidate calcChain.
         let mut updated_content_types: Option<Vec<u8>> = None;
         let mut updated_workbook_rels: Option<Vec<u8>> = None;
+        let mut updated_workbook_bin: Option<Vec<u8>> = None;
 
         if edited {
-            let content_types =
-                get_part_bytes(&mut zip, &self.preserved_parts, overrides, "[Content_Types].xml")?;
+            let content_types = get_part_bytes(
+                &mut zip,
+                &self.preserved_parts,
+                overrides,
+                "[Content_Types].xml",
+            )?;
             if let Some(content_types) = content_types {
                 updated_content_types = Some(remove_calc_chain_from_content_types(&content_types)?);
             }
@@ -402,6 +408,18 @@ impl XlsbWorkbook {
             )?;
             if let Some(workbook_rels) = workbook_rels {
                 updated_workbook_rels = Some(remove_calc_chain_from_workbook_rels(&workbook_rels)?);
+            }
+
+            let workbook_bin = get_part_bytes(
+                &mut zip,
+                &self.preserved_parts,
+                overrides,
+                "xl/workbook.bin",
+            )?;
+            if let Some(workbook_bin) = workbook_bin {
+                if let Some(patched) = patch_workbook_bin_full_calc_on_load(&workbook_bin)? {
+                    updated_workbook_bin = Some(patched);
+                }
             }
         }
 
@@ -455,6 +473,15 @@ impl XlsbWorkbook {
                     continue;
                 }
             }
+            if edited && name == "xl/workbook.bin" {
+                if let Some(updated) = &updated_workbook_bin {
+                    if overrides.contains_key(&name) {
+                        used_overrides.insert(name.clone());
+                    }
+                    writer.write_all(updated)?;
+                    continue;
+                }
+            }
 
             if let Some(bytes) = overrides.get(&name) {
                 used_overrides.insert(name.clone());
@@ -476,7 +503,10 @@ impl XlsbWorkbook {
             missing.sort();
             return Err(ParseError::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("override parts not found in source package: {}", missing.join(", ")),
+                format!(
+                    "override parts not found in source package: {}",
+                    missing.join(", ")
+                ),
             )));
         }
 
@@ -574,6 +604,53 @@ fn worksheets_edited<R: Read + Seek>(
 fn is_calc_chain_part_name(name: &str) -> bool {
     name.trim_start_matches('/')
         .eq_ignore_ascii_case("xl/calcChain.bin")
+}
+
+fn patch_workbook_bin_full_calc_on_load(
+    workbook_bin: &[u8],
+) -> Result<Option<Vec<u8>>, ParseError> {
+    let mut cursor = Cursor::new(workbook_bin);
+    let mut out = Vec::with_capacity(workbook_bin.len());
+    let mut changed = false;
+
+    loop {
+        let start = cursor.position() as usize;
+        let Some(id) = biff12_varint::read_record_id(&mut cursor)? else {
+            break;
+        };
+        let Some(len) = biff12_varint::read_record_len(&mut cursor)? else {
+            return Err(ParseError::UnexpectedEof);
+        };
+        let len: usize = len as usize;
+        let header_end = cursor.position() as usize;
+        let payload_start = header_end;
+        let payload_end = payload_start
+            .checked_add(len)
+            .filter(|&end| end <= workbook_bin.len())
+            .ok_or(ParseError::UnexpectedEof)?;
+
+        // Preserve the exact varint encoding for id/len.
+        out.extend_from_slice(&workbook_bin[start..payload_start]);
+
+        let payload = &workbook_bin[payload_start..payload_end];
+        cursor.set_position(payload_end as u64);
+
+        if id == biff12::CALC_PROP && payload.len() >= 6 {
+            let mut patched = payload.to_vec();
+            let flags_off = 4usize;
+            let flags = u16::from_le_bytes([patched[flags_off], patched[flags_off + 1]]);
+            let new_flags = flags | 0x0004;
+            if new_flags != flags {
+                patched[flags_off..flags_off + 2].copy_from_slice(&new_flags.to_le_bytes());
+                changed = true;
+            }
+            out.extend_from_slice(&patched);
+        } else {
+            out.extend_from_slice(payload);
+        }
+    }
+
+    Ok(changed.then_some(out))
 }
 
 fn zip_entry_equals<R: Read + Seek>(
