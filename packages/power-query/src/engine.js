@@ -437,11 +437,23 @@ export class QueryEngine {
     if (this.cache && cacheMode !== "bypass") {
       cacheKey = await this.computeCacheKey(query, context, options, state, callStack);
       if (cacheKey && cacheMode === "use") {
-        const cached = await this.cache.getEntry(cacheKey);
+        /** @type {import("./cache/cache.js").CacheEntry | null} */
+        let cached = null;
+        try {
+          cached = await this.cache.getEntry(cacheKey);
+        } catch {
+          cached = null;
+        }
         if (cached) {
           const payload = /** @type {any} */ (cached.value);
-          const cacheHitValid =
-            cacheValidation === "none" ? true : await this.validateCacheEntry(query, context, options, state, callStack, payload?.meta);
+          let cacheHitValid = cacheValidation === "none";
+          if (!cacheHitValid) {
+            try {
+              cacheHitValid = await this.validateCacheEntry(query, context, options, state, callStack, payload?.meta);
+            } catch {
+              cacheHitValid = false;
+            }
+          }
           if (cacheHitValid) {
             const completedAt = new Date(state.now());
             try {
@@ -458,7 +470,11 @@ export class QueryEngine {
               return { table, meta };
             } catch {
               // Treat cache corruption as a miss so we can recover on the next refresh.
-              await this.cache.delete(cacheKey);
+              try {
+                await this.cache.delete(cacheKey);
+              } catch {
+                // ignore
+              }
             }
           }
           options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
@@ -608,12 +624,16 @@ export class QueryEngine {
     };
 
     if (this.cache && cacheKey && cacheMode !== "bypass" && (table instanceof DataTable || table instanceof ArrowTableAdapter)) {
-      await this.cache.set(
-        cacheKey,
-        { version: 2, table: serializeAnyTable(table), meta: serializeQueryMeta(meta) },
-        { ttlMs: cacheTtlMs },
-      );
-      options.onProgress?.({ type: "cache:set", queryId: query.id, cacheKey });
+      try {
+        await this.cache.set(
+          cacheKey,
+          { version: 2, table: serializeAnyTable(table), meta: serializeQueryMeta(meta) },
+          { ttlMs: cacheTtlMs },
+        );
+        options.onProgress?.({ type: "cache:set", queryId: query.id, cacheKey });
+      } catch {
+        // Best-effort: cache failures should not fail the query execution.
+      }
     }
 
     return { table, meta };

@@ -37,6 +37,47 @@ test("CacheManager: hit/miss, TTL, manual invalidation", async () => {
   assert.equal(await cache.get("k1"), null);
 });
 
+test("QueryEngine: cache failures do not fail query execution", async () => {
+  /** @type {import("../../src/cache/cache.js").CacheStore} */
+  const store = {
+    get: async () => {
+      throw new Error("boom");
+    },
+    set: async () => {
+      throw new Error("boom");
+    },
+    delete: async () => {},
+  };
+
+  const cache = new CacheManager({ store });
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readText: async () => {
+        readCount += 1;
+        return ["Region,Sales", "East,100", "West,200"].join("\n");
+      },
+    },
+  });
+
+  const query = {
+    id: "q_cache_failures",
+    name: "Cache failures",
+    source: { type: "csv", path: "/tmp/sales.csv", options: { hasHeaders: true } },
+    steps: [],
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(readCount, 1);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, false);
+  assert.equal(readCount, 2, "cache failures should not prevent query execution but also won't cache");
+});
+
 test("QueryEngine: caches by source + query + credentialId and still checks permissions", async () => {
   let now = 0;
   const store = new MemoryCacheStore();

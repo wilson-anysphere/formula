@@ -109,8 +109,7 @@ export function deserializeTable(data) {
 export function serializeAnyTable(table) {
   if (table instanceof ArrowTableAdapter) {
     if (!arrowTableToIPC) {
-      const materialized = new DataTable(table.columns, Array.from(table.iterRows()));
-      return { kind: "data", data: serializeTable(materialized) };
+      throw new Error("Arrow IPC cache serialization requires Arrow IPC support (install @formula/data-io dependencies)");
     }
     return {
       kind: "arrow",
