@@ -341,6 +341,35 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
     })
 }
 
+/// Read a local text file on behalf of the frontend.
+///
+/// This exists so the desktop webview can power-query local sources (CSV/JSON) without
+/// depending on the optional Tauri FS plugin.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || std::fs::read_to_string(path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Read a local file and return its contents as base64.
+///
+/// The frontend decodes this into a `Uint8Array` for Parquet sources.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn read_binary_file(path: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+    Ok(STANDARD.encode(bytes))
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_workbook_theme_palette(

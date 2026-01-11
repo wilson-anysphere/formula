@@ -44,6 +44,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::open_workbook,
             commands::new_workbook,
+            commands::read_text_file,
+            commands::read_binary_file,
             commands::save_workbook,
             commands::mark_saved,
             commands::get_workbook_theme_palette,

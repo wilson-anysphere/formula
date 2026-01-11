@@ -52,12 +52,36 @@ const PERMISSION_KIND_TO_DLP_ACTION: Record<string, string> = {
   "database:query": DLP_ACTION.EXTERNAL_CONNECTOR,
 };
 
+type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+function getTauriInvoke(): TauriInvoke {
+  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+  if (!invoke) {
+    throw new Error("Tauri invoke API not available");
+  }
+  return invoke;
+}
+
 function getTauriFs(): any {
   const tauri = (globalThis as any).__TAURI__;
   return tauri?.fs ?? tauri?.plugin?.fs ?? null;
 }
 
 function normalizeBinaryPayload(payload: unknown): Uint8Array {
+  if (typeof payload === "string") {
+    if (typeof Buffer !== "undefined") {
+      // Node (and some bundlers) provide Buffer.
+      // eslint-disable-next-line no-undef
+      return new Uint8Array(Buffer.from(payload, "base64"));
+    }
+    if (typeof atob === "function") {
+      const binary = atob(payload);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+    throw new Error("Base64 decoding is not available in this environment");
+  }
   if (payload instanceof Uint8Array) return payload;
   // Some APIs return plain number arrays.
   if (Array.isArray(payload)) return new Uint8Array(payload);
@@ -73,13 +97,19 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
   const readTextFile = fs?.readTextFile;
   const readFile = fs?.readFile ?? fs?.readBinaryFile;
 
-  if (typeof readTextFile !== "function" || typeof readFile !== "function") {
-    throw new Error("Tauri filesystem API not available (missing readTextFile/readFile)");
+  if (typeof readTextFile === "function" && typeof readFile === "function") {
+    return {
+      readText: async (path) => readTextFile(path),
+      readBinary: async (path) => normalizeBinaryPayload(await readFile(path)),
+    };
   }
 
+  // The desktop app does not currently ship with the official Tauri FS plugin enabled.
+  // Use our own invoke commands as a fallback.
+  const invoke = getTauriInvoke();
   return {
-    readText: async (path) => readTextFile(path),
-    readBinary: async (path) => normalizeBinaryPayload(await readFile(path)),
+    readText: async (path) => String(await invoke("read_text_file", { path })),
+    readBinary: async (path) => normalizeBinaryPayload(await invoke("read_binary_file", { path })),
   };
 }
 
