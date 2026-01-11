@@ -145,13 +145,29 @@ class SqliteFileDb {
     return this._withLock(async () => {
       const db = await this._open();
       db.run("BEGIN");
+      let committed = false;
       try {
         const result = await fn(db);
         db.run("COMMIT");
+        committed = true;
         await this._persist();
         return result;
       } catch (err) {
-        db.run("ROLLBACK");
+        if (!committed) {
+          try {
+            db.run("ROLLBACK");
+          } catch {
+            // ignore rollback failures; throw original error below
+          }
+        } else {
+          // COMMIT succeeded but persistence failed; reset the in-memory DB to the last
+          // durable snapshot on disk so callers don't observe state that never flushed.
+          try {
+            this.close();
+          } catch {
+            // ignore
+          }
+        }
         throw err;
       }
     });
