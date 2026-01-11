@@ -1,5 +1,6 @@
 import { parseM } from "./parser.js";
 import { MLanguageCompileError } from "./errors.js";
+import { valueKey } from "../valueKey.js";
 import {
   SOURCE_FUNCTIONS,
   TABLE_FUNCTIONS,
@@ -1332,9 +1333,9 @@ function evaluateConstant(ctx, expr) {
         case "or":
           return Boolean(left) || Boolean(right);
         case "=":
-          return left === right;
+          return valueKey(left) === valueKey(right);
         case "<>":
-          return left !== right;
+          return valueKey(left) !== valueKey(right);
         case "<":
           return /** @type {any} */ (left) < /** @type {any} */ (right);
         case "<=":

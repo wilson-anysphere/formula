@@ -84,6 +84,25 @@ in
   ]);
 });
 
+test("m_language execution: constant equality compares dates and records by value", async () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Value"},
+    {#date(2024, 1, 1) = #date(2024, 1, 1)},
+    {#date(2024, 1, 1) <> #date(2024, 1, 1)},
+    {[a=1, b=2] = [b=2, a=1]}
+  })
+in
+  Source
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [["Value"], [true], [false], [true]]);
+});
+
 test("m_language execution: Web.Contents + Table.RemoveColumns", async () => {
   const script = `
 let
