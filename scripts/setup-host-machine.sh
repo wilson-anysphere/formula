@@ -1,0 +1,172 @@
+#!/bin/bash
+# ONE-TIME HOST MACHINE SETUP
+# Run this ONCE on the EC2 instance before agents start
+# Requires sudo privileges
+#
+# Usage: sudo ./scripts/setup-host-machine.sh
+
+set -e
+
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run with sudo: sudo $0"
+  exit 1
+fi
+
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║  Formula Development Host Setup                                 ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
+echo ""
+
+# ============================================================================
+# System Limits
+# ============================================================================
+echo "=== Configuring System Limits ==="
+
+# Increase inotify limits (for file watchers across many repos)
+if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf; then
+  echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
+  echo "fs.inotify.max_user_instances=8192" >> /etc/sysctl.conf
+  sysctl -p
+  echo "✓ Increased inotify limits"
+else
+  echo "✓ inotify limits already configured"
+fi
+
+# Increase file descriptor limits
+if ! grep -q "nofile" /etc/security/limits.conf | grep -q 1048576; then
+  cat >> /etc/security/limits.conf << 'EOF'
+*               soft    nofile          1048576
+*               hard    nofile          1048576
+root            soft    nofile          1048576
+root            hard    nofile          1048576
+EOF
+  echo "✓ Increased file descriptor limits"
+else
+  echo "✓ File descriptor limits already configured"
+fi
+
+# ============================================================================
+# Essential Packages
+# ============================================================================
+echo ""
+echo "=== Installing Essential Packages ==="
+
+apt-get update
+
+# Build essentials
+apt-get install -y \
+  build-essential \
+  pkg-config \
+  cmake \
+  git \
+  curl \
+  wget \
+  unzip
+
+# For Canvas/graphics
+apt-get install -y \
+  libcairo2-dev \
+  libjpeg-dev \
+  libpango1.0-dev \
+  libgif-dev \
+  librsvg2-dev \
+  libpixman-1-dev
+
+# For Tauri
+apt-get install -y \
+  libgtk-3-dev \
+  libwebkit2gtk-4.0-dev \
+  libappindicator3-dev \
+  librsvg2-dev \
+  patchelf
+
+# For headless browser testing
+apt-get install -y \
+  xvfb \
+  libnss3 \
+  libatk1.0-0 \
+  libatk-bridge2.0-0 \
+  libcups2 \
+  libxkbcommon0 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxfixes3 \
+  libxrandr2 \
+  libgbm1 \
+  libpango-1.0-0 \
+  libcairo2 \
+  libasound2
+
+# Fonts (for consistent text rendering)
+apt-get install -y \
+  fonts-liberation \
+  fonts-dejavu-core \
+  fonts-noto-core \
+  fonts-noto-cjk \
+  fontconfig
+
+# Refresh font cache
+fc-cache -f -v >/dev/null 2>&1
+
+echo "✓ Essential packages installed"
+
+# ============================================================================
+# Development Tools (if not already installed)
+# ============================================================================
+echo ""
+echo "=== Checking Development Tools ==="
+
+# Node.js (via nvm or direct)
+if ! command -v node &> /dev/null; then
+  echo "⚠️  Node.js not found. Install via nvm or your preferred method."
+else
+  echo "✓ Node.js: $(node --version)"
+fi
+
+# Rust
+if ! command -v rustc &> /dev/null; then
+  echo "⚠️  Rust not found. Install via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+else
+  echo "✓ Rust: $(rustc --version)"
+fi
+
+# ============================================================================
+# Optional: sccache for shared Rust compilation cache
+# ============================================================================
+echo ""
+echo "=== Optional: Shared Compilation Cache ==="
+
+if command -v sccache &> /dev/null; then
+  echo "✓ sccache already installed"
+else
+  echo "ℹ️  sccache not installed. To enable shared compilation caching:"
+  echo "   cargo install sccache"
+  echo "   Then configure RUSTC_WRAPPER=sccache in agent-init.sh"
+fi
+
+# Create shared cache directory if desired
+if [ ! -d /shared ]; then
+  echo "ℹ️  Consider creating /shared directory for shared caches:"
+  echo "   mkdir -p /shared/sccache /shared/npm-cache"
+  echo "   chmod 1777 /shared /shared/sccache /shared/npm-cache"
+fi
+
+# ============================================================================
+# Summary
+# ============================================================================
+echo ""
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║  Setup Complete                                                 ║"
+echo "╠════════════════════════════════════════════════════════════════╣"
+echo "║  • inotify limits increased                                     ║"
+echo "║  • File descriptor limits increased                             ║"
+echo "║  • Canvas/graphics libraries installed                          ║"
+echo "║  • Tauri dependencies installed                                 ║"
+echo "║  • Headless browser dependencies installed                      ║"
+echo "║  • Fonts installed                                              ║"
+echo "╠════════════════════════════════════════════════════════════════╣"
+echo "║  Next Steps:                                                    ║"
+echo "║  1. Reboot or re-login for limits to take effect                ║"
+echo "║  2. Ensure Node.js and Rust are installed                       ║"
+echo "║  3. Agents should run: source scripts/agent-init.sh             ║"
+echo "╚════════════════════════════════════════════════════════════════╝"

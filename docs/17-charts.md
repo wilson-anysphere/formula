@@ -1,300 +1,702 @@
-# Charts: DrawingML + ChartEx Compatibility and Rendering
+# Chart System Design
 
 ## Overview
 
-Excel charts are defined using **DrawingML** (DrawingML Charts, `c:` namespace) and, for newer chart types, **ChartEx** (a newer schema used by Excel 2016+ for several “modern” charts). Chart support has two non‑negotiable goals:
-
-1. **Round-trip preservation (P0)**: Loading and saving an `.xlsx` must not drop or rewrite chart parts we don’t fully understand.
-2. **Rendering fidelity (P1)**: When we *do* render a chart, the result should be visually close to Excel across chart types, formatting, axes, legends, labels, and layout.
-
-This document defines the chart roadmap and a system design that makes it possible to reach broad Excel parity incrementally without data loss.
+Excel's charting system is built on DrawingML (ECMA-376), one of the most complex parts of the file format. Perfect chart compatibility requires understanding both the file format representation and Excel's rendering behavior.
 
 ---
 
-## File/Part Anatomy (What must round-trip)
+## Chart Types to Support
 
-Charts are not a single XML file. A “chart on a sheet” is a graph of OPC parts:
+### Priority 0 (Launch Required)
+
+| Type | DrawingML Element | Complexity |
+|------|-------------------|------------|
+| Column | `<c:barChart>` with `barDir="col"` | Medium |
+| Bar | `<c:barChart>` with `barDir="bar"` | Medium |
+| Line | `<c:lineChart>` | Medium |
+| Pie | `<c:pieChart>` | Medium |
+| Area | `<c:areaChart>` | Medium |
+| Scatter (XY) | `<c:scatterChart>` | Medium |
+
+### Priority 1 (Power Users)
+
+| Type | DrawingML Element | Complexity |
+|------|-------------------|------------|
+| Combo | Multiple chart types overlaid | High |
+| Doughnut | `<c:doughnutChart>` | Low |
+| Radar | `<c:radarChart>` | Medium |
+| Stock (OHLC) | `<c:stockChart>` | High |
+| Surface | `<c:surfaceChart>` | High |
+| Bubble | `<c:bubbleChart>` | Medium |
+
+### Priority 2 (Specialty)
+
+| Type | DrawingML Element | Complexity |
+|------|-------------------|------------|
+| Treemap | `<cx:chart>` (ChartEx) | Very High |
+| Sunburst | `<cx:chart>` (ChartEx) | Very High |
+| Waterfall | `<cx:chart>` (ChartEx) | Very High |
+| Funnel | `<cx:chart>` (ChartEx) | High |
+| Box & Whisker | `<cx:chart>` (ChartEx) | High |
+| Histogram | `<cx:chart>` (ChartEx) | Medium |
+| Map | Geographic data | Very High |
+
+---
+
+## File Format Structure
+
+### Chart Part Location
 
 ```
-xl/worksheets/sheetN.xml
-  └── <drawing r:id="rIdDwg"/>
-       └── xl/drawings/drawingN.xml
-            └── xdr:twoCellAnchor / oneCellAnchor / absoluteAnchor
-                 └── xdr:graphicFrame
-                      └── a:graphic/a:graphicData/c:chart r:id="rIdChart"
-                           ├── xl/charts/chartM.xml            (DrawingML chartSpace)
-                           ├── xl/charts/chartExM.xml          (ChartEx, for some chart types)
-                           ├── xl/charts/styleN.xml            (optional preset chart style)
-                           ├── xl/charts/colorsN.xml           (optional preset chart color style)
-                           └── embedded images (rare, e.g. textures)
+xl/
+├── workbook.xml
+├── worksheets/
+│   └── sheet1.xml          <- Contains <drawing> reference
+├── drawings/
+│   ├── drawing1.xml        <- Anchors chart to cell range
+│   └── _rels/
+│       └── drawing1.xml.rels  <- Links to chart parts
+└── charts/
+    ├── chart1.xml          <- Chart definition
+    ├── colors1.xml         <- Color scheme
+    ├── style1.xml          <- Chart style
+    └── _rels/
+        └── chart1.xml.rels <- External data links
 ```
 
-### Chart-related parts to preserve
+### DrawingML Chart XML Structure
 
-At minimum, round-trip must preserve:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+              xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <c:chart>
+    <c:title>
+      <c:tx>
+        <c:rich>
+          <a:p>
+            <a:r>
+              <a:t>Sales by Region</a:t>
+            </a:r>
+          </a:p>
+        </c:rich>
+      </c:tx>
+    </c:title>
+    
+    <c:plotArea>
+      <c:layout/>  <!-- Positioning -->
+      
+      <!-- Chart type specific element -->
+      <c:barChart>
+        <c:barDir val="col"/>
+        <c:grouping val="clustered"/>
+        
+        <c:ser>  <!-- Series 1 -->
+          <c:idx val="0"/>
+          <c:order val="0"/>
+          <c:tx>
+            <c:strRef>
+              <c:f>Sheet1!$B$1</c:f>  <!-- Series name -->
+            </c:strRef>
+          </c:tx>
+          <c:cat>  <!-- Categories (X-axis) -->
+            <c:strRef>
+              <c:f>Sheet1!$A$2:$A$5</c:f>
+            </c:strRef>
+          </c:cat>
+          <c:val>  <!-- Values (Y-axis) -->
+            <c:numRef>
+              <c:f>Sheet1!$B$2:$B$5</c:f>
+            </c:numRef>
+          </c:val>
+        </c:ser>
+        
+        <c:axId val="1"/>  <!-- Category axis ID -->
+        <c:axId val="2"/>  <!-- Value axis ID -->
+      </c:barChart>
+      
+      <c:catAx>  <!-- Category axis definition -->
+        <c:axId val="1"/>
+        <c:scaling><c:orientation val="minMax"/></c:scaling>
+        <c:axPos val="b"/>  <!-- bottom -->
+        <c:crossAx val="2"/>
+      </c:catAx>
+      
+      <c:valAx>  <!-- Value axis definition -->
+        <c:axId val="2"/>
+        <c:scaling><c:orientation val="minMax"/></c:scaling>
+        <c:axPos val="l"/>  <!-- left -->
+        <c:crossAx val="1"/>
+        <c:numFmt formatCode="General"/>
+      </c:valAx>
+      
+    </c:plotArea>
+    
+    <c:legend>
+      <c:legendPos val="r"/>  <!-- right -->
+    </c:legend>
+    
+  </c:chart>
+  
+  <!-- Cached data for offline viewing -->
+  <c:externalData r:id="rId1">
+    <c:autoUpdate val="0"/>
+  </c:externalData>
+  
+</c:chartSpace>
+```
 
-- `xl/drawings/drawing*.xml` and its `.rels` exactly (anchors, EMU offsets, relationship ids).
-- `xl/charts/chart*.xml` and its `.rels` exactly.
-- `xl/charts/chartEx*.xml` and its `.rels` (when present).
-- `xl/charts/style*.xml`, `xl/charts/colors*.xml` (when present).
-- Any `mc:AlternateContent`, `c:extLst`, `a:extLst` blocks (forward-compat extensions).
+### ChartEx (Excel 2016+ Charts)
 
-**Rule:** if we don’t actively edit charts, the safest default is *byte-for-byte copy* of all chart-related parts on save.
+Treemaps, sunbursts, waterfalls use the newer ChartEx format:
+
+```xml
+<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+  <cx:chart>
+    <cx:plotArea>
+      <cx:plotAreaRegion>
+        <cx:series layoutId="treemap">
+          <cx:dataLabels/>
+          <cx:dataId val="0"/>
+        </cx:series>
+      </cx:plotAreaRegion>
+    </cx:plotArea>
+  </cx:chart>
+  <cx:chartData>
+    <cx:data id="0">
+      <cx:strDim type="cat">
+        <cx:f>Sheet1!$A$2:$A$10</cx:f>
+      </cx:strDim>
+      <cx:numDim type="size">
+        <cx:f>Sheet1!$B$2:$B$10</cx:f>
+      </cx:numDim>
+    </cx:data>
+  </cx:chartData>
+</cx:chartSpace>
+```
 
 ---
 
-## Code Organization (Target Paths)
+## Implementation Architecture
 
-Charts are an end-to-end feature spanning:
+### Chart Data Model
 
-- **XLSX parsing/writing (Rust):** `crates/formula-xlsx/src/drawingml/charts/**`
-  - Parse DrawingML charts (`c:chartSpace`) and ChartEx (`cx:chartSpace`) where applicable.
-  - Preserve unknown/unsupported chart content for round-trip.
-  - Expose a structured `ChartModel` + a raw XML fallback to the application layer.
+```typescript
+interface Chart {
+  id: string;
+  type: ChartType;
+  title?: ChartTitle;
+  plotArea: PlotArea;
+  legend?: Legend;
+  series: ChartSeries[];
+  axes: ChartAxis[];
+  
+  // Positioning
+  anchor: ChartAnchor;
+  
+  // Styling
+  style?: ChartStyle;
+  colorScheme?: ColorScheme;
+}
 
-- **Rendering (Desktop/UI):** `apps/desktop/src/charts/**`
-  - Implement a chart scene graph and renderers (Canvas2D first, optionally GPU later).
-  - Ensure layout positioning matches drawing anchors (EMUs) and sheet cell geometry.
-  - Implement visual regression infrastructure for chart rendering.
+interface ChartSeries {
+  index: number;
+  name?: CellReference | string;
+  categories?: CellReference;
+  values: CellReference;
+  
+  // Visual properties
+  fill?: Fill;
+  line?: LineProperties;
+  marker?: MarkerProperties;
+  dataLabels?: DataLabelProperties;
+  
+  // Cached data (for round-trip)
+  cachedCategories?: (string | number)[];
+  cachedValues?: number[];
+}
 
-These paths are intentionally separated: the core XLSX layer must be *lossless* and deterministic, while the UI renderer can evolve independently as we improve fidelity.
-
----
-
-## Chart Type Roadmap (Incremental, but comprehensive)
-
-Excel exposes dozens of chart types, but many are parameterizations of a few core geometries. The roadmap below prioritizes what’s required for parity and what’s structurally easiest to implement without sacrificing fidelity.
-
-### Core DrawingML chart types (classic `c:chartSpace`)
-
-| Excel UI | OOXML primary element(s) | Notes |
-|---|---|---|
-| Column / Bar | `c:barChart` | Includes clustered, stacked, 100% stacked via `c:grouping`. `c:barDir` controls col vs bar. |
-| Line | `c:lineChart` | Markers, smoothing, gaps, secondary axis support. |
-| Area | `c:areaChart` | Stacked/100% stacked variants exist. |
-| Scatter (XY) | `c:scatterChart` | Also the base for many “combo-like” visuals. |
-| Pie / Doughnut | `c:pieChart`, `c:doughnutChart` | Exploded slices, leader lines, data labels. |
-| Bubble | `c:bubbleChart` | Requires `xVal`, `yVal`, `bubbleSize` series data. |
-| Radar | `c:radarChart` | `standard`, `marker`, `filled`. |
-| Stock (OHLC) | `c:stockChart` | Typically multiple series (high/low/open/close) + category axis. |
-| Combo | multiple chart elements in one `c:plotArea` | Shared axes via `c:axId`. Often secondary axis per subset of series. |
-
-### Modern chart types (often ChartEx, Excel 2016+)
-
-These chart types frequently appear as ChartEx parts (or in extension lists inside a classic chart). The parsing strategy must be robust to both encodings.
-
-| Excel UI | Common storage | Notes |
-|---|---|---|
-| Waterfall | ChartEx (`cx:*`) | Includes “total” bars, connectors, negative coloring rules. |
-| Histogram | ChartEx (`cx:*`) | Requires binning rules (bin width/number of bins, underflow/overflow). |
-| Pareto | ChartEx (`cx:*`) | Histogram + cumulative percentage line on secondary axis. |
-| Box & Whisker | ChartEx (`cx:*`) | Quartile algorithm, outliers, mean markers, whisker definition. |
-| Treemap | ChartEx (`cx:*`) | Hierarchical rectangles, labels by level, color scale. |
-| Sunburst | ChartEx (`cx:*`) | Hierarchical rings, label placement. |
-| Funnel | ChartEx (`cx:*`) | Stage sizing, gaps, label placement. |
-| Map (optional) | ChartEx (`cx:*`) | If unsupported: preserve and show placeholder. |
-
----
-
-## Parsing Requirements (XLSX → Internal Model → XLSX)
-
-### 1) Lossless ingestion: always keep the original XML
-
-Even when we implement a chart type, we still need the original XML for:
-
-- future fields we don’t model yet,
-- Excel extensions (`extLst`) we don’t interpret,
-- stable “no-op” round-trips when users only edit cells.
-
-Recommended representation (language-agnostic):
-
-```ts
-type OpcPartPath = string;
-
-interface ChartObject {
-  // Where it lives on the sheet (from drawing anchors)
-  sheetId: string;
-  anchor: DrawingAnchor; // twoCell/oneCell/absolute, includes EMU offsets
-
-  // The chart definition parts
-  chartPart: { path: OpcPartPath; relsPath: OpcPartPath; xmlBytes: Uint8Array };
-  chartExPart?: { path: OpcPartPath; relsPath: OpcPartPath; xmlBytes: Uint8Array };
-  stylePart?: { path: OpcPartPath; xmlBytes: Uint8Array };
-  colorStylePart?: { path: OpcPartPath; xmlBytes: Uint8Array };
-
-  // Parsed model (optional; only present when we render/edit)
-  model?: ChartModel;
-
-  // Optional: structured warnings for unsupported features
-  diagnostics: ChartDiagnostic[];
+interface ChartAxis {
+  id: number;
+  type: 'category' | 'value' | 'date' | 'series';
+  position: 'top' | 'bottom' | 'left' | 'right';
+  title?: AxisTitle;
+  scaling: AxisScaling;
+  numberFormat?: string;
+  tickMarks?: TickMarkProperties;
+  gridLines?: GridLineProperties;
+  crossesAt?: number | 'autoZero' | 'max' | 'min';
 }
 ```
 
-### 2) Detect and parse both classic and ChartEx forms
-
-Parsing flow:
-
-1. From `sheetN.xml`, follow the drawing relationship to `drawingN.xml`.
-2. From each `xdr:*Anchor`, extract:
-   - `from/to` cell + EMU offsets (or absolute position),
-   - size in EMUs,
-   - the target chart relationship id in `graphicData`.
-3. Load `xl/charts/chartM.xml`. In addition:
-   - If `chartM.xml.rels` includes a relationship to a ChartEx part, load it.
-   - Preserve `mc:AlternateContent` and `extLst` blocks exactly.
-
-### 3) Series data resolution (cached vs live)
-
-Excel chart parts often contain both:
-
-- a formula reference to cells (e.g. `Sheet1!$B$2:$B$13`), and
-- a cached copy of values (`c:numCache`, `c:strCache`).
-
-**Rendering rule:** prefer cached values unless we can guarantee a correct recalculation of the workbook, including volatile functions and external links. This matches Excel’s own behavior when opening a workbook with stale chart caches.
-
-**Editing rule:** if we ever “rebuild” chart XML, we must decide whether to update caches. For a first implementation, avoid rewriting chart XML unless explicitly editing charts.
-
----
-
-## Fidelity Requirements (What “acceptable” means)
-
-### Axes
-
-Minimum fidelity features to implement:
-
-- Tick label text and placement (`c:tickLblPos`, `c:tickMark`).
-- Number formats (`c:numFmt formatCode="…"`) using the same formatting engine as cells.
-- Major/minor gridlines (`c:majorGridlines`, `c:minorGridlines`) including line style.
-- Scaling: min/max, log, reverse order (`c:scaling`), crossing rules (`c:crosses`, `c:crossesAt`).
-- Axis title (`c:title`) including rich text.
-
-### Legend, titles, data labels
-
-- Chart title: text, rich text, and cell reference title (`c:title` with `c:strRef`).
-- Legend: position, overlay behavior, text styling (`c:legend`, `c:legendPos`, `c:overlay`).
-- Data labels: series-level defaults and point overrides (`c:dLbls`, `c:dLbl`) for value/category/percent, leader lines, label position.
-
-### Theme + style inheritance (Task 109 dependency)
-
-Charts inherit formatting from:
-
-1. Document theme (`xl/theme/theme1.xml`),
-2. Chart preset styles (`xl/charts/style*.xml` + `colors*.xml`),
-3. Chart/series/point overrides (`c:spPr`, `c:txPr`, `a:*` drawing properties).
-
-To render consistently, chart color resolution must share the same theme/`schemeClr` machinery as cell fills/fonts.
-
-### Layout + positioning
-
-There are two layouts to get right:
-
-1. **Sheet anchoring** (drawing layer): object position and size in EMUs anchored to cells.
-2. **Chart internal layout**: plot area vs legend vs title using `c:layout` / `c:manualLayout`.
-
-#### EMU conversion
-
-- `1 inch = 914400 EMUs`
-- `px = (emu / 914400) * dpi` (use a consistent DPI for offscreen rendering; map to device pixels later)
-
-#### Two-cell anchor to pixels
-
-For `xdr:twoCellAnchor`:
+### Rendering Pipeline
 
 ```
-x = sumPx(colWidth[0..from.col-1]) + emuToPx(from.colOff)
-y = sumPx(rowHeight[0..from.row-1]) + emuToPx(from.rowOff)
-
-right  = sumPx(colWidth[0..to.col-1]) + emuToPx(to.colOff)
-bottom = sumPx(rowHeight[0..to.row-1]) + emuToPx(to.rowOff)
-
-width  = right - x
-height = bottom - y
+┌──────────────────┐
+│   Chart Model    │
+│  (from parser)   │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Layout Engine   │
+│  - Calculate     │
+│    plot area     │
+│  - Position axes │
+│  - Scale data    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Render Pipeline  │
+│  1. Background   │
+│  2. Grid lines   │
+│  3. Plot area    │
+│  4. Data series  │
+│  5. Axes         │
+│  6. Labels       │
+│  7. Legend       │
+│  8. Title        │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Canvas Output   │
+└──────────────────┘
 ```
 
-Accurate `colWidthPx` conversion requires Excel’s column width rules (character-based width → pixels). This should be implemented once and reused by images, shapes, and charts.
+### Canvas Rendering
+
+```typescript
+class ChartRenderer {
+  private ctx: CanvasRenderingContext2D;
+  private chart: Chart;
+  private bounds: Rectangle;
+  
+  render(): void {
+    this.calculateLayout();
+    this.renderBackground();
+    this.renderGridLines();
+    this.renderPlotArea();
+    this.renderSeries();
+    this.renderAxes();
+    this.renderLegend();
+    this.renderTitle();
+  }
+  
+  private renderSeries(): void {
+    for (const series of this.chart.series) {
+      switch (this.chart.type) {
+        case 'bar':
+        case 'column':
+          this.renderBarSeries(series);
+          break;
+        case 'line':
+          this.renderLineSeries(series);
+          break;
+        case 'pie':
+          this.renderPieSeries(series);
+          break;
+        case 'scatter':
+          this.renderScatterSeries(series);
+          break;
+        // ... more types
+      }
+    }
+  }
+  
+  private renderBarSeries(series: ChartSeries): void {
+    const { ctx } = this;
+    const data = this.getSeriesData(series);
+    const barWidth = this.calculateBarWidth();
+    
+    for (let i = 0; i < data.length; i++) {
+      const x = this.dataToCanvasX(i);
+      const y = this.dataToCanvasY(data[i].value);
+      const height = this.plotArea.bottom - y;
+      
+      ctx.fillStyle = this.getSeriesColor(series, i);
+      ctx.fillRect(x, y, barWidth, height);
+      
+      if (series.line) {
+        ctx.strokeStyle = series.line.color;
+        ctx.lineWidth = series.line.width;
+        ctx.strokeRect(x, y, barWidth, height);
+      }
+    }
+  }
+}
+```
 
 ---
 
-## Rendering Strategy (Consistency across platforms)
+## Data Binding
 
-We need deterministic rendering across:
+### Live Updates
 
-- Desktop (Tauri/WebView)
-- Web (Canvas/WebGPU)
+Charts must update when source data changes:
 
-### Recommended approach: custom renderer via a chart scene graph
+```typescript
+class ChartDataBinding {
+  private chart: Chart;
+  private worksheet: Worksheet;
+  private subscriptions: Subscription[] = [];
+  
+  bind(): void {
+    for (const series of this.chart.series) {
+      // Watch category range
+      if (series.categories) {
+        this.subscriptions.push(
+          this.worksheet.watchRange(series.categories, () => {
+            this.refreshSeriesCategories(series);
+          })
+        );
+      }
+      
+      // Watch value range
+      this.subscriptions.push(
+        this.worksheet.watchRange(series.values, () => {
+          this.refreshSeriesValues(series);
+        })
+      );
+      
+      // Watch series name cell
+      if (series.name && typeof series.name !== 'string') {
+        this.subscriptions.push(
+          this.worksheet.watchCell(series.name, () => {
+            this.refreshSeriesName(series);
+          })
+        );
+      }
+    }
+  }
+  
+  unbind(): void {
+    this.subscriptions.forEach(s => s.unsubscribe());
+    this.subscriptions = [];
+  }
+}
+```
 
-Build a platform-agnostic scene graph that resolves chart geometry into:
+### Caching for Round-Trip
 
-- paths (rects, lines, arcs),
-- fills/strokes,
-- text runs (font, size, color),
-- clipping regions.
+Excel stores cached data in charts for offline viewing. We must preserve this:
 
-Then implement backends:
-
-- Canvas2D for immediate correctness and broad compatibility,
-- optional Skia/WebGPU for performance later.
-
-This avoids the fidelity mismatch you get when mapping Excel charts into third-party chart libraries with different defaults and layout engines.
-
-### Rendering pipeline (high level)
-
-1. Parse chart model (or fallback to placeholder if unsupported).
-2. Resolve theme + style inheritance to concrete colors/fonts.
-3. Resolve layout (chart area → plot area → axes/legend/title).
-4. Project data into screen coordinates (scales).
-5. Emit scene graph primitives.
-6. Rasterize to the target surface.
-
-**Fallback behavior:** if a chart type is unsupported, render a placeholder rectangle with the chart name/title and keep all parts intact for round-trip.
+```xml
+<c:val>
+  <c:numRef>
+    <c:f>Sheet1!$B$2:$B$5</c:f>
+    <c:numCache>
+      <c:formatCode>General</c:formatCode>
+      <c:ptCount val="4"/>
+      <c:pt idx="0"><c:v>100</c:v></c:pt>
+      <c:pt idx="1"><c:v>200</c:v></c:pt>
+      <c:pt idx="2"><c:v>150</c:v></c:pt>
+      <c:pt idx="3"><c:v>175</c:v></c:pt>
+    </c:numCache>
+  </c:numRef>
+</c:val>
+```
 
 ---
 
-## Testing Plan (fixtures + round-trip + visual regression)
+## Sparklines
 
-### Fixtures (one workbook per chart family)
+Sparklines are mini-charts inside cells:
 
-Maintain a `fixtures/charts/` corpus created in desktop Excel (not Google Sheets):
+```xml
+<x14:sparklineGroups xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <x14:sparklineGroup type="line" displayEmptyCellsAs="gap">
+    <x14:colorSeries theme="4"/>
+    <x14:colorNegative theme="5"/>
+    <x14:colorMarkers theme="4" tint="-0.499984740745262"/>
+    <x14:sparklines>
+      <x14:sparkline>
+        <xm:f>Sheet1!A1:L1</xm:f>  <!-- Data range -->
+        <xm:sqref>M1</xm:sqref>    <!-- Display cell -->
+      </x14:sparkline>
+    </x14:sparklines>
+  </x14:sparklineGroup>
+</x14:sparklineGroups>
+```
 
-- `combo.xlsx`
-- `stacked-column.xlsx`, `stacked-bar.xlsx`, `stacked-100.xlsx`
-- `bubble.xlsx`
-- `radar.xlsx`
-- `waterfall.xlsx`
-- `histogram.xlsx`, `pareto.xlsx`
-- `box-whisker.xlsx`
-- `treemap.xlsx`, `sunburst.xlsx`
-- `funnel.xlsx`
-- `stock-ohlc.xlsx`
-- `map.xlsx` (placeholder/preserve)
+### Sparkline Types
 
-Each fixture should include:
+| Type | Description |
+|------|-------------|
+| `line` | Line chart (most common) |
+| `column` | Bar chart |
+| `stacked` | Win/loss visualization |
 
-- non-default theme,
-- axis number formats,
-- gridlines on/off,
-- legend position variations,
-- data labels variations,
-- at least one series with per-point formatting overrides.
+---
 
-### Round-trip preservation tests
+## Interactivity
 
-For chart fixtures, implement “no-op” round-trip tests:
+### Chart Selection
 
-1. Load workbook.
-2. Save without editing charts.
-3. Unzip both and compare:
-   - existence of all chart-related parts,
-   - relationship ids,
-   - byte equality for chart XML parts (preferred) or canonicalized XML equality (acceptable if we reserialize).
+```typescript
+class ChartInteraction {
+  private chart: Chart;
+  private selectedElement: ChartElement | null = null;
+  
+  handleClick(x: number, y: number): void {
+    const element = this.hitTest(x, y);
+    
+    if (element) {
+      this.select(element);
+      this.emit('select', element);
+    } else {
+      this.deselect();
+    }
+  }
+  
+  private hitTest(x: number, y: number): ChartElement | null {
+    // Test in reverse render order (top elements first)
+    
+    // Test data points
+    for (const series of this.chart.series) {
+      const point = this.hitTestSeries(series, x, y);
+      if (point) return { type: 'dataPoint', series, point };
+    }
+    
+    // Test legend items
+    const legendItem = this.hitTestLegend(x, y);
+    if (legendItem) return { type: 'legendItem', ...legendItem };
+    
+    // Test axes
+    const axis = this.hitTestAxis(x, y);
+    if (axis) return { type: 'axis', axis };
+    
+    // Test title
+    if (this.hitTestTitle(x, y)) {
+      return { type: 'title' };
+    }
+    
+    // Test chart area (for moving/resizing)
+    if (this.hitTestChartArea(x, y)) {
+      return { type: 'chart' };
+    }
+    
+    return null;
+  }
+}
+```
 
-### Visual regression tests
+### Tooltips
 
-For each fixture chart:
+```typescript
+class ChartTooltip {
+  show(element: ChartElement, x: number, y: number): void {
+    const content = this.formatTooltip(element);
+    
+    this.tooltipEl.innerHTML = content;
+    this.tooltipEl.style.left = `${x + 10}px`;
+    this.tooltipEl.style.top = `${y + 10}px`;
+    this.tooltipEl.style.display = 'block';
+  }
+  
+  private formatTooltip(element: ChartElement): string {
+    switch (element.type) {
+      case 'dataPoint':
+        return `
+          <div class="chart-tooltip">
+            <div class="series-name">${element.series.name}</div>
+            <div class="category">${element.point.category}</div>
+            <div class="value">${this.formatValue(element.point.value)}</div>
+          </div>
+        `;
+      // ... other element types
+    }
+  }
+}
+```
 
-- Export a golden PNG from Excel (scripted via VBA or manual export).
-- Render in our app at a fixed size and DPI.
-- Compare images with a perceptual diff and a strict threshold.
+---
 
-The goal is not perfect pixel-identical output (Excel uses proprietary layout heuristics), but “acceptably close” with stable regressions over time.
+## Performance Considerations
+
+### Large Datasets
+
+For charts with thousands of points:
+
+```typescript
+class OptimizedChartRenderer {
+  // Downsample for display
+  private downsample(data: DataPoint[], maxPoints: number): DataPoint[] {
+    if (data.length <= maxPoints) return data;
+    
+    // LTTB (Largest Triangle Three Buckets) algorithm
+    return lttbDownsample(data, maxPoints);
+  }
+  
+  // Use WebGL for very large datasets
+  private shouldUseWebGL(pointCount: number): boolean {
+    return pointCount > 10000;
+  }
+  
+  // Batch canvas operations
+  private renderOptimized(points: DataPoint[]): void {
+    const ctx = this.ctx;
+    
+    // Single path for all line segments
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    
+    ctx.stroke();  // Single draw call
+  }
+}
+```
+
+### Animation
+
+```typescript
+class ChartAnimator {
+  animate(from: ChartState, to: ChartState, duration: number): void {
+    const start = performance.now();
+    
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const t = Math.min(elapsed / duration, 1);
+      const eased = this.easeOutCubic(t);
+      
+      const state = this.interpolate(from, to, eased);
+      this.render(state);
+      
+      if (t < 1) {
+        requestAnimationFrame(tick);
+      }
+    };
+    
+    requestAnimationFrame(tick);
+  }
+  
+  private interpolate(from: ChartState, to: ChartState, t: number): ChartState {
+    // Interpolate each data point
+    return {
+      series: from.series.map((s, i) => ({
+        ...s,
+        values: s.values.map((v, j) => 
+          v + (to.series[i].values[j] - v) * t
+        )
+      }))
+    };
+  }
+}
+```
+
+---
+
+## Testing Strategy
+
+### Visual Regression Tests
+
+```typescript
+describe('Chart Rendering', () => {
+  it('should match Excel column chart', async () => {
+    const xlsx = await loadTestFile('charts/column-basic.xlsx');
+    const chart = xlsx.sheets[0].charts[0];
+    
+    const canvas = renderChart(chart, 800, 600);
+    const screenshot = canvas.toDataURL();
+    
+    expect(screenshot).toMatchImageSnapshot({
+      failureThreshold: 0.01,  // 1% pixel difference allowed
+      failureThresholdType: 'percent'
+    });
+  });
+});
+```
+
+### Round-Trip Tests
+
+```typescript
+describe('Chart Preservation', () => {
+  it('should preserve chart on round-trip', async () => {
+    const original = await loadTestFile('charts/complex.xlsx');
+    const saved = await saveAndReload(original);
+    
+    // Compare chart XML
+    expect(saved.charts[0].xml).toEqualXML(original.charts[0].xml);
+    
+    // Verify in Excel
+    // (automated Excel comparison in CI)
+  });
+});
+```
+
+---
+
+## AI Integration
+
+### Natural Language Chart Creation
+
+```typescript
+// AI tool for creating charts
+const createChartTool = {
+  name: 'create_chart',
+  description: 'Create a chart from data',
+  parameters: {
+    type: { type: 'string', enum: ['bar', 'line', 'pie', 'scatter', 'area'] },
+    dataRange: { type: 'string', description: 'Range like A1:D10' },
+    title: { type: 'string', optional: true },
+    xAxisLabel: { type: 'string', optional: true },
+    yAxisLabel: { type: 'string', optional: true }
+  }
+};
+
+// Usage: "Create a bar chart of sales by region from columns A and B"
+```
+
+### Chart Suggestions
+
+```typescript
+class ChartSuggestionEngine {
+  suggest(data: CellRange): ChartSuggestion[] {
+    const analysis = this.analyzeData(data);
+    const suggestions: ChartSuggestion[] = [];
+    
+    // Time series → Line chart
+    if (analysis.hasTimeColumn && analysis.hasNumericColumns) {
+      suggestions.push({
+        type: 'line',
+        reason: 'Data appears to be a time series',
+        confidence: 0.9
+      });
+    }
+    
+    // Categories + values → Bar chart
+    if (analysis.hasCategoryColumn && analysis.hasNumericColumns) {
+      suggestions.push({
+        type: 'bar',
+        reason: 'Categorical comparison',
+        confidence: 0.85
+      });
+    }
+    
+    // Parts of whole → Pie chart
+    if (analysis.sumToWhole && analysis.categoryCount < 10) {
+      suggestions.push({
+        type: 'pie',
+        reason: 'Data represents parts of a whole',
+        confidence: 0.8
+      });
+    }
+    
+    // Two numeric columns → Scatter
+    if (analysis.numericColumnCount >= 2) {
+      suggestions.push({
+        type: 'scatter',
+        reason: 'Explore correlation between variables',
+        confidence: 0.7
+      });
+    }
+    
+    return suggestions.sort((a, b) => b.confidence - a.confidence);
+  }
+}
+```

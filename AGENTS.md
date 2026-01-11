@@ -1,5 +1,7 @@
 # Formula: Next-Generation AI-Native Spreadsheet
 
+> **⚠️ AGENT DEVELOPMENT CONSTRAINTS**: Before running any build commands, read [docs/99-agent-development-guide.md](./docs/99-agent-development-guide.md) and run `source scripts/agent-init.sh`. Memory limits are critical—this machine runs ~200 concurrent agents.
+
 ## Mission Statement
 
 Build a spreadsheet application that achieves **100% Excel compatibility** while introducing **radical AI-native capabilities** and **modern architectural foundations** that make it objectively superior to Excel in every measurable dimension. This is not incremental improvement—it's a generational leap that will make users say "I can't imagine going back."
@@ -609,6 +611,12 @@ Workstream F: Platform
 | [14-competitive-analysis.md](./docs/14-competitive-analysis.md) | Excel, Google Sheets, Notion, Airtable, others |
 | [15-excel-feature-parity.md](./docs/15-excel-feature-parity.md) | Complete feature checklist with priority |
 | [16-performance-targets.md](./docs/16-performance-targets.md) | Detailed benchmarks and optimization strategies |
+
+### Agent Development
+
+| Document | Description |
+|----------|-------------|
+| [99-agent-development-guide.md](./docs/99-agent-development-guide.md) | **CRITICAL**: Memory limits, parallelism, headless setup for multi-agent development |
 
 ---
 
