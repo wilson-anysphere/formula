@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const require = createRequire(import.meta.url);
@@ -53,25 +54,36 @@ testFiles.sort();
 
 const canStripTypes = supportsTypeStripping();
 let runnableTestFiles = canStripTypes ? testFiles : await filterTypeScriptImportTests(testFiles);
+const typeScriptFilteredCount = testFiles.length - runnableTestFiles.length;
 
 const hasDeps = await hasNodeModules();
+let externalDepsFilteredCount = 0;
+let missingWorkspaceDepsFilteredCount = 0;
 if (!hasDeps) {
+  const before = runnableTestFiles.length;
   runnableTestFiles = await filterExternalDependencyTests(runnableTestFiles);
+  externalDepsFilteredCount = before - runnableTestFiles.length;
+} else {
+  const before = runnableTestFiles.length;
+  runnableTestFiles = await filterMissingWorkspaceDependencyTests(runnableTestFiles, { canStripTypes });
+  missingWorkspaceDepsFilteredCount = before - runnableTestFiles.length;
 }
 
 if (runnableTestFiles.length !== testFiles.length) {
   const skipped = testFiles.length - runnableTestFiles.length;
-  if (canStripTypes) {
-    console.log(
-      `Skipping ${skipped} node:test file(s) that depend on external packages (dependencies not installed).`,
-    );
-  } else if (hasDeps) {
-    console.log(`Skipping ${skipped} node:test file(s) that import .ts modules (TypeScript stripping not available).`);
-  } else {
-    console.log(
-      `Skipping ${skipped} node:test file(s) that import .ts modules or depend on external packages (TypeScript stripping not available and dependencies not installed).`,
-    );
+  /** @type {string[]} */
+  const reasons = [];
+  if (typeScriptFilteredCount > 0) {
+    reasons.push(`${typeScriptFilteredCount} import .ts modules (TypeScript stripping not available)`);
   }
+  if (externalDepsFilteredCount > 0) {
+    reasons.push(`${externalDepsFilteredCount} depend on external packages (dependencies not installed)`);
+  }
+  if (missingWorkspaceDepsFilteredCount > 0) {
+    reasons.push(`${missingWorkspaceDepsFilteredCount} depend on missing workspace packages`);
+  }
+  const suffix = reasons.length > 0 ? ` (${reasons.join("; ")})` : "";
+  console.log(`Skipping ${skipped} node:test file(s) that can't run in this environment${suffix}.`);
 }
 
 if (runnableTestFiles.length === 0) {
@@ -408,6 +420,190 @@ async function filterExternalDependencyTests(files) {
   const out = [];
   for (const file of files) {
     if (await fileHasExternalDependencies(file)) continue;
+    out.push(file);
+  }
+  return out;
+}
+
+/**
+ * Filter out node:test files that import workspace packages that aren't present in
+ * the local `node_modules/` tree.
+ *
+ * Some environments (including agent sandboxes) may have third-party dependencies
+ * installed but only a subset of workspace package links. In that case, running
+ * the full node:test suite would fail fast with `ERR_MODULE_NOT_FOUND` for the
+ * missing workspace packages.
+ *
+ * We conservatively skip tests that depend on missing `@formula/*` imports.
+ *
+ * @param {string[]} files
+ * @param {{ canStripTypes: boolean }} opts
+ */
+async function filterMissingWorkspaceDependencyTests(files, opts) {
+  /** @type {Map<string, boolean>} */
+  const missingCache = new Map();
+  /** @type {Set<string>} */
+  const visiting = new Set();
+  const builtins = new Set(builtinModules);
+
+  const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
+  const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
+  const candidateExtensions = [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"];
+
+  function isBuiltin(specifier) {
+    if (specifier.startsWith("node:")) return true;
+    return builtins.has(specifier);
+  }
+
+  /**
+   * @param {string} importingFile
+   * @param {string} specifier
+   */
+  async function resolveRelativeModule(importingFile, specifier) {
+    const base = path.resolve(path.dirname(importingFile), specifier.split("?")[0].split("#")[0]);
+    const ext = path.extname(base);
+    if (ext) {
+      try {
+        const stats = await stat(base);
+        if (stats.isFile()) return base;
+      } catch {
+        return null;
+      }
+      return null;
+    }
+
+    for (const candidateExt of candidateExtensions) {
+      const candidate = `${base}${candidateExt}`;
+      try {
+        const stats = await stat(candidate);
+        if (stats.isFile()) return candidate;
+      } catch {
+        // continue
+      }
+    }
+
+    // Directory import: try index files.
+    try {
+      const stats = await stat(base);
+      if (stats.isDirectory()) {
+        for (const candidateExt of candidateExtensions) {
+          const candidate = path.join(base, `index${candidateExt}`);
+          try {
+            const idxStats = await stat(candidate);
+            if (idxStats.isFile()) return candidate;
+          } catch {
+            // continue
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
+  }
+
+  /**
+   * @param {string} specifier
+   * @param {string} importingFile
+   * @returns {string | null}
+   */
+  function resolveWorkspaceSpecifier(specifier, importingFile) {
+    try {
+      const parentUrl = pathToFileURL(importingFile).href;
+      if (typeof import.meta.resolve === "function") {
+        const resolved = import.meta.resolve(specifier, parentUrl);
+        if (resolved && resolved.startsWith("file:")) return fileURLToPath(resolved);
+        return null;
+      }
+    } catch {
+      return null;
+    }
+
+    try {
+      return require.resolve(specifier, { paths: [path.dirname(importingFile), repoRoot] });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * @param {string} file
+   * @returns {Promise<boolean>}
+   */
+  async function fileHasMissingWorkspaceDeps(file) {
+    const cached = missingCache.get(file);
+    if (cached !== undefined) return cached;
+    if (visiting.has(file)) return false;
+    visiting.add(file);
+
+    let missing = false;
+    const text = await readFile(file, "utf8").catch(() => "");
+
+    /** @type {Array<{ specifier: string, typeOnly: boolean }>} */
+    const imports = [];
+    for (const match of text.matchAll(importFromRe)) {
+      const typeOnly = Boolean(match[1]);
+      const specifier = match[2];
+      if (specifier) imports.push({ specifier, typeOnly });
+    }
+    for (const match of text.matchAll(sideEffectImportRe)) {
+      const specifier = match[1];
+      if (specifier) imports.push({ specifier, typeOnly: false });
+    }
+
+    for (const { specifier: raw, typeOnly } of imports) {
+      const specifier = raw.split("?")[0].split("#")[0];
+      if (!specifier) continue;
+
+      // Type-only imports are erased by TypeScript stripping and should not be
+      // treated as runtime dependencies.
+      if (typeOnly && opts.canStripTypes) continue;
+
+      if (specifier.startsWith(".")) {
+        const resolved = await resolveRelativeModule(file, specifier);
+        if (!resolved) continue;
+        if (await fileHasMissingWorkspaceDeps(resolved)) {
+          missing = true;
+          break;
+        }
+        continue;
+      }
+
+      // Ignore absolute paths and URL-style imports when running node tests.
+      if (specifier.startsWith("/") || /^[a-zA-Z]+:/.test(specifier)) continue;
+      if (isBuiltin(specifier)) continue;
+
+      // Only check workspace packages; external deps are handled by the normal
+      // `node_modules` installation check above.
+      if (!specifier.startsWith("@formula/")) continue;
+
+      const resolved = resolveWorkspaceSpecifier(specifier, file);
+      if (!resolved) {
+        missing = true;
+        break;
+      }
+
+      if (!opts.canStripTypes && /\.(ts|tsx)$/.test(resolved)) {
+        missing = true;
+        break;
+      }
+
+      if (resolved.startsWith(repoRoot) && (await fileHasMissingWorkspaceDeps(resolved))) {
+        missing = true;
+        break;
+      }
+    }
+
+    visiting.delete(file);
+    missingCache.set(file, missing);
+    return missing;
+  }
+
+  /** @type {string[]} */
+  const out = [];
+  for (const file of files) {
+    if (await fileHasMissingWorkspaceDeps(file)) continue;
     out.push(file);
   }
   return out;
