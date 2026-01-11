@@ -378,12 +378,23 @@ impl WorkbookState {
     }
 
     fn recalculate_internal(&mut self, sheet: Option<&str>) -> Result<Vec<CellChange>, JsValue> {
-        let _ = sheet;
+        if let Some(sheet) = sheet {
+            self.require_sheet(sheet)?;
+        }
+
+        let sheet_filter = sheet
+            .and_then(|s| self.resolve_sheet(s))
+            .map(str::to_string);
 
         let recalc_changes = self.engine.recalculate_with_value_changes_single_threaded();
         let mut by_cell: BTreeMap<FormulaCellKey, JsonValue> = BTreeMap::new();
 
         for change in recalc_changes {
+            if let Some(filter) = &sheet_filter {
+                if &change.sheet != filter {
+                    continue;
+                }
+            }
             by_cell.insert(
                 FormulaCellKey {
                     sheet: change.sheet,
@@ -394,25 +405,65 @@ impl WorkbookState {
             );
         }
 
-        let pending_spills = std::mem::take(&mut self.pending_spill_clears);
-        for key in pending_spills {
-            if by_cell.contains_key(&key) {
-                continue;
+        if let Some(filter) = &sheet_filter {
+            let keys: Vec<FormulaCellKey> = self
+                .pending_spill_clears
+                .iter()
+                .filter(|k| &k.sheet == filter)
+                .cloned()
+                .collect();
+            for key in keys {
+                self.pending_spill_clears.remove(&key);
+                if by_cell.contains_key(&key) {
+                    continue;
+                }
+                let address = key.address();
+                let value = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
+                by_cell.insert(key, value);
             }
-            let address = key.address();
-            let value = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
-            by_cell.insert(key, value);
+        } else {
+            let pending = std::mem::take(&mut self.pending_spill_clears);
+            for key in pending {
+                if by_cell.contains_key(&key) {
+                    continue;
+                }
+                let address = key.address();
+                let value = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
+                by_cell.insert(key, value);
+            }
         }
 
-        let pending_formulas = std::mem::take(&mut self.pending_formula_baselines);
-        for (key, before) in pending_formulas {
-            if by_cell.contains_key(&key) {
-                continue;
+        if let Some(filter) = &sheet_filter {
+            let keys: Vec<FormulaCellKey> = self
+                .pending_formula_baselines
+                .keys()
+                .filter(|k| &k.sheet == filter)
+                .cloned()
+                .collect();
+            for key in keys {
+                let Some(before) = self.pending_formula_baselines.remove(&key) else {
+                    continue;
+                };
+                if by_cell.contains_key(&key) {
+                    continue;
+                }
+                let address = key.address();
+                let after = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
+                if after != before {
+                    by_cell.insert(key, after);
+                }
             }
-            let address = key.address();
-            let after = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
-            if after != before {
-                by_cell.insert(key, after);
+        } else {
+            let pending = std::mem::take(&mut self.pending_formula_baselines);
+            for (key, before) in pending {
+                if by_cell.contains_key(&key) {
+                    continue;
+                }
+                let address = key.address();
+                let after = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
+                if after != before {
+                    by_cell.insert(key, after);
+                }
             }
         }
 

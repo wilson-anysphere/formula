@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { ensureFormulaWasmNodeBuild, formulaWasmNodeEntryUrl } from "../../../../scripts/build-formula-wasm-node.mjs";
 
 import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker";
 import type {
@@ -60,13 +59,11 @@ function createMockChannel(): MessageChannelLike {
 }
 
 async function loadFormulaWasm() {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  const repoRoot = path.resolve(__dirname, "../../../..");
-
-  const entry = pathToFileURL(
-    path.join(repoRoot, "crates", "formula-wasm", "pkg-node", "formula_wasm.js")
-  ).href;
+  // The Node-compatible wasm-bindgen build lives under `crates/formula-wasm/pkg-node/`.
+  // It's a generated (gitignored) directory, so tests must ensure it's built/up-to-date
+  // before importing the entrypoint.
+  ensureFormulaWasmNodeBuild();
+  const entry = formulaWasmNodeEntryUrl();
 
   // wasm-pack `--target nodejs` outputs CommonJS. Under ESM dynamic import, the exports
   // are exposed on `default`.

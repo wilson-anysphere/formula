@@ -1,26 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
-import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
+import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient.js";
 import { analyzeVbaModule } from "../../../../../packages/vba-migrate/src/analyzer.js";
 import { VbaMigrator } from "../../../../../packages/vba-migrate/src/converter.js";
 
 import { getVbaProject, type VbaModuleSummary, type VbaProjectSummary } from "../../macros/vba_project.js";
-
-const API_KEY_STORAGE_KEY = "formula:openaiApiKey";
-
-function loadApiKeyFromRuntime(): string | null {
-  try {
-    const stored = globalThis.localStorage?.getItem(API_KEY_STORAGE_KEY);
-    if (stored) return stored;
-  } catch {
-    // ignore
-  }
-
-  const envKey = (import.meta as any)?.env?.VITE_OPENAI_API_KEY;
-  if (typeof envKey === "string" && envKey.length > 0) return envKey;
-
-  return null;
-}
+import { loadDesktopLLMConfig, saveDesktopLLMConfig, type DesktopLLMConfig } from "../../ai/llm/settings.js";
 
 function moduleDisplayName(project: VbaProjectSummary, module: VbaModuleSummary) {
   const suffix = module.moduleType ? ` (${module.moduleType})` : "";
@@ -255,7 +240,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   const [selectedModuleName, setSelectedModuleName] = useState<string | null>(null);
   const [analysisScope, setAnalysisScope] = useState<"module" | "project">("module");
 
-  const [apiKey, setApiKey] = useState<string | null>(() => loadApiKeyFromRuntime());
+  const [llmConfig, setLlmConfig] = useState<DesktopLLMConfig | null>(() => loadDesktopLLMConfig());
   const [draftKey, setDraftKey] = useState("");
 
   const [entryPoint, setEntryPoint] = useState("Main");
@@ -272,13 +257,17 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
   const migrator = useMemo(() => {
     if (props.createMigrator) return props.createMigrator();
-    if (!apiKey) return null;
+    if (!llmConfig) return null;
     try {
-      return new VbaMigrator({ llm: new OpenAIClient({ apiKey }) });
+      return new VbaMigrator({ llm: createLLMClient(llmConfig as any) });
     } catch {
       return null;
     }
-  }, [apiKey, props.createMigrator]);
+  }, [llmConfig, props.createMigrator]);
+
+  const reloadLlmConfig = useCallback(() => {
+    setLlmConfig(loadDesktopLLMConfig());
+  }, []);
 
   const refreshProject = useCallback(async () => {
     setLoadingProject(true);
@@ -651,7 +640,15 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
               alignItems: "center",
             }}
           >
-            <div style={{ fontWeight: 600, flex: 1 }}>Conversion</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600 }}>Conversion</div>
+              <div style={{ fontSize: 11, opacity: 0.8 }}>
+                AI provider: <span style={{ fontFamily: "monospace" }}>{llmConfig ? llmConfig.provider : "not configured"}</span>
+              </div>
+            </div>
+            <button type="button" onClick={reloadLlmConfig} data-testid="vba-reload-llm-settings">
+              Reload AI settings
+            </button>
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
               Macro:
               {availableMacros.length > 0 ? (
@@ -711,7 +708,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
             </button>
           </div>
 
-          {!props.createMigrator && !apiKey ? (
+          {!props.createMigrator && !llmConfig ? (
             <div style={{ padding: 10, borderBottom: "1px solid var(--panel-border)", display: "flex", gap: 8 }}>
               <input
                 value={draftKey}
@@ -725,13 +722,9 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                 onClick={() => {
                   const next = draftKey.trim();
                   if (!next) return;
-                  try {
-                    globalThis.localStorage?.setItem(API_KEY_STORAGE_KEY, next);
-                  } catch {
-                    // ignore
-                  }
+                  saveDesktopLLMConfig({ provider: "openai", apiKey: next });
                   setDraftKey("");
-                  setApiKey(next);
+                  setLlmConfig(loadDesktopLLMConfig());
                 }}
                 data-testid="vba-save-openai-key"
               >
