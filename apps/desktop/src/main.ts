@@ -1105,12 +1105,9 @@ function getTauriListen(): TauriListen {
 
 type TauriEmit = (event: string, payload?: any) => Promise<void> | void;
 
-function getTauriEmit(): TauriEmit {
+function getTauriEmit(): TauriEmit | null {
   const emit = (globalThis as any).__TAURI__?.event?.emit as TauriEmit | undefined;
-  if (!emit) {
-    throw new Error("Tauri event API not available");
-  }
-  return emit;
+  return emit ?? null;
 }
 
 type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | string[] | null>;
@@ -1665,10 +1662,12 @@ try {
     } catch (err) {
       console.error("Failed to prepare close request:", err);
     } finally {
-      try {
-        await emit("close-prep-done", token);
-      } catch (err) {
-        console.error("Failed to acknowledge close request:", err);
+      if (emit) {
+        try {
+          await emit("close-prep-done", token);
+        } catch (err) {
+          console.error("Failed to acknowledge close request:", err);
+        }
       }
     }
   });
@@ -1761,9 +1760,11 @@ try {
   async function handleCloseRequest({
     quit,
     beforeCloseUpdates,
+    closeToken,
   }: {
     quit: boolean;
     beforeCloseUpdates?: unknown;
+    closeToken?: string;
   }): Promise<void> {
     if (closeInFlight) return;
     closeInFlight = true;
@@ -1778,10 +1779,26 @@ try {
         }
       }
 
-      if (!quit && beforeCloseUpdates && vbaEventMacros) {
+      if (!quit && beforeCloseUpdates) {
         const normalized = normalizeCloseMacroUpdates(beforeCloseUpdates);
         if (normalized.length > 0) {
-          await vbaEventMacros.applyMacroUpdates(normalized, { label: "Workbook_BeforeClose" });
+          if (vbaEventMacros) {
+            await vbaEventMacros.applyMacroUpdates(normalized, { label: "Workbook_BeforeClose" });
+          } else {
+            const doc = app.getDocument();
+            doc.beginBatch({ label: "Workbook_BeforeClose" });
+            let committed = false;
+            try {
+              applyMacroCellUpdates(doc, normalized);
+              committed = true;
+            } finally {
+              if (committed) doc.endBatch();
+              else doc.cancelBatch();
+            }
+            app.refresh();
+            await app.whenIdle();
+            app.refresh();
+          }
         }
       }
 
@@ -1809,13 +1826,21 @@ try {
     } catch (err) {
       console.error("Failed to handle close request:", err);
     } finally {
+      if (closeToken && emit) {
+        try {
+          await emit("close-handled", closeToken);
+        } catch (err) {
+          console.error("Failed to signal close handled:", err);
+        }
+      }
       closeInFlight = false;
     }
   }
 
   void listen("close-requested", async (event) => {
     const payload = (event as any)?.payload;
-    await handleCloseRequest({ quit: false, beforeCloseUpdates: payload?.updates });
+    const token = typeof payload?.token === "string" ? String(payload.token) : undefined;
+    await handleCloseRequest({ quit: false, beforeCloseUpdates: payload?.updates, closeToken: token });
   });
 
   window.addEventListener("keydown", (e) => {

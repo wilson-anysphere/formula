@@ -25,6 +25,7 @@ static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Serialize)]
 struct CloseRequestedPayload {
+    token: String,
     /// Optional cell updates produced by `Workbook_BeforeClose`.
     ///
     /// Note: if the user cancels the close in the frontend (e.g. via an unsaved-changes prompt),
@@ -206,6 +207,14 @@ fn main() {
                 let shared_trust = window.state::<SharedMacroTrustStore>().inner().clone();
 
                 tauri::async_runtime::spawn(async move {
+                    struct CloseRequestGuard;
+                    impl Drop for CloseRequestGuard {
+                        fn drop(&mut self) {
+                            CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+                        }
+                    }
+                    let _guard = CloseRequestGuard;
+
                     // Best-effort Workbook_BeforeClose. We do this in a background task so we
                     // don't block the window event loop. Cancellation isn't supported yet.
                     //
@@ -233,7 +242,7 @@ fn main() {
                         }
                     });
 
-                    let _ = window.emit("close-prep", token);
+                    let _ = window.emit("close-prep", token.clone());
                     let _ = timeout(Duration::from_millis(750), rx).await;
                     window.unlisten(handler);
 
@@ -247,7 +256,7 @@ fn main() {
                         drop(trust_store);
 
                         if !should_run {
-                            return Ok::<_, String>(CloseRequestedPayload { updates: Vec::new() });
+                            return Ok::<_, String>(Vec::new());
                         }
 
                         let options = MacroExecutionOptions {
@@ -273,33 +282,57 @@ fn main() {
                                     .into_iter()
                                     .map(cell_update_from_state)
                                     .collect();
-                                return Ok(CloseRequestedPayload { updates });
+                                return Ok(updates);
                             }
                             Err(err) => {
                                 eprintln!("[macro] Workbook_BeforeClose failed: {err}");
                             }
                         }
 
-                        Ok(CloseRequestedPayload { updates: Vec::new() })
+                        Ok(Vec::new())
                     })
                     .await;
 
-                    let payload = match macro_outcome {
-                        Ok(Ok(payload)) => payload,
+                    let updates = match macro_outcome {
+                        Ok(Ok(updates)) => updates,
                         Ok(Err(err)) => {
                             eprintln!("[macro] Workbook_BeforeClose task failed: {err}");
-                            CloseRequestedPayload { updates: Vec::new() }
+                            Vec::new()
                         }
                         Err(err) => {
                             eprintln!("[macro] Workbook_BeforeClose task panicked: {err}");
-                            CloseRequestedPayload { updates: Vec::new() }
+                            Vec::new()
                         }
                     };
 
                     // Delegate the rest of close-handling to the frontend (unsaved changes prompt
                     // + deciding whether to hide the window or keep it open).
+                    let payload = CloseRequestedPayload { token: token.clone(), updates };
                     let _ = window.emit("close-requested", payload);
-                    CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+
+                    // Wait until the frontend finishes its close flow (e.g. after an unsaved
+                    // changes prompt). This keeps `CLOSE_REQUEST_IN_FLIGHT` set while the close
+                    // prompt is active so repeated close clicks don't rerun macros.
+                    let (handled_tx, handled_rx) = oneshot::channel::<()>();
+                    let handled_tx = Arc::new(Mutex::new(Some(handled_tx)));
+                    let token_for_handled = token.clone();
+                    let handled_tx_for_listener = handled_tx.clone();
+                    let handled_handler = window.listen("close-handled", move |event| {
+                        let Some(payload) = event.payload() else {
+                            return;
+                        };
+                        let received = payload.trim().trim_matches('"');
+                        if received != token_for_handled {
+                            return;
+                        }
+                        if let Ok(mut guard) = handled_tx_for_listener.lock() {
+                            if let Some(sender) = guard.take() {
+                                let _ = sender.send(());
+                            }
+                        }
+                    });
+                    let _ = timeout(Duration::from_secs(60), handled_rx).await;
+                    window.unlisten(handled_handler);
                 });
             }
             tauri::WindowEvent::DragDrop(drag_drop) => {
