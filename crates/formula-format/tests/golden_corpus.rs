@@ -13,6 +13,10 @@ fn golden_corpus_numbers_and_datetime() {
         (Value::Number(-2.0), "0", &en_1900, "-2"),
         (Value::Number(0.5), "#.00", &en_1900, ".50"),
         (Value::Number(0.0), "#.00", &en_1900, ".00"),
+        // Negative values that round to zero should not display a negative sign when the sign is
+        // automatic (single-section formats).
+        (Value::Number(-0.0001), "0.00", &en_1900, "0.00"),
+        (Value::Number(-0.0001), "#", &en_1900, ""),
         // Percent scaling.
         (Value::Number(0.256), "0%", &en_1900, "26%"),
         // Scaling commas.

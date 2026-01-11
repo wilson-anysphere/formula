@@ -66,10 +66,11 @@ pub(crate) fn format_number(
     // Scientific
     if let Some(spec) = parse_scientific(number_raw) {
         let out = format_scientific(v, &spec, options);
+        let is_zero = v == 0.0;
         let mut rendered = prefix;
         rendered.push_str(&out);
         rendered.extend(suffix);
-        if value < 0.0 && auto_negative_sign {
+        if value < 0.0 && auto_negative_sign && !is_zero {
             rendered.prepend_char('-');
         }
         return rendered;
@@ -77,10 +78,11 @@ pub(crate) fn format_number(
 
     if let Some(spec) = parse_fraction(number_raw) {
         let out = format_fraction(v, &spec, options);
+        let is_zero = out.trim() == "0" || out.trim().is_empty();
         let mut rendered = prefix;
         rendered.push_str(&out);
         rendered.extend(suffix);
-        if value < 0.0 && auto_negative_sign {
+        if value < 0.0 && auto_negative_sign && !is_zero {
             rendered.prepend_char('-');
         }
         return rendered;
@@ -88,13 +90,23 @@ pub(crate) fn format_number(
 
     let spec = parse_fixed(number_raw);
     let out = format_fixed(v, &spec, options);
+    let is_zero = is_effective_zero_fixed(v, &spec);
     let mut rendered = prefix;
     rendered.push_str(&out);
     rendered.extend(suffix);
-    if value < 0.0 && auto_negative_sign {
+    if value < 0.0 && auto_negative_sign && !is_zero {
         rendered.prepend_char('-');
     }
     rendered
+}
+
+fn is_effective_zero_fixed(mut value: f64, spec: &FixedSpec) -> bool {
+    // Match `format_fixed` scaling + rounding behavior.
+    for _ in 0..spec.scale_commas {
+        value /= 1000.0;
+    }
+    let max_frac = spec.frac_placeholders.len();
+    round_to(value, max_frac) == 0.0
 }
 
 fn format_general(value: f64, options: &FormatOptions) -> String {
