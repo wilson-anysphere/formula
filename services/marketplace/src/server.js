@@ -6,6 +6,7 @@ const { pipeline } = require("node:stream/promises");
 const { MarketplaceStore } = require("./store");
 
 const CACHE_CONTROL_REVALIDATE = "public, max-age=0, must-revalidate";
+const CACHE_CONTROL_NO_STORE = "no-store";
 
 class HttpError extends Error {
   constructor(statusCode, message) {
@@ -426,6 +427,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
 
       if (req.method === "POST" && url.pathname === "/api/publish-bin") {
         route = "/api/publish-bin";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
         const token = getBearerToken(req);
         if (!token) {
           statusCode = 401;
@@ -506,6 +508,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
 
       if (req.method === "POST" && url.pathname === "/api/publish") {
         route = "/api/publish";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
         const token = getBearerToken(req);
         if (!token) {
           statusCode = 401;
@@ -553,6 +556,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
 
       if (req.method === "POST" && url.pathname === "/api/publishers/register") {
         route = "/api/publishers/register";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
         if (!adminToken) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Endpoint disabled" });
@@ -588,6 +592,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         segments.length === 4
       ) {
         route = "/api/extensions/:id/flags";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
         if (!adminToken) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Endpoint disabled" });
@@ -632,6 +637,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         segments.length === 6
       ) {
         route = "/api/extensions/:id/versions/:version/flags";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
         if (!adminToken) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Endpoint disabled" });
@@ -660,6 +666,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
 
       if (req.method === "GET" && url.pathname === "/api/admin/audit") {
         route = "/api/admin/audit";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
         if (!adminToken) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Endpoint disabled" });
