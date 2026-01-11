@@ -151,10 +151,38 @@ describe("CanvasGrid header selection", () => {
 
     expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 5, endRow: 6, startCol: 1, endCol: 20 });
 
+    // Shift+clicking headers extends across full rows/cols.
+    await act(async () => {
+      apiRef.current?.setSelection(10, 4);
+    });
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerdown", { clientX: 65, clientY: 5, pointerId: 5, shiftKey: true })
+      );
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerup", { clientX: 65, clientY: 5, pointerId: 5, shiftKey: true })
+      );
+    });
+
+    // Selected columns 4..6 (inclusive) across all rows, excluding the header row.
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 1, endRow: 20, startCol: 4, endCol: 7 });
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerdown", { clientX: 5, clientY: 125, pointerId: 6, shiftKey: true })
+      );
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerup", { clientX: 5, clientY: 125, pointerId: 6, shiftKey: true })
+      );
+    });
+
+    // Selected rows 10..12 (inclusive) across all cols, excluding the header col.
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 10, endRow: 13, startCol: 1, endCol: 20 });
+
     await act(async () => {
       root.unmount();
     });
     host.remove();
   });
 });
-
