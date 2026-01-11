@@ -19,7 +19,7 @@ export type Branch = {
   headCommitId: string;
 };
 
-export type Actor = { userId: string; role: "owner" | "admin" | "editor" | "viewer" };
+export type Actor = { userId: string; role: "owner" | "admin" | "editor" | "commenter" | "viewer" };
 
 export type BranchService = {
   listBranches(): Promise<Branch[]>;

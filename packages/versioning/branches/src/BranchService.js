@@ -10,9 +10,29 @@ import { applyConflictResolutions, mergeDocumentStates } from "./merge.js";
  * @typedef {import("./merge.js").ConflictResolution} ConflictResolution
  */
 
-function assertCanManageBranches(actor) {
+/**
+ * Branch mutations (create/rename/delete/checkout/merge) are restricted to
+ * document owners/admins. Editors can still create commits (see
+ * `assertCanCommit`).
+ *
+ * @param {Actor} actor
+ * @param {string} operation
+ */
+function assertCanManageBranches(actor, operation) {
   if (actor.role !== "owner" && actor.role !== "admin") {
-    throw new Error("Branch operations require owner/admin permissions");
+    throw new Error(`${operation} requires owner/admin permissions (role=${actor.role})`);
+  }
+}
+
+/**
+ * Commits mutate document history but are allowed for any role that can edit the
+ * document contents.
+ *
+ * @param {Actor} actor
+ */
+function assertCanCommit(actor) {
+  if (actor.role !== "owner" && actor.role !== "admin" && actor.role !== "editor") {
+    throw new Error(`Commit requires edit permission (role=${actor.role})`);
   }
 }
 
@@ -44,6 +64,14 @@ export class BranchService {
    * @param {DocumentState} initialState
    */
   async init(actor, initialState) {
+    // `ensureDocument` will create the root commit + main branch if the document
+    // doesn't exist yet. Creating a new document is an admin-level action, but
+    // calling `init` on an existing document is safe for any role (it becomes a
+    // no-op in the store).
+    const existingMain = await this.#store.getBranch(this.#docId, "main");
+    if (!existingMain) {
+      assertCanManageBranches(actor, "init");
+    }
     await this.#store.ensureDocument(this.#docId, actor, initialState);
   }
 
@@ -65,7 +93,7 @@ export class BranchService {
    * @param {{ name: string, description?: string }} input
    */
   async createBranch(actor, { name, description }) {
-    assertCanManageBranches(actor);
+    assertCanManageBranches(actor, "createBranch");
     const current = await this.getCurrentBranch();
     return this.#store.createBranch({
       docId: this.#docId,
@@ -82,7 +110,7 @@ export class BranchService {
    * @param {{ oldName: string, newName: string }} input
    */
   async renameBranch(actor, { oldName, newName }) {
-    assertCanManageBranches(actor);
+    assertCanManageBranches(actor, "renameBranch");
     if (oldName === this.#currentBranchName) this.#currentBranchName = newName;
     await this.#store.renameBranch(this.#docId, oldName, newName);
   }
@@ -92,7 +120,7 @@ export class BranchService {
    * @param {{ name: string }} input
    */
   async deleteBranch(actor, { name }) {
-    assertCanManageBranches(actor);
+    assertCanManageBranches(actor, "deleteBranch");
     if (name === "main") throw new Error("Cannot delete main branch");
     if (name === this.#currentBranchName) {
       throw new Error("Cannot delete the currently checked-out branch");
@@ -108,7 +136,7 @@ export class BranchService {
    * @returns {Promise<DocumentState>}
    */
   async checkoutBranch(actor, { name }) {
-    assertCanManageBranches(actor);
+    assertCanManageBranches(actor, "checkoutBranch");
     const branch = await this.#store.getBranch(this.#docId, name);
     if (!branch) throw new Error(`Branch not found: ${name}`);
     this.#currentBranchName = name;
@@ -122,6 +150,7 @@ export class BranchService {
    * @param {{ nextState: DocumentState, message?: string }} input
    */
   async commit(actor, { nextState, message }) {
+    assertCanCommit(actor);
     const branch = await this.getCurrentBranch();
     const currentState = await this.#store.getDocumentStateAtCommit(branch.headCommitId);
     const patch = diffDocumentStates(currentState, nextState);
@@ -144,7 +173,7 @@ export class BranchService {
    * @returns {Promise<MergeResult & { baseCommitId: string, oursHeadCommitId: string, theirsHeadCommitId: string }>}
    */
   async previewMerge(actor, { sourceBranch }) {
-    assertCanManageBranches(actor);
+    assertCanManageBranches(actor, "previewMerge");
     const oursBranch = await this.getCurrentBranch();
     const theirsBranch = await this.#store.getBranch(this.#docId, sourceBranch);
     if (!theirsBranch) throw new Error(`Branch not found: ${sourceBranch}`);
@@ -178,6 +207,7 @@ export class BranchService {
    * @returns {Promise<{ commit: Commit, state: DocumentState }>}
    */
   async merge(actor, { sourceBranch, resolutions, message }) {
+    assertCanManageBranches(actor, "merge");
     const preview = await this.previewMerge(actor, { sourceBranch });
     const finalState = applyConflictResolutions(preview, resolutions);
 
@@ -255,4 +285,3 @@ export class BranchService {
     return best;
   }
 }
-

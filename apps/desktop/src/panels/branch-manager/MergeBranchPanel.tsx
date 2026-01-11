@@ -29,7 +29,7 @@ export type MergePreview = {
   conflicts: MergeConflict[];
 };
 
-export type Actor = { userId: string; role: "owner" | "admin" | "editor" | "viewer" };
+export type Actor = { userId: string; role: "owner" | "admin" | "editor" | "commenter" | "viewer" };
 
 export type ConflictResolution =
   | { conflictIndex: number; choice: "ours" | "theirs" | "manual"; manualCell?: Cell | null }

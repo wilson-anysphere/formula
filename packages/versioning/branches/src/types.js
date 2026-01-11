@@ -67,7 +67,7 @@
  */
 
 /**
- * @typedef {"owner" | "admin" | "editor" | "viewer"} Role
+ * @typedef {"owner" | "admin" | "editor" | "commenter" | "viewer"} Role
  */
 
 /**
@@ -103,4 +103,3 @@
  */
 
 export {};
-

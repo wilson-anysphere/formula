@@ -38,3 +38,31 @@ test("integration: create branch, diverge, merge back", async () => {
     C1: { value: 7 }
   });
 });
+
+test("viewer cannot commit", async () => {
+  const owner = { userId: "u1", role: "owner" };
+  const viewer = { userId: "u2", role: "viewer" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc1", store });
+
+  await service.init(owner, { sheets: { Sheet1: { A1: { value: 1 } } } });
+
+  await assert.rejects(
+    service.commit(viewer, { nextState: { sheets: { Sheet1: { A1: { value: 2 } } } } }),
+    { message: "Commit requires edit permission (role=viewer)" }
+  );
+});
+
+test("commenter cannot commit", async () => {
+  const owner = { userId: "u1", role: "owner" };
+  const commenter = { userId: "u2", role: "commenter" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc1", store });
+
+  await service.init(owner, { sheets: { Sheet1: { A1: { value: 1 } } } });
+
+  await assert.rejects(
+    service.commit(commenter, { nextState: { sheets: { Sheet1: { A1: { value: 2 } } } } }),
+    { message: "Commit requires edit permission (role=commenter)" }
+  );
+});
