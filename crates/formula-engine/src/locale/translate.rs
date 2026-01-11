@@ -112,6 +112,25 @@ fn translate_formula(
                 }
                 idx += 1;
             }
+            TokenKind::Error(raw) => {
+                match dir {
+                    Direction::ToCanonical => {
+                        if let Some(canon) = locale.canonical_error_literal(raw) {
+                            out.push_str(canon);
+                        } else {
+                            out.push_str(token_slice(expr_src, tok)?);
+                        }
+                    }
+                    Direction::ToLocalized => {
+                        if let Some(loc) = locale.localized_error_literal(raw) {
+                            out.push_str(loc);
+                        } else {
+                            out.push_str(token_slice(expr_src, tok)?);
+                        }
+                    }
+                }
+                idx += 1;
+            }
             TokenKind::Number(raw) => {
                 out.push_str(&translate_number(
                     raw,

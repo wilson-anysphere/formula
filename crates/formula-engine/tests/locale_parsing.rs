@@ -94,6 +94,19 @@ fn canonicalize_and_localize_boolean_literals() {
 }
 
 #[test]
+fn canonicalize_and_localize_error_literals() {
+    let de = "=#WERT!";
+    let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
+    assert_eq!(canon, "=#VALUE!");
+    assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), de);
+
+    let fr = "=#VALEUR!";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=#VALUE!");
+    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+}
+
+#[test]
 fn engine_accepts_localized_formulas_and_persists_canonical() {
     let mut engine = Engine::new();
     engine

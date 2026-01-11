@@ -92,6 +92,10 @@ pub struct FormulaLocale {
     /// Localized boolean literals (Excel keywords).
     pub boolean_true: &'static str,
     pub boolean_false: &'static str,
+    /// Mapping table between canonical (English) error literals and localized error literals.
+    ///
+    /// Each entry is `(canonical, localized)`, e.g. `("#VALUE!", "#WERT!")`.
+    pub error_literal_map: &'static [(&'static str, &'static str)],
     functions: &'static FunctionTranslations,
 }
 
@@ -149,6 +153,24 @@ impl FormulaLocale {
             self.boolean_false
         }
     }
+
+    pub fn canonical_error_literal(&self, localized: &str) -> Option<&'static str> {
+        for (canonical, loc) in self.error_literal_map {
+            if loc.eq_ignore_ascii_case(localized) {
+                return Some(*canonical);
+            }
+        }
+        None
+    }
+
+    pub fn localized_error_literal(&self, canonical: &str) -> Option<&'static str> {
+        for (canon, localized) in self.error_literal_map {
+            if canon.eq_ignore_ascii_case(canonical) {
+                return Some(*localized);
+            }
+        }
+        None
+    }
 }
 
 fn split_xlfn_prefix(name: &str) -> (bool, &str) {
@@ -170,6 +192,7 @@ pub static EN_US: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "TRUE",
     boolean_false: "FALSE",
+    error_literal_map: &[],
     functions: &EMPTY_FUNCTIONS,
 };
 
@@ -184,6 +207,7 @@ pub static DE_DE: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "WAHR",
     boolean_false: "FALSCH",
+    error_literal_map: &[("#VALUE!", "#WERT!"), ("#REF!", "#BEZUG!")],
     functions: &DE_DE_FUNCTIONS,
 };
 
@@ -201,6 +225,7 @@ pub static FR_FR: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "VRAI",
     boolean_false: "FAUX",
+    error_literal_map: &[("#VALUE!", "#VALEUR!"), ("#NAME?", "#NOM?")],
     functions: &FR_FR_FUNCTIONS,
 };
 
@@ -217,6 +242,7 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "VERDADERO",
     boolean_false: "FALSO",
+    error_literal_map: &[],
     functions: &ES_ES_FUNCTIONS,
 };
 
