@@ -4141,8 +4141,9 @@ fn walk_expr_flags(
                 }
             } else {
                 let name_key = normalize_defined_name(name);
+                let is_local = !name_key.is_empty() && name_is_local(lexical_scopes, &name_key);
                 let mut resolved_defined_name = None;
-                if !name_key.is_empty() && !name_is_local(lexical_scopes, &name_key) {
+                if !name_key.is_empty() && !is_local {
                     names.insert(name_key.clone());
 
                     let sheet = current_cell.sheet;
@@ -4171,7 +4172,7 @@ fn walk_expr_flags(
                 }
 
                 // Placeholder: treat unresolved UDFs as non-thread-safe.
-                if resolved_defined_name.is_none() {
+                if !is_local && resolved_defined_name.is_none() {
                     *thread_safe = false;
                 }
             }
@@ -4713,6 +4714,45 @@ fn rewrite_defined_name_range_map(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn let_lambda_calls_are_thread_safe() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=LET(f,LAMBDA(x,x+1),f(2))")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").unwrap();
+        let cell = engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&addr)
+            .expect("cell stored");
+        assert!(cell.thread_safe, "LET/LAMBDA should be safe for parallel evaluation");
+    }
+
+    #[test]
+    fn lambda_parameter_calls_are_thread_safe() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                "=LET(apply,LAMBDA(f,f(1)),apply(LAMBDA(x,x+1)))",
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").unwrap();
+        let cell = engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&addr)
+            .expect("cell stored");
+        assert!(cell.thread_safe, "higher-order lambda calls should be parallel-safe");
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    }
 
     #[test]
     fn multithreaded_and_singlethreaded_match_for_volatiles_given_same_recalc_context() {
