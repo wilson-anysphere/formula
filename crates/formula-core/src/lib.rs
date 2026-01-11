@@ -312,7 +312,12 @@ impl Workbook {
         let value = match cell {
             None => JsonValue::Null,
             Some(cell) => {
-                if let Some(formula) = cell.input.as_str().and_then(|s| s.strip_prefix('=')) {
+                if let Some(formula) = cell
+                    .input
+                    .as_str()
+                    .map(str::trim_start)
+                    .and_then(|s| s.strip_prefix('='))
+                {
                     eval_formula(formula, |dep| self.eval_cell_value(sheet_name, dep, ctx))?
                 } else {
                     cell.value.clone()
@@ -335,7 +340,7 @@ struct EvalContext {
 fn is_formula_input(value: &JsonValue) -> bool {
     value
         .as_str()
-        .is_some_and(|s| s.starts_with('='))
+        .is_some_and(|s| s.trim_start().starts_with('='))
 }
 
 fn is_scalar_json(value: &JsonValue) -> bool {
@@ -1260,6 +1265,15 @@ mod tests {
 
         wb.recalculate(None).unwrap();
         assert_eq!(wb.get_cell("A1", None).unwrap().value, JsonValue::Null);
+    }
+
+    #[test]
+    fn leading_whitespace_is_ignored_when_detecting_formulas() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("   =1+1"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(2.0));
     }
 
     #[test]
