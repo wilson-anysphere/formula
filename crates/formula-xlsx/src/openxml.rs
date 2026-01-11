@@ -41,8 +41,21 @@ pub fn resolve_relationship_target(
 }
 
 pub fn resolve_target(base_part: &str, target: &str) -> String {
-    let target = target.trim_start_matches('/');
-    let base_dir = base_part.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+    // Relationship targets can be relative to the source part's folder (e.g. `worksheets/sheet1.xml`)
+    // or absolute (e.g. `/xl/worksheets/sheet1.xml`). Absolute targets are rooted at the package
+    // root and must not be prefixed with the source part directory.
+    let (target, is_absolute) = match target.strip_prefix('/') {
+        Some(target) => (target, true),
+        None => (target, false),
+    };
+    let base_dir = if is_absolute {
+        ""
+    } else {
+        base_part
+            .rsplit_once('/')
+            .map(|(dir, _)| dir)
+            .unwrap_or("")
+    };
 
     let mut components: Vec<&str> = if base_dir.is_empty() {
         Vec::new()

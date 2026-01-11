@@ -13,9 +13,14 @@ use formula_model::{CellRef, CellValue};
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader, Writer};
 
-use crate::openxml::resolve_relationship_target;
+use crate::openxml::{parse_relationships, rels_part_name, resolve_relationship_target};
+use crate::path::resolve_target;
 use crate::shared_strings::{parse_shared_strings_xml, write_shared_strings_xml, SharedStrings};
 use crate::{WorkbookSheetInfo, XlsxError, XlsxPackage};
+
+const WORKBOOK_PART: &str = "xl/workbook.xml";
+const REL_TYPE_SHARED_STRINGS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 /// An owned set of cell edits to apply to an existing workbook package.
 ///
@@ -210,8 +215,11 @@ pub(crate) fn apply_cell_patches_to_package(
 
     let workbook_sheets = pkg.workbook_sheets()?;
 
-    let mut shared_strings = pkg
-        .part("xl/sharedStrings.xml")
+    let shared_strings_part_name = resolve_shared_strings_part_name(pkg)?
+        .or_else(|| pkg.part("xl/sharedStrings.xml").map(|_| "xl/sharedStrings.xml".to_string()));
+    let mut shared_strings = shared_strings_part_name
+        .as_deref()
+        .and_then(|part_name| pkg.part(part_name))
         .map(SharedStringsState::from_part)
         .transpose()?;
 
@@ -242,7 +250,13 @@ pub(crate) fn apply_cell_patches_to_package(
 
     if let Some(ss) = shared_strings.as_ref() {
         if let Some(updated) = ss.write_if_dirty()? {
-            pkg.set_part("xl/sharedStrings.xml", updated);
+            let Some(part_name) = shared_strings_part_name.as_deref() else {
+                return Err(XlsxError::Invalid(
+                    "shared strings table was modified but part name could not be resolved"
+                        .to_string(),
+                ));
+            };
+            pkg.set_part(part_name, updated);
         }
     }
 
@@ -257,11 +271,24 @@ pub(crate) fn apply_cell_patches_to_package(
     Ok(())
 }
 
+fn resolve_shared_strings_part_name(pkg: &XlsxPackage) -> Result<Option<String>, XlsxError> {
+    let rels_name = rels_part_name(WORKBOOK_PART);
+    let rels_bytes = match pkg.part(&rels_name) {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+    let rels = parse_relationships(rels_bytes)?;
+    Ok(rels
+        .into_iter()
+        .find(|rel| rel.type_uri == REL_TYPE_SHARED_STRINGS)
+        .map(|rel| resolve_target(WORKBOOK_PART, &rel.target)))
+}
+
 fn resolve_worksheet_part(
     pkg: &XlsxPackage,
     sheet: &WorkbookSheetInfo,
 ) -> Result<String, XlsxError> {
-    resolve_relationship_target(pkg, "xl/workbook.xml", &sheet.rel_id)?.ok_or_else(|| {
+    resolve_relationship_target(pkg, WORKBOOK_PART, &sheet.rel_id)?.ok_or_else(|| {
         XlsxError::Invalid(format!("missing worksheet relationship for {}", sheet.name))
     })
 }
