@@ -72,6 +72,17 @@ fn criteria_wildcard_star_does_not_match_blank_cells() {
 }
 
 #[test]
+fn criteria_preserves_whitespace_in_text_patterns() {
+    let c = Criteria::parse(&Value::from(" ")).unwrap();
+    assert!(c.matches(&Value::from(" ")));
+    assert!(!c.matches(&Value::Blank));
+    assert!(!c.matches(&Value::from("")));
+
+    let c = Criteria::parse(&Value::from("= ")).unwrap();
+    assert!(c.matches(&Value::from(" ")));
+}
+
+#[test]
 fn criteria_is_case_insensitive_unicode() {
     // Uses Unicode-aware uppercasing: ß -> SS.
     let c = Criteria::parse(&Value::from("straße")).unwrap();
