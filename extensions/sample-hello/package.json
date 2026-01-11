@@ -7,6 +7,7 @@
   "license": "MIT",
   "main": "./dist/extension.js",
   "module": "./dist/extension.mjs",
+  "browser": "./dist/extension.mjs",
   "engines": {
     "formula": "^1.0.0"
   },

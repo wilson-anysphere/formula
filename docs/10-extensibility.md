@@ -812,8 +812,9 @@ by integration tests and marketplace packaging tests. It demonstrates:
 
 `extensions/sample-hello/src/extension.js` is the source of truth, and
 `extensions/sample-hello/dist/extension.js` is the built entrypoint referenced by the extension
-manifest. Run `node extensions/sample-hello/build.js` to regenerate the dist file; CI enforces that
-`dist/extension.js` stays in sync with `src/extension.js`.
+manifest for the Node extension host. The build also emits `dist/extension.mjs` for the browser
+extension host. Run `node extensions/sample-hello/build.js` to regenerate the dist files; CI
+enforces that the dist entrypoints stay in sync with `src/extension.js`.
 
 ### 1. Custom Visualization Extension
 

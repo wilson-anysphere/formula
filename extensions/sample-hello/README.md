@@ -23,7 +23,10 @@ marketplace packaging tests.
 
 `src/extension.js` is the source of truth.
 
-`dist/extension.js` is the built entrypoint referenced by `package.json` (`main`).
+`dist/extension.js` is the Node (CommonJS) entrypoint referenced by `package.json` (`main`).
+
+`dist/extension.mjs` is an ES module build that can be used by the browser extension host
+(`package.json` `browser`/`module` fields).
 
 To regenerate:
 
@@ -32,4 +35,3 @@ node extensions/sample-hello/build.js
 ```
 
 CI runs a node:test (`build.test.js`) that fails if `dist/extension.js` is out of date.
-

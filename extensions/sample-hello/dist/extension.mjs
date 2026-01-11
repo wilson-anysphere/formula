@@ -1,122 +1,164 @@
+// This file is generated from src/extension.js by build.js. Do not edit.
 import * as formula from "@formula/extension-api";
+const PANEL_ID = "sampleHello.panel";
+const PANEL_TITLE = "Sample Hello Panel";
 
-async function activate(context) {
-  let panel = null;
-  let panelListener = null;
+/** @type {import("@formula/extension-api").Panel | null} */
+let panel = null;
+/** @type {Promise<import("@formula/extension-api").Panel> | null} */
+let panelPromise = null;
+/** @type {import("@formula/extension-api").Disposable | null} */
+let panelMessageDisposable = null;
 
-  async function ensurePanel() {
-    if (panel) return panel;
-
-    panel = await formula.ui.createPanel("sampleHello.panel", {
-      title: "Sample Hello Panel",
-      position: "right"
-    });
-
-    panelListener = panel.webview.onDidReceiveMessage(async (message) => {
-      if (message && message.type === "ping") {
-        await panel.webview.postMessage({ type: "pong" });
-      }
-    });
-    context.subscriptions.push(panelListener);
-
-    return panel;
-  }
-
-  async function renderPanel() {
-    const p = await ensurePanel();
-    await p.webview.setHtml(`<!DOCTYPE html>
+function panelHtml() {
+  return `<!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Sample Hello Panel</title>
-  </head>
   <body>
     <h1>Sample Hello Panel</h1>
-    <p>This panel is rendered from an extension.</p>
   </body>
-</html>`);
-    return p.id;
+</html>`;
+}
+
+/**
+ * @param {import("@formula/extension-api").CellValue[][] | undefined | null} values
+ */
+function sumValues(values) {
+  let sum = 0;
+  if (!Array.isArray(values)) return sum;
+  for (const row of values) {
+    if (!Array.isArray(row)) continue;
+    for (const value of row) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        sum += value;
+      }
+    }
+  }
+  return sum;
+}
+
+async function getSelectionSum() {
+  const selection = await formula.cells.getSelection();
+  return sumValues(selection?.values);
+}
+
+/**
+ * @param {import("@formula/extension-api").ExtensionContext} context
+ */
+async function ensurePanel(context) {
+  const html = panelHtml();
+
+  if (panel) {
+    try {
+      await panel.webview.setHtml(html);
+      return panel;
+    } catch (error) {
+      panel = null;
+      if (panelMessageDisposable) {
+        try {
+          panelMessageDisposable.dispose();
+        } catch {
+          // ignore
+        }
+        panelMessageDisposable = null;
+      }
+    }
   }
 
-  const doubleFn = await formula.functions.register("SAMPLEHELLO_DOUBLE", {
-    description: "Doubles the input value",
-    parameters: [{ name: "value", type: "number", description: "Value to double" }],
-    result: { type: "number" },
-    handler: (value) => {
-      if (typeof value !== "number" || !Number.isFinite(value)) return null;
-      return value * 2;
-    }
-  });
+  if (panelPromise) return panelPromise;
 
-  const sumCmd = await formula.commands.registerCommand("sampleHello.sumSelection", async () => {
-    const selection = await formula.cells.getSelection();
-    const values = selection.values ?? [];
+  panelPromise = (async () => {
+    const created = await formula.ui.createPanel(PANEL_ID, { title: PANEL_TITLE });
+    await created.webview.setHtml(html);
 
-    let sum = 0;
-    for (const row of values) {
-      for (const val of row) {
-        if (typeof val === "number" && Number.isFinite(val)) sum += val;
-      }
-    }
-
-    await formula.cells.setCell(selection.endRow + 1, selection.startCol, sum);
-    await formula.ui.showMessage(`Sum: ${sum}`, "info");
-    return sum;
-  });
-
-  const panelCmd = await formula.commands.registerCommand("sampleHello.openPanel", async () => {
-    return renderPanel();
-  });
-
-  const viewActivated = formula.events.onViewActivated(async ({ viewId }) => {
-    if (viewId === "sampleHello.panel") {
-      await renderPanel();
-    }
-  });
-
-  const fetchCmd = await formula.commands.registerCommand("sampleHello.fetchText", async (url) => {
-    const response = await fetch(String(url));
-    const text = await response.text();
-    await formula.ui.showMessage(`Fetched: ${text}`, "info");
-    return text;
-  });
-
-  const copySumCmd = await formula.commands.registerCommand(
-    "sampleHello.copySumToClipboard",
-    async () => {
-      const selection = await formula.cells.getSelection();
-      const values = selection.values ?? [];
-
-      let sum = 0;
-      for (const row of values) {
-        for (const val of row) {
-          if (typeof val === "number" && Number.isFinite(val)) sum += val;
+    if (!panelMessageDisposable) {
+      panelMessageDisposable = created.webview.onDidReceiveMessage((message) => {
+        if (message && message.type === "ping") {
+          created.webview.postMessage({ type: "pong" }).catch((err) => {
+            // eslint-disable-next-line no-console
+            console.error(err);
+          });
         }
-      }
-
-      await formula.clipboard.writeText(String(sum));
-      await formula.ui.showMessage(`Copied sum ${sum} to clipboard`, "info");
-      return sum;
+      });
+      context.subscriptions.push(panelMessageDisposable);
     }
+
+    panel = created;
+    context.subscriptions.push(created);
+    return created;
+  })();
+
+  try {
+    return await panelPromise;
+  } finally {
+    panelPromise = null;
+  }
+}
+
+/**
+ * @param {import("@formula/extension-api").ExtensionContext} context
+ */
+async function activate(context) {
+  context.subscriptions.push(
+    await formula.commands.registerCommand("sampleHello.sumSelection", async () => {
+      const selection = await formula.cells.getSelection();
+      const sum = sumValues(selection?.values);
+      await formula.cells.setCell(2, 0, sum);
+      await formula.ui.showMessage(`Sum: ${sum}`);
+      return sum;
+    })
   );
 
-  const greetingCmd = await formula.commands.registerCommand("sampleHello.showGreeting", async () => {
-    const greeting = await formula.config.get("sampleHello.greeting");
-    await formula.ui.showMessage(`Greeting: ${greeting ?? ""}`, "info");
-    return greeting ?? null;
-  });
+  context.subscriptions.push(
+    await formula.commands.registerCommand("sampleHello.openPanel", async () => {
+      const created = await ensurePanel(context);
+      return created.id;
+    })
+  );
 
   context.subscriptions.push(
-    doubleFn,
-    sumCmd,
-    panelCmd,
-    fetchCmd,
-    copySumCmd,
-    greetingCmd,
-    viewActivated
+    await formula.commands.registerCommand("sampleHello.fetchText", async (url) => {
+      const doFetch = typeof fetch === "function" ? fetch : formula.network.fetch;
+      const response = await doFetch(String(url));
+      const text = await response.text();
+      await formula.ui.showMessage(`Fetched: ${text}`);
+      return text;
+    })
+  );
+
+  context.subscriptions.push(
+    await formula.commands.registerCommand("sampleHello.copySumToClipboard", async () => {
+      const sum = await getSelectionSum();
+      await formula.clipboard.writeText(String(sum));
+      return sum;
+    })
+  );
+
+  context.subscriptions.push(
+    await formula.commands.registerCommand("sampleHello.showGreeting", async () => {
+      const greeting = await formula.config.get("sampleHello.greeting");
+      const value = typeof greeting === "string" ? greeting : String(greeting ?? "");
+      await formula.ui.showMessage(`Greeting: ${value}`);
+      return value;
+    })
+  );
+
+  context.subscriptions.push(
+    await formula.functions.register("SAMPLEHELLO_DOUBLE", {
+      handler(value) {
+        return value * 2;
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    formula.events.onViewActivated(({ viewId }) => {
+      if (viewId !== PANEL_ID) return;
+      void ensurePanel(context).catch((error) => {
+        // eslint-disable-next-line no-console
+        console.error(error);
+      });
+    })
   );
 }
 
 export { activate };
-export default { activate };
-
