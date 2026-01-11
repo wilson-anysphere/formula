@@ -956,6 +956,18 @@ export class SpreadsheetApp {
           });
         }
       );
+
+      // `initWasmEngine` runs asynchronously and can overlap with early user edits (or e2e
+      // interactions) before the `document.on("change")` listener is installed. If the
+      // DocumentController changed while `engineHydrateFromDocument` was in-flight, those
+      // deltas could be missed, leaving the worker with an incomplete view of inputs.
+      //
+      // Re-hydrate once through the serialized WASM queue to guarantee the worker matches the
+      // latest DocumentController state before incremental deltas begin flowing.
+      void this.enqueueWasmSync(async (worker) => {
+        const changes = await engineHydrateFromDocument(worker, this.document);
+        this.applyComputedChanges(changes);
+      });
     } catch {
       // Ignore initialization failures (e.g. missing WASM bundle).
       engine?.terminate();
@@ -3471,17 +3483,6 @@ export class SpreadsheetApp {
   }
 
   private getCellComputedValue(cell: CellCoord): SpreadsheetValue {
-    const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null } | null;
-    // Prefer local evaluation for formulas stored in the DocumentController. The WASM engine
-    // worker is best-effort and can produce incorrect results for some reference patterns
-    // (e.g. SUM over a range), which would otherwise override our local evaluator via
-    // `computedValues`.
-    if (state?.formula != null) {
-      const memo = new Map<string, SpreadsheetValue>();
-      const stack = new Set<string>();
-      return this.computeCellValue(this.sheetId, cell, memo, stack);
-    }
-
     const cacheKey = this.computedKey(this.sheetId, cellToA1(cell));
     if (this.computedValues.has(cacheKey)) {
       return this.computedValues.get(cacheKey) ?? null;
@@ -3557,6 +3558,9 @@ export class SpreadsheetApp {
   ): SpreadsheetValue {
     const address = cellToA1(cell);
     const computedKey = this.computedKey(sheetId, address);
+    if (this.computedValues.has(computedKey)) {
+      return this.computedValues.get(computedKey) ?? null;
+    }
     const cached = memo.get(computedKey);
     if (cached !== undefined || memo.has(computedKey)) return cached ?? null;
     if (stack.has(computedKey)) return "#REF!";
@@ -3565,14 +3569,7 @@ export class SpreadsheetApp {
     const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
     let value: SpreadsheetValue;
 
-    // Prefer local formula evaluation when a formula is present in the DocumentController.
-    // The WASM engine integration is still evolving and can lag behind edge cases (like
-    // range references). By treating DocumentController formulas as authoritative for
-    // UI display, we keep results consistent across desktop/web and match unit-tested
-    // `evaluateFormula` semantics.
-    if (state?.formula == null && this.computedValues.has(computedKey)) {
-      value = this.computedValues.get(computedKey) ?? null;
-    } else if (state?.formula != null) {
+    if (state?.formula != null) {
       const resolveSheetId = (name: string): string | null => {
         const trimmed = name.trim();
         if (!trimmed) return null;
