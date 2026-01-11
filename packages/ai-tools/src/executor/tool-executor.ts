@@ -73,17 +73,17 @@ export type ToolResultDataByName = {
     | {
         range: string;
         method: "iqr";
-        anomalies: Array<{ cell: string; value: number }>;
+        anomalies: Array<{ cell: string; value: number | null }>;
       }
     | {
         range: string;
         method: "zscore";
-        anomalies: Array<{ cell: string; value: number; score: number }>;
+        anomalies: Array<{ cell: string; value: number | null; score: number | null }>;
       }
     | {
         range: string;
         method: "isolation_forest";
-        anomalies: Array<{ cell: string; value: number; score: number }>;
+        anomalies: Array<{ cell: string; value: number | null; score: number | null }>;
       };
   compute_statistics: {
     range: string;
@@ -639,24 +639,20 @@ export class ToolExecutor {
       );
     }
     const cells = this.spreadsheet.readRange(range);
-    const entries: Array<{ cell: string; value: number }> = [];
-    let redactedCellCount = 0;
+    const entries: Array<{ cell: string; value: number; allowed: boolean }> = [];
     for (let r = 0; r < cells.length; r++) {
       for (let c = 0; c < cells[r]!.length; c++) {
-        if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
-          const rowIndex = range.startRow + r;
-          const colIndex = range.startCol + c;
-          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
-            redactedCellCount++;
-            continue;
-          }
-        }
+        const rowIndex = range.startRow + r;
+        const colIndex = range.startCol + c;
+        const allowed =
+          !dlp || dlp.decision.decision !== DLP_DECISION.REDACT ? true : this.isDlpCellAllowed(dlp, rowIndex, colIndex);
         const cell = cells[r]![c]!;
         const numeric = toNumber(cell);
         if (numeric === null) continue;
         entries.push({
           cell: formatA1Cell({ sheet: range.sheet, row: range.startRow + r, col: range.startCol + c }),
-          value: numeric
+          value: numeric,
+          allowed
         });
       }
     }
@@ -666,7 +662,7 @@ export class ToolExecutor {
         case "zscore":
         case "iqr":
         case "isolation_forest":
-          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount: 0 });
           return { range: formattedRange, method, anomalies: [] };
         default: {
           const exhaustive: never = method;
@@ -685,13 +681,20 @@ export class ToolExecutor {
             : 0;
         const stdev = Math.sqrt(variance);
         if (stdev === 0) {
-          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount: 0 });
           return { range: formattedRange, method, anomalies: [] };
         }
+        let redactedCellCount = 0;
         const anomalies = entries
           .map((e) => ({ ...e, score: (e.value - mean) / stdev }))
           .filter((e) => Math.abs(e.score) >= threshold)
-          .map((e) => ({ cell: e.cell, value: e.value, score: e.score }));
+          .map((e) => {
+            if (!e.allowed) {
+              redactedCellCount++;
+              return { cell: e.cell, value: null, score: null };
+            }
+            return { cell: e.cell, value: e.value, score: e.score };
+          });
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }
@@ -703,9 +706,16 @@ export class ToolExecutor {
         const iqr = q3 - q1;
         const low = q1 - multiplier * iqr;
         const high = q3 + multiplier * iqr;
+        let redactedCellCount = 0;
         const anomalies = entries
           .filter((e) => e.value < low || e.value > high)
-          .map((e) => ({ cell: e.cell, value: e.value }));
+          .map((e) => {
+            if (!e.allowed) {
+              redactedCellCount++;
+              return { cell: e.cell, value: null };
+            }
+            return { cell: e.cell, value: e.value };
+          });
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }
@@ -726,17 +736,31 @@ export class ToolExecutor {
         const threshold = params.threshold as number | undefined;
         if (threshold === undefined || threshold <= 1) {
           const cutoff = threshold ?? 0.65;
+          let redactedCellCount = 0;
           const anomalies = scored
             .filter((entry) => entry.score >= cutoff)
-            .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
+            .map((entry) => {
+              if (!entry.allowed) {
+                redactedCellCount++;
+                return { cell: entry.cell, value: null, score: null };
+              }
+              return { cell: entry.cell, value: entry.value, score: entry.score };
+            });
           if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
           return { range: formattedRange, method, anomalies };
         }
 
         const topN = Math.min(scored.length, Math.max(0, Math.round(threshold)));
+        let redactedCellCount = 0;
         const anomalies = scored
           .slice(0, topN)
-          .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
+          .map((entry) => {
+            if (!entry.allowed) {
+              redactedCellCount++;
+              return { cell: entry.cell, value: null, score: null };
+            }
+            return { cell: entry.cell, value: entry.value, score: entry.score };
+          });
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }

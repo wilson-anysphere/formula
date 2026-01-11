@@ -478,4 +478,72 @@ describe("ToolExecutor DLP enforcement", () => {
     });
     expect(event.decision?.decision).toBe("block");
   });
+
+  it("detect_anomalies redacts restricted anomaly values under REDACT policy", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 4,
+              col: 0
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        audit_logger
+      }
+    });
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:A5",
+        values: [[1], [1], [2], [2], [100]]
+      }
+    });
+
+    const result = await executor.execute({
+      name: "detect_anomalies",
+      parameters: { range: "Sheet1!A1:A5", method: "isolation_forest" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("detect_anomalies");
+    if (!result.ok || result.tool !== "detect_anomalies") throw new Error("Unexpected tool result");
+    if (!result.data || result.data.method !== "isolation_forest") throw new Error("Unexpected anomaly result");
+
+    const outlier = result.data.anomalies.find((anomaly) => anomaly.cell === "Sheet1!A5");
+    expect(outlier).toBeDefined();
+    expect(outlier?.value).toBeNull();
+    expect(outlier?.score).toBeNull();
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "detect_anomalies",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1:A5",
+      redactedCellCount: 1
+    });
+    expect(event.decision?.decision).toBe("redact");
+  });
 });
