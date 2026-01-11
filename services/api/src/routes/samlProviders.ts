@@ -32,27 +32,50 @@ function isValidProviderId(value: string): boolean {
   return /^[a-z0-9_-]{1,64}$/.test(value);
 }
 
+function pemFromBase64Certificate(base64: string): string {
+  const cleaned = base64.replace(/\s+/g, "");
+  if (!cleaned) throw new Error("invalid_certificate");
+  const lines = cleaned.match(/.{1,64}/g);
+  if (!lines) throw new Error("invalid_certificate");
+  return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
+}
+
+function normalizePemCertificateBlock(block: string): string {
+  const normalized = block.replace(/\r\n|\r/g, "\n").trim();
+  const header = "-----BEGIN CERTIFICATE-----";
+  const footer = "-----END CERTIFICATE-----";
+  if (!normalized.startsWith(header) || !normalized.endsWith(footer)) throw new Error("invalid_certificate");
+
+  const body = normalized.slice(header.length, normalized.length - footer.length).replace(/\s+/g, "");
+  return pemFromBase64Certificate(body);
+}
+
 function normalizeCertificatePem(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error("invalid_certificate");
 
-  let pem = trimmed;
-  if (!trimmed.includes("-----BEGIN")) {
-    const cleaned = trimmed.replace(/\s+/g, "");
-    if (!cleaned) throw new Error("invalid_certificate");
-    const lines = cleaned.match(/.{1,64}/g);
-    if (!lines) throw new Error("invalid_certificate");
-    pem = `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
+  const certBlockRegex = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+
+  const blocks = [...trimmed.matchAll(certBlockRegex)].map((match) => match[0]);
+  const pemBlocks: string[] =
+    blocks.length > 0 ? blocks.map((block) => normalizePemCertificateBlock(block)) : [pemFromBase64Certificate(trimmed)];
+
+  // Ensure we didn't accidentally accept other PEM blocks (e.g. private keys) in the input.
+  if (blocks.length > 0) {
+    const leftover = trimmed.replace(certBlockRegex, "").trim();
+    if (leftover.length > 0) throw new Error("invalid_certificate");
   }
 
   try {
-    // Throws if invalid.
-    new crypto.X509Certificate(pem);
+    for (const pemBlock of pemBlocks) {
+      // Throws if invalid.
+      new crypto.X509Certificate(pemBlock);
+    }
   } catch {
     throw new Error("invalid_certificate");
   }
 
-  return pem;
+  return pemBlocks.join("\n");
 }
 
 function parseAttributeMapping(value: unknown): AttributeMapping | null {

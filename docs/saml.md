@@ -36,6 +36,10 @@ MIIC...
 
 For convenience, the admin API also accepts a raw base64-encoded certificate string and normalizes it to PEM. Invalid certificates are rejected with `error: "invalid_certificate"`.
 
+### Certificate rollover
+
+To support IdP signing certificate rotation, `idpCertPem` may contain multiple PEM certificates concatenated together. Formula will try each certificate when verifying signatures.
+
 ## Admin APIs
 
 All endpoints require an authenticated **org admin**.

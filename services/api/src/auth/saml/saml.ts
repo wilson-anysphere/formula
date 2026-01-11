@@ -237,13 +237,17 @@ function buildSaml(options: {
   wantResponseSigned: boolean;
   cacheProvider: CacheProvider;
 }): SAML {
+  const certBlockRegex = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+  const idpCertBlocks = [...options.idpCertPem.matchAll(certBlockRegex)].map((match) => match[0].trim());
+  const idpCert = idpCertBlocks.length > 1 ? idpCertBlocks : options.idpCertPem;
+
   return new SAML({
     entryPoint: options.entryPoint,
     issuer: options.issuer,
     callbackUrl: options.callbackUrl,
     // Audience must match the SP issuer for most IdPs.
     audience: options.issuer,
-    idpCert: options.idpCertPem,
+    idpCert,
     wantAssertionsSigned: options.wantAssertionsSigned,
     wantAuthnResponseSigned: options.wantResponseSigned,
     // Allow small clock skew for NotBefore/NotOnOrAfter checks.

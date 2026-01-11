@@ -363,7 +363,8 @@ describe("SAML SSO", () => {
           entryPoint: "http://idp.example.test/sso",
           issuer: "http://sp.example.test/metadata",
           idpIssuer: "https://idp.example.test/metadata",
-          idpCertPem: TEST_CERT_PEM,
+          // Duplicate cert to exercise certificate-bundle handling (rollover support).
+          idpCertPem: `${TEST_CERT_PEM}\n${TEST_CERT_PEM}`,
           wantAssertionsSigned: true,
           wantResponseSigned: false,
           attributeMapping: { email: "email", name: "name" },
