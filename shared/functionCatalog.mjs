@@ -199,6 +199,18 @@ export default {
       ]
     },
     {
+      "name": "FILTER",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "FIND",
       "min_args": 2,
       "max_args": 3,
@@ -804,6 +816,19 @@ export default {
       ]
     },
     {
+      "name": "SORT",
+      "min_args": 1,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
       "name": "SUBSTITUTE",
       "min_args": 3,
       "max_args": 4,
@@ -938,6 +963,18 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "UNIQUE",
+      "min_args": 1,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "bool",
+        "bool"
       ]
     },
     {

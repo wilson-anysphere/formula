@@ -5,22 +5,23 @@ use crate::date::ExcelDateSystem;
 use crate::eval::{CellAddr, CompiledExpr};
 use crate::value::{ErrorKind, Value};
 
+pub mod date_time;
 pub mod financial;
 pub mod information;
 pub mod lookup;
 pub mod math;
 pub mod text;
-pub mod date_time;
 
 // Built-in Excel-compatible functions registered with the inventory-backed
 // registry live in dedicated modules to avoid merge conflicts.
+mod builtins_array;
 mod builtins_date_time;
+mod builtins_dynamic_arrays;
 mod builtins_information;
 mod builtins_logical;
 mod builtins_lookup;
 mod builtins_math;
 mod builtins_text;
-mod builtins_array;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Volatility {
@@ -114,7 +115,8 @@ pub trait FunctionContext {
     fn eval_scalar(&self, expr: &CompiledExpr) -> Value;
     fn apply_implicit_intersection(&self, reference: Reference) -> Value;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
-    fn iter_reference_cells(&self, reference: Reference) -> Box<dyn Iterator<Item = CellAddr> + '_>;
+    fn iter_reference_cells(&self, reference: Reference)
+        -> Box<dyn Iterator<Item = CellAddr> + '_>;
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc>;
     fn date_system(&self) -> ExcelDateSystem;
 
