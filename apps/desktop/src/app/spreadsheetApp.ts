@@ -327,7 +327,8 @@ export class SpreadsheetApp {
           value: unknown;
           formula: string | null;
         };
-        return state?.value ?? null;
+        const value = state?.value ?? null;
+        return isRichTextValue(value) ? value.text : value;
       },
       onChange: () => this.renderCharts()
     });
@@ -1032,7 +1033,8 @@ export class SpreadsheetApp {
               value: unknown;
               formula: string | null;
             };
-            row.push(state?.value ?? null);
+            const value = state?.value ?? null;
+            row.push(isRichTextValue(value) ? value.text : value);
           }
           out.push(row);
         }

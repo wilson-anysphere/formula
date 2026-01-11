@@ -94,10 +94,19 @@ function formatAbsRange(sheet: string, startRow: number, startCol: number, endRo
   return `${sheetPrefix}!${body}`;
 }
 
+function getTextLike(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const maybe = value as { text?: unknown };
+    if (typeof maybe.text === "string") return maybe.text;
+  }
+  return null;
+}
+
 function isMostlyStrings(row: unknown[]): boolean {
   const nonEmpty = row.filter((value) => value != null && value !== "");
   if (nonEmpty.length === 0) return false;
-  const stringCount = nonEmpty.filter((value) => typeof value === "string").length;
+  const stringCount = nonEmpty.filter((value) => typeof getTextLike(value) === "string").length;
   return stringCount / nonEmpty.length >= 0.6;
 }
 
@@ -142,7 +151,9 @@ export class ChartStore {
       if (!hasHeader) return undefined;
       const raw = headerRow[offset];
       if (raw == null) return undefined;
-      const name = String(raw).trim();
+      const text = getTextLike(raw);
+      if (text == null) return undefined;
+      const name = text.trim();
       return name ? name : undefined;
     };
 
