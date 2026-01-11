@@ -515,6 +515,47 @@ test("executeQueryStreaming(..., materialize:false) streams promoteHeaders after
   assert.deepEqual(streamed, expected);
 });
 
+test("executeQueryStreaming(..., materialize:false) streams multiple promoteHeaders operations", async () => {
+  const csvText = ["A,B", "X,Y", "1,2", "3,4"].join("\n") + "\n";
+
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("readText should not be called in streaming mode");
+      },
+      readTextStream: async function* () {
+        yield "A,B\nX,Y\n1,2\n";
+        yield "3,4\n";
+      },
+    },
+  });
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readText: async () => csvText,
+    },
+  });
+
+  const query = {
+    id: "q_stream_promote_headers_twice",
+    name: "Promote headers twice",
+    source: { type: "csv", path: "/tmp/promote_twice.csv", options: { hasHeaders: false } },
+    steps: [
+      { id: "s_promote1", name: "Promote 1", operation: { type: "promoteHeaders" } },
+      { id: "s_promote2", name: "Promote 2", operation: { type: "promoteHeaders" } },
+      { id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "X", operator: "equals", value: 1 } } },
+      { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["Y"] } },
+    ],
+  };
+
+  const batches = [];
+  await engineStreaming.executeQueryStreaming(query, {}, { batchSize: 2, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
+
 test("executeQueryStreaming(..., materialize:false) streams unpivot", async () => {
   const csvText = ["ID,Q1,Q2", "A,10,20", "B,30,40"].join("\n") + "\n";
 

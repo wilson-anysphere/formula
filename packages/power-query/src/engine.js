@@ -2927,13 +2927,19 @@ export class QueryEngine {
     let inputColumns = source.columns;
     let inputBatches = source.batches;
 
-    const promoteIndex = pipelineOperations.findIndex((op) => op.type === "promoteHeaders");
-    if (promoteIndex >= 0) {
+    while (true) {
+      const promoteIndex = pipelineOperations.findIndex((op) => op.type === "promoteHeaders");
+      if (promoteIndex < 0) break;
+
       const prefixOps = pipelineOperations.slice(0, promoteIndex);
       const suffixOps = pipelineOperations.slice(promoteIndex + 1);
       const prefixPipeline = compileStreamingPipeline(prefixOps, inputColumns);
       const prefixBatches = applyStreamingPipelineToBatches(prefixPipeline, inputBatches, options.signal);
-      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(prefixPipeline.columns, prefixBatches, options.signal));
+      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(
+        prefixPipeline.columns,
+        prefixBatches,
+        options.signal,
+      ));
       pipelineOperations = suffixOps;
     }
 
@@ -3382,13 +3388,19 @@ export class QueryEngine {
     let inputColumns = source.columns;
     let inputBatches = source.batches;
 
-    const promoteIndex = pipelineOperations.findIndex((op) => op.type === "promoteHeaders");
-    if (promoteIndex >= 0) {
+    while (true) {
+      const promoteIndex = pipelineOperations.findIndex((op) => op.type === "promoteHeaders");
+      if (promoteIndex < 0) break;
+
       const prefixOps = pipelineOperations.slice(0, promoteIndex);
       const suffixOps = pipelineOperations.slice(promoteIndex + 1);
       const prefixPipeline = compileStreamingPipeline(prefixOps, inputColumns);
       const prefixBatches = applyStreamingPipelineToBatches(prefixPipeline, inputBatches, options.signal);
-      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(prefixPipeline.columns, prefixBatches, options.signal));
+      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(
+        prefixPipeline.columns,
+        prefixBatches,
+        options.signal,
+      ));
       pipelineOperations = suffixOps;
     }
 

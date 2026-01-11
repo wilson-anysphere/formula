@@ -1449,20 +1449,15 @@ export function isStreamableOperation(operation) {
 /**
  * Determine whether a sequence of operations can be executed incrementally without materializing.
  *
- * This includes special-casing `promoteHeaders`, which is streamable only once per sequence.
- *
- * The engine consumes the first data row at the `promoteHeaders` point to derive the new header
- * names, then continues streaming the remaining operations.
+ * This includes special-casing `promoteHeaders`, which is executed by the engine by consuming the
+ * first data row at each `promoteHeaders` point to derive the new header names.
  *
  * @param {QueryOperation[]} operations
  * @returns {boolean}
  */
 export function isStreamableOperationSequence(operations) {
-  let promoteHeadersCount = 0;
   for (const op of operations) {
     if (op.type === "promoteHeaders") {
-      promoteHeadersCount += 1;
-      if (promoteHeadersCount > 1) return false;
       continue;
     }
     if (!isStreamableOperation(op)) return false;
