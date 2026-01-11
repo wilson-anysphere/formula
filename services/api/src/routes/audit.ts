@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { auditLogRowToAuditEvent, redactAuditEvent, serializeBatch } from "@formula/audit-core";
+import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
 
@@ -40,111 +41,117 @@ export function registerAuditRoutes(app: FastifyInstance): void {
     format: z.enum(["json", "cef", "leef"]).optional()
   });
 
-  app.get("/orgs/:orgId/audit", { preHandler: requireAuth }, async (request, reply) => {
-    const orgId = (request.params as { orgId: string }).orgId;
-    const role = await requireOrgAdminRole(request, reply, orgId);
-    if (!role) return;
+  app.get(
+    "/orgs/:orgId/audit",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
+      const orgId = (request.params as { orgId: string }).orgId;
+      const role = await requireOrgAdminRole(request, reply, orgId);
+      if (!role) return;
 
-    const parsed = AuditQuery.safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+      const parsed = AuditQuery.safeParse(request.query);
+      if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
-    const where: string[] = ["org_id = $1"];
-    const values: unknown[] = [orgId];
-    const add = (clause: string, value: unknown) => {
-      values.push(value);
-      where.push(clause.replace("$", `$${values.length}`));
-    };
+      const where: string[] = ["org_id = $1"];
+      const values: unknown[] = [orgId];
+      const add = (clause: string, value: unknown) => {
+        values.push(value);
+        where.push(clause.replace("$", `$${values.length}`));
+      };
 
-    if (parsed.data.start) add("created_at >= $", new Date(parsed.data.start));
-    if (parsed.data.end) add("created_at <= $", new Date(parsed.data.end));
-    if (parsed.data.eventType) add("event_type = $", parsed.data.eventType);
-    if (parsed.data.userId) add("user_id = $", parsed.data.userId);
-    if (parsed.data.resourceId) add("resource_id = $", parsed.data.resourceId);
-    if (parsed.data.success)
-      add("success = $", parsed.data.success === "true" ? true : false);
+      if (parsed.data.start) add("created_at >= $", new Date(parsed.data.start));
+      if (parsed.data.end) add("created_at <= $", new Date(parsed.data.end));
+      if (parsed.data.eventType) add("event_type = $", parsed.data.eventType);
+      if (parsed.data.userId) add("user_id = $", parsed.data.userId);
+      if (parsed.data.resourceId) add("resource_id = $", parsed.data.resourceId);
+      if (parsed.data.success) add("success = $", parsed.data.success === "true" ? true : false);
 
-    const limit = parsed.data.limit ? Math.min(Number(parsed.data.limit), 1000) : 100;
-    const offset = parsed.data.offset ? Math.max(Number(parsed.data.offset), 0) : 0;
+      const limit = parsed.data.limit ? Math.min(Number(parsed.data.limit), 1000) : 100;
+      const offset = parsed.data.offset ? Math.max(Number(parsed.data.offset), 0) : 0;
 
-    values.push(limit);
-    values.push(offset);
+      values.push(limit);
+      values.push(offset);
 
-    const columns =
-      "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
-    const whereSql = where.join(" AND ");
+      const columns =
+        "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
+      const whereSql = where.join(" AND ");
 
-    const result = await app.db.query(
-      `
-        SELECT ${columns}
-        FROM (
+      const result = await app.db.query(
+        `
           SELECT ${columns}
-          FROM audit_log
-          WHERE ${whereSql}
-          UNION ALL
+          FROM (
+            SELECT ${columns}
+            FROM audit_log
+            WHERE ${whereSql}
+            UNION ALL
+            SELECT ${columns}
+            FROM audit_log_archive
+            WHERE ${whereSql}
+          ) audit
+          ORDER BY created_at DESC
+          LIMIT $${values.length - 1}
+          OFFSET $${values.length}
+        `,
+        values
+      );
+
+      const events = result.rows.map((row) => redactAuditEvent(auditLogRowToAuditEvent(row as any)));
+      return { events };
+    }
+  );
+
+  app.get(
+    "/orgs/:orgId/audit/export",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
+      const orgId = (request.params as { orgId: string }).orgId;
+      const role = await requireOrgAdminRole(request, reply, orgId);
+      if (!role) return;
+
+      const parsed = AuditExportQuery.safeParse(request.query);
+      if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+      const where: string[] = ["org_id = $1"];
+      const values: unknown[] = [orgId];
+      const add = (clause: string, value: unknown) => {
+        values.push(value);
+        where.push(clause.replace("$", `$${values.length}`));
+      };
+
+      if (parsed.data.start) add("created_at >= $", new Date(parsed.data.start));
+      if (parsed.data.end) add("created_at <= $", new Date(parsed.data.end));
+      if (parsed.data.eventType) add("event_type = $", parsed.data.eventType);
+      if (parsed.data.userId) add("user_id = $", parsed.data.userId);
+      if (parsed.data.resourceId) add("resource_id = $", parsed.data.resourceId);
+      if (parsed.data.success) add("success = $", parsed.data.success === "true" ? true : false);
+
+      const columns =
+        "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
+      const whereSql = where.join(" AND ");
+
+      const result = await app.db.query(
+        `
           SELECT ${columns}
-          FROM audit_log_archive
-          WHERE ${whereSql}
-        ) audit
-        ORDER BY created_at DESC
-        LIMIT $${values.length - 1}
-        OFFSET $${values.length}
-      `,
-      values
-    );
+          FROM (
+            SELECT ${columns}
+            FROM audit_log
+            WHERE ${whereSql}
+            UNION ALL
+            SELECT ${columns}
+            FROM audit_log_archive
+            WHERE ${whereSql}
+          ) audit
+          ORDER BY created_at ASC
+        `,
+        values
+      );
 
-    const events = result.rows.map((row) => redactAuditEvent(auditLogRowToAuditEvent(row as any)));
-    return { events };
-  });
+      const events = result.rows.map((row) => auditLogRowToAuditEvent(row as any));
+      const format = parsed.data.format ?? "json";
+      const { contentType, body } = serializeBatch(events, { format });
 
-  app.get("/orgs/:orgId/audit/export", { preHandler: requireAuth }, async (request, reply) => {
-    const orgId = (request.params as { orgId: string }).orgId;
-    const role = await requireOrgAdminRole(request, reply, orgId);
-    if (!role) return;
-
-    const parsed = AuditExportQuery.safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
-
-    const where: string[] = ["org_id = $1"];
-    const values: unknown[] = [orgId];
-    const add = (clause: string, value: unknown) => {
-      values.push(value);
-      where.push(clause.replace("$", `$${values.length}`));
-    };
-
-    if (parsed.data.start) add("created_at >= $", new Date(parsed.data.start));
-    if (parsed.data.end) add("created_at <= $", new Date(parsed.data.end));
-    if (parsed.data.eventType) add("event_type = $", parsed.data.eventType);
-    if (parsed.data.userId) add("user_id = $", parsed.data.userId);
-    if (parsed.data.resourceId) add("resource_id = $", parsed.data.resourceId);
-    if (parsed.data.success)
-      add("success = $", parsed.data.success === "true" ? true : false);
-
-    const columns =
-      "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
-    const whereSql = where.join(" AND ");
-
-    const result = await app.db.query(
-      `
-        SELECT ${columns}
-        FROM (
-          SELECT ${columns}
-          FROM audit_log
-          WHERE ${whereSql}
-          UNION ALL
-          SELECT ${columns}
-          FROM audit_log_archive
-          WHERE ${whereSql}
-        ) audit
-        ORDER BY created_at ASC
-      `,
-      values
-    );
-
-    const events = result.rows.map((row) => auditLogRowToAuditEvent(row as any));
-    const format = parsed.data.format ?? "json";
-    const { contentType, body } = serializeBatch(events, { format });
-
-    reply.header("content-type", contentType);
-    reply.send(body);
-  });
+      reply.header("content-type", contentType);
+      reply.send(body);
+    }
+  );
 }

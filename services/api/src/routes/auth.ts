@@ -8,6 +8,7 @@ import { oidcCallback, oidcStart } from "../auth/oidc/oidc";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { createSession, lookupSessionByToken, revokeSession } from "../auth/sessions";
 import { withTransaction } from "../db/tx";
+import { TokenBucketRateLimiter, sha256Hex } from "../http/rateLimit";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 
 type AuthCredentials =
@@ -92,6 +93,18 @@ async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promis
 }
 
 export function registerAuthRoutes(app: FastifyInstance): void {
+  const loginIpLimiter = new TokenBucketRateLimiter({ capacity: 20, refillMs: 60_000 });
+  const loginEmailLimiter = new TokenBucketRateLimiter({ capacity: 5, refillMs: 60_000 });
+  const registerIpLimiter = new TokenBucketRateLimiter({ capacity: 20, refillMs: 60_000 });
+  const oidcIpLimiter = new TokenBucketRateLimiter({ capacity: 30, refillMs: 60_000 });
+
+  const rateLimited = (reply: FastifyReply, retryAfterMs: number) => {
+    return reply
+      .header("Retry-After", String(Math.max(1, Math.ceil(retryAfterMs / 1000))))
+      .code(429)
+      .send({ error: "too_many_requests" });
+  };
+
   const RegisterBody = z.object({
     email: z.string().email(),
     password: z.string().min(8),
@@ -106,6 +119,13 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const email = body.data.email.trim().toLowerCase();
     const name = body.data.name.trim();
     const password = body.data.password;
+
+    const ip = getClientIp(request) ?? "unknown";
+    const limited = registerIpLimiter.take(ip);
+    if (!limited.ok) {
+      app.metrics.rateLimitedTotal.inc({ route: "/auth/register", reason: "ip" });
+      return rateLimited(reply, limited.retryAfterMs);
+    }
 
     const existing = await app.db.query("SELECT 1 FROM users WHERE email = $1", [email]);
     if (existing.rowCount && existing.rowCount > 0) {
@@ -204,6 +224,16 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
     const email = body.data.email.trim().toLowerCase();
     const password = body.data.password;
+
+    const ip = getClientIp(request) ?? "unknown";
+    const ipResult = loginIpLimiter.take(ip);
+    const emailResult = loginEmailLimiter.take(sha256Hex(email));
+    if (!ipResult.ok || !emailResult.ok) {
+      const retryAfterMs = Math.max(ipResult.ok ? 0 : ipResult.retryAfterMs, emailResult.ok ? 0 : emailResult.retryAfterMs);
+      const reason = !ipResult.ok && !emailResult.ok ? "multiple" : !ipResult.ok ? "ip" : "email";
+      app.metrics.rateLimitedTotal.inc({ route: "/auth/login", reason });
+      return rateLimited(reply, retryAfterMs);
+    }
 
     const found = await app.db.query(
       `
@@ -505,8 +535,21 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   });
 
   // OIDC / SSO: per-organization providers.
-  app.get("/auth/oidc/:orgId/:provider/start", oidcStart);
-  app.get("/auth/oidc/:orgId/:provider/callback", oidcCallback);
+  const oidcRateLimitByIp = (route: string) => async (request: FastifyRequest, reply: FastifyReply) => {
+    const ip = getClientIp(request) ?? "unknown";
+    const limited = oidcIpLimiter.take(ip);
+    if (!limited.ok) {
+      app.metrics.rateLimitedTotal.inc({ route, reason: "ip" });
+      return rateLimited(reply, limited.retryAfterMs);
+    }
+  };
+
+  app.get("/auth/oidc/:orgId/:provider/start", { preHandler: oidcRateLimitByIp("/auth/oidc/:orgId/:provider/start") }, oidcStart);
+  app.get(
+    "/auth/oidc/:orgId/:provider/callback",
+    { preHandler: oidcRateLimitByIp("/auth/oidc/:orgId/:provider/callback") },
+    oidcCallback
+  );
 }
 
 export { requireAuth };

@@ -4,6 +4,13 @@ export interface AppConfig {
   sessionCookieName: string;
   sessionTtlSeconds: number;
   cookieSecure: boolean;
+  /**
+   * Comma-separated allowlist of allowed CORS origins.
+   *
+   * - In production, defaults to no allowed origins unless explicitly configured.
+   * - In dev/test, defaults to common localhost origins for the web UI.
+   */
+  corsAllowedOrigins: string[];
   syncTokenSecret: string;
   syncTokenTtlSeconds: number;
   /**
@@ -61,41 +68,99 @@ function parseIntEnv(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
+const DEV_SYNC_TOKEN_SECRET = "dev-sync-token-secret-change-me";
+const DEV_SECRET_STORE_KEY = "dev-secret-store-key-change-me";
+const DEV_LOCAL_KMS_MASTER_KEY = "dev-local-kms-master-key-change-me";
+
+function readStringEnv(value: string | undefined, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function parseCorsAllowedOrigins(value: string | undefined, nodeEnv: string): string[] {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const entries = raw.length > 0 ? raw.split(",") : [];
+
+  const parsed = entries
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      const url = new URL(entry);
+      if (url.origin === "null") throw new Error("CORS origin must not be null");
+      return url.origin;
+    });
+
+  // Deduplicate after normalization.
+  if (parsed.length > 0) return Array.from(new Set(parsed));
+
+  if (nodeEnv === "production") return [];
+
+  return [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+  ];
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const nodeEnv = env.NODE_ENV ?? "development";
   const port = parseIntEnv(env.PORT, 3000);
-  const databaseUrl = env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/formula";
-  const sessionCookieName = env.SESSION_COOKIE_NAME ?? "formula_session";
+  const databaseUrl = readStringEnv(env.DATABASE_URL, "postgres://postgres:postgres@localhost:5432/formula");
+  const sessionCookieName = readStringEnv(env.SESSION_COOKIE_NAME, "formula_session");
   const sessionTtlSeconds = parseIntEnv(env.SESSION_TTL_SECONDS, 60 * 60 * 24);
   const cookieSecure = env.COOKIE_SECURE === "true";
-  const syncTokenSecret = env.SYNC_TOKEN_SECRET ?? "dev-sync-token-secret-change-me";
+  const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS, nodeEnv);
+  const syncTokenSecret = readStringEnv(env.SYNC_TOKEN_SECRET, DEV_SYNC_TOKEN_SECRET);
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
-  const secretStoreKey = env.SECRET_STORE_KEY ?? "dev-secret-store-key-change-me";
-  const syncServerInternalUrl = env.SYNC_SERVER_INTERNAL_URL;
-  const syncServerInternalAdminToken = env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN;
-  const localKmsMasterKey = env.LOCAL_KMS_MASTER_KEY ?? "dev-local-kms-master-key-change-me";
+  const secretStoreKey = readStringEnv(env.SECRET_STORE_KEY, DEV_SECRET_STORE_KEY);
+  const syncServerInternalUrl = readStringEnv(env.SYNC_SERVER_INTERNAL_URL, "");
+  const syncServerInternalAdminToken = readStringEnv(env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN, "");
+  const localKmsMasterKey = readStringEnv(env.LOCAL_KMS_MASTER_KEY, DEV_LOCAL_KMS_MASTER_KEY);
   const awsKmsEnabled = env.AWS_KMS_ENABLED === "true";
-  const awsRegion = env.AWS_REGION;
+  const awsRegion = readStringEnv(env.AWS_REGION, "");
   const retentionSweepIntervalMs =
     env.RETENTION_SWEEP_INTERVAL_MS === "0"
       ? null
       : parseIntEnv(env.RETENTION_SWEEP_INTERVAL_MS, 60 * 60 * 1000);
-  const internalAdminToken = env.INTERNAL_ADMIN_TOKEN;
+  const internalAdminToken = readStringEnv(env.INTERNAL_ADMIN_TOKEN, "");
 
-  return {
+  const config: AppConfig = {
     port,
     databaseUrl,
     sessionCookieName,
     sessionTtlSeconds,
     cookieSecure,
+    corsAllowedOrigins,
     syncTokenSecret,
     syncTokenTtlSeconds,
     secretStoreKey,
-    syncServerInternalUrl,
-    syncServerInternalAdminToken,
+    syncServerInternalUrl: syncServerInternalUrl.length > 0 ? syncServerInternalUrl : undefined,
+    syncServerInternalAdminToken:
+      syncServerInternalAdminToken.length > 0 ? syncServerInternalAdminToken : undefined,
     localKmsMasterKey,
     awsKmsEnabled,
-    awsRegion,
+    awsRegion: awsRegion.length > 0 ? awsRegion : undefined,
     retentionSweepIntervalMs,
-    internalAdminToken
+    internalAdminToken: internalAdminToken.length > 0 ? internalAdminToken : undefined
   };
+
+  if (nodeEnv === "production") {
+    const invalidSecrets: string[] = [];
+    if (config.syncTokenSecret === DEV_SYNC_TOKEN_SECRET) invalidSecrets.push("SYNC_TOKEN_SECRET");
+    if (config.secretStoreKey === DEV_SECRET_STORE_KEY) invalidSecrets.push("SECRET_STORE_KEY");
+    if (config.localKmsMasterKey === DEV_LOCAL_KMS_MASTER_KEY) invalidSecrets.push("LOCAL_KMS_MASTER_KEY");
+    if (invalidSecrets.length > 0) {
+      throw new Error(
+        `Refusing to start with default development secrets in production: ${invalidSecrets.join(", ")}`
+      );
+    }
+
+    if (!config.cookieSecure) {
+      throw new Error("Refusing to start in production with COOKIE_SECURE!=true");
+    }
+  }
+
+  return config;
 }

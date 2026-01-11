@@ -221,6 +221,7 @@ describe("API keys", () => {
     const createKey = await app.inject({
       method: "POST",
       url: `/orgs/${orgId}/api-keys`,
+      remoteAddress: "10.1.2.3",
       headers: { cookie },
       payload: { name: "ip-test" }
     });

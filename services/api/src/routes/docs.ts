@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { enforceOrgIpAllowlistForSessionWithAllowlist } from "../auth/orgIpAllowlist";
 import { isMfaEnforcedForOrg } from "../auth/mfa";
 import { encryptEnvelope, ENVELOPE_VERSION } from "../crypto/envelope";
 import { createKeyring } from "../crypto/keyring";
@@ -57,11 +58,13 @@ async function getDocMembership(
   orgId: string;
   deletedAt: Date | null;
   role: DocumentRole | null;
+  ipAllowlist: unknown;
 }> {
   const result = await request.server.db.query(
     `
-      SELECT d.org_id, d.deleted_at, dm.role
+      SELECT d.org_id, d.deleted_at, dm.role, os.ip_allowlist
       FROM documents d
+      LEFT JOIN org_settings os ON os.org_id = d.org_id
       LEFT JOIN document_members dm
         ON dm.document_id = d.id AND dm.user_id = $2
       WHERE d.id = $1
@@ -71,11 +74,11 @@ async function getDocMembership(
   );
 
   if (result.rowCount !== 1) {
-    return { orgId: "", deletedAt: null, role: null };
+    return { orgId: "", deletedAt: null, role: null, ipAllowlist: null };
   }
 
-  const row = result.rows[0] as { org_id: string; deleted_at: Date | null; role: DocumentRole | null };
-  return { orgId: row.org_id, deletedAt: row.deleted_at, role: row.role };
+  const row = result.rows[0] as { org_id: string; deleted_at: Date | null; role: DocumentRole | null; ip_allowlist: unknown };
+  return { orgId: row.org_id, deletedAt: row.deleted_at, role: row.role, ipAllowlist: row.ip_allowlist };
 }
 
 async function requireDocRole(
@@ -88,6 +91,18 @@ async function requireDocRole(
     reply.code(404).send({ error: "doc_not_found" });
     return null;
   }
+
+  if (
+    !(await enforceOrgIpAllowlistForSessionWithAllowlist(
+      request,
+      reply,
+      membership.orgId,
+      membership.ipAllowlist
+    ))
+  ) {
+    return null;
+  }
+
   if (!membership.role) {
     reply.code(403).send({ error: "forbidden" });
     return null;

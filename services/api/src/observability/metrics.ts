@@ -10,6 +10,7 @@ export type ApiMetrics = {
   dbQueriesTotal: Counter<"operation" | "status">;
   dbQueryDurationSeconds: Histogram<"operation" | "status">;
   authFailuresTotal: Counter<"reason">;
+  rateLimitedTotal: Counter<"route" | "reason">;
   siemBatchesTotal: Counter<"status">;
   siemEventsTotal: Counter<"status">;
   siemBatchDurationSeconds: Histogram;
@@ -81,6 +82,13 @@ export function createMetrics(): ApiMetrics {
     registers: [registry]
   });
 
+  const rateLimitedTotal = new Counter({
+    name: "rate_limited_total",
+    help: "Requests rejected by API rate limiting",
+    labelNames: ["route", "reason"],
+    registers: [registry]
+  });
+
   const siemBatchesTotal = new Counter({
     name: "siem_batches_total",
     help: "SIEM export batches processed",
@@ -115,6 +123,7 @@ export function createMetrics(): ApiMetrics {
     dbQueriesTotal,
     dbQueryDurationSeconds,
     authFailuresTotal,
+    rateLimitedTotal,
     siemBatchesTotal,
     siemEventsTotal,
     siemBatchDurationSeconds,

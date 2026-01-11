@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { validateDlpPolicy } from "../dlp/dlp";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
@@ -162,7 +163,7 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     };
   });
 
-  app.get("/orgs/:orgId", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/orgs/:orgId", { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] }, async (request, reply) => {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgMember(request, reply, orgId);
     if (!member) return;
@@ -202,164 +203,137 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     certificatePins: z.array(z.string().min(1)).optional()
   });
 
-  app.patch("/orgs/:orgId/settings", { preHandler: requireAuth }, async (request, reply) => {
-    const orgId = (request.params as { orgId: string }).orgId;
-    const member = await requireOrgMember(request, reply, orgId);
-    if (!member) return;
-    if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
+  app.patch(
+    "/orgs/:orgId/settings",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
+      const orgId = (request.params as { orgId: string }).orgId;
+      const member = await requireOrgMember(request, reply, orgId);
+      if (!member) return;
+      if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
 
-    const parsed = PatchSettingsBody.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+      const parsed = PatchSettingsBody.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
-    const updates = parsed.data;
+      const updates = parsed.data;
 
-    const currentSettingsRes = await app.db.query("SELECT * FROM org_settings WHERE org_id = $1", [orgId]);
-    if (currentSettingsRes.rowCount !== 1) {
-      return reply.code(404).send({ error: "org_not_found" });
-    }
-    const currentSettings = currentSettingsRes.rows[0] as Record<string, any>;
-    const beforePolicy = extractPolicy(currentSettings);
-    const nextPolicy: OrgPolicySnapshot = structuredClone(beforePolicy);
-
-    if (updates.cloudEncryptionAtRest !== undefined)
-      nextPolicy.encryption.cloudEncryptionAtRest = updates.cloudEncryptionAtRest;
-    if (updates.kmsProvider !== undefined) nextPolicy.encryption.kmsProvider = updates.kmsProvider;
-    if (updates.kmsKeyId !== undefined) nextPolicy.encryption.kmsKeyId = updates.kmsKeyId;
-    if (updates.keyRotationDays !== undefined) nextPolicy.encryption.keyRotationDays = updates.keyRotationDays;
-    if (updates.certificatePinningEnabled !== undefined)
-      nextPolicy.encryption.certificatePinningEnabled = updates.certificatePinningEnabled;
-    if (updates.certificatePins !== undefined) nextPolicy.encryption.certificatePins = updates.certificatePins;
-
-    if (updates.dataResidencyRegion !== undefined) nextPolicy.dataResidency.region = updates.dataResidencyRegion;
-    if (updates.dataResidencyAllowedRegions !== undefined)
-      nextPolicy.dataResidency.allowedRegions = updates.dataResidencyAllowedRegions;
-    if (updates.allowCrossRegionProcessing !== undefined)
-      nextPolicy.dataResidency.allowCrossRegionProcessing = updates.allowCrossRegionProcessing;
-    if (updates.aiProcessingRegion !== undefined)
-      nextPolicy.dataResidency.aiProcessingRegion = updates.aiProcessingRegion;
-
-    if (updates.auditLogRetentionDays !== undefined)
-      nextPolicy.retention.auditLogRetentionDays = updates.auditLogRetentionDays;
-    if (updates.documentVersionRetentionDays !== undefined)
-      nextPolicy.retention.documentVersionRetentionDays = updates.documentVersionRetentionDays;
-    if (updates.deletedDocumentRetentionDays !== undefined)
-      nextPolicy.retention.deletedDocumentRetentionDays = updates.deletedDocumentRetentionDays;
-    if (updates.legalHoldOverridesRetention !== undefined)
-      nextPolicy.retention.legalHoldOverridesRetention = updates.legalHoldOverridesRetention;
-
-    if (nextPolicy.dataResidency.region !== "custom") {
-      nextPolicy.dataResidency.allowedRegions = [];
-    }
-
-    try {
-      validatePolicy(nextPolicy);
-    } catch (err) {
-      return reply.code(400).send({ error: "invalid_request", message: (err as Error).message });
-    }
-
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    const addSet = (sql: string, value: unknown) => {
-      values.push(value);
-      sets.push(`${sql} = $${values.length}`);
-    };
-
-    if (updates.requireMfa !== undefined) addSet("require_mfa", updates.requireMfa);
-    if (updates.allowedAuthMethods !== undefined)
-      addSet("allowed_auth_methods", JSON.stringify(updates.allowedAuthMethods));
-    if (updates.ipAllowlist !== undefined) addSet("ip_allowlist", JSON.stringify(updates.ipAllowlist));
-    if (updates.allowExternalSharing !== undefined) addSet("allow_external_sharing", updates.allowExternalSharing);
-    if (updates.allowPublicLinks !== undefined) addSet("allow_public_links", updates.allowPublicLinks);
-    if (updates.defaultPermission !== undefined) addSet("default_permission", updates.defaultPermission);
-    if (updates.aiEnabled !== undefined) addSet("ai_enabled", updates.aiEnabled);
-    if (updates.aiDataProcessingConsent !== undefined)
-      addSet("ai_data_processing_consent", updates.aiDataProcessingConsent);
-    if (updates.dataResidencyRegion !== undefined) addSet("data_residency_region", updates.dataResidencyRegion);
-    if (updates.dataResidencyAllowedRegions !== undefined) {
-      const effectiveRegion =
-        updates.dataResidencyRegion !== undefined
-          ? updates.dataResidencyRegion
-          : String(currentSettings.data_residency_region ?? "us");
-      if (effectiveRegion !== "custom") {
-        return reply.code(400).send({
-          error: "invalid_request",
-          message: "dataResidencyAllowedRegions is only valid when dataResidencyRegion is custom"
-        });
+      const currentSettingsRes = await app.db.query("SELECT * FROM org_settings WHERE org_id = $1", [orgId]);
+      if (currentSettingsRes.rowCount !== 1) {
+        return reply.code(404).send({ error: "org_not_found" });
       }
-      addSet("data_residency_allowed_regions", JSON.stringify(updates.dataResidencyAllowedRegions));
-    }
-    if (updates.allowCrossRegionProcessing !== undefined)
-      addSet("allow_cross_region_processing", updates.allowCrossRegionProcessing);
-    if (updates.aiProcessingRegion !== undefined) addSet("ai_processing_region", updates.aiProcessingRegion);
-    if (updates.auditLogRetentionDays !== undefined)
-      addSet("audit_log_retention_days", updates.auditLogRetentionDays);
-    if (updates.documentVersionRetentionDays !== undefined)
-      addSet("document_version_retention_days", updates.documentVersionRetentionDays);
-    if (updates.deletedDocumentRetentionDays !== undefined)
-      addSet("deleted_document_retention_days", updates.deletedDocumentRetentionDays);
-    if (updates.legalHoldOverridesRetention !== undefined)
-      addSet("legal_hold_overrides_retention", updates.legalHoldOverridesRetention);
+      const currentSettings = currentSettingsRes.rows[0] as Record<string, any>;
+      const beforePolicy = extractPolicy(currentSettings);
+      const nextPolicy: OrgPolicySnapshot = structuredClone(beforePolicy);
 
-    if (updates.cloudEncryptionAtRest !== undefined)
-      addSet("cloud_encryption_at_rest", updates.cloudEncryptionAtRest);
-    if (updates.kmsProvider !== undefined) addSet("kms_provider", updates.kmsProvider);
-    if (updates.kmsKeyId !== undefined) addSet("kms_key_id", updates.kmsKeyId);
-    if (updates.keyRotationDays !== undefined) addSet("key_rotation_days", updates.keyRotationDays);
-    if (updates.certificatePinningEnabled !== undefined)
-      addSet("certificate_pinning_enabled", updates.certificatePinningEnabled);
-    if (updates.certificatePins !== undefined) addSet("certificate_pins", JSON.stringify(updates.certificatePins));
+      if (updates.cloudEncryptionAtRest !== undefined)
+        nextPolicy.encryption.cloudEncryptionAtRest = updates.cloudEncryptionAtRest;
+      if (updates.kmsProvider !== undefined) nextPolicy.encryption.kmsProvider = updates.kmsProvider;
+      if (updates.kmsKeyId !== undefined) nextPolicy.encryption.kmsKeyId = updates.kmsKeyId;
+      if (updates.keyRotationDays !== undefined) nextPolicy.encryption.keyRotationDays = updates.keyRotationDays;
+      if (updates.certificatePinningEnabled !== undefined)
+        nextPolicy.encryption.certificatePinningEnabled = updates.certificatePinningEnabled;
+      if (updates.certificatePins !== undefined) nextPolicy.encryption.certificatePins = updates.certificatePins;
 
-    // Normalize residency_allowed_regions: only meaningful for `custom`. Clear any stale values on region change.
-    if (updates.dataResidencyRegion !== undefined && updates.dataResidencyRegion !== "custom") {
-      addSet("data_residency_allowed_regions", null);
-    }
+      if (updates.dataResidencyRegion !== undefined) nextPolicy.dataResidency.region = updates.dataResidencyRegion;
+      if (updates.dataResidencyAllowedRegions !== undefined)
+        nextPolicy.dataResidency.allowedRegions = updates.dataResidencyAllowedRegions;
+      if (updates.allowCrossRegionProcessing !== undefined)
+        nextPolicy.dataResidency.allowCrossRegionProcessing = updates.allowCrossRegionProcessing;
+      if (updates.aiProcessingRegion !== undefined)
+        nextPolicy.dataResidency.aiProcessingRegion = updates.aiProcessingRegion;
 
-    if (sets.length === 0) return reply.send({ ok: true });
+      if (updates.auditLogRetentionDays !== undefined)
+        nextPolicy.retention.auditLogRetentionDays = updates.auditLogRetentionDays;
+      if (updates.documentVersionRetentionDays !== undefined)
+        nextPolicy.retention.documentVersionRetentionDays = updates.documentVersionRetentionDays;
+      if (updates.deletedDocumentRetentionDays !== undefined)
+        nextPolicy.retention.deletedDocumentRetentionDays = updates.deletedDocumentRetentionDays;
+      if (updates.legalHoldOverridesRetention !== undefined)
+        nextPolicy.retention.legalHoldOverridesRetention = updates.legalHoldOverridesRetention;
 
-    values.push(orgId);
-    await app.db.query(
-      `
-        UPDATE org_settings
-        SET ${sets.join(", ")}, updated_at = now()
-        WHERE org_id = $${values.length}
-      `,
-      values
-    );
+      if (nextPolicy.dataResidency.region !== "custom") {
+        nextPolicy.dataResidency.allowedRegions = [];
+      }
 
-    await writeAuditEvent(
-      app.db,
-      createAuditEvent({
-        eventType: "admin.settings_changed",
-        actor: { type: "user", id: request.user!.id },
-        context: {
-          orgId,
-          userId: request.user!.id,
-          userEmail: request.user!.email,
-          sessionId: request.session?.id,
-          ipAddress: getClientIp(request),
-          userAgent: getUserAgent(request)
-        },
-        resource: { type: "organization", id: orgId },
-        success: true,
-        details: { updates }
-      })
-    );
+      try {
+        validatePolicy(nextPolicy);
+      } catch (err) {
+        return reply.code(400).send({ error: "invalid_request", message: (err as Error).message });
+      }
 
-    const policyChanged = {
-      encryption: JSON.stringify(beforePolicy.encryption) !== JSON.stringify(nextPolicy.encryption),
-      dataResidency: JSON.stringify(beforePolicy.dataResidency) !== JSON.stringify(nextPolicy.dataResidency),
-      retention: JSON.stringify(beforePolicy.retention) !== JSON.stringify(nextPolicy.retention)
-    };
+      const sets: string[] = [];
+      const values: unknown[] = [];
+      const addSet = (sql: string, value: unknown) => {
+        values.push(value);
+        sets.push(`${sql} = $${values.length}`);
+      };
 
-    const writePolicyEvent = async (
-      section: keyof OrgPolicySnapshot,
-      before: OrgPolicySnapshot[keyof OrgPolicySnapshot],
-      after: OrgPolicySnapshot[keyof OrgPolicySnapshot]
-    ) => {
+      if (updates.requireMfa !== undefined) addSet("require_mfa", updates.requireMfa);
+      if (updates.allowedAuthMethods !== undefined)
+        addSet("allowed_auth_methods", JSON.stringify(updates.allowedAuthMethods));
+      if (updates.ipAllowlist !== undefined) addSet("ip_allowlist", JSON.stringify(updates.ipAllowlist));
+      if (updates.allowExternalSharing !== undefined) addSet("allow_external_sharing", updates.allowExternalSharing);
+      if (updates.allowPublicLinks !== undefined) addSet("allow_public_links", updates.allowPublicLinks);
+      if (updates.defaultPermission !== undefined) addSet("default_permission", updates.defaultPermission);
+      if (updates.aiEnabled !== undefined) addSet("ai_enabled", updates.aiEnabled);
+      if (updates.aiDataProcessingConsent !== undefined)
+        addSet("ai_data_processing_consent", updates.aiDataProcessingConsent);
+      if (updates.dataResidencyRegion !== undefined) addSet("data_residency_region", updates.dataResidencyRegion);
+      if (updates.dataResidencyAllowedRegions !== undefined) {
+        const effectiveRegion =
+          updates.dataResidencyRegion !== undefined
+            ? updates.dataResidencyRegion
+            : String(currentSettings.data_residency_region ?? "us");
+        if (effectiveRegion !== "custom") {
+          return reply.code(400).send({
+            error: "invalid_request",
+            message: "dataResidencyAllowedRegions is only valid when dataResidencyRegion is custom"
+          });
+        }
+        addSet("data_residency_allowed_regions", JSON.stringify(updates.dataResidencyAllowedRegions));
+      }
+      if (updates.allowCrossRegionProcessing !== undefined)
+        addSet("allow_cross_region_processing", updates.allowCrossRegionProcessing);
+      if (updates.aiProcessingRegion !== undefined) addSet("ai_processing_region", updates.aiProcessingRegion);
+      if (updates.auditLogRetentionDays !== undefined)
+        addSet("audit_log_retention_days", updates.auditLogRetentionDays);
+      if (updates.documentVersionRetentionDays !== undefined)
+        addSet("document_version_retention_days", updates.documentVersionRetentionDays);
+      if (updates.deletedDocumentRetentionDays !== undefined)
+        addSet("deleted_document_retention_days", updates.deletedDocumentRetentionDays);
+      if (updates.legalHoldOverridesRetention !== undefined)
+        addSet("legal_hold_overrides_retention", updates.legalHoldOverridesRetention);
+
+      if (updates.cloudEncryptionAtRest !== undefined)
+        addSet("cloud_encryption_at_rest", updates.cloudEncryptionAtRest);
+      if (updates.kmsProvider !== undefined) addSet("kms_provider", updates.kmsProvider);
+      if (updates.kmsKeyId !== undefined) addSet("kms_key_id", updates.kmsKeyId);
+      if (updates.keyRotationDays !== undefined) addSet("key_rotation_days", updates.keyRotationDays);
+      if (updates.certificatePinningEnabled !== undefined)
+        addSet("certificate_pinning_enabled", updates.certificatePinningEnabled);
+      if (updates.certificatePins !== undefined) addSet("certificate_pins", JSON.stringify(updates.certificatePins));
+
+      // Normalize residency_allowed_regions: only meaningful for `custom`. Clear any stale values on region change.
+      if (updates.dataResidencyRegion !== undefined && updates.dataResidencyRegion !== "custom") {
+        addSet("data_residency_allowed_regions", null);
+      }
+
+      if (sets.length === 0) return reply.send({ ok: true });
+
+      values.push(orgId);
+      await app.db.query(
+        `
+          UPDATE org_settings
+          SET ${sets.join(", ")}, updated_at = now()
+          WHERE org_id = $${values.length}
+        `,
+        values
+      );
+
       await writeAuditEvent(
         app.db,
         createAuditEvent({
-          eventType: `org.policy.${String(section)}.updated`,
+          eventType: "admin.settings_changed",
           actor: { type: "user", id: request.user!.id },
           context: {
             orgId,
@@ -371,81 +345,120 @@ export function registerOrgRoutes(app: FastifyInstance): void {
           },
           resource: { type: "organization", id: orgId },
           success: true,
-          details: { before, after }
+          details: { updates }
         })
       );
-    };
 
-    if (policyChanged.encryption) {
-      await writePolicyEvent("encryption", beforePolicy.encryption, nextPolicy.encryption);
+      const policyChanged = {
+        encryption: JSON.stringify(beforePolicy.encryption) !== JSON.stringify(nextPolicy.encryption),
+        dataResidency: JSON.stringify(beforePolicy.dataResidency) !== JSON.stringify(nextPolicy.dataResidency),
+        retention: JSON.stringify(beforePolicy.retention) !== JSON.stringify(nextPolicy.retention)
+      };
+
+      const writePolicyEvent = async (
+        section: keyof OrgPolicySnapshot,
+        before: OrgPolicySnapshot[keyof OrgPolicySnapshot],
+        after: OrgPolicySnapshot[keyof OrgPolicySnapshot]
+      ) => {
+        await writeAuditEvent(
+          app.db,
+          createAuditEvent({
+            eventType: `org.policy.${String(section)}.updated`,
+            actor: { type: "user", id: request.user!.id },
+            context: {
+              orgId,
+              userId: request.user!.id,
+              userEmail: request.user!.email,
+              sessionId: request.session?.id,
+              ipAddress: getClientIp(request),
+              userAgent: getUserAgent(request)
+            },
+            resource: { type: "organization", id: orgId },
+            success: true,
+            details: { before, after }
+          })
+        );
+      };
+
+      if (policyChanged.encryption) {
+        await writePolicyEvent("encryption", beforePolicy.encryption, nextPolicy.encryption);
+      }
+      if (policyChanged.dataResidency) {
+        await writePolicyEvent("dataResidency", beforePolicy.dataResidency, nextPolicy.dataResidency);
+      }
+      if (policyChanged.retention) {
+        await writePolicyEvent("retention", beforePolicy.retention, nextPolicy.retention);
+      }
+
+      return reply.send({ ok: true });
     }
-    if (policyChanged.dataResidency) {
-      await writePolicyEvent("dataResidency", beforePolicy.dataResidency, nextPolicy.dataResidency);
+  );
+
+  app.get(
+    "/orgs/:orgId/dlp-policy",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
+      const orgId = (request.params as { orgId: string }).orgId;
+      const member = await requireOrgMember(request, reply, orgId);
+      if (!member) return;
+
+      const res = await app.db.query("SELECT policy FROM org_dlp_policies WHERE org_id = $1", [orgId]);
+      if (res.rowCount !== 1) return reply.code(404).send({ error: "dlp_policy_not_found" });
+      return reply.send({ policy: res.rows[0].policy });
     }
-    if (policyChanged.retention) {
-      await writePolicyEvent("retention", beforePolicy.retention, nextPolicy.retention);
-    }
-
-    return reply.send({ ok: true });
-  });
-
-  app.get("/orgs/:orgId/dlp-policy", { preHandler: requireAuth }, async (request, reply) => {
-    const orgId = (request.params as { orgId: string }).orgId;
-    const member = await requireOrgMember(request, reply, orgId);
-    if (!member) return;
-
-    const res = await app.db.query("SELECT policy FROM org_dlp_policies WHERE org_id = $1", [orgId]);
-    if (res.rowCount !== 1) return reply.code(404).send({ error: "dlp_policy_not_found" });
-    return reply.send({ policy: res.rows[0].policy });
-  });
+  );
 
   const PutDlpPolicyBody = z.object({ policy: z.unknown() });
 
-  app.put("/orgs/:orgId/dlp-policy", { preHandler: requireAuth }, async (request, reply) => {
-    const orgId = (request.params as { orgId: string }).orgId;
-    const member = await requireOrgMember(request, reply, orgId);
-    if (!member) return;
-    if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
+  app.put(
+    "/orgs/:orgId/dlp-policy",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
+      const orgId = (request.params as { orgId: string }).orgId;
+      const member = await requireOrgMember(request, reply, orgId);
+      if (!member) return;
+      if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
 
-    const parsed = PutDlpPolicyBody.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+      const parsed = PutDlpPolicyBody.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
-    try {
-      validateDlpPolicy(parsed.data.policy);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid policy";
-      return reply.code(400).send({ error: "invalid_policy", message });
+      try {
+        validateDlpPolicy(parsed.data.policy);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid policy";
+        return reply.code(400).send({ error: "invalid_policy", message });
+      }
+
+      await app.db.query(
+        `
+          INSERT INTO org_dlp_policies (org_id, policy)
+          VALUES ($1, $2)
+          ON CONFLICT (org_id)
+          DO UPDATE SET policy = EXCLUDED.policy, updated_at = now()
+        `,
+        [orgId, JSON.stringify(parsed.data.policy)]
+      );
+
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType: "admin.settings_changed",
+          actor: { type: "user", id: request.user!.id },
+          context: {
+            orgId,
+            userId: request.user!.id,
+            userEmail: request.user!.email,
+            sessionId: request.session?.id,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "organization", id: orgId },
+          success: true,
+          details: { updates: { dlpPolicy: true } }
+        })
+      );
+
+      return reply.send({ policy: parsed.data.policy });
     }
-
-    await app.db.query(
-      `
-        INSERT INTO org_dlp_policies (org_id, policy)
-        VALUES ($1, $2)
-        ON CONFLICT (org_id)
-        DO UPDATE SET policy = EXCLUDED.policy, updated_at = now()
-      `,
-      [orgId, JSON.stringify(parsed.data.policy)]
-    );
-
-    await writeAuditEvent(
-      app.db,
-      createAuditEvent({
-        eventType: "admin.settings_changed",
-        actor: { type: "user", id: request.user!.id },
-        context: {
-          orgId,
-          userId: request.user!.id,
-          userEmail: request.user!.email,
-          sessionId: request.session?.id,
-          ipAddress: getClientIp(request),
-          userAgent: getUserAgent(request)
-        },
-        resource: { type: "organization", id: orgId },
-        success: true,
-        details: { updates: { dlpPolicy: true } }
-      })
-    );
-
-    return reply.send({ policy: parsed.data.policy });
-  });
+  );
 }
