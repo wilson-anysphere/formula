@@ -24,24 +24,26 @@ function applyStroke(ctx: CanvasRenderingContext2D, stroke: Stroke | undefined):
 
 function drawRoundedRect(ctx: CanvasRenderingContext2D, node: Pick<RectNode, "x" | "y" | "width" | "height" | "rx" | "ry">): void {
   const { x, y, width, height } = node;
-  const rx = node.rx ?? node.ry ?? 0;
-  const ry = node.ry ?? node.rx ?? 0;
-  const r = Math.max(0, Math.min(rx, ry, width / 2, height / 2));
+  const rxRaw = node.rx ?? node.ry ?? 0;
+  const ryRaw = node.ry ?? node.rx ?? 0;
+  const rx = Math.max(0, Math.min(rxRaw, width / 2));
+  const ry = Math.max(0, Math.min(ryRaw, height / 2));
 
-  if (!r) {
+  if (!rx || !ry) {
     ctx.rect(x, y, width, height);
     return;
   }
 
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.arcTo(x + width, y, x + width, y + r, r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.arcTo(x + width, y + height, x + width - r, y + height, r);
-  ctx.lineTo(x + r, y + height);
-  ctx.arcTo(x, y + height, x, y + height - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
+  // Use `ellipse` so rx/ry can differ (Canvas `arcTo` only supports circular radii).
+  ctx.moveTo(x + rx, y);
+  ctx.lineTo(x + width - rx, y);
+  ctx.ellipse(x + width - rx, y + ry, rx, ry, 0, -Math.PI / 2, 0);
+  ctx.lineTo(x + width, y + height - ry);
+  ctx.ellipse(x + width - rx, y + height - ry, rx, ry, 0, 0, Math.PI / 2);
+  ctx.lineTo(x + rx, y + height);
+  ctx.ellipse(x + rx, y + height - ry, rx, ry, 0, Math.PI / 2, Math.PI);
+  ctx.lineTo(x, y + ry);
+  ctx.ellipse(x + rx, y + ry, rx, ry, 0, Math.PI, (Math.PI * 3) / 2);
   ctx.closePath();
 }
 

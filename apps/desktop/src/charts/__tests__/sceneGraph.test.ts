@@ -18,6 +18,7 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: stri
     bezierCurveTo: () => calls.push("bezierCurveTo"),
     arcTo: () => calls.push("arcTo"),
     arc: () => calls.push("arc"),
+    ellipse: () => calls.push("ellipse"),
     closePath: () => calls.push("closePath"),
     rect: () => calls.push("rect"),
     fill: () => calls.push("fill"),
@@ -132,7 +133,8 @@ describe("charts scene graph", () => {
       ],
     };
 
-    const { ctx } = createStubCanvasContext();
+    const { ctx, calls } = createStubCanvasContext();
     expect(() => renderSceneToCanvas(scene, ctx)).not.toThrow();
+    expect(calls).toContain("ellipse");
   });
 });
