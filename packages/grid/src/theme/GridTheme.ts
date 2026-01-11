@@ -1,18 +1,33 @@
 export interface GridTheme {
+  /** Background color for the entire grid surface. */
   gridBg: string;
+  /** Grid line (cell border) color. */
   gridLine: string;
+  /** Background color for the header row/col (when enabled via frozen rows/cols). */
   headerBg: string;
+  /** Text color for header cells. */
   headerText: string;
+  /** Default text color for regular cells (unless a cell style overrides it). */
   cellText: string;
+  /** Text color used for error strings (values starting with `#`, unless overridden). */
   errorText: string;
+  /** Fill color for selection rectangles. */
   selectionFill: string;
+  /** Stroke color for selection rectangles. */
   selectionBorder: string;
+  /** Fill color for the selection handle (bottom-right square). */
   selectionHandle: string;
+  /** Scrollbar track background. */
   scrollbarTrack: string;
+  /** Scrollbar thumb background. */
   scrollbarThumb: string;
+  /** Freeze pane divider line color. */
   freezeLine: string;
+  /** Comment indicator (unresolved) triangle fill. */
   commentIndicator: string;
+  /** Comment indicator (resolved) triangle fill. */
   commentIndicatorResolved: string;
+  /** Fallback color for remote presence overlays when no per-presence color is provided. */
   remotePresenceDefault: string;
 }
 
@@ -77,4 +92,3 @@ export function gridThemesEqual(a: GridTheme, b: GridTheme): boolean {
   }
   return true;
 }
-
