@@ -38,6 +38,7 @@ pub struct Column {
     chunks: Vec<EncodedChunk>,
     stats: ColumnStats,
     dictionary: Option<Arc<Vec<Arc<str>>>>,
+    distinct: Option<DistinctCounter>,
 }
 
 impl Column {
@@ -1134,23 +1135,32 @@ impl MutableIntColumn {
     }
 
     fn from_column(col: Column, page_size: usize) -> Self {
-        let distinct_base = col.stats.distinct_count;
-        let (null_count, min, max, sum) = match (&col.stats.min, &col.stats.max, col.stats.sum) {
-            (min, max, sum) => {
-                let min_i = min.as_ref().and_then(i64_from_value);
-                let max_i = max.as_ref().and_then(i64_from_value);
-                (col.stats.null_count, min_i, max_i, sum.unwrap_or(0.0) as i128)
-            }
+        let Column {
+            schema,
+            chunks,
+            stats,
+            dictionary: _,
+            distinct,
+        } = col;
+
+        let (distinct_base, distinct) = match distinct {
+            Some(counter) => (0, counter),
+            None => (stats.distinct_count, DistinctCounter::new()),
         };
 
+        let min = stats.min.as_ref().and_then(i64_from_value);
+        let max = stats.max.as_ref().and_then(i64_from_value);
+        let sum = stats.sum.unwrap_or(0.0) as i128;
+        let null_count = stats.null_count;
+
         Self {
-            schema: col.schema,
+            schema,
             page_size,
             current: Vec::with_capacity(page_size),
             validity: BitVec::with_capacity_bits(page_size),
-            chunks: col.chunks,
+            chunks,
             distinct_base,
-            distinct: DistinctCounter::new(),
+            distinct,
             null_count,
             min,
             max,
@@ -1314,21 +1324,25 @@ impl MutableIntColumn {
     }
 
     fn as_column(&self) -> Column {
+        let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
         Column {
             schema: self.schema.clone(),
             chunks: self.chunks.clone(),
             stats: self.stats(),
             dictionary: None,
+            distinct,
         }
     }
 
     fn into_column(self) -> Column {
         let stats = self.stats();
+        let distinct = (self.distinct_base == 0).then(|| self.distinct);
         Column {
             schema: self.schema,
             chunks: self.chunks,
             stats,
             dictionary: None,
+            distinct,
         }
     }
 }
@@ -1351,26 +1365,38 @@ impl MutableFloatColumn {
     }
 
     fn from_column(col: Column, page_size: usize) -> Self {
-        let distinct_base = col.stats.distinct_count;
-        let min = match &col.stats.min {
+        let Column {
+            schema,
+            chunks,
+            stats,
+            dictionary: _,
+            distinct,
+        } = col;
+
+        let (distinct_base, distinct) = match distinct {
+            Some(counter) => (0, counter),
+            None => (stats.distinct_count, DistinctCounter::new()),
+        };
+
+        let min = match &stats.min {
             Some(Value::Number(v)) => Some(*v),
             _ => None,
         };
-        let max = match &col.stats.max {
+        let max = match &stats.max {
             Some(Value::Number(v)) => Some(*v),
             _ => None,
         };
-        let sum = col.stats.sum.unwrap_or(0.0);
+        let sum = stats.sum.unwrap_or(0.0);
 
         Self {
-            schema: col.schema,
+            schema,
             page_size,
             current: Vec::with_capacity(page_size),
             validity: BitVec::with_capacity_bits(page_size),
-            chunks: col.chunks,
+            chunks,
             distinct_base,
-            distinct: DistinctCounter::new(),
-            null_count: col.stats.null_count,
+            distinct,
+            null_count: stats.null_count,
             min,
             max,
             sum,
@@ -1505,21 +1531,25 @@ impl MutableFloatColumn {
     }
 
     fn as_column(&self) -> Column {
+        let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
         Column {
             schema: self.schema.clone(),
             chunks: self.chunks.clone(),
             stats: self.stats(),
             dictionary: None,
+            distinct,
         }
     }
 
     fn into_column(self) -> Column {
         let stats = self.stats();
+        let distinct = (self.distinct_base == 0).then(|| self.distinct);
         Column {
             schema: self.schema,
             chunks: self.chunks,
             stats,
             dictionary: None,
+            distinct,
         }
     }
 }
@@ -1538,14 +1568,22 @@ impl MutableBoolColumn {
     }
 
     fn from_column(col: Column, page_size: usize) -> Self {
-        let true_count = col.stats.sum.unwrap_or(0.0).round().max(0.0) as u64;
+        let Column {
+            schema,
+            chunks,
+            stats,
+            dictionary: _,
+            distinct: _,
+        } = col;
+
+        let true_count = stats.sum.unwrap_or(0.0).round().max(0.0) as u64;
         Self {
-            schema: col.schema,
+            schema,
             page_size,
             current: BitVec::with_capacity_bits(page_size),
             validity: BitVec::with_capacity_bits(page_size),
-            chunks: col.chunks,
-            null_count: col.stats.null_count,
+            chunks,
+            null_count: stats.null_count,
             true_count,
         }
     }
@@ -1699,6 +1737,7 @@ impl MutableBoolColumn {
             chunks: self.chunks.clone(),
             stats: self.stats(),
             dictionary: None,
+            distinct: None,
         }
     }
 
@@ -1709,6 +1748,7 @@ impl MutableBoolColumn {
             chunks: self.chunks,
             stats,
             dictionary: None,
+            distinct: None,
         }
     }
 }
@@ -1731,38 +1771,46 @@ impl MutableDictColumn {
     }
 
     fn from_column(col: Column, page_size: usize) -> Self {
-        let dict = col.dictionary.unwrap_or_else(|| Arc::new(Vec::new()));
+        let Column {
+            schema,
+            chunks,
+            stats,
+            dictionary,
+            distinct: _,
+        } = col;
+
+        let dict = dictionary.unwrap_or_else(|| Arc::new(Vec::new()));
         let mut dict_map = HashMap::with_capacity(dict.len());
         for (idx, s) in dict.iter().cloned().enumerate() {
             dict_map.insert(s, idx as u32);
         }
 
         let (min, max, total_len) = {
-            let min = col.stats.min.as_ref().and_then(|v| match v {
+            let min = stats.min.as_ref().and_then(|v| match v {
                 Value::String(s) => Some(s.clone()),
                 _ => None,
             });
-            let max = col.stats.max.as_ref().and_then(|v| match v {
+            let max = stats.max.as_ref().and_then(|v| match v {
                 Value::String(s) => Some(s.clone()),
                 _ => None,
             });
-            let non_null = (col.chunks.iter().map(|c| c.len() as u64).sum::<u64>())
-                .saturating_sub(col.stats.null_count)
+            let non_null =
+                (chunks.iter().map(|c| c.len() as u64).sum::<u64>()).saturating_sub(stats.null_count)
                 .max(1);
-            let avg = col.stats.avg_length.unwrap_or(0.0);
+            let avg = stats.avg_length.unwrap_or(0.0);
             let total_len = (avg * non_null as f64).round().max(0.0) as u64;
             (min, max, total_len)
         };
 
         Self {
-            schema: col.schema,
+            schema,
             page_size,
             dictionary: dict,
             dict_map,
             current: Vec::with_capacity(page_size),
             validity: BitVec::with_capacity_bits(page_size),
-            chunks: col.chunks,
-            null_count: col.stats.null_count,
+            chunks,
+            null_count: stats.null_count,
             min,
             max,
             total_len,
@@ -1948,6 +1996,7 @@ impl MutableDictColumn {
             chunks: self.chunks.clone(),
             stats: self.stats(),
             dictionary: Some(self.dictionary.clone()),
+            distinct: None,
         }
     }
 
@@ -1958,6 +2007,7 @@ impl MutableDictColumn {
             chunks: self.chunks,
             stats,
             dictionary: Some(self.dictionary),
+            distinct: None,
         }
     }
 }
@@ -2363,6 +2413,7 @@ impl IntBuilder {
             chunks: self.chunks,
             stats: self.stats,
             dictionary: None,
+            distinct: Some(self.distinct),
         }
     }
 }
@@ -2439,6 +2490,7 @@ impl FloatBuilder {
             chunks: self.chunks,
             stats: self.stats,
             dictionary: None,
+            distinct: Some(self.distinct),
         }
     }
 }
@@ -2521,6 +2573,7 @@ impl BoolBuilder {
             chunks: self.chunks,
             stats: self.stats,
             dictionary: None,
+            distinct: None,
         }
     }
 }
@@ -2628,6 +2681,7 @@ impl DictBuilder {
             chunks: self.chunks,
             stats: self.stats,
             dictionary: Some(Arc::new(self.dictionary)),
+            distinct: None,
         }
     }
 }
