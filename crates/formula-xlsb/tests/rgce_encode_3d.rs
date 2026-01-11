@@ -51,6 +51,14 @@ fn unknown_name_is_a_structured_error() {
 }
 
 #[test]
+fn encodes_and_decodes_builtin_function_via_ftab() {
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("=ABS(-1)", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "ABS(-1)");
+}
+
+#[test]
 fn encodes_addin_udf_calls_via_namex() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/udf.xlsb");
     let wb = XlsbWorkbook::open(path).expect("open xlsb");

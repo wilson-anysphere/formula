@@ -1493,11 +1493,12 @@ fn emit_func(
 ) -> Result<(), EncodeError> {
     let upper = name.trim().to_ascii_uppercase();
 
-    // Built-in functions (currently very small subset).
-    if let Some(iftab) = match upper.as_str() {
-        "SUM" => Some(0x0004u16),
-        _ => None,
-    } {
+    // Built-in functions.
+    //
+    // Note: Excel encodes "future" (forward-compatible) functions as user-defined calls (iftab=255)
+    // paired with a name token. We do not currently support that encoding path, so we explicitly
+    // avoid treating `iftab=0x00FF` as a built-in here.
+    if let Some(iftab) = formula_biff::function_name_to_id(&upper).filter(|id| *id != 0x00FF) {
         if argc > u8::MAX as usize {
             return Err(EncodeError::Parse("too many function arguments".to_string()));
         }
