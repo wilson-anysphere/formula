@@ -609,3 +609,130 @@ test("api surface: config.onDidChange fires after config.update and value persis
     value: "Hi"
   });
 });
+
+test("api surface: workbook.saveAs updates workbook path and emits beforeSave", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-saveas-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.saveAs";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-saveas-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook SaveAs" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async (nextPath) => {
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.events.onBeforeSave((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+
+          await formula.workbook.saveAs(nextPath);
+          const evt = await eventPromise;
+          const workbook = await formula.workbook.getActiveWorkbook();
+          return { evt, workbook };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const initialPath = path.join(dir, "Initial.xlsx");
+  host.openWorkbook(initialPath);
+
+  const nextPath = path.join(dir, "Next.xlsx");
+  const result = await host.executeCommand(commandId, nextPath);
+
+  assert.deepEqual(result, {
+    evt: { workbook: { name: "Next.xlsx", path: nextPath } },
+    workbook: { name: "Next.xlsx", path: nextPath }
+  });
+});
+
+test("api surface: workbook.close resets to default workbook and emits workbookOpened", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-close-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.close";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-close-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook Close" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.events.onWorkbookOpened((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+
+          await formula.workbook.close();
+          const evt = await eventPromise;
+          const workbook = await formula.workbook.getActiveWorkbook();
+          return { evt, workbook };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  host.openWorkbook(path.join(dir, "Book3.xlsx"));
+
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, {
+    evt: { workbook: { name: "MockWorkbook", path: null } },
+    workbook: { name: "MockWorkbook", path: null }
+  });
+});
