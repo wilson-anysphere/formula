@@ -170,7 +170,14 @@ export class DesktopPowerQueryRefreshManager {
   }
 
   triggerOnOpen(queryId?: string) {
-    this.manager.triggerOnOpen(queryId);
+    const handle = (this.orchestrator as any).triggerOnOpen?.(queryId) ?? null;
+    if (handle && typeof handle.cancel === "function" && handle.promise && typeof handle.promise.finally === "function") {
+      this.activeRefreshAll.add(handle);
+      handle.promise.finally(() => this.activeRefreshAll.delete(handle)).catch(() => {});
+    } else {
+      // Fallback for older orchestrator builds (should not happen in practice).
+      this.manager.triggerOnOpen(queryId);
+    }
   }
 
   refresh(queryId: string, reason: any = "manual") {

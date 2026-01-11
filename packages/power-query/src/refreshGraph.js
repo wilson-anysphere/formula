@@ -463,6 +463,11 @@ export class RefreshOrchestrator {
       resolve = res;
       reject = rej;
     });
+    // refreshAll is commonly used in "fire-and-forget" scenarios (UI buttons that
+    // rely on events, refresh-on-open policies, etc). Attach a noop handler to
+    // avoid unhandled rejection warnings/crashes when callers don't await the
+    // aggregate promise.
+    promise.catch(() => {});
 
     let remainingJobs = closure.size;
     /** @type {Set<string>} */
