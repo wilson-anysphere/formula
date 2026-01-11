@@ -319,6 +319,8 @@ describe("SAML SSO", () => {
       const startUrl = new URL(startRes.headers.location as string);
       expect(`${startUrl.origin}${startUrl.pathname}`).toBe("http://idp.example.test/sso");
       expect(startUrl.searchParams.get("SAMLRequest")).toBeTruthy();
+      const relayState = startUrl.searchParams.get("RelayState");
+      expect(relayState).toBeTruthy();
 
       const callbackUrl = `${config.publicBaseUrl}/auth/saml/${orgId}/test/callback`;
       const samlResponse = buildSignedSamlResponse({
@@ -333,7 +335,7 @@ describe("SAML SSO", () => {
         method: "POST",
         url: `/auth/saml/${orgId}/test/callback`,
         headers: { "content-type": "application/x-www-form-urlencoded" },
-        payload: new URLSearchParams({ SAMLResponse: samlResponse }).toString()
+        payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: relayState! }).toString()
       });
       expect(callbackRes.statusCode).toBe(200);
 

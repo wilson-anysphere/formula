@@ -5,6 +5,7 @@ import { SAML } from "@node-saml/node-saml";
 import { createAuditEvent, writeAuditEvent } from "../../audit/audit";
 import { withTransaction } from "../../db/tx";
 import { getClientIp, getUserAgent } from "../../http/request-meta";
+import { randomBase64Url } from "../oidc/pkce";
 import { createSession } from "../sessions";
 
 type OrgSamlProviderRow = {
@@ -24,11 +25,20 @@ type OrgAuthSettingsRow = {
   require_mfa: boolean;
 };
 
+type SamlAuthStateRow = {
+  state: string;
+  org_id: string;
+  provider_id: string;
+  created_at: Date;
+};
+
 type AttributeMapping = {
   email: string;
   name: string;
   groups?: string;
 };
+
+const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 function isProd(): boolean {
   return process.env.NODE_ENV === "production";
@@ -330,9 +340,10 @@ export async function samlStart(request: FastifyRequest, reply: FastifyReply): P
     wantResponseSigned: provider.wantResponseSigned
   });
 
+  const relayState = randomBase64Url(32);
   let url: string;
   try {
-    url = await saml.getAuthorizeUrlAsync("", undefined, {} as any);
+    url = await saml.getAuthorizeUrlAsync(relayState, undefined, {} as any);
   } catch (err) {
     request.server.metrics.authFailuresTotal.inc({ reason: "saml_authorize_url_failed" });
     await writeSamlFailureAudit({
@@ -346,13 +357,34 @@ export async function samlStart(request: FastifyRequest, reply: FastifyReply): P
     return;
   }
 
+  try {
+    await request.server.db.query(
+      `
+        INSERT INTO saml_auth_states (state, org_id, provider_id)
+        VALUES ($1, $2, $3)
+      `,
+      [relayState, orgId, providerId]
+    );
+  } catch (err) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "saml_state_store_failed" });
+    await writeSamlFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: "saml_state_store_failed",
+      errorMessage: err instanceof Error ? err.message : undefined
+    });
+    reply.code(500).send({ error: "saml_state_store_failed" });
+    return;
+  }
+
   reply.redirect(url);
 }
 
 const CallbackBody = z
   .object({
     SAMLResponse: z.string().min(1),
-    RelayState: z.string().optional()
+    RelayState: z.string().min(1)
   })
   .passthrough();
 
@@ -364,6 +396,38 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
   const parsed = CallbackBody.safeParse(request.body);
   if (!parsed.success) {
     reply.code(400).send({ error: "invalid_request" });
+    return;
+  }
+
+  const stateRes = await request.server.db.query<SamlAuthStateRow>(
+    `
+      DELETE FROM saml_auth_states
+      WHERE state = $1
+      RETURNING state, org_id, provider_id, created_at
+    `,
+    [parsed.data.RelayState]
+  );
+
+  if (stateRes.rowCount !== 1) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_state" });
+    await writeSamlFailureAudit({ request, orgId, providerId, errorCode: "invalid_state" });
+    reply.code(401).send({ error: "invalid_state" });
+    return;
+  }
+
+  const authState = stateRes.rows[0] as SamlAuthStateRow;
+  if (authState.org_id !== orgId || authState.provider_id !== providerId) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_state" });
+    await writeSamlFailureAudit({ request, orgId, providerId, errorCode: "invalid_state" });
+    reply.code(401).send({ error: "invalid_state" });
+    return;
+  }
+
+  const ageMs = Date.now() - new Date(authState.created_at).getTime();
+  if (!Number.isFinite(ageMs) || ageMs > AUTH_STATE_TTL_MS) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "state_expired" });
+    await writeSamlFailureAudit({ request, orgId, providerId, errorCode: "state_expired" });
+    reply.code(401).send({ error: "invalid_state" });
     return;
   }
 
@@ -405,8 +469,10 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
 
   let profile: Record<string, unknown>;
   try {
-    const container: Record<string, string> = { SAMLResponse: parsed.data.SAMLResponse };
-    if (typeof parsed.data.RelayState === "string") container.RelayState = parsed.data.RelayState;
+    const container: Record<string, string> = {
+      SAMLResponse: parsed.data.SAMLResponse,
+      RelayState: parsed.data.RelayState
+    };
 
     const result = await saml.validatePostResponseAsync(container);
     profile = (result?.profile ?? null) as Record<string, unknown>;
