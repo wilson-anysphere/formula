@@ -307,6 +307,9 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let eventsAllowed = true;
   let promptedForTrust = false;
   let workbookOpenFired = false;
+  // `await` always yields, even when the awaited promise is already resolved. Track when macro
+  // security status has been loaded so we can avoid extra microtask turns that can re-order event
+  // scheduling during startup (e.g. Workbook_Open racing Worksheet_Change / SelectionChange flush).
   let macroStatusResolved = false;
 
   let pendingChangesBySheet = new Map<string, Rect>();
@@ -326,7 +329,6 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let selectionFlushPromise: Promise<void> | null = null;
   let selectionFlushQueued = false;
   let selectionFlushDeferredUntilIdle = false;
-
   const statusPromise = (async () => {
     try {
       const statusRaw = await args.invoke("get_macro_security_status", { workbook_id: args.workbookId });
@@ -370,9 +372,19 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     try {
       // Allow microtask-batched edits (e.g. `startWorkbookSync`) to enqueue into the backend
       // sync chain before we drain it, so event macros see the latest persisted workbook state.
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
-      await args.drainBackendSync();
-      await setMacroUiContext(args);
+      //
+      // Selection changes are sourced from the UI (not the backend sync chain), so skipping the
+      // extra microtask turn keeps selection change macros responsive.
+      if (kind !== "selection_change") {
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+      }
+      if (kind === "selection_change") {
+        // Selection changes are emitted directly by the UI. Draining the backend sync chain here can
+        // add avoidable latency (and extra promise turns), so we only sync UI context.
+        await setMacroUiContext(args);
+      } else {
+        await Promise.all([args.drainBackendSync(), setMacroUiContext(args)]);
+      }
 
       let raw: any;
       try {
@@ -451,7 +463,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   }
 
   async function fireWorkbookOpen(): Promise<void> {
-    await statusPromise;
+    if (!macroStatusResolved) await statusPromise;
     if (disposed) return;
     if (eventsDisabled) return;
     if (workbookOpenFired) return;
@@ -499,7 +511,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   }
 
   async function doFlushWorksheetChanges(): Promise<void> {
-    await statusPromise;
+    if (!macroStatusResolved) await statusPromise;
     if (disposed) return;
     if (eventsDisabled) {
       pendingChangesBySheet.clear();
@@ -588,7 +600,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   }
 
   async function doFlushSelectionChange(): Promise<void> {
-    await statusPromise;
+    if (!macroStatusResolved) await statusPromise;
     if (disposed) return;
     if (eventsDisabled) {
       pendingSelectionRect = null;
