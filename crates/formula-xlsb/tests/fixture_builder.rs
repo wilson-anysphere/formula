@@ -24,10 +24,23 @@ enum CellSpec {
     Rk(u32),
     Sst(u32),
     InlineString(String),
-    FormulaNum { cached: f64, rgce: Vec<u8>, extra: Vec<u8> },
-    FormulaStr { cached: String, rgce: Vec<u8> },
-    FormulaBool { cached: bool, rgce: Vec<u8> },
-    FormulaErr { cached: u8, rgce: Vec<u8> },
+    FormulaNum {
+        cached: f64,
+        rgce: Vec<u8>,
+        extra: Vec<u8>,
+    },
+    FormulaStr {
+        cached: String,
+        rgce: Vec<u8>,
+    },
+    FormulaBool {
+        cached: bool,
+        rgce: Vec<u8>,
+    },
+    FormulaErr {
+        cached: u8,
+        rgce: Vec<u8>,
+    },
 }
 
 impl XlsbFixtureBuilder {
@@ -58,7 +71,10 @@ impl XlsbFixtureBuilder {
 
     pub fn set_cell_number_rk(&mut self, row: u32, col: u32, v: f64) {
         let rk = encode_rk_number(v).unwrap_or_else(|| panic!("value {v} not representable as RK"));
-        self.cells.entry(row).or_default().insert(col, CellSpec::Rk(rk));
+        self.cells
+            .entry(row)
+            .or_default()
+            .insert(col, CellSpec::Rk(rk));
     }
 
     pub fn set_cell_sst(&mut self, row: u32, col: u32, sst_idx: u32) {
@@ -75,7 +91,14 @@ impl XlsbFixtureBuilder {
             .insert(col, CellSpec::InlineString(s.to_string()));
     }
 
-    pub fn set_cell_formula_num(&mut self, row: u32, col: u32, cached: f64, rgce: Vec<u8>, extra: Vec<u8>) {
+    pub fn set_cell_formula_num(
+        &mut self,
+        row: u32,
+        col: u32,
+        cached: f64,
+        rgce: Vec<u8>,
+        extra: Vec<u8>,
+    ) {
         self.cells.entry(row).or_default().insert(
             col,
             CellSpec::FormulaNum {
@@ -86,11 +109,20 @@ impl XlsbFixtureBuilder {
         );
     }
 
-    pub fn set_cell_formula_str(&mut self, row: u32, col: u32, cached: impl Into<String>, rgce: Vec<u8>) {
-        self.cells
-            .entry(row)
-            .or_default()
-            .insert(col, CellSpec::FormulaStr { cached: cached.into(), rgce });
+    pub fn set_cell_formula_str(
+        &mut self,
+        row: u32,
+        col: u32,
+        cached: impl Into<String>,
+        rgce: Vec<u8>,
+    ) {
+        self.cells.entry(row).or_default().insert(
+            col,
+            CellSpec::FormulaStr {
+                cached: cached.into(),
+                rgce,
+            },
+        );
     }
 
     pub fn set_cell_formula_bool(&mut self, row: u32, col: u32, cached: bool, rgce: Vec<u8>) {
@@ -131,12 +163,12 @@ impl XlsbFixtureBuilder {
 
         zip.start_file("_rels/.rels", options)
             .expect("start _rels/.rels");
-        zip.write_all(rels_xml.as_bytes()).expect("write _rels/.rels");
+        zip.write_all(rels_xml.as_bytes())
+            .expect("write _rels/.rels");
 
         zip.start_file("xl/workbook.bin", options)
             .expect("start xl/workbook.bin");
-        zip.write_all(&workbook_bin)
-            .expect("write xl/workbook.bin");
+        zip.write_all(&workbook_bin).expect("write xl/workbook.bin");
 
         zip.start_file("xl/_rels/workbook.bin.rels", options)
             .expect("start xl/_rels/workbook.bin.rels");
@@ -313,7 +345,11 @@ fn build_sheet_bin(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> Vec<u8> {
                     write_utf16_string(&mut data, s);
                     write_record(&mut out, biff12::CELL_ST, &data);
                 }
-                CellSpec::FormulaNum { cached, rgce, extra } => {
+                CellSpec::FormulaNum {
+                    cached,
+                    rgce,
+                    extra,
+                } => {
                     let mut data = Vec::<u8>::new();
                     data.extend_from_slice(&col.to_le_bytes());
                     data.extend_from_slice(&0u32.to_le_bytes()); // style
@@ -414,13 +450,15 @@ fn compute_dimension(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> (u32, u3
 
 fn write_record(out: &mut Vec<u8>, id: u32, data: &[u8]) {
     biff12_varint::write_record_id(out, id).expect("write record id");
-    biff12_varint::write_record_len(out, data.len() as u32).expect("write record len");
+    let len = u32::try_from(data.len()).expect("record too large");
+    biff12_varint::write_record_len(out, len).expect("write record len");
     out.extend_from_slice(data);
 }
 
 fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
     let units: Vec<u16> = s.encode_utf16().collect();
-    out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+    let len = u32::try_from(units.len()).expect("string too large");
+    out.extend_from_slice(&len.to_le_bytes());
     for u in units {
         out.extend_from_slice(&u.to_le_bytes());
     }
