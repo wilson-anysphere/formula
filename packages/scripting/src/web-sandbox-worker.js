@@ -156,6 +156,15 @@ function createWorkbookProxy() {
   };
 }
 
+function createUiProxy() {
+  return {
+    log: (...args) => safeConsole.log(...args),
+    alert: (message) => rpc("ui.alert", { message }),
+    confirm: (message) => rpc("ui.confirm", { message }),
+    prompt: (message, defaultValue) => rpc("ui.prompt", { message, defaultValue }),
+  };
+}
+
 function compileTypeScript(tsSource) {
   // Wrap user code in an async entrypoint so scripts can freely use top-level
   // `await` (relative to the script body).
@@ -222,9 +231,10 @@ async function runUserScript({ code, activeSheetName, selection, permissions }) 
     workbook: createWorkbookProxy(),
     activeSheet: createSheetProxy(activeSheetName),
     selection: createRangeProxy(selection.sheetName, selection.address),
-    ui: {
-      log: (...args) => safeConsole.log(...args),
-    },
+    ui: createUiProxy(),
+    alert: (message) => rpc("ui.alert", { message }),
+    confirm: (message) => rpc("ui.confirm", { message }),
+    prompt: (message, defaultValue) => rpc("ui.prompt", { message, defaultValue }),
     fetch: self.fetch?.bind(self),
     console: safeConsole,
   };

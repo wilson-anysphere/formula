@@ -110,6 +110,15 @@ export class ScriptRuntime {
 
   async handleRpc(method, params) {
     switch (method) {
+      case "ui.alert": {
+        throw new Error("ui.alert is not available in the Node ScriptRuntime");
+      }
+      case "ui.confirm": {
+        throw new Error("ui.confirm is not available in the Node ScriptRuntime");
+      }
+      case "ui.prompt": {
+        throw new Error("ui.prompt is not available in the Node ScriptRuntime");
+      }
       case "range.getValues": {
         const { sheetName, address } = params;
         return this.workbook.getSheet(sheetName).getRange(address).getValues();

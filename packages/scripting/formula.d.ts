@@ -41,6 +41,9 @@ export interface Range {
 
   export interface UIHelpers {
     log(...args: unknown[]): void;
+    alert(message: string): Promise<void>;
+    confirm(message: string): Promise<boolean>;
+    prompt(message: string, defaultValue?: string): Promise<string | null>;
   }
 
   export interface ScriptContext {
@@ -48,6 +51,11 @@ export interface Range {
     activeSheet: Sheet;
     selection: Range;
     ui: UIHelpers;
+
+    // UI helpers (docs-style).
+    alert(message: string): Promise<void>;
+    confirm(message: string): Promise<boolean>;
+    prompt(message: string, defaultValue?: string): Promise<string | null>;
 
     // Network + logging helpers (subject to ScriptRuntime permissions).
     fetch: typeof fetch;

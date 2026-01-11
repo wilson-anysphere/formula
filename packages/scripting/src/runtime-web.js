@@ -167,6 +167,31 @@ export class ScriptRuntime {
 
   async handleRpc(method, params) {
     switch (method) {
+      case "ui.alert": {
+        const message = params?.message ?? "";
+        if (typeof globalThis.alert !== "function") {
+          throw new Error("alert() is not available in this environment");
+        }
+        globalThis.alert(String(message));
+        return null;
+      }
+      case "ui.confirm": {
+        const message = params?.message ?? "";
+        if (typeof globalThis.confirm !== "function") {
+          throw new Error("confirm() is not available in this environment");
+        }
+        return Boolean(globalThis.confirm(String(message)));
+      }
+      case "ui.prompt": {
+        const message = params?.message ?? "";
+        const defaultValue = params?.defaultValue;
+        if (typeof globalThis.prompt !== "function") {
+          throw new Error("prompt() is not available in this environment");
+        }
+        const result =
+          defaultValue === undefined ? globalThis.prompt(String(message)) : globalThis.prompt(String(message), String(defaultValue));
+        return result ?? null;
+      }
       case "range.getValues": {
         const { sheetName, address } = params;
         return this.workbook.getSheet(sheetName).getRange(address).getValues();

@@ -137,6 +137,15 @@ function createWorkbookProxy() {
   };
 }
 
+function createUiProxy() {
+  return {
+    log: (...args) => safeConsole.log(...args),
+    alert: (message) => rpc("ui.alert", { message }),
+    confirm: (message) => rpc("ui.confirm", { message }),
+    prompt: (message, defaultValue) => rpc("ui.prompt", { message, defaultValue }),
+  };
+}
+
 function compileTypeScript(tsSource) {
   const wrapped = `async function __formulaUserMain(ctx) {\n${tsSource}\n}\n__formulaUserMain(ctx)`;
   if (!ts) return wrapped;
@@ -210,9 +219,10 @@ async function runUserScript(tsSource) {
     workbook: createWorkbookProxy(),
     activeSheet: createSheetProxy(workerData.activeSheetName),
     selection: createRangeProxy(workerData.selection.sheetName, workerData.selection.address),
-    ui: {
-      log: (...args) => safeConsole.log(...args),
-    },
+    ui: createUiProxy(),
+    alert: (message) => rpc("ui.alert", { message }),
+    confirm: (message) => rpc("ui.confirm", { message }),
+    prompt: (message, defaultValue) => rpc("ui.prompt", { message, defaultValue }),
     fetch: networkSandbox.fetch,
     console: safeConsole,
   };
