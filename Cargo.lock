@@ -1411,6 +1411,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "formula-biff"
+version = "0.1.0"
+dependencies = [
+ "formula-engine",
+ "pretty_assertions",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "formula-columnar"
 version = "0.1.0"
 
@@ -1615,6 +1624,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "calamine 0.26.1",
+ "formula-biff",
  "pretty_assertions",
  "proptest",
  "quick-xml 0.31.0",

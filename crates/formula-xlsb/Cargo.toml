@@ -3,10 +3,16 @@ name = "formula-xlsb"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Keep the default reader minimal; enabling `write` pulls in the formula parser +
+# rgce encoder so worksheet patchers can emit BIFF12 formulas.
+write = ["dep:formula-biff"]
+
 [dependencies]
 quick-xml = "0.31"
 thiserror = "1.0"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
+formula-biff = { path = "../formula-biff", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"

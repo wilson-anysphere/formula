@@ -1,0 +1,21 @@
+[package]
+name = "formula-biff"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["encode"]
+# Enable formula text -> rgce encoding (requires the formula parser).
+encode = ["dep:formula-engine"]
+
+[dependencies]
+thiserror = "1.0"
+
+# Keep the parser dependency optional so other crates (e.g. minimal XLSB reader)
+# can depend on `formula-biff` for rgce decoding without pulling in the full
+# formula engine.
+formula-engine = { path = "../formula-engine", optional = true }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+formula-engine = { path = "../formula-engine" }
