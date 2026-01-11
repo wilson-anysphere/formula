@@ -8,8 +8,6 @@ import {
 } from "../encryption/src/index.node.js";
 import { maskCellValue as defaultMaskCellValue } from "../permissions/index.js";
 
-const MASKED_CELL_VALUE = "###";
-
 function stableStringify(value) {
   if (value === undefined) return "undefined";
   if (value == null || typeof value !== "object") return JSON.stringify(value);
@@ -66,9 +64,10 @@ function normalizeFormula(value) {
  *   keyForCell: (cell: { sheetId: string, row: number, col: number }) => { keyId: string, keyBytes: Uint8Array } | null,
  * } | null} encryption
  * @param {string} docIdForEncryption
+ * @param {(value: unknown, cell?: { sheetId: string, row: number, col: number }) => unknown} maskFn
  * @returns {Promise<ParsedYjsCell>}
  */
-async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption) {
+async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, maskFn = defaultMaskCellValue) {
   let value;
   let formula;
 
@@ -106,7 +105,7 @@ async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption) {
     }
 
     if (value === undefined && formula === undefined) {
-      value = MASKED_CELL_VALUE;
+      value = maskFn(null, cellRef);
       formula = null;
     }
   } else {
@@ -323,7 +322,7 @@ export function bindYjsToDocumentController(options) {
       const cellData = cells.get(rawKey);
       const cell = getYMapCell(cellData);
       if (!cell) continue;
-      const parsed = await readCellFromYjs(cell, cellRef, encryption, docIdForEncryption);
+      const parsed = await readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, maskFn);
       const hasData =
         parsed.value != null || parsed.formula != null || parsed.formatKey !== undefined;
       if (!hasData) continue;
