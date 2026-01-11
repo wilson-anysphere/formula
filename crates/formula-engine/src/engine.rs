@@ -4401,6 +4401,30 @@ mod tests {
     }
 
     #[test]
+    fn recalculate_with_value_changes_clears_shrunk_spill_cells() {
+        let mut engine = Engine::new();
+        engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=SEQUENCE(1,A2)")
+            .unwrap();
+
+        let _ = engine.recalculate_with_value_changes(RecalcMode::SingleThreaded);
+
+        // Shrink the spill width from 2 columns to 1. The previous spill cell (B1)
+        // should be returned as a delta back to blank.
+        engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+        let changes = engine.recalculate_with_value_changes(RecalcMode::SingleThreaded);
+        assert_eq!(
+            changes,
+            vec![RecalcValueChange {
+                sheet: "Sheet1".to_string(),
+                addr: parse_a1("B1").unwrap(),
+                value: Value::Blank,
+            }]
+        );
+    }
+
+    #[test]
     fn bytecode_column_cache_uses_range_min_row() {
         let mut engine = Engine::new();
         engine
