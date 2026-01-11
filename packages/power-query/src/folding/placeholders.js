@@ -149,6 +149,142 @@ export function normalizePostgresPlaceholders(sql, paramCount) {
 }
 
 /**
+ * Convert anonymous `?` placeholders into SQL Server named parameters
+ * (`@p1..@pn`).
+ *
+ * SQL Server does not support `?` placeholders directly; most drivers expect
+ * named parameters. We only rewrite placeholders that appear outside of string
+ * literals, quoted identifiers, and comments.
+ *
+ * @param {string} sql
+ * @param {number} paramCount
+ * @returns {string}
+ */
+export function normalizeSqlServerPlaceholders(sql, paramCount) {
+  if (paramCount <= 0) return sql;
+
+  let out = "";
+  let replaced = 0;
+
+  let inSingle = false;
+  let inDouble = false;
+  let inBracket = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const next = sql[i + 1] ?? "";
+
+    if (inLineComment) {
+      out += ch;
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (inBlockComment) {
+      out += ch;
+      if (ch === "*" && next === "/") {
+        out += next;
+        i += 1;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (inSingle) {
+      out += ch;
+      if (ch === "'") {
+        if (next === "'") {
+          out += next;
+          i += 1;
+        } else {
+          inSingle = false;
+        }
+      }
+      continue;
+    }
+
+    if (inDouble) {
+      out += ch;
+      if (ch === '"') {
+        if (next === '"') {
+          out += next;
+          i += 1;
+        } else {
+          inDouble = false;
+        }
+      }
+      continue;
+    }
+
+    if (inBracket) {
+      out += ch;
+      if (ch === "]") {
+        if (next === "]") {
+          out += next;
+          i += 1;
+        } else {
+          inBracket = false;
+        }
+      }
+      continue;
+    }
+
+    if (ch === "-" && next === "-") {
+      out += ch + next;
+      i += 1;
+      inLineComment = true;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      out += ch + next;
+      i += 1;
+      inBlockComment = true;
+      continue;
+    }
+
+    if (ch === "'") {
+      out += ch;
+      inSingle = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      out += ch;
+      inDouble = true;
+      continue;
+    }
+
+    if (ch === "[") {
+      out += ch;
+      inBracket = true;
+      continue;
+    }
+
+    if (ch === "?") {
+      replaced += 1;
+      if (replaced > paramCount) {
+        throw new Error(
+          `Failed to normalize SQL Server SQL placeholders: expected ${paramCount}, encountered more than ${paramCount}`,
+        );
+      }
+      out += `@p${replaced}`;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  if (replaced !== paramCount) {
+    throw new Error(`Failed to normalize SQL Server SQL placeholders: expected ${paramCount}, replaced ${replaced}`);
+  }
+
+  return out;
+}
+
+/**
  * @param {string} sql
  * @param {number} pos
  * @returns {string | null}
@@ -184,4 +320,3 @@ function isValuePlaceholder(sql, pos) {
 
   return true;
 }
-

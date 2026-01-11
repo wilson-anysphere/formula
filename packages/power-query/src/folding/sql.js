@@ -671,6 +671,17 @@ export class QueryFoldingEngine {
       }
       case "take": {
         if (!Number.isFinite(operation.count) || operation.count < 0) return null;
+        if (dialect.name === "sqlserver") {
+          // `TOP (?)` appears before the wrapped subquery, so its placeholder must
+          // come before any placeholders in `state.fragment.sql`.
+          const nextParams = [operation.count, ...params];
+          return {
+            fragment: { sql: `SELECT TOP (?) * FROM ${from}`, params: nextParams },
+            columns: state.columns,
+            connectionId: state.connectionId,
+            connection: state.connection,
+          };
+        }
         params.push(operation.count);
         return {
           fragment: { sql: `SELECT * FROM ${from} LIMIT ?`, params },
@@ -1127,9 +1138,9 @@ function joinTypeToSql(dialect, joinType) {
     case "left":
       return "LEFT JOIN";
     case "right":
-      return dialect.name === "postgres" ? "RIGHT JOIN" : null;
+      return dialect.name === "postgres" || dialect.name === "sqlserver" ? "RIGHT JOIN" : null;
     case "full":
-      return dialect.name === "postgres" ? "FULL OUTER JOIN" : null;
+      return dialect.name === "postgres" || dialect.name === "sqlserver" ? "FULL OUTER JOIN" : null;
     default: {
       /** @type {never} */
       const exhausted = joinType;
@@ -1155,6 +1166,8 @@ function nullSafeEqualsSql(dialect, leftExpr, rightExpr) {
       return `${leftExpr} <=> ${rightExpr}`;
     case "sqlite":
       return `${leftExpr} IS ${rightExpr}`;
+    case "sqlserver":
+      return `(${leftExpr} = ${rightExpr} OR (${leftExpr} IS NULL AND ${rightExpr} IS NULL))`;
     default: {
       /** @type {never} */
       const exhausted = dialect.name;
@@ -1250,6 +1263,22 @@ function dataTypeToSqlType(dialect, type) {
           throw new Error(`Unsupported type '${exhausted}'`);
         }
       }
+    case "sqlserver":
+      switch (type) {
+        case "string":
+          return "NVARCHAR(MAX)";
+        case "number":
+          return "FLOAT";
+        case "boolean":
+          return "BIT";
+        case "date":
+          return "DATETIME2";
+        default: {
+          /** @type {never} */
+          const exhausted = type;
+          throw new Error(`Unsupported type '${exhausted}'`);
+        }
+      }
     default: {
       /** @type {never} */
       const exhausted = dialect.name;
@@ -1288,7 +1317,8 @@ function safeCastNumberToSql(dialect, colRef) {
   // throwing (and they accept leading/trailing whitespace). We emulate that
   // behavior with a conservative numeric regex gate. Dialects without a regex
   // operator (e.g. SQLite) fall back to local execution.
-  const trimmed = `TRIM(${dialect.castText(colRef)})`;
+  const trimmed =
+    dialect.name === "sqlserver" ? `LTRIM(RTRIM(${dialect.castText(colRef)}))` : `TRIM(${dialect.castText(colRef)})`;
   const pattern = "'^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$'";
   const casted = `CAST(${trimmed} AS ${sqlType})`;
 
@@ -1299,6 +1329,8 @@ function safeCastNumberToSql(dialect, colRef) {
       return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} REGEXP ${pattern} THEN (CASE WHEN ABS(${casted}) <= 1.7976931348623157e308 THEN ${casted} ELSE NULL END) ELSE NULL END`;
     case "sqlite":
       return null;
+    case "sqlserver":
+      return `TRY_CAST(NULLIF(${trimmed}, '') AS ${sqlType})`;
     default: {
       /** @type {never} */
       const exhausted = dialect.name;

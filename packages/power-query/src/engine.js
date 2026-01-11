@@ -9,7 +9,7 @@ import { FileConnector } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { SqlConnector } from "./connectors/sql.js";
 import { QueryFoldingEngine } from "./folding/sql.js";
-import { normalizePostgresPlaceholders } from "./folding/placeholders.js";
+import { normalizePostgresPlaceholders, normalizeSqlServerPlaceholders } from "./folding/placeholders.js";
 import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parquetProjection.js";
 import { collectSourcePrivacy, distinctPrivacyLevels, shouldBlockCombination } from "./privacy/firewall.js";
 import { getSourceIdForProvenance, getSourceIdForQuerySource, getSqlSourceId } from "./privacy/sourceId.js";
@@ -874,15 +874,22 @@ export class QueryEngine {
       query.source.type === "database" &&
       foldedDialect
     ) {
-      const sqlToRun =
-        foldedPlan.type === "sql" && options.limit != null
-          ? `SELECT * FROM (${foldedPlan.sql}) AS t LIMIT ?`
-          : foldedPlan.sql;
-      const paramsToRun =
-        foldedPlan.type === "sql" && options.limit != null ? [...foldedPlan.params, options.limit] : foldedPlan.params;
-
       const dialectName = typeof foldedDialect === "string" ? foldedDialect : foldedDialect.name;
-      executedSql = dialectName === "postgres" ? normalizePostgresPlaceholders(sqlToRun, paramsToRun.length) : sqlToRun;
+      // For historical/backwards compatibility we push `ExecuteOptions.limit` down
+      // via `LIMIT ?`. SQL Server does not support `LIMIT`, and also rejects
+      // nested `ORDER BY` in derived tables (which this wrapper would create).
+      //
+      // Until we have a dedicated SQL Server top/offset wrapper that preserves
+      // parameter ordering and ORDER BY semantics, keep limits local.
+      const canPushDownLimit = foldedPlan.type === "sql" && options.limit != null && dialectName !== "sqlserver";
+      const sqlToRun = canPushDownLimit ? `SELECT * FROM (${foldedPlan.sql}) AS t LIMIT ?` : foldedPlan.sql;
+      const paramsToRun = canPushDownLimit ? [...foldedPlan.params, options.limit] : foldedPlan.params;
+      executedSql =
+        dialectName === "postgres"
+          ? normalizePostgresPlaceholders(sqlToRun, paramsToRun.length)
+          : dialectName === "sqlserver"
+            ? normalizeSqlServerPlaceholders(sqlToRun, paramsToRun.length)
+            : sqlToRun;
       executedParams = paramsToRun;
       const sourceResult = await this.loadDatabaseQueryWithMeta(
         query.source,
@@ -1790,6 +1797,8 @@ export class QueryEngine {
     let normalizedSql = sql;
     if (dialectName === "postgres") {
       normalizedSql = normalizePostgresPlaceholders(sql, params.length);
+    } else if (dialectName === "sqlserver") {
+      normalizedSql = normalizeSqlServerPlaceholders(sql, params.length);
     }
     const connectionId = resolveDatabaseConnectionId(source, connector);
     const request = { connectionId: connectionId ?? undefined, connection: source.connection, sql: normalizedSql, params };

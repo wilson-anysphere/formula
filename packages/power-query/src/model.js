@@ -77,7 +77,7 @@
  *    * dialect, but pushdown folding should only be enabled when the dialect is
  *    * known to avoid generating incompatible SQL.
  *    */
- *   dialect?: "postgres" | "mysql" | "sqlite";
+ *   dialect?: "postgres" | "mysql" | "sqlite" | "sqlserver";
  *   /**
  *    * Optional column names for the query result.
  *    *

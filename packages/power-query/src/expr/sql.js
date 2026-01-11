@@ -58,6 +58,8 @@ function sqlTypesForDialect(dialect) {
       return { boolean: "SIGNED", number: "DOUBLE", date: "DATETIME" };
     case "sqlite":
       return { boolean: "INTEGER", number: "REAL", date: "TEXT" };
+    case "sqlserver":
+      return { boolean: "BIT", number: "FLOAT", date: "DATETIME2" };
     default: {
       /** @type {never} */
       const exhausted = dialect;
@@ -155,6 +157,9 @@ export function compileExprToSql(expr, ctx) {
           if (leftNull && rightNull) {
             // Match JS semantics: `null == null` is true, `null != null` is false.
             const isNotEquals = node.op === "!=" || node.op === "!==";
+            if (ctx.dialect.name === "sqlserver") {
+              return isNotEquals ? "(1=0)" : "(1=1)";
+            }
             return isNotEquals ? "(FALSE)" : "(TRUE)";
           }
           if (leftNull || rightNull) {
