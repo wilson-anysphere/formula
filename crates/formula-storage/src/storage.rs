@@ -678,15 +678,15 @@ impl Storage {
                 params![workbook_id.to_string()],
                 |r| {
                     Ok((
-                        r.get::<_, Option<i64>>(0)?,
-                        r.get::<_, Option<i64>>(1)?,
-                        r.get::<_, Option<String>>(2)?,
-                        r.get::<_, Option<serde_json::Value>>(3)?,
-                        r.get::<_, Option<serde_json::Value>>(4)?,
-                        r.get::<_, Option<serde_json::Value>>(5)?,
-                        r.get::<_, Option<serde_json::Value>>(6)?,
-                        r.get::<_, Option<serde_json::Value>>(7)?,
-                        r.get::<_, Option<serde_json::Value>>(8)?,
+                        r.get::<_, Option<i64>>(0).ok().flatten(),
+                        r.get::<_, Option<i64>>(1).ok().flatten(),
+                        r.get::<_, Option<String>>(2).ok().flatten(),
+                        r.get::<_, Option<String>>(3).ok().flatten(),
+                        r.get::<_, Option<String>>(4).ok().flatten(),
+                        r.get::<_, Option<String>>(5).ok().flatten(),
+                        r.get::<_, Option<String>>(6).ok().flatten(),
+                        r.get::<_, Option<String>>(7).ok().flatten(),
+                        r.get::<_, Option<String>>(8).ok().flatten(),
                     ))
                 },
             )
@@ -722,32 +722,32 @@ impl Storage {
             }
         }
         if let Some(calc_settings) = calc_settings {
-            if let Ok(calc_settings) = serde_json::from_value(calc_settings) {
+            if let Ok(calc_settings) = serde_json::from_str(&calc_settings) {
                 model_workbook.calc_settings = calc_settings;
             }
         }
         if let Some(theme) = theme {
-            if let Ok(theme) = serde_json::from_value(theme) {
+            if let Ok(theme) = serde_json::from_str(&theme) {
                 model_workbook.theme = theme;
             }
         }
         if let Some(workbook_protection) = workbook_protection {
-            if let Ok(workbook_protection) = serde_json::from_value(workbook_protection) {
+            if let Ok(workbook_protection) = serde_json::from_str(&workbook_protection) {
                 model_workbook.workbook_protection = workbook_protection;
             }
         }
         if let Some(defined_names) = defined_names {
-            if let Ok(defined_names) = serde_json::from_value(defined_names) {
+            if let Ok(defined_names) = serde_json::from_str(&defined_names) {
                 model_workbook.defined_names = defined_names;
             }
         }
         if let Some(print_settings) = print_settings {
-            if let Ok(print_settings) = serde_json::from_value(print_settings) {
+            if let Ok(print_settings) = serde_json::from_str(&print_settings) {
                 model_workbook.print_settings = print_settings;
             }
         }
         if let Some(view) = view {
-            if let Ok(view) = serde_json::from_value(view) {
+            if let Ok(view) = serde_json::from_str(&view) {
                 model_workbook.view = view;
             }
         }
@@ -828,15 +828,15 @@ impl Storage {
             let storage_sheet_id: String = row.get(0)?;
             let name: String = row.get(1)?;
             let visibility_raw: String = row.get(3)?;
-            let tab_color_fast: Option<String> = row.get(4)?;
-            let tab_color_json: Option<serde_json::Value> = row.get(5)?;
+            let tab_color_fast: Option<String> = row.get(4).ok().flatten();
+            let tab_color_json: Option<String> = row.get(5).ok().flatten();
             let xlsx_sheet_id: Option<i64> = row.get(6)?;
             let xlsx_rel_id: Option<String> = row.get(7)?;
             let frozen_rows: i64 = row.get(8)?;
             let frozen_cols: i64 = row.get(9)?;
             let zoom: f64 = row.get(10)?;
             let model_sheet_id: Option<i64> = row.get(11)?;
-            let model_sheet_json: Option<serde_json::Value> = row.get(12)?;
+            let model_sheet_json: Option<String> = row.get(12).ok().flatten();
 
             let sheet_id = match model_sheet_id.and_then(|id| u32::try_from(id).ok()) {
                 Some(explicit) if !used_sheet_ids.contains(&explicit) => explicit,
@@ -851,11 +851,9 @@ impl Storage {
             };
             used_sheet_ids.insert(sheet_id);
 
-            let mut sheet = match model_sheet_json {
-                Some(json) => serde_json::from_value::<formula_model::Worksheet>(json)
-                    .unwrap_or_else(|_| formula_model::Worksheet::new(sheet_id, name.clone())),
-                None => formula_model::Worksheet::new(sheet_id, name.clone()),
-            };
+            let mut sheet = model_sheet_json
+                .and_then(|raw| serde_json::from_str::<formula_model::Worksheet>(&raw).ok())
+                .unwrap_or_else(|| formula_model::Worksheet::new(sheet_id, name.clone()));
             sheet.id = sheet_id;
             sheet.name = name.clone();
             sheet.visibility = storage_sheet_visibility_to_model(&visibility_raw);
@@ -874,7 +872,7 @@ impl Storage {
             sheet.view.zoom = sheet.zoom;
 
             sheet.tab_color = tab_color_json
-                .and_then(|raw| serde_json::from_value::<formula_model::TabColor>(raw).ok())
+                .and_then(|raw| serde_json::from_str::<formula_model::TabColor>(&raw).ok())
                 .or_else(|| tab_color_fast.map(formula_model::TabColor::rgb));
 
             // Load sheet drawing objects.
@@ -887,13 +885,20 @@ impl Storage {
                     ORDER BY position
                     "#,
                 )?;
-                let drawings = stmt
-                    .query_map(params![&storage_sheet_id], |r| r.get::<_, serde_json::Value>(0))?;
+                let drawings = stmt.query_map(params![&storage_sheet_id], |r| {
+                    Ok(r.get::<_, Option<String>>(0).ok().flatten())
+                })?;
                 let mut out = Vec::new();
                 for drawing in drawings {
-                    out.push(serde_json::from_value::<formula_model::drawings::DrawingObject>(
-                        drawing?,
-                    )?);
+                    let Some(raw) = drawing? else {
+                        continue;
+                    };
+                    let Ok(parsed) =
+                        serde_json::from_str::<formula_model::drawings::DrawingObject>(&raw)
+                    else {
+                        continue;
+                    };
+                    out.push(parsed);
                 }
                 sheet.drawings = out;
             }
@@ -2289,14 +2294,14 @@ fn sync_named_range_into_defined_names_tx(tx: &Transaction<'_>, range: &NamedRan
         DefinedNameScope::Sheet(sheet_id)
     };
 
-    let defined_names: Option<serde_json::Value> = tx.query_row(
+    let defined_names: Option<String> = tx.query_row(
         "SELECT defined_names FROM workbooks WHERE id = ?1",
         params![&workbook_id_str],
-        |r| r.get(0),
+        |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
     )?;
 
     let mut names = match defined_names {
-        Some(raw) => match serde_json::from_value::<Vec<DefinedName>>(raw) {
+        Some(raw) => match serde_json::from_str::<Vec<DefinedName>>(&raw) {
             Ok(names) => names,
             // Corrupt JSON blob - avoid overwriting it from the legacy compatibility layer.
             Err(_) => return Ok(()),
@@ -2457,16 +2462,16 @@ fn update_sheet_model_json_tx<F>(
 where
     F: FnOnce(&mut formula_model::Worksheet),
 {
-    let model_sheet_json: Option<serde_json::Value> = tx.query_row(
+    let model_sheet_json: Option<String> = tx.query_row(
         "SELECT model_sheet_json FROM sheets WHERE id = ?1",
         params![sheet_id.to_string()],
-        |r| r.get(0),
+        |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
     )?;
     let Some(raw) = model_sheet_json else {
         return Ok(());
     };
 
-    let Ok(mut sheet) = serde_json::from_value::<formula_model::Worksheet>(raw) else {
+    let Ok(mut sheet) = serde_json::from_str::<formula_model::Worksheet>(&raw) else {
         return Ok(());
     };
     f(&mut sheet);
@@ -2541,13 +2546,13 @@ fn rewrite_sheet_rename_references_tx(
 
     // Keep workbook-level JSON columns in sync so `export_model_workbook` round-trips correctly.
     {
-        let defined_names: Option<serde_json::Value> = tx.query_row(
+        let defined_names: Option<String> = tx.query_row(
             "SELECT defined_names FROM workbooks WHERE id = ?1",
             params![&workbook_id_str],
-            |r| r.get(0),
+            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
         )?;
         if let Some(raw) = defined_names {
-            if let Ok(mut names) = serde_json::from_value::<Vec<DefinedName>>(raw) {
+            if let Ok(mut names) = serde_json::from_str::<Vec<DefinedName>>(&raw) {
                 let mut changed = false;
                 for name in &mut names {
                     let rewritten =
@@ -2570,14 +2575,14 @@ fn rewrite_sheet_rename_references_tx(
     }
 
     {
-        let print_settings: Option<serde_json::Value> = tx.query_row(
+        let print_settings: Option<String> = tx.query_row(
             "SELECT print_settings FROM workbooks WHERE id = ?1",
             params![&workbook_id_str],
-            |r| r.get(0),
+            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
         )?;
         if let Some(raw) = print_settings {
             if let Ok(mut settings) =
-                serde_json::from_value::<formula_model::WorkbookPrintSettings>(raw)
+                serde_json::from_str::<formula_model::WorkbookPrintSettings>(&raw)
             {
                 let mut changed = false;
                 for sheet_settings in &mut settings.sheets {
@@ -2622,8 +2627,10 @@ fn rewrite_sheet_metadata_json_for_rename_tx(
     let mut rows = select_stmt.query(params![workbook_id])?;
     while let Some(row) = rows.next()? {
         let sheet_id: String = row.get(0)?;
-        let json: serde_json::Value = row.get(1)?;
-        let Ok(mut sheet) = serde_json::from_value::<formula_model::Worksheet>(json) else {
+        let Ok(json) = row.get::<_, String>(1) else {
+            continue;
+        };
+        let Ok(mut sheet) = serde_json::from_str::<formula_model::Worksheet>(&json) else {
             continue;
         };
 
@@ -2817,13 +2824,13 @@ fn rewrite_sheet_delete_references_tx(
 
     // Keep workbook-level JSON columns in sync so `export_model_workbook` round-trips correctly.
     {
-        let defined_names: Option<serde_json::Value> = tx.query_row(
+        let defined_names: Option<String> = tx.query_row(
             "SELECT defined_names FROM workbooks WHERE id = ?1",
             params![&workbook_id_str],
-            |r| r.get(0),
+            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
         )?;
         if let Some(raw) = defined_names {
-            if let Ok(mut names) = serde_json::from_value::<Vec<DefinedName>>(raw) {
+            if let Ok(mut names) = serde_json::from_str::<Vec<DefinedName>>(&raw) {
                 let mut changed = false;
                 if let Some(deleted_id) = deleted_model_sheet_id {
                     let before = names.len();
@@ -2855,14 +2862,14 @@ fn rewrite_sheet_delete_references_tx(
     }
 
     {
-        let print_settings: Option<serde_json::Value> = tx.query_row(
+        let print_settings: Option<String> = tx.query_row(
             "SELECT print_settings FROM workbooks WHERE id = ?1",
             params![&workbook_id_str],
-            |r| r.get(0),
+            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
         )?;
         if let Some(raw) = print_settings {
             if let Ok(mut settings) =
-                serde_json::from_value::<formula_model::WorkbookPrintSettings>(raw)
+                serde_json::from_str::<formula_model::WorkbookPrintSettings>(&raw)
             {
                 let before = settings.sheets.len();
                 settings
@@ -2881,13 +2888,13 @@ fn rewrite_sheet_delete_references_tx(
     }
 
     {
-        let view: Option<serde_json::Value> = tx.query_row(
+        let view: Option<String> = tx.query_row(
             "SELECT view FROM workbooks WHERE id = ?1",
             params![&workbook_id_str],
-            |r| r.get(0),
+            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
         )?;
         if let Some(raw) = view {
-            if let Ok(mut view) = serde_json::from_value::<formula_model::WorkbookView>(raw) {
+            if let Ok(mut view) = serde_json::from_str::<formula_model::WorkbookView>(&raw) {
                 if let Some(deleted_id) = deleted_model_sheet_id {
                     if view.active_sheet_id == Some(deleted_id) {
                         let idx = ordered_sheet_ids
@@ -2945,8 +2952,10 @@ fn rewrite_sheet_metadata_json_for_delete_tx(
     let mut rows = select_stmt.query(params![workbook_id])?;
     while let Some(row) = rows.next()? {
         let sheet_id: String = row.get(0)?;
-        let json: serde_json::Value = row.get(1)?;
-        let Ok(mut sheet) = serde_json::from_value::<formula_model::Worksheet>(json) else {
+        let Ok(json) = row.get::<_, String>(1) else {
+            continue;
+        };
+        let Ok(mut sheet) = serde_json::from_str::<formula_model::Worksheet>(&json) else {
             continue;
         };
 
