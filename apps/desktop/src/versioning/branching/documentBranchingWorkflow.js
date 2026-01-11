@@ -24,6 +24,46 @@ export class DocumentBranchingWorkflow {
   }
 
   /**
+   * Convenience passthroughs so UI code can treat this as a BranchService-like
+   * object while ensuring checkout/merge are applied to the live document.
+   */
+  async listBranches() {
+    return this.branchService.listBranches();
+  }
+
+  /**
+   * @param {Actor} actor
+   * @param {{ name: string, description?: string }} input
+   */
+  async createBranch(actor, input) {
+    return this.branchService.createBranch(actor, input);
+  }
+
+  /**
+   * @param {Actor} actor
+   * @param {{ oldName: string, newName: string }} input
+   */
+  async renameBranch(actor, input) {
+    return this.branchService.renameBranch(actor, input);
+  }
+
+  /**
+   * @param {Actor} actor
+   * @param {{ name: string }} input
+   */
+  async deleteBranch(actor, input) {
+    return this.branchService.deleteBranch(actor, input);
+  }
+
+  /**
+   * @param {Actor} actor
+   * @param {{ sourceBranch: string }} input
+   */
+  async previewMerge(actor, input) {
+    return this.branchService.previewMerge(actor, input);
+  }
+
+  /**
    * @param {Actor} actor
    * @param {string} [message]
    */
@@ -43,6 +83,16 @@ export class DocumentBranchingWorkflow {
   }
 
   /**
+   * Alias for BranchService UI integrations that expect `checkoutBranch`.
+   *
+   * @param {Actor} actor
+   * @param {{ name: string }} input
+   */
+  async checkoutBranch(actor, input) {
+    return this.checkoutIntoDoc(actor, input.name);
+  }
+
+  /**
    * @param {Actor} actor
    * @param {string} sourceBranch
    * @param {ConflictResolution[]} resolutions
@@ -57,5 +107,14 @@ export class DocumentBranchingWorkflow {
     applyBranchStateToDocumentController(this.doc, result.state);
     return result;
   }
-}
 
+  /**
+   * Alias for BranchService UI integrations that expect `merge`.
+   *
+   * @param {Actor} actor
+   * @param {{ sourceBranch: string, resolutions: ConflictResolution[], message?: string }} input
+   */
+  async merge(actor, input) {
+    return this.mergeIntoDoc(actor, input.sourceBranch, input.resolutions, input.message);
+  }
+}
