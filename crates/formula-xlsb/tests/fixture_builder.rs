@@ -366,8 +366,9 @@ mod biff12 {
     pub const SST_END: u32 = 0x01A0;
     pub const SI: u32 = 0x0013;
 
-    // Stylesheet records are intentionally omitted from fixtures. `formula-xlsb`
-    // does not parse them, and Calamine is tolerant of missing `styles.bin`.
+    // Stylesheet records are intentionally omitted from fixtures. `formula-xlsb` does not parse
+    // them, and Calamine (used in our formula-comparison regression tests) currently fails to
+    // open minimal XLSB packages that include `xl/styles.bin`.
 }
 
 fn build_workbook_bin(sheet_name: &str) -> Vec<u8> {
