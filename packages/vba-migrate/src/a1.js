@@ -28,10 +28,12 @@ export function columnLettersToNumber(colLetters) {
 
 export function normalizeA1Address(address) {
   const str = String(address || "").trim().toUpperCase();
-  if (!/^[A-Z]+[0-9]+$/.test(str)) {
+  // Accept absolute references like `$A$1` by stripping the `$` markers.
+  const normalized = str.replace(/\$/g, "");
+  if (!/^[A-Z]+[0-9]+$/.test(normalized)) {
     throw new Error(`Invalid A1 address: ${address}`);
   }
-  return str;
+  return normalized;
 }
 
 export function a1ToRowCol(address) {
@@ -49,4 +51,3 @@ export function rowColToA1(row, col) {
   const letters = columnNumberToLetters(col);
   return `${letters}${row}`;
 }
-

@@ -160,9 +160,54 @@ function parseA1Range(address) {
   return { startRow, endRow, startCol, endCol };
 }
 
+function isIdentifier(expr) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(expr || "").trim());
+}
+
+function resolveScalar(expr, env) {
+  const parsed = parseJsLiteral(expr);
+  if (parsed !== UNSUPPORTED) return parsed;
+  const ident = String(expr || "").trim();
+  if (!isIdentifier(ident)) return UNSUPPORTED;
+  const binding = env.get(ident);
+  if (!binding || binding.kind !== "scalar") return UNSUPPORTED;
+  return binding.value;
+}
+
+function parseArrayFromFill(expr, env) {
+  const trimmed = String(expr || "").trim().replace(/;$/, "");
+  const match =
+    /^Array\.from\(\s*\{\s*length\s*:\s*(?<rows>[0-9]+)\s*\}\s*,\s*\(\s*\)\s*=>\s*Array\(\s*(?<cols>[0-9]+)\s*\)\.fill\(\s*(?<fill>.+)\s*\)\s*\)\s*$/.exec(
+      trimmed,
+    );
+  if (!match?.groups) return null;
+  const rows = Number(match.groups.rows);
+  const cols = Number(match.groups.cols);
+  if (!Number.isFinite(rows) || rows <= 0 || !Number.isFinite(cols) || cols <= 0) return null;
+
+  const fillValue = resolveScalar(match.groups.fill, env);
+  if (fillValue === UNSUPPORTED) return null;
+
+  return Array.from({ length: rows }, () => Array.from({ length: cols }, () => fillValue));
+}
+
+function resolveMatrix(expr, env) {
+  const trimmed = String(expr || "").trim().replace(/;$/, "");
+  const literal = parseJsMatrix(trimmed);
+  if (literal) return literal;
+
+  if (isIdentifier(trimmed)) {
+    const binding = env.get(trimmed);
+    if (binding?.kind === "matrix") return binding.value;
+  }
+
+  return parseArrayFromFill(trimmed, env);
+}
+
 export function executeTypeScriptMigrationScript({ workbook, code }) {
   const lines = String(code || "").split(/\r?\n/);
   let currentSheet = workbook.activeSheet;
+  const env = new Map();
 
   for (const rawLine of lines) {
     const noComment = stripLineComment(rawLine);
@@ -170,18 +215,34 @@ export function executeTypeScriptMigrationScript({ workbook, code }) {
     if (!line) continue;
     if (/^export\b/.test(line)) continue;
     if (/^import\b/.test(line)) continue;
-    if (/^const\b/.test(line) || /^let\b/.test(line)) {
+    if (/^(const|let|var)\b/.test(line)) {
       // Handle: const sheet = ctx.activeSheet;
       if (/=\s*ctx\.activeSheet\s*;?$/.test(line)) {
         currentSheet = workbook.activeSheet;
+        continue;
       }
+
+      const match = /^(?:const|let|var)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<expr>.+?)\s*;?$/.exec(line);
+      if (match?.groups?.name) {
+        const name = match.groups.name;
+        const expr = match.groups.expr;
+
+        const scalar = resolveScalar(expr, env);
+        if (scalar !== UNSUPPORTED) {
+          env.set(name, { kind: "scalar", value: scalar });
+        } else {
+          const matrix = resolveMatrix(expr, env);
+          if (matrix) env.set(name, { kind: "matrix", value: matrix });
+        }
+      }
+
       continue;
     }
     if (line === "{" || line === "}") continue;
 
     const setValueCall = /\.getRange\(\s*(['"])(?<addr>[^'"]+)\1\s*\)\.setValue\(\s*(?<expr>.+)\)\s*;?$/.exec(line);
     if (setValueCall) {
-      const value = parseJsLiteral(setValueCall.groups.expr);
+      const value = resolveScalar(setValueCall.groups.expr, env);
       if (value === UNSUPPORTED) throw new Error(`Unsupported TS literal: ${setValueCall.groups.expr}`);
       currentSheet.setCellValue(setValueCall.groups.addr, value);
       continue;
@@ -190,7 +251,7 @@ export function executeTypeScriptMigrationScript({ workbook, code }) {
     const setValuesCall = /\.getRange\(\s*(['"])(?<addr>[^'"]+)\1\s*\)\.setValues\(\s*(?<expr>.+)\)\s*;?$/.exec(line);
     if (setValuesCall) {
       const range = parseA1Range(setValuesCall.groups.addr);
-      const matrix = parseJsMatrix(setValuesCall.groups.expr);
+      const matrix = resolveMatrix(setValuesCall.groups.expr, env);
       if (!matrix) throw new Error(`Unsupported TS values matrix: ${setValuesCall.groups.expr}`);
       const rowCount = range.endRow - range.startRow + 1;
       const colCount = range.endCol - range.startCol + 1;
@@ -213,7 +274,7 @@ export function executeTypeScriptMigrationScript({ workbook, code }) {
       /\.getRange\(\s*(['"])(?<addr>[^'"]+)\1\s*\)\.setFormulas\(\s*(?<expr>.+)\)\s*;?$/.exec(line);
     if (setFormulasCall) {
       const range = parseA1Range(setFormulasCall.groups.addr);
-      const matrix = parseJsMatrix(setFormulasCall.groups.expr);
+      const matrix = resolveMatrix(setFormulasCall.groups.expr, env);
       if (!matrix) throw new Error(`Unsupported TS formulas matrix: ${setFormulasCall.groups.expr}`);
       const rowCount = range.endRow - range.startRow + 1;
       const colCount = range.endCol - range.startCol + 1;
@@ -241,7 +302,7 @@ export function executeTypeScriptMigrationScript({ workbook, code }) {
 
     const setValueRange = /^sheet\.range\(\s*(['"])(?<addr>[^'"]+)\1\s*\)\.value\s*=\s*(?<expr>.+)$/.exec(line);
     if (setValueRange) {
-      const value = parseJsLiteral(setValueRange.groups.expr);
+      const value = resolveScalar(setValueRange.groups.expr, env);
       if (value === UNSUPPORTED) throw new Error(`Unsupported TS literal: ${setValueRange.groups.expr}`);
       currentSheet.setCellValue(setValueRange.groups.addr, value);
       continue;
@@ -249,19 +310,21 @@ export function executeTypeScriptMigrationScript({ workbook, code }) {
 
     const setFormulaRange = /^sheet\.range\(\s*(['"])(?<addr>[^'"]+)\1\s*\)\.formula\s*=\s*(?<expr>.+)$/.exec(line);
     if (setFormulaRange) {
-      const value = parseJsLiteral(setFormulaRange.groups.expr);
+      const value = resolveScalar(setFormulaRange.groups.expr, env);
       if (value === UNSUPPORTED) throw new Error(`Unsupported TS literal: ${setFormulaRange.groups.expr}`);
       if (value === null) {
         currentSheet.setCellValue(setFormulaRange.groups.addr, null);
-      } else {
+      } else if (typeof value === "string") {
         currentSheet.setCellFormula(setFormulaRange.groups.addr, value);
+      } else {
+        throw new Error(`Expected formula string, got ${typeof value}`);
       }
       continue;
     }
 
     const setValueCell = /^sheet\.cell\(\s*(?<row>[0-9]+)\s*,\s*(?<col>[0-9]+)\s*\)\.value\s*=\s*(?<expr>.+)$/.exec(line);
     if (setValueCell) {
-      const value = parseJsLiteral(setValueCell.groups.expr);
+      const value = resolveScalar(setValueCell.groups.expr, env);
       if (value === UNSUPPORTED) throw new Error(`Unsupported TS literal: ${setValueCell.groups.expr}`);
       const address = rowColToA1(Number(setValueCell.groups.row), Number(setValueCell.groups.col));
       currentSheet.setCellValue(address, value);
@@ -270,13 +333,15 @@ export function executeTypeScriptMigrationScript({ workbook, code }) {
 
     const setFormulaCell = /^sheet\.cell\(\s*(?<row>[0-9]+)\s*,\s*(?<col>[0-9]+)\s*\)\.formula\s*=\s*(?<expr>.+)$/.exec(line);
     if (setFormulaCell) {
-      const value = parseJsLiteral(setFormulaCell.groups.expr);
+      const value = resolveScalar(setFormulaCell.groups.expr, env);
       if (value === UNSUPPORTED) throw new Error(`Unsupported TS literal: ${setFormulaCell.groups.expr}`);
       const address = rowColToA1(Number(setFormulaCell.groups.row), Number(setFormulaCell.groups.col));
       if (value === null) {
         currentSheet.setCellValue(address, null);
-      } else {
+      } else if (typeof value === "string") {
         currentSheet.setCellFormula(address, value);
+      } else {
+        throw new Error(`Expected formula string, got ${typeof value}`);
       }
       continue;
     }

@@ -2177,6 +2177,250 @@ fn parse_typescript_formulas_matrix(expr: &str) -> Result<Vec<Vec<Option<String>
 }
 
 #[cfg(any(feature = "desktop", test))]
+#[derive(Clone, Debug)]
+enum TypeScriptBinding {
+    Scalar(Option<JsonValue>),
+    Matrix(Vec<Vec<Option<JsonValue>>>),
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn is_typescript_identifier(input: &str) -> bool {
+    let mut chars = input.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn split_typescript_top_level_commas(input: &str) -> Vec<&str> {
+    let trimmed = input.trim();
+    let mut parts: Vec<&str> = Vec::new();
+    let mut start = 0usize;
+
+    let mut in_string: Option<char> = None;
+    let mut escape = false;
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+    let mut brace_depth: i32 = 0;
+
+    for (idx, ch) in trimmed.char_indices() {
+        if let Some(quote) = in_string {
+            if escape {
+                escape = false;
+                continue;
+            }
+            if ch == '\\' {
+                escape = true;
+                continue;
+            }
+            if ch == quote {
+                in_string = None;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => in_string = Some(ch),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = (paren_depth - 1).max(0),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = (bracket_depth - 1).max(0),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = (brace_depth - 1).max(0),
+            ',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                parts.push(trimmed[start..idx].trim());
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    parts.push(trimmed[start..].trim());
+    parts
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn resolve_typescript_scalar_expr(
+    expr: &str,
+    bindings: &std::collections::HashMap<String, TypeScriptBinding>,
+) -> Result<Option<JsonValue>, String> {
+    match parse_typescript_value_expr(expr) {
+        Ok(value) => Ok(value),
+        Err(parse_err) => {
+            let ident = expr.trim().trim_end_matches(';').trim();
+            if is_typescript_identifier(ident) {
+                if let Some(TypeScriptBinding::Scalar(value)) = bindings.get(ident) {
+                    return Ok(value.clone());
+                }
+            }
+            Err(parse_err)
+        }
+    }
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_typescript_array_from_fill_matrix(
+    expr: &str,
+    bindings: &std::collections::HashMap<String, TypeScriptBinding>,
+) -> Result<Vec<Vec<Option<JsonValue>>>, String> {
+    let trimmed = expr.trim().trim_end_matches(';').trim();
+    let after = trimmed
+        .strip_prefix("Array.from")
+        .ok_or_else(|| format!("unsupported matrix expression: {trimmed}"))?;
+    let after = after.trim_start();
+    let after = after
+        .strip_prefix('(')
+        .ok_or_else(|| format!("unsupported matrix expression: {trimmed}"))?;
+
+    let (args, remainder) = parse_typescript_call_args(after)?;
+    if !remainder.trim().is_empty() {
+        return Err(format!(
+            "unexpected trailing tokens after Array.from(...): {remainder}"
+        ));
+    }
+
+    let parts = split_typescript_top_level_commas(&args);
+    if parts.len() != 2 {
+        return Err(format!("unsupported Array.from(...) arguments: {args}"));
+    }
+
+    let length_arg = parts[0];
+    let mut rest = length_arg.trim();
+    rest = rest
+        .strip_prefix('{')
+        .ok_or_else(|| format!("unsupported Array.from length arg: {length_arg}"))?;
+    rest = rest
+        .strip_suffix('}')
+        .ok_or_else(|| format!("unsupported Array.from length arg: {length_arg}"))?;
+    rest = rest.trim_start();
+    rest = rest
+        .strip_prefix("length")
+        .ok_or_else(|| format!("unsupported Array.from length arg: {length_arg}"))?;
+    rest = rest.trim_start();
+    rest = rest
+        .strip_prefix(':')
+        .ok_or_else(|| format!("unsupported Array.from length arg: {length_arg}"))?;
+    rest = rest.trim_start();
+    let digits = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        return Err(format!("unsupported Array.from length arg: {length_arg}"));
+    }
+    let rows = digits
+        .parse::<usize>()
+        .map_err(|_| format!("invalid Array.from length: {digits}"))?;
+    if rows == 0 {
+        return Err("Array.from length must be > 0".to_string());
+    }
+
+    let fill_arg = parts[1];
+    let fill_str = fill_arg.trim();
+    let array_idx = fill_str
+        .find("Array(")
+        .ok_or_else(|| format!("unsupported Array.from fill arg: {fill_arg}"))?;
+    let after_array = &fill_str[array_idx + "Array(".len()..];
+    let after_array = after_array.trim_start();
+    let digits = after_array
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        return Err(format!("unsupported Array.from fill arg: {fill_arg}"));
+    }
+    let cols = digits
+        .parse::<usize>()
+        .map_err(|_| format!("invalid Array(...) length: {digits}"))?;
+    if cols == 0 {
+        return Err("Array(...) length must be > 0".to_string());
+    }
+
+    let mut rest = after_array[digits.len()..].trim_start();
+    rest = rest
+        .strip_prefix(')')
+        .ok_or_else(|| format!("unsupported Array.from fill arg: {fill_arg}"))?;
+    rest = rest.trim_start();
+    rest = rest
+        .strip_prefix(".fill(")
+        .ok_or_else(|| format!("unsupported Array.from fill arg: {fill_arg}"))?;
+
+    let (fill_expr, remainder) = parse_typescript_call_args(rest)?;
+    if !remainder.trim().is_empty() {
+        return Err(format!(
+            "unexpected trailing tokens after Array(...).fill(...): {remainder}"
+        ));
+    }
+
+    let fill_value = resolve_typescript_scalar_expr(&fill_expr, bindings)?;
+    let mut matrix: Vec<Vec<Option<JsonValue>>> = Vec::new();
+    for _ in 0..rows {
+        matrix.push((0..cols).map(|_| fill_value.clone()).collect());
+    }
+    Ok(matrix)
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn resolve_typescript_value_matrix_expr(
+    expr: &str,
+    bindings: &std::collections::HashMap<String, TypeScriptBinding>,
+) -> Result<Vec<Vec<Option<JsonValue>>>, String> {
+    let trimmed = expr.trim().trim_end_matches(';').trim();
+    if trimmed.starts_with('[') {
+        return parse_typescript_value_matrix(trimmed);
+    }
+    if trimmed.starts_with("Array.from") {
+        return parse_typescript_array_from_fill_matrix(trimmed, bindings);
+    }
+    if is_typescript_identifier(trimmed) {
+        match bindings.get(trimmed) {
+            Some(TypeScriptBinding::Matrix(matrix)) => return Ok(matrix.clone()),
+            Some(TypeScriptBinding::Scalar(_)) => {
+                return Err(format!("expected matrix expression, got scalar {trimmed}"))
+            }
+            None => return Err(format!("unknown identifier: {trimmed}")),
+        }
+    }
+    Err(format!(
+        "unsupported TypeScript matrix expression: {trimmed}"
+    ))
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn resolve_typescript_formulas_matrix_expr(
+    expr: &str,
+    bindings: &std::collections::HashMap<String, TypeScriptBinding>,
+) -> Result<Vec<Vec<Option<String>>>, String> {
+    let trimmed = expr.trim().trim_end_matches(';').trim();
+    if trimmed.starts_with('[') {
+        return parse_typescript_formulas_matrix(trimmed);
+    }
+
+    let matrix = resolve_typescript_value_matrix_expr(trimmed, bindings)?;
+    let mut out: Vec<Vec<Option<String>>> = Vec::new();
+    for row in matrix {
+        let mut row_out: Vec<Option<String>> = Vec::new();
+        for value in row {
+            match value {
+                None => row_out.push(None),
+                Some(JsonValue::String(s)) => row_out.push(Some(s)),
+                Some(other) => {
+                    return Err(format!(
+                        "expected formula string literal or null, got {other}"
+                    ))
+                }
+            }
+        }
+        out.push(row_out);
+    }
+    Ok(out)
+}
+
+#[cfg(any(feature = "desktop", test))]
 fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScriptRunResult {
     use std::collections::HashMap;
 
@@ -2201,6 +2445,7 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
 
     let mut updates = Vec::<CellUpdateData>::new();
     let mut error: Option<String> = None;
+    let mut bindings: HashMap<String, TypeScriptBinding> = HashMap::new();
 
     for raw_line in code.lines() {
         let line = raw_line.trim();
@@ -2217,6 +2462,33 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
             continue;
         }
         if line.starts_with("const ") || line.starts_with("let ") || line.starts_with("var ") {
+            let rest = if let Some(rest) = line.strip_prefix("const ") {
+                rest
+            } else if let Some(rest) = line.strip_prefix("let ") {
+                rest
+            } else {
+                line.strip_prefix("var ").unwrap_or("")
+            };
+
+            if let Some((name_raw, expr_raw)) = rest.split_once('=') {
+                let name = name_raw.trim();
+                let expr = expr_raw.trim().trim_end_matches(';').trim();
+                if is_typescript_identifier(name) {
+                    if let Ok(value) = parse_typescript_value_expr(expr) {
+                        bindings.insert(name.to_string(), TypeScriptBinding::Scalar(value));
+                    } else if expr.trim_start().starts_with('[') {
+                        if let Ok(matrix) = parse_typescript_value_matrix(expr) {
+                            bindings.insert(name.to_string(), TypeScriptBinding::Matrix(matrix));
+                        }
+                    } else if expr.trim_start().starts_with("Array.from") {
+                        if let Ok(matrix) = parse_typescript_array_from_fill_matrix(expr, &bindings)
+                        {
+                            bindings.insert(name.to_string(), TypeScriptBinding::Matrix(matrix));
+                        }
+                    }
+                }
+            }
+
             continue;
         }
 
@@ -2242,7 +2514,7 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
                                 ));
                                 break;
                             }
-                            match parse_typescript_value_expr(&args) {
+                            match resolve_typescript_scalar_expr(&args, &bindings) {
                                 Ok(value) => {
                                     match state.set_cell(
                                         &active_sheet_id,
@@ -2302,7 +2574,7 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
                             }
                         };
 
-                    let matrix = match parse_typescript_value_matrix(&args) {
+                    let matrix = match resolve_typescript_value_matrix_expr(&args, &bindings) {
                         Ok(m) => m,
                         Err(e) => {
                             error = Some(e);
@@ -2378,7 +2650,7 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
                             }
                         };
 
-                    let matrix = match parse_typescript_formulas_matrix(&args) {
+                    let matrix = match resolve_typescript_formulas_matrix_expr(&args, &bindings) {
                         Ok(m) => m,
                         Err(e) => {
                             error = Some(e);
@@ -2452,12 +2724,18 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
         };
 
         let result = match assign_kind {
-            "value" => match parse_typescript_value_expr(rhs_raw) {
+            "value" => match resolve_typescript_scalar_expr(rhs_raw, &bindings) {
                 Ok(value) => state.set_cell(&active_sheet_id, row, col, value, None),
                 Err(e) => Err(AppStateError::WhatIf(e)),
             },
-            "formula" => match parse_typescript_string_literal(rhs_raw) {
-                Ok(formula) => state.set_cell(&active_sheet_id, row, col, None, Some(formula)),
+            "formula" => match resolve_typescript_scalar_expr(rhs_raw, &bindings) {
+                Ok(None) => state.set_cell(&active_sheet_id, row, col, None, None),
+                Ok(Some(JsonValue::String(formula))) => {
+                    state.set_cell(&active_sheet_id, row, col, None, Some(formula))
+                }
+                Ok(Some(other)) => Err(AppStateError::WhatIf(format!(
+                    "expected formula string literal or null, got {other}"
+                ))),
                 Err(e) => Err(AppStateError::WhatIf(e)),
             },
             _ => continue,
@@ -2562,9 +2840,7 @@ pub async fn validate_vba_migration(
         match target {
             MigrationTarget::Python => {
                 let python_context = {
-                    let workbook = script_state
-                        .get_workbook()
-                        .map_err(|e| e.to_string())?;
+                    let workbook = script_state.get_workbook().map_err(|e| e.to_string())?;
                     let fallback_sheet_id = workbook
                         .sheets
                         .first()
@@ -2576,13 +2852,16 @@ pub async fn validate_vba_migration(
                         .map(|s| s.id.clone())
                         .unwrap_or_else(|| fallback_sheet_id.clone());
 
-                    let selection = macro_ctx.selection.unwrap_or(formula_vba_runtime::VbaRangeRef {
-                        sheet: macro_ctx.active_sheet,
-                        start_row: macro_ctx.active_cell.0,
-                        start_col: macro_ctx.active_cell.1,
-                        end_row: macro_ctx.active_cell.0,
-                        end_col: macro_ctx.active_cell.1,
-                    });
+                    let selection =
+                        macro_ctx
+                            .selection
+                            .unwrap_or(formula_vba_runtime::VbaRangeRef {
+                                sheet: macro_ctx.active_sheet,
+                                start_row: macro_ctx.active_cell.0,
+                                start_col: macro_ctx.active_cell.1,
+                                end_row: macro_ctx.active_cell.0,
+                                end_col: macro_ctx.active_cell.1,
+                            });
                     let selection_sheet_id = workbook
                         .sheets
                         .get(selection.sheet)
@@ -2941,23 +3220,35 @@ mod tests {
         let code = r#"
 export default async function main(ctx) {
   const sheet = ctx.activeSheet;
-  await sheet.getRange("A1:B1").setValues([[1, 2]]);
-  await sheet.getRange("C1").setFormulas([["=A1+B1"]]);
-}
+  const fill = 7;
+  const values = Array.from({ length: 2 }, () => Array(2).fill(fill));
+  await sheet.getRange("$A$1:$B$2").setValues(values);
+  await sheet.getRange("C1").setValue(fill);
+
+  const formula = "=A1+B1";
+  await sheet.getRange("D1:E1").setFormulas(Array.from({ length: 1 }, () => Array(2).fill(formula)));
+ }
 "#;
 
         let result = run_typescript_migration_script(&mut state, code);
         assert!(result.ok, "expected ok, got {:?}", result.error);
 
         let a1 = state.get_cell("Sheet1", 0, 0).expect("A1 exists");
-        assert_eq!(a1.value.display(), "1");
+        assert_eq!(a1.value.display(), "7");
 
-        let b1 = state.get_cell("Sheet1", 0, 1).expect("B1 exists");
-        assert_eq!(b1.value.display(), "2");
+        let b2 = state.get_cell("Sheet1", 1, 1).expect("B2 exists");
+        assert_eq!(b2.value.display(), "7");
 
         let c1 = state.get_cell("Sheet1", 0, 2).expect("C1 exists");
-        assert_eq!(c1.formula.as_deref(), Some("=A1+B1"));
-        assert_eq!(c1.value.display(), "3");
+        assert_eq!(c1.value.display(), "7");
+
+        let d1 = state.get_cell("Sheet1", 0, 3).expect("D1 exists");
+        assert_eq!(d1.formula.as_deref(), Some("=A1+B1"));
+        assert_eq!(d1.value.display(), "14");
+
+        let e1 = state.get_cell("Sheet1", 0, 4).expect("E1 exists");
+        assert_eq!(e1.formula.as_deref(), Some("=A1+B1"));
+        assert_eq!(e1.value.display(), "14");
     }
 
     #[test]
