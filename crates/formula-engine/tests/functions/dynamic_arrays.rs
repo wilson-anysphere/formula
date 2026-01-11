@@ -134,6 +134,46 @@ fn sort_by_col_sorts_columns() {
 }
 
 #[test]
+fn sort_supports_multi_key_sort_index_and_order_vectors() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "a").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "b").unwrap();
+    engine.set_cell_value("Sheet1", "A3", "c").unwrap();
+    engine.set_cell_value("Sheet1", "A4", "d").unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B4", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SORT(A1:B4,{2,1},{1,-1})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D1"),
+        Value::Text("c".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(1.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D2"),
+        Value::Text("b".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(1.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D3"),
+        Value::Text("a".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(2.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D4"),
+        Value::Text("d".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "E4"), Value::Number(3.0));
+}
+
+#[test]
 fn unique_by_row_and_column_and_exactly_once() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
@@ -278,6 +318,33 @@ fn sort_treats_blank_optional_args_as_defaults() {
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C3"), Value::Number(3.0));
+}
+
+#[test]
+fn sort_does_not_treat_blank_cell_references_as_omitted_args() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", Value::Blank).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "E1", "=SORT(A1:A3,C1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E1"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    engine
+        .set_cell_formula("Sheet1", "F1", "=SORT(A1:A3,1,C1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "F1"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]

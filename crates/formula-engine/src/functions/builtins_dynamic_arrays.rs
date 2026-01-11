@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::eval::{CellAddr, CompiledExpr};
+use crate::eval::{CellAddr, CompiledExpr, Expr};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
@@ -123,42 +123,44 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let sort_index = match eval_optional_i64(ctx, args.get(1), 1) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-
-    let descending = match eval_optional_sort_descending(ctx, args.get(2), false) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-
     let by_col = match eval_optional_bool(ctx, args.get(3), false) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
-    if by_col {
-        let max_index = i64::try_from(array.rows).unwrap_or(i64::MAX);
-        if sort_index < 1 || sort_index > max_index {
-            return Value::Error(ErrorKind::Value);
-        }
-        let key_row = (sort_index - 1) as usize;
+    if array.rows == 0 || array.cols == 0 {
+        return Value::Array(array);
+    }
 
-        let mut keys = Vec::with_capacity(array.cols);
-        for col in 0..array.cols {
-            let v = array.get(key_row, col).unwrap_or(&Value::Blank);
-            keys.push(sort_key(v));
+    let key_count = if by_col { array.rows } else { array.cols };
+    let sort_indices = match sort_vector_indices(ctx, args.get(1), key_count) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let descending_flags = match sort_vector_orders(ctx, args.get(2), sort_indices.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if by_col {
+        let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(sort_indices.len());
+        for &row_idx in &sort_indices {
+            let mut out = Vec::with_capacity(array.cols);
+            for col in 0..array.cols {
+                out.push(sort_key(array.get(row_idx, col).unwrap_or(&Value::Blank)));
+            }
+            keys.push(out);
         }
 
         let mut order: Vec<usize> = (0..array.cols).collect();
         order.sort_by(|&a, &b| {
-            let ord = compare_sort_keys(&keys[a], &keys[b], descending);
-            if ord == Ordering::Equal {
-                a.cmp(&b)
-            } else {
-                ord
+            for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
+                let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
+                if ord != Ordering::Equal {
+                    return ord;
+                }
             }
+            a.cmp(&b)
         });
 
         let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
@@ -171,26 +173,24 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Array(Array::new(array.rows, array.cols, values));
     }
 
-    let max_index = i64::try_from(array.cols).unwrap_or(i64::MAX);
-    if sort_index < 1 || sort_index > max_index {
-        return Value::Error(ErrorKind::Value);
-    }
-    let key_col = (sort_index - 1) as usize;
-
-    let mut keys = Vec::with_capacity(array.rows);
-    for row in 0..array.rows {
-        let v = array.get(row, key_col).unwrap_or(&Value::Blank);
-        keys.push(sort_key(v));
+    let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(sort_indices.len());
+    for &col_idx in &sort_indices {
+        let mut out = Vec::with_capacity(array.rows);
+        for row in 0..array.rows {
+            out.push(sort_key(array.get(row, col_idx).unwrap_or(&Value::Blank)));
+        }
+        keys.push(out);
     }
 
     let mut order: Vec<usize> = (0..array.rows).collect();
     order.sort_by(|&a, &b| {
-        let ord = compare_sort_keys(&keys[a], &keys[b], descending);
-        if ord == Ordering::Equal {
-            a.cmp(&b)
-        } else {
-            ord
+        for (key_idx, desc) in descending_flags.iter().copied().enumerate() {
+            let ord = compare_sort_keys(&keys[key_idx][a], &keys[key_idx][b], desc);
+            if ord != Ordering::Equal {
+                return ord;
+            }
         }
+        a.cmp(&b)
     });
 
     let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
@@ -232,13 +232,22 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // - If the next argument is a range/array, it is treated as the next `by_array`.
     // - Otherwise it is treated as `sort_order` for the current key.
     //
-    // We must only evaluate each argument once to preserve volatility semantics.
-    let evaluated: Vec<ArgValue> = args[1..].iter().map(|expr| ctx.eval_arg(expr)).collect();
+    // We must only evaluate each argument once to preserve volatility semantics. We also need to
+    // preserve whether the argument was omitted (`Expr::Blank`) so that blank *values* can still
+    // be distinguished from omitted optional `sort_order` arguments.
+    let evaluated: Vec<(bool, ArgValue)> = args[1..]
+        .iter()
+        .map(|expr| (matches!(expr, Expr::Blank), ctx.eval_arg(expr)))
+        .collect();
 
     let mut idx = 0usize;
     while idx < evaluated.len() {
-        let by_value = evaluated[idx].clone();
+        let (by_is_blank, by_value) = evaluated[idx].clone();
         idx += 1;
+
+        if by_is_blank {
+            return Value::Error(ErrorKind::Value);
+        }
 
         let by_array = match arg_value_to_array(ctx, by_value) {
             Ok(v) => v,
@@ -246,18 +255,21 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         };
 
         let mut desc = false;
-        if idx < evaluated.len() && !arg_value_is_array_like(&evaluated[idx]) {
-            let order_value = match evaluated[idx].clone() {
+        if idx < evaluated.len() && !arg_value_is_array_like(&evaluated[idx].1) {
+            let (order_is_blank, order_arg) = evaluated[idx].clone();
+            let order_value = match order_arg {
                 ArgValue::Scalar(v) => v,
                 // References are always treated as `by_array` candidates above.
                 ArgValue::Reference(_) | ArgValue::ReferenceUnion(_) => {
                     Value::Error(ErrorKind::Value)
                 }
             };
-            desc = match sort_descending_from_value(&order_value, false) {
-                Ok(v) => v,
-                Err(e) => return Value::Error(e),
-            };
+            if !order_is_blank {
+                desc = match sort_descending_from_value(&order_value) {
+                    Ok(v) => v,
+                    Err(e) => return Value::Error(e),
+                };
+            }
             idx += 1;
         }
 
@@ -1066,6 +1078,76 @@ fn arg_value_to_array(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Array,
     }
 }
 
+fn sort_vector_indices(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+    key_count: usize,
+) -> Result<Vec<usize>, ErrorKind> {
+    if key_count == 0 {
+        return Err(ErrorKind::Value);
+    }
+
+    let Some(expr) = expr else {
+        return Ok(vec![0]);
+    };
+    if matches!(expr, Expr::Blank) {
+        return Ok(vec![0]);
+    }
+
+    let arr = arg_value_to_array(ctx, ctx.eval_arg(expr))?;
+    if arr.rows != 1 && arr.cols != 1 {
+        return Err(ErrorKind::Value);
+    }
+    if arr.values.is_empty() {
+        return Err(ErrorKind::Value);
+    }
+
+    let max_index = i64::try_from(key_count).unwrap_or(i64::MAX);
+    let mut indices = Vec::with_capacity(arr.values.len());
+    for v in &arr.values {
+        let idx = v.coerce_to_i64()?;
+        if idx < 1 || idx > max_index {
+            return Err(ErrorKind::Value);
+        }
+        indices.push((idx - 1) as usize);
+    }
+    Ok(indices)
+}
+
+fn sort_vector_orders(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+    key_len: usize,
+) -> Result<Vec<bool>, ErrorKind> {
+    let Some(expr) = expr else {
+        return Ok(vec![false; key_len]);
+    };
+    if matches!(expr, Expr::Blank) {
+        return Ok(vec![false; key_len]);
+    }
+
+    let arr = arg_value_to_array(ctx, ctx.eval_arg(expr))?;
+    if arr.rows != 1 && arr.cols != 1 {
+        return Err(ErrorKind::Value);
+    }
+    if arr.values.is_empty() {
+        return Err(ErrorKind::Value);
+    }
+
+    let mut orders = Vec::with_capacity(arr.values.len());
+    for v in &arr.values {
+        orders.push(sort_descending_from_value(v)?);
+    }
+
+    if orders.len() == 1 {
+        Ok(vec![orders[0]; key_len])
+    } else if orders.len() == key_len {
+        Ok(orders)
+    } else {
+        Err(ErrorKind::Value)
+    }
+}
+
 fn eval_optional_i64(
     ctx: &dyn FunctionContext,
     expr: Option<&CompiledExpr>,
@@ -1074,9 +1156,11 @@ fn eval_optional_i64(
     let Some(expr) = expr else {
         return Ok(default);
     };
+    if matches!(expr, Expr::Blank) {
+        return Ok(default);
+    }
     let v = eval_scalar_arg(ctx, expr);
     match v {
-        Value::Blank => Ok(default),
         Value::Error(e) => Err(e),
         other => other.coerce_to_i64(),
     }
@@ -1090,9 +1174,11 @@ fn eval_optional_number(
     let Some(expr) = expr else {
         return Ok(default);
     };
+    if matches!(expr, Expr::Blank) {
+        return Ok(default);
+    }
     let v = eval_scalar_arg(ctx, expr);
     match v {
-        Value::Blank => Ok(default),
         Value::Error(e) => Err(e),
         other => other.coerce_to_number(),
     }
@@ -1106,29 +1192,18 @@ fn eval_optional_bool(
     let Some(expr) = expr else {
         return Ok(default);
     };
+    if matches!(expr, Expr::Blank) {
+        return Ok(default);
+    }
     let v = eval_scalar_arg(ctx, expr);
     match v {
-        Value::Blank => Ok(default),
         Value::Error(e) => Err(e),
         other => other.coerce_to_bool(),
     }
 }
 
-fn eval_optional_sort_descending(
-    ctx: &dyn FunctionContext,
-    expr: Option<&CompiledExpr>,
-    default_descending: bool,
-) -> Result<bool, ErrorKind> {
-    let Some(expr) = expr else {
-        return Ok(default_descending);
-    };
-    let v = eval_scalar_arg(ctx, expr);
-    sort_descending_from_value(&v, default_descending)
-}
-
-fn sort_descending_from_value(value: &Value, default_descending: bool) -> Result<bool, ErrorKind> {
+fn sort_descending_from_value(value: &Value) -> Result<bool, ErrorKind> {
     match value {
-        Value::Blank => Ok(default_descending),
         Value::Error(e) => Err(*e),
         Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         other => match other.coerce_to_i64() {
