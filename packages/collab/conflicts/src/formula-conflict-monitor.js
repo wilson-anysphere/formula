@@ -289,8 +289,13 @@ export class FormulaConflictMonitor {
 
       const cellMap = /** @type {Y.Map<any>} */ (event.target);
       const modifiedByChange = event.changes.keys.get("modifiedBy");
-      const remoteUserId = (cellMap.get("modifiedBy") ?? "").toString();
-      const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : remoteUserId;
+      const currentModifiedBy = (cellMap.get("modifiedBy") ?? "").toString();
+      // `modifiedBy` is best-effort metadata. Some legacy writers may not update it.
+      // In that case we treat the remote user id as unknown rather than incorrectly
+      // attributing the overwrite to ourselves (the previous modifier).
+      const remoteUserId =
+        modifiedByChange || currentModifiedBy !== this.localUserId ? currentModifiedBy : "";
+      const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : currentModifiedBy;
 
       const valueChange = event.changes.keys.get("value");
       const formulaChange = event.changes.keys.get("formula");

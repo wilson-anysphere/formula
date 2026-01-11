@@ -516,6 +516,9 @@ test("restart fallback still detects conflicts when remote updates omit modified
   syncDocs(alice.doc, bobDoc);
 
   assert.ok(alice.conflicts.length >= 1, "expected a conflict after restart");
+  const conflict = alice.conflicts[0];
+  // Since the remote overwrite didn't update modifiedBy, the remote user is unknown.
+  assert.equal(conflict.remoteUserId, "");
 });
 
 test("content conflicts (value vs formula) are still detected after restarting the monitor", () => {

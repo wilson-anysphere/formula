@@ -129,8 +129,10 @@ export class CellConflictMonitor {
       const modifiedByChange = event.changes.keys.get("modifiedBy");
       const oldValue = change.oldValue ?? null;
       const newValue = cellMap.get("value") ?? null;
-      const remoteUserId = (cellMap.get("modifiedBy") ?? "").toString();
-      const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : remoteUserId;
+      const currentModifiedBy = (cellMap.get("modifiedBy") ?? "").toString();
+      const remoteUserId =
+        modifiedByChange || currentModifiedBy !== this.localUserId ? currentModifiedBy : "";
+      const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : currentModifiedBy;
       const action = change.action;
       const itemId = getItemId(cellMap, "value");
       const newItemOriginId = getItemOriginId(cellMap, "value");

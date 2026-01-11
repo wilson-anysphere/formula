@@ -100,7 +100,7 @@ export class ConflictUiController {
     });
     const right = this._renderConflictSide({
       testid: "conflict-remote",
-      label: `Theirs (${conflict.remoteUserId})`,
+      label: conflict.remoteUserId ? `Theirs (${conflict.remoteUserId})` : "Theirs",
       conflict,
       side: "remote"
     });
