@@ -160,6 +160,22 @@ in
   assert.deepEqual(toJson(query2), toJson(query));
 });
 
+test("m_language round-trip: prettyPrintQueryToM (nested join comparer list)", () => {
+  const script = `
+let
+  Left = Query.Reference("q_left"),
+  Right = Query.Reference("q_right"),
+  #"Merged Queries" = Table.NestedJoin(Left, {"First", "Last"}, Right, {"First", "Last"}, "Matches", JoinKind.LeftOuter, null, {Comparer.OrdinalIgnoreCase, Comparer.Ordinal})
+in
+  #"Merged Queries"
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});
+
 test("m_language round-trip: prettyPrintQueryToM (expanded scalar types)", () => {
   const script = `
 let

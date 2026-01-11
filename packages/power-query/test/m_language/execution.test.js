@@ -884,6 +884,99 @@ in
   ]);
 });
 
+test("m_language execution: Table.NestedJoin supports comparer lists (per-key)", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"First", "Last", "Id"},
+    {"Alice", "Smith", 1},
+    {"ALICE", "Smith", 2},
+    {"Alice", "SMITH", 3},
+    {"Bob", "Smith", 4}
+  })
+in
+  Source
+`,
+    { id: "q_left_nested_comparers", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"First", "Last", "Score"},
+    {"alice", "Smith", 10},
+    {"alice", "SMITH", 20}
+  })
+in
+  Source
+`,
+    { id: "q_right_nested_comparers", name: "Right" },
+  );
+
+  const nestedJoin = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_nested_comparers"),
+  Right = Query.Reference("q_right_nested_comparers"),
+  #"Merged Queries" = Table.NestedJoin(
+    Left,
+    {"First", "Last"},
+    Right,
+    {"First", "Last"},
+    "Matches",
+    JoinKind.LeftOuter,
+    null,
+    {Comparer.OrdinalIgnoreCase, Comparer.Ordinal}
+  )
+in
+  #"Merged Queries"
+`,
+    { id: "q_nested_join_comparers", name: "Nested join comparers" },
+  );
+
+  assert.equal(nestedJoin.steps[0]?.operation.type, "merge");
+  assert.deepEqual(nestedJoin.steps[0]?.operation.comparers, [
+    { comparer: "ordinalIgnoreCase", caseSensitive: false },
+    { comparer: "ordinal", caseSensitive: true },
+  ]);
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(
+    nestedJoin,
+    { queries: { q_left_nested_comparers: left, q_right_nested_comparers: right } },
+    {},
+  );
+
+  const matchesIdx = result.getColumnIndex("Matches");
+
+  const row0 = result.getCell(0, matchesIdx);
+  assert.ok(row0 instanceof DataTable);
+  assert.deepEqual(row0.toGrid(), [
+    ["First", "Last", "Score"],
+    ["alice", "Smith", 10],
+  ]);
+
+  const row1 = result.getCell(1, matchesIdx);
+  assert.ok(row1 instanceof DataTable);
+  assert.deepEqual(row1.toGrid(), [
+    ["First", "Last", "Score"],
+    ["alice", "Smith", 10],
+  ]);
+
+  const row2 = result.getCell(2, matchesIdx);
+  assert.ok(row2 instanceof DataTable);
+  assert.deepEqual(row2.toGrid(), [
+    ["First", "Last", "Score"],
+    ["alice", "SMITH", 20],
+  ]);
+
+  const row3 = result.getCell(3, matchesIdx);
+  assert.ok(row3 instanceof DataTable);
+  assert.deepEqual(row3.toGrid(), [["First", "Last", "Score"]]);
+});
+
 test("m_language execution: Table.ExpandTableColumn expands nested joins (empty nested tables keep the row)", async () => {
   const left = compileMToQuery(
     `
