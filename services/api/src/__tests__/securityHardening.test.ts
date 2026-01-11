@@ -24,6 +24,7 @@ describe("security hardening", () => {
   let config: AppConfig;
   let app: ReturnType<typeof buildApp>;
   let secureApp: ReturnType<typeof buildApp>;
+  let trustProxyApp: ReturnType<typeof buildApp>;
 
   beforeAll(async () => {
     const mem = newDb({ autoCreateForeignKeyIndices: true });
@@ -48,11 +49,14 @@ describe("security hardening", () => {
 
     app = buildApp({ db, config });
     secureApp = buildApp({ db, config: { ...config, cookieSecure: true } });
+    trustProxyApp = buildApp({ db, config: { ...config, trustProxy: true } });
     await app.ready();
     await secureApp.ready();
+    await trustProxyApp.ready();
   });
 
   afterAll(async () => {
+    await trustProxyApp.close();
     await secureApp.close();
     await app.close();
     await db.end();
@@ -249,5 +253,46 @@ describe("security hardening", () => {
       "org.ip_allowlist.blocked"
     ]);
     expect(audit.rowCount).toBeGreaterThan(0);
+  });
+
+  it("uses X-Forwarded-For for allowlist enforcement when TRUST_PROXY=true", async () => {
+    const register = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "trust-proxy-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "Trust Proxy Org"
+      }
+    });
+    expect(register.statusCode).toBe(200);
+    const cookie = extractCookie(register.headers["set-cookie"]);
+    const orgId = (register.json() as any).organization.id as string;
+
+    const setAllowlist = await app.inject({
+      method: "PATCH",
+      url: `/orgs/${orgId}/settings`,
+      headers: { cookie },
+      payload: { ipAllowlist: ["203.0.113.0/24"] }
+    });
+    expect(setAllowlist.statusCode).toBe(200);
+
+    const blockedWithoutTrustProxy = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgId}`,
+      headers: { cookie, "x-forwarded-for": "203.0.113.10" },
+      remoteAddress: "10.0.0.1"
+    });
+    expect(blockedWithoutTrustProxy.statusCode).toBe(403);
+    expect((blockedWithoutTrustProxy.json() as any).error).toBe("ip_not_allowed");
+
+    const allowedWithTrustProxy = await trustProxyApp.inject({
+      method: "GET",
+      url: `/orgs/${orgId}`,
+      headers: { cookie, "x-forwarded-for": "203.0.113.10" },
+      remoteAddress: "10.0.0.1"
+    });
+    expect(allowedWithTrustProxy.statusCode).toBe(200);
   });
 });
