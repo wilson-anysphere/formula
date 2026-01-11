@@ -14,7 +14,8 @@ export function normalizeFilePath(input) {
   // Preserve UNC / network path prefix (`//server/share`) by only collapsing
   // duplicate slashes after the leading `//` when present.
   if (out.startsWith("//")) {
-    out = `//${out.slice(2).replace(/\/{2,}/g, "/")}`;
+    const rest = out.slice(2).replace(/\/{2,}/g, "/").replace(/^\/+/, "");
+    out = `//${rest}`;
   } else {
     out = out.replace(/\/{2,}/g, "/");
   }
