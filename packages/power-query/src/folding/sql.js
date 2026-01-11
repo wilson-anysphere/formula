@@ -210,6 +210,8 @@ export class QueryFoldingEngine {
     const from = `(${state.fragment.sql}) AS t`;
     switch (operation.type) {
       case "selectColumns": {
+        if (operation.columns.length === 0) return null;
+        if (hasDuplicateStrings(operation.columns)) return null;
         const cols = operation.columns.map((c) => `t.${quoteIdentifier(c)}`).join(", ");
         return {
           fragment: { sql: `SELECT ${cols} FROM ${from}`, params },
@@ -261,6 +263,16 @@ export class QueryFoldingEngine {
         };
       }
       case "groupBy": {
+        if (operation.groupColumns.length === 0 && operation.aggregations.length === 0) return null;
+        if (hasDuplicateStrings(operation.groupColumns)) return null;
+        if (
+          hasDuplicateStrings([
+            ...operation.groupColumns,
+            ...operation.aggregations.map((agg) => agg.as ?? `${agg.op} of ${agg.column}`),
+          ])
+        ) {
+          return null;
+        }
         const groupCols = operation.groupColumns.map((c) => `t.${quoteIdentifier(c)}`).join(", ");
         const aggSql = operation.aggregations.map((agg) => aggregationToSql(agg, dialect)).join(", ");
         const selectList = [groupCols, aggSql].filter(Boolean).join(", ");
@@ -577,6 +589,19 @@ function columnsCompatible(base, candidate) {
   if (base.length !== candidate.length) return false;
   const set = new Set(base);
   return candidate.every((c) => set.has(c));
+}
+
+/**
+ * @param {string[]} values
+ * @returns {boolean}
+ */
+function hasDuplicateStrings(values) {
+  const seen = new Set();
+  for (const value of values) {
+    if (seen.has(value)) return true;
+    seen.add(value);
+  }
+  return false;
 }
 
 /**

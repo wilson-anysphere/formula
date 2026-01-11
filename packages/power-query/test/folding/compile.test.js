@@ -36,6 +36,36 @@ test("compile: folds selectColumns/filterRows/groupBy into a parameterized SQL p
   });
 });
 
+test("compile: selectColumns with duplicate names breaks folding (SQL cannot return zero/duplicate columns safely)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_select_dupe",
+    name: "Select dupe",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Region", "Region"] } }],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "hybrid");
+  assert.equal(plan.sql, "SELECT * FROM sales");
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["selectColumns"]);
+});
+
+test("compile: groupBy with no columns + no aggregations breaks folding", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_group_empty",
+    name: "Group empty",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [{ id: "s1", name: "Group", operation: { type: "groupBy", groupColumns: [], aggregations: [] } }],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "hybrid");
+  assert.equal(plan.sql, "SELECT * FROM sales");
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["groupBy"]);
+});
+
 test("compile: LIKE predicates escape wildcard characters + use ESCAPE clause", () => {
   const folding = new QueryFoldingEngine();
   const query = {
