@@ -378,33 +378,54 @@ fn locale_for_lcid(lcid: u32) -> Option<Locale> {
 
         // --- German (decimal ',', thousands '.', date '.', time ':') ---
         0x0407 | // de-DE
-        0x0807 | // de-CH
         0x0C07 | // de-AT
         0x1007 | // de-LU
         0x1407   // de-LI
             => Locale::de_de(),
 
+        // --- Swiss German (decimal '.', thousands ''', date '.', time ':') ---
+        0x0807 => Locale {
+            decimal_sep: '.',
+            thousands_sep: '\'',
+            date_sep: '.',
+            time_sep: ':',
+        }, // de-CH
+
         // --- French (decimal ',', thousands NBSP, date '/', time ':') ---
         0x040C | // fr-FR
         0x080C | // fr-BE
         0x0C0C | // fr-CA
-        0x100C | // fr-CH
         0x140C | // fr-LU
         0x180C   // fr-MC
             => Locale::fr_fr(),
 
+        // --- Swiss French (decimal '.', thousands ''', date '.', time ':') ---
+        0x100C => Locale {
+            decimal_sep: '.',
+            thousands_sep: '\'',
+            date_sep: '.',
+            time_sep: ':',
+        }, // fr-CH
+
         // --- Italian (decimal ',', thousands '.', date '/', time ':') ---
-        0x0410 | // it-IT
-        0x0810   // it-CH
-            => Locale::it_it(),
+        0x0410 => Locale::it_it(), // it-IT
+        // Swiss Italian (decimal '.', thousands ''', date '.', time ':')
+        0x0810 => Locale {
+            decimal_sep: '.',
+            thousands_sep: '\'',
+            date_sep: '.',
+            time_sep: ':',
+        }, // it-CH
 
         // --- Spanish (decimal ',', thousands '.', date '/', time ':') ---
         0x040A | // es-ES (traditional sort)
         0x0C0A | // es-ES (modern sort)
-        0x080A | // es-MX
         0x2C0A | // es-AR
         0x240A   // es-CO
             => Locale::es_es(),
+
+        // --- Spanish (Mexico): decimal '.', thousands ',', date '/', time ':' ---
+        0x080A => Locale::en_us(), // es-MX
 
         // --- Portuguese (approximate with Spanish separators) ---
         0x0416 | // pt-BR
@@ -428,6 +449,148 @@ fn locale_for_lcid(lcid: u32) -> Option<Locale> {
                 decimal_sep: ',',
                 thousands_sep: '\u{00A0}',
                 date_sep: '-',
+                time_sep: ':',
+            },
+
+        // --- Danish (decimal ',', thousands '.', date '-', time ':') ---
+        0x0406 => Locale {
+            decimal_sep: ',',
+            thousands_sep: '.',
+            date_sep: '-',
+            time_sep: ':',
+        }, // da-DK
+
+        // --- Norwegian (decimal ',', thousands NBSP, date '.', time ':') ---
+        0x0414 | // nb-NO
+        0x0814   // nn-NO
+            => Locale {
+                decimal_sep: ',',
+                thousands_sep: '\u{00A0}',
+                date_sep: '.',
+                time_sep: ':',
+            },
+
+        // --- Finnish (decimal ',', thousands NBSP, date '.', time ':') ---
+        0x040B => Locale {
+            decimal_sep: ',',
+            thousands_sep: '\u{00A0}',
+            date_sep: '.',
+            time_sep: ':',
+        }, // fi-FI
+
+        // --- Polish (decimal ',', thousands NBSP, date '.', time ':') ---
+        0x0415 => Locale {
+            decimal_sep: ',',
+            thousands_sep: '\u{00A0}',
+            date_sep: '.',
+            time_sep: ':',
+        }, // pl-PL
+
+        // --- Czech / Slovak (decimal ',', thousands NBSP, date '.', time ':') ---
+        0x0405 | // cs-CZ
+        0x041B   // sk-SK
+            => Locale {
+                decimal_sep: ',',
+                thousands_sep: '\u{00A0}',
+                date_sep: '.',
+                time_sep: ':',
+            },
+
+        // --- Hungarian (decimal ',', thousands NBSP, date '.', time ':') ---
+        0x040E => Locale {
+            decimal_sep: ',',
+            thousands_sep: '\u{00A0}',
+            date_sep: '.',
+            time_sep: ':',
+        }, // hu-HU
+
+        // --- Romanian (decimal ',', thousands '.', date '.', time ':') ---
+        0x0418 => Locale {
+            decimal_sep: ',',
+            thousands_sep: '.',
+            date_sep: '.',
+            time_sep: ':',
+        }, // ro-RO
+
+        // --- Russian / Ukrainian (decimal ',', thousands NBSP, date '.', time ':') ---
+        0x0419 | // ru-RU
+        0x0422   // uk-UA
+            => Locale {
+                decimal_sep: ',',
+                thousands_sep: '\u{00A0}',
+                date_sep: '.',
+                time_sep: ':',
+            },
+
+        // --- Turkish (decimal ',', thousands '.', date '.', time ':') ---
+        0x041F => Locale {
+            decimal_sep: ',',
+            thousands_sep: '.',
+            date_sep: '.',
+            time_sep: ':',
+        }, // tr-TR
+
+        // --- Greek (decimal ',', thousands '.', date '/', time ':') ---
+        0x0408 => Locale {
+            decimal_sep: ',',
+            thousands_sep: '.',
+            date_sep: '/',
+            time_sep: ':',
+        }, // el-GR
+
+        // --- Hebrew (decimal '.', thousands ',', date '/', time ':') ---
+        0x040D => Locale {
+            decimal_sep: '.',
+            thousands_sep: ',',
+            date_sep: '/',
+            time_sep: ':',
+        }, // he-IL
+
+        // --- Arabic / Hindi (approximate with en-US separators) ---
+        0x0401 | // ar-SA
+        0x0439   // hi-IN
+            => Locale::en_us(),
+
+        // --- Korean (decimal '.', thousands ',', date '-', time ':') ---
+        0x0412 => Locale {
+            decimal_sep: '.',
+            thousands_sep: ',',
+            date_sep: '-',
+            time_sep: ':',
+        }, // ko-KR
+
+        // --- Thai (decimal '.', thousands ',', date '/', time ':') ---
+        0x041E => Locale::en_us(), // th-TH (approx)
+
+        // --- Indonesian / Vietnamese (decimal ',', thousands '.', date '/', time ':') ---
+        0x0421 | // id-ID
+        0x042A   // vi-VN
+            => Locale::es_es(),
+
+        // --- Bulgarian / Croatian / Slovenian (decimal ',', thousands NBSP/dot, date '.', time ':') ---
+        0x0402 => Locale {
+            decimal_sep: ',',
+            thousands_sep: '\u{00A0}',
+            date_sep: '.',
+            time_sep: ':',
+        }, // bg-BG
+        0x041A | // hr-HR
+        0x0424   // sl-SI
+            => Locale {
+                decimal_sep: ',',
+                thousands_sep: '.',
+                date_sep: '.',
+                time_sep: ':',
+            },
+
+        // --- Baltic (decimal ',', thousands NBSP, date '.', time ':') ---
+        0x0425 | // et-EE
+        0x0426 | // lv-LV
+        0x0427   // lt-LT
+            => Locale {
+                decimal_sep: ',',
+                thousands_sep: '\u{00A0}',
+                date_sep: '.',
                 time_sep: ':',
             },
 
@@ -493,6 +656,69 @@ mod tests {
         // Asian locales mapped to en-US separators.
         assert_eq!(locale_for_lcid(0x0411), Some(Locale::en_us())); // ja-JP
         assert_eq!(locale_for_lcid(0x0804), Some(Locale::en_us())); // zh-CN
+
+        // Swiss variants.
+        assert_eq!(
+            locale_for_lcid(0x0807),
+            Some(Locale {
+                decimal_sep: '.',
+                thousands_sep: '\'',
+                date_sep: '.',
+                time_sep: ':',
+            })
+        ); // de-CH
+
+        // Additional common European locales.
+        assert_eq!(
+            locale_for_lcid(0x0419),
+            Some(Locale {
+                decimal_sep: ',',
+                thousands_sep: '\u{00A0}',
+                date_sep: '.',
+                time_sep: ':',
+            })
+        ); // ru-RU
+        assert_eq!(
+            locale_for_lcid(0x0415),
+            Some(Locale {
+                decimal_sep: ',',
+                thousands_sep: '\u{00A0}',
+                date_sep: '.',
+                time_sep: ':',
+            })
+        ); // pl-PL
+        assert_eq!(
+            locale_for_lcid(0x0406),
+            Some(Locale {
+                decimal_sep: ',',
+                thousands_sep: '.',
+                date_sep: '-',
+                time_sep: ':',
+            })
+        ); // da-DK
+        assert_eq!(
+            locale_for_lcid(0x041F),
+            Some(Locale {
+                decimal_sep: ',',
+                thousands_sep: '.',
+                date_sep: '.',
+                time_sep: ':',
+            })
+        ); // tr-TR
+
+        // es-MX uses en-US separators (best-effort).
+        assert_eq!(locale_for_lcid(0x080A), Some(Locale::en_us())); // es-MX
+
+        // Korean uses '-' date separator.
+        assert_eq!(
+            locale_for_lcid(0x0412),
+            Some(Locale {
+                decimal_sep: '.',
+                thousands_sep: ',',
+                date_sep: '-',
+                time_sep: ':',
+            })
+        ); // ko-KR
 
         assert_eq!(locale_for_lcid(0x9999), None);
     }
