@@ -299,4 +299,146 @@ describe("API e2e: auth + RBAC + sync token", () => {
     });
     expect(body.permissions.rangeRestrictions[0].readAllowlist).toContain(publicUserId);
   });
+
+  it("creates, lists, fetches, deletes document versions and enforces RBAC", async () => {
+    const ownerRes = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "versions-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "Versions Org"
+      }
+    });
+    expect(ownerRes.statusCode).toBe(200);
+    const ownerCookie = extractCookie(ownerRes.headers["set-cookie"]);
+    const ownerBody = ownerRes.json() as any;
+    const ownerId = ownerBody.user.id as string;
+    const orgId = ownerBody.organization.id as string;
+
+    const viewerRes = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "versions-viewer@example.com",
+        password: "password1234",
+        name: "Viewer"
+      }
+    });
+    expect(viewerRes.statusCode).toBe(200);
+    const viewerCookie = extractCookie(viewerRes.headers["set-cookie"]);
+
+    const createDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie: ownerCookie },
+      payload: { orgId, title: "Versions Doc" }
+    });
+    expect(createDoc.statusCode).toBe(200);
+    const docId = (createDoc.json() as any).document.id as string;
+
+    const inviteViewer = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/invite`,
+      headers: { cookie: ownerCookie },
+      payload: { email: "versions-viewer@example.com", role: "viewer" }
+    });
+    expect(inviteViewer.statusCode).toBe(200);
+
+    const bytes = Buffer.from("hello versions");
+    const dataBase64 = bytes.toString("base64");
+
+    const invalidBase64 = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/versions`,
+      headers: { cookie: ownerCookie },
+      payload: { dataBase64: "not base64!!!" }
+    });
+    expect(invalidBase64.statusCode).toBe(400);
+    expect((invalidBase64.json() as any).error).toBe("invalid_request");
+
+    const createVersion = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/versions`,
+      headers: { cookie: ownerCookie },
+      payload: { description: "v1", dataBase64 }
+    });
+    expect(createVersion.statusCode).toBe(200);
+    const created = createVersion.json() as any;
+    expect(created.version.description).toBe("v1");
+    expect(created.version.sizeBytes).toBe(bytes.length);
+    const versionId = created.version.id as string;
+
+    const listAsViewer = await app.inject({
+      method: "GET",
+      url: `/docs/${docId}/versions`,
+      headers: { cookie: viewerCookie }
+    });
+    expect(listAsViewer.statusCode).toBe(200);
+    const listed = listAsViewer.json() as any;
+    expect(listed.versions).toHaveLength(1);
+    expect(listed.versions[0]).toMatchObject({
+      id: versionId,
+      createdBy: ownerId,
+      description: "v1",
+      sizeBytes: bytes.length
+    });
+
+    const fetchAsViewer = await app.inject({
+      method: "GET",
+      url: `/docs/${docId}/versions/${versionId}`,
+      headers: { cookie: viewerCookie }
+    });
+    expect(fetchAsViewer.statusCode).toBe(200);
+    const fetched = (fetchAsViewer.json() as any).version as any;
+    expect(fetched.createdBy).toBe(ownerId);
+    expect(Buffer.from(fetched.dataBase64, "base64").equals(bytes)).toBe(true);
+
+    const viewerCannotCreate = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/versions`,
+      headers: { cookie: viewerCookie },
+      payload: { dataBase64 }
+    });
+    expect(viewerCannotCreate.statusCode).toBe(403);
+
+    const viewerCannotDelete = await app.inject({
+      method: "DELETE",
+      url: `/docs/${docId}/versions/${versionId}`,
+      headers: { cookie: viewerCookie }
+    });
+    expect(viewerCannotDelete.statusCode).toBe(403);
+
+    const deleteDoc = await app.inject({
+      method: "DELETE",
+      url: `/docs/${docId}`,
+      headers: { cookie: ownerCookie }
+    });
+    expect(deleteDoc.statusCode).toBe(200);
+
+    const createAfterDocDeleted = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/versions`,
+      headers: { cookie: ownerCookie },
+      payload: { dataBase64 }
+    });
+    expect(createAfterDocDeleted.statusCode).toBe(403);
+    expect((createAfterDocDeleted.json() as any).error).toBe("doc_deleted");
+
+    const deleteAsOwner = await app.inject({
+      method: "DELETE",
+      url: `/docs/${docId}/versions/${versionId}`,
+      headers: { cookie: ownerCookie }
+    });
+    expect(deleteAsOwner.statusCode).toBe(200);
+
+    const listAfterDelete = await app.inject({
+      method: "GET",
+      url: `/docs/${docId}/versions`,
+      headers: { cookie: ownerCookie }
+    });
+    expect(listAfterDelete.statusCode).toBe(200);
+    expect((listAfterDelete.json() as any).versions).toHaveLength(0);
+  });
 });

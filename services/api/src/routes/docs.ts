@@ -13,6 +13,20 @@ import { requireAuth } from "./auth";
 type ShareLinkRole = Exclude<DocumentRole, "owner" | "admin">;
 type ShareLinkVisibility = "public" | "private";
 
+function decodeBase64Strict(input: string): Buffer | null {
+  // Buffer.from(..., "base64") is permissive and does not throw for many invalid inputs.
+  // We validate the alphabet + padding and ensure a stable round-trip to reject malformed base64.
+  if (typeof input !== "string") return null;
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(input)) return null;
+  if (input.length % 4 !== 0) return null;
+
+  const decoded = Buffer.from(input, "base64");
+  const normalizedInput = input.replace(/=+$/, "");
+  const normalizedRoundTrip = decoded.toString("base64").replace(/=+$/, "");
+  if (normalizedInput !== normalizedRoundTrip) return null;
+  return decoded;
+}
+
 function roleRank(role: DocumentRole): number {
   switch (role) {
     case "owner":
@@ -37,11 +51,12 @@ async function getDocMembership(
   docId: string
 ): Promise<{
   orgId: string;
+  deletedAt: Date | null;
   role: DocumentRole | null;
 }> {
   const result = await request.server.db.query(
     `
-      SELECT d.org_id, dm.role
+      SELECT d.org_id, d.deleted_at, dm.role
       FROM documents d
       LEFT JOIN document_members dm
         ON dm.document_id = d.id AND dm.user_id = $2
@@ -52,18 +67,18 @@ async function getDocMembership(
   );
 
   if (result.rowCount !== 1) {
-    return { orgId: "", role: null };
+    return { orgId: "", deletedAt: null, role: null };
   }
 
-  const row = result.rows[0] as { org_id: string; role: DocumentRole | null };
-  return { orgId: row.org_id, role: row.role };
+  const row = result.rows[0] as { org_id: string; deleted_at: Date | null; role: DocumentRole | null };
+  return { orgId: row.org_id, deletedAt: row.deleted_at, role: row.role };
 }
 
 async function requireDocRole(
   request: FastifyRequest,
   reply: FastifyReply,
   docId: string
-): Promise<{ orgId: string; role: DocumentRole } | null> {
+): Promise<{ orgId: string; deletedAt: Date | null; role: DocumentRole } | null> {
   const membership = await getDocMembership(request, docId);
   if (!membership.orgId) {
     reply.code(404).send({ error: "doc_not_found" });
@@ -73,7 +88,7 @@ async function requireDocRole(
     reply.code(403).send({ error: "forbidden" });
     return null;
   }
-  return { orgId: membership.orgId, role: membership.role };
+  return { orgId: membership.orgId, deletedAt: membership.deletedAt, role: membership.role };
 }
 
 async function requireOrgMembership(request: FastifyRequest, orgId: string): Promise<boolean> {
@@ -172,6 +187,149 @@ export function registerDocRoutes(app: FastifyInstance): void {
       sessionId: request.session?.id,
       success: true,
       details: { soft: true },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({ ok: true });
+  });
+
+  const CreateDocVersionBody = z.object({
+    description: z.string().max(1000).optional(),
+    dataBase64: z.string()
+  });
+
+  app.post("/docs/:docId/versions", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
+    if (membership.deletedAt) return reply.code(403).send({ error: "doc_deleted" });
+
+    const parsed = CreateDocVersionBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const data = decodeBase64Strict(parsed.data.dataBase64);
+    if (!data) return reply.code(400).send({ error: "invalid_request" });
+
+    const versionId = crypto.randomUUID();
+    const inserted = await app.db.query(
+      `
+        INSERT INTO document_versions (id, document_id, created_by, description, data)
+        VALUES ($1,$2,$3,$4,$5)
+        RETURNING created_at
+      `,
+      [versionId, docId, request.user!.id, parsed.data.description ?? null, data]
+    );
+
+    const createdAt = (inserted.rows[0] as any).created_at as Date;
+    const sizeBytes = data.length;
+
+    await writeAuditEvent(app.db, {
+      orgId: membership.orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "document.version_created",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { versionId, description: parsed.data.description ?? null, sizeBytes },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({
+      version: {
+        id: versionId,
+        createdAt,
+        description: parsed.data.description ?? null,
+        sizeBytes
+      }
+    });
+  });
+
+  app.get("/docs/:docId/versions", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+
+    const versions = await app.db.query(
+      `
+        SELECT id, created_at, created_by, description, data
+        FROM document_versions
+        WHERE document_id = $1
+        ORDER BY created_at DESC
+      `,
+      [docId]
+    );
+
+    return reply.send({
+      versions: versions.rows.map((row: any) => ({
+        id: row.id as string,
+        createdAt: row.created_at as Date,
+        createdBy: row.created_by as string | null,
+        description: row.description as string | null,
+        sizeBytes: row.data ? Buffer.from(row.data as any).length : 0
+      }))
+    });
+  });
+
+  app.get("/docs/:docId/versions/:versionId", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string; versionId: string }).docId;
+    const versionId = (request.params as { docId: string; versionId: string }).versionId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+
+    const res = await app.db.query(
+      `
+        SELECT id, created_at, created_by, description, data
+        FROM document_versions
+        WHERE document_id = $1 AND id = $2
+        LIMIT 1
+      `,
+      [docId, versionId]
+    );
+    if (res.rowCount !== 1) return reply.code(404).send({ error: "version_not_found" });
+
+    const row = res.rows[0] as any;
+    const bytes = row.data ? Buffer.from(row.data as any) : Buffer.alloc(0);
+    return reply.send({
+      version: {
+        id: row.id as string,
+        createdAt: row.created_at as Date,
+        createdBy: row.created_by as string | null,
+        description: (row.description as string | null) ?? null,
+        dataBase64: bytes.toString("base64")
+      }
+    });
+  });
+
+  app.delete("/docs/:docId/versions/:versionId", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string; versionId: string }).docId;
+    const versionId = (request.params as { docId: string; versionId: string }).versionId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
+
+    const deleted = await app.db.query(
+      "DELETE FROM document_versions WHERE document_id = $1 AND id = $2 RETURNING id",
+      [docId, versionId]
+    );
+    if (deleted.rowCount !== 1) return reply.code(404).send({ error: "version_not_found" });
+
+    await writeAuditEvent(app.db, {
+      orgId: membership.orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "document.version_deleted",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { versionId },
       ipAddress: getClientIp(request),
       userAgent: getUserAgent(request)
     });
