@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 use std::io::{Cursor, Read};
@@ -22,6 +22,7 @@ use crate::path::{rels_for_part, resolve_target};
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
 use crate::styles::StylesPart;
+use crate::tables::{parse_table, TABLE_REL_TYPE};
 use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
     CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta,
@@ -163,6 +164,58 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
         ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
 
         parse_worksheet_into_model(ws, ws_id, &sheet_xml, &shared_strings, &styles_part, None)?;
+
+        // Attach any Excel table definitions referenced by this worksheet so structured references
+        // (e.g. `Table1[Column]`, `[@Column]`) can be resolved by the engine. The fast reader is
+        // best-effort here: if a table part is missing or malformed, skip it instead of failing
+        // the entire workbook load.
+        let table_part_ids = parse_table_part_ids(&sheet_xml)?;
+        if let Some(rels_bytes) = rels_xml_bytes.as_deref() {
+            if !table_part_ids.is_empty() {
+                let relationships = crate::openxml::parse_relationships(rels_bytes)?;
+                let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
+                    HashMap::with_capacity(relationships.len());
+                for rel in relationships {
+                    rels_by_id.insert(rel.id.clone(), rel);
+                }
+
+                let mut seen_rel_ids: HashSet<String> = ws
+                    .tables
+                    .iter()
+                    .filter_map(|t| t.relationship_id.clone())
+                    .collect();
+
+                for r_id in table_part_ids {
+                    if !seen_rel_ids.insert(r_id.clone()) {
+                        continue;
+                    }
+
+                    let Some(rel) = rels_by_id.get(&r_id) else {
+                        continue;
+                    };
+                    if rel.type_uri != TABLE_REL_TYPE {
+                        continue;
+                    }
+
+                    let target = resolve_target(&sheet.path, &rel.target);
+                    let Some(table_bytes) = read_zip_part_optional(&mut archive, &target)? else {
+                        continue;
+                    };
+
+                    let Ok(table_xml) = std::str::from_utf8(&table_bytes) else {
+                        continue;
+                    };
+
+                    let Ok(mut table) = parse_table(table_xml) else {
+                        continue;
+                    };
+
+                    table.relationship_id = Some(r_id);
+                    table.part_path = Some(target);
+                    ws.tables.push(table);
+                }
+            }
+        }
     }
 
     for defined in defined_names {
@@ -1173,6 +1226,33 @@ fn expand_shared_formulas(
 
 fn parse_xml_bool(val: &str) -> bool {
     val == "1" || val.eq_ignore_ascii_case("true")
+}
+
+fn parse_table_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e)
+                if crate::openxml::local_name(e.name().as_ref()) == b"tablePart" =>
+            {
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if crate::openxml::local_name(attr.key.as_ref()) == b"id" {
+                        out.push(attr.unescape_value()?.into_owned());
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
 }
 
 fn parse_inline_is_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {

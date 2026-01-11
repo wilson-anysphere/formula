@@ -544,6 +544,16 @@ impl WasmWorkbook {
             wb.ensure_sheet(&sheet.name);
         }
 
+        // Import Excel tables (structured reference metadata) before formulas are compiled so
+        // expressions like `Table1[Col]` and `[@Col]` resolve correctly.
+        for sheet in &model.sheets {
+            let sheet_name = wb
+                .resolve_sheet(&sheet.name)
+                .expect("sheet just ensured must resolve")
+                .to_string();
+            wb.engine.set_sheet_tables(&sheet_name, sheet.tables.clone());
+        }
+
         // Best-effort defined names.
         let mut sheet_names_by_id: HashMap<u32, String> = HashMap::new();
         for sheet in &model.sheets {
@@ -922,5 +932,29 @@ mod tests {
         let json_str2 = wb2.to_json().unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&json_str2).unwrap();
         assert_eq!(parsed2["sheets"]["Sheet1"]["cells"]["A2"], json!("=A1*2"));
+    }
+
+    #[test]
+    fn from_xlsx_bytes_imports_tables_for_structured_reference_formulas() {
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../formula-xlsx/tests/fixtures/table.xlsx"
+        ));
+
+        let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "D2"),
+            EngineValue::Number(6.0)
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "E1"),
+            EngineValue::Number(20.0)
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "F1"),
+            EngineValue::Text("Qty".into())
+        );
     }
 }
