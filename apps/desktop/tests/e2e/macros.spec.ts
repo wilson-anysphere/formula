@@ -97,4 +97,47 @@ test.describe("macros panel", () => {
     const a2 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2"));
     expect(a2).toBe("A");
   });
+
+  test("runs TypeScript + Python macros in the web demo", async ({ page }) => {
+    test.setTimeout(90_000);
+
+    await page.addInitScript(() => localStorage.clear());
+    page.on("dialog", (dialog) => dialog.accept());
+
+    await page.goto("/");
+
+    await page.getByTestId("open-macros-panel").click();
+
+    const panel = page.getByTestId("dock-right").getByTestId("panel-macros");
+    await expect(panel).toBeVisible();
+
+    const body = panel.locator(".dock-panel__body");
+    const select = body.locator("select");
+    await expect(select).toBeVisible();
+
+    // Run TypeScript macro (writes E1).
+    await select.selectOption({ label: "TypeScript: Write E1" });
+    const runButton = body.getByRole("button", { name: "Run" });
+    await runButton.click();
+    await expect(runButton).toBeDisabled();
+    await expect(runButton).toBeEnabled();
+
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E1")), {
+        timeout: 10_000,
+      })
+      .toBe("hello from ts");
+
+    // Run Python macro (writes E2).
+    await select.selectOption({ label: "Python: Write E2" });
+    await runButton.click();
+    await expect(runButton).toBeDisabled();
+    await expect(runButton).toBeEnabled();
+
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E2")), {
+        timeout: 60_000,
+      })
+      .toBe("hello from python");
+  });
 });

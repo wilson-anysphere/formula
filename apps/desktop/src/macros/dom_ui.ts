@@ -50,7 +50,7 @@ export async function renderMacroRunner(
     runButton.disabled = true;
     try {
       const macroId = select.value;
-      const result = await runner.run({ workbookId, macroId, timeoutMs: 250 });
+      const result = await runner.run({ workbookId, macroId, timeoutMs: 5_000 });
       if (result.output.length) {
         output.textContent += result.output.join("\n") + "\n";
       }

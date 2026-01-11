@@ -1,4 +1,4 @@
-export type MacroLanguage = "vba";
+export type MacroLanguage = "vba" | "typescript" | "python";
 
 export interface MacroInfo {
   /** Workbook-scoped unique id. */

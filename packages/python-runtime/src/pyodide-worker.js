@@ -245,7 +245,7 @@ function rpcCallSync(method, params) {
   }
 
   const length = Atomics.load(header, 1);
-  // Chromium's TextDecoder does not accept views backed by SharedArrayBuffer.
+  // Some browsers disallow decoding directly from SharedArrayBuffer-backed views.
   // Copy into an ArrayBuffer-backed Uint8Array before decoding.
   const text = decoder.decode(payload.slice(0, length));
   const parsed = JSON.parse(text);

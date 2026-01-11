@@ -3,3 +3,4 @@ export * from "./security";
 export * from "./runner";
 export * from "./dom_ui";
 export * from "./tauri_backend";
+export * from "./web_backend";
