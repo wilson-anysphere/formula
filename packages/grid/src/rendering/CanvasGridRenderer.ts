@@ -1024,54 +1024,76 @@ export class CanvasGridRenderer {
     const frozenWidth = viewport.frozenWidth;
     const frozenHeight = viewport.frozenHeight;
 
-    const topRight = { x: frozenWidth, y: 0, width: viewport.width - frozenWidth, height: frozenHeight };
-    const bottomLeft = { x: 0, y: frozenHeight, width: frozenWidth, height: viewport.height - frozenHeight };
-    const main = {
-      x: frozenWidth,
-      y: frozenHeight,
-      width: viewport.width - frozenWidth,
-      height: viewport.height - frozenHeight
-    };
-
-    const candidates: { rect: Rect; shiftX: number; shiftY: number }[] = [
-      { rect: topRight, shiftX: deltaX, shiftY: 0 },
-      { rect: bottomLeft, shiftX: 0, shiftY: deltaY },
-      { rect: main, shiftX: deltaX, shiftY: deltaY }
-    ];
-
     const selectionPadding = 1;
 
-    for (const { rect, shiftX, shiftY } of candidates) {
-      if (rect.width <= 0 || rect.height <= 0) continue;
-
-      if (shiftX > 0) {
-        const stripe = { x: rect.x, y: rect.y, width: shiftX, height: rect.height };
-        this.markDirtyBoth(stripe);
-        this.markDirtySelection(stripe, selectionPadding);
-      } else if (shiftX < 0) {
-        const stripe = {
-          x: rect.x + rect.width + shiftX,
-          y: rect.y,
-          width: -shiftX,
-          height: rect.height
-        };
-        this.markDirtyBoth(stripe);
-        this.markDirtySelection(stripe, selectionPadding);
+    // Frozen rows + scrollable columns (top-right): horizontal-only scroll.
+    {
+      const rectX = frozenWidth;
+      const rectY = 0;
+      const rectW = viewport.width - frozenWidth;
+      const rectH = frozenHeight;
+      if (rectW > 0 && rectH > 0) {
+        const shiftX = deltaX;
+        if (shiftX > 0) {
+          const stripe = { x: rectX, y: rectY, width: shiftX, height: rectH };
+          this.markDirtyBoth(stripe);
+          this.markDirtySelection(stripe, selectionPadding);
+        } else if (shiftX < 0) {
+          const stripe = { x: rectX + rectW + shiftX, y: rectY, width: -shiftX, height: rectH };
+          this.markDirtyBoth(stripe);
+          this.markDirtySelection(stripe, selectionPadding);
+        }
       }
+    }
 
-      if (shiftY > 0) {
-        const stripe = { x: rect.x, y: rect.y, width: rect.width, height: shiftY };
-        this.markDirtyBoth(stripe);
-        this.markDirtySelection(stripe, selectionPadding);
-      } else if (shiftY < 0) {
-        const stripe = {
-          x: rect.x,
-          y: rect.y + rect.height + shiftY,
-          width: rect.width,
-          height: -shiftY
-        };
-        this.markDirtyBoth(stripe);
-        this.markDirtySelection(stripe, selectionPadding);
+    // Scrollable rows + frozen columns (bottom-left): vertical-only scroll.
+    {
+      const rectX = 0;
+      const rectY = frozenHeight;
+      const rectW = frozenWidth;
+      const rectH = viewport.height - frozenHeight;
+      if (rectW > 0 && rectH > 0) {
+        const shiftY = deltaY;
+        if (shiftY > 0) {
+          const stripe = { x: rectX, y: rectY, width: rectW, height: shiftY };
+          this.markDirtyBoth(stripe);
+          this.markDirtySelection(stripe, selectionPadding);
+        } else if (shiftY < 0) {
+          const stripe = { x: rectX, y: rectY + rectH + shiftY, width: rectW, height: -shiftY };
+          this.markDirtyBoth(stripe);
+          this.markDirtySelection(stripe, selectionPadding);
+        }
+      }
+    }
+
+    // Main scrollable quadrant: both-axis scroll.
+    {
+      const rectX = frozenWidth;
+      const rectY = frozenHeight;
+      const rectW = viewport.width - frozenWidth;
+      const rectH = viewport.height - frozenHeight;
+      if (rectW > 0 && rectH > 0) {
+        const shiftX = deltaX;
+        const shiftY = deltaY;
+        if (shiftX > 0) {
+          const stripe = { x: rectX, y: rectY, width: shiftX, height: rectH };
+          this.markDirtyBoth(stripe);
+          this.markDirtySelection(stripe, selectionPadding);
+        } else if (shiftX < 0) {
+          const stripe = { x: rectX + rectW + shiftX, y: rectY, width: -shiftX, height: rectH };
+          this.markDirtyBoth(stripe);
+          this.markDirtySelection(stripe, selectionPadding);
+        }
+
+        if (shiftY > 0) {
+          const stripe = { x: rectX, y: rectY, width: rectW, height: shiftY };
+          this.markDirtyBoth(stripe);
+          this.markDirtySelection(stripe, selectionPadding);
+        } else if (shiftY < 0) {
+          const stripe = { x: rectX, y: rectY + rectH + shiftY, width: rectW, height: -shiftY };
+          this.markDirtyBoth(stripe);
+          this.markDirtySelection(stripe, selectionPadding);
+        }
       }
     }
 
