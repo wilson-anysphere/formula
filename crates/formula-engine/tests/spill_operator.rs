@@ -67,12 +67,11 @@ fn engine_evaluates_spill_operator_against_spilled_ranges() {
     assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Blank);
     assert_eq!(engine.get_cell_value("Sheet1", "H2"), Value::Blank);
 
-    // `B1` is no longer part of a spill; `B1#` behaves like a 1x1 reference.
-    assert_eq!(engine.get_cell_value("Sheet1", "I1"), Value::Blank);
+    // `B1` is no longer part of a spill; `B1#` should return `#REF!`.
+    assert_eq!(engine.get_cell_value("Sheet1", "I1"), Value::Error(formula_engine::ErrorKind::Ref));
     assert_eq!(engine.get_cell_value("Sheet1", "J1"), Value::Blank);
     assert_eq!(engine.get_cell_value("Sheet1", "I2"), Value::Blank);
     assert_eq!(engine.get_cell_value("Sheet1", "J2"), Value::Blank);
 
     assert_eq!(engine.get_cell_value("Sheet1", "C4"), Value::Number(4.0));
 }
-

@@ -200,33 +200,33 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             },
             Expr::NameRef(nref) => self.eval_name_ref(nref),
             Expr::SpillRange(inner) => {
-                let v = self.eval_value(inner);
-                match v {
-                    EvalValue::Scalar(_) => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                match self.eval_value(inner) {
+                    EvalValue::Scalar(Value::Error(e)) => EvalValue::Scalar(Value::Error(e)),
+                    EvalValue::Scalar(_) => EvalValue::Scalar(Value::Error(ErrorKind::Value)),
                     EvalValue::Reference(mut ranges) => {
                         // Spill-range references are only well-defined for a single-cell reference.
                         if ranges.len() != 1 {
-                            return EvalValue::Reference(ranges);
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Value));
                         }
                         let range = ranges
                             .pop()
                             .expect("checked len() above");
-
-                        // If `#` is applied to a multi-cell reference, treat it as a no-op.
                         if !range.is_single_cell() {
-                            return EvalValue::Reference(vec![range]);
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Value));
                         }
 
-                        let sheet_id = range.sheet_id;
-                        let addr = range.start;
-                        let origin = self.resolver.spill_origin(sheet_id, addr).unwrap_or(addr);
+                        let Some(origin) = self.resolver.spill_origin(range.sheet_id, range.start) else {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                        };
+                        let Some((start, end)) = self.resolver.spill_range(range.sheet_id, origin) else {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                        };
 
-                        match self.resolver.spill_range(sheet_id, origin) {
-                            Some((start, end)) => {
-                                EvalValue::Reference(vec![ResolvedRange { sheet_id, start, end }])
-                            }
-                            None => EvalValue::Reference(vec![ResolvedRange { sheet_id, start: origin, end: origin }]),
-                        }
+                        EvalValue::Reference(vec![ResolvedRange {
+                            sheet_id: range.sheet_id,
+                            start,
+                            end,
+                        }])
                     }
                 }
             }

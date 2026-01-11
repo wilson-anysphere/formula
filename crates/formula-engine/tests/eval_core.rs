@@ -361,6 +361,7 @@ fn array_functions_spill_and_respect_spill_blocking() {
         Value::Error(ErrorKind::Spill)
     );
 
+    // The D2 formula blocks D1's spill attempt, but D2's own dynamic array spills successfully.
     // SEQUENCE spills a 2x2 matrix starting at D2.
     assert_eq!(
         engine.spill_range("Sheet1", "D2"),

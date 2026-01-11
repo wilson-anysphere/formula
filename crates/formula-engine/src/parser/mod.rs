@@ -311,7 +311,12 @@ impl<'a> Lexer<'a> {
                         }
                         let raw = self.src[start..end].to_string();
                         self.push(TokenKind::Error(raw), start, self.idx);
-                    } else {
+                    } else if self
+                        .src
+                        .get(self.idx + 1..)
+                        .and_then(|s| s.chars().next())
+                        .is_some_and(is_error_body_char)
+                    {
                         self.bump(); // '#'
                         let mut rest = self.take_while(is_error_body_char);
                         if matches!(self.peek_char(), Some('!' | '?')) {
@@ -320,6 +325,10 @@ impl<'a> Lexer<'a> {
                         let mut raw = String::from("#");
                         raw.push_str(&rest);
                         self.push(TokenKind::Error(raw), start, self.idx);
+                    } else {
+                        // Standalone `#` is the spill-range reference postfix operator (e.g. `A1#`).
+                        self.bump();
+                        self.push(TokenKind::Hash, start, self.idx);
                     }
                 }
                 '(' => {

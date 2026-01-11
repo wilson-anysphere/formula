@@ -3042,12 +3042,12 @@ struct Snapshot {
     sheets: HashSet<SheetId>,
     sheet_names_by_id: Vec<String>,
     values: HashMap<CellKey, Value>,
+    spill_end_by_origin: HashMap<CellKey, CellAddr>,
+    spill_origin_by_cell: HashMap<CellKey, CellKey>,
     tables: Vec<Vec<Table>>,
     workbook_names: HashMap<String, crate::eval::ResolvedName>,
     sheet_names: Vec<HashMap<String, crate::eval::ResolvedName>>,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
-    spill_end_by_origin: HashMap<CellKey, CellAddr>,
-    spill_origin_by_cell: HashMap<CellKey, CellKey>,
 }
 
 impl Snapshot {
@@ -3071,9 +3071,9 @@ impl Snapshot {
             }
         }
 
-        let mut spill_end_by_origin = HashMap::new();
         // Overlay spilled values so formula evaluation can observe dynamic array results even
         // when the workbook map doesn't contain explicit cell records.
+        let mut spill_end_by_origin = HashMap::new();
         for (origin, spill) in &spills.by_origin {
             spill_end_by_origin.insert(*origin, spill.end);
             for r in 0..spill.array.rows {
@@ -3095,8 +3095,8 @@ impl Snapshot {
                 }
             }
         }
-        let tables = workbook.sheets.iter().map(|s| s.tables.clone()).collect();
         let spill_origin_by_cell = spills.origin_by_cell.clone();
+        let tables = workbook.sheets.iter().map(|s| s.tables.clone()).collect();
 
         let mut workbook_names = HashMap::new();
         for (name, def) in &workbook.names {
@@ -3127,12 +3127,12 @@ impl Snapshot {
             sheets,
             sheet_names_by_id,
             values,
+            spill_end_by_origin,
+            spill_origin_by_cell,
             tables,
             workbook_names,
             sheet_names,
             external_value_provider,
-            spill_end_by_origin,
-            spill_origin_by_cell,
         }
     }
 }
