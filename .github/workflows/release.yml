@@ -40,8 +40,15 @@ jobs:
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
-      - name: Use shared Cargo home for CI caching
-        shell: bash
+      - name: Use shared Cargo home for CI caching (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $cargoHome = Join-Path $env:USERPROFILE ".cargo"
+          "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Use shared Cargo home for CI caching (Unix)
+        if: matrix.platform != 'windows-latest'
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
       - name: Install Linux dependencies

@@ -70,8 +70,10 @@ jobs:
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo builds share the same cache.
       - name: Use shared Cargo home for CI caching
-        shell: bash
-        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+        shell: powershell
+        run: |
+          $cargoHome = Join-Path $env:USERPROFILE ".cargo"
+          "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - uses: actions/setup-python@v5
         with:
