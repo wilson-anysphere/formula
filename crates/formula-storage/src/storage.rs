@@ -1386,23 +1386,30 @@ impl Storage {
                 range.col_end
             ],
             |r| {
-                let row: i64 = r.get(0)?;
-                let col: i64 = r.get(1)?;
+                let Ok(row) = r.get::<_, i64>(0) else {
+                    return Ok(None);
+                };
+                let Ok(col) = r.get::<_, i64>(1) else {
+                    return Ok(None);
+                };
                 let snapshot = snapshot_from_row(
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                    r.get(6)?,
-                    r.get(7)?,
+                    r.get::<_, Option<String>>(2).ok().flatten(),
+                    r.get::<_, Option<f64>>(3).ok().flatten(),
+                    r.get::<_, Option<String>>(4).ok().flatten(),
+                    r.get::<_, Option<String>>(5).ok().flatten(),
+                    r.get::<_, Option<String>>(6).ok().flatten(),
+                    r.get::<_, Option<i64>>(7).ok().flatten(),
                 )?;
-                Ok(((row, col), snapshot))
+                Ok(Some(((row, col), snapshot)))
             },
         )?;
 
         let mut out = Vec::new();
         for item in rows {
-            out.push(item?);
+            let Some(item) = item? else {
+                continue;
+            };
+            out.push(item);
         }
         Ok(out)
     }
@@ -1732,11 +1739,7 @@ fn snapshot_from_row(
 ) -> rusqlite::Result<CellSnapshot> {
     let value_type_str = value_type.as_deref();
     let raw_json = value_json.as_deref().filter(|s| !s.trim().is_empty());
-    let parse_json = |raw: &str| {
-        serde_json::from_str::<CellValue>(raw).map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err))
-        })
-    };
+    let parse_json = |raw: &str| serde_json::from_str::<CellValue>(raw).ok();
 
     // Prefer the scalar columns when they are available, even if `value_json` is present.
     // This keeps `cells.value_json` as the canonical stored representation (we always write it),
@@ -1744,21 +1747,17 @@ fn snapshot_from_row(
     let value = match value_type_str {
         Some("number") => match value_number {
             Some(n) => CellValue::Number(n),
-            None => raw_json.map(parse_json).transpose()?.unwrap_or(CellValue::Number(0.0)),
+            None => raw_json.and_then(parse_json).unwrap_or(CellValue::Number(0.0)),
         },
         Some("string") => match value_string {
             Some(s) => CellValue::String(s),
             None => raw_json
-                .map(parse_json)
-                .transpose()?
+                .and_then(parse_json)
                 .unwrap_or_else(|| CellValue::String(String::new())),
         },
         Some("boolean") => match value_number {
             Some(n) => CellValue::Boolean(n != 0.0),
-            None => raw_json
-                .map(parse_json)
-                .transpose()?
-                .unwrap_or(CellValue::Boolean(false)),
+            None => raw_json.and_then(parse_json).unwrap_or(CellValue::Boolean(false)),
         },
         Some("error") => match value_string {
             Some(s) => {
@@ -1766,14 +1765,13 @@ fn snapshot_from_row(
                 CellValue::Error(parsed)
             }
             None => raw_json
-                .map(parse_json)
-                .transpose()?
+                .and_then(parse_json)
                 .unwrap_or(CellValue::Error(ErrorValue::Unknown)),
         },
         // Legacy sentinel used by older schema versions when a cell contains a formula but no cached value.
         Some("formula") => CellValue::Empty,
         // Unknown/NULL types fall back to canonical JSON when present.
-        _ => raw_json.map(parse_json).transpose()?.unwrap_or_else(|| match value_type_str {
+        _ => raw_json.and_then(parse_json).unwrap_or_else(|| match value_type_str {
             // `NULL` value_type means a style-only blank cell.
             None => CellValue::Empty,
             // Unknown value types are treated as strings to preserve data.
@@ -1892,12 +1890,12 @@ fn fetch_cell_snapshot_tx(
             params![sheet_id.to_string(), row, col],
             |r| {
                 snapshot_from_row(
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
+                    r.get::<_, Option<String>>(0).ok().flatten(),
+                    r.get::<_, Option<f64>>(1).ok().flatten(),
+                    r.get::<_, Option<String>>(2).ok().flatten(),
+                    r.get::<_, Option<String>>(3).ok().flatten(),
+                    r.get::<_, Option<String>>(4).ok().flatten(),
+                    r.get::<_, Option<i64>>(5).ok().flatten(),
                 )
             },
         )
@@ -3281,8 +3279,12 @@ fn stream_cells_into_model_sheet(
 
     let mut rows = stmt.query(params![sheet_id])?;
     while let Some(row) = rows.next()? {
-        let row_idx: i64 = row.get(0)?;
-        let col_idx: i64 = row.get(1)?;
+        let Ok(row_idx) = row.get::<_, i64>(0) else {
+            continue;
+        };
+        let Ok(col_idx) = row.get::<_, i64>(1) else {
+            continue;
+        };
 
         if row_idx < 0
             || row_idx > u32::MAX as i64
@@ -3293,12 +3295,12 @@ fn stream_cells_into_model_sheet(
         }
 
         let snapshot = snapshot_from_row(
-            row.get(2)?,
-            row.get(3)?,
-            row.get(4)?,
-            row.get(5)?,
-            row.get(6)?,
-            row.get(7)?,
+            row.get::<_, Option<String>>(2).ok().flatten(),
+            row.get::<_, Option<f64>>(3).ok().flatten(),
+            row.get::<_, Option<String>>(4).ok().flatten(),
+            row.get::<_, Option<String>>(5).ok().flatten(),
+            row.get::<_, Option<String>>(6).ok().flatten(),
+            row.get::<_, Option<i64>>(7).ok().flatten(),
         )?;
 
         let style_id = snapshot
