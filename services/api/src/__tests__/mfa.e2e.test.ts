@@ -194,7 +194,8 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     const regen = await app.inject({
       method: "POST",
       url: "/auth/mfa/recovery-codes/regenerate",
-      headers: { cookie }
+      headers: { cookie },
+      payload: { code: authenticator.generate(secret) }
     });
     expect(regen.statusCode).toBe(200);
     const codes = (regen.json() as any).codes as string[];
