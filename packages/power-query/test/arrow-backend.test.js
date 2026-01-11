@@ -10,7 +10,9 @@ import { DataTable } from "../src/table.js";
 
 let arrowAvailable = true;
 try {
-  await import("apache-arrow");
+  // Validate Arrow is actually usable via the data-io helpers (pnpm workspaces
+  // don't necessarily hoist `apache-arrow` to the repo root).
+  arrowTableFromColumns({ __probe: [1] });
 } catch {
   arrowAvailable = false;
 }
