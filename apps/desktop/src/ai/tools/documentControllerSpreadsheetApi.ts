@@ -6,6 +6,12 @@ import { isCellEmpty, type CellData, type CellFormat } from "../../../../../pack
 
 type DocumentControllerStyle = Record<string, any>;
 
+function cloneCellValue(value: any): any {
+  if (value == null || typeof value !== "object") return value;
+  const structuredCloneFn = typeof globalThis.structuredClone === "function" ? globalThis.structuredClone : null;
+  return structuredCloneFn ? structuredCloneFn(value) : JSON.parse(JSON.stringify(value));
+}
+
 function normalizeFormula(raw: string): string {
   const trimmed = raw.trimStart();
   if (!trimmed) return "=";
@@ -85,8 +91,10 @@ function toCellData(controller: DocumentController, cellState: any): CellData {
   const normalizedFormula =
     rawFormula == null || rawFormula === "" ? undefined : normalizeFormula(String(rawFormula));
 
+  const value = normalizedFormula ? null : cloneCellValue(cellState?.value ?? null);
+
   return {
-    value: normalizedFormula ? null : (cellState?.value ?? null),
+    value,
     ...(normalizedFormula ? { formula: normalizedFormula } : {}),
     ...(format ? { format } : {})
   };

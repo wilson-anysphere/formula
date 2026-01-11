@@ -137,6 +137,24 @@ describe("DocumentControllerSpreadsheetApi", () => {
     ]);
   });
 
+  it("does not leak mutable references to DocumentController cell values from listNonEmptyCells()", () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", {
+      text: "Rich Bold",
+      runs: [{ start: 0, end: 4, style: { bold: true } }]
+    });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const entries = api.listNonEmptyCells("Sheet1");
+    const value = entries[0]?.cell.value as any;
+    expect(value?.text).toBe("Rich Bold");
+
+    value.text = "Mutated";
+
+    const after = controller.getCell("Sheet1", "A1").value as any;
+    expect(after?.text).toBe("Rich Bold");
+  });
+
   it("applies per-cell formatting provided to writeRange()", () => {
     const controller = new DocumentController();
     const api = new DocumentControllerSpreadsheetApi(controller);
