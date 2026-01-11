@@ -3,6 +3,7 @@ import {
   documentControllerToBranchState,
 } from "./branchStateAdapter.js";
 import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/state.js";
+import { parseA1 } from "../../document/coords.js";
 
 /**
  * @typedef {import("../../document/documentController.js").DocumentController} DocumentController
@@ -90,12 +91,25 @@ export class DocumentBranchingWorkflow {
       const mergedSheet = {};
 
       for (const [addr, cell] of Object.entries(nextSheet ?? {})) {
+        const baseCell = baseSheet[addr];
+
+        let canEdit = true;
+        if (typeof this.doc.canEditCell === "function") {
+          try {
+            const coord = parseA1(addr);
+            canEdit = this.doc.canEditCell({ sheetId, row: coord.row, col: coord.col });
+          } catch {
+            canEdit = true;
+          }
+        }
+
         const isMasked =
           cell &&
           typeof cell === "object" &&
           cell.enc == null &&
           cell.formula == null &&
-          cell.value === MASKED_CELL_VALUE;
+          cell.value === MASKED_CELL_VALUE &&
+          (canEdit === false || (baseCell && typeof baseCell === "object" && baseCell.enc != null));
 
         if (isMasked && baseSheet[addr] !== undefined) {
           mergedSheet[addr] = baseSheet[addr];
