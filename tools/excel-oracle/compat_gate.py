@@ -67,8 +67,9 @@ def main() -> int:
     p.add_argument(
         "--expected",
         default="",
-        help="Path to pinned Excel results JSON. Defaults to excel-oracle.pinned.json if present, "
-        "else the newest file in datasets/versioned/.",
+        help="Path to pinned Excel results JSON. Defaults to the newest file in "
+        "tests/compatibility/excel-oracle/datasets/versioned/ if present, else "
+        "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json.",
     )
     p.add_argument(
         "--actual",

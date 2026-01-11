@@ -16,6 +16,10 @@ This runs:
 1. `cargo run -p formula-excel-oracle` → writes `datasets/engine-results.json`
 2. `python tools/excel-oracle/compare.py` → writes `reports/mismatch-report.json`
 
+It also writes a human-readable summary to:
+
+* `reports/summary.md`
+
 and exits non-zero if mismatches exceed the configured threshold.
 
 ## Repository layout
@@ -34,6 +38,10 @@ or comparing.
 
 This lets CI stay fast (start with a small tag set) while still enabling full
 corpus runs locally or on a self-hosted Windows runner.
+
+`compat_gate.py` defaults to a curated tag set (basic arithmetic/comparison + a
+few baseline functions), plus a small amount of **dynamic array spill coverage**
+(`range`, `TRANSPOSE`, `SEQUENCE`).
 
 ## Regenerate the case corpus
 
