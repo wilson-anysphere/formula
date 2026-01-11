@@ -310,6 +310,10 @@ export class QueryEngine {
     /** @type {WeakMap<object, Set<string>>} */
     this._tableSourceIds = new WeakMap();
 
+    /** @type {WeakMap<object, string>} */
+    this._ephemeralObjectIds = new WeakMap();
+    this._ephemeralObjectIdCounter = 0;
+
     /** @type {Map<string, any>} */
     this.connectors = new Map();
 
@@ -345,6 +349,71 @@ export class QueryEngine {
 
     /** @type {Map<string, Promise<{ columns: string[], types?: Record<string, import("./model.js").DataType> }>>} */
     this.databaseSchemaCache = new Map();
+  }
+
+  /**
+   * Generate a stable, per-engine identifier for an object reference.
+   *
+   * This is used as a fallback for permission/credential prompt caching when we
+   * don't have a stable, user-provided identity (e.g. for opaque DB connection
+   * handles). The ID is only stable for the lifetime of this engine instance.
+   *
+   * @private
+   * @param {unknown} value
+   * @returns {string | null}
+   */
+  getEphemeralObjectId(value) {
+    if (!value) return null;
+    const type = typeof value;
+    if (type !== "object" && type !== "function") return null;
+    const obj = /** @type {object} */ (value);
+    const existing = this._ephemeralObjectIds.get(obj);
+    if (existing) return existing;
+    const next = `obj:${++this._ephemeralObjectIdCounter}`;
+    this._ephemeralObjectIds.set(obj, next);
+    return next;
+  }
+
+  /**
+   * Build a stable cache-key input for a connector request.
+   *
+   * Prefer the connector's `getCacheKey(request)` (which should be JSON-safe and
+   * avoid opaque handles). For SQL requests without a stable connection identity,
+   * include an ephemeral per-object identifier to avoid collisions between
+   * different connection handles in the same session.
+   *
+   * @private
+   * @param {string} connectorId
+   * @param {any} request
+   * @returns {unknown}
+   */
+  buildConnectorRequestCacheKey(connectorId, request) {
+    const connector = this.connectors.get(connectorId);
+    /** @type {any} */
+    let keyInput = request;
+    if (connector && typeof connector.getCacheKey === "function") {
+      try {
+        keyInput = connector.getCacheKey(request);
+      } catch {
+        keyInput = request;
+      }
+    }
+
+    if (
+      connectorId === "sql" &&
+      keyInput &&
+      typeof keyInput === "object" &&
+      !Array.isArray(keyInput) &&
+      // @ts-ignore - runtime indexing
+      keyInput.missingConnectionId === true
+    ) {
+      const refId = this.getEphemeralObjectId(request?.connection);
+      if (refId) {
+        keyInput = { ...keyInput, connectionRefId: refId };
+      }
+    }
+
+    return keyInput;
   }
 
   /**
@@ -1658,7 +1727,27 @@ export class QueryEngine {
   async assertPermission(kind, details, state) {
     if (!this.onPermissionRequest) return;
     const cache = state?.permissionCache;
-    const key = cache ? `${kind}:${hashValue(details)}` : null;
+    /** @type {any} */
+    const req =
+      details && typeof details === "object" && !Array.isArray(details)
+        ? // @ts-ignore - runtime access
+          details.request
+        : undefined;
+    const sourceType =
+      details && typeof details === "object" && !Array.isArray(details)
+        ? // @ts-ignore - runtime access
+          details.source?.type
+        : null;
+    const connectorId =
+      sourceType === "database"
+        ? "sql"
+        : sourceType === "api"
+          ? "http"
+          : sourceType === "csv" || sourceType === "json" || sourceType === "parquet"
+            ? "file"
+            : null;
+    const keyInput = connectorId ? this.buildConnectorRequestCacheKey(connectorId, req) : req ?? details;
+    const key = cache ? `${kind}:${hashValue(keyInput)}` : null;
     const allowedPromise = key
       ? cache.get(key) ?? Promise.resolve(this.onPermissionRequest(kind, details))
       : Promise.resolve(this.onPermissionRequest(kind, details));
@@ -1678,7 +1767,8 @@ export class QueryEngine {
    */
   async getCredentials(connectorId, request, state) {
     if (!this.onCredentialRequest) return undefined;
-    const key = `${connectorId}:${hashValue(request)}`;
+    const keyInput = this.buildConnectorRequestCacheKey(connectorId, request);
+    const key = `${connectorId}:${hashValue(keyInput)}`;
     const existing = state.credentialCache.get(key);
     if (existing) return existing;
     const promise = Promise.resolve(this.onCredentialRequest(connectorId, { request }));

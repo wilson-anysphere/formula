@@ -538,6 +538,95 @@ test("QueryEngine: database permission/credentials are requested once per execut
   assert.equal(credentialCount, 1);
 });
 
+test("QueryEngine: permission/credential caches do not collide for DB sources without connection identity", async () => {
+  let permissionCount = 0;
+  let credentialCount = 0;
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Value"],
+              [1],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+    onPermissionRequest: async () => {
+      permissionCount += 1;
+      return true;
+    },
+    onCredentialRequest: async () => {
+      credentialCount += 1;
+      return { credentialId: `cred-${credentialCount}` };
+    },
+  });
+
+  const session = engine.createSession({ now: () => 0 });
+
+  const q1 = { id: "q_db_no_id_1", name: "DB no identity 1", source: { type: "database", connection: {}, query: "SELECT 1" }, steps: [] };
+  const q2 = { id: "q_db_no_id_2", name: "DB no identity 2", source: { type: "database", connection: {}, query: "SELECT 1" }, steps: [] };
+
+  await engine.executeQueryWithMetaInSession(q1, { queries: {} }, {}, session);
+  await engine.executeQueryWithMetaInSession(q2, { queries: {} }, {}, session);
+
+  assert.equal(permissionCount, 2);
+  assert.equal(credentialCount, 2);
+});
+
+test("QueryEngine: permission/credential caches reuse prompts for the same DB connection handle without identity", async () => {
+  let permissionCount = 0;
+  let credentialCount = 0;
+  const connection = {};
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Value"],
+              [1],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+    onPermissionRequest: async () => {
+      permissionCount += 1;
+      return true;
+    },
+    onCredentialRequest: async () => {
+      credentialCount += 1;
+      return { credentialId: `cred-${credentialCount}` };
+    },
+  });
+
+  const session = engine.createSession({ now: () => 0 });
+
+  const q1 = {
+    id: "q_db_no_id_same_1",
+    name: "DB no identity same 1",
+    source: { type: "database", connection, query: "SELECT 1" },
+    steps: [],
+  };
+  const q2 = {
+    id: "q_db_no_id_same_2",
+    name: "DB no identity same 2",
+    source: { type: "database", connection, query: "SELECT 1" },
+    steps: [],
+  };
+
+  await engine.executeQueryWithMetaInSession(q1, { queries: {} }, {}, session);
+  await engine.executeQueryWithMetaInSession(q2, { queries: {} }, {}, session);
+
+  assert.equal(permissionCount, 1);
+  assert.equal(credentialCount, 1);
+});
+
 test("QueryEngine: source-state cache validation respects explicit database connectionId", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store, now: () => 0 });
