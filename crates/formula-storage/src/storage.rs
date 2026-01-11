@@ -765,9 +765,13 @@ impl Storage {
             )?;
             let mut rows = stmt.query(params![workbook_id.to_string()])?;
             while let Some(row) = rows.next()? {
-                let image_id: String = row.get(0)?;
-                let content_type: Option<String> = row.get(1)?;
-                let bytes: Vec<u8> = row.get(2)?;
+                let Ok(image_id) = row.get::<_, String>(0) else {
+                    continue;
+                };
+                let content_type: Option<String> = row.get(1).ok().flatten();
+                let Ok(bytes) = row.get::<_, Vec<u8>>(2) else {
+                    continue;
+                };
                 model_workbook.images.insert(
                     formula_model::drawings::ImageId::new(image_id),
                     formula_model::drawings::ImageData { bytes, content_type },
