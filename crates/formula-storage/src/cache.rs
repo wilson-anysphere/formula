@@ -286,6 +286,10 @@ impl MemoryManager {
             if let Some(page) = inner.pages.get(&key) {
                 add_cells_in_viewport(key, &page.cells, &mut cells);
             }
+
+            // Keep memory bounded as we load each missing page so viewports
+            // spanning many pages don't temporarily balloon the cache.
+            self.evict_if_needed_locked(&mut inner)?;
         }
 
         {
