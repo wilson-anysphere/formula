@@ -201,3 +201,27 @@ test("branchStateFromYjsDoc: prefers encrypted payloads over plaintext duplicate
   const state = branchStateFromYjsDoc(doc);
   assert.deepEqual(state.cells.Sheet1.A1, { enc });
 });
+
+test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips workbook metadata", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+
+    const metadata = doc.getMap("metadata");
+    metadata.set("title", "Budget");
+    metadata.set("theme", { name: "dark" });
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.metadata, { theme: { name: "dark" }, title: "Budget" });
+
+  const doc2 = new Y.Doc();
+  applyBranchStateToYjsDoc(doc2, state);
+
+  assert.equal(doc2.getMap("metadata").get("title"), "Budget");
+  assert.deepEqual(doc2.getMap("metadata").get("theme"), { name: "dark" });
+});
