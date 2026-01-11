@@ -263,6 +263,34 @@ export class RefreshOrchestrator {
   }
 
   /**
+   * Trigger all registered queries whose refreshPolicy is `{ type: "on-open" }`.
+   *
+   * This is a dependency-aware equivalent to `RefreshManager.triggerOnOpen`, and is useful for
+   * hosts that want Excel-like "refresh on open" semantics while still deduping shared
+   * dependencies and sharing a single credential/permission session.
+   *
+   * @param {string} [queryId]
+   * @returns {RefreshAllHandle}
+   */
+  triggerOnOpen(queryId) {
+    if (queryId) {
+      const query = this.registrations.get(queryId);
+      if (!query || query.refreshPolicy?.type !== "on-open") {
+        // Match `RefreshManager.triggerOnOpen(queryId)` behavior: silently ignore unknown
+        // ids or queries that are not configured for on-open refresh.
+        return this.refreshAll([], "on-open");
+      }
+      return this.refreshAll([queryId], "on-open");
+    }
+
+    const ids = [];
+    for (const [id, query] of this.registrations) {
+      if (query.refreshPolicy?.type === "on-open") ids.push(id);
+    }
+    return this.refreshAll(ids, "on-open");
+  }
+
+  /**
    * Refresh a set of queries (or all registered queries if none provided).
    *
    * The orchestrator will:

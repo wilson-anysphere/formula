@@ -278,6 +278,53 @@ test("RefreshOrchestrator: refreshAll sessions get unique sessionIds", async () 
   assert.notEqual(h1.sessionId, h2.sessionId);
 });
 
+test("RefreshOrchestrator: triggerOnOpen refreshes on-open queries with dependencies", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery({
+    ...makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }),
+    refreshPolicy: { type: "manual" },
+  });
+  orchestrator.registerQuery({
+    ...makeQuery("B", { type: "query", queryId: "A" }),
+    refreshPolicy: { type: "on-open" },
+  });
+  orchestrator.registerQuery({
+    ...makeQuery("C", { type: "range", range: { values: [["Value"], [3]], hasHeaders: true } }),
+    refreshPolicy: { type: "on-open" },
+  });
+
+  const handle = orchestrator.triggerOnOpen();
+  assert.equal(engine.calls.length, 2);
+  assert.deepEqual(new Set(engine.calls.map((c) => c.queryId)), new Set(["A", "C"]));
+
+  const callA = engine.calls.find((c) => c.queryId === "A");
+  const callC = engine.calls.find((c) => c.queryId === "C");
+  assert.ok(callA);
+  assert.ok(callC);
+  callA.deferred.resolve(makeResult("A"));
+  callC.deferred.resolve(makeResult("C"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(engine.calls.length, 3);
+  assert.equal(engine.calls[2].queryId, "B");
+  engine.calls[2].deferred.resolve(makeResult("B"));
+
+  const results = await handle.promise;
+  assert.deepEqual(new Set(Object.keys(results)), new Set(["B", "C"]));
+});
+
+test("RefreshOrchestrator: triggerOnOpen(queryId) is a no-op when the query is not on-open", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1 });
+  orchestrator.registerQuery({ ...makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }), refreshPolicy: { type: "manual" } });
+
+  const handle = orchestrator.triggerOnOpen("A");
+  const results = await handle.promise;
+  assert.equal(engine.calls.length, 0);
+  assert.deepEqual(results, {});
+});
+
 test("RefreshOrchestrator: job ids are namespaced by the refreshAll sessionId", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1 });
