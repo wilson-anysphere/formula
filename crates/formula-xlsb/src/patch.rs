@@ -224,10 +224,8 @@ fn value_edit_is_noop_rk(payload: &[u8], edit: &CellEdit) -> Result<bool, Error>
         CellValue::Number(v) => *v,
         _ => return Ok(false),
     };
-    let Some(desired_rk) = encode_rk_number(desired) else {
-        return Ok(false);
-    };
-    Ok(existing_rk == desired_rk)
+    let existing = decode_rk_number(existing_rk);
+    Ok(existing.to_bits() == desired.to_bits())
 }
 
 fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
@@ -469,5 +467,41 @@ fn encode_rk_number(value: f64) -> Option<u32> {
         return Some(((i as u32) << 2) | 0x03);
     }
 
+    // Non-integer RK numbers store the top 30 bits of the IEEE754 f64 (with the low
+    // 34 bits cleared) and set the low two bits to 0b00 (or 0b01 when scaled by 100).
+    const LOW_34_MASK: u64 = (1u64 << 34) - 1;
+    let bits = value.to_bits();
+    if bits & LOW_34_MASK == 0 {
+        let raw = (bits >> 32) as u32;
+        if raw & 0x03 == 0 {
+            return Some(raw);
+        }
+    }
+
+    let scaled = value * 100.0;
+    if scaled.is_finite() {
+        let bits = scaled.to_bits();
+        if bits & LOW_34_MASK == 0 {
+            let raw = (bits >> 32) as u32;
+            if raw & 0x03 == 0 {
+                return Some(raw | 0x01);
+            }
+        }
+    }
+
     None
+}
+
+fn decode_rk_number(raw: u32) -> f64 {
+    let raw_i = raw as i32;
+    let mut v = if raw_i & 0x02 != 0 {
+        (raw_i >> 2) as f64
+    } else {
+        let shifted = raw & 0xFFFFFFFC;
+        f64::from_bits((shifted as u64) << 32)
+    };
+    if raw_i & 0x01 != 0 {
+        v /= 100.0;
+    }
+    v
 }
