@@ -32,6 +32,7 @@ const SUPPORTED_OPS = new Set([
   "take",
   "skip",
   "removeRows",
+  "unpivot",
   "reorderColumns",
   "addIndexColumn",
   "combineColumns",
@@ -188,6 +189,9 @@ export function computeParquetProjectionColumns(steps) {
       case "renameColumn":
         requireColumn(op.oldName);
         break;
+      case "unpivot":
+        op.columns.forEach(requireColumn);
+        break;
       case "addIndexColumn":
         break;
       case "combineColumns":
@@ -333,6 +337,19 @@ export function computeParquetProjectionColumns(steps) {
         schema?.add(op.newColumnName);
         break;
       }
+      case "unpivot": {
+        for (const name of op.columns) {
+          mapping.delete(name);
+          schema?.delete(name);
+        }
+        mapping.set(op.nameColumn, null);
+        mapping.set(op.valueColumn, null);
+        if (schema) {
+          schema.add(op.nameColumn);
+          schema.add(op.valueColumn);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -350,7 +367,6 @@ const LIMIT_UNSAFE_OPS = new Set([
   "merge",
   "append",
   "pivot",
-  "unpivot",
 ]);
 
 /**
@@ -386,7 +402,7 @@ export function computeParquetRowLimit(steps, limit) {
   // to produce the first N output rows.
   //
   // This allows safe limit pushdown through deterministic row-window operations like
-  // `take`, `skip`, `removeRows`, and `promoteHeaders`.
+  // `take`, `skip`, `removeRows`, `unpivot`, and `promoteHeaders`.
   let required = base;
   for (let i = steps.length - 1; i >= 0; i--) {
     /** @type {QueryOperation} */
@@ -411,6 +427,14 @@ export function computeParquetRowLimit(steps, limit) {
         // `removeRows` drops a contiguous window starting at `offset`.
         // If the downstream limit is entirely before that window, no adjustment is needed.
         if (required > offset) required += count;
+        break;
+      }
+      case "unpivot": {
+        const width = Array.isArray(op.columns) ? op.columns.length : 0;
+        if (width <= 0) return null;
+        if (required > 0) {
+          required = Math.ceil(required / width);
+        }
         break;
       }
       case "promoteHeaders": {

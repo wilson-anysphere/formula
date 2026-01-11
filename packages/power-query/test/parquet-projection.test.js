@@ -212,6 +212,17 @@ test("computeParquetProjectionColumns refuses transformColumnNames before schema
   assert.equal(computeParquetProjectionColumns(steps), null);
 });
 
+test("computeParquetProjectionColumns supports unpivot", () => {
+  const steps = [
+    { id: "s_unpivot", name: "Unpivot", operation: { type: "unpivot", columns: ["q1", "q2"], nameColumn: "Quarter", valueColumn: "Value" } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["Quarter", "Value"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["q1", "q2"]));
+});
+
 test("computeParquetProjectionColumns maps renamed columns through replaceValues", () => {
   const steps = [
     { id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "a", newName: "A" } },
@@ -304,6 +315,13 @@ test("computeParquetRowLimit accounts for skip/removeRows/promoteHeaders", () =>
   assert.equal(
     computeParquetRowLimit([{ id: "s_headers", name: "Headers", operation: { type: "promoteHeaders" } }], 100),
     101,
+  );
+});
+
+test("computeParquetRowLimit accounts for unpivot row expansion", () => {
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_unpivot", name: "Unpivot", operation: { type: "unpivot", columns: ["q1", "q2"], nameColumn: "Quarter", valueColumn: "Value" } }], 5),
+    3,
   );
 });
 
