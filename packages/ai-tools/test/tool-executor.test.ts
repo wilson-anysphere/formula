@@ -1013,6 +1013,30 @@ describe("ToolExecutor", () => {
     expect(result.error?.code).toBe("permission_denied");
   });
 
+  it("fetch_external_data requires an explicit allowed_external_hosts allowlist", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true });
+
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch should not be called without host allowlist");
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://example.com/data",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/allowlist/i);
+  });
+
   it("fetch_external_data redacts sensitive query parameters in returned url metadata", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });

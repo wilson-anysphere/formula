@@ -79,6 +79,12 @@ describe("llm integration helpers", () => {
     expect(executor.tools.map((t) => t.name)).not.toContain("fetch_external_data");
   });
 
+  it("does not expose fetch_external_data when host allowlist is missing (defense in depth)", () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new SpreadsheetLLMToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: [] });
+    expect(executor.tools.map((t) => t.name)).not.toContain("fetch_external_data");
+  });
+
   it("does not expose create_chart when SpreadsheetApi lacks chart support", () => {
     const workbook: any = new InMemoryWorkbook(["Sheet1"]);
     workbook.createChart = undefined;

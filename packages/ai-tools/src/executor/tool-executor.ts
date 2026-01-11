@@ -2039,7 +2039,13 @@ function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
       "External URLs with embedded credentials are not supported for fetch_external_data. Pass credentials via headers instead."
     );
   }
-  if (allowedHosts.length > 0 && !allowedHosts.includes(url.host)) {
+  if (allowedHosts.length === 0) {
+    throw toolError(
+      "permission_denied",
+      "fetch_external_data requires an explicit host allowlist (allowed_external_hosts)."
+    );
+  }
+  if (!allowedHosts.includes(url.host)) {
     throw toolError("permission_denied", `External host "${url.host}" is not in the allowlist for fetch_external_data.`);
   }
 }

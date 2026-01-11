@@ -225,7 +225,20 @@ function toolSupportError(
     if (!options.allow_external_data) {
       return { code: "permission_denied", message: "fetch_external_data is disabled by host configuration." };
     }
+    const allowedHosts = normalizeAllowedExternalHosts(options.allowed_external_hosts);
+    if (allowedHosts.length === 0) {
+      return {
+        code: "permission_denied",
+        message: "fetch_external_data requires an explicit host allowlist (allowed_external_hosts)."
+      };
+    }
   }
 
   return null;
+}
+
+function normalizeAllowedExternalHosts(hosts: SpreadsheetLLMToolExecutorOptions["allowed_external_hosts"]): string[] {
+  return (hosts ?? [])
+    .map((host) => String(host).trim().toLowerCase())
+    .filter((host) => host.length > 0);
 }
