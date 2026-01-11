@@ -110,4 +110,47 @@ test.describe("grid scrolling + virtualization", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("CW1");
     await expect(page.getByTestId("active-value")).toHaveText("FarX");
   });
+
+  test("charts remain anchored to sheet coordinates while scrolling", async ({ page }) => {
+    await page.goto("/");
+
+    const before = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const el = document.querySelector<HTMLElement>('[data-testid="chart-object"]');
+      if (!el) return null;
+      return {
+        scroll: app.getScroll(),
+        left: Number.parseFloat(el.style.left),
+        top: Number.parseFloat(el.style.top),
+      };
+    });
+    expect(before).not.toBeNull();
+    expect(Number.isFinite(before!.left)).toBe(true);
+    expect(Number.isFinite(before!.top)).toBe(true);
+
+    const grid = page.locator("#grid");
+    await grid.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 240);
+
+    await expect.poll(async () => {
+      return await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    }).toBeGreaterThan(before!.scroll.y);
+
+    const after = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const el = document.querySelector<HTMLElement>('[data-testid="chart-object"]');
+      if (!el) return null;
+      return {
+        scroll: app.getScroll(),
+        left: Number.parseFloat(el.style.left),
+        top: Number.parseFloat(el.style.top),
+      };
+    });
+    expect(after).not.toBeNull();
+
+    const deltaScroll = after!.scroll.y - before!.scroll.y;
+    // Chart DOM nodes are positioned in sheet space minus scroll offsets.
+    expect(Math.abs((before!.top - after!.top) - deltaScroll)).toBeLessThan(1);
+    expect(Math.abs(before!.left - after!.left)).toBeLessThan(1);
+  });
 });
