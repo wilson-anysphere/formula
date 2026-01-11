@@ -72,3 +72,4 @@ fn engine_renders_stored_a1_formula_as_r1c1_for_cell() {
         Some("=R1C1".to_string())
     );
 }
+

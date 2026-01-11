@@ -1,4 +1,4 @@
-use formula_engine::{EditOp, Engine, Value};
+use formula_engine::{EditOp, Engine, NameDefinition, NameScope, Value};
 use formula_model::{CellRef, Range};
 use pretty_assertions::assert_eq;
 
@@ -308,4 +308,65 @@ fn delete_cells_shift_up_rewrites_moved_references_and_invalidates_deleted_targe
 
     // Reference directly into deleted region becomes #REF!
     assert_eq!(engine.get_cell_formula("Sheet1", "B2"), Some("=#REF!"));
+}
+
+#[test]
+fn structural_edits_update_named_range_definitions() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .define_name(
+            "MyX",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A1".to_string()),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=MyX").unwrap();
+
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "Sheet1".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.get_name("MyX", NameScope::Workbook).cloned(),
+        Some(NameDefinition::Reference("Sheet1!A2".to_string()))
+    );
+
+    // The formula cell moved to B2 and should still evaluate to the moved value once recalculated.
+    assert_eq!(engine.get_cell_formula("Sheet1", "B2"), Some("=MyX"));
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(1.0));
+}
+
+#[test]
+fn move_range_updates_named_range_definitions() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 42.0).unwrap();
+    engine
+        .define_name(
+            "MyX",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A1".to_string()),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=MyX").unwrap();
+
+    engine
+        .apply_operation(EditOp::MoveRange {
+            sheet: "Sheet1".to_string(),
+            src: range("A1:A1"),
+            dst_top_left: cell("A2"),
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.get_name("MyX", NameScope::Workbook).cloned(),
+        Some(NameDefinition::Reference("Sheet1!A2".to_string()))
+    );
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(42.0));
 }

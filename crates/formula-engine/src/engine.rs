@@ -770,10 +770,17 @@ impl Engine {
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
                 shift_rows(&mut self.workbook.sheets[sheet_id], row, count, true);
+                let edit = StructuralEdit::InsertRows {
+                    sheet: sheet.clone(),
+                    row,
+                    count,
+                };
+                self.rewrite_defined_names_structural(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
-                    StructuralEdit::InsertRows { sheet, row, count },
+                    edit,
                 ));
             }
             EditOp::DeleteRows { sheet, row, count } => {
@@ -785,10 +792,17 @@ impl Engine {
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
                 shift_rows(&mut self.workbook.sheets[sheet_id], row, count, false);
+                let edit = StructuralEdit::DeleteRows {
+                    sheet: sheet.clone(),
+                    row,
+                    count,
+                };
+                self.rewrite_defined_names_structural(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
-                    StructuralEdit::DeleteRows { sheet, row, count },
+                    edit,
                 ));
             }
             EditOp::InsertCols { sheet, col, count } => {
@@ -800,10 +814,17 @@ impl Engine {
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
                 shift_cols(&mut self.workbook.sheets[sheet_id], col, count, true);
+                let edit = StructuralEdit::InsertCols {
+                    sheet: sheet.clone(),
+                    col,
+                    count,
+                };
+                self.rewrite_defined_names_structural(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
-                    StructuralEdit::InsertCols { sheet, col, count },
+                    edit,
                 ));
             }
             EditOp::DeleteCols { sheet, col, count } => {
@@ -815,10 +836,17 @@ impl Engine {
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
                 shift_cols(&mut self.workbook.sheets[sheet_id], col, count, false);
+                let edit = StructuralEdit::DeleteCols {
+                    sheet: sheet.clone(),
+                    col,
+                    count,
+                };
+                self.rewrite_defined_names_structural(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
-                    StructuralEdit::DeleteCols { sheet, col, count },
+                    edit,
                 ));
             }
             EditOp::InsertCellsShiftRight { sheet, range } => {
@@ -843,6 +871,8 @@ impl Engine {
                     delta_col: width as i32,
                     deleted_region: None,
                 };
+                self.rewrite_defined_names_range_map(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -871,6 +901,8 @@ impl Engine {
                     delta_col: 0,
                     deleted_region: None,
                 };
+                self.rewrite_defined_names_range_map(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -905,6 +937,8 @@ impl Engine {
                         range.end.col,
                     )),
                 };
+                self.rewrite_defined_names_range_map(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -939,6 +973,8 @@ impl Engine {
                         range.end.col,
                     )),
                 };
+                self.rewrite_defined_names_range_map(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -980,6 +1016,8 @@ impl Engine {
                     delta_col: dst.start.col as i32 - src.start.col as i32,
                     deleted_region: None,
                 };
+                self.rewrite_defined_names_range_map(&sheet_names, &edit)
+                    .map_err(|e| EditError::Engine(e.to_string()))?;
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -1683,7 +1721,7 @@ impl Engine {
         Some(self.bytecode_cache.get_or_compile(&expr))
     }
 
-    fn compile_name_expr(&mut self, expr: &Expr<String>) -> CompiledExpr {
+    fn compile_name_expr(&self, expr: &Expr<String>) -> CompiledExpr {
         let mut map = |sref: &SheetReference<String>| match sref {
             SheetReference::Current => SheetReference::Current,
             SheetReference::Sheet(name) => self
@@ -1694,6 +1732,109 @@ impl Engine {
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
         expr.map_sheets(&mut map)
+    }
+
+    fn rewrite_defined_names_structural(
+        &mut self,
+        sheet_names: &HashMap<SheetId, String>,
+        edit: &StructuralEdit,
+    ) -> Result<(), EngineError> {
+        let edit_sheet = match edit {
+            StructuralEdit::InsertRows { sheet, .. }
+            | StructuralEdit::DeleteRows { sheet, .. }
+            | StructuralEdit::InsertCols { sheet, .. }
+            | StructuralEdit::DeleteCols { sheet, .. } => sheet.as_str(),
+        };
+
+        let mut updates: Vec<(Option<SheetId>, String, NameDefinition, CompiledExpr)> = Vec::new();
+
+        for (name, def) in &self.workbook.names {
+            let Some((new_def, compiled)) =
+                rewrite_defined_name_structural(self, def, edit_sheet, edit)?
+            else {
+                continue;
+            };
+            updates.push((None, name.clone(), new_def, compiled));
+        }
+
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            let Some(ctx_sheet) = sheet_names.get(&sheet_id) else { continue };
+            for (name, def) in &sheet.names {
+                let Some((new_def, compiled)) =
+                    rewrite_defined_name_structural(self, def, ctx_sheet, edit)?
+                else {
+                    continue;
+                };
+                updates.push((Some(sheet_id), name.clone(), new_def, compiled));
+            }
+        }
+
+        for (scope_sheet, name, new_def, compiled) in updates {
+            match scope_sheet {
+                None => {
+                    if let Some(def) = self.workbook.names.get_mut(&name) {
+                        def.definition = new_def;
+                        def.compiled = Some(compiled);
+                    }
+                }
+                Some(sheet_id) => {
+                    if let Some(def) = self.workbook.sheets[sheet_id].names.get_mut(&name) {
+                        def.definition = new_def;
+                        def.compiled = Some(compiled);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn rewrite_defined_names_range_map(
+        &mut self,
+        sheet_names: &HashMap<SheetId, String>,
+        edit: &RangeMapEdit,
+    ) -> Result<(), EngineError> {
+        let mut updates: Vec<(Option<SheetId>, String, NameDefinition, CompiledExpr)> = Vec::new();
+
+        for (name, def) in &self.workbook.names {
+            let Some((new_def, compiled)) =
+                rewrite_defined_name_range_map(self, def, &edit.sheet, edit)?
+            else {
+                continue;
+            };
+            updates.push((None, name.clone(), new_def, compiled));
+        }
+
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            let Some(ctx_sheet) = sheet_names.get(&sheet_id) else { continue };
+            for (name, def) in &sheet.names {
+                let Some((new_def, compiled)) =
+                    rewrite_defined_name_range_map(self, def, ctx_sheet, edit)?
+                else {
+                    continue;
+                };
+                updates.push((Some(sheet_id), name.clone(), new_def, compiled));
+            }
+        }
+
+        for (scope_sheet, name, new_def, compiled) in updates {
+            match scope_sheet {
+                None => {
+                    if let Some(def) = self.workbook.names.get_mut(&name) {
+                        def.definition = new_def;
+                        def.compiled = Some(compiled);
+                    }
+                }
+                Some(sheet_id) => {
+                    if let Some(def) = self.workbook.sheets[sheet_id].names.get_mut(&name) {
+                        def.definition = new_def;
+                        def.compiled = Some(compiled);
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn clear_cell_name_refs(&mut self, cell: CellKey) {
@@ -3580,4 +3721,68 @@ fn numeric_value(value: &Value) -> Option<f64> {
 
 fn normalize_defined_name(name: &str) -> String {
     name.trim().to_ascii_uppercase()
+}
+
+fn rewrite_defined_name_structural(
+    engine: &Engine,
+    def: &DefinedName,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
+    let (new_def, changed) = match &def.definition {
+        NameDefinition::Constant(_) => return Ok(None),
+        NameDefinition::Reference(formula) => {
+            let (new_formula, changed) =
+                rewrite_formula_for_structural_edit(formula, ctx_sheet, edit);
+            (NameDefinition::Reference(new_formula), changed)
+        }
+        NameDefinition::Formula(formula) => {
+            let (new_formula, changed) =
+                rewrite_formula_for_structural_edit(formula, ctx_sheet, edit);
+            (NameDefinition::Formula(new_formula), changed)
+        }
+    };
+
+    if !changed {
+        return Ok(None);
+    }
+
+    let formula = match &new_def {
+        NameDefinition::Reference(f) | NameDefinition::Formula(f) => f,
+        NameDefinition::Constant(_) => unreachable!("handled above"),
+    };
+    let parsed = Parser::parse(formula)?;
+    let compiled = engine.compile_name_expr(&parsed);
+    Ok(Some((new_def, compiled)))
+}
+
+fn rewrite_defined_name_range_map(
+    engine: &Engine,
+    def: &DefinedName,
+    ctx_sheet: &str,
+    edit: &RangeMapEdit,
+) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
+    let (new_def, changed) = match &def.definition {
+        NameDefinition::Constant(_) => return Ok(None),
+        NameDefinition::Reference(formula) => {
+            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, edit);
+            (NameDefinition::Reference(new_formula), changed)
+        }
+        NameDefinition::Formula(formula) => {
+            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, edit);
+            (NameDefinition::Formula(new_formula), changed)
+        }
+    };
+
+    if !changed {
+        return Ok(None);
+    }
+
+    let formula = match &new_def {
+        NameDefinition::Reference(f) | NameDefinition::Formula(f) => f,
+        NameDefinition::Constant(_) => unreachable!("handled above"),
+    };
+    let parsed = Parser::parse(formula)?;
+    let compiled = engine.compile_name_expr(&parsed);
+    Ok(Some((new_def, compiled)))
 }
