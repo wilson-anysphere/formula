@@ -134,6 +134,7 @@ export function QueryEditorPanelContainer(props: Props) {
   const [refreshEvent, setRefreshEvent] = useState<unknown>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeLoad, setActiveLoad] = useState<{ jobId: string; controller: AbortController } | null>(null);
+  const [activeRefresh, setActiveRefresh] = useState<{ jobId: string; cancel: () => void; applying: boolean } | null>(null);
   const triggeredOnOpenForQueryId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -159,6 +160,33 @@ export function QueryEditorPanelContainer(props: Props) {
   useEffect(() => {
     return refreshManager.onEvent((evt) => {
       setRefreshEvent(evt);
+      const refreshJobId = evt?.job?.id;
+      if (typeof refreshJobId === "string" && (evt.type === "error" || evt.type === "cancelled")) {
+        setActiveRefresh((prev) => (prev?.jobId === refreshJobId ? null : prev));
+      }
+
+      if (typeof refreshJobId === "string" && evt.type === "completed") {
+        // If the refresh completes but no "apply" phase starts (e.g. no destination),
+        // clear the active refresh state on the next tick.
+        queueMicrotask(() => {
+          setActiveRefresh((prev) => (prev?.jobId === refreshJobId && !prev.applying ? null : prev));
+        });
+      }
+
+      const applyJobId = evt?.jobId;
+      if (
+        typeof applyJobId === "string" &&
+        evt.type === "apply:started"
+      ) {
+        setActiveRefresh((prev) => (prev?.jobId === applyJobId ? { ...prev, applying: true } : prev));
+      }
+
+      if (
+        typeof applyJobId === "string" &&
+        (evt.type === "apply:completed" || evt.type === "apply:error" || evt.type === "apply:cancelled")
+      ) {
+        setActiveRefresh((prev) => (prev?.jobId === applyJobId ? null : prev));
+      }
     });
   }, [refreshManager]);
 
@@ -284,7 +312,8 @@ export function QueryEditorPanelContainer(props: Props) {
   function refreshNow(queryId: string): void {
     setActionError(null);
     try {
-      refreshManager.refresh(queryId);
+      const handle = refreshManager.refresh(queryId);
+      setActiveRefresh({ jobId: handle.id, cancel: handle.cancel, applying: false });
     } catch (err: any) {
       setActionError(err?.message ?? String(err));
     }
@@ -315,6 +344,11 @@ export function QueryEditorPanelContainer(props: Props) {
         {activeLoad ? (
           <button type="button" onClick={cancelActiveLoad}>
             Cancel load
+          </button>
+        ) : null}
+        {activeRefresh ? (
+          <button type="button" onClick={activeRefresh.cancel}>
+            Cancel refresh
           </button>
         ) : null}
       </div>
