@@ -94,6 +94,7 @@ if (outputExists) {
   );
 
   if (outputStamp >= sourceStamp) {
+    console.log("[formula] WASM artifacts up to date; copying runtime assets into apps/*/public/engine.");
     await copyToPublic();
     process.exit(0);
   }
@@ -132,6 +133,8 @@ if (outputExists) {
     );
   }
 }
+
+console.log("[formula] Building WASM artifacts via wasm-pack…");
 
 // `wasm-pack` refuses to overwrite some files if the output already exists.
 await rm(outDir, { recursive: true, force: true });
