@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { newDb } from "pg-mem";
 import type { Pool } from "pg";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import jwt from "jsonwebtoken";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
@@ -174,6 +176,31 @@ describe("internal sync token introspection", () => {
     },
     15_000
   );
+
+  it("rejects sync tokens with invalid UUID claims", async () => {
+    const userId = crypto.randomUUID();
+    const orgId = crypto.randomUUID();
+    const docId = crypto.randomUUID();
+
+    const token = jwt.sign(
+      { sub: userId, docId, orgId, role: "viewer", sessionId: "not-a-uuid" },
+      config.syncTokenSecret,
+      {
+        algorithm: "HS256",
+        expiresIn: 60,
+        audience: "formula-sync"
+      }
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/sync/introspect",
+      headers: { "x-internal-admin-token": config.internalAdminToken! },
+      payload: { token, docId, userAgent: "vitest" }
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: false, active: false, error: "forbidden", reason: "invalid_claims" });
+  });
 
   it(
     "rejects introspection for revoked sessions",

@@ -3,6 +3,8 @@ import type { DocumentRole } from "../rbac/roles";
 
 type JwtModule = typeof import("jsonwebtoken");
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function loadJwt(): JwtModule {
   // Use runtime require so Vitest/Vite SSR doesn't try to transform jsonwebtoken
   // (a CJS package that relies on relative requires like `./decode`).
@@ -47,6 +49,10 @@ function isDocumentRole(value: unknown): value is DocumentRole {
   return value === "owner" || value === "admin" || value === "editor" || value === "commenter" || value === "viewer";
 }
 
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_REGEX.test(value);
+}
+
 export function verifySyncToken(params: { token: string; secret: string }): SyncTokenClaims {
   const jwt = loadJwt();
   const verified = jwt.verify(params.token, params.secret, {
@@ -65,11 +71,11 @@ export function verifySyncToken(params: { token: string; secret: string }): Sync
   const role = payload.role;
   const sessionId = payload.sessionId;
 
-  if (typeof sub !== "string" || sub.length === 0) throw new Error("invalid_sync_token");
-  if (typeof docId !== "string" || docId.length === 0) throw new Error("invalid_sync_token");
-  if (typeof orgId !== "string" || orgId.length === 0) throw new Error("invalid_sync_token");
+  if (!isUuid(sub)) throw new Error("invalid_sync_token");
+  if (!isUuid(docId)) throw new Error("invalid_sync_token");
+  if (!isUuid(orgId)) throw new Error("invalid_sync_token");
   if (!isDocumentRole(role)) throw new Error("invalid_sync_token");
-  if (sessionId !== undefined && (typeof sessionId !== "string" || sessionId.length === 0)) {
+  if (sessionId !== undefined && !isUuid(sessionId)) {
     throw new Error("invalid_sync_token");
   }
 

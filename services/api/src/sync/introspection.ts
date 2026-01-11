@@ -17,11 +17,11 @@ const RoleSchema = z.enum(["owner", "admin", "editor", "commenter", "viewer"]);
 
 const SyncJwtClaimsSchema = z
   .object({
-    sub: z.string().min(1),
-    docId: z.string().min(1),
-    orgId: z.string().min(1),
+    sub: z.string().uuid(),
+    docId: z.string().uuid(),
+    orgId: z.string().uuid(),
     role: RoleSchema,
-    sessionId: z.string().min(1).optional()
+    sessionId: z.string().uuid().optional()
   })
   // Allow standard claims (iat, exp, aud, jti, etc).
   .passthrough();
