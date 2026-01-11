@@ -9,6 +9,7 @@ import { FileConnector } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { SqlConnector } from "./connectors/sql.js";
 import { QueryFoldingEngine } from "./folding/sql.js";
+import { normalizePostgresPlaceholders } from "./folding/placeholders.js";
 import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parquetProjection.js";
 
 /**
@@ -830,8 +831,7 @@ export class QueryEngine {
     const dialectName = typeof dialect === "string" ? dialect : dialect.name;
     let normalizedSql = sql;
     if (dialectName === "postgres") {
-      let idx = 0;
-      normalizedSql = sql.replaceAll("?", () => `$${++idx}`);
+      normalizedSql = normalizePostgresPlaceholders(sql, params.length);
     }
     const request = { connection: source.connection, sql: normalizedSql, params };
     await this.assertPermission(connector.permissionKind, { source, request }, state);
