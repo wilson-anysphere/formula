@@ -406,3 +406,72 @@ fn parse_bool(v: Option<String>) -> PivotCacheValue {
     let v = v.trim();
     PivotCacheValue::Bool(v == "1" || v.eq_ignore_ascii_case("true"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn parses_record_item_tag_variants() {
+        let xml = r##"
+            <pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <r>
+                <m/>
+                <b v="1"/>
+                <b v="0"/>
+                <e v="#DIV/0!"/>
+                <n v="42"/>
+                <n>42</n>
+                <s v="Hello"/>
+                <s>Hello</s>
+                <x v="3"/>
+              </r>
+            </pivotCacheRecords>
+        "##;
+
+        let mut reader = PivotCacheRecordsReader::new(xml.as_bytes());
+        let records = reader.parse_all_records();
+
+        assert_eq!(
+            records,
+            vec![vec![
+                PivotCacheValue::Missing,
+                PivotCacheValue::Bool(true),
+                PivotCacheValue::Bool(false),
+                PivotCacheValue::Error("#DIV/0!".to_string()),
+                PivotCacheValue::Number(42.0),
+                PivotCacheValue::Number(42.0),
+                PivotCacheValue::String("Hello".to_string()),
+                PivotCacheValue::String("Hello".to_string()),
+                PivotCacheValue::Index(3),
+            ]]
+        );
+    }
+
+    #[test]
+    fn parses_namespace_prefixed_value_tags() {
+        let xml = r#"
+            <pc:pivotCacheRecords xmlns:pc="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <pc:r>
+                <pc:n v="1"/>
+                <pc:s>World</pc:s>
+                <pc:m/>
+              </pc:r>
+            </pc:pivotCacheRecords>
+        "#;
+
+        let mut reader = PivotCacheRecordsReader::new(xml.as_bytes());
+        let records = reader.parse_all_records();
+
+        assert_eq!(
+            records,
+            vec![vec![
+                PivotCacheValue::Number(1.0),
+                PivotCacheValue::String("World".to_string()),
+                PivotCacheValue::Missing,
+            ]]
+        );
+    }
+}
