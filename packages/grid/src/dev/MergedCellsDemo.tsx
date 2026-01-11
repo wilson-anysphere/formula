@@ -138,6 +138,7 @@ export function MergedCellsDemo(): React.ReactElement {
           frozenCols={1}
           defaultRowHeight={24}
           defaultColWidth={80}
+          onZoomChange={setZoom}
           apiRef={apiRef}
         />
       </div>

@@ -163,6 +163,7 @@ export function GridPerformanceHarness(props?: {
         headerCols={1}
         frozenRows={1}
         frozenCols={1}
+        onZoomChange={setZoom}
         apiRef={apiRef}
       />
     </div>

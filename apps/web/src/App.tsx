@@ -1117,20 +1117,21 @@ function EngineDemoApp() {
       >
         {provider ? (
           <>
-            <CanvasGrid
-              provider={provider}
-              rowCount={rowCount}
-              colCount={colCount}
-              headerRows={headerRowOffset}
-              headerCols={headerColOffset}
-              frozenRows={frozenRows}
-              frozenCols={frozenCols}
-               enableResize
-               apiRef={(api) => {
-                 gridApiRef.current = api;
-                 if (api) api.setZoom(zoomRef.current);
-                 const params = new URLSearchParams(window.location.search);
-                 if (params.has("e2e") || params.has("perf")) {
+              <CanvasGrid
+                provider={provider}
+                rowCount={rowCount}
+                colCount={colCount}
+                headerRows={headerRowOffset}
+                headerCols={headerColOffset}
+                frozenRows={frozenRows}
+                frozenCols={frozenCols}
+                enableResize
+                onZoomChange={setZoom}
+                apiRef={(api) => {
+                  gridApiRef.current = api;
+                  if (api) api.setZoom(zoomRef.current);
+                  const params = new URLSearchParams(window.location.search);
+                  if (params.has("e2e") || params.has("perf")) {
                    (window as any).__gridApi = api;
                  }
                }}
