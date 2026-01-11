@@ -288,8 +288,11 @@ export class FormulaConflictMonitor {
       if (typeof cellKey !== "string") continue;
 
       const cellMap = /** @type {Y.Map<any>} */ (event.target);
+      const modifiedByChange = event.changes.keys.get("modifiedBy");
+      const oldModifiedBy = (modifiedByChange?.oldValue ?? "").toString();
       const remoteUserId = (cellMap.get("modifiedBy") ?? "").toString();
 
+      const valueChange = event.changes.keys.get("value");
       const formulaChange = event.changes.keys.get("formula");
       if (formulaChange) {
         const oldFormula = (formulaChange.oldValue ?? "").toString();
@@ -297,7 +300,9 @@ export class FormulaConflictMonitor {
         const action = formulaChange.action;
         const itemId = getItemId(cellMap, "formula");
         const newItemOriginId = getItemOriginId(cellMap, "formula");
-        const hasValueChange = Boolean(event.changes.keys.get("value"));
+        const itemLeftId = getItemLeftId(cellMap, "formula");
+        const hasValueChange = Boolean(valueChange);
+        const oldValue = valueChange?.oldValue ?? null;
         const currentValue = cellMap.get("value") ?? null;
 
         this._handleFormulaChange({
@@ -306,22 +311,26 @@ export class FormulaConflictMonitor {
           newFormula,
           action,
           remoteUserId,
+          oldModifiedBy,
           origin: transaction.origin,
           itemId,
           newItemOriginId,
+          itemLeftId,
           hasValueChange,
+          oldValue,
           currentValue
         });
       }
 
       if (this.includeValueConflicts) {
-        const valueChange = event.changes.keys.get("value");
         if (valueChange) {
           const oldValue = valueChange.oldValue ?? null;
           const newValue = cellMap.get("value") ?? null;
           const action = valueChange.action;
           const itemId = getItemId(cellMap, "value");
           const newItemOriginId = getItemOriginId(cellMap, "value");
+          const itemLeftId = getItemLeftId(cellMap, "value");
+          const currentFormula = (cellMap.get("formula") ?? "").toString();
 
           this._handleValueChange({
             cellKey,
@@ -329,9 +338,12 @@ export class FormulaConflictMonitor {
             newValue,
             action,
             remoteUserId,
+            oldModifiedBy,
             origin: transaction.origin,
             itemId,
-            newItemOriginId
+            newItemOriginId,
+            itemLeftId,
+            currentFormula
           });
         }
       }
@@ -345,10 +357,13 @@ export class FormulaConflictMonitor {
    * @param {string} input.newFormula
    * @param {"add" | "update" | "delete"} input.action
    * @param {string} input.remoteUserId
+   * @param {string} [input.oldModifiedBy]
    * @param {any} input.origin
    * @param {{ client: number, clock: number } | null} input.itemId
    * @param {{ client: number, clock: number } | null} input.newItemOriginId
+   * @param {{ client: number, clock: number } | null} [input.itemLeftId]
    * @param {boolean} [input.hasValueChange]
+   * @param {any} [input.oldValue]
    * @param {any} [input.currentValue]
    */
   _handleFormulaChange(input) {
@@ -358,10 +373,13 @@ export class FormulaConflictMonitor {
       newFormula,
       action,
       remoteUserId,
+      oldModifiedBy = "",
       origin,
       itemId,
       newItemOriginId,
+      itemLeftId = null,
       hasValueChange = false,
+      oldValue = null,
       currentValue = null
     } = input;
 
@@ -427,33 +445,102 @@ export class FormulaConflictMonitor {
           return;
         }
       }
+
+      // Fallback when the monitor restarts (or local edit tracking is otherwise lost):
+      // if this user last modified the cell by writing a literal value and a remote
+      // user concurrently writes a formula that overwrites our `formula=null` marker,
+      // surface a content conflict even though we don't have `_lastLocalContentEditByCellKey`.
+      //
+      // We intentionally only surface this as a content conflict when the local value
+      // is non-null. When the local value is null, it's ambiguous whether the user
+      // cleared the cell via a value edit or via a formula clear, so we let formula
+      // conflict handling cover it instead.
+      if (lastContent?.kind !== "value") {
+        const remoteFormula = newFormula.trim();
+        const localValue = hasValueChange ? oldValue : currentValue;
+        if (
+          remoteFormula &&
+          localValue !== null &&
+          oldModifiedBy === this.localUserId &&
+          formulasRoughlyEqual(oldFormula, "")
+        ) {
+          // Sequential overwrite (remote saw our clear) - ignore.
+          if (itemLeftId && idsEqual(newItemOriginId, itemLeftId)) return;
+
+          const cell = cellRefFromKey(cellKey);
+          const conflict = /** @type {FormulaConflict} */ ({
+            id: crypto.randomUUID(),
+            kind: "content",
+            cell,
+            cellKey,
+            local: { type: "value", value: localValue },
+            remote: { type: "formula", formula: remoteFormula },
+            remoteUserId,
+            detectedAt: Date.now()
+          });
+
+          if (this.getCellValue) {
+            const remotePreview = tryEvaluateFormula(remoteFormula, {
+              getCellValue: ({ col, row }) => this.getCellValue({ sheetId: cell.sheetId, col, row })
+            });
+            if (conflict.remote.type === "formula") {
+              conflict.remote.preview = remotePreview.ok ? remotePreview.value : null;
+            }
+          }
+
+          this._conflicts.set(conflict.id, conflict);
+          this.onConflict(conflict);
+          return;
+        }
+      }
     }
 
     const lastLocal = this._lastLocalFormulaEditByCellKey.get(cellKey);
-    if (!lastLocal) return;
+    if (!lastLocal) {
+      // When the conflict monitor is re-created (e.g. app reload) it loses the
+      // in-memory record of what formulas were written by this user. Use the
+      // cell-level `modifiedBy` metadata as a best-effort fallback so we can
+      // still detect true offline/concurrent overwrites of a cell last edited
+      // by this user.
+      //
+      // Note: this is intentionally conservative - it won't fire if a client
+      // doesn't write `modifiedBy`.
+      if (oldModifiedBy !== this.localUserId) return;
+
+      // Deletes never create new Items, so a delete that removes this formula
+      // is necessarily sequential (remote must have seen the exact item id).
+      // We only care about concurrent overwrites here.
+      if (action === "delete") return;
+    }
 
     // Did this remote update overwrite the last formula we wrote locally?
-    if (!formulasRoughlyEqual(oldFormula, lastLocal.formula)) return;
+    if (lastLocal && !formulasRoughlyEqual(oldFormula, lastLocal.formula)) return;
 
     // Sequential delete: remote explicitly deleted the exact item we wrote.
     // Map deletes don't create a new Item, so we can't use origin ids like we do for overwrites.
-    if (action === "delete" && lastLocal.itemId && idsEqual(itemId, lastLocal.itemId)) {
+    if (action === "delete" && lastLocal?.itemId && idsEqual(itemId, lastLocal.itemId)) {
       this._lastLocalFormulaEditByCellKey.delete(cellKey);
       this._lastLocalContentEditByCellKey.delete(cellKey);
       return;
     }
 
     // Sequential overwrite (remote saw our write) - ignore.
-    if (lastLocal.itemId && idsEqual(newItemOriginId, lastLocal.itemId)) {
+    if (lastLocal?.itemId && idsEqual(newItemOriginId, lastLocal.itemId)) {
       this._lastLocalFormulaEditByCellKey.delete(cellKey);
       this._lastLocalContentEditByCellKey.delete(cellKey);
       return;
     }
 
+    // Sequential overwrite fallback (local tracking lost): compare the overwrite's
+    // origin id to the currently-left item for this key (the overwritten value).
+    if (!lastLocal && itemLeftId && idsEqual(newItemOriginId, itemLeftId)) {
+      return;
+    }
+
     // We no longer consider that local edit "pending" for conflict detection.
-    this._lastLocalFormulaEditByCellKey.delete(cellKey);
-    const lastContent = this._lastLocalContentEditByCellKey.get(cellKey);
-    this._lastLocalContentEditByCellKey.delete(cellKey);
+    if (lastLocal) this._lastLocalFormulaEditByCellKey.delete(cellKey);
+    const lastContent = lastLocal ? this._lastLocalContentEditByCellKey.get(cellKey) : null;
+    if (lastLocal) this._lastLocalContentEditByCellKey.delete(cellKey);
 
     const localFormula = oldFormula.trim();
     const remoteFormula = newFormula.trim();
@@ -701,6 +788,35 @@ function getItemId(ymap, key) {
   const item = ymap?._map?.get?.(key);
   if (!item) return null;
   const id = item.id;
+  if (!id || typeof id !== "object") return null;
+  const client = id.client;
+  const clock = id.clock;
+  if (typeof client !== "number" || typeof clock !== "number") return null;
+  return { client, clock };
+}
+
+/**
+ * Extract the id for the Item immediately to the left of the currently visible
+ * value of a Y.Map key.
+ *
+ * This can be used to recover the overwritten item id even when local edit
+ * tracking has been lost (e.g. after recreating a monitor instance), since Yjs
+ * integrates concurrent overwrites into a linked list ordered by Item ids.
+ *
+ * @param {Y.Map<any>} ymap
+ * @param {string} key
+ * @returns {{ client: number, clock: number } | null}
+ */
+function getItemLeftId(ymap, key) {
+  // @ts-ignore - accessing Yjs internals
+  const item = ymap?._map?.get?.(key);
+  if (!item) return null;
+
+  /** @type {any} */
+  const left = item.left;
+  if (!left) return null;
+
+  const id = left.lastId ?? left.id;
   if (!id || typeof id !== "object") return null;
   const client = id.client;
   const clock = id.clock;

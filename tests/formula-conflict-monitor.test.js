@@ -59,6 +59,30 @@ function createClient(userId, opts = {}) {
 }
 
 /**
+ * Re-create the conflict monitor for a client, simulating an app/session reload
+ * where the in-memory local-edit tracking state is lost.
+ *
+ * @param {ReturnType<typeof createClient>} client
+ * @param {{ mode?: "formula" | "formula+value" }} [opts]
+ */
+function restartMonitor(client, opts = {}) {
+  client.monitor.dispose();
+  client.conflicts.length = 0;
+
+  const origin = { type: "local", userId: client.monitor.localUserId, restart: true };
+  const localOrigins = new Set([...client.undo.localOrigins, origin]);
+  client.monitor = new FormulaConflictMonitor({
+    doc: client.doc,
+    cells: client.cells,
+    localUserId: client.monitor.localUserId,
+    origin,
+    localOrigins,
+    mode: opts.mode,
+    onConflict: (c) => client.conflicts.push(c)
+  });
+}
+
+/**
  * @param {Y.Map<any>} cells
  * @param {string} key
  */
@@ -422,4 +446,70 @@ test("sequential value -> formula edits do not surface a content conflict", () =
 
   assert.equal(alice.conflicts.length, 0);
   assert.equal(bob.conflicts.length, 0);
+});
+
+test("formula conflicts are still detected after restarting the monitor (fallback via modifiedBy + Item.origin)", () => {
+  const alice = createClient("alice");
+  const bob = createClient("bob");
+
+  // Establish a common base cell map so concurrent edits race on the formula key
+  // (not on the `cells[cellKey] = new Y.Map()` insertion).
+  alice.monitor.setLocalFormula("s:0:0", "=0");
+  syncDocs(alice.doc, bob.doc);
+
+  // Offline concurrent edits.
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  bob.monitor.setLocalFormula("s:0:0", "=2");
+
+  // Simulate restarting both clients before reconnecting.
+  restartMonitor(alice);
+  restartMonitor(bob);
+
+  syncDocs(alice.doc, bob.doc);
+
+  const allConflicts = [...alice.conflicts, ...bob.conflicts];
+  assert.ok(allConflicts.length >= 1, "expected at least one conflict to be detected after restart");
+});
+
+test("sequential overwrites do not surface conflicts after restarting the monitor", () => {
+  const alice = createClient("alice");
+  const bob = createClient("bob");
+
+  bob.monitor.setLocalFormula("s:0:0", "=1");
+  syncDocs(alice.doc, bob.doc);
+
+  // Restart the monitor on the side whose formula will be overwritten.
+  restartMonitor(bob);
+
+  // Alice sees Bob's edit before overwriting (sequential, not a conflict).
+  alice.monitor.setLocalFormula("s:0:0", "=2");
+  syncDocs(alice.doc, bob.doc);
+
+  assert.equal(bob.conflicts.length, 0);
+});
+
+test("content conflicts (value vs formula) are still detected after restarting the monitor", () => {
+  // Ensure deterministic tie-breaking for concurrent map-entry overwrites.
+  const alice = createClient("alice", { clientID: 2, mode: "formula+value" });
+  const bob = createClient("bob", { clientID: 1, mode: "formula+value" });
+
+  // Establish a shared base cell map.
+  bob.monitor.setLocalValue("s:0:0", "base");
+  syncDocs(alice.doc, bob.doc);
+
+  // Offline concurrent edits: alice writes formula; bob writes value.
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  bob.monitor.setLocalValue("s:0:0", "bob");
+
+  // Restart only the losing side (value writer).
+  restartMonitor(bob, { mode: "formula+value" });
+
+  syncDocs(alice.doc, bob.doc);
+
+  const conflict = bob.conflicts.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict on bob after restart");
+  assert.equal(conflict.remote.type, "formula");
+  assert.equal(conflict.remote.formula, "=1");
+  assert.equal(conflict.local.type, "value");
+  assert.equal(conflict.local.value, "bob");
 });
