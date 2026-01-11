@@ -78,27 +78,36 @@ Endpoints:
 - `GET /orgs/:orgId/siem` – fetch sanitized config (auth secrets are masked as `"***"`).
 - `DELETE /orgs/:orgId/siem` – remove SIEM configuration (disables exports).
 
+Request/response shape:
+
+- `GET` returns `{ enabled, config }`.
+- `PUT` accepts either `{ enabled, config }` (preferred) or the `config` object itself (backwards compatible).
+- When updating an existing config, you can keep previously stored secret values by sending `"***"` for secret fields (the same masked value returned by `GET`).
+
 Auth secrets are stored encrypted in the database-backed secret store (`secrets` table; key = `SECRET_STORE_KEY`) and referenced from `org_siem_configs.config` via `{ "secretRef": "siem:<orgId>:..." }` entries (never plaintext).
 
 Example payload:
 
 ```json
 {
-  "endpointUrl": "https://example.invalid/services/collector/event",
-  "format": "json",
-  "batchSize": 250,
-  "timeoutMs": 10000,
-  "idempotencyKeyHeader": "Idempotency-Key",
-  "auth": {
-    "type": "header",
-    "name": "Authorization",
-    "value": "Splunk <hec-token>"
-  },
-  "retry": {
-    "maxAttempts": 5,
-    "baseDelayMs": 500,
-    "maxDelayMs": 30000,
-    "jitter": true
+  "enabled": true,
+  "config": {
+    "endpointUrl": "https://example.invalid/services/collector/event",
+    "format": "json",
+    "batchSize": 250,
+    "timeoutMs": 10000,
+    "idempotencyKeyHeader": "Idempotency-Key",
+    "auth": {
+      "type": "header",
+      "name": "Authorization",
+      "value": "Splunk <hec-token>"
+    },
+    "retry": {
+      "maxAttempts": 5,
+      "baseDelayMs": 500,
+      "maxDelayMs": 30000,
+      "jitter": true
+    }
   }
 }
 ```
