@@ -161,9 +161,17 @@ pub fn write_xlsx_from_storage(
     workbook_meta: &AppWorkbook,
     path: &Path,
 ) -> anyhow::Result<Arc<[u8]>> {
-    let model = storage
+    let mut model = storage
         .export_model_workbook(workbook_id)
         .context("export workbook from storage")?;
+
+    // Patch cached formula values using the in-memory engine results so exports
+    // don't ship stale/empty `<v>` values for formula cells.
+    //
+    // This is particularly important for:
+    // - new workbooks (no original XLSX baseline)
+    // - non-XLSX imports (csv/xls/xlsb) where we generate a fresh XLSX on save
+    apply_cached_formula_values(&mut model, workbook_meta);
 
     let mut cursor = Cursor::new(Vec::new());
     formula_xlsx::write_workbook_to_writer(&model, &mut cursor).context("write workbook to bytes")?;
@@ -212,4 +220,48 @@ pub fn write_xlsx_from_storage(
     let bytes = Arc::<[u8]>::from(bytes);
     std::fs::write(path, bytes.as_ref()).with_context(|| format!("write workbook {path:?}"))?;
     Ok(bytes)
+}
+
+fn apply_cached_formula_values(model: &mut ModelWorkbook, workbook: &AppWorkbook) {
+    for sheet in &workbook.sheets {
+        let Some(model_sheet) = model
+            .sheets
+            .iter_mut()
+            .find(|s| s.name.eq_ignore_ascii_case(&sheet.name))
+        else {
+            continue;
+        };
+
+        for ((row, col), cell) in sheet.cells_iter() {
+            if cell.formula.is_none() {
+                continue;
+            }
+            let (row, col) = match (u32::try_from(row), u32::try_from(col)) {
+                (Ok(r), Ok(c)) => (r, c),
+                _ => continue,
+            };
+            let cell_ref = CellRef::new(row, col);
+
+            // Only update cached values for cells that are formulas in the model workbook.
+            if model_sheet.formula(cell_ref).is_none() {
+                continue;
+            }
+
+            let computed = cell.computed_value.clone();
+            let existing = model_sheet
+                .cell(cell_ref)
+                .map(|c| model_value_to_scalar(&c.value))
+                .unwrap_or(CellScalar::Empty);
+
+            // Preserve existing cached values when the engine can't evaluate the formula (commonly
+            // surfaced as `#NAME?`). This keeps round-trips stable for formulas we don't support yet.
+            if matches!(computed, CellScalar::Error(_)) && !matches!(existing, CellScalar::Error(_)) {
+                continue;
+            }
+
+            if computed != existing {
+                model_sheet.set_value(cell_ref, scalar_to_model_value(&computed));
+            }
+        }
+    }
 }

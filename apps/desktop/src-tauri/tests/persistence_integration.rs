@@ -3,6 +3,7 @@ use formula_desktop_tauri::persistence::{write_xlsx_from_storage, WorkbookPersis
 use formula_desktop_tauri::state::{AppState, CellScalar};
 use formula_storage::{CellRange, CellValue, Storage};
 use serde_json::json;
+use std::io::Cursor;
 use std::path::PathBuf;
 
 #[tokio::test]
@@ -140,5 +141,54 @@ fn xlsx_import_uses_origin_bytes_to_preserve_styles_in_storage() {
     assert!(
         model.styles.len() > 1,
         "expected more than the default style in imported workbook"
+    );
+}
+
+#[tokio::test]
+async fn export_writes_cached_values_for_formula_cells() {
+    let tmp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = tmp_dir.path().join("autosave.sqlite");
+
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+    let sheet_id = workbook.sheets[0].id.clone();
+
+    let mut state = AppState::new();
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path.clone()))
+        .expect("load persistent workbook");
+
+    state
+        .set_cell(&sheet_id, 0, 0, Some(json!(2.0)), None)
+        .expect("set A1");
+    state
+        .set_cell(&sheet_id, 0, 1, None, Some("=A1+1".to_string()))
+        .expect("set B1 formula");
+
+    state
+        .autosave_manager()
+        .expect("autosave")
+        .flush()
+        .await
+        .expect("flush autosave");
+
+    let export_storage = state.persistent_storage().expect("storage handle");
+    let export_id = state.persistent_workbook_id().expect("workbook id");
+    let export_meta = state.get_workbook().expect("workbook").clone();
+    let xlsx_path = tmp_dir.path().join("export.xlsx");
+    let bytes =
+        write_xlsx_from_storage(&export_storage, export_id, &export_meta, &xlsx_path).expect("export xlsx");
+
+    let model =
+        formula_xlsx::read_workbook_from_reader(Cursor::new(bytes.as_ref())).expect("read exported model");
+    let sheet = model.sheets.first().expect("sheet");
+    let cell = sheet
+        .cell(formula_model::CellRef::new(0, 1))
+        .expect("B1 cell should exist");
+
+    assert_eq!(
+        cell.value,
+        formula_model::CellValue::Number(3.0),
+        "expected cached value for B1"
     );
 }
