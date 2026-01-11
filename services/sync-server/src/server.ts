@@ -26,7 +26,11 @@ import {
   LeveldbDocNameHashingLayer,
   persistedDocName as derivePersistedDocName,
 } from "./leveldb-docname.js";
-import { ConnectionTracker, TokenBucketRateLimiter } from "./limits.js";
+import {
+  ConnectionTracker,
+  SlidingWindowRateLimiter,
+  TokenBucketRateLimiter,
+} from "./limits.js";
 import {
   FilePersistence,
   migrateLegacyPlaintextFilesToEncryptedFormat,
@@ -59,6 +63,17 @@ function pickIp(req: IncomingMessage, trustProxy: boolean): string {
     }
   }
   return req.socket.remoteAddress ?? "unknown";
+}
+
+function rawDataByteLength(raw: WebSocket.RawData): number {
+  if (typeof raw === "string") return Buffer.byteLength(raw);
+  if (Array.isArray(raw)) {
+    return raw.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  }
+  if (raw instanceof ArrayBuffer) return raw.byteLength;
+  // Buffer is a Uint8Array
+  if (raw instanceof Uint8Array) return raw.byteLength;
+  return 0;
 }
 
 function sendUpgradeRejection(
@@ -164,6 +179,10 @@ export function createSyncServer(
   const connectionAttemptLimiter = new TokenBucketRateLimiter(
     config.limits.maxConnAttemptsPerWindow,
     config.limits.connAttemptWindowMs
+  );
+  const docMessageLimiter = new SlidingWindowRateLimiter(
+    config.limits.maxMessagesPerDocWindow,
+    config.limits.docMessageWindowMs
   );
 
   const activeSocketsByDoc = new Map<string, Set<WebSocket>>();
@@ -808,7 +827,10 @@ export function createSyncServer(
     return await tombstoneSweepInFlight;
   };
 
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: config.limits.maxMessageBytes,
+  });
 
   const server = http.createServer((req, res) => {
     void (async () => {
@@ -1002,12 +1024,37 @@ export function createSyncServer(
     }, config.limits.messageWindowMs);
     messageWindow.unref();
 
-    ws.on("message", () => {
+    ws.on("message", (data) => {
+      const messageBytes = rawDataByteLength(data);
+      if (messageBytes > config.limits.maxMessageBytes) {
+        logger.warn(
+          {
+            ip,
+            docName,
+            userId: authCtx?.userId,
+            messageBytes,
+            limitBytes: config.limits.maxMessageBytes,
+          },
+          "ws_message_too_large"
+        );
+        ws.close(1009, "Message too big");
+        return;
+      }
+
       messagesInWindow += 1;
       if (messagesInWindow > config.limits.maxMessagesPerWindow) {
         logger.warn(
           { ip, docName, userId: authCtx?.userId },
           "ws_message_rate_limited"
+        );
+        ws.close(1013, "Rate limit exceeded");
+        return;
+      }
+
+      if (!docMessageLimiter.consume(docName)) {
+        logger.warn(
+          { ip, docName, userId: authCtx?.userId },
+          "ws_doc_message_rate_limited"
         );
         ws.close(1013, "Rate limit exceeded");
       }
@@ -1031,7 +1078,10 @@ export function createSyncServer(
       const sockets = activeSocketsByDoc.get(docName);
       if (sockets) {
         sockets.delete(ws);
-        if (sockets.size === 0) activeSocketsByDoc.delete(docName);
+        if (sockets.size === 0) {
+          activeSocketsByDoc.delete(docName);
+          docMessageLimiter.reset(docName);
+        }
       }
       logger.info({ ip, docName, userId: authCtx?.userId }, "ws_connection_closed");
     });
@@ -1064,7 +1114,16 @@ export function createSyncServer(
       void retentionManager?.markSeen(persistedName);
     }
 
-    installYwsSecurity(ws, { docName, auth: authCtx, logger });
+    installYwsSecurity(ws, {
+      docName,
+      auth: authCtx,
+      logger,
+      limits: {
+        maxMessageBytes: config.limits.maxMessageBytes,
+        maxAwarenessStateBytes: config.limits.maxAwarenessStateBytes,
+        maxAwarenessEntries: config.limits.maxAwarenessEntries,
+      },
+    });
     setupWSConnection(ws, req, { gc: config.gc });
   });
 

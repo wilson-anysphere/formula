@@ -21,6 +21,17 @@ const textEncoder = new TextEncoder();
 // Used to reject attempts to send awareness updates for another live connection.
 const awarenessClientIdOwnersByDoc = new Map<string, Map<number, WebSocket>>();
 
+function rawDataByteLength(raw: WebSocket.RawData): number {
+  if (typeof raw === "string") return Buffer.byteLength(raw);
+  if (Array.isArray(raw)) {
+    return raw.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  }
+  if (raw instanceof ArrayBuffer) return raw.byteLength;
+  // Buffer is a Uint8Array
+  if (raw instanceof Uint8Array) return raw.byteLength;
+  return 0;
+}
+
 function getAwarenessOwnerMap(docName: string): Map<number, WebSocket> {
   let map = awarenessClientIdOwnersByDoc.get(docName);
   if (!map) {
@@ -112,13 +123,18 @@ function concatUint8Arrays(arrays: Uint8Array[]): Uint8Array {
 
 type AwarenessEntry = { clientID: number; clock: number; stateJSON: string };
 
-function decodeAwarenessUpdate(update: Uint8Array): AwarenessEntry[] {
+function decodeAwarenessUpdate(
+  update: Uint8Array,
+  limits: { maxEntries: number; maxStateBytes: number }
+): AwarenessEntry[] {
   let offset = 0;
   const { value: count, offset: afterCount } = readVarUint(update, offset);
   offset = afterCount;
 
   const entries: AwarenessEntry[] = [];
-  for (let i = 0; i < count; i += 1) {
+  const maxEntries = Math.max(0, limits.maxEntries);
+  const limitCount = Math.min(count, maxEntries);
+  for (let i = 0; i < limitCount; i += 1) {
     const clientRes = readVarUint(update, offset);
     const clientID = clientRes.value;
     offset = clientRes.offset;
@@ -127,9 +143,18 @@ function decodeAwarenessUpdate(update: Uint8Array): AwarenessEntry[] {
     const clock = clockRes.value;
     offset = clockRes.offset;
 
-    const stateRes = readVarString(update, offset);
-    const stateJSON = stateRes.value;
-    offset = stateRes.offset;
+    const lenRes = readVarUint(update, offset);
+    const stateLength = lenRes.value;
+    const start = lenRes.offset;
+    const end = start + stateLength;
+    if (end > update.length) {
+      throw new Error("Unexpected end of buffer while reading awareness stateJSON");
+    }
+    offset = end;
+
+    if (stateLength > limits.maxStateBytes) continue;
+
+    const stateJSON = textDecoder.decode(update.subarray(start, end));
 
     entries.push({ clientID, clock, stateJSON });
   }
@@ -293,9 +318,18 @@ function patchWebSocketMessageHandlers(ws: WebSocket, guard: MessageGuard): void
 
 export function installYwsSecurity(
   ws: WebSocket,
-  params: { docName: string; auth: AuthContext | undefined; logger: Logger }
+  params: {
+    docName: string;
+    auth: AuthContext | undefined;
+    logger: Logger;
+    limits: {
+      maxMessageBytes: number;
+      maxAwarenessStateBytes: number;
+      maxAwarenessEntries: number;
+    };
+  }
 ): void {
-  const { docName, auth, logger } = params;
+  const { docName, auth, logger, limits } = params;
   const role = auth?.role ?? "viewer";
   const userId = auth?.userId ?? "unknown";
   const readOnly = role === "viewer" || role === "commenter";
@@ -343,6 +377,12 @@ export function installYwsSecurity(
   };
 
   const guard: MessageGuard = (raw, isBinary) => {
+    const messageBytes = rawDataByteLength(raw);
+    if (limits.maxMessageBytes > 0 && messageBytes > limits.maxMessageBytes) {
+      ws.close(1009, "Message too big");
+      return { drop: true };
+    }
+
     if (typeof raw === "string") {
       // y-websocket is a binary protocol; reject string messages early.
       ws.close(1003, "binary messages only");
@@ -352,7 +392,7 @@ export function installYwsSecurity(
     // ws can deliver text frames as a Buffer with `isBinary=false`. Treat the
     // bytes equivalently regardless of the `isBinary` flag.
     const normalizedRaw: WebSocket.RawData = Array.isArray(raw)
-      ? Buffer.concat(raw)
+      ? Buffer.concat(raw, messageBytes)
       : raw;
 
     const message = toUint8Array(normalizedRaw);
@@ -407,7 +447,10 @@ export function installYwsSecurity(
     const awarenessUpdate = message.subarray(payloadOffset, payloadEnd);
     let entries: AwarenessEntry[];
     try {
-      entries = decodeAwarenessUpdate(awarenessUpdate);
+      entries = decodeAwarenessUpdate(awarenessUpdate, {
+        maxEntries: limits.maxAwarenessEntries,
+        maxStateBytes: limits.maxAwarenessStateBytes,
+      });
     } catch {
       ws.close(1003, "malformed awareness update");
       return { drop: true };
@@ -425,6 +468,7 @@ export function installYwsSecurity(
     let sawOtherClientIds = false;
     const filtered: AwarenessEntry[] = [];
     for (const entry of entries) {
+      if (filtered.length >= limits.maxAwarenessEntries) break;
       if (entry.clientID !== allowedId) {
         sawOtherClientIds = true;
         continue;
@@ -432,6 +476,12 @@ export function installYwsSecurity(
 
       const sanitizedJson = sanitizeAwarenessStateJson(entry.stateJSON, userId);
       if (sanitizedJson === null) continue;
+      if (
+        limits.maxAwarenessStateBytes > 0 &&
+        Buffer.byteLength(sanitizedJson, "utf8") > limits.maxAwarenessStateBytes
+      ) {
+        continue;
+      }
 
       filtered.push({ ...entry, stateJSON: sanitizedJson });
     }

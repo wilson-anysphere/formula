@@ -59,6 +59,11 @@ export type SyncServerConfig = {
     connAttemptWindowMs: number;
     maxMessagesPerWindow: number;
     messageWindowMs: number;
+    maxMessageBytes: number;
+    maxAwarenessStateBytes: number;
+    maxAwarenessEntries: number;
+    maxMessagesPerDocWindow: number;
+    docMessageWindowMs: number;
   };
 
   logLevel: string;
@@ -260,6 +265,23 @@ export function loadConfigFromEnv(): SyncServerConfig {
       ),
       messageWindowMs: envInt(
         process.env.SYNC_SERVER_MESSAGE_WINDOW_MS,
+        10_000
+      ),
+      maxMessageBytes: envInt(
+        process.env.SYNC_SERVER_MAX_MESSAGE_BYTES,
+        2 * 1024 * 1024
+      ),
+      maxAwarenessStateBytes: envInt(
+        process.env.SYNC_SERVER_MAX_AWARENESS_STATE_BYTES,
+        64 * 1024
+      ),
+      maxAwarenessEntries: envInt(process.env.SYNC_SERVER_MAX_AWARENESS_ENTRIES, 10),
+      maxMessagesPerDocWindow: envInt(
+        process.env.SYNC_SERVER_MAX_MESSAGES_PER_DOC_WINDOW,
+        10_000
+      ),
+      docMessageWindowMs: envInt(
+        process.env.SYNC_SERVER_DOC_MESSAGE_WINDOW_MS,
         10_000
       ),
     },

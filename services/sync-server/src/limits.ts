@@ -31,6 +31,58 @@ export class TokenBucketRateLimiter {
   }
 }
 
+/**
+ * Exact sliding-window rate limiter.
+ *
+ * For each key, tracks timestamps of accepted events within `windowMs` and
+ * rejects once more than `maxEvents` occur in that window.
+ */
+export class SlidingWindowRateLimiter {
+  private readonly windows = new Map<
+    string,
+    { timestamps: number[]; startIndex: number }
+  >();
+
+  constructor(
+    private readonly maxEvents: number,
+    private readonly windowMs: number
+  ) {}
+
+  consume(key: string, nowMs: number = Date.now()): boolean {
+    if (this.maxEvents <= 0 || this.windowMs <= 0) return true;
+
+    const cutoff = nowMs - this.windowMs;
+    const existing = this.windows.get(key) ?? { timestamps: [], startIndex: 0 };
+    const { timestamps } = existing;
+
+    while (existing.startIndex < timestamps.length) {
+      if (timestamps[existing.startIndex]! > cutoff) break;
+      existing.startIndex += 1;
+    }
+
+    const inWindowCount = timestamps.length - existing.startIndex;
+    if (inWindowCount >= this.maxEvents) {
+      this.windows.set(key, existing);
+      return false;
+    }
+
+    timestamps.push(nowMs);
+
+    // Compaction to avoid unbounded growth from a large number of old entries.
+    if (existing.startIndex > 0 && existing.startIndex * 2 >= timestamps.length) {
+      existing.timestamps = timestamps.slice(existing.startIndex);
+      existing.startIndex = 0;
+    }
+
+    this.windows.set(key, existing);
+    return true;
+  }
+
+  reset(key: string): void {
+    this.windows.delete(key);
+  }
+}
+
 export class ConnectionTracker {
   private total = 0;
   private perIp = new Map<string, number>();
@@ -71,4 +123,3 @@ export class ConnectionTracker {
     if (this.total > 0) this.total -= 1;
   }
 }
-
