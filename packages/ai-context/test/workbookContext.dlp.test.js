@@ -344,3 +344,93 @@ test("buildWorkbookContext: classificationStore records are enforced for non-reg
   // First embedder call is for the chunk text; the query may still contain the search term.
   assert.doesNotMatch(embedder.seen[0], /TopSecret/);
 });
+
+test("buildWorkbookContextFromSpreadsheetApi: blocks sensitive workbook chunks when policy blocks", async () => {
+  const spreadsheet = {
+    listSheets() {
+      return ["Contacts"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Contacts");
+      return [
+        { address: { sheet: "Contacts", row: 1, col: 1 }, cell: { value: "Name" } },
+        { address: { sheet: "Contacts", row: 1, col: 2 }, cell: { value: "Email" } },
+        { address: { sheet: "Contacts", row: 1, col: 3 }, cell: { value: "SSN" } },
+        { address: { sheet: "Contacts", row: 2, col: 1 }, cell: { value: "Alice" } },
+        { address: { sheet: "Contacts", row: 2, col: 2 }, cell: { value: "alice@example.com" } },
+        { address: { sheet: "Contacts", row: 2, col: 3 }, cell: { value: "123-45-6789" } },
+      ];
+    },
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 500,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  await assert.rejects(
+    () =>
+      cm.buildWorkbookContextFromSpreadsheetApi({
+        spreadsheet,
+        workbookId: "wb-api-dlp",
+        query: "alice@example.com",
+        dlp: {
+          documentId: "wb-api-dlp",
+          policy: makePolicy({ redactDisallowed: false }),
+        },
+      }),
+    (err) => {
+      assert.ok(err instanceof DlpViolationError);
+      return true;
+    }
+  );
+});
+
+test("buildWorkbookContextFromSpreadsheetApi: redacts sensitive workbook chunks when policy allows with redaction", async () => {
+  const spreadsheet = {
+    listSheets() {
+      return ["Contacts"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Contacts");
+      return [
+        { address: { sheet: "Contacts", row: 1, col: 1 }, cell: { value: "Name" } },
+        { address: { sheet: "Contacts", row: 1, col: 2 }, cell: { value: "Email" } },
+        { address: { sheet: "Contacts", row: 1, col: 3 }, cell: { value: "SSN" } },
+        { address: { sheet: "Contacts", row: 2, col: 1 }, cell: { value: "Alice" } },
+        { address: { sheet: "Contacts", row: 2, col: 2 }, cell: { value: "alice@example.com" } },
+        { address: { sheet: "Contacts", row: 2, col: 3 }, cell: { value: "123-45-6789" } },
+      ];
+    },
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const auditEvents = [];
+
+  const out = await cm.buildWorkbookContextFromSpreadsheetApi({
+    spreadsheet,
+    workbookId: "wb-api-dlp-redact",
+    query: "123-45-6789",
+    dlp: {
+      documentId: "wb-api-dlp-redact",
+      policy: makePolicy({ redactDisallowed: true }),
+      auditLogger: { log: (e) => auditEvents.push(e) },
+    },
+  });
+
+  assert.match(out.promptContext, /## dlp/i);
+  assert.match(out.promptContext, /\[REDACTED_(EMAIL|SSN)\]/);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0].type, "ai.workbook_context");
+  assert.equal(auditEvents[0].decision.decision, "redact");
+});
