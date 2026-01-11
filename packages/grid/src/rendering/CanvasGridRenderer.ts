@@ -924,7 +924,7 @@ export class CanvasGridRenderer {
       gridCtx.beginPath();
       gridCtx.rect(region.x, region.y, region.width, region.height);
       gridCtx.clip();
-      gridCtx.fillStyle = "#ffffff";
+      gridCtx.fillStyle = this.theme.gridBg;
       gridCtx.fillRect(region.x, region.y, region.width, region.height);
 
       contentCtx.save();
@@ -1233,7 +1233,7 @@ export class CanvasGridRenderer {
             contentCtx.font = toCanvasFontString(fontSpec);
           }
 
-          const fillStyle = resolveCellTextColor(cell.value, style?.color);
+          const fillStyle = resolveCellTextColorWithTheme(cell.value, style?.color, this.theme);
           if (fillStyle !== currentTextFill) {
             contentCtx.fillStyle = fillStyle;
             currentTextFill = fillStyle;
@@ -1363,7 +1363,7 @@ export class CanvasGridRenderer {
             contentCtx.lineTo(x + colWidth - size, y);
             contentCtx.lineTo(x + colWidth, y + size);
             contentCtx.closePath();
-            contentCtx.fillStyle = resolved ? "#9ca3af" : "#f59e0b";
+            contentCtx.fillStyle = resolved ? this.theme.commentIndicatorResolved : this.theme.commentIndicator;
             contentCtx.fill();
             contentCtx.restore();
           }
@@ -1376,7 +1376,7 @@ export class CanvasGridRenderer {
     }
 
     // Gridlines (grid layer), drawn after fills.
-    gridCtx.strokeStyle = "#e6e6e6";
+    gridCtx.strokeStyle = this.theme.gridLine;
     gridCtx.lineWidth = 1;
 
     const xStart = this.scroll.cols.positionOf(startCol) - quadrant.scrollBaseX + quadrant.originX;
