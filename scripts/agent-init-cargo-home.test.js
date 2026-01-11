@@ -14,6 +14,12 @@ const hasBash = (() => {
   return probe.status === 0;
 })();
 
+const hasSh = (() => {
+  if (process.platform === 'win32') return false;
+  const probe = spawnSync('sh', ['-c', 'exit 0'], { stdio: 'ignore' });
+  return probe.status === 0;
+})();
+
 function runBash(command) {
   const proc = spawnSync('bash', ['-lc', command], {
     encoding: 'utf8',
@@ -22,6 +28,16 @@ function runBash(command) {
   if (proc.error) throw proc.error;
   assert.equal(proc.status, 0, proc.stderr);
   return proc.stdout.trim();
+}
+
+function runSh(command) {
+  const proc = spawnSync('sh', ['-c', command], {
+    encoding: 'utf8',
+    cwd: repoRoot,
+  });
+  if (proc.error) throw proc.error;
+  assert.equal(proc.status, 0, proc.stderr);
+  return { stdout: proc.stdout.trim(), stderr: proc.stderr.trim() };
 }
 
 test('agent-init defaults CARGO_HOME to a repo-local directory', { skip: !hasBash }, () => {
@@ -65,4 +81,19 @@ test('agent-init prepends CARGO_HOME/bin to PATH', { skip: !hasBash }, () => {
   const [cargoHome, pathValue] = out.split('\n');
   assert.equal(cargoHome, resolve(repoRoot, 'target', 'cargo-home'));
   assert.ok(pathValue.split(':')[0] === resolve(repoRoot, 'target', 'cargo-home', 'bin'));
+});
+
+test('agent-init can be sourced under /bin/sh (no bash-only syntax)', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'unset CARGO_HOME',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'printf "%s" "$CARGO_HOME"',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, resolve(repoRoot, 'target', 'cargo-home'));
 });
