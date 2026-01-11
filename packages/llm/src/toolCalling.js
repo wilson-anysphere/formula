@@ -41,7 +41,8 @@ function toolRequiresApproval(tools, name) {
  *   continueOnApprovalDenied?: boolean,
  *   model?: string,
  *   temperature?: number,
- *   maxTokens?: number
+ *   maxTokens?: number,
+ *   signal?: AbortSignal
  * }} params
  */
 export async function runChatWithTools(params) {
@@ -62,6 +63,7 @@ export async function runChatWithTools(params) {
       model: params.model,
       temperature: params.temperature,
       maxTokens: params.maxTokens,
+      signal: params.signal,
     });
 
     messages.push(response.message);

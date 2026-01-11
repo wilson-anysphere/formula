@@ -1,8 +1,8 @@
 /**
- * Minimal OpenAI Chat Completions client with tool calling support.
+ * Minimal Ollama chat client with tool calling + streaming support.
  *
- * Note: this package keeps the surface small and dependency-free. It uses the
- * global `fetch` available in modern Node and browsers.
+ * Ollama's `/api/chat` endpoint is OpenAI-ish (role/content messages and optional
+ * tool calling). Streaming responses are newline-delimited JSON objects.
  */
 
 /**
@@ -31,7 +31,7 @@ function tryParseJson(input) {
 /**
  * @param {import("./types.js").LLMMessage[]} messages
  */
-function toOpenAIMessages(messages) {
+function toOllamaMessages(messages) {
   return messages.map((m) => {
     if (m.role === "tool") {
       return {
@@ -63,7 +63,7 @@ function toOpenAIMessages(messages) {
 /**
  * @param {import("./types.js").ToolDefinition[]} tools
  */
-function toOpenAITools(tools) {
+function toOllamaTools(tools) {
   return tools.map((t) => ({
     type: "function",
     function: {
@@ -74,27 +74,17 @@ function toOpenAITools(tools) {
   }));
 }
 
-export class OpenAIClient {
+export class OllamaChatClient {
   /**
    * @param {{
-   *   apiKey?: string,
-   *   model?: string,
    *   baseUrl?: string,
+   *   model?: string,
    *   timeoutMs?: number
    * }} [options]
    */
   constructor(options = {}) {
-    const envKey = globalThis.process?.env?.OPENAI_API_KEY;
-    const apiKey = options.apiKey ?? envKey;
-    if (!apiKey) {
-      throw new Error(
-        "OpenAI API key is required. Pass `apiKey` to `new OpenAIClient({ apiKey })` or set the `OPENAI_API_KEY` environment variable in Node.js."
-      );
-    }
-
-    this.apiKey = apiKey;
-    this.model = options.model ?? "gpt-4o-mini";
-    this.baseUrl = options.baseUrl ?? "https://api.openai.com/v1";
+    this.model = options.model ?? "llama3.1";
+    this.baseUrl = options.baseUrl ?? "http://localhost:11434";
     this.timeoutMs = options.timeoutMs ?? 30_000;
   }
 
@@ -117,34 +107,34 @@ export class OpenAIClient {
       }
     }
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
+          "content-type": "application/json",
         },
         body: JSON.stringify({
           model: request.model ?? this.model,
-          messages: toOpenAIMessages(request.messages),
-          tools: request.tools?.length ? toOpenAITools(request.tools) : undefined,
-          tool_choice: request.tools?.length ? request.toolChoice ?? "auto" : undefined,
-          temperature: request.temperature,
-          max_tokens: request.maxTokens,
+          messages: toOllamaMessages(request.messages),
+          tools: request.tools?.length ? toOllamaTools(request.tools) : undefined,
           stream: false,
+          options: {
+            temperature: request.temperature,
+          },
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");
-        throw new Error(`OpenAI chat error ${response.status}: ${text}`);
+        throw new Error(`Ollama chat error ${response.status}: ${text}`);
       }
 
       const json = await response.json();
-      const message = json.choices?.[0]?.message;
-      const toolCalls = (message?.tool_calls ?? []).map((c) => ({
-        id: c.id,
+      const message = json.message;
+      const toolCalls = (message?.tool_calls ?? []).map((c, index) => ({
+        id: typeof c.id === "string" ? c.id : `toolcall-${index}`,
         name: c.function?.name,
         arguments: tryParseJson(c.function?.arguments ?? "{}"),
       }));
@@ -155,12 +145,6 @@ export class OpenAIClient {
           content: message?.content ?? "",
           toolCalls: toolCalls.length ? toolCalls : undefined,
         },
-        usage: json.usage
-          ? {
-              promptTokens: json.usage.prompt_tokens,
-              completionTokens: json.usage.completion_tokens,
-            }
-          : undefined,
         raw: json,
       };
     } finally {
@@ -170,8 +154,6 @@ export class OpenAIClient {
   }
 
   /**
-   * Stream text + tool-call deltas.
-   *
    * @param {import("./types.js").ChatRequest} request
    * @returns {AsyncIterable<import("./types.js").ChatStreamEvent>}
    */
@@ -190,28 +172,28 @@ export class OpenAIClient {
       }
     }
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
+          "content-type": "application/json",
         },
         body: JSON.stringify({
           model: request.model ?? this.model,
-          messages: toOpenAIMessages(request.messages),
-          tools: request.tools?.length ? toOpenAITools(request.tools) : undefined,
-          tool_choice: request.tools?.length ? request.toolChoice ?? "auto" : undefined,
-          temperature: request.temperature,
-          max_tokens: request.maxTokens,
+          messages: toOllamaMessages(request.messages),
+          tools: request.tools?.length ? toOllamaTools(request.tools) : undefined,
           stream: true,
+          options: {
+            temperature: request.temperature,
+          },
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");
-        throw new Error(`OpenAI streamChat error ${response.status}: ${text}`);
+        throw new Error(`Ollama streamChat error ${response.status}: ${text}`);
       }
 
       const reader = response.body?.getReader();
@@ -231,15 +213,24 @@ export class OpenAIClient {
 
       const decoder = new TextDecoder();
       let buffer = "";
-      /** @type {Map<number, { id?: string, name?: string, started: boolean }>} */
-      const toolCallsByIndex = new Map();
+
+      /** @type {Map<string, { name?: string, args: string, started: boolean }>} */
+      const toolCallsById = new Map();
       /** @type {Set<string>} */
-      const openToolCallIds = new Set();
+      const openToolCalls = new Set();
 
       function closeOpenToolCalls() {
-        const ids = Array.from(openToolCallIds);
-        openToolCallIds.clear();
+        const ids = Array.from(openToolCalls);
+        openToolCalls.clear();
         return ids;
+      }
+
+      function getOrCreateToolCall(id) {
+        const existing = toolCallsById.get(id);
+        if (existing) return existing;
+        const next = { args: "", started: false };
+        toolCallsById.set(id, next);
+        return next;
       }
 
       while (true) {
@@ -247,67 +238,51 @@ export class OpenAIClient {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
 
-        const parts = buffer.split(/\r?\n\r?\n/);
-        buffer = parts.pop() ?? "";
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? "";
 
-        for (const part of parts) {
-          const lines = part.split(/\r?\n/);
-          const dataLines = [];
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            dataLines.push(line.slice("data:".length).trimStart());
-          }
-          if (!dataLines.length) continue;
-          const data = dataLines.join("\n").trim();
-          if (!data) continue;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          const json = JSON.parse(trimmed);
+          const msg = json.message;
 
-          if (data === "[DONE]") {
-            for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
-            yield { type: "done" };
-            return;
+          const contentDelta = msg?.content;
+          if (typeof contentDelta === "string" && contentDelta.length > 0) {
+            yield { type: "text", delta: contentDelta };
           }
 
-          const json = JSON.parse(data);
-          const choice = json.choices?.[0];
-          const delta = choice?.delta;
-
-          const textDelta = delta?.content;
-          if (typeof textDelta === "string" && textDelta.length > 0) {
-            yield { type: "text", delta: textDelta };
-          }
-
-          const toolCalls = delta?.tool_calls;
+          const toolCalls = msg?.tool_calls;
           if (Array.isArray(toolCalls)) {
-            for (const callDelta of toolCalls) {
-              const index = callDelta?.index;
-              if (typeof index !== "number") continue;
+            for (let idx = 0; idx < toolCalls.length; idx++) {
+              const c = toolCalls[idx];
+              const id = typeof c.id === "string" ? c.id : `toolcall-${idx}`;
+              const name = typeof c.function?.name === "string" ? c.function.name : undefined;
+              const args = typeof c.function?.arguments === "string" ? c.function.arguments : "";
 
-              const state = toolCallsByIndex.get(index) ?? { started: false };
-              const id = typeof callDelta?.id === "string" ? callDelta.id : state.id;
-              const name =
-                typeof callDelta?.function?.name === "string" ? callDelta.function.name : state.name;
-              const argsFragment =
-                typeof callDelta?.function?.arguments === "string" ? callDelta.function.arguments : null;
-
-              if (id) state.id = id;
+              const state = getOrCreateToolCall(id);
               if (name) state.name = name;
 
-              if (!state.started && id && name) {
+              if (!state.started && state.name) {
                 state.started = true;
-                openToolCallIds.add(id);
-                yield { type: "tool_call_start", id, name };
+                openToolCalls.add(id);
+                yield { type: "tool_call_start", id, name: state.name };
               }
 
-              toolCallsByIndex.set(index, state);
-
-              if (id && argsFragment) {
-                yield { type: "tool_call_delta", id, delta: argsFragment };
+              if (typeof args === "string" && args.length > 0) {
+                const prev = state.args;
+                // Best-effort diffing: Ollama may stream the full argument string repeatedly.
+                const delta = args.startsWith(prev) ? args.slice(prev.length) : args;
+                state.args = args;
+                if (delta) yield { type: "tool_call_delta", id, delta };
               }
             }
           }
 
-          if (typeof choice?.finish_reason === "string" && choice.finish_reason === "tool_calls") {
+          if (json.done) {
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
+            yield { type: "done" };
+            return;
           }
         }
       }

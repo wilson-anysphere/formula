@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Attachment, ChatMessage } from "./types.js";
-import type { LLMClient, LLMMessage, ToolCall, ToolExecutor } from "../../../../../packages/llm/src/types.js";
-import { runChatWithTools } from "../../../../../packages/llm/src/toolCalling.js";
+import type {
+  ChatStreamEvent,
+  LLMClient,
+  LLMMessage,
+  ToolCall,
+  ToolExecutor,
+} from "../../../../../packages/llm/src/types.js";
+import { runChatWithToolsStreaming } from "../../../../../packages/llm/src/toolCallingStreaming.js";
 import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage } from "../../../../../packages/ai-tools/src/llm/verification.js";
 import { t, tWithVars } from "../../i18n/index.js";
 
@@ -27,6 +33,8 @@ export interface AIChatPanelSendMessageArgs {
   messages: LLMMessage[];
   userText: string;
   attachments: Attachment[];
+  signal?: AbortSignal;
+  onStreamEvent?: (event: ChatStreamEvent) => void;
   onToolCall: (call: ToolCall, meta: { requiresApproval: boolean }) => void;
   onToolResult?: (call: ToolCall, result: unknown) => void;
 }
@@ -64,6 +72,8 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sending, setSending] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const messageSeqRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Provider-facing history is stored separately from UI messages. UI tool
   // entries created in `onToolCall` / `onToolResult` are for display only and
@@ -71,9 +81,13 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const [llmHistory, setLlmHistory] = useState<LLMMessage[]>([]);
 
   function messageId(): string {
+    messageSeqRef.current += 1;
     const maybeCrypto = globalThis.crypto as Crypto | undefined;
-    if (maybeCrypto && typeof maybeCrypto.randomUUID === "function") return maybeCrypto.randomUUID();
-    return `msg-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const base =
+      maybeCrypto && typeof maybeCrypto.randomUUID === "function"
+        ? maybeCrypto.randomUUID()
+        : `msg-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    return `${base}-${messageSeqRef.current}`;
   }
 
   const systemPrompt = useMemo(
@@ -89,6 +103,19 @@ export function AIChatPanel(props: AIChatPanelProps) {
     el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  function isAbortError(err: unknown): boolean {
+    if (!err || (typeof err !== "object" && typeof err !== "function")) return false;
+    const name = (err as any).name;
+    const message = (err as any).message;
+    return name === "AbortError" || /aborted/i.test(String(message ?? "")) || /abort/i.test(String(message ?? ""));
+  }
+
   function formatToolResult(result: unknown): string {
     const rendered = safeStringify(result, { pretty: true });
     const limit = 2_000;
@@ -101,6 +128,10 @@ export function AIChatPanel(props: AIChatPanelProps) {
     const text = input.trim();
     if (!text) return;
     setSending(true);
+
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     const needsTools = classifyQueryNeedsTools({ userText: text, attachments });
     const executedToolCalls: Array<{ name: string; ok?: boolean }> = [];
@@ -122,10 +153,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
     const requestMessages: LLMMessage[] = [...base, { role: "user", content: userContent }];
 
     try {
-      setMessages((prev) => [
-        ...prev,
-        { id: messageId(), role: "assistant", content: "", pending: true },
-      ]);
+      setMessages((prev) => [...prev, { id: messageId(), role: "assistant", content: "", pending: true }]);
 
       const onToolCall = (call: ToolCall, meta: { requiresApproval: boolean }) => {
         setMessages((prev) => [
@@ -153,6 +181,30 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ]);
       };
 
+      const onStreamEvent = (event: ChatStreamEvent) => {
+        if (event.type === "tool_call_start") {
+          // We only display the final assistant answer. Clear any pre-tool chatter so the
+          // pending assistant message doesn't briefly show "planning" text that will be
+          // replaced after tool execution.
+          setMessages((prev) => {
+            const next = prev.slice();
+            const msg = [...next].reverse().find((m) => m.role === "assistant" && m.pending);
+            if (msg && msg.pending) msg.content = "";
+            return next;
+          });
+          return;
+        }
+
+        if (event.type !== "text") return;
+        if (!event.delta) return;
+        setMessages((prev) => {
+          const next = prev.slice();
+          const msg = [...next].reverse().find((m) => m.role === "assistant" && m.pending);
+          if (msg && msg.pending) msg.content += event.delta;
+          return next;
+        });
+      };
+
       // NOTE: `props` is a discriminated union. Keep narrowing outside of closures
       // so TypeScript doesn't lose the refinement when capturing variables.
       let runner: AIChatPanelSendMessage;
@@ -161,11 +213,13 @@ export function AIChatPanel(props: AIChatPanelProps) {
       } else {
         const { client, toolExecutor } = props;
         const requireApproval = props.onRequestToolApproval ?? (async () => true);
-        runner = async ({ messages, onToolCall, onToolResult }: AIChatPanelSendMessageArgs) =>
-          runChatWithTools({
+        runner = async ({ messages, onToolCall, onToolResult, onStreamEvent, signal }: AIChatPanelSendMessageArgs) =>
+          runChatWithToolsStreaming({
             client,
             toolExecutor,
             messages,
+            signal,
+            onStreamEvent,
             onToolCall,
             onToolResult,
             requireApproval,
@@ -176,6 +230,8 @@ export function AIChatPanel(props: AIChatPanelProps) {
         messages: requestMessages,
         userText: text,
         attachments,
+        signal: abortController.signal,
+        onStreamEvent,
         onToolCall,
         onToolResult,
       });
@@ -223,8 +279,8 @@ export function AIChatPanel(props: AIChatPanelProps) {
         return next;
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const content = tWithVars("chat.errorWithMessage", { message });
+      const message = isAbortError(err) ? t("chat.cancelled") : err instanceof Error ? err.message : String(err);
+      const content = isAbortError(err) ? message : tWithVars("chat.errorWithMessage", { message });
       setMessages((prev) => {
         const next = prev.slice();
         const lastAssistant = [...next].reverse().find((m) => m.role === "assistant" && m.pending);
@@ -238,6 +294,9 @@ export function AIChatPanel(props: AIChatPanelProps) {
       });
     } finally {
       setSending(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   }
 
@@ -334,6 +393,14 @@ export function AIChatPanel(props: AIChatPanelProps) {
         />
         <button onClick={() => void send()} style={{ padding: "8px 12px" }} disabled={sending}>
           {t("chat.send")}
+        </button>
+        <button
+          onClick={() => abortControllerRef.current?.abort()}
+          style={{ padding: "8px 12px" }}
+          disabled={!sending}
+          type="button"
+        >
+          {t("chat.cancel")}
         </button>
       </div>
       <div

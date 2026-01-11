@@ -195,18 +195,36 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
 
   const sendMessage: AIChatPanelSendMessage = useMemo(() => {
     return async (args) => {
-      const result = await orchestrator.sendMessage({
-        text: args.userText,
-        attachments: args.attachments as any,
-        history: llmHistory.current,
-        onToolCall: args.onToolCall as any,
-        onToolResult: args.onToolResult as any,
-      });
+      let abortListener: (() => void) | null = null;
+      if (args.signal) {
+        abortListener = () => {
+          // Also resolve any pending approval prompt so the UI doesn't get stuck
+          // if cancellation happens while waiting for user approval.
+          resolveApproval(false);
+        };
+        args.signal.addEventListener("abort", abortListener, { once: true });
+      }
 
-      llmHistory.current = stripSystemPrompt(result.messages);
-      return { messages: result.messages, final: result.finalText, verification: result.verification as any };
+      try {
+        const result = await orchestrator.sendMessage({
+          text: args.userText,
+          attachments: args.attachments as any,
+          history: llmHistory.current,
+          onToolCall: args.onToolCall as any,
+          onToolResult: args.onToolResult as any,
+          onStreamEvent: args.onStreamEvent as any,
+          signal: args.signal,
+        });
+
+        llmHistory.current = stripSystemPrompt(result.messages);
+        return { messages: result.messages, final: result.finalText, verification: result.verification as any };
+      } finally {
+        if (abortListener && args.signal) {
+          args.signal.removeEventListener("abort", abortListener);
+        }
+      }
     };
-  }, [orchestrator]);
+  }, [orchestrator, resolveApproval]);
 
   const [agentGoal, setAgentGoal] = useState("");
   const [agentConstraints, setAgentConstraints] = useState("");
@@ -266,7 +284,16 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
         llmClient: client as any,
         auditStore,
         createChart: props.createChart,
-        onProgress: (event) => setAgentEvents((prev) => [...prev, event]),
+        onProgress: (event) =>
+          setAgentEvents((prev) => {
+            const last = prev.at(-1);
+            if (event.type === "assistant_message" && last?.type === "assistant_message" && last.iteration === event.iteration) {
+              const next = prev.slice();
+              next[next.length - 1] = event;
+              return next;
+            }
+            return [...prev, event];
+          }),
         onApprovalRequired: onApprovalRequired as any,
         ragService,
         continueOnApprovalDenied: agentContinueOnDenied,

@@ -39,6 +39,19 @@
  * @typedef {{
  *   type: "text",
  *   delta: string
+ * } | {
+ *   type: "tool_call_start",
+ *   id: string,
+ *   name: string
+ * } | {
+ *   type: "tool_call_delta",
+ *   id: string,
+ *   delta: string
+ * } | {
+ *   type: "tool_call_end",
+ *   id: string
+ * } | {
+ *   type: "done"
  * }} ChatStreamEvent
  *
  * @typedef {{

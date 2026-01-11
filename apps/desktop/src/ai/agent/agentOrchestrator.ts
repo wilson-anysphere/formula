@@ -343,7 +343,23 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
           emit({ type: "assistant_message", iteration, content });
         }
         return response;
-      }
+      },
+      streamChat: params.llmClient.streamChat
+        ? async function* streamChat(request: any) {
+            iteration += 1;
+            emit({ type: "planning", iteration });
+            await refreshSystemMessage(request.messages);
+
+            let content = "";
+            for await (const event of params.llmClient.streamChat!({ ...request, model: request.model ?? params.model })) {
+              if (event?.type === "text" && typeof event.delta === "string" && event.delta.length > 0) {
+                content += event.delta;
+                if (content.trim()) emit({ type: "assistant_message", iteration, content });
+              }
+              yield event;
+            }
+          }
+        : undefined
     };
 
     const wrappedToolExecutor = {
@@ -373,18 +389,19 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     };
 
     const result = await guard(
-        runChatWithToolsAudited({
-          client: wrappedClient,
-          tool_executor: wrappedToolExecutor,
-          messages,
-          audit: {
-            audit_store: auditStore,
-            session_id: sessionId,
-            workbook_id: params.workbookId,
-            mode: "agent",
-            input: { goal, constraints: params.constraints ?? [], workbookId: params.workbookId },
-            model: params.model ?? "unknown"
-          },
+      runChatWithToolsAudited({
+        client: wrappedClient,
+        tool_executor: wrappedToolExecutor,
+        messages,
+        signal,
+        audit: {
+          audit_store: auditStore,
+          session_id: sessionId,
+          workbook_id: params.workbookId,
+          mode: "agent",
+          input: { goal, constraints: params.constraints ?? [], workbookId: params.workbookId },
+          model: params.model ?? "unknown"
+        },
         max_iterations: maxIterations,
         require_approval: requireApproval,
         continue_on_approval_denied: params.continueOnApprovalDenied,

@@ -1,4 +1,4 @@
-import type { LLMClient, LLMMessage } from "../../../../../packages/llm/src/types.js";
+import type { ChatStreamEvent, LLMClient, LLMMessage } from "../../../../../packages/llm/src/types.js";
 
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 import type { AIAuditEntry, AuditListFilters } from "../../../../../packages/ai-audit/src/types.js";
@@ -54,6 +54,14 @@ export interface SendAiChatMessageParams {
    * Optional hook for displaying tool results as they return.
    */
   onToolResult?: (call: LLMToolCall, result: ToolExecutionResult) => void;
+  /**
+   * Optional hook for rendering incremental assistant output.
+   */
+  onStreamEvent?: (event: ChatStreamEvent) => void;
+  /**
+   * Optional abort signal (cancels streaming + tool calling).
+   */
+  signal?: AbortSignal;
 }
 
 export interface SendAiChatMessageResult {
@@ -291,7 +299,35 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
               request.messages = trimmed;
             }
             return options.llmClient.chat({ ...request, model: request?.model ?? options.model } as any);
-          }
+          },
+          streamChat: options.llmClient.streamChat
+            ? async function* streamChat(request: any) {
+                const requestToolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
+                const requestMaxMessageTokens = Math.max(0, contextWindowTokens - requestToolTokens);
+                const trimmed = await trimMessagesToBudget({
+                  messages: request.messages as any,
+                  maxTokens: requestMaxMessageTokens,
+                  reserveForOutputTokens,
+                  estimator,
+                  keepLastMessages
+                });
+ 
+                if (Array.isArray(request.messages)) {
+                  const next = trimmed === request.messages ? trimmed.slice() : trimmed;
+                  request.messages.length = 0;
+                  request.messages.push(...next);
+                } else {
+                  request.messages = trimmed;
+                }
+
+                for await (const event of options.llmClient.streamChat!({
+                  ...request,
+                  model: request?.model ?? options.model
+                } as any)) {
+                  yield event;
+                }
+              }
+            : undefined
         } as any,
         tool_executor: {
           tools: toolExecutor.tools,
@@ -306,6 +342,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         require_approval: requireApproval as any,
         on_tool_call: params.onToolCall as any,
         on_tool_result: params.onToolResult as any,
+        on_stream_event: params.onStreamEvent as any,
+        signal: params.signal,
         verify_claims: true,
         verification_tool_executor: toolExecutor as any,
         audit: {

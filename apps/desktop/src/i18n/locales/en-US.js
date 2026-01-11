@@ -15,6 +15,8 @@ export const enUS = {
   "chat.pendingAttachments": "Pending attachments:",
   "chat.input.placeholder": "Ask a question about your data…",
   "chat.send": "Send",
+  "chat.cancel": "Cancel",
+  "chat.cancelled": "Cancelled.",
   "chat.errorWithMessage": "Error: {message}",
   "chat.attachmentsApiPlaceholder":
     "Attachments API placeholder: this panel supports range/formula/table/chart references, but wiring to the selection manager is pending.",

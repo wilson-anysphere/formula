@@ -1,7 +1,7 @@
 import { AIAuditRecorder } from "@formula/ai-audit";
 import type { AIAuditStore, AIMode, TokenUsage } from "@formula/ai-audit";
 
-import { runChatWithTools } from "../../../llm/src/toolCalling.js";
+import { runChatWithToolsStreaming } from "../../../llm/src/toolCallingStreaming.js";
 import { serializeToolResultForModel } from "../../../llm/src/toolResultSerialization.js";
 
 import type { LLMToolCall } from "./integration.js";
@@ -36,7 +36,7 @@ export interface AuditedRunOptions {
 }
 
 export interface AuditedRunParams {
-  client: { chat: (request: any) => Promise<any> };
+  client: { chat: (request: any) => Promise<any>; streamChat?: (request: any) => AsyncIterable<any> };
   tool_executor: { tools: any[]; execute: (call: any) => Promise<any> };
   messages: any[];
   audit: AuditedRunOptions;
@@ -54,12 +54,20 @@ export interface AuditedRunParams {
   on_tool_call?: (call: LLMToolCall, meta: { requiresApproval: boolean }) => void;
   on_tool_result?: (call: LLMToolCall, result: unknown) => void;
   /**
+   * Optional stream hook for UI surfaces that want partial assistant output.
+   */
+  on_stream_event?: (event: unknown) => void;
+  /**
    * Optional LLM request parameters forwarded to `runChatWithTools`.
    * If omitted, `audit.model` is used as the request model (providers may ignore it).
    */
   model?: string;
   temperature?: number;
   max_tokens?: number;
+  /**
+   * Optional abort signal forwarded to the underlying LLM client.
+   */
+  signal?: AbortSignal;
   /**
    * When enabled, if the query is classified as needing data tools but the model
    * produced an answer without using any tools, the run is retried once with a
@@ -119,7 +127,19 @@ export async function runChatWithToolsAuditedVerified(
       const usage = extractTokenUsage(response?.usage);
       if (usage) recorder.recordTokenUsage(usage);
       return response;
-    }
+    },
+    streamChat: params.client.streamChat
+      ? async function* streamChat(request: any) {
+          const started = nowMs();
+          try {
+            for await (const event of params.client.streamChat!(request)) {
+              yield event;
+            }
+          } finally {
+            recorder.recordModelLatency(nowMs() - started);
+          }
+        }
+      : undefined
   };
 
   try {
@@ -127,15 +147,17 @@ export async function runChatWithToolsAuditedVerified(
     const needsTools = classifyQueryNeedsTools({ userText, attachments: params.attachments });
 
     const runOnce = async (messages: any[]) =>
-      runChatWithTools({
+      runChatWithToolsStreaming({
         client: auditedClient as any,
         toolExecutor: params.tool_executor as any,
         messages: messages as any,
         maxIterations: params.max_iterations,
         continueOnApprovalDenied: params.continue_on_approval_denied,
+        onStreamEvent: params.on_stream_event as any,
         model: params.model ?? params.audit.model,
         temperature: params.temperature,
         maxTokens: params.max_tokens,
+        signal: params.signal,
         onToolCall: (call: any, meta: any) => {
           const maxParamChars = params.audit.max_audit_parameter_chars ?? 20_000;
           const rawParams = sanitizeAuditToolParameters(call.name, call.arguments);
