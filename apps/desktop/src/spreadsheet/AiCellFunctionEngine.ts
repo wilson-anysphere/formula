@@ -37,8 +37,9 @@ const MAX_RANGE_PREVIEW_VALUES = 30;
 const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
 
-// Match Excel-style error codes. See `evaluateFormula.ts` for rationale.
-const ERROR_CODE_REGEX = /^#(?:[A-Z0-9/_]+[!?]|N\/A|GETTING_DATA)$/;
+// Match Excel-style error codes plus a couple of app-specific sentinels (see `evaluateFormula.ts`).
+const ERROR_CODE_REGEX =
+  /^#(?:DIV\/0!|N\/A|NAME\?|NULL!|NUM!|REF!|SPILL!|VALUE!|CALC!|GETTING_DATA|FIELD!|CONNECT!|BLOCKED!|UNKNOWN!|DLP!|AI!)$/;
 
 export interface AiCellFunctionEngineOptions {
   llmClient?: LLMClient;

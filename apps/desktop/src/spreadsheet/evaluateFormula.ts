@@ -59,14 +59,12 @@ export interface EvaluateFormulaOptions {
   aiRangeSampleLimit?: number;
 }
 
-// Excel-compatible error codes follow a few common patterns:
-// - Most end with `!` or `?` (e.g. `#DIV/0!`, `#VALUE!`, `#NAME?`)
-// - `#N/A` has no punctuation
-// - `#GETTING_DATA` (cube formulas) has no punctuation
-//
-// We intentionally *do not* treat arbitrary `#`-prefixed strings as errors (e.g. `#hashtag`),
-// because those are common as plain text.
-const ERROR_CODE_REGEX = /^#(?:[A-Z0-9/_]+[!?]|N\/A|GETTING_DATA)$/;
+// Spreadsheet error codes are a small closed set in Excel (plus a couple of app-specific
+// sentinel values like `#DLP!` for blocked AI calls). We intentionally *do not* treat
+// arbitrary `#`-prefixed strings as errors (e.g. `#hashtag`), because those are common
+// as plain text.
+const ERROR_CODE_REGEX =
+  /^#(?:DIV\/0!|N\/A|NAME\?|NULL!|NUM!|REF!|SPILL!|VALUE!|CALC!|GETTING_DATA|FIELD!|CONNECT!|BLOCKED!|UNKNOWN!|DLP!|AI!)$/;
 
 function isErrorCode(value: unknown): value is string {
   return typeof value === "string" && ERROR_CODE_REGEX.test(value);
