@@ -260,6 +260,14 @@ const cells = {
 const workbook = {
   async getActiveWorkbook() {
     return rpcCall("workbook", "getActiveWorkbook", []);
+  },
+
+  async openWorkbook(workbookPath) {
+    return rpcCall("workbook", "openWorkbook", [String(workbookPath)]);
+  },
+
+  async createWorkbook() {
+    return rpcCall("workbook", "createWorkbook", []);
   }
 };
 

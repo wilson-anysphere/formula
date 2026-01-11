@@ -11,6 +11,8 @@ const { installExtensionFromDirectory, uninstallExtension, listInstalledExtensio
 
 const API_PERMISSIONS = {
   "workbook.getActiveWorkbook": [],
+  "workbook.openWorkbook": ["workbook.manage"],
+  "workbook.createWorkbook": ["workbook.manage"],
   "sheets.getActiveSheet": [],
 
   "cells.getSelection": ["cells.read"],
@@ -690,6 +692,10 @@ class ExtensionHost {
     switch (`${namespace}.${method}`) {
       case "workbook.getActiveWorkbook":
         return this._workbook;
+      case "workbook.openWorkbook":
+        return this.openWorkbook(args[0]);
+      case "workbook.createWorkbook":
+        return this.openWorkbook(null);
       case "sheets.getActiveSheet":
         return this._spreadsheet.getActiveSheet?.() ?? { id: "sheet1", name: "Sheet1" };
       case "sheets.getSheet":

@@ -42,6 +42,8 @@ export interface Panel extends Disposable {
 
 export namespace workbook {
   function getActiveWorkbook(): Promise<Workbook>;
+  function openWorkbook(path: string): Promise<Workbook>;
+  function createWorkbook(): Promise<Workbook>;
 }
 
 export namespace sheets {

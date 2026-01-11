@@ -266,3 +266,162 @@ test("permissions: sheets.createSheet requires sheets.manage", async (t) => {
   await assert.rejects(() => host.executeCommand(commandId), /Permission denied: sheets\.manage/);
 });
 
+test("events: sheets.createSheet emits sheetActivated with stable payload", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sheet-activated-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "sheetExt.activatedEvent";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "sheet-activated-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Sheet Activated Event" }] },
+      permissions: ["ui.commands", "sheets.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.events.onSheetActivated((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+          const sheet = await formula.sheets.createSheet("Data");
+          const evt = await eventPromise;
+          return { sheet, evt };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.equal(result.sheet.name, "Data");
+  assert.ok(result.sheet.id);
+  assert.deepEqual(result.evt, { sheet: result.sheet });
+});
+
+test("api surface: workbook.openWorkbook emits workbookOpened with stable payload", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-open-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.open";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-open-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook Open" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async (workbookPath) => {
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.events.onWorkbookOpened((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+          const workbook = await formula.workbook.openWorkbook(workbookPath);
+          const evt = await eventPromise;
+          return { workbook, evt };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const workbookPath = path.join(dir, "Book1.xlsx");
+  const result = await host.executeCommand(commandId, workbookPath);
+  assert.deepEqual(result.workbook, { name: "Book1.xlsx", path: workbookPath });
+  assert.deepEqual(result.evt, { workbook: result.workbook });
+});
+
+test("permissions: workbook.openWorkbook requires workbook.manage", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-open-deny-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.openDenied";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-open-denied-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook Open Denied" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          return formula.workbook.openWorkbook("Denied.xlsx");
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async ({ permissions }) => !permissions.includes("workbook.manage")
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  await assert.rejects(() => host.executeCommand(commandId), /Permission denied: workbook\.manage/);
+});
