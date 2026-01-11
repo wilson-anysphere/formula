@@ -319,7 +319,7 @@ export function createSyncServer(
         await ldb.destroy();
       };
       clearPersistedDocument = (docName: string) =>
-        enqueue(docName, async () => {
+        enqueue(persistedDocNameForLeveldb(docName), async () => {
           await hashedLdb.clearDocument(docName);
           if (hashingEnabled) {
             // Legacy namespace cleanup (raw docName keys).
@@ -337,11 +337,11 @@ export function createSyncServer(
              if (origin === persistenceOrigin) return;
              if (!shouldPersist(docName)) return;
              if (retentionManager?.isPurging(retentionDocName)) return;
-             void enqueue(docName, async () => {
-               await hashedLdb.storeUpdate(docName, update);
-             });
-             void retentionManager?.markSeen(retentionDocName);
-           });
+             void enqueue(retentionDocName, async () => {
+                await hashedLdb.storeUpdate(docName, update);
+              });
+              void retentionManager?.markSeen(retentionDocName);
+            });
 
           if (shouldPersist(docName)) {
             void retentionManager?.markSeen(retentionDocName, { force: true });
@@ -371,14 +371,14 @@ export function createSyncServer(
                 );
               }
 
-              if (legacyMetas && legacyMetas.size > 0) {
-                needsMigration = true;
-                await enqueue(docName, async () => {
-                  for (const [metaKey, value] of legacyMetas.entries()) {
-                    await hashedLdb.setMeta(docName, metaKey, value);
-                  }
-                });
-              }
+               if (legacyMetas && legacyMetas.size > 0) {
+                 needsMigration = true;
+                 await enqueue(retentionDocName, async () => {
+                   for (const [metaKey, value] of legacyMetas.entries()) {
+                     await hashedLdb.setMeta(docName, metaKey, value);
+                   }
+                 });
+               }
 
               if (needsMigration) {
                 docsNeedingMigration.add(docName);
@@ -393,19 +393,19 @@ export function createSyncServer(
 
           if (hashingEnabled && docsNeedingMigration.has(docName)) {
             if (ydoc) {
-              await enqueue(docName, () =>
+              await enqueue(retentionDocName, () =>
                 hashedLdb.storeUpdate(docName, Y.encodeStateAsUpdate(ydoc))
               );
             }
 
-            await enqueue(docName, () => hashedLdb.flushDocument(docName));
-            await enqueue(docName, () => ldb.clearDocument(docName));
+            await enqueue(retentionDocName, () => hashedLdb.flushDocument(docName));
+            await enqueue(retentionDocName, () => ldb.clearDocument(docName));
             docsNeedingMigration.delete(docName);
             void retentionManager?.markFlushed(retentionDocName);
             return;
           }
 
-          await enqueue(docName, () => hashedLdb.flushDocument(docName));
+          await enqueue(retentionDocName, () => hashedLdb.flushDocument(docName));
           void retentionManager?.markFlushed(retentionDocName);
         },
       });
@@ -554,7 +554,7 @@ export function createSyncServer(
           await ldb.destroy();
         };
         clearPersistedDocument = (docName: string) =>
-          enqueue(docName, async () => {
+          enqueue(persistedDocNameForLeveldb(docName), async () => {
             await hashedLdb.clearDocument(docName);
             if (hashingEnabled) {
               await ldb.clearDocument(docName);
@@ -573,7 +573,7 @@ export function createSyncServer(
               if (origin === persistenceOrigin) return;
               if (!shouldPersist(docName)) return;
               if (retentionManager?.isPurging(retentionDocName)) return;
-              void enqueue(docName, async () => {
+              void enqueue(retentionDocName, async () => {
                 await hashedLdb.storeUpdate(docName, update);
               });
               void retentionManager?.markSeen(retentionDocName);
@@ -608,7 +608,7 @@ export function createSyncServer(
 
                 if (legacyMetas && legacyMetas.size > 0) {
                   needsMigration = true;
-                  await enqueue(docName, async () => {
+                  await enqueue(retentionDocName, async () => {
                     for (const [metaKey, value] of legacyMetas.entries()) {
                       await hashedLdb.setMeta(docName, metaKey, value);
                     }
@@ -629,19 +629,19 @@ export function createSyncServer(
 
             if (hashingEnabled && docsNeedingMigration.has(docName)) {
               if (ydoc) {
-                await enqueue(docName, () =>
+                await enqueue(retentionDocName, () =>
                   hashedLdb.storeUpdate(docName, Y.encodeStateAsUpdate(ydoc))
                 );
               }
 
-              await enqueue(docName, () => hashedLdb.flushDocument(docName));
-              await enqueue(docName, () => ldb.clearDocument(docName));
+              await enqueue(retentionDocName, () => hashedLdb.flushDocument(docName));
+              await enqueue(retentionDocName, () => ldb.clearDocument(docName));
               docsNeedingMigration.delete(docName);
               void retentionManager?.markFlushed(retentionDocName);
               return;
             }
 
-            await enqueue(docName, () => hashedLdb.flushDocument(docName));
+            await enqueue(retentionDocName, () => hashedLdb.flushDocument(docName));
             void retentionManager?.markFlushed(retentionDocName);
           },
         });
