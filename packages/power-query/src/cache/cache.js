@@ -18,18 +18,27 @@
  */
 
 /**
+ * @typedef {{
+ *   maxEntries?: number;
+ *   maxBytes?: number;
+ * }} CacheLimits
+ */
+
+/**
  * @typedef {Object} CacheStore
  * @property {(key: string) => Promise<CacheEntry | null>} get
  * @property {(key: string, entry: CacheEntry) => Promise<void>} set
  * @property {(key: string) => Promise<void>} delete
  * @property {(() => Promise<void>) | undefined} [clear]
  * @property {((nowMs?: number) => Promise<void>) | undefined} [pruneExpired]
+ * @property {((options: { nowMs: number, maxEntries?: number, maxBytes?: number }) => Promise<void>) | undefined} [prune]
  */
 
 /**
  * @typedef {{
  *   store: CacheStore;
  *   now?: () => number;
+ *   limits?: CacheLimits;
  * }} CacheManagerOptions
  */
 
@@ -40,6 +49,7 @@ export class CacheManager {
   constructor(options) {
     this.store = options.store;
     this.now = options.now ?? (() => Date.now());
+    this.limits = options.limits ?? null;
   }
 
   /**
@@ -79,6 +89,13 @@ export class CacheManager {
     const createdAtMs = this.now();
     const expiresAtMs = options.ttlMs != null ? createdAtMs + options.ttlMs : null;
     await this.store.set(key, { value, createdAtMs, expiresAtMs });
+    if (this.limits && (this.limits.maxEntries != null || this.limits.maxBytes != null)) {
+      try {
+        await this.prune();
+      } catch {
+        // Best-effort: cache pruning should never make callers fail to populate the cache.
+      }
+    }
   }
 
   /**
@@ -102,6 +119,27 @@ export class CacheManager {
     if (!this.store.pruneExpired) return;
     try {
       await this.store.pruneExpired(nowMs);
+    } catch {
+      // Cache pruning should never be fatal; callers may invoke this opportunistically.
+    }
+  }
+
+  /**
+   * Best-effort cache pruning. If the underlying store supports it, this will:
+   * - delete expired entries
+   * - enforce entry/byte quotas using LRU eviction
+   *
+   * @param {CacheLimits | undefined} [limits]
+   */
+  async prune(limits = this.limits ?? undefined) {
+    const nowMs = this.now();
+    await this.pruneExpired(nowMs);
+
+    if (!this.store.prune) return;
+    if (limits?.maxEntries == null && limits?.maxBytes == null) return;
+
+    try {
+      await this.store.prune({ nowMs, maxEntries: limits?.maxEntries, maxBytes: limits?.maxBytes });
     } catch {
       // Cache pruning should never be fatal; callers may invoke this opportunistically.
     }

@@ -7,6 +7,35 @@ import { fnv1a64 } from "./key.js";
 const BINARY_MARKER_KEY = "__pq_cache_binary";
 
 /**
+ * @typedef {{
+ *   lastAccessMs: number;
+ *   sizeBytes: number;
+ * }} FileSystemCacheEntryMeta
+ */
+
+/**
+ * @typedef {{
+ *   key: string;
+ *   entry: CacheEntry | null;
+ *   meta?: Partial<FileSystemCacheEntryMeta>;
+ * }} FileSystemCacheFile
+ */
+
+/**
+ * @param {string} text
+ */
+function utf8ByteLength(text) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.byteLength(text, "utf8");
+  }
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(text).byteLength;
+  }
+  // Fallback: assume 1 byte per code unit.
+  return text.length;
+}
+
+/**
  * @param {unknown} value
  * @returns {value is Record<string, unknown> & { [BINARY_MARKER_KEY]: string }}
  */
@@ -39,7 +68,7 @@ function containsBinaryMarker(value) {
  * JSON.stringify replacer that extracts Uint8Array payloads into a sibling `.bin`
  * file and replaces them with marker objects.
  *
- * @param {{ key: string, entry: CacheEntry }} payload
+ * @param {FileSystemCacheFile} payload
  * @param {string} binFileName
  * @returns {{ jsonText: string, segments: Array<{ offset: number, length: number, bytes: Uint8Array }>, totalBytes: number }}
  */
@@ -150,10 +179,11 @@ function hydrateBinarySegments(value, binBytes, binFileName) {
  */
 export class FileSystemCacheStore {
   /**
-   * @param {{ directory: string }} options
+   * @param {{ directory: string, now?: () => number }} options
    */
   constructor(options) {
     this.directory = options.directory;
+    this.now = options.now ?? (() => Date.now());
     /** @type {{ fs: typeof import("node:fs/promises"), path: typeof import("node:path") } | null} */
     this._deps = null;
   }
@@ -258,19 +288,57 @@ export class FileSystemCacheStore {
 
     try {
       const hasBinaryMarkers = text.includes(`"${BINARY_MARKER_KEY}":`);
+
+      /** @type {FileSystemCacheFile} */
       const parsed = JSON.parse(text);
       if (!parsed || parsed.key !== key) return null;
 
-      const entry = parsed.entry ?? null;
-      const value = entry?.value;
+      const persistedEntry = parsed.entry ?? null;
+      const value = persistedEntry?.value;
+      if (!persistedEntry) return null;
+
+      /** @type {CacheEntry} */
+      let hydratedEntry = persistedEntry;
+      let binSizeBytes = 0;
 
       if (hasBinaryMarkers && containsBinaryMarker(value)) {
         const bytes = await fs.readFile(binPath);
         const restored = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        entry.value = hydrateBinarySegments(value, restored, binFileName);
+        binSizeBytes = restored.byteLength;
+
+        // Parse again so hydration can mutate without affecting the persisted entry
+        // (we rewrite the JSON file to update access metadata).
+        const hydratedParsed = JSON.parse(text);
+        const hydrated = hydratedParsed?.entry ?? null;
+        if (!hydrated) return null;
+        hydrated.value = hydrateBinarySegments(hydrated.value, restored, binFileName);
+        hydratedEntry = hydrated;
       }
 
-      return entry;
+      const nowMs = this.now();
+      const meta = parsed.meta && typeof parsed.meta === "object" && !Array.isArray(parsed.meta) ? parsed.meta : {};
+      meta.lastAccessMs = nowMs;
+      if (typeof meta.sizeBytes !== "number") {
+        if (hasBinaryMarkers && binSizeBytes === 0) {
+          try {
+            const stats = await fs.stat(binPath);
+            binSizeBytes = stats.size;
+          } catch {
+            binSizeBytes = 0;
+          }
+        }
+        meta.sizeBytes = utf8ByteLength(text) + binSizeBytes;
+      }
+      parsed.meta = meta;
+
+      // Best-effort metadata update; do not fail reads if we can't update access time.
+      try {
+        await this.writeFileAtomic(jsonPath, JSON.stringify(parsed), "utf8");
+      } catch {
+        // ignore
+      }
+
+      return hydratedEntry;
     } catch {
       // Best-effort cleanup of corrupted cache entries so we don't repeatedly
       // attempt to hydrate invalid JSON / binary markers.
@@ -289,7 +357,26 @@ export class FileSystemCacheStore {
     const { fs } = await this.deps();
     const { jsonPath, binPath, binFileName } = await this.pathsForKey(key);
 
-    const serialized = jsonWithBinarySegments({ key, entry }, binFileName);
+    const nowMs = this.now();
+    /** @type {FileSystemCacheFile} */
+    const record = {
+      key,
+      entry,
+      meta: { lastAccessMs: nowMs, sizeBytes: 0 },
+    };
+
+    // Compute a stable-ish `sizeBytes` including the binary payload.
+    let sizeBytes = 0;
+    let serialized = jsonWithBinarySegments(record, binFileName);
+    for (let i = 0; i < 4; i++) {
+      record.meta.sizeBytes = sizeBytes;
+      serialized = jsonWithBinarySegments(record, binFileName);
+      const nextSize = utf8ByteLength(serialized.jsonText) + serialized.totalBytes;
+      if (nextSize === sizeBytes) break;
+      sizeBytes = nextSize;
+    }
+    record.meta.sizeBytes = sizeBytes;
+    serialized = jsonWithBinarySegments(record, binFileName);
 
     if (serialized.segments.length > 0) {
       const combined = new Uint8Array(serialized.totalBytes);
@@ -409,4 +496,108 @@ export class FileSystemCacheStore {
       }
     }
   }
+
+  /**
+   * Prune expired entries and enforce optional entry/byte quotas using LRU eviction.
+   *
+   * @param {{ nowMs: number, maxEntries?: number, maxBytes?: number }} options
+   */
+  async prune(options) {
+    const maxEntries = options.maxEntries;
+    const maxBytes = options.maxBytes;
+
+    await this.pruneExpired(options.nowMs);
+
+    if (maxEntries == null && maxBytes == null) return;
+
+    await this.ensureDir();
+    const { fs, path } = await this.deps();
+
+    /** @type {import("node:fs").Dirent[]} */
+    let dirEntries = [];
+    try {
+      dirEntries = await fs.readdir(this.directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    /** @type {{ base: string, jsonPath: string, binPath: string, lastAccessMs: number, sizeBytes: number }[]} */
+    const records = [];
+
+    for (const ent of dirEntries) {
+      if (!ent.isFile()) continue;
+      if (!ent.name.endsWith(".json")) continue;
+
+      const base = ent.name.slice(0, -".json".length);
+      const jsonPath = path.join(this.directory, ent.name);
+      const binPath = path.join(this.directory, `${base}.bin`);
+
+      let text;
+      try {
+        text = await fs.readFile(jsonPath, "utf8");
+      } catch {
+        continue;
+      }
+
+      /** @type {FileSystemCacheFile | null} */
+      let parsed = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        continue;
+      }
+
+      const entry = parsed?.entry ?? null;
+      if (!entry) continue;
+
+      const expiresAtMs = typeof entry.expiresAtMs === "number" ? entry.expiresAtMs : null;
+      if (expiresAtMs != null && expiresAtMs <= options.nowMs) {
+        await fs.rm(jsonPath, { force: true }).catch(() => {});
+        await fs.rm(binPath, { force: true }).catch(() => {});
+        continue;
+      }
+
+      const meta = parsed?.meta && typeof parsed.meta === "object" && !Array.isArray(parsed.meta) ? parsed.meta : null;
+      const lastAccessFallback = typeof entry.createdAtMs === "number" ? entry.createdAtMs : 0;
+      const lastAccessMs = typeof meta?.lastAccessMs === "number" ? meta.lastAccessMs : lastAccessFallback;
+
+      /** @type {number} */
+      let sizeBytes;
+      if (typeof meta?.sizeBytes === "number") {
+        sizeBytes = meta.sizeBytes;
+      } else {
+        // Legacy entries: compute size without reading the `.bin` blob.
+        let binSize = 0;
+        try {
+          const stats = await fs.stat(binPath);
+          binSize = stats.size;
+        } catch {
+          binSize = 0;
+        }
+        sizeBytes = utf8ByteLength(text) + binSize;
+      }
+
+      records.push({ base, jsonPath, binPath, lastAccessMs, sizeBytes });
+    }
+
+    let totalEntries = records.length;
+    let totalBytes = 0;
+    for (const rec of records) totalBytes += rec.sizeBytes;
+
+    records.sort((a, b) => {
+      if (a.lastAccessMs !== b.lastAccessMs) return a.lastAccessMs - b.lastAccessMs;
+      return a.base.localeCompare(b.base);
+    });
+
+    let idx = 0;
+    while ((maxEntries != null && totalEntries > maxEntries) || (maxBytes != null && totalBytes > maxBytes)) {
+      const victim = records[idx++];
+      if (!victim) break;
+      await fs.rm(victim.jsonPath, { force: true }).catch(() => {});
+      await fs.rm(victim.binPath, { force: true }).catch(() => {});
+      totalEntries -= 1;
+      totalBytes -= victim.sizeBytes;
+    }
+  }
 }
+

@@ -5,6 +5,79 @@ import { fnv1a64 } from "./key.js";
  */
 
 /**
+ * @typedef {{
+ *   entry: CacheEntry;
+ *   sizeBytes: number;
+ *   lastAccessMs: number;
+ * }} IndexedDBCacheRecord
+ */
+
+const SIZE_MARKER_KEY = "__pq_cache_bytes";
+
+/**
+ * @param {string} text
+ */
+function utf8ByteLength(text) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.byteLength(text, "utf8");
+  }
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(text).byteLength;
+  }
+  // Fallback: assume 1 byte per code unit.
+  return text.length;
+}
+
+/**
+ * Approximate the serialized size of a cache entry.
+ *
+ * We want something cheap and deterministic (not perfect). The heuristic:
+ * - JSON byte length for the non-binary parts
+ * - + `byteLength` for any `Uint8Array` payloads
+ *
+ * @param {CacheEntry} entry
+ */
+function estimateEntrySizeBytes(entry) {
+  let binaryBytes = 0;
+  let json = "";
+  try {
+    json = JSON.stringify(entry, (_key, value) => {
+      if (value instanceof Uint8Array) {
+        binaryBytes += value.byteLength;
+        return { [SIZE_MARKER_KEY]: value.byteLength };
+      }
+      if (value instanceof ArrayBuffer) {
+        binaryBytes += value.byteLength;
+        return { [SIZE_MARKER_KEY]: value.byteLength };
+      }
+      if (typeof value === "bigint") {
+        return value.toString();
+      }
+      return value;
+    });
+  } catch {
+    json = "";
+  }
+
+  return utf8ByteLength(json) + binaryBytes;
+}
+
+/**
+ * @param {any} value
+ * @returns {value is IndexedDBCacheRecord}
+ */
+function isCacheRecord(value) {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "entry" in value &&
+    "sizeBytes" in value &&
+    "lastAccessMs" in value
+  );
+}
+
+/**
  * Minimal IndexedDB-backed cache store (browser environments).
  *
  * This implementation is intentionally tiny and only targets the needs of
@@ -13,11 +86,12 @@ import { fnv1a64 } from "./key.js";
  */
 export class IndexedDBCacheStore {
   /**
-   * @param {{ dbName?: string, storeName?: string }} [options]
+   * @param {{ dbName?: string, storeName?: string, now?: () => number }} [options]
    */
   constructor(options = {}) {
     this.dbName = options.dbName ?? "power-query-cache";
     this.storeName = options.storeName ?? "entries";
+    this.now = options.now ?? (() => Date.now());
     /** @type {Promise<IDBDatabase> | null} */
     this.dbPromise = null;
   }
@@ -90,7 +164,39 @@ export class IndexedDBCacheStore {
   async get(key) {
     const normalized = this.normalizeKey(key);
     const result = await this.withRead((store) => store.get(normalized));
-    return result ?? null;
+    if (!result) return null;
+
+    /** @type {CacheEntry | null} */
+    let entry = null;
+    /** @type {number | null} */
+    let sizeBytes = null;
+
+    if (isCacheRecord(result)) {
+      entry = result.entry ?? null;
+      sizeBytes = typeof result.sizeBytes === "number" ? result.sizeBytes : null;
+    } else {
+      entry = result;
+      sizeBytes = null;
+    }
+
+    if (!entry) return null;
+
+    const updated = {
+      entry,
+      sizeBytes: sizeBytes ?? estimateEntrySizeBytes(entry),
+      lastAccessMs: this.now(),
+    };
+
+    // Best-effort metadata update (do not fail reads if updating access time races).
+    try {
+      await this.withWrite((store) => {
+        store.put(updated, normalized);
+      });
+    } catch {
+      // ignore; return cached value even if metadata update fails
+    }
+
+    return entry;
   }
 
   /**
@@ -99,8 +205,13 @@ export class IndexedDBCacheStore {
    */
   async set(key, entry) {
     const normalized = this.normalizeKey(key);
+    const record = {
+      entry,
+      sizeBytes: estimateEntrySizeBytes(entry),
+      lastAccessMs: this.now(),
+    };
     await this.withWrite((store) => {
-      store.put(entry, normalized);
+      store.put(record, normalized);
     });
   }
 
@@ -142,7 +253,8 @@ export class IndexedDBCacheStore {
         const cursor = req.result;
         if (!cursor) return;
 
-        const entry = cursor.value;
+        const value = cursor.value;
+        const entry = isCacheRecord(value) ? value.entry : value;
         const expiresAtMs =
           entry && typeof entry === "object" && "expiresAtMs" in entry
             ? // @ts-ignore - runtime access
@@ -160,5 +272,118 @@ export class IndexedDBCacheStore {
         cursor.continue();
       };
     });
+  }
+
+  /**
+   * Prune expired entries and enforce optional entry/byte quotas using LRU eviction.
+   *
+   * @param {{ nowMs: number, maxEntries?: number, maxBytes?: number }} options
+   */
+  async prune(options) {
+    const maxEntries = options.maxEntries;
+    const maxBytes = options.maxBytes;
+
+    if (maxEntries == null && maxBytes == null) {
+      // Still allow pruning expired entries when no explicit quotas are supplied.
+    }
+
+    /** @type {any[]} */
+    let keys = [];
+    /** @type {any[]} */
+    let values = [];
+
+    try {
+      keys = (await this.withRead((store) => store.getAllKeys())) ?? [];
+      values = (await this.withRead((store) => store.getAll())) ?? [];
+    } catch {
+      return;
+    }
+
+    /** @type {{ id: any, entry: CacheEntry, sizeBytes: number, lastAccessMs: number }[]} */
+    const items = [];
+
+    for (let i = 0; i < Math.min(keys.length, values.length); i++) {
+      const id = keys[i];
+      const value = values[i];
+
+      /** @type {CacheEntry | null} */
+      let entry = null;
+      /** @type {number | null} */
+      let sizeBytes = null;
+      /** @type {number | null} */
+      let lastAccessMs = null;
+
+      if (isCacheRecord(value)) {
+        entry = value.entry ?? null;
+        sizeBytes = typeof value.sizeBytes === "number" ? value.sizeBytes : null;
+        lastAccessMs = typeof value.lastAccessMs === "number" ? value.lastAccessMs : null;
+      } else {
+        entry = value;
+      }
+
+      if (!entry) continue;
+
+      const normalizedSize = sizeBytes ?? estimateEntrySizeBytes(entry);
+      const normalizedLastAccess =
+        lastAccessMs ??
+        (typeof entry.createdAtMs === "number" ? entry.createdAtMs : 0);
+
+      items.push({ id, entry, sizeBytes: normalizedSize, lastAccessMs: normalizedLastAccess });
+    }
+
+    /** @type {Set<any>} */
+    const deleteIds = new Set();
+
+    /** @type {{ id: any, entry: CacheEntry, sizeBytes: number, lastAccessMs: number }[]} */
+    const remaining = [];
+    let totalBytes = 0;
+
+    for (const item of items) {
+      if (item.entry.expiresAtMs != null && item.entry.expiresAtMs <= options.nowMs) {
+        deleteIds.add(item.id);
+      } else {
+        remaining.push(item);
+        totalBytes += item.sizeBytes;
+      }
+    }
+
+    let totalEntries = remaining.length;
+
+    remaining.sort((a, b) => {
+      if (a.lastAccessMs !== b.lastAccessMs) return a.lastAccessMs - b.lastAccessMs;
+      const aCreated = typeof a.entry.createdAtMs === "number" ? a.entry.createdAtMs : 0;
+      const bCreated = typeof b.entry.createdAtMs === "number" ? b.entry.createdAtMs : 0;
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    let idx = 0;
+    while (
+      (maxEntries != null && totalEntries > maxEntries) ||
+      (maxBytes != null && totalBytes > maxBytes)
+    ) {
+      const victim = remaining[idx++];
+      if (!victim) break;
+      if (deleteIds.has(victim.id)) continue;
+      deleteIds.add(victim.id);
+      totalEntries -= 1;
+      totalBytes -= victim.sizeBytes;
+    }
+
+    if (deleteIds.size === 0) return;
+
+    try {
+      await this.withWrite((store) => {
+        for (const id of deleteIds) {
+          try {
+            store.delete(id);
+          } catch {
+            // ignore per-key failures; best-effort pruning
+          }
+        }
+      });
+    } catch {
+      // Ignore transaction failures (concurrent prune / blocked transactions).
+    }
   }
 }

@@ -554,4 +554,13 @@ export class EncryptedCacheStore {
   async pruneExpired(nowMs) {
     if (this.store.pruneExpired) await this.store.pruneExpired(nowMs);
   }
+
+  /**
+   * Delegate store-level pruning (e.g. quota/LRU eviction) to the underlying store.
+   *
+   * @param {{ nowMs: number, maxEntries?: number, maxBytes?: number }} options
+   */
+  async prune(options) {
+    if (this.store.prune) await this.store.prune(options);
+  }
 }
