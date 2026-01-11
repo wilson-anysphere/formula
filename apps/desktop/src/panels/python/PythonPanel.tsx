@@ -167,14 +167,10 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
   runButton.addEventListener("click", async () => {
     if (disposed) return;
 
-    if (typeof SharedArrayBuffer === "undefined") {
-      output.textContent =
-        "SharedArrayBuffer is required for the Python panel.\n" +
-        "Make sure the app is served with COOP/COEP headers (cross-origin isolation).\n";
-      return;
-    }
-
-    output.textContent = "";
+    output.textContent =
+      runtime.getBackendMode() === "mainThread"
+        ? "SharedArrayBuffer unavailable; running Pyodide on main thread (UI may freeze during execution).\n\n"
+        : "";
     runButton.disabled = true;
 
     try {

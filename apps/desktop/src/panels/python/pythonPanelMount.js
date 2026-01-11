@@ -114,6 +114,17 @@ export function mountPythonPanel({
   isolationLabel.style.color = "var(--text-secondary)";
   toolbar.appendChild(isolationLabel);
 
+  const degradedBanner = document.createElement("div");
+  degradedBanner.style.padding = "8px";
+  degradedBanner.style.borderBottom = "1px solid var(--panel-border)";
+  degradedBanner.style.fontSize = "12px";
+  degradedBanner.style.color = "var(--text-secondary)";
+  degradedBanner.style.background = "var(--surface-secondary, rgba(0, 0, 0, 0.03))";
+  degradedBanner.dataset.testid = "python-panel-degraded-banner";
+  degradedBanner.textContent =
+    "SharedArrayBuffer unavailable; running Pyodide on main thread (UI may freeze during execution).";
+  degradedBanner.style.display = "none";
+
   const editorHost = document.createElement("div");
   editorHost.style.flex = "1";
   editorHost.style.minHeight = "0";
@@ -133,6 +144,7 @@ export function mountPythonPanel({
   root.style.height = "100%";
 
   root.appendChild(toolbar);
+  root.appendChild(degradedBanner);
   root.appendChild(editorHost);
   root.appendChild(consoleHost);
   container.appendChild(root);
@@ -157,34 +169,36 @@ export function mountPythonPanel({
     consoleHost.textContent = text;
   };
 
+  const effectivePyodideBackendMode = () => {
+    if (pyodideRuntime && typeof pyodideRuntime.getBackendMode === "function") {
+      return pyodideRuntime.getBackendMode();
+    }
+    const canUseWorker =
+      typeof Worker !== "undefined" && isolation.sharedArrayBuffer && isolation.crossOriginIsolated;
+    return canUseWorker ? "worker" : "mainThread";
+  };
+
   const updateRuntimeStatus = () => {
     if (runtimeSelect.value === "native") {
       isolationLabel.textContent = nativeAvailable ? "Using system Python via Tauri" : "Native runtime unavailable";
+      degradedBanner.style.display = "none";
       return;
     }
-    isolationLabel.textContent = isolation.sharedArrayBuffer
-      ? "SharedArrayBuffer enabled"
-      : "SharedArrayBuffer unavailable (crossOriginIsolated required)";
+
+    const backendMode = effectivePyodideBackendMode();
+    isolationLabel.textContent =
+      backendMode === "worker"
+        ? "Pyodide worker (SharedArrayBuffer enabled)"
+        : "Pyodide main thread (SharedArrayBuffer unavailable)";
+    degradedBanner.style.display = backendMode === "mainThread" ? "block" : "none";
   };
 
   updateRuntimeStatus();
 
   runtimeSelect.addEventListener("change", () => {
     updateRuntimeStatus();
-    if (runtimeSelect.value === "pyodide" && (!isolation.sharedArrayBuffer || !isolation.crossOriginIsolated)) {
-      setOutput(
-        "SharedArrayBuffer is required for the Pyodide formula bridge.\n\n" +
-          "In browsers/webviews this requires a cross-origin isolated context (COOP/COEP).\n" +
-          "Formula's Vite dev server config enables this automatically; other hosts must do the same.",
-      );
-    } else {
-      setOutput("");
-    }
+    setOutput("");
   });
-
-  if (runtimeSelect.value === "pyodide" && (!isolation.sharedArrayBuffer || !isolation.crossOriginIsolated)) {
-    runtimeSelect.dispatchEvent(new Event("change"));
-  }
 
   class PanelBridge extends DocumentControllerBridge {
     constructor(doc, options) {
@@ -225,7 +239,6 @@ export function mountPythonPanel({
       return super.set_selection({ selection });
     }
   }
-
   async function ensureInitialized() {
     if (pyodideRuntime) {
       if (initPromise) return await initPromise;
@@ -247,6 +260,7 @@ export function mountPythonPanel({
       indexURL: PYODIDE_INDEX_URL,
       rpcTimeoutMs: 5_000,
     });
+    updateRuntimeStatus();
     if (initPromise) return await initPromise;
     initPromise = pyodideRuntime.initialize().catch((err) => {
       initPromise = null;

@@ -320,17 +320,18 @@ export class WebMacroBackend implements MacroBackend {
       this.pyodide = new PyodideRuntime({
         api,
         indexURL,
+        mode: "auto",
         permissions: defaultPythonPermissions(),
         timeoutMs: 5_000,
         maxMemoryBytes: 256 * 1024 * 1024,
       });
     }
 
-    // The worker-side RPC handler looks at `this.api` at call time, so updating
-    // it here swaps the bridge between executions.
+    // Both backends read `this.api` at call time, so updating it here swaps the
+    // bridge between executions (used to keep `formula.active_sheet` aligned).
     (this.pyodide as any).api = api;
 
-    if ((this.pyodide as any).worker == null) {
+    if ((this.pyodide as any).initialized !== true) {
       this.pyodideInit = null;
     }
 
@@ -345,11 +346,20 @@ export class WebMacroBackend implements MacroBackend {
     try {
       await this.pyodideInit;
     } catch (err) {
+      const runtimeErr = err instanceof Error ? err : new Error(String(err));
+      const needsIsolation = globalThis.crossOriginIsolated !== true || typeof (globalThis as any).SharedArrayBuffer === "undefined";
+      const guidance = needsIsolation
+        ? "SharedArrayBuffer is unavailable, so Pyodide is running on the main thread.\n" +
+          "If initialization fails, ensure Pyodide assets are reachable (pyodideIndexURL) or enable COOP/COEP headers to use the worker backend."
+        : "If initialization fails, ensure Pyodide assets are reachable (pyodideIndexURL).";
+
+      runtimeErr.message = `${runtimeErr.message}\n\n${guidance}`;
+
       // Reset so a subsequent attempt can retry initialization.
       this.pyodide?.destroy();
       this.pyodide = null;
       this.pyodideInit = null;
-      throw err;
+      throw runtimeErr;
     }
 
     return this.pyodide;
