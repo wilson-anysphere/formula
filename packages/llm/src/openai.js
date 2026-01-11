@@ -291,6 +291,23 @@ export class OpenAIClient {
         return ids;
       }
 
+      function* flushPendingToolCalls() {
+        for (const [index, state] of toolCallsByIndex.entries()) {
+          if (!state || typeof state !== "object") continue;
+          if (state.started) continue;
+          if (!state.id && state.name) state.id = `toolcall-${index}`;
+          if (!state.started && state.id && state.name) {
+            state.started = true;
+            openToolCallIds.add(state.id);
+            yield { type: "tool_call_start", id: state.id, name: state.name };
+            if (state.pendingArgs) {
+              yield { type: "tool_call_delta", id: state.id, delta: state.pendingArgs };
+              state.pendingArgs = "";
+            }
+          }
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -311,6 +328,7 @@ export class OpenAIClient {
           if (!data) continue;
 
           if (data === "[DONE]") {
+            for (const event of flushPendingToolCalls()) yield event;
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
             yield usage ? { type: "done", usage } : { type: "done" };
             return;
@@ -382,11 +400,13 @@ export class OpenAIClient {
           }
 
           if (typeof choice?.finish_reason === "string" && choice.finish_reason === "tool_calls") {
+            for (const event of flushPendingToolCalls()) yield event;
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
           }
         }
       }
 
+      for (const event of flushPendingToolCalls()) yield event;
       for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
       yield usage ? { type: "done", usage } : { type: "done" };
     } finally {
