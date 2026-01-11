@@ -1672,6 +1672,21 @@ test("publisher revocation blocks publishing + hides extensions from search/meta
     );
     assert.equal(revokeRes.status, 200);
 
+    const adminPublisherRes = await fetch(`${baseUrl}/api/admin/publishers/${encodeURIComponent(manifest.publisher)}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(adminPublisherRes.status, 200);
+    const adminPublisher = await adminPublisherRes.json();
+    assert.equal(Boolean(adminPublisher.revoked), true);
+    assert.ok(Array.isArray(adminPublisher.keys));
+
+    const adminExtRes = await fetch(`${baseUrl}/api/admin/extensions/${encodeURIComponent(extensionId)}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(adminExtRes.status, 200);
+    const adminExt = await adminExtRes.json();
+    assert.equal(Boolean(adminExt.publisherRevoked), true);
+
     const packaged = await packageExtension(extSource, { privateKeyPem });
     const publishBlocked = await fetch(`${baseUrl}/api/publish-bin`, {
       method: "POST",
@@ -1703,6 +1718,13 @@ test("publisher revocation blocks publishing + hides extensions from search/meta
       }
     );
     assert.equal(unRevokeRes.status, 200);
+
+    const adminPublisherRes2 = await fetch(`${baseUrl}/api/admin/publishers/${encodeURIComponent(manifest.publisher)}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(adminPublisherRes2.status, 200);
+    const adminPublisher2 = await adminPublisherRes2.json();
+    assert.equal(Boolean(adminPublisher2.revoked), false);
 
     await writeManifestVersion(extSource, "1.0.1");
     await publishExtension({

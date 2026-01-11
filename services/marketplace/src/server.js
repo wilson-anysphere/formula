@@ -673,6 +673,36 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
       }
 
       if (
+        req.method === "GET" &&
+        segments[0] === "api" &&
+        segments[1] === "admin" &&
+        segments[2] === "publishers" &&
+        segments.length === 4
+      ) {
+        route = "/api/admin/publishers/:publisher";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const publisher = segments[3];
+        const record = await store.getPublisher(publisher);
+        if (!record) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Publisher not found" });
+        }
+        const keys = await store.getPublisherKeys(publisher, { includeRevoked: true });
+        statusCode = 200;
+        return sendJson(res, 200, { ...record, keys });
+      }
+
+      if (
         req.method === "POST" &&
         segments[0] === "api" &&
         segments[1] === "admin" &&
@@ -753,6 +783,35 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           }
           throw error;
         }
+      }
+
+      if (
+        req.method === "GET" &&
+        segments[0] === "api" &&
+        segments[1] === "admin" &&
+        segments[2] === "extensions" &&
+        segments.length === 4
+      ) {
+        route = "/api/admin/extensions/:id";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const id = segments[3];
+        const ext = await store.getExtension(id, { includeHidden: true });
+        if (!ext) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Not found" });
+        }
+        statusCode = 200;
+        return sendJson(res, 200, ext);
       }
 
       if (
