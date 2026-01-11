@@ -1094,10 +1094,6 @@ function compactArrayForPrompt(params: {
   return { value, compaction, redactedCount };
 }
 
-function unwrapArrayValues(values: Array<SpreadsheetValue | ProvenanceCellValue>): SpreadsheetValue[] {
-  return values.map((entry) => (isProvenanceCellValue(entry) ? entry.value : (entry as SpreadsheetValue)));
-}
-
 function mulberry32(seed: number): () => number {
   let t = seed >>> 0;
   return () => {
