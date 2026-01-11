@@ -71,10 +71,20 @@ function tryReadNumber(input: string, start: number): { text: string; end: numbe
 
 function tryReadSheetPrefix(input: string, start: number): { text: string; end: number } | null {
   if (input[start] === "'") {
+    // Excel escapes apostrophes inside sheet names using doubled quotes: ''.
     let i = start + 1;
-    while (i < input.length && input[i] !== "'") i += 1;
-    if (input[i] === "'" && input[i + 1] === "!") {
-      return { text: input.slice(start, i + 2), end: i + 2 };
+    while (i < input.length) {
+      if (input[i] === "'") {
+        if (input[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        if (input[i + 1] === "!") {
+          return { text: input.slice(start, i + 2), end: i + 2 };
+        }
+        return null;
+      }
+      i += 1;
     }
     return null;
   }

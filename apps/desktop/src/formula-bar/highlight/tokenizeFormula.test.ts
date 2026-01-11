@@ -21,4 +21,10 @@ describe("tokenizeFormula", () => {
     expect(types.some(([type]) => type === "operator")).toBe(true);
     expect(types.some(([type, text]) => type === "string" && text === '"Over"')).toBe(true);
   });
+
+  it("tokenizes quoted sheet-qualified references with escaped apostrophes", () => {
+    const tokens = tokenizeFormula("=SUM('Bob''s Sheet'!A1, 'Bob''s Sheet'!A1:A2)");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["'Bob''s Sheet'!A1", "'Bob''s Sheet'!A1:A2"]);
+  });
 });
