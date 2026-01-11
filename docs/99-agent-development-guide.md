@@ -218,6 +218,23 @@ rm -rf .next/cache  # if using Next.js
 | ESLint/Prettier | ✅      | Works perfectly |
 | Git             | ✅      | Works perfectly |
 
+### Vitest + WASM builds
+
+The root Vitest config (`vitest.config.ts`) runs a global setup step
+(`scripts/vitest.global-setup.mjs`) that ensures a Node-compatible wasm-bindgen
+build of `crates/formula-wasm` exists. This may trigger a Rust/wasm-pack build,
+which is slow and memory intensive.
+
+For test runs that don't touch the WASM engine (e.g. `packages/llm`,
+`packages/ai-tools`), you can skip the setup step:
+
+```bash
+FORMULA_SKIP_WASM_BUILD=1 pnpm vitest run packages/llm/src/*.test.ts
+```
+
+If you need engine-backed tests, omit the variable (or run
+`node scripts/build-formula-wasm-node.mjs` once).
+
 
 ### Requires Setup
 
