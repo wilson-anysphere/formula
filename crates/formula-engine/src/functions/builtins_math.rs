@@ -655,6 +655,12 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
         }
 
+        fn record_reference(&self, ctx: &dyn FunctionContext) {
+            if let CriteriaRange::Reference(r) = self {
+                ctx.record_reference(r);
+            }
+        }
+
         fn value_at(&self, ctx: &dyn FunctionContext, idx: usize, cols: usize) -> Value {
             match self {
                 CriteriaRange::Reference(r) => {
@@ -689,6 +695,7 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Some(expected) if expected != (rows, cols) => return Value::Error(ErrorKind::Value),
             Some(_) => {}
         }
+        criteria_range.record_reference(ctx);
         ranges.push(criteria_range);
 
         let criteria_value = eval_scalar_arg(ctx, &pair[1]);
@@ -741,6 +748,7 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(r) => r,
         Err(e) => return Value::Error(e),
     };
+    criteria_range.record_reference(ctx);
 
     let criteria_value = eval_scalar_arg(ctx, &args[1]);
     if let Value::Error(e) = criteria_value {
@@ -759,6 +767,9 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     } else {
         None
     };
+    if let Some(ref sum_range) = sum_range {
+        sum_range.record_reference(ctx);
+    }
 
     let (rows, cols) = criteria_range.shape();
     if let Some(ref sum_range) = sum_range {
@@ -815,6 +826,7 @@ fn sumifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(r) => r,
         Err(e) => return Value::Error(e),
     };
+    sum_range.record_reference(ctx);
     let (rows, cols) = sum_range.shape();
 
     let mut criteria_ranges = Vec::new();
@@ -841,6 +853,10 @@ fn sumifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
         criteria_ranges.push(range);
         criteria.push(crit);
+    }
+
+    for range in &criteria_ranges {
+        range.record_reference(ctx);
     }
 
     let mut sum = 0.0;
@@ -888,6 +904,7 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(r) => r,
         Err(e) => return Value::Error(e),
     };
+    criteria_range.record_reference(ctx);
 
     let criteria_value = eval_scalar_arg(ctx, &args[1]);
     if let Value::Error(e) = criteria_value {
@@ -906,6 +923,9 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     } else {
         None
     };
+    if let Some(ref average_range) = average_range {
+        average_range.record_reference(ctx);
+    }
 
     let (rows, cols) = criteria_range.shape();
     if let Some(ref average_range) = average_range {
@@ -969,6 +989,7 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(r) => r,
         Err(e) => return Value::Error(e),
     };
+    average_range.record_reference(ctx);
     let (rows, cols) = average_range.shape();
 
     let mut criteria_ranges = Vec::new();
@@ -995,6 +1016,10 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
         criteria_ranges.push(range);
         criteria.push(crit);
+    }
+
+    for range in &criteria_ranges {
+        range.record_reference(ctx);
     }
 
     let mut sum = 0.0;
@@ -1042,6 +1067,12 @@ impl Range2D {
             ArgValue::Reference(r) => Ok(Self::Reference(r.normalized())),
             ArgValue::Scalar(Value::Array(arr)) => Ok(Self::Array(arr)),
             ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => Err(ErrorKind::Value),
+        }
+    }
+
+    fn record_reference(&self, ctx: &dyn FunctionContext) {
+        if let Range2D::Reference(r) = self {
+            ctx.record_reference(r);
         }
     }
 

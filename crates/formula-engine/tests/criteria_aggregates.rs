@@ -1,5 +1,6 @@
 use formula_engine::value::ErrorKind;
-use formula_engine::{Engine, Value};
+use formula_engine::{Engine, PrecedentNode, Value};
+use formula_engine::eval::CellAddr;
 
 struct TestSheet {
     engine: Engine,
@@ -110,6 +111,36 @@ fn criteria_aggregates_reject_scalar_range_args() {
 }
 
 #[test]
+fn sumif_supports_boolean_and_error_criteria() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set("A1", true);
+    sheet.set("A2", false);
+    sheet.set("A3", true);
+
+    sheet.set("B1", 1);
+    sheet.set("B2", 2);
+    sheet.set("B3", 3);
+
+    assert_number(&sheet.eval(r#"=SUMIF(A1:A3,TRUE,B1:B3)"#), 4.0);
+
+    // Criteria strings can match errors without the criteria argument itself being an error.
+    sheet.set("C1", Value::Error(ErrorKind::Div0));
+    sheet.set("C2", 0);
+    sheet.set("C3", Value::Error(ErrorKind::Div0));
+    sheet.set("D1", 10);
+    sheet.set("D2", 20);
+    sheet.set("D3", 30);
+
+    assert_number(&sheet.eval("=SUMIF(C1:C3,\"#DIV/0!\",D1:D3)"), 40.0);
+    // If the criteria argument evaluates to an error value, it propagates.
+    assert_eq!(
+        sheet.eval(r#"=SUMIF(C1:C3,C1,D1:D3)"#),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
 fn sumif_propagates_sum_range_errors_only_when_included() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1);
@@ -203,4 +234,43 @@ fn sumif_parses_date_criteria_strings() {
     sheet.set("B3", 3);
 
     assert_number(&sheet.eval(r#"=SUMIF(A1:A3,">1/1/2020",B1:B3)"#), 3.0);
+}
+
+#[test]
+fn sumif_indirect_records_dynamic_dependencies() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=SUMIF(INDIRECT("A1:A3"),">0")"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(6.0));
+
+    let precedents = engine.precedents("Sheet1", "Z1").unwrap();
+    assert!(
+        precedents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr { row: 2, col: 0 },
+            }
+        )),
+        "expected Z1 precedents to include Sheet1!A1:A3, got: {precedents:?}"
+    );
+
+    let dependents = engine.dependents("Sheet1", "A1").unwrap();
+    assert!(
+        dependents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 25 },
+            }
+        )),
+        "expected A1 dependents to include Sheet1!Z1, got: {dependents:?}"
+    );
 }
