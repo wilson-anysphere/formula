@@ -55,9 +55,12 @@ test("EncryptedCacheStore + IndexedDBCacheStore: stores ciphertext and roundtrip
   assert.ok(raw);
   assert.ok(raw.value && typeof raw.value === "object");
   // @ts-ignore - test access
+  assert.equal(raw.value.v, 2);
+  // @ts-ignore - test access
   const ciphertext = raw.value.payload?.ciphertext;
-  assert.ok(ciphertext instanceof Uint8Array);
-  assert.equal(Buffer.from(ciphertext).includes(Buffer.from(secret)), false);
+  assert.ok(ciphertext instanceof Uint8Array || ciphertext instanceof ArrayBuffer);
+  const ciphertextBytes = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext);
+  assert.equal(Buffer.from(ciphertextBytes).includes(Buffer.from(secret)), false);
 
   // Close DB handles before deleting to keep fake-indexeddb happy.
   const db = await underlying.open();
@@ -70,4 +73,3 @@ test("EncryptedCacheStore + IndexedDBCacheStore: stores ciphertext and roundtrip
     req.onblocked = () => resolve(undefined);
   });
 });
-
