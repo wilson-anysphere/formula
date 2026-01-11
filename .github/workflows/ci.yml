@@ -119,15 +119,19 @@ jobs:
       - name: Smoke test container
         run: |
           set -euo pipefail
+          docker volume create sync-server-ci-data-leveldb > /dev/null
           docker run -d \
             -p 12345:1234 \
             -e SYNC_SERVER_AUTH_TOKEN=ci-token \
+            -e SYNC_SERVER_DATA_DIR=/data \
+            -v sync-server-ci-data-leveldb:/data \
             --name sync-server \
             formula-sync-server:ci
 
           cleanup() {
             docker logs sync-server --tail 200 || true
             docker rm -f sync-server || true
+            docker volume rm -f sync-server-ci-data-leveldb || true
           }
           trap cleanup EXIT
 
@@ -147,18 +151,22 @@ jobs:
           # KeyRing JSON with a deterministic all-zero 32-byte key (sufficient for CI smoke testing).
           KEYRING_JSON='{"currentVersion":1,"keys":{"1":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}}'
 
+          docker volume create sync-server-ci-data-file > /dev/null
           docker run -d \
             -p 12346:1234 \
             -e SYNC_SERVER_AUTH_TOKEN=ci-token \
             -e SYNC_SERVER_PERSISTENCE_BACKEND=file \
             -e SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring \
             -e SYNC_SERVER_ENCRYPTION_KEYRING_JSON="$KEYRING_JSON" \
+            -e SYNC_SERVER_DATA_DIR=/data \
+            -v sync-server-ci-data-file:/data \
             --name sync-server \
             formula-sync-server:ci
 
           cleanup() {
             docker logs sync-server --tail 200 || true
             docker rm -f sync-server || true
+            docker volume rm -f sync-server-ci-data-file || true
           }
           trap cleanup EXIT
 
