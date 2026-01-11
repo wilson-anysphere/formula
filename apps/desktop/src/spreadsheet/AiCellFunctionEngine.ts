@@ -258,7 +258,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     }): Promise<void> {
     const auditInput: any = {
       function: params.functionName,
-      prompt: params.prompt,
+      prompt: truncateText(params.prompt, this.maxAuditPreviewChars),
       prompt_hash: hashText(params.prompt),
       inputs_hash: params.inputsHash,
       inputs_preview: params.inputsPreview,
@@ -567,7 +567,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       model: this.model,
       input: {
         function: params.functionName,
-        prompt: params.prompt,
+        prompt: truncateText(params.prompt, this.maxAuditPreviewChars),
+        prompt_hash: hashText(params.prompt),
         inputs_hash: params.inputsHash,
         inputs_preview: params.inputsPreview,
         cell: params.cellAddress,
