@@ -1,4 +1,3 @@
-import { applyMacroCellUpdates } from "./applyUpdates";
 import { DefaultMacroSecurityController } from "./security";
 import type { MacroCellUpdate, MacroSecurityStatus, MacroTrustDecision } from "./types";
 
@@ -20,8 +19,12 @@ type CellDelta = {
 
 type DocumentControllerLike = {
   on(event: "change", listener: (payload: { deltas: CellDelta[]; source?: string; recalc?: boolean }) => void): () => void;
-  beginBatch(options?: { label?: string }): void;
-  endBatch(): void;
+  // These APIs are supported by the real DocumentController, but tests/embedders may
+  // provide lighter stubs.
+  getCell?(sheetId: string, coord: { row: number; col: number }): any;
+  applyExternalDeltas?(deltas: any[], options?: { source?: string }): void;
+  beginBatch?(options?: { label?: string }): void;
+  endBatch?(): void;
   cancelBatch?(): void;
 };
 
@@ -86,8 +89,8 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   }
 }
 
-function inputEquals(before: CellState, after: CellState): boolean {
-  return valuesEqual(before.value ?? null, after.value ?? null) && (before.formula ?? null) === (after.formula ?? null);
+function inputEquals(before: CellState | null | undefined, after: CellState | null | undefined): boolean {
+  return valuesEqual(before?.value ?? null, after?.value ?? null) && (before?.formula ?? null) === (after?.formula ?? null);
 }
 
 function normalizeRect(rect: Rect): Rect {
@@ -96,6 +99,16 @@ function normalizeRect(rect: Rect): Rect {
   const startCol = Math.min(rect.startCol, rect.endCol);
   const endCol = Math.max(rect.startCol, rect.endCol);
   return { startRow, startCol, endRow, endCol };
+}
+
+function normalizeFormulaText(formula: unknown): string | null {
+  if (formula == null) return null;
+  if (typeof formula !== "string") return null;
+  const trimmed = formula.trim();
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = strippedLeading.trim();
+  if (stripped === "") return null;
+  return `=${stripped}`;
 }
 
 function unionCell(rect: Rect | undefined, row: number, col: number): Rect {
@@ -227,14 +240,51 @@ async function applyMacroUpdatesToDocument(
   if (!updates.length) return;
   const doc = app.getDocument();
 
-  doc.beginBatch({ label: options.label });
-  let committed = false;
-  try {
-    applyMacroCellUpdates(doc as any, updates);
-    committed = true;
-  } finally {
-    if (committed) doc.endBatch();
-    else doc.cancelBatch?.() ?? doc.endBatch();
+  if (typeof doc.getCell === "function" && typeof doc.applyExternalDeltas === "function") {
+    const deltas: any[] = [];
+    for (const update of updates) {
+      const sheetId = String(update?.sheetId ?? "").trim();
+      if (!sheetId) continue;
+      const row = Number(update?.row);
+      const col = Number(update?.col);
+      if (!Number.isInteger(row) || row < 0) continue;
+      if (!Number.isInteger(col) || col < 0) continue;
+
+      const before = doc.getCell(sheetId, { row, col });
+      const formula = normalizeFormulaText(update.formula);
+      const value = formula ? null : (update.value ?? null);
+      const after = { value, formula, styleId: before?.styleId ?? 0 };
+      if (inputEquals(before, after)) continue;
+      deltas.push({ sheetId, row, col, before, after });
+    }
+    if (deltas.length) {
+      // These updates already happened in the backend (VBA runtime). Apply them without
+      // creating a new undo step, and tag them so the workbook sync bridge doesn't echo
+      // them back to the backend via set_cell/set_range.
+      doc.applyExternalDeltas(deltas, { source: "macro" });
+    }
+  } else if (typeof doc.beginBatch === "function" && typeof doc.endBatch === "function") {
+    // Fallback for lightweight embedders/tests: apply updates as a normal batch edit.
+    doc.beginBatch({ label: options.label });
+    let committed = false;
+    try {
+      for (const update of updates) {
+        const sheetId = String(update?.sheetId ?? "").trim();
+        if (!sheetId) continue;
+        const row = Number(update?.row);
+        const col = Number(update?.col);
+        if (!Number.isInteger(row) || row < 0) continue;
+        if (!Number.isInteger(col) || col < 0) continue;
+
+        const formula = normalizeFormulaText(update.formula);
+        const value = formula ? null : (update.value ?? null);
+        (doc as any).setCellInput?.(sheetId, { row, col }, { value, formula });
+      }
+      committed = true;
+    } finally {
+      if (committed) doc.endBatch();
+      else doc.cancelBatch?.() ?? doc.endBatch();
+    }
   }
 
   app.refresh();
@@ -505,7 +555,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (!Array.isArray(deltas) || deltas.length === 0) return;
     if (eventsDisabled) return;
     if (applyingMacroUpdates) return;
-    if (source === "applyState") return;
+    if (source === "applyState" || source === "macro" || source === "python") return;
 
     // Only run Worksheet_Change when macros are already trusted.
     if (!eventsAllowed) return;
@@ -513,7 +563,6 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     for (const delta of deltas) {
       if (!delta?.before || !delta?.after) continue;
       if (inputEquals(delta.before, delta.after)) continue;
-
       const sheetId = String(delta?.sheetId ?? "").trim();
       if (!sheetId) continue;
       const row = Number(delta?.row);

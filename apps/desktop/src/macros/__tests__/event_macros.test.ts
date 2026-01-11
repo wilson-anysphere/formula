@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
-import { installVbaEventMacros } from "../event_macros";
+import { fireWorkbookBeforeCloseBestEffort, installVbaEventMacros } from "../event_macros";
 
 type Range = { startRow: number; startCol: number; endRow: number; endCol: number };
 
@@ -402,5 +402,56 @@ describe("VBA event macros wiring", () => {
     });
 
     wiring.dispose();
+  });
+
+  it("fires Workbook_BeforeClose via the best-effort helper and applies updates", async () => {
+    const calls: Array<{ cmd: string; args?: any }> = [];
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_before_close") {
+        return {
+          ok: true,
+          output: [],
+          updates: [
+            {
+              sheet_id: "Sheet1",
+              row: 0,
+              col: 0,
+              value: 42,
+              formula: null,
+              display_value: "42",
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    await fireWorkbookBeforeCloseBestEffort({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    expect(doc.getCell("Sheet1", { row: 0, col: 0 }).value).toBe(42);
+
+    const setIdx = calls.findIndex((c) => c.cmd === "set_macro_ui_context");
+    const closeIdx = calls.findIndex((c) => c.cmd === "fire_workbook_before_close");
+    expect(closeIdx).toBeGreaterThan(setIdx);
   });
 });
