@@ -79,7 +79,7 @@ pub(crate) fn apply_recalc_policy_to_parts(
     Ok(())
 }
 
-fn workbook_xml_force_full_calc_on_load(
+pub(crate) fn workbook_xml_force_full_calc_on_load(
     workbook_xml: &[u8],
 ) -> Result<Vec<u8>, RecalcPolicyError> {
     let mut reader = Reader::from_reader(workbook_xml);
@@ -135,7 +135,7 @@ fn patched_calc_pr(e: &BytesStart<'_>) -> Result<BytesStart<'static>, RecalcPoli
     Ok(calc_pr.into_owned())
 }
 
-fn workbook_rels_remove_calc_chain(rels_xml: &[u8]) -> Result<Vec<u8>, RecalcPolicyError> {
+pub(crate) fn workbook_rels_remove_calc_chain(rels_xml: &[u8]) -> Result<Vec<u8>, RecalcPolicyError> {
     const CALC_CHAIN_REL_TYPE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain";
 
@@ -184,7 +184,7 @@ fn relationship_type_is(e: &BytesStart<'_>, expected: &str) -> Result<bool, Reca
     Ok(false)
 }
 
-fn content_types_remove_calc_chain(ct_xml: &[u8]) -> Result<Vec<u8>, RecalcPolicyError> {
+pub(crate) fn content_types_remove_calc_chain(ct_xml: &[u8]) -> Result<Vec<u8>, RecalcPolicyError> {
     let mut reader = Reader::from_reader(ct_xml);
     reader.config_mut().trim_text(false);
     let mut writer = Writer::new(Vec::with_capacity(ct_xml.len()));

@@ -9,7 +9,12 @@ use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::openxml::{parse_relationships, resolve_target};
+use crate::recalc_policy::{
+    content_types_remove_calc_chain, workbook_rels_remove_calc_chain,
+    workbook_xml_force_full_calc_on_load, RecalcPolicyError,
+};
 use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
+use crate::RecalcPolicy;
 
 #[derive(Debug, Error)]
 pub enum StreamingPatchError {
@@ -31,6 +36,16 @@ pub enum StreamingPatchError {
     MissingSheetData(String),
     #[error("xlsx error: {0}")]
     Xlsx(#[from] crate::XlsxError),
+}
+
+impl From<RecalcPolicyError> for StreamingPatchError {
+    fn from(value: RecalcPolicyError) -> Self {
+        match value {
+            RecalcPolicyError::Io(err) => StreamingPatchError::Io(err),
+            RecalcPolicyError::Xml(err) => StreamingPatchError::Xml(err),
+            RecalcPolicyError::XmlAttr(err) => StreamingPatchError::XmlAttr(err),
+        }
+    }
 }
 
 /// Patch a single cell in a worksheet part (`xl/worksheets/sheetN.xml`).
@@ -87,6 +102,14 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
     output: W,
     cell_patches: &[WorksheetCellPatch],
 ) -> Result<(), StreamingPatchError> {
+    let recalc_policy = if cell_patches.iter().any(|p| p.formula.is_some()) {
+        // Match `XlsxPackage::apply_cell_patches` default: dropping calcChain and requesting a full
+        // calc on load is the safest behavior after formula edits.
+        RecalcPolicy::default()
+    } else {
+        RecalcPolicy::Preserve
+    };
+
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
     for patch in cell_patches {
         patches_by_part
@@ -100,7 +123,13 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
     }
 
     let mut archive = ZipArchive::new(input)?;
-    patch_xlsx_streaming_with_archive(&mut archive, output, &patches_by_part, &HashMap::new())?;
+    patch_xlsx_streaming_with_archive(
+        &mut archive,
+        output,
+        &patches_by_part,
+        &HashMap::new(),
+        recalc_policy,
+    )?;
     Ok(())
 }
 
@@ -134,6 +163,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
     }
 
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+    let mut saw_formula_patch = false;
     for (sheet_name, sheet_patches) in patches.sheets() {
         if sheet_patches.is_empty() {
             continue;
@@ -154,6 +184,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
                 CellPatch::Clear { .. } => (CellValue::Empty, None),
                 CellPatch::Set { value, formula, .. } => (value.clone(), formula.clone()),
             };
+            saw_formula_patch |= formula.is_some();
             let xf_index = patch.style_index();
             patches_by_part
                 .entry(worksheet_part.clone())
@@ -172,7 +203,19 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
         patches.sort_by_key(|p| (p.cell.row, p.cell.col));
     }
 
-    patch_xlsx_streaming_with_archive(&mut archive, output, &patches_by_part, &pre_read_parts)?;
+    let recalc_policy = if saw_formula_patch {
+        RecalcPolicy::default()
+    } else {
+        RecalcPolicy::Preserve
+    };
+
+    patch_xlsx_streaming_with_archive(
+        &mut archive,
+        output,
+        &patches_by_part,
+        &pre_read_parts,
+        recalc_policy,
+    )?;
     Ok(())
 }
 
@@ -181,6 +224,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     output: W,
     patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
     pre_read_parts: &HashMap<String, Vec<u8>>,
+    recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
     let mut missing_parts: BTreeMap<String, ()> =
         patches_by_part.keys().map(|k| (k.clone(), ())).collect();
@@ -196,9 +240,12 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         }
 
         let name = file.name().to_string();
-        if patches_by_part.contains_key(&name) || pre_read_parts.contains_key(&name) {
-            // Avoid reading entries that we already buffered for metadata resolution.
-            // We'll write the regenerated/cached bytes instead.
+
+        if recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
+            && name == "xl/calcChain.xml"
+        {
+            // Drop calcChain.xml entirely when formulas change, matching the in-memory patcher.
+            continue;
         }
 
         zip.start_file(name.clone(), options)?;
@@ -207,7 +254,10 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             missing_parts.remove(&name);
             patch_worksheet_xml_streaming(&mut file, &mut zip, &name, patches)?;
         } else if let Some(bytes) = pre_read_parts.get(&name) {
-            zip.write_all(bytes)?;
+            let bytes = maybe_patch_recalc_part(&name, bytes, recalc_policy)?;
+            zip.write_all(&bytes)?;
+        } else if let Some(updated) = patch_recalc_part_from_file(&name, &mut file, recalc_policy)? {
+            zip.write_all(&updated)?;
         } else {
             std::io::copy(&mut file, &mut zip)?;
         }
@@ -219,6 +269,60 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
 
     zip.finish()?;
     Ok(())
+}
+
+fn maybe_patch_recalc_part(
+    name: &str,
+    bytes: &[u8],
+    recalc_policy: RecalcPolicy,
+) -> Result<Vec<u8>, StreamingPatchError> {
+    match name {
+        "xl/workbook.xml"
+            if matches!(
+                recalc_policy,
+                RecalcPolicy::ForceFullCalcOnLoad | RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
+            ) =>
+        {
+            Ok(workbook_xml_force_full_calc_on_load(bytes)?)
+        }
+        "xl/_rels/workbook.xml.rels"
+            if recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad =>
+        {
+            Ok(workbook_rels_remove_calc_chain(bytes)?)
+        }
+        "[Content_Types].xml"
+            if recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad =>
+        {
+            Ok(content_types_remove_calc_chain(bytes)?)
+        }
+        _ => Ok(bytes.to_vec()),
+    }
+}
+
+fn patch_recalc_part_from_file<R: Read>(
+    name: &str,
+    file: &mut R,
+    recalc_policy: RecalcPolicy,
+) -> Result<Option<Vec<u8>>, StreamingPatchError> {
+    let should_patch = match name {
+        "xl/workbook.xml" => matches!(
+            recalc_policy,
+            RecalcPolicy::ForceFullCalcOnLoad | RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
+        ),
+        "xl/_rels/workbook.xml.rels" => {
+            recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
+        }
+        "[Content_Types].xml" => recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad,
+        _ => false,
+    };
+
+    if !should_patch {
+        return Ok(None);
+    }
+
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    Ok(Some(maybe_patch_recalc_part(name, &buf, recalc_policy)?))
 }
 
 fn read_zip_part<R: Read + Seek>(

@@ -232,6 +232,67 @@ fn streaming_patch_detaches_textless_shared_formula() -> Result<(), Box<dyn std:
 }
 
 #[test]
+fn streaming_patch_drops_calc_chain_when_formulas_change() -> Result<(), Box<dyn std::error::Error>>
+{
+    use zip::result::ZipError;
+
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/calc_settings.xlsx");
+    let bytes = fs::read(&fixture_path)?;
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(2.0),
+        Some("=1+1".to_string()),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    assert!(
+        matches!(archive.by_name("xl/calcChain.xml").err(), Some(ZipError::FileNotFound)),
+        "expected streaming patcher to drop xl/calcChain.xml after formula edits"
+    );
+
+    let mut workbook_xml = String::new();
+    archive
+        .by_name("xl/workbook.xml")?
+        .read_to_string(&mut workbook_xml)?;
+    let workbook_doc = roxmltree::Document::parse(&workbook_xml)?;
+    let calc_pr = workbook_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "calcPr")
+        .expect("workbook.xml should include <calcPr>");
+    assert_eq!(
+        calc_pr.attribute("fullCalcOnLoad"),
+        Some("1"),
+        "streaming patcher should force fullCalcOnLoad after formula edits"
+    );
+
+    let mut rels_xml = String::new();
+    archive
+        .by_name("xl/_rels/workbook.xml.rels")?
+        .read_to_string(&mut rels_xml)?;
+    assert!(
+        !rels_xml.contains("relationships/calcChain"),
+        "workbook.xml.rels should not contain calcChain relationship after formula edits"
+    );
+
+    let mut content_types = String::new();
+    archive
+        .by_name("[Content_Types].xml")?
+        .read_to_string(&mut content_types)?;
+    assert!(
+        !content_types.contains("calcChain.xml"),
+        "[Content_Types].xml should not reference calcChain.xml after formula edits"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn streaming_workbook_cell_patches_resolve_sheet_names() -> Result<(), Box<dyn std::error::Error>> {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/basic.xlsx");
