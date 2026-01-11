@@ -205,6 +205,7 @@ function findCycle(graph) {
  *   engine: QueryEngine;
  *   getContext?: () => QueryExecutionContext;
  *   concurrency?: number;
+ *   now?: () => number;
  * }} RefreshOrchestratorOptions
  */
 
@@ -225,6 +226,7 @@ export class RefreshOrchestrator {
     this.engine = options.engine;
     this.getContext = options.getContext ?? (() => ({}));
     this.concurrency = Math.max(1, options.concurrency ?? 2);
+    this.now = options.now ?? (() => Date.now());
 
     this.emitter = new Emitter();
 
@@ -372,8 +374,8 @@ export class RefreshOrchestrator {
 
     const engineSession =
       typeof this.engine.createSession === "function"
-        ? this.engine.createSession()
-        : { credentialCache: new Map(), permissionCache: new Map(), now: undefined };
+        ? this.engine.createSession({ now: this.now })
+        : { credentialCache: new Map(), permissionCache: new Map(), now: this.now };
 
     const engine = {
       /**
@@ -389,7 +391,7 @@ export class RefreshOrchestrator {
       },
     };
 
-    const manager = new RefreshManager({ engine, getContext: () => context, concurrency: this.concurrency });
+    const manager = new RefreshManager({ engine, getContext: () => context, concurrency: this.concurrency, now: this.now });
     for (const id of closure) {
       const query = this.registrations.get(id);
       if (query) manager.registerQuery(query, { type: "manual" });

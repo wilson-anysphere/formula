@@ -442,6 +442,17 @@ test("RefreshOrchestrator: shared execution session dedupes permission prompts",
   assert.equal(permissionRequests, 1);
 });
 
+test("RefreshOrchestrator: supports injecting a shared now() for the session", async () => {
+  const engine = new QueryEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1, now: () => 123 });
+  orchestrator.registerQuery(makeQuery("Q1", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+
+  const results = await orchestrator.refreshAll(["Q1"]).promise;
+  assert.equal(results["Q1"].meta.startedAt.getTime(), 123);
+  assert.equal(results["Q1"].meta.completedAt.getTime(), 123);
+  assert.equal(results["Q1"].meta.refreshedAt.getTime(), 123);
+});
+
 test("RefreshOrchestrator: cycle detection emits a clear error", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
