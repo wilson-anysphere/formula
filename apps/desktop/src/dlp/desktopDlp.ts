@@ -24,10 +24,10 @@ export function createDesktopDlpContext(params: {
   auditLogger?: InMemoryAuditLogger;
   classificationStore?: LocalClassificationStore;
 }): DesktopDlpContext {
-  const orgId = params.orgId ?? "local-org";
-  const documentId = params.documentId;
-
   const storage: StorageLike = safeStorage(params.storage ?? getLocalStorageOrNull() ?? createMemoryStorage());
+  const documentId = params.documentId;
+  const orgId =
+    typeof params.orgId === "string" && params.orgId.trim().length > 0 ? params.orgId.trim() : loadActiveOrgId(storage);
 
   const policyStore = new LocalPolicyStore({ storage });
   let orgPolicy: any = createDefaultOrgPolicy();
@@ -52,6 +52,17 @@ export function createDesktopDlpContext(params: {
   const auditLogger = params.auditLogger ?? new InMemoryAuditLogger();
 
   return { orgId, documentId, policy, classificationStore, auditLogger };
+}
+
+function loadActiveOrgId(storage: StorageLike): string {
+  // Desktop currently doesn't have a first-class org/session concept. Allow tests or
+  // future integrations to configure the active org id via localStorage.
+  const candidates = ["dlp:activeOrgId", "formula:activeOrgId", "formula:orgId"];
+  for (const key of candidates) {
+    const value = storage.getItem(key);
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "default";
 }
 
 function safeStorage(storage: StorageLike): StorageLike {
