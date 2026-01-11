@@ -860,6 +860,8 @@ test("rangeRestrictions: legacy cell key formats cannot bypass protected ranges"
   // and still be rejected.
   await attemptLegacyWrite("r0c1");
   await attemptLegacyWrite("Sheet1:0,1");
+  await attemptLegacyWrite(":0:1");
+  await attemptLegacyWrite(":0,1");
 
   await waitForCondition(async () => {
     try {
@@ -867,7 +869,9 @@ test("rangeRestrictions: legacy cell key formats cannot bypass protected ranges"
       const ok =
         getCellValue(persisted, "Sheet1:0:1") === "initB" &&
         getCellsMap(persisted).has("r0c1") === false &&
-        getCellsMap(persisted).has("Sheet1:0,1") === false;
+        getCellsMap(persisted).has("Sheet1:0,1") === false &&
+        getCellsMap(persisted).has(":0:1") === false &&
+        getCellsMap(persisted).has(":0,1") === false;
       persisted.destroy();
       return ok;
     } catch {
@@ -881,4 +885,6 @@ test("rangeRestrictions: legacy cell key formats cannot bypass protected ranges"
   assert.equal(getCellValue(persisted, "Sheet1:0:1"), "initB");
   assert.equal(getCellsMap(persisted).has("r0c1"), false);
   assert.equal(getCellsMap(persisted).has("Sheet1:0,1"), false);
+  assert.equal(getCellsMap(persisted).has(":0:1"), false);
+  assert.equal(getCellsMap(persisted).has(":0,1"), false);
 });
