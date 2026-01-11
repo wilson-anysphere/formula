@@ -36,6 +36,8 @@ describe("Sandbox audit trail", () => {
       code: `await fs.readFile(${JSON.stringify(filePath)}, "utf8");\nreturn null;`
     });
 
+    // AuditLogger normalizes the legacy `metadata` field into `details` on the
+    // canonical AuditEvent schema.
     const types = events.map((e) => [e.eventType, e.details?.phase ?? null]);
 
     // Ensure ordering within the run.
