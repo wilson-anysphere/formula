@@ -212,8 +212,28 @@ def main() -> int:
             f"actual={actual_sha} cases={cases_sha}"
         )
 
-    expected_index = _index_results(expected.get("results", []))
-    actual_index = _index_results(actual.get("results", []))
+    expected_results = expected.get("results", [])
+    if not isinstance(expected_results, list):
+        raise SystemExit("Expected dataset 'results' must be an array.")
+    expected_count = expected_case_set.get("count") if isinstance(expected_case_set, dict) else None
+    if isinstance(expected_count, int) and expected_count != len(expected_results):
+        raise SystemExit(
+            "Expected dataset caseSet.count does not match results length. "
+            f"count={expected_count} results={len(expected_results)}"
+        )
+
+    actual_results = actual.get("results", [])
+    if not isinstance(actual_results, list):
+        raise SystemExit("Actual dataset 'results' must be an array.")
+    actual_count = actual_case_set.get("count") if isinstance(actual_case_set, dict) else None
+    if isinstance(actual_count, int) and actual_count != len(actual_results):
+        raise SystemExit(
+            "Actual dataset caseSet.count does not match results length. "
+            f"count={actual_count} results={len(actual_results)}"
+        )
+
+    expected_index = _index_results(expected_results)
+    actual_index = _index_results(actual_results)
 
     cfg = CompareConfig(abs_tol=args.abs_tol, rel_tol=args.rel_tol)
 
