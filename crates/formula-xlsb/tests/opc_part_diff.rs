@@ -222,6 +222,48 @@ fn patch_writer_allows_only_expected_calc_chain_side_effects() {
         format_report(&report)
     );
 
+    for diff in report
+        .differences
+        .iter()
+        .filter(|d| d.part == "[Content_Types].xml")
+    {
+        let mentions_calc_chain = diff.path.contains("calcChain")
+            || diff
+                .expected
+                .as_deref()
+                .map_or(false, |value| value.contains("calcChain"))
+            || diff
+                .actual
+                .as_deref()
+                .map_or(false, |value| value.contains("calcChain"));
+        assert!(
+            mentions_calc_chain,
+            "unexpected diff in [Content_Types].xml:\n{diff}\nfull report:\n{}",
+            format_report(&report)
+        );
+    }
+    for diff in report
+        .differences
+        .iter()
+        .filter(|d| d.part == "xl/_rels/workbook.bin.rels")
+    {
+        let mentions_calc_chain = diff.path.contains("rId4")
+            || diff.path.contains("calcChain")
+            || diff
+                .expected
+                .as_deref()
+                .map_or(false, |value| value.contains("calcChain"))
+            || diff
+                .actual
+                .as_deref()
+                .map_or(false, |value| value.contains("calcChain"));
+        assert!(
+            mentions_calc_chain,
+            "unexpected diff in xl/_rels/workbook.bin.rels:\n{diff}\nfull report:\n{}",
+            format_report(&report)
+        );
+    }
+
     let diff_parts: BTreeSet<String> = report.differences.iter().map(|d| d.part.clone()).collect();
     let unexpected_parts: Vec<_> = diff_parts
         .difference(&allowed_parts)
