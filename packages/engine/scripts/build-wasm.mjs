@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +12,9 @@ const repoRoot = path.resolve(__dirname, "..", "..", "..");
 
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
 const coreDir = path.join(repoRoot, "crates", "formula-core");
+const engineDir = path.join(repoRoot, "crates", "formula-engine");
+const xlsxDir = path.join(repoRoot, "crates", "formula-xlsx");
+const modelDir = path.join(repoRoot, "crates", "formula-model");
 
 const outDir = path.join(repoRoot, "packages", "engine", "pkg");
 // Note: `wasm-pack build --out-dir` is documented as a *relative* path and is
@@ -47,6 +50,83 @@ async function latestMtime(entryPath) {
   }
 
   return latest;
+}
+
+function isDependencyKeyValueTable(tableName) {
+  if (tableName === "dependencies" || tableName === "build-dependencies") return true;
+  if (!tableName.startsWith("target.")) return false;
+  return tableName.endsWith(".dependencies") || tableName.endsWith(".build-dependencies");
+}
+
+function isDependencyDetailTable(tableName) {
+  if (tableName.startsWith("dependencies.") || tableName.startsWith("build-dependencies.")) return true;
+  if (!tableName.startsWith("target.")) return false;
+  return tableName.includes(".dependencies.") || tableName.includes(".build-dependencies.");
+}
+
+function extractPathDependencies(cargoToml) {
+  const deps = new Set();
+  let currentTable = null;
+
+  for (const rawLine of cargoToml.split(/\r?\n/)) {
+    const withoutComment = rawLine.split("#")[0];
+    const line = withoutComment.trim();
+    if (!line) continue;
+
+    const headerMatch = line.match(/^\[([^\]]+)\]\s*$/);
+    if (headerMatch) {
+      currentTable = headerMatch[1].trim();
+      continue;
+    }
+
+    if (currentTable && isDependencyKeyValueTable(currentTable)) {
+      const inlineTableMatch = line.match(/^[A-Za-z0-9_-]+\s*=\s*\{([^}]*)\}\s*$/);
+      if (!inlineTableMatch) continue;
+
+      const body = inlineTableMatch[1];
+      const pathMatch = body.match(/\bpath\s*=\s*(?:"([^"]+)"|'([^']+)')/);
+      const depPath = pathMatch?.[1] ?? pathMatch?.[2];
+      if (depPath) deps.add(depPath);
+      continue;
+    }
+
+    if (currentTable && isDependencyDetailTable(currentTable)) {
+      const pathMatch = line.match(/^path\s*=\s*(?:"([^"]+)"|'([^']+)')\s*$/);
+      const depPath = pathMatch?.[1] ?? pathMatch?.[2];
+      if (depPath) deps.add(depPath);
+    }
+  }
+
+  return Array.from(deps);
+}
+
+async function collectDependencyCrates(entryDirs) {
+  const visited = new Set();
+  const queue = [...entryDirs];
+
+  while (queue.length > 0) {
+    const cratePath = queue.pop();
+    if (!cratePath) continue;
+
+    const crateDirPath = path.resolve(cratePath);
+    if (visited.has(crateDirPath)) continue;
+
+    const manifestPath = path.join(crateDirPath, "Cargo.toml");
+    if (!existsSync(manifestPath)) continue;
+
+    visited.add(crateDirPath);
+
+    const cargoToml = await readFile(manifestPath, "utf8");
+    const depPaths = extractPathDependencies(cargoToml);
+    for (const depPath of depPaths) {
+      const resolved = path.resolve(crateDirPath, depPath);
+      if (existsSync(path.join(resolved, "Cargo.toml"))) {
+        queue.push(resolved);
+      }
+    }
+  }
+
+  return visited;
 }
 
 async function copyRuntimeAssets(sourceDir, destDir) {
@@ -87,11 +167,12 @@ if (!existsSync(path.join(crateDir, "Cargo.toml"))) {
 const outputExists = existsSync(wrapper) && existsSync(wasm);
 if (outputExists) {
   const outputStamp = Math.min((await stat(wrapper)).mtimeMs, (await stat(wasm)).mtimeMs);
-  const sourceStamp = Math.max(
-    await latestMtime(crateDir),
-    await latestMtime(coreDir),
-    await latestMtime(path.join(repoRoot, "Cargo.lock"))
-  );
+  const dependencyCrates = await collectDependencyCrates([crateDir, coreDir, engineDir, xlsxDir, modelDir]);
+
+  let sourceStamp = await latestMtime(path.join(repoRoot, "Cargo.lock"));
+  for (const dependencyCrate of dependencyCrates) {
+    sourceStamp = Math.max(sourceStamp, await latestMtime(dependencyCrate));
+  }
 
   if (outputStamp >= sourceStamp) {
     console.log("[formula] WASM artifacts up to date; copying runtime assets into apps/*/public/engine.");
