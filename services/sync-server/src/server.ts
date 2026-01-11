@@ -162,6 +162,20 @@ function toErrorMessage(err: unknown): string {
   return typeof err === "string" ? err : JSON.stringify(err);
 }
 
+function statusCodeForIntrospectionFailure(reason: string | undefined): 401 | 403 {
+  switch (reason) {
+    case "invalid_token":
+    case "token_expired":
+    case "session_not_found":
+    case "session_revoked":
+    case "session_expired":
+    case "session_user_mismatch":
+      return 401;
+    default:
+      return 403;
+  }
+}
+
 export type SyncServerHandle = {
   start: () => Promise<{ port: number }>;
   stop: () => Promise<void>;
@@ -1377,19 +1391,28 @@ export function createSyncServer(
               userAgent,
             });
 
-            if (!introspection.ok) {
+            if (!introspection.active) {
+              const statusCode = statusCodeForIntrospectionFailure(introspection.reason);
               recordUpgradeRejection("auth_failure");
               logger.warn(
                 {
                   ip,
                   docName,
+                  statusCode,
+                  reason: introspection.reason ?? "inactive",
                   userId: authCtx.userId,
-                  error: introspection.error ?? "forbidden",
                 },
-                "ws_connection_rejected_introspection_forbidden"
+                "ws_connection_rejected_introspection_inactive"
               );
-              sendUpgradeRejection(socket, 403, introspection.error ?? "forbidden");
+              sendUpgradeRejection(socket, statusCode, introspection.reason ?? "inactive");
               return;
+            }
+
+            // Sync token introspection may clamp the effective role to the current
+            // DB membership. Prefer the introspected role so demotions take effect
+            // even if the client is still holding an older token.
+            if (introspection.role) {
+              authCtx.role = introspection.role;
             }
           } catch (err) {
             recordUpgradeRejection("auth_failure");

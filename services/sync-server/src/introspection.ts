@@ -1,12 +1,11 @@
 import type { SyncRole } from "./auth.js";
 
 export type SyncTokenIntrospectionResult = {
-  ok: boolean;
+  active: boolean;
+  reason?: string;
   userId?: string;
   orgId?: string;
   role?: SyncRole;
-  sessionId?: string | null;
-  error?: string;
 };
 
 function parseRole(value: unknown): SyncRole | undefined {
@@ -28,26 +27,30 @@ function parseIntrospectionResult(value: unknown): SyncTokenIntrospectionResult 
   }
 
   const obj = value as Record<string, unknown>;
-  if (typeof obj.ok !== "boolean") {
-    throw new Error('Invalid introspection response (missing boolean "ok")');
+  const active =
+    typeof obj.active === "boolean"
+      ? obj.active
+      : typeof obj.ok === "boolean"
+        ? obj.ok
+        : null;
+  if (active === null) {
+    throw new Error('Invalid introspection response (missing boolean "active")');
   }
 
+  const reason =
+    typeof obj.reason === "string" && obj.reason.length > 0
+      ? obj.reason
+      : undefined;
   const userId = typeof obj.userId === "string" && obj.userId.length > 0 ? obj.userId : undefined;
   const orgId = typeof obj.orgId === "string" && obj.orgId.length > 0 ? obj.orgId : undefined;
   const role = parseRole(obj.role);
-  const sessionId =
-    obj.sessionId === undefined || obj.sessionId === null || (typeof obj.sessionId === "string" && obj.sessionId.length > 0)
-      ? (obj.sessionId as string | null | undefined)
-      : undefined;
-  const error = typeof obj.error === "string" && obj.error.length > 0 ? obj.error : undefined;
 
   return {
-    ok: obj.ok,
+    active,
+    reason,
     userId,
     orgId,
-    role,
-    sessionId,
-    error
+    role
   };
 }
 
@@ -109,18 +112,11 @@ export function createSyncTokenIntrospectionClient(config: {
         signal: AbortSignal.timeout(5_000)
       });
 
-      const json = (await res.json().catch(() => null)) as unknown;
-
-      if (res.status === 403) {
-        // Token is inactive/invalid. API returns `{ ok: false, error: "forbidden" }`.
-        if (!json) return { ok: false, error: "forbidden" };
-        return parseIntrospectionResult(json);
-      }
-
       if (!res.ok) {
         throw new Error(`Introspection request failed (${res.status})`);
       }
 
+      const json = (await res.json()) as unknown;
       return parseIntrospectionResult(json);
     })();
 

@@ -126,8 +126,13 @@ describe("internal: sync token introspection", () => {
         headers: { "x-internal-admin-token": config.internalAdminToken! },
         payload: { token, docId, clientIp: "203.0.113.5", userAgent: "vitest" }
       });
-      expect(blocked.statusCode).toBe(403);
-      expect(blocked.json()).toEqual({ ok: false, error: "forbidden" });
+      expect(blocked.statusCode).toBe(200);
+      expect(blocked.json()).toMatchObject({
+        ok: false,
+        active: false,
+        error: "forbidden",
+        reason: "ip_not_allowed"
+      });
     },
     20_000
   );

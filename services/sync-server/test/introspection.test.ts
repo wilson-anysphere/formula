@@ -107,7 +107,7 @@ test("sync-server rejects connections when introspection marks token inactive", 
         typeof header === "string" ? header : Array.isArray(header) ? header[0] : undefined;
       if (provided !== introspectionAdminToken) {
         res.writeHead(403, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+        res.end(JSON.stringify({ ok: false, active: false, error: "forbidden" }));
         return;
       }
 
@@ -118,15 +118,35 @@ test("sync-server rejects connections when introspection marks token inactive", 
       const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as any;
       calls.push({ token: parsed.token as string, docId: parsed.docId as string });
 
+      let body: any;
       if (parsed.token === okToken) {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, userId: "u-ok", orgId: "o1", role: "editor" }));
-        return;
+        body = { ok: true, active: true, userId: "u-ok", orgId: "o1", role: "editor" };
+      } else if (parsed.token === revokedToken) {
+        body = {
+          ok: false,
+          active: false,
+          error: "forbidden",
+          reason: "session_revoked",
+          userId: "u-revoked",
+          orgId: "o1",
+          role: "editor",
+        };
+      } else if (parsed.token === notMemberToken) {
+        body = {
+          ok: false,
+          active: false,
+          error: "forbidden",
+          reason: "not_member",
+          userId: "u-removed",
+          orgId: "o1",
+          role: "editor",
+        };
+      } else {
+        body = { ok: false, active: false, error: "forbidden", reason: "unknown_token" };
       }
 
-      // Token rejected.
-      res.writeHead(403, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
     })().catch((err) => {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "internal_error", message: String(err) }));
@@ -170,7 +190,7 @@ test("sync-server rejects connections when introspection marks token inactive", 
 
   await expectWebSocketUpgradeStatus(
     `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(revokedToken)}`,
-    403
+    401
   );
 
   await expectWebSocketUpgradeStatus(
