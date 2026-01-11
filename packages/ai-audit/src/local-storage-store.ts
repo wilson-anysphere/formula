@@ -39,28 +39,47 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
   }
 
   private loadEntries(): AIAuditEntry[] {
-    if (!hasLocalStorage()) return this.memoryFallback;
-    const raw = globalThis.localStorage.getItem(this.key);
-    if (!raw) return [];
+    const storage = getLocalStorageOrNull();
+    if (!storage) return this.memoryFallback.slice();
+
     try {
+      const raw = storage.getItem(this.key);
+      if (!raw) return [];
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? (parsed as AIAuditEntry[]) : [];
     } catch {
-      return [];
+      // localStorage can throw in some environments (e.g. Node webstorage without a file,
+      // Safari private mode). Fall back to in-memory storage.
+      return this.memoryFallback.slice();
     }
   }
 
   private saveEntries(entries: AIAuditEntry[]): void {
-    if (!hasLocalStorage()) {
+    const storage = getLocalStorageOrNull();
+    if (!storage) {
       this.memoryFallback.length = 0;
       this.memoryFallback.push(...entries);
       return;
     }
-    globalThis.localStorage.setItem(this.key, JSON.stringify(entries));
+
+    try {
+      storage.setItem(this.key, JSON.stringify(entries));
+    } catch {
+      // If persistence fails, at least keep the latest entries in memory.
+      this.memoryFallback.length = 0;
+      this.memoryFallback.push(...entries);
+    }
   }
 }
 
-function hasLocalStorage(): boolean {
-  return typeof globalThis !== "undefined" && typeof globalThis.localStorage !== "undefined";
+function getLocalStorageOrNull(): Storage | null {
+  try {
+    if (typeof globalThis === "undefined") return null;
+    const storage = globalThis.localStorage;
+    if (!storage) return null;
+    if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
+    return storage;
+  } catch {
+    return null;
+  }
 }
-
