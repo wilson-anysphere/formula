@@ -1,4 +1,4 @@
-export type AIMode = "tab_completion" | "inline_edit" | "chat" | "agent";
+export type AIMode = "tab_completion" | "inline_edit" | "chat" | "agent" | "cell_function";
 
 export interface TokenUsage {
   prompt_tokens: number;

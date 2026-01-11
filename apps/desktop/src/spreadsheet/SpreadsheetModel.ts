@@ -1,5 +1,6 @@
 import { FormulaBarModel } from "../formula-bar/FormulaBarModel.js";
 import { evaluateFormula, type SpreadsheetValue } from "./evaluateFormula.js";
+import { AiCellFunctionEngine } from "./AiCellFunctionEngine.js";
 import { normalizeRange, parseA1, rangeToA1, toA1, type CellAddress, type RangeAddress } from "./a1.js";
 import { TabCompletionEngine } from "@formula/ai-completion";
 
@@ -8,6 +9,7 @@ export type Cell = { input: string; value: SpreadsheetValue };
 export class SpreadsheetModel {
   readonly formulaBar = new FormulaBarModel();
   readonly #cells = new Map<string, Cell>();
+  readonly #aiCellFunctions = new AiCellFunctionEngine({ onUpdate: () => this.#recomputeAiCells() });
   readonly #completion = new TabCompletionEngine();
   #completionRequest = 0;
   #pendingCompletion: Promise<void> | null = null;
@@ -47,7 +49,10 @@ export class SpreadsheetModel {
   }
 
   setCellInput(address: string, input: string): void {
-    const value = evaluateFormula(input, (ref) => this.getCellValue(ref));
+    const value = evaluateFormula(input, (ref) => this.getCellValue(ref), {
+      ai: this.#aiCellFunctions,
+      cellAddress: address
+    });
     this.#cells.set(address, { input, value });
     this.#cellsVersion += 1;
     if (address === this.#activeCell) {
@@ -162,4 +167,33 @@ export class SpreadsheetModel {
         this.formulaBar.setAiSuggestion(null);
       });
   }
+
+  #recomputeAiCells(): void {
+    let changed = false;
+    for (const [address, cell] of this.#cells) {
+      if (!isAiFormula(cell.input)) continue;
+      const value = evaluateFormula(cell.input, (ref) => this.getCellValue(ref), {
+        ai: this.#aiCellFunctions,
+        cellAddress: address
+      });
+      if (value === cell.value) continue;
+      this.#cells.set(address, { input: cell.input, value });
+      changed = true;
+    }
+
+    if (!changed) return;
+    this.#cellsVersion += 1;
+
+    if (this.#activeCell && !this.formulaBar.isEditing) {
+      const active = this.getCell(this.#activeCell);
+      this.formulaBar.setActiveCell({ address: this.#activeCell, input: active.input, value: active.value });
+    }
+  }
+}
+
+function isAiFormula(input: string): boolean {
+  const trimmed = input.trimStart();
+  if (!trimmed.startsWith("=")) return false;
+  const upper = trimmed.slice(1).trimStart().toUpperCase();
+  return upper.startsWith("AI(") || upper.startsWith("AI.");
 }

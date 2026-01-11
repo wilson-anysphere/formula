@@ -4,6 +4,15 @@ import { tokenizeFormula } from "../formula-bar/highlight/tokenizeFormula.js";
 export type SpreadsheetValue = number | string | boolean | null;
 export type CellValue = SpreadsheetValue | SpreadsheetValue[];
 
+export interface AiFunctionEvaluator {
+  evaluateAiFunction(params: { name: string; args: CellValue[]; cellAddress?: string }): SpreadsheetValue;
+}
+
+export interface EvaluateFormulaOptions {
+  ai?: AiFunctionEvaluator;
+  cellAddress?: string;
+}
+
 function isErrorCode(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("#");
 }
@@ -109,8 +118,16 @@ function flattenNumbers(values: CellValue[], out: number[]): string | null {
 
 type GetCellValue = (address: string) => SpreadsheetValue;
 
-function evalFunction(name: string, args: CellValue[], getCellValue: GetCellValue): SpreadsheetValue {
+function evalFunction(
+  name: string,
+  args: CellValue[],
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions
+): SpreadsheetValue {
   const upper = name.toUpperCase();
+  if (upper === "AI" || upper === "AI.EXTRACT" || upper === "AI.CLASSIFY" || upper === "AI.TRANSLATE") {
+    return options.ai ? options.ai.evaluateAiFunction({ name: upper, args, cellAddress: options.cellAddress }) : "#NAME?";
+  }
   if (upper === "SUM") {
     const nums: number[] = [];
     const err = flattenNumbers(args, nums);
@@ -171,7 +188,7 @@ function toA1(addr: { row: number; col: number }): string {
   return `${col}${addr.row + 1}`;
 }
 
-function parsePrimary(parser: Parser, getCellValue: GetCellValue): CellValue {
+function parsePrimary(parser: Parser, getCellValue: GetCellValue, options: EvaluateFormulaOptions): CellValue {
   const tok = parser.peek();
   if (!tok) return null;
 
@@ -208,19 +225,19 @@ function parsePrimary(parser: Parser, getCellValue: GetCellValue): CellValue {
     const args: CellValue[] = [];
     if (!parser.match("paren", ")")) {
       while (true) {
-        args.push(parseExpression(parser, getCellValue));
+        args.push(parseExpression(parser, getCellValue, options));
         if (parser.match("comma", ",")) continue;
         if (parser.match("paren", ")")) break;
         return "#VALUE!";
       }
     }
 
-    return evalFunction(name, args, getCellValue);
+    return evalFunction(name, args, getCellValue, options);
   }
 
   if (tok.type === "paren" && tok.value === "(") {
     parser.consume();
-    const inner = parseExpression(parser, getCellValue);
+    const inner = parseExpression(parser, getCellValue, options);
     if (!parser.match("paren", ")")) return "#VALUE!";
     return inner;
   }
@@ -228,27 +245,27 @@ function parsePrimary(parser: Parser, getCellValue: GetCellValue): CellValue {
   return "#VALUE!";
 }
 
-function parseUnary(parser: Parser, getCellValue: GetCellValue): CellValue {
+function parseUnary(parser: Parser, getCellValue: GetCellValue, options: EvaluateFormulaOptions): CellValue {
   const tok = parser.peek();
   if (tok?.type === "operator" && (tok.value === "+" || tok.value === "-")) {
     parser.consume();
-    const rhs = parseUnary(parser, getCellValue);
+    const rhs = parseUnary(parser, getCellValue, options);
     if (isErrorCode(rhs)) return rhs;
     if (Array.isArray(rhs)) return "#VALUE!";
     const num = toNumber(rhs as SpreadsheetValue);
     if (num === null) return "#VALUE!";
     return tok.value === "-" ? -num : num;
   }
-  return parsePrimary(parser, getCellValue);
+  return parsePrimary(parser, getCellValue, options);
 }
 
-function parseTerm(parser: Parser, getCellValue: GetCellValue): CellValue {
-  let left = parseUnary(parser, getCellValue);
+function parseTerm(parser: Parser, getCellValue: GetCellValue, options: EvaluateFormulaOptions): CellValue {
+  let left = parseUnary(parser, getCellValue, options);
   while (true) {
     const tok = parser.peek();
     if (!tok || tok.type !== "operator" || (tok.value !== "*" && tok.value !== "/")) break;
     parser.consume();
-    const right = parseUnary(parser, getCellValue);
+    const right = parseUnary(parser, getCellValue, options);
     if (isErrorCode(left)) return left;
     if (isErrorCode(right)) return right;
     if (Array.isArray(left) || Array.isArray(right)) return "#VALUE!";
@@ -265,13 +282,13 @@ function parseTerm(parser: Parser, getCellValue: GetCellValue): CellValue {
   return left;
 }
 
-function parseExpression(parser: Parser, getCellValue: GetCellValue): CellValue {
-  let left = parseTerm(parser, getCellValue);
+function parseExpression(parser: Parser, getCellValue: GetCellValue, options: EvaluateFormulaOptions): CellValue {
+  let left = parseTerm(parser, getCellValue, options);
   while (true) {
     const tok = parser.peek();
     if (!tok || tok.type !== "operator" || (tok.value !== "+" && tok.value !== "-")) break;
     parser.consume();
-    const right = parseTerm(parser, getCellValue);
+    const right = parseTerm(parser, getCellValue, options);
     if (isErrorCode(left)) return left;
     if (isErrorCode(right)) return right;
     if (Array.isArray(left) || Array.isArray(right)) return "#VALUE!";
@@ -283,7 +300,11 @@ function parseExpression(parser: Parser, getCellValue: GetCellValue): CellValue 
   return left;
 }
 
-export function evaluateFormula(formulaText: string, getCellValue: GetCellValue): SpreadsheetValue {
+export function evaluateFormula(
+  formulaText: string,
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions = {}
+): SpreadsheetValue {
   const text = formulaText.trim();
   if (!text.startsWith("=")) {
     const maybeNum = Number(text);
@@ -293,7 +314,7 @@ export function evaluateFormula(formulaText: string, getCellValue: GetCellValue)
 
   const tokens = lex(text.slice(1));
   const parser = new Parser(tokens);
-  const value = parseExpression(parser, getCellValue);
+  const value = parseExpression(parser, getCellValue, options);
   if (isErrorCode(value)) return value;
   if (Array.isArray(value)) return (value[0] ?? null) as SpreadsheetValue;
   return value as SpreadsheetValue;

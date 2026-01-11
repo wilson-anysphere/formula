@@ -37,6 +37,7 @@ import {
 } from "@formula/engine";
 import { drawCommentIndicator } from "../comments/CommentIndicator";
 import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
+import { AiCellFunctionEngine } from "../spreadsheet/AiCellFunctionEngine.js";
 import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
 import { parseGoTo } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
@@ -229,6 +230,7 @@ export class SpreadsheetApp {
   );
   private readonly document = new DocumentController({ engine: this.engine });
   private readonly searchWorkbook = new DocumentWorkbookAdapter({ document: this.document });
+  private readonly aiCellFunctions: AiCellFunctionEngine;
   private limits: GridLimits;
 
   private wasmEngine: EngineClient | null = null;
@@ -505,6 +507,11 @@ export class SpreadsheetApp {
       chart_type: "bar",
       data_range: "Sheet1!A2:B5",
       title: "Example Chart"
+    });
+
+    this.aiCellFunctions = new AiCellFunctionEngine({
+      onUpdate: () => this.refresh(),
+      cache: { persistKey: "formula:ai_cell_cache" },
     });
 
     // Initial layout + render.
@@ -1867,6 +1874,9 @@ export class SpreadsheetApp {
         const normalized = ref.replaceAll("$", "");
         const coord = parseA1(normalized);
         return this.computeCellValue(coord, memo, stack);
+      }, {
+        ai: this.aiCellFunctions,
+        cellAddress: `${this.sheetId}!${key}`,
       });
     } else if (state?.value != null) {
       value = state.value as SpreadsheetValue;
