@@ -221,3 +221,55 @@ fn patching_shared_string_cell_appends_to_shared_strings_bin() {
         "expected sharedStrings.bin to contain 'New'"
     );
 }
+
+#[test]
+fn inserting_new_text_cell_uses_shared_string_record_and_updates_shared_strings_bin() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.set_cell_sst(0, 0, 0);
+
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open input workbook");
+    wb.save_with_cell_edits_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Text("New".to_string()),
+            new_formula: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_shared_strings");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open output workbook");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let b1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 1)
+        .expect("B1 exists");
+    assert_eq!(b1.value, CellValue::Text("New".to_string()));
+
+    let sheet_bin = read_zip_part(output_path.to_str().unwrap(), "xl/worksheets/sheet1.bin");
+    let (id, payload) = find_cell_record(&sheet_bin, 0, 1).expect("find B1 record");
+    assert_eq!(id, 0x0007, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+        1,
+        "expected B1 to reference appended shared string index 1"
+    );
+
+    let shared_strings_bin = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    let info = read_shared_strings_info(&shared_strings_bin);
+    assert_eq!(info.unique_count, Some(2));
+    assert_eq!(info.strings.len(), 2);
+    assert_eq!(info.strings[1], "New");
+ }

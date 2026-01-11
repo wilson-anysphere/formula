@@ -423,9 +423,19 @@ impl XlsbWorkbook {
             let CellValue::Text(text) = &edit.new_value else {
                 continue;
             };
+
             let coord = (edit.row, edit.col);
-            if matches!(cell_record_ids.get(&coord), Some(&biff12::STRING)) {
-                edit.shared_string_index = Some(sst.intern_plain(text)?);
+            match cell_record_ids.get(&coord) {
+                Some(&biff12::STRING) => {
+                    // Preserve existing shared-string cells as shared-string references.
+                    edit.shared_string_index = Some(sst.intern_plain(text)?);
+                }
+                None => {
+                    // Newly inserted text cells can also use the shared string table, since we're
+                    // already updating `xl/sharedStrings.bin`.
+                    edit.shared_string_index = Some(sst.intern_plain(text)?);
+                }
+                _ => {}
             }
         }
 
