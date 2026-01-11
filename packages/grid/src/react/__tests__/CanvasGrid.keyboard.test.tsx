@@ -209,6 +209,77 @@ describe("CanvasGrid keyboard navigation", () => {
     host.remove();
   });
 
+  it("excludes header rows/cols when using Excel-style selection shortcuts", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onSelectionChange = vi.fn();
+    const onSelectionRangeChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={10}
+          colCount={10}
+          headerRows={1}
+          headerCols={1}
+          apiRef={apiRef}
+          onSelectionChange={onSelectionChange}
+          onSelectionRangeChange={onSelectionRangeChange}
+        />
+      );
+    });
+
+    await act(async () => {
+      apiRef.current?.setSelection(2, 3);
+    });
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    container.focus();
+
+    await act(async () => {
+      container.dispatchEvent(
+        new KeyboardEvent("keydown", { key: " ", code: "Space", ctrlKey: true, bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(onSelectionRangeChange).toHaveBeenCalledWith({ startRow: 1, endRow: 10, startCol: 3, endCol: 4 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 1, endRow: 10, startCol: 3, endCol: 4 });
+
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: " ", code: "Space", shiftKey: true, bubbles: true, cancelable: true }));
+    });
+
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(onSelectionRangeChange).toHaveBeenCalledWith({ startRow: 2, endRow: 3, startCol: 1, endCol: 10 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 2, endRow: 3, startCol: 1, endCol: 10 });
+
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(onSelectionRangeChange).toHaveBeenCalledWith({ startRow: 1, endRow: 10, startCol: 1, endCol: 10 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 1, endRow: 10, startCol: 1, endCol: 10 });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
   it("moves horizontally with Alt+PageDown/PageUp", async () => {
     const apiRef = React.createRef<GridApi>();
     const onSelectionChange = vi.fn();
