@@ -529,6 +529,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         rootObserver.observe(root, { attributes: true, attributeFilter: ["style", "class"] });
         observers.push(rootObserver);
       }
+
+      const body = container.ownerDocument?.body;
+      if (body && body !== container && body !== root) {
+        const bodyObserver = new MutationObserver(() => refreshTheme());
+        bodyObserver.observe(body, { attributes: true, attributeFilter: ["style", "class"] });
+        observers.push(bodyObserver);
+      }
     }
 
     const canMatchMedia = typeof window !== "undefined" && typeof window.matchMedia === "function";
