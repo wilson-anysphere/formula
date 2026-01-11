@@ -1071,4 +1071,55 @@ mod tests {
 
         assert!(pkg.part("xl/activeX/activeX1.bin").is_none());
     }
+
+    #[test]
+    fn remove_vba_project_strips_drawing_embed_references() {
+        let drawing_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+ xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:twoCellAnchor>
+    <xdr:pic>
+      <xdr:blipFill>
+        <a:blip r:embed="rIdImg"/>
+      </xdr:blipFill>
+    </xdr:pic>
+  </xdr:twoCellAnchor>
+  <xdr:twoCellAnchor>
+    <xdr:pic>
+      <xdr:blipFill>
+        <a:blip r:embed="rIdKeep"/>
+      </xdr:blipFill>
+    </xdr:pic>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>"#;
+
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../ctrlProps/image1.png"/>
+  <Relationship Id="rIdKeep" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
+</Relationships>"#;
+
+        let bytes = build_package(&[
+            ("xl/drawings/drawing1.xml", drawing_xml.as_bytes()),
+            ("xl/drawings/_rels/drawing1.xml.rels", rels_xml.as_bytes()),
+            ("xl/ctrlProps/image1.png", b"macro-image"),
+            ("xl/media/image2.png", b"keep-image"),
+        ]);
+
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.remove_vba_project().expect("strip macros");
+
+        let updated_rels =
+            std::str::from_utf8(pkg.part("xl/drawings/_rels/drawing1.xml.rels").unwrap()).unwrap();
+        assert!(!updated_rels.contains("rIdImg"));
+        assert!(updated_rels.contains("rIdKeep"));
+
+        let updated_drawing = std::str::from_utf8(pkg.part("xl/drawings/drawing1.xml").unwrap()).unwrap();
+        assert!(!updated_drawing.contains("rIdImg"));
+        assert!(updated_drawing.contains("rIdKeep"));
+
+        assert!(pkg.part("xl/ctrlProps/image1.png").is_none());
+        assert!(pkg.part("xl/media/image2.png").is_some());
+    }
 }
