@@ -158,7 +158,9 @@ The `file` persistence backend supports **encryption at rest** (AES-256-GCM) for
 Enable:
 
 - `SYNC_SERVER_PERSISTENCE_BACKEND=file`
-- `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring`
+- Enable keyring encryption via **either**:
+  - `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring`, or
+  - `SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64=<base64>` (shorthand; implies `keyring` mode)
 - Provide key material via **one** of:
   - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON` (KeyRing JSON string), or
   - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH` (path to a JSON file containing KeyRing JSON)
@@ -198,7 +200,9 @@ When using `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb` (default) with `y-leveldb` 
 Enable:
 
 - `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb`
-- `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring`
+- Enable keyring encryption via **either**:
+  - `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring`, or
+  - `SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64=<base64>` (shorthand; implies `keyring` mode)
 - Provide key material via **one** of:
   - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON`, or
   - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH`
