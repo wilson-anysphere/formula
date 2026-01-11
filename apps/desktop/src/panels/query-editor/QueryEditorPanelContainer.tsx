@@ -6,6 +6,7 @@ import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
 import { parseA1 } from "../../document/coords.js";
 
 import { applyQueryToDocument, type QuerySheetDestination } from "../../power-query/applyToDocument.js";
+import { maybeGetPowerQueryDlpContext } from "../../power-query/dlpContext.js";
 import { createDesktopQueryEngine } from "../../power-query/engine.js";
 import { DesktopPowerQueryRefreshManager } from "../../power-query/refresh.js";
 
@@ -104,7 +105,8 @@ export function QueryEditorPanelContainer(props: Props) {
 
   const [{ engine, engineError }] = useState(() => {
     try {
-      return { engine: createDesktopQueryEngine(), engineError: null as string | null };
+      const dlp = maybeGetPowerQueryDlpContext({ documentId: props.workbookId ?? "default" });
+      return { engine: createDesktopQueryEngine({ dlp: dlp ?? undefined }), engineError: null as string | null };
     } catch (err: any) {
       // Fall back to an in-memory engine in non-Tauri contexts (e.g. browser previews).
       return { engine: new QueryEngine(), engineError: err?.message ?? String(err) };

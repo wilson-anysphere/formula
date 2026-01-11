@@ -419,12 +419,14 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
       onPermissionRequest: async (kind, details) => {
         const dlpAction = PERMISSION_KIND_TO_DLP_ACTION[kind];
         if (dlpAction === DLP_ACTION.EXTERNAL_CONNECTOR && options.dlp) {
+          const policy =
+            typeof (options.dlp as any).policy === "function" ? await (options.dlp as any).policy() : options.dlp.policy;
           enforceExternalConnector({
             documentId: options.dlp.documentId,
             sheetId: options.dlp.sheetId,
             range: options.dlp.range,
             classificationStore: options.dlp.classificationStore,
-            policy: options.dlp.policy,
+            policy,
           });
         }
 

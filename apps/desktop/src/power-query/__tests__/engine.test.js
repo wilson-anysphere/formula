@@ -133,6 +133,46 @@ test("createDesktopQueryEngine enforces DLP policy on external connector permiss
   await assert.rejects(engine.executeQuery(query, {}, {}), (err) => err?.name === "DlpViolationError");
 });
 
+test("createDesktopQueryEngine supports dynamic DLP policy resolvers", async () => {
+  const policy = createDefaultOrgPolicy();
+  let policyCalls = 0;
+
+  const engine = createDesktopQueryEngine({
+    dlp: {
+      documentId: "doc1",
+      classificationStore: {
+        list: () => [
+          {
+            selector: { scope: "document", documentId: "doc1" },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+      },
+      policy: async () => {
+        policyCalls += 1;
+        return policy;
+      },
+    },
+    fileAdapter: {
+      readText: async () => ["A,B", "1,2"].join("\n"),
+      readBinary: async () => new Uint8Array([1, 2, 3]),
+    },
+    onPermissionPrompt: () => {
+      throw new Error("Permission prompt should not run when DLP blocks first");
+    },
+  });
+
+  const query = {
+    id: "q_csv",
+    name: "CSV",
+    source: { type: "csv", path: "/tmp/test.csv", options: { hasHeaders: true } },
+    steps: [],
+  };
+
+  await assert.rejects(engine.executeQuery(query, {}, {}), (err) => err?.name === "DlpViolationError");
+  assert.equal(policyCalls, 1);
+});
+
 test("createDesktopQueryEngine caches permission prompts across executions", async () => {
   let promptCount = 0;
   const engine = createDesktopQueryEngine({
@@ -153,8 +193,9 @@ test("createDesktopQueryEngine caches permission prompts across executions", asy
     steps: [],
   };
 
-  await engine.executeQuery(query, {}, {});
-  await engine.executeQuery(query, {}, {});
+  // Bypass query result caching so we can specifically validate the permission prompt cache.
+  await engine.executeQuery(query, {}, { cache: { mode: "bypass" } });
+  await engine.executeQuery(query, {}, { cache: { mode: "bypass" } });
 
   assert.equal(promptCount, 1);
 });
