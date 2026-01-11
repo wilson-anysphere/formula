@@ -296,3 +296,55 @@ test("QueryEngine: folds append into a single SQL query when schemas are compati
     [2, "b"],
   ]);
 });
+
+test("QueryEngine: schema discovery enables folding renameColumn/changeType without an explicit projection", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined }[]} */
+  const calls = [];
+  let schemaCalls = 0;
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        getSchema: async () => {
+          schemaCalls += 1;
+          return { columns: ["Region", "Sales"], types: { Region: "string", Sales: "number" } };
+        },
+        querySql: async (_connection, sql, options) => {
+          calls.push({ sql, params: options?.params });
+          // Return data as though the database applied the rename + cast.
+          return DataTable.fromGrid(
+            [
+              ["Region", "Amount"],
+              ["East", 100],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const query = {
+    id: "q_schema_folding",
+    name: "Schema Folding",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM raw", dialect: "postgres" },
+    steps: [
+      { id: "s1", name: "Rename", operation: { type: "renameColumn", oldName: "Sales", newName: "Amount" } },
+      { id: "s2", name: "Type", operation: { type: "changeType", column: "Amount", newType: "number" } },
+    ],
+  };
+
+  const first = await engine.executeQuery(query, { queries: {} }, {});
+  assert.equal(schemaCalls, 1);
+  assert.equal(query.source.columns, undefined, "schema discovery should not mutate the caller query");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /\bCAST\b/);
+  assert.deepEqual(first.toGrid(), [
+    ["Region", "Amount"],
+    ["East", 100],
+  ]);
+
+  // Schema discovery should be cached within the engine instance.
+  await engine.executeQuery(query, { queries: {} }, {});
+  assert.equal(schemaCalls, 1);
+});

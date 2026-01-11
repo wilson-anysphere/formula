@@ -1,4 +1,5 @@
 import { predicateToSql } from "../predicate.js";
+import { hashValue } from "../cache/key.js";
 import { POSTGRES_DIALECT, getSqlDialect } from "./dialect.js";
 import { compileExprToSql, parseFormula } from "../expr/index.js";
 
@@ -63,21 +64,25 @@ import { compileExprToSql, parseFormula } from "../expr/index.js";
  *   fragment: SqlFragment;
  *   // When known, output column ordering + names. Used for conservative folding
  *   // of operations that need an explicit projection (rename/changeType/merge).
- *   columns: string[] | null;
- *   // Connection identity used to ensure we only fold `merge`/`append` when both
- *   // sides originate from the same database connection.
- *   connection: unknown;
- * }} SqlState
- */
+  *   columns: string[] | null;
+  *   // Connection identity used to ensure we only fold `merge`/`append` when both
+  *   // sides originate from the same database connection.
+  *   connectionId: string | null;
+  *   // Original connection descriptor used for backwards-compatible fallback
+  *   // when no stable identity is available.
+  *   connection: unknown;
+  * }} SqlState
+  */
 
 /**
  * @typedef {{
  *   dialect?: SqlDialect | SqlDialectName;
  *   // Queries are required to fold operations like `merge`, `append`, and
- *   // sources of type `query`.
- *   queries?: Record<string, Query>;
- * }} CompileOptions
- */
+  *   // sources of type `query`.
+  *   queries?: Record<string, Query>;
+  *   getConnectionIdentity?: (connection: unknown) => unknown;
+  * }} CompileOptions
+  */
 
 /**
  * A conservative SQL query folding engine. It folds a prefix of operations to
@@ -127,7 +132,12 @@ export class QueryFoldingEngine {
   compile(query, options = {}) {
     const dialect = resolveDialect(options.dialect ?? this.dialect);
     const queries = options.queries ?? this.queries;
-    const initial = this.compileSourceToSqlState(query.source, { dialect, queries }, new Set([query.id]));
+    const getConnectionIdentity = options.getConnectionIdentity ?? null;
+    const initial = this.compileSourceToSqlState(
+      query.source,
+      { dialect, queries, getConnectionIdentity },
+      new Set([query.id]),
+    );
     if (!initial) {
       return { type: "local", steps: query.steps };
     }
@@ -150,7 +160,7 @@ export class QueryFoldingEngine {
         continue;
       }
 
-      const next = this.applySqlStep(current, step.operation, { dialect, queries }, new Set([query.id]));
+      const next = this.applySqlStep(current, step.operation, { dialect, queries, getConnectionIdentity }, new Set([query.id]));
       if (!next) {
         foldingBroken = true;
         localSteps.push(step);
@@ -179,6 +189,7 @@ export class QueryFoldingEngine {
    */
   explain(query, options = {}) {
     const queries = options.queries ?? this.queries;
+    const getConnectionIdentity = options.getConnectionIdentity ?? null;
 
     const dialectInput =
       options.dialect ??
@@ -198,7 +209,7 @@ export class QueryFoldingEngine {
     }
 
     const dialect = resolveDialect(dialectInput);
-    const ctx = { dialect, queries };
+    const ctx = { dialect, queries, getConnectionIdentity };
 
     const callStack = new Set([query.id]);
     const initial = this.compileSourceToSqlState(query.source, ctx, callStack);
@@ -284,7 +295,7 @@ export class QueryFoldingEngine {
    * on other queries (e.g. `merge` + `append`).
    *
    * @param {Query} query
-   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null }} ctx
+   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null, getConnectionIdentity?: ((connection: unknown) => unknown) | null }} ctx
    * @param {Set<string>} callStack
    * @returns {SqlState | null}
    */
@@ -309,7 +320,7 @@ export class QueryFoldingEngine {
 
   /**
    * @param {import("../model.js").QuerySource} source
-   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null }} ctx
+   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null, getConnectionIdentity?: ((connection: unknown) => unknown) | null }} ctx
    * @param {Set<string>} callStack
    * @returns {SqlState | null}
    */
@@ -317,7 +328,8 @@ export class QueryFoldingEngine {
     switch (source.type) {
       case "database": {
         const columns = source.columns ? source.columns.slice() : null;
-        return { fragment: { sql: source.query, params: [] }, columns, connection: source.connection };
+        const connectionId = resolveConnectionId(source, ctx.getConnectionIdentity);
+        return { fragment: { sql: source.query, params: [] }, columns, connectionId, connection: source.connection };
       }
       case "query": {
         const target = ctx.queries?.[source.queryId];
@@ -333,7 +345,7 @@ export class QueryFoldingEngine {
   /**
    * @param {SqlState} state
    * @param {QueryOperation} operation
-   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null }} ctx
+   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null, getConnectionIdentity?: ((connection: unknown) => unknown) | null }} ctx
    * @param {Set<string>} callStack
    * @returns {SqlState | null}
    */
@@ -352,6 +364,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols} FROM ${from}`, params },
           columns: operation.columns.slice(),
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -368,6 +381,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols} FROM ${from}`, params },
           columns: remaining,
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -384,17 +398,24 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT * FROM ${from} WHERE ${where}`, params },
           columns: state.columns,
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
       case "sortRows": {
         if (operation.sortBy.length === 0) {
-          return { fragment: { sql: state.fragment.sql, params }, columns: state.columns, connection: state.connection };
+          return {
+            fragment: { sql: state.fragment.sql, params },
+            columns: state.columns,
+            connectionId: state.connectionId,
+            connection: state.connection,
+          };
         }
         const orderBy = sortSpecsToSql(dialect, operation.sortBy);
         return {
           fragment: { sql: `SELECT * FROM ${from} ORDER BY ${orderBy}`, params },
           columns: state.columns,
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -409,6 +430,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT DISTINCT ${cols} FROM ${from}`, params },
           columns: state.columns.slice(),
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -443,6 +465,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${selectList} FROM ${groupFrom}${groupByClause}`, params },
           columns,
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -457,6 +480,7 @@ export class QueryFoldingEngine {
           return {
             fragment: { sql: state.fragment.sql, params },
             columns: state.columns.slice(),
+            connectionId: state.connectionId,
             connection: state.connection,
           };
         }
@@ -474,6 +498,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols.join(", ")} FROM ${from}`, params },
           columns: nextColumns,
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -482,6 +507,7 @@ export class QueryFoldingEngine {
           return {
             fragment: { sql: state.fragment.sql, params },
             columns: state.columns ? state.columns.slice() : null,
+            connectionId: state.connectionId,
             connection: state.connection,
           };
         }
@@ -499,6 +525,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols.join(", ")} FROM ${from}`, params },
           columns: state.columns.slice(),
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -529,6 +556,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${projections.join(", ")} FROM ${from}`, params },
           columns: state.columns.slice(),
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -560,6 +588,7 @@ export class QueryFoldingEngine {
             params: nextParams,
           },
           columns: nextColumns,
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -569,6 +598,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT * FROM ${from} LIMIT ?`, params },
           columns: state.columns,
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -578,7 +608,7 @@ export class QueryFoldingEngine {
         if (!rightQuery) return null;
         const rightState = this.compileQueryToSqlState(rightQuery, ctx, callStack);
         if (!rightState?.columns) return null;
-        if (state.connection !== rightState.connection) return null;
+        if (!connectionsMatch(state, rightState)) return null;
 
         if (!state.columns.includes(operation.leftKey)) return null;
         if (!rightState.columns.includes(operation.rightKey)) return null;
@@ -611,6 +641,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: mergedSql, params: [...state.fragment.params, ...rightState.fragment.params] },
           columns: [...leftCols, ...rightOut.map((c) => c.out)],
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -621,14 +652,14 @@ export class QueryFoldingEngine {
 
         const baseColumns = state.columns;
         /** @type {SqlState[]} */
-        const branches = [{ fragment: state.fragment, columns: baseColumns }];
+        const branches = [state];
 
         for (const id of operation.queries) {
           const q = queries[id];
           if (!q) return null;
           const compiled = this.compileQueryToSqlState(q, ctx, callStack);
           if (!compiled?.columns) return null;
-          if (state.connection !== compiled.connection) return null;
+          if (!connectionsMatch(state, compiled)) return null;
           if (!columnsCompatible(baseColumns, compiled.columns)) return null;
           branches.push(compiled);
         }
@@ -641,6 +672,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: unionSql, params: unionParams },
           columns: baseColumns.slice(),
+          connectionId: state.connectionId,
           connection: state.connection,
         };
       }
@@ -774,6 +806,43 @@ function explainSourceFailure(source, ctx) {
     default:
       return "unsupported_source";
   }
+}
+
+/**
+ * @param {import("../model.js").DatabaseQuerySource} source
+ * @param {((connection: unknown) => unknown) | null | undefined} getConnectionIdentity
+ * @returns {string | null}
+ */
+function resolveConnectionId(source, getConnectionIdentity) {
+  if (typeof source.connectionId === "string" && source.connectionId) {
+    return source.connectionId;
+  }
+  if (!getConnectionIdentity) return null;
+  try {
+    const identity = getConnectionIdentity(source.connection);
+    if (identity == null) return null;
+    if (typeof identity === "string") return identity;
+    return hashValue(identity);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {SqlState} left
+ * @param {SqlState} right
+ * @returns {boolean}
+ */
+function connectionsMatch(left, right) {
+  if (left.connectionId && right.connectionId) {
+    return left.connectionId === right.connectionId;
+  }
+  if (!left.connectionId && !right.connectionId) {
+    return left.connection === right.connection;
+  }
+  // If only one side has an identity, be conservative and only allow folding
+  // when both sides share the same (referentially equal) connection handle.
+  return left.connection === right.connection;
 }
 
 /**

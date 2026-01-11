@@ -1,4 +1,18 @@
-import * as arrow from 'apache-arrow';
+/** @type {typeof import('apache-arrow') | null} */
+let arrow = null;
+try {
+  // `apache-arrow` is a heavy dependency and is not always installed in minimal
+  // environments (e.g. some test sandboxes). Import it lazily but synchronously
+  // for the rest of this module.
+  arrow = await import('apache-arrow');
+} catch {
+  arrow = null;
+}
+
+function requireArrow() {
+  if (arrow) return arrow;
+  throw new Error("Parquet/Arrow support requires the optional 'apache-arrow' dependency");
+}
 let parquetWasmLoadPromise;
 
 async function getParquetWasm() {
@@ -100,6 +114,7 @@ function arrowValueToCellValue(value, type) {
  * @param {import('parquet-wasm').ReaderOptions} [options]
  */
 export async function parquetToArrowTable(parquetBytes, options) {
+  const arrow = requireArrow();
   const parquet = await getParquetWasm();
   const wasmTable = parquet.readParquet(parquetBytes, options ?? null);
   return arrow.tableFromIPC(wasmTable.intoIPCStream());
@@ -120,6 +135,7 @@ export async function parquetToArrowTable(parquetBytes, options) {
  * }} [options]
  */
 export async function parquetFileToArrowTable(handle, options = {}) {
+  const arrow = requireArrow();
   const parquet = await getParquetWasm();
   const parquetFile = await parquet.ParquetFile.fromFile(handle);
 
@@ -183,6 +199,7 @@ export async function parquetFileToArrowTable(handle, options = {}) {
  * @param {{ compression?: keyof typeof Compression | Compression | null }} [options]
  */
 export async function arrowTableToParquet(table, options = {}) {
+  const arrow = requireArrow();
   const parquet = await getParquetWasm();
   const wasmTable = parquet.Table.fromIPCStream(arrow.tableToIPC(table, 'stream'));
 
@@ -243,7 +260,7 @@ export function arrowTableFromIPC(bytes) {
  * @param {Record<string, any[] | ArrayLike<any>>} columns
  */
 export function arrowTableFromColumns(columns) {
-  return arrow.tableFromArrays(columns);
+  return requireArrow().tableFromArrays(columns);
 }
 
 /**
@@ -259,6 +276,7 @@ export async function* arrowTableToGridBatches(
   table,
   { batchSize = 1024, includeHeader = true } = {}
 ) {
+  requireArrow();
   const columnNames = table.schema.fields.map((field) => field.name);
   const columnCount = columnNames.length;
   const dataBaseRowOffset = includeHeader ? 1 : 0;
@@ -297,6 +315,7 @@ export class ArrowColumnarSheet {
    * @param {arrow.Table} table
    */
   constructor(table) {
+    requireArrow();
     this.table = table;
     this.columnNames = table.schema.fields.map((field) => field.name);
   }

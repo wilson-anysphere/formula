@@ -1,4 +1,5 @@
 import { DataTable } from "../table.js";
+import { hashValue } from "../cache/key.js";
 
 /**
  * @typedef {import("./types.js").ConnectorExecuteOptions} ConnectorExecuteOptions
@@ -7,14 +8,29 @@ import { DataTable } from "../table.js";
 
 /**
  * @typedef {Object} SqlConnectorRequest
+ * @property {string | undefined} [connectionId]
  * @property {unknown} connection
  * @property {string} sql
  * @property {unknown[] | undefined} [params]
  */
 
 /**
+ * @typedef {{
+ *   columns: string[];
+ *   types?: Record<string, import("../model.js").DataType>;
+ * }} SqlConnectorSchema
+ */
+
+/**
  * @typedef {Object} SqlConnectorOptions
  * @property {((connection: unknown, sql: string, options?: { params?: unknown[]; signal?: AbortSignal; credentials?: unknown }) => Promise<DataTable>) | undefined} [querySql]
+ * @property {((connection: unknown) => unknown) | undefined} [getConnectionIdentity]
+ *   Return a JSON-serializable identity for the provided connection descriptor.
+ *   The engine will hash this identity for stable cache keys + folding.
+ * @property {((request: SqlConnectorRequest, options?: { signal?: AbortSignal; credentials?: unknown }) => Promise<SqlConnectorSchema>) | undefined} [getSchema]
+ *   Optional hook for schema discovery (columns/types) used to enable SQL folding
+ *   of operations like `renameColumn` / `changeType` when the source column list
+ *   is not pre-specified.
  */
 
 export class SqlConnector {
@@ -25,6 +41,8 @@ export class SqlConnector {
     this.id = "sql";
     this.permissionKind = "database:query";
     this.querySql = options.querySql ?? null;
+    this.getConnectionIdentity = options.getConnectionIdentity ?? defaultGetConnectionIdentity;
+    this.getSchema = options.getSchema ?? null;
   }
 
   /**
@@ -32,9 +50,10 @@ export class SqlConnector {
    * @returns {unknown}
    */
   getCacheKey(request) {
+    const connectionId = resolveConnectionId(request, this.getConnectionIdentity);
     return {
       connector: "sql",
-      connection: request.connection,
+      ...(connectionId ? { connectionId } : { missingConnectionId: true }),
       sql: request.sql,
       params: request.params ?? null,
     };
@@ -82,4 +101,41 @@ export class SqlConnector {
       },
     };
   }
+}
+
+/**
+ * @param {unknown} connection
+ * @returns {unknown}
+ */
+function defaultGetConnectionIdentity(connection) {
+  if (connection == null) return null;
+  const type = typeof connection;
+  if (type === "string" || type === "number" || type === "boolean") {
+    return connection;
+  }
+
+  if (type === "object" && !Array.isArray(connection)) {
+    // Common case: host apps pass connection descriptors like `{ id: "db1", ... }`.
+    // Prefer a stable string identifier instead of hashing the entire object.
+    // @ts-ignore - runtime inspection
+    if (typeof connection.id === "string" && connection.id) return connection.id;
+  }
+
+  return null;
+}
+
+/**
+ * @param {SqlConnectorRequest} request
+ * @param {(connection: unknown) => unknown} getConnectionIdentity
+ * @returns {string | null}
+ */
+function resolveConnectionId(request, getConnectionIdentity) {
+  if (typeof request.connectionId === "string" && request.connectionId) {
+    return request.connectionId;
+  }
+
+  const identity = getConnectionIdentity(request.connection);
+  if (identity == null) return null;
+  if (typeof identity === "string") return identity;
+  return hashValue(identity);
 }

@@ -330,6 +330,33 @@ test("compile: folds merge (join) when both sides fully fold to SQL", () => {
   });
 });
 
+test("compile: folds merge when connections are deep-equal but not referentially equal", () => {
+  const folding = new QueryFoldingEngine();
+  const leftConn = { host: "localhost", id: "db1" };
+  const rightConn = { host: "localhost", id: "db1" };
+
+  const right = {
+    id: "q_right",
+    name: "Targets",
+    source: { type: "database", connection: rightConn, query: "SELECT * FROM targets" },
+    steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left",
+    name: "Sales",
+    source: { type: "database", connection: leftConn, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region", "Sales"] } },
+      { id: "s2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+    ],
+  };
+
+  const plan = folding.compile(left, { queries: { q_right: right }, getConnectionIdentity: (connection) => connection });
+  assert.equal(plan.type, "sql");
+  assert.match(plan.sql, /\bJOIN\b/);
+});
+
 test("compile: merge across different database connections breaks folding", () => {
   const folding = new QueryFoldingEngine();
 
@@ -384,6 +411,33 @@ test("compile: folds append (UNION ALL) when schemas are compatible", () => {
     sql: '(SELECT t."Id", t."Value" FROM (SELECT t."Id", t."Value" FROM (SELECT * FROM a) AS t) AS t) UNION ALL (SELECT t."Id", t."Value" FROM (SELECT t."Value", t."Id" FROM (SELECT * FROM b) AS t) AS t)',
     params: [],
   });
+});
+
+test("compile: folds append when connections are deep-equal but not referentially equal", () => {
+  const folding = new QueryFoldingEngine();
+  const baseConn = { host: "localhost", id: "db1" };
+  const otherConn = { host: "localhost", id: "db1" };
+
+  const other = {
+    id: "q_other",
+    name: "Other",
+    source: { type: "database", connection: otherConn, query: "SELECT * FROM b" },
+    steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Value", "Id"] } }],
+  };
+
+  const base = {
+    id: "q_base",
+    name: "Base",
+    source: { type: "database", connection: baseConn, query: "SELECT * FROM a" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Value"] } },
+      { id: "s2", name: "Append", operation: { type: "append", queries: ["q_other"] } },
+    ],
+  };
+
+  const plan = folding.compile(base, { queries: { q_other: other }, getConnectionIdentity: (connection) => connection });
+  assert.equal(plan.type, "sql");
+  assert.match(plan.sql, /\bUNION ALL\b/);
 });
 
 test("compile: append across different database connections breaks folding", () => {

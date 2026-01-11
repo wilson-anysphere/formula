@@ -320,6 +320,9 @@ export class QueryEngine {
     this.sqlFoldingEnabled = options.sqlFolding?.enabled ?? true;
     this.sqlFoldingDialect = options.sqlFolding?.dialect ?? null;
     this.foldingEngine = new QueryFoldingEngine();
+
+    /** @type {Map<string, Promise<{ columns: string[], types?: Record<string, import("./model.js").DataType> }>>} */
+    this.databaseSchemaCache = new Map();
   }
 
   /**
@@ -499,9 +502,57 @@ export class QueryEngine {
     if (this.sqlFoldingEnabled && query.source.type === "database") {
       const dialect = query.source.dialect ?? this.sqlFoldingDialect;
       foldedDialect = dialect ?? null;
+
+      const sqlConnector = this.connectors.get("sql");
+      const getConnectionIdentity =
+        sqlConnector && typeof sqlConnector.getConnectionIdentity === "function"
+          ? (connection) => sqlConnector.getConnectionIdentity(connection)
+          : undefined;
+
+      let sourceForFolding = query.source;
+      if (dialect && query.source.columns == null && sqlConnector && typeof sqlConnector.getSchema === "function") {
+        const connectionId = resolveDatabaseConnectionId(query.source, sqlConnector);
+        const schemaCacheKey = connectionId ? `pq:schema:v1:${hashValue({ connectionId, sql: query.source.query })}` : null;
+        let schemaPromise = schemaCacheKey ? this.databaseSchemaCache.get(schemaCacheKey) ?? null : null;
+
+        if (!schemaPromise) {
+          const request = {
+            connectionId: connectionId ?? undefined,
+            connection: query.source.connection,
+            sql: query.source.query,
+          };
+          try {
+            throwIfAborted(options.signal);
+            await this.assertPermission(sqlConnector.permissionKind, { source: query.source, request }, state);
+            const credentials = await this.getCredentials("sql", request, state);
+            schemaPromise = Promise.resolve(sqlConnector.getSchema(request, { signal: options.signal, credentials }));
+            if (schemaCacheKey) {
+              schemaPromise = schemaPromise.catch((err) => {
+                this.databaseSchemaCache.delete(schemaCacheKey);
+                throw err;
+              });
+              this.databaseSchemaCache.set(schemaCacheKey, schemaPromise);
+            }
+          } catch {
+            schemaPromise = null;
+          }
+        }
+
+        if (schemaPromise) {
+          try {
+            const schema = await schemaPromise;
+            if (schema && Array.isArray(schema.columns) && schema.columns.length > 0) {
+              sourceForFolding = { ...query.source, columns: schema.columns.slice() };
+            }
+          } catch {
+            // Schema discovery is best-effort; ignore failures and let folding fall back to hybrid/local execution.
+          }
+        }
+      }
+
       foldingExplain = this.foldingEngine.explain(
-        { ...query, steps },
-        { dialect: dialect ?? undefined, queries: context.queries ?? undefined },
+        { ...query, source: sourceForFolding, steps },
+        { dialect: dialect ?? undefined, queries: context.queries ?? undefined, getConnectionIdentity },
       );
       foldedPlan = foldingExplain.plan;
     }
@@ -844,7 +895,7 @@ export class QueryEngine {
    * @param {ExecuteOptions} options
    * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
    * @param {Set<string>} callStack
-   * @returns {Promise<unknown>}
+   * @returns {Promise<unknown | null>}
    */
   async buildQuerySignature(query, context, options, state, callStack) {
     const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
@@ -910,7 +961,7 @@ export class QueryEngine {
    * @param {QueryExecutionContext} context
    * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
    * @param {Set<string>} callStack
-   * @returns {Promise<unknown>}
+   * @returns {Promise<unknown | null>}
    */
   async buildSourceSignature(source, context, state, callStack) {
     if (source.type === "query") {
@@ -993,13 +1044,26 @@ export class QueryEngine {
     if (source.type === "database") {
       const connector = this.connectors.get("sql");
       if (!connector) return { type: "database", missingConnector: "sql" };
-      const request = { connection: source.connection, sql: source.query };
+      const connectionId = resolveDatabaseConnectionId(source, connector);
+      if (!connectionId) {
+        return {
+          type: "database",
+          dialect: source.dialect ?? null,
+          request: connector.getCacheKey({ connection: source.connection, sql: source.query }),
+          credentialsHash: null,
+          missingConnectionId: true,
+          $cacheable: false,
+        };
+      }
+
+      const request = { connectionId, connection: source.connection, sql: source.query };
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("sql", request, state);
       const credentialId = extractCredentialId(credentials);
       const cacheable = credentials == null || credentialId != null;
       return {
         type: "database",
+        connectionId,
         dialect: source.dialect ?? null,
         request: connector.getCacheKey(request),
         credentialsHash: credentialId ? hashValue(credentialId) : null,
@@ -1276,7 +1340,7 @@ export class QueryEngine {
     if (source.type === "database") {
       const connector = this.connectors.get("sql");
       if (!connector) throw new Error("Database source requires a SqlConnector");
-      const request = { connection: source.connection, sql: source.query };
+      const request = { connectionId: source.connectionId, connection: source.connection, sql: source.query };
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("sql", request, state);
@@ -1339,8 +1403,8 @@ export class QueryEngine {
     if (dialectName === "postgres") {
       normalizedSql = normalizePostgresPlaceholders(sql, params.length);
     }
-    const request = { connection: source.connection, sql: normalizedSql, params };
-    const signatureRequest = { connection: source.connection, sql: source.query };
+    const request = { connectionId: source.connectionId, connection: source.connection, sql: normalizedSql, params };
+    const signatureRequest = { connectionId: source.connectionId, connection: source.connection, sql: source.query };
     await this.assertPermission(connector.permissionKind, { source, request }, state);
     const credentials = await this.getCredentials("sql", request, state);
 
@@ -1635,6 +1699,40 @@ export class QueryEngine {
     }
 
     return table;
+  }
+}
+
+/**
+ * Resolve a stable identity for a database connection descriptor.
+ *
+ * This is used for:
+ * - deterministic cache keys for database sources
+ * - schema discovery caching (per engine instance)
+ *
+ * @param {import("./model.js").DatabaseQuerySource} source
+ * @param {any} connector
+ * @returns {string | null}
+ */
+function resolveDatabaseConnectionId(source, connector) {
+  if (typeof source.connectionId === "string" && source.connectionId) {
+    return source.connectionId;
+  }
+
+  // Conservative built-in fallback: treat `{ id: string }` as a stable identity.
+  const connection = source.connection;
+  if (connection && typeof connection === "object" && !Array.isArray(connection)) {
+    // @ts-ignore - runtime inspection
+    if (typeof connection.id === "string" && connection.id) return connection.id;
+  }
+
+  if (!connector || typeof connector.getConnectionIdentity !== "function") return null;
+  try {
+    const identity = connector.getConnectionIdentity(connection);
+    if (identity == null) return null;
+    if (typeof identity === "string") return identity;
+    return hashValue(identity);
+  } catch {
+    return null;
   }
 }
 

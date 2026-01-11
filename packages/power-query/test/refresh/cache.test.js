@@ -15,6 +15,7 @@ import { MemoryCacheStore } from "../../src/cache/memory.js";
 import { ArrowTableAdapter } from "../../src/arrowTable.js";
 import { HttpConnector } from "../../src/connectors/http.js";
 import { QueryEngine } from "../../src/engine.js";
+import { SqlConnector } from "../../src/connectors/sql.js";
 import { stableStringify } from "../../src/cache/key.js";
 import { DataTable } from "../../src/table.js";
 
@@ -594,6 +595,82 @@ test("QueryEngine: table sources incorporate host signatures into the cache key"
   const contextV2 = { tables: { T1: table }, tableSignatures: { T1: 2 } };
   const third = await engine.executeQueryWithMeta(query, contextV2, {});
   assert.equal(third.meta.cache?.hit, false);
+});
+
+test("QueryEngine: database cache keys are stable for equivalent connections", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  const engine = new QueryEngine({
+    cache,
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Value"],
+              [1],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+  });
+
+  const base = {
+    id: "q_db",
+    name: "DB",
+    source: { type: "database", connection: { id: "db1", ephemeral: 1 }, query: "SELECT 1", dialect: "postgres" },
+    steps: [],
+  };
+  const sameConnDifferentObject = {
+    ...base,
+    source: { ...base.source, connection: { id: "db1", ephemeral: 999 } },
+  };
+
+  const key1 = await engine.getCacheKey(base, { queries: {} }, {});
+  const key2 = await engine.getCacheKey(sameConnDifferentObject, { queries: {} }, {});
+  assert.ok(key1);
+  assert.equal(key1, key2);
+});
+
+test("QueryEngine: bypasses cache when database connection identity is missing", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  let callCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async () => {
+          callCount += 1;
+          return DataTable.fromGrid(
+            [
+              ["Value"],
+              [callCount],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const query = {
+    id: "q_no_id",
+    name: "DB (no identity)",
+    source: { type: "database", connection: {}, query: "SELECT 1", dialect: "postgres" },
+    steps: [],
+  };
+
+  assert.equal(await engine.getCacheKey(query, { queries: {} }, {}), null);
+
+  const first = await engine.executeQueryWithMeta(query, { queries: {} }, {});
+  const second = await engine.executeQueryWithMeta(query, { queries: {} }, {});
+  assert.equal(callCount, 2);
+  assert.equal(first.meta.cache, undefined);
+  assert.equal(second.meta.cache, undefined);
 });
 
 test("QueryEngine: invalidates file cache entries when mtime changes (within TTL)", async () => {
