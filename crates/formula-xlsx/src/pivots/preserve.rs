@@ -4,7 +4,7 @@ use roxmltree::Document;
 
 use crate::path::{rels_for_part, resolve_target};
 use crate::preserve::sheet_match::{match_sheet_by_name_or_index, workbook_sheet_parts};
-use crate::relationships::parse_relationships;
+use crate::relationships::{parse_relationships, Relationship, Relationships};
 use crate::workbook::ChartExtractionError;
 use crate::XlsxPackage;
 
@@ -247,6 +247,10 @@ impl XlsxPackage {
         &mut self,
         preserved: &PreservedPivotParts,
     ) -> Result<(), ChartExtractionError> {
+        if preserved.is_empty() {
+            return Ok(());
+        }
+
         for (name, bytes) in &preserved.parts {
             self.set_part(name.clone(), bytes.clone());
         }
@@ -255,37 +259,34 @@ impl XlsxPackage {
 
         let workbook_part = "xl/workbook.xml";
         let workbook_rels_part = "xl/_rels/workbook.xml.rels";
-        let workbook_pivot_conflict = relationship_conflicts(
-            self.part(workbook_rels_part),
-            workbook_rels_part,
-            workbook_part,
-            PIVOT_CACHE_DEF_REL_TYPE,
-            &preserved.workbook_pivot_cache_rels,
-        )?;
 
-        if !workbook_pivot_conflict {
+        let workbook_rid_map = if !preserved.workbook_pivot_cache_rels.is_empty() {
+            let (updated_workbook_rels, rid_map) = ensure_rels_has_relationships(
+                self.part(workbook_rels_part),
+                workbook_rels_part,
+                workbook_part,
+                PIVOT_CACHE_DEF_REL_TYPE,
+                &preserved.workbook_pivot_cache_rels,
+            )?;
+            self.set_part(workbook_rels_part, updated_workbook_rels);
+            rid_map
+        } else {
+            HashMap::new()
+        };
+
+        if let Some(pivot_caches) = preserved.workbook_pivot_caches.as_deref() {
             if !preserved.workbook_pivot_cache_rels.is_empty() {
-                let updated_workbook_rels = ensure_rels_has_relationships(
-                    self.part(workbook_rels_part),
-                    workbook_rels_part,
-                    PIVOT_CACHE_DEF_REL_TYPE,
-                    &preserved.workbook_pivot_cache_rels,
+                let rewritten =
+                    rewrite_relationship_ids(pivot_caches, "pivotCaches", &workbook_rid_map)?;
+                let workbook_xml = self.part(workbook_part).ok_or_else(|| {
+                    ChartExtractionError::MissingPart(workbook_part.to_string())
+                })?;
+                let updated = ensure_workbook_xml_has_pivot_caches(
+                    workbook_xml,
+                    workbook_part,
+                    &rewritten,
                 )?;
-                self.set_part(workbook_rels_part, updated_workbook_rels);
-            }
-
-            if let Some(pivot_caches) = preserved.workbook_pivot_caches.as_deref() {
-                if !preserved.workbook_pivot_cache_rels.is_empty() {
-                    let workbook_xml = self.part(workbook_part).ok_or_else(|| {
-                        ChartExtractionError::MissingPart(workbook_part.to_string())
-                    })?;
-                    let updated = ensure_workbook_xml_has_pivot_caches(
-                        workbook_xml,
-                        workbook_part,
-                        pivot_caches,
-                    )?;
-                    self.set_part(workbook_part, updated);
-                }
+                self.set_part(workbook_part, updated);
             }
         }
 
@@ -299,76 +300,39 @@ impl XlsxPackage {
                 continue;
             };
 
-            let Some(sheet_xml) = self.part(&sheet.part_name) else {
-                continue;
-            };
-            let sheet_xml = sheet_xml.to_vec();
-
-            let sheet_rels_part = rels_for_part(&sheet.part_name);
-            let sheet_pivot_conflict = relationship_conflicts(
-                self.part(&sheet_rels_part),
-                &sheet_rels_part,
-                &sheet.part_name,
-                PIVOT_TABLE_REL_TYPE,
-                &preserved_sheet.pivot_table_rels,
-            )?;
-            if sheet_pivot_conflict {
-                continue;
-            }
-
-            if !preserved_sheet.pivot_table_rels.is_empty() {
-                let updated_sheet_rels = ensure_rels_has_relationships(
+            let rid_map = if !preserved_sheet.pivot_table_rels.is_empty() {
+                let sheet_rels_part = rels_for_part(&sheet.part_name);
+                let (updated_sheet_rels, rid_map) = ensure_rels_has_relationships(
                     self.part(&sheet_rels_part),
                     &sheet_rels_part,
+                    &sheet.part_name,
                     PIVOT_TABLE_REL_TYPE,
                     &preserved_sheet.pivot_table_rels,
                 )?;
                 self.set_part(sheet_rels_part, updated_sheet_rels);
-            }
+                rid_map
+            } else {
+                HashMap::new()
+            };
 
-            let updated_sheet_xml = ensure_sheet_xml_has_pivot_tables(
-                &sheet_xml,
-                &sheet.part_name,
+            let rewritten = rewrite_relationship_ids(
                 &preserved_sheet.pivot_tables_xml,
+                "pivotTables",
+                &rid_map,
+            )?;
+            let Some(sheet_xml) = self.part(&sheet.part_name) else {
+                continue;
+            };
+            let updated_sheet_xml = ensure_sheet_xml_has_pivot_tables(
+                sheet_xml,
+                &sheet.part_name,
+                &rewritten,
             )?;
             self.set_part(sheet.part_name.clone(), updated_sheet_xml);
         }
 
         Ok(())
     }
-}
-
-fn relationship_conflicts(
-    rels_xml: Option<&[u8]>,
-    part_name: &str,
-    base_part: &str,
-    expected_type: &str,
-    relationships: &[RelationshipStub],
-) -> Result<bool, ChartExtractionError> {
-    if relationships.is_empty() {
-        return Ok(false);
-    }
-    let Some(rels_xml) = rels_xml else {
-        return Ok(false);
-    };
-    let rels = parse_relationships(rels_xml, part_name)?;
-    let rel_map: HashMap<_, _> = rels.into_iter().map(|r| (r.id.clone(), r)).collect();
-
-    for expected in relationships {
-        let Some(existing) = rel_map.get(&expected.rel_id) else {
-            continue;
-        };
-        if existing.type_ != expected_type {
-            return Ok(true);
-        }
-        let existing_target = resolve_target(base_part, &existing.target);
-        let expected_target = resolve_target(base_part, &expected.target);
-        if existing_target != expected_target {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
 }
 
 fn ensure_workbook_xml_has_pivot_caches(
@@ -447,14 +411,36 @@ fn ensure_sheet_xml_has_pivot_tables(
     Ok(xml.into_bytes())
 }
 
+fn rewrite_relationship_ids(
+    xml_bytes: &[u8],
+    part_name: &str,
+    id_map: &HashMap<String, String>,
+) -> Result<Vec<u8>, ChartExtractionError> {
+    if id_map.is_empty() {
+        return Ok(xml_bytes.to_vec());
+    }
+
+    let mut xml = std::str::from_utf8(xml_bytes)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?
+        .to_string();
+
+    for (old_id, new_id) in id_map {
+        xml = xml.replace(&format!("r:id=\"{old_id}\""), &format!("r:id=\"{new_id}\""));
+        xml = xml.replace(&format!("r:id='{old_id}'"), &format!("r:id='{new_id}'"));
+    }
+
+    Ok(xml.into_bytes())
+}
+
 fn ensure_rels_has_relationships(
     rels_xml: Option<&[u8]>,
     part_name: &str,
+    base_part: &str,
     rel_type: &str,
     relationships: &[RelationshipStub],
-) -> Result<Vec<u8>, ChartExtractionError> {
+) -> Result<(Vec<u8>, HashMap<String, String>), ChartExtractionError> {
     if relationships.is_empty() {
-        return Ok(rels_xml.unwrap_or_default().to_vec());
+        return Ok((rels_xml.unwrap_or_default().to_vec(), HashMap::new()));
     }
 
     let mut xml = match rels_xml {
@@ -466,24 +452,90 @@ fn ensure_rels_has_relationships(
         ),
     };
 
-    let insert_idx = xml.rfind("</Relationships>").ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: missing </Relationships>"))
-    })?;
+    let existing_rels = match rels_xml {
+        Some(bytes) => parse_relationships(bytes, part_name)?,
+        None => Vec::new(),
+    };
+    let mut rels = Relationships::new(existing_rels);
+
+    let mut id_map: HashMap<String, String> = HashMap::new();
+    let mut to_insert: Vec<Relationship> = Vec::new();
 
     for relationship in relationships {
-        if xml.contains(&format!("Id=\"{}\"", relationship.rel_id)) {
+        let desired_id = relationship.rel_id.as_str();
+        let desired_target = relationship.target.as_str();
+
+        if let Some(mapped) = id_map.get(desired_id) {
+            // We've already allocated a stable replacement for this ID in this scope.
+            // Ensure the relationship exists in the output but don't allocate again.
+            if rels.get(mapped).is_none() {
+                let rel = Relationship {
+                    id: mapped.clone(),
+                    type_: rel_type.to_string(),
+                    target: desired_target.to_string(),
+                };
+                rels.push(rel.clone());
+                to_insert.push(rel);
+            }
             continue;
         }
-        xml.insert_str(
-            insert_idx,
-            &format!(
-                "  <Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"/>\n",
-                relationship.rel_id, rel_type, relationship.target
-            ),
-        );
+
+        let final_id = match rels.get(desired_id) {
+            None => desired_id.to_string(),
+            Some(existing)
+                if existing.type_ == rel_type
+                    && resolve_target(base_part, &existing.target)
+                        == resolve_target(base_part, desired_target) =>
+            {
+                desired_id.to_string()
+            }
+            Some(_) => {
+                let new_id = rels.next_r_id();
+                id_map.insert(desired_id.to_string(), new_id.clone());
+                new_id
+            }
+        };
+
+        if rels.get(&final_id).is_some() {
+            continue;
+        }
+
+        let rel = Relationship {
+            id: final_id.clone(),
+            type_: rel_type.to_string(),
+            target: desired_target.to_string(),
+        };
+        rels.push(rel.clone());
+        to_insert.push(rel);
     }
 
-    Ok(xml.into_bytes())
+    if !to_insert.is_empty() {
+        let insert_idx = xml.rfind("</Relationships>").ok_or_else(|| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: missing </Relationships>"))
+        })?;
+
+        let mut insertion = String::new();
+        for rel in &to_insert {
+            insertion.push_str(&format!(
+                "  <Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"/>\n",
+                xml_escape(&rel.id),
+                xml_escape(&rel.type_),
+                xml_escape(&rel.target)
+            ));
+        }
+        xml.insert_str(insert_idx, &insertion);
+    }
+
+    Ok((xml.into_bytes(), id_map))
+}
+
+fn xml_escape(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 #[cfg(test)]
@@ -504,4 +556,3 @@ mod tests {
         assert!(pivot_pos < ext_pos, "pivotTables should be inserted before extLst");
     }
 }
-
