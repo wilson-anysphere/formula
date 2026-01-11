@@ -168,9 +168,15 @@ pub fn lex(formula: &str, opts: &ParseOptions) -> Result<Vec<Token>, ParseError>
     Lexer::new(formula, opts.locale.clone(), opts.reference_style).lex()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParenContext {
-    FunctionCall,
+    /// Parentheses opened as part of a function call, along with the brace depth at the `(`.
+    ///
+    /// This is used to disambiguate locale separators that overlap between function argument
+    /// separators and array literal separators. For example, in `={SUM(1,2),3}` the comma inside
+    /// `SUM(1,2)` should be lexed as a function argument separator, while the comma after the
+    /// closing `)` should be lexed as an array column separator.
+    FunctionCall { brace_depth: usize },
     Group,
 }
 
@@ -335,7 +341,7 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     let is_func = matches!(self.prev_sig, Some(TokenKind::Ident(_)));
                     self.paren_stack.push(if is_func {
-                        ParenContext::FunctionCall
+                        ParenContext::FunctionCall { brace_depth: self.brace_depth }
                     } else {
                         ParenContext::Group
                     });
@@ -387,7 +393,11 @@ impl<'a> Lexer<'a> {
                 }
                 c if c == self.locale.arg_separator => {
                     self.bump();
-                    if self.brace_depth > 0 {
+                    let is_func_arg_sep = matches!(
+                        self.paren_stack.last(),
+                        Some(ParenContext::FunctionCall { brace_depth }) if *brace_depth == self.brace_depth
+                    );
+                    if self.brace_depth > 0 && !is_func_arg_sep {
                         // In array literals, commas/semicolons map to array separators.
                         if c == self.locale.array_row_separator {
                             self.push(TokenKind::ArrayRowSep, start, self.idx);
@@ -396,7 +406,7 @@ impl<'a> Lexer<'a> {
                         } else {
                             self.push(TokenKind::ArrayColSep, start, self.idx);
                         }
-                    } else if matches!(self.paren_stack.last(), Some(ParenContext::FunctionCall)) {
+                    } else if is_func_arg_sep {
                         self.push(TokenKind::ArgSep, start, self.idx);
                     } else {
                         self.push(TokenKind::Union, start, self.idx);
@@ -1516,11 +1526,15 @@ impl<'a> Parser<'a> {
         }
         let mut rows: Vec<Vec<Expr>> = Vec::new();
         let mut current_row: Vec<Expr> = Vec::new();
+        let mut expecting_value = true;
         loop {
             self.skip_trivia();
             match self.peek_kind() {
                 TokenKind::RBrace => {
                     self.next();
+                    if expecting_value && (!current_row.is_empty() || !rows.is_empty()) {
+                        current_row.push(Expr::Missing);
+                    }
                     if !current_row.is_empty() || !rows.is_empty() {
                         rows.push(current_row);
                     }
@@ -1531,25 +1545,45 @@ impl<'a> Parser<'a> {
                         "Unterminated array literal",
                         self.current_span(),
                     ));
+                    if expecting_value && (!current_row.is_empty() || !rows.is_empty()) {
+                        current_row.push(Expr::Missing);
+                    }
                     if !current_row.is_empty() || !rows.is_empty() {
                         rows.push(current_row);
                     }
                     break;
+                }
+                TokenKind::ArrayColSep => {
+                    current_row.push(Expr::Missing);
+                    self.next();
+                    expecting_value = true;
+                    continue;
+                }
+                TokenKind::ArrayRowSep => {
+                    current_row.push(Expr::Missing);
+                    self.next();
+                    rows.push(current_row);
+                    current_row = Vec::new();
+                    expecting_value = true;
+                    continue;
                 }
                 _ => {}
             }
 
             let el = self.parse_expression_best_effort(0);
             current_row.push(el);
+            expecting_value = false;
             self.skip_trivia();
             match self.peek_kind() {
                 TokenKind::ArrayColSep => {
                     self.next();
+                    expecting_value = true;
                 }
                 TokenKind::ArrayRowSep => {
                     self.next();
                     rows.push(current_row);
                     current_row = Vec::new();
+                    expecting_value = true;
                 }
                 TokenKind::RBrace => {}
                 TokenKind::Eof => {}
@@ -1895,27 +1929,53 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LBrace)?;
         let mut rows: Vec<Vec<Expr>> = Vec::new();
         let mut current_row: Vec<Expr> = Vec::new();
+        let mut expecting_value = true;
         loop {
             self.skip_trivia();
-            if matches!(self.peek_kind(), TokenKind::RBrace) {
-                self.next();
-                if !current_row.is_empty() || !rows.is_empty() {
-                    rows.push(current_row);
+            match self.peek_kind() {
+                TokenKind::RBrace => {
+                    self.next();
+                    if expecting_value && (!current_row.is_empty() || !rows.is_empty()) {
+                        current_row.push(Expr::Missing);
+                    }
+                    if !current_row.is_empty() || !rows.is_empty() {
+                        rows.push(current_row);
+                    }
+                    break;
                 }
-                break;
+                TokenKind::ArrayColSep => {
+                    // Blank element, e.g. `{1,,3}`.
+                    current_row.push(Expr::Missing);
+                    self.next();
+                    expecting_value = true;
+                    continue;
+                }
+                TokenKind::ArrayRowSep => {
+                    // Blank element at the end of a row, e.g. `{1,;2,3}`.
+                    current_row.push(Expr::Missing);
+                    self.next();
+                    rows.push(current_row);
+                    current_row = Vec::new();
+                    expecting_value = true;
+                    continue;
+                }
+                _ => {}
             }
 
             let el = self.parse_expression(0)?;
             current_row.push(el);
+            expecting_value = false;
             self.skip_trivia();
             match self.peek_kind() {
                 TokenKind::ArrayColSep => {
                     self.next();
+                    expecting_value = true;
                 }
                 TokenKind::ArrayRowSep => {
                     self.next();
                     rows.push(current_row);
                     current_row = Vec::new();
+                    expecting_value = true;
                 }
                 TokenKind::RBrace => {
                     // loop will close

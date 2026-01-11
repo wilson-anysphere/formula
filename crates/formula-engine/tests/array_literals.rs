@@ -75,7 +75,7 @@ fn array_literal_rejects_ragged_rows() {
 fn array_literal_coerces_nested_arrays_to_value_errors() {
     let mut engine = Engine::new();
     engine
-        .set_cell_formula("Sheet1", "A1", "={SEQUENCE(2),1}")
+        .set_cell_formula("Sheet1", "A1", "={SEQUENCE(2,1),1}")
         .unwrap();
     engine.recalculate_single_threaded();
 
@@ -88,4 +88,21 @@ fn array_literal_coerces_nested_arrays_to_value_errors() {
         Value::Error(ErrorKind::Value)
     );
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+}
+
+#[test]
+fn array_literal_supports_missing_elements() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1,,3}")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("C1").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Blank);
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(3.0));
 }
