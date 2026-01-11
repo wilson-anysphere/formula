@@ -57,7 +57,10 @@ export function createPinnedCheckServerIdentity({ pins }: { pins: string[] }): C
 
   return function checkServerIdentity(hostname, cert) {
     const defaultError = tls.checkServerIdentity(hostname, cert);
-    if (defaultError) return defaultError;
+    if (defaultError) {
+      (defaultError as { retriable?: boolean }).retriable = false;
+      return defaultError;
+    }
 
     const fingerprint = cert?.raw
       ? sha256FingerprintHexFromCertRaw(cert.raw)

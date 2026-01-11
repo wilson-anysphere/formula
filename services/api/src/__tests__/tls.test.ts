@@ -43,6 +43,19 @@ describe("TLS pinning helpers", () => {
     }
   });
 
+  it("treats TLS hostname validation failures as non-retriable", () => {
+    const hostnameError = new Error("Hostname/IP does not match certificate");
+    const checkSpy = vi.spyOn(tls, "checkServerIdentity").mockReturnValue(hostnameError);
+    try {
+      const check = createPinnedCheckServerIdentity({ pins: ["00".repeat(32)] });
+      const err = check("example.com", { raw: Buffer.from("irrelevant") } as any);
+      expect(err).toBe(hostnameError);
+      expect((err as any).retriable).toBe(false);
+    } finally {
+      checkSpy.mockRestore();
+    }
+  });
+
   it("accepts pin matches", () => {
     const checkSpy = vi.spyOn(tls, "checkServerIdentity").mockReturnValue(undefined);
     try {
