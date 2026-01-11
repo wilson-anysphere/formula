@@ -194,6 +194,32 @@ describe("MacroEventBridge", () => {
     vi.useRealTimers();
   });
 
+  it("normalizes macro formula updates using canonical display semantics", () => {
+    const invoke = vi.fn(async () => ({ ok: true, output: [], updates: [] }));
+    const doc = new DocumentController();
+    const bridge = new MacroEventBridge({
+      workbookId: "local-workbook",
+      document: doc,
+      invoke,
+      drainBackendSync: async () => {},
+      getSelection: () => ({ sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 }),
+    });
+
+    bridge.applyMacroUpdates(
+      [
+        { sheetId: "Sheet1", row: 0, col: 0, value: null, formula: "  =  SUM(A1:A3)  ", displayValue: "" },
+        { sheetId: "Sheet1", row: 0, col: 1, value: null, formula: "   =   ", displayValue: "" },
+        { sheetId: "Sheet1", row: 0, col: 2, value: null, formula: "A1*2", displayValue: "" },
+      ],
+      { label: "Apply macro updates" },
+    );
+
+    expect(doc.getCell("Sheet1", "A1").formula).toBe("=SUM(A1:A3)");
+    expect(doc.getCell("Sheet1", "B1").formula).toBeNull();
+    expect(doc.getCell("Sheet1", "B1").value).toBeNull();
+    expect(doc.getCell("Sheet1", "C1").formula).toBe("=A1*2");
+  });
+
   it("silently ignores macro event invocations when no workbook is loaded", async () => {
     const invoke = vi.fn(async () => {
       throw "no workbook loaded";

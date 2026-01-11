@@ -1,5 +1,6 @@
 import type { DocumentController } from "../document/documentController.js";
 import type { MacroCellUpdate, MacroPermission } from "./types";
+import { normalizeFormulaTextOpt } from "@formula/engine";
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
@@ -80,9 +81,7 @@ function inputEquals(before: CellState, after: CellState): boolean {
 
 function normalizeFormulaText(formula: unknown): string | null {
   if (typeof formula !== "string") return null;
-  const trimmed = formula.trimStart();
-  if (trimmed === "") return null;
-  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+  return normalizeFormulaTextOpt(formula);
 }
 
 function normalizeUpdates(raw: any[] | undefined): MacroCellUpdate[] | undefined {
