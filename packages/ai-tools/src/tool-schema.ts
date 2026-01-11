@@ -372,15 +372,20 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
   },
   create_chart: {
     name: "create_chart",
-    description: "Create a chart from a data range.",
+    description:
+      "Create a chart from a data range. If position is omitted, the host will choose a default anchor near the data.",
     paramsSchema: CreateChartParamsSchema,
     jsonSchema: {
       type: "object",
       properties: {
         chart_type: { type: "string", enum: ["bar", "line", "pie", "scatter", "area"] },
-        data_range: { type: "string" },
-        title: { type: "string" },
-        position: { type: "string" }
+        data_range: { type: "string", description: "Range in A1 notation containing the source data." },
+        title: { type: "string", description: "Optional chart title." },
+        position: {
+          type: "string",
+          description:
+            "Optional A1 cell or range where the chart should be placed (e.g. 'Sheet1!E2' or 'Sheet1!E2:I12')."
+        }
       },
       required: ["chart_type", "data_range"]
     }
