@@ -147,6 +147,14 @@ pub struct FunctionSpec {
 
 inventory::collect!(FunctionSpec);
 
+/// Iterate all [`FunctionSpec`] registrations collected via [`inventory`].
+///
+/// This is primarily intended for cross-crate test coverage (e.g. ensuring XLSB
+/// BIFF function-id mappings cover every function that the engine can evaluate).
+pub fn iter_function_specs() -> impl Iterator<Item = &'static FunctionSpec> {
+    inventory::iter::<FunctionSpec>.into_iter()
+}
+
 fn registry() -> &'static HashMap<String, &'static FunctionSpec> {
     static REGISTRY: OnceLock<HashMap<String, &'static FunctionSpec>> = OnceLock::new();
     REGISTRY.get_or_init(|| {

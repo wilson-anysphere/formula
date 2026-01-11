@@ -9,9 +9,11 @@
 //! constants, A1-style refs, basic operators, and a curated set of built-in
 //! functions.
 
+mod ftab;
 mod function_ids;
 mod rgce;
 
+pub use ftab::{function_id_from_name, function_name_from_id, FTAB_USER_DEFINED};
 pub use function_ids::{function_id_to_name, function_name_to_id, function_spec_from_id};
 pub use rgce::{decode_rgce, DecodeRgceError};
 

@@ -10,8 +10,9 @@ pub struct FunctionSpec {
 // by `PtgFunc`/`PtgFuncVar`). These are shared across BIFF8/BIFF12 for
 // "classic" Excel functions.
 //
-// The encoder/decoder currently only needs a small subset for early editing
-// workflows (matching the functions implemented by `formula-engine`).
+// The full BIFF12 id <-> name mapping lives in [`crate::ftab`]. This module
+// maintains a curated subset with argument-count metadata used by the BIFF
+// encoder and by `PtgFunc` decoding (fixed-arity calls).
 pub(crate) const FUNCTION_SPECS: &[FunctionSpec] = &[
     // Statistics / Math
     FunctionSpec {
@@ -231,12 +232,6 @@ pub(crate) const FUNCTION_SPECS: &[FunctionSpec] = &[
         max_args: 2,
     },
     FunctionSpec {
-        id: 0x0165,
-        name: "IFNA",
-        min_args: 2,
-        max_args: 2,
-    },
-    FunctionSpec {
         id: 0x00A9,
         name: "COUNTA",
         min_args: 1,
@@ -260,41 +255,14 @@ pub(crate) const FUNCTION_SPECS: &[FunctionSpec] = &[
         min_args: 2,
         max_args: 2,
     },
-    // Excel 365 functions. These are typically stored with `_xlfn.` prefix in
-    // OOXML; BIFF12 uses function IDs directly.
-    FunctionSpec {
-        id: 0x01C6,
-        name: "CONCAT",
-        min_args: 1,
-        max_args: 255,
-    },
-    FunctionSpec {
-        id: 0x01C7,
-        name: "XMATCH",
-        min_args: 2,
-        max_args: 4,
-    },
-    FunctionSpec {
-        id: 0x01C8,
-        name: "XLOOKUP",
-        min_args: 3,
-        max_args: 6,
-    },
 ];
 
 pub fn function_name_to_id(name: &str) -> Option<u16> {
-    let upper = name.trim().to_ascii_uppercase();
-    FUNCTION_SPECS
-        .iter()
-        .find(|spec| spec.name == upper)
-        .map(|spec| spec.id)
+    crate::ftab::function_id_from_name(name)
 }
 
 pub fn function_id_to_name(id: u16) -> Option<&'static str> {
-    FUNCTION_SPECS
-        .iter()
-        .find(|spec| spec.id == id)
-        .map(|spec| spec.name)
+    crate::ftab::function_name_from_id(id)
 }
 
 pub fn function_spec_from_id(id: u16) -> Option<FunctionSpec> {
