@@ -279,6 +279,33 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("treats a bare '=' input as literal text (not a formula)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", "=");
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([]);
+
+      const a1 = await engine.getCell("A1");
+      expect(a1.input).toBe("=");
+      expect(a1.value).toBe("=");
+
+      const exported = JSON.parse(await engine.toJson());
+      expect(exported.sheets.Sheet1.cells).toHaveProperty("A1", "=");
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("clears spill output cells when a spill cell is overwritten", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);

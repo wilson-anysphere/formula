@@ -652,3 +652,23 @@ fn set_range_clears_null_entries() {
         .unwrap();
     assert!(!cells.contains_key("A1"));
 }
+
+#[wasm_bindgen_test]
+fn equals_sign_only_is_treated_as_literal_text_input() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_str("="), None)
+        .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert!(changes.is_empty());
+
+    let cell_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.input, json!("="));
+    assert_eq!(cell.value, json!("="));
+
+    let exported = wb.to_json().unwrap();
+    let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
+    assert_eq!(parsed["sheets"][DEFAULT_SHEET]["cells"]["A1"], json!("="));
+}
