@@ -106,3 +106,12 @@ Downloads raw package bytes.
 **Client integrity requirement**
 
 Clients should compute sha256 over the downloaded bytes and reject the download if it does not match `X-Package-Sha256`.
+
+### `POST /api/publishers/:publisher/keys/:id/revoke` (admin)
+
+Revoke a publisher signing key.
+
+**Notes**
+
+- Admin-only (requires the marketplace admin bearer token).
+- Revoked keys are excluded from publish-time verification and clients ignore them during install.

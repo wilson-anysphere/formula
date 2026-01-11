@@ -739,6 +739,8 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         lower.includes("manifest") ||
         lower.includes("package") ||
         lower.includes("signature") ||
+        lower.includes("public key") ||
+        lower.includes("signing key") ||
         lower.includes("invalid") ||
         lower.includes("disallowed") ||
         lower.includes("too many files") ||
