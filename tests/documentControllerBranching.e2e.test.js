@@ -67,3 +67,37 @@ test("DocumentController + BranchService: checkout/merge mutate the live workboo
   });
 });
 
+test("DocumentController + BranchService: format-only conflicts round-trip through adapter", async () => {
+  const actor = { userId: "u1", role: "owner" };
+
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setRangeFormat("Sheet1", "A1", { numberFormat: "currency" });
+
+  const store = new InMemoryBranchStore();
+  const branchService = new BranchService({ docId: "doc-format", store });
+  await branchService.init(actor, { sheets: { Sheet1: {} } });
+
+  const workflow = new DocumentBranchingWorkflow({ doc, branchService });
+  await workflow.commitCurrentState(actor, "base");
+
+  await branchService.createBranch(actor, { name: "fmt" });
+
+  await workflow.checkoutIntoDoc(actor, "fmt");
+  doc.setRangeFormat("Sheet1", "A1", { numberFormat: "percent" });
+  await workflow.commitCurrentState(actor, "fmt: percent");
+
+  await workflow.checkoutIntoDoc(actor, "main");
+  doc.setRangeFormat("Sheet1", "A1", { numberFormat: "accounting" });
+  await workflow.commitCurrentState(actor, "main: accounting");
+
+  const preview = await branchService.previewMerge(actor, { sourceBranch: "fmt" });
+  assert.equal(preview.conflicts.length, 1);
+  assert.equal(preview.conflicts[0]?.reason, "format");
+
+  await workflow.mergeIntoDoc(actor, "fmt", [{ conflictIndex: 0, choice: "theirs" }]);
+
+  const a1 = doc.getCell("Sheet1", "A1");
+  assert.equal(a1.value, 1);
+  assert.deepEqual(doc.styleTable.get(a1.styleId), { numberFormat: "percent" });
+});
