@@ -475,6 +475,45 @@ test("QueryEngine: schema discovery enables folding renameColumn/changeType with
   assert.equal(schemaCalls, 1);
 });
 
+test("QueryEngine: schema discovery caches by connection handle when connection identity is missing", async () => {
+  let schemaCalls = 0;
+  const connection = {};
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        getSchema: async () => {
+          schemaCalls += 1;
+          return { columns: ["Region", "Sales"], types: { Region: "string", Sales: "number" } };
+        },
+        querySql: async (_connection, _sql) =>
+          DataTable.fromGrid(
+            [
+              ["Region", "Amount"],
+              ["East", 100],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+  });
+
+  const query = {
+    id: "q_schema_cache_ref",
+    name: "Schema cache by ref",
+    source: { type: "database", connection, query: "SELECT * FROM raw", dialect: "postgres" },
+    steps: [
+      { id: "s1", name: "Rename", operation: { type: "renameColumn", oldName: "Sales", newName: "Amount" } },
+      { id: "s2", name: "Type", operation: { type: "changeType", column: "Amount", newType: "number" } },
+    ],
+  };
+
+  await engine.executeQuery(query, { queries: {} }, {});
+  await engine.executeQuery(query, { queries: {} }, {});
+  assert.equal(schemaCalls, 1);
+  assert.equal(query.source.columns, undefined, "schema discovery should not mutate the caller query");
+});
+
 test("QueryEngine: schema discovery cache varies by credentialId", async () => {
   let schemaCalls = 0;
   let currentCredentialId = "cred-a";

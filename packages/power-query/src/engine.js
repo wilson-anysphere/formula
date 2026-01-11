@@ -709,6 +709,7 @@ export class QueryEngine {
          */
         const discoverSchema = async (dbSource) => {
           const connectionId = resolveDatabaseConnectionId(dbSource, sqlConnector);
+          const connectionRefId = !connectionId ? this.getEphemeralObjectId(dbSource.connection) : null;
           const request = {
             connectionId: connectionId ?? undefined,
             connection: dbSource.connection,
@@ -726,9 +727,10 @@ export class QueryEngine {
             const credentialId = extractCredentialId(credentials);
             const schemaCacheable = credentials == null || credentialId != null;
 
-            if (connectionId && schemaCacheable) {
+            if ((connectionId || connectionRefId) && schemaCacheable) {
               schemaCacheKey = `pq:schema:v2:${hashValue({
-                connectionId,
+                connectionId: connectionId ?? null,
+                connectionRefId,
                 sql: dbSource.query,
                 credentialsHash: credentialId ? hashValue(credentialId) : null,
               })}`;
