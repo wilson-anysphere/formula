@@ -9,5 +9,7 @@ test("normalizeScopes trims, sorts, and dedupes scope strings", () => {
 
   const b = normalizeScopes(["write", "read"]);
   assert.equal(a.scopesHash, b.scopesHash);
-});
 
+  const c = normalizeScopes("write   read");
+  assert.equal(a.scopesHash, c.scopesHash);
+});

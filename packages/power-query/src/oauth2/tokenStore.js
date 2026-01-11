@@ -40,7 +40,10 @@ import { hashValue } from "../cache/key.js";
  * @returns {{ scopes: string[], scopesHash: string }}
  */
 export function normalizeScopes(scopes) {
-  const raw = Array.isArray(scopes) ? scopes : [];
+  /** @type {unknown[]} */
+  let raw = [];
+  if (Array.isArray(scopes)) raw = scopes;
+  else if (typeof scopes === "string") raw = scopes.split(/[\s,]+/).filter(Boolean);
   const normalized = raw
     .filter((s) => typeof s === "string")
     .map((s) => s.trim())

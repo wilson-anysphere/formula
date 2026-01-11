@@ -135,6 +135,22 @@ export class HttpConnector {
     /** @type {Record<string, string>} */
     const headers = { ...(request.headers ?? {}) };
 
+    /**
+     * @param {unknown} scopes
+     * @returns {string[] | undefined}
+     */
+    const coerceScopes = (scopes) => {
+      if (Array.isArray(scopes)) return scopes;
+      if (typeof scopes === "string") {
+        const parts = scopes
+          .split(/[\s,]+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        return parts.length > 0 ? parts : undefined;
+      }
+      return undefined;
+    };
+
     let credentials = options.credentials;
     if (
       credentials &&
@@ -165,9 +181,9 @@ export class HttpConnector {
         // @ts-ignore - runtime access
         const providerId = oauth2.providerId;
         // @ts-ignore - runtime access
-        const scopes = oauth2.scopes;
+        const scopes = coerceScopes(oauth2.scopes);
         if (typeof providerId === "string" && providerId) {
-          credentialOAuth2 = { providerId, scopes: Array.isArray(scopes) ? scopes : undefined };
+          credentialOAuth2 = { providerId, scopes };
         }
       }
     }
@@ -175,7 +191,8 @@ export class HttpConnector {
     /** @type {{ type: "oauth2"; providerId: string; scopes?: string[] } | null} */
     let oauth2Auth = null;
     if (request.auth?.type === "oauth2") {
-      oauth2Auth = request.auth;
+      // @ts-ignore - tolerate `scopes` being encoded as a string in persisted JSON.
+      oauth2Auth = { ...request.auth, scopes: coerceScopes(request.auth.scopes) };
     } else if (credentialOAuth2) {
       oauth2Auth = { type: "oauth2", ...credentialOAuth2 };
     }
@@ -234,8 +251,8 @@ export class HttpConnector {
    */
   getCacheKey(request) {
     const normalizedScopes = (scopes) => {
-      if (!Array.isArray(scopes)) return [];
-      const cleaned = scopes
+      const raw = Array.isArray(scopes) ? scopes : typeof scopes === "string" ? scopes.split(/[\s,]+/).filter(Boolean) : [];
+      const cleaned = raw
         .filter((s) => typeof s === "string")
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
@@ -290,6 +307,22 @@ export class HttpConnector {
       credentials = await credentials.getSecret();
     }
 
+    /**
+     * @param {unknown} scopes
+     * @returns {string[] | undefined}
+     */
+    const coerceScopes = (scopes) => {
+      if (Array.isArray(scopes)) return scopes;
+      if (typeof scopes === "string") {
+        const parts = scopes
+          .split(/[\s,]+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        return parts.length > 0 ? parts : undefined;
+      }
+      return undefined;
+    };
+
     /** @type {{ providerId: string; scopes?: string[] } | null} */
     let credentialOAuth2 = null;
     if (credentials && typeof credentials === "object" && !Array.isArray(credentials)) {
@@ -307,9 +340,9 @@ export class HttpConnector {
         // @ts-ignore - runtime access
         const providerId = oauth2.providerId;
         // @ts-ignore - runtime access
-        const scopes = oauth2.scopes;
+        const scopes = coerceScopes(oauth2.scopes);
         if (typeof providerId === "string" && providerId) {
-          credentialOAuth2 = { providerId, scopes: Array.isArray(scopes) ? scopes : undefined };
+          credentialOAuth2 = { providerId, scopes };
         }
       }
     }
@@ -319,7 +352,8 @@ export class HttpConnector {
     /** @type {{ type: "oauth2"; providerId: string; scopes?: string[] } | null} */
     let oauth2Auth = null;
     if (request.auth?.type === "oauth2") {
-      oauth2Auth = request.auth;
+      // @ts-ignore - tolerate `scopes` being encoded as a string in persisted JSON.
+      oauth2Auth = { ...request.auth, scopes: coerceScopes(request.auth.scopes) };
     } else if (credentialOAuth2) {
       oauth2Auth = { type: "oauth2", ...credentialOAuth2 };
     }

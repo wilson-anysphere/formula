@@ -35,7 +35,8 @@ test("Http OAuth2: request.auth overrides credentials-provided oauth2 config", a
       type: "api",
       url: "https://api.example/data",
       method: "GET",
-      auth: { type: "oauth2", providerId: "explicit" },
+      // @ts-ignore - tolerate `scopes` being encoded as a string in persisted JSON.
+      auth: { type: "oauth2", providerId: "explicit", scopes: "read write" },
     },
     steps: [],
     refreshPolicy: { type: "manual" },
@@ -45,5 +46,5 @@ test("Http OAuth2: request.auth overrides credentials-provided oauth2 config", a
   assert.deepEqual(table.toGrid(), [["id"], [1]]);
   assert.equal(observedTokenRequests.length, 1);
   assert.equal(observedTokenRequests[0].providerId, "explicit");
+  assert.deepEqual(observedTokenRequests[0].scopes, ["read", "write"]);
 });
-
