@@ -325,6 +325,47 @@ type QueryOperation =
   | { type: "splitColumn"; column: string; delimiter: string };
 ```
 
+### Refresh Orchestration ("Refresh All")
+
+Excel's "Refresh All" respects query dependencies: referenced queries must refresh before dependents, and shared upstream dependencies should run at most once.
+
+In Formula, this is handled by a dependency-aware refresh orchestrator that:
+
+- Extracts a query dependency graph (`source.type === "query"`, plus `merge` + `append` dependencies)
+- Executes dependencies before dependents (topological ordering)
+- Shares a single execution session across the whole refresh so credentials/permissions are cached and prompts are minimized
+- Supports concurrency for independent subgraphs and cancellation/progress reporting per query
+
+```js
+import { QueryEngine, RefreshOrchestrator } from "@formula/power-query";
+
+const engine = new QueryEngine({
+  onCredentialRequest: async (connectorId, details) => {
+    // prompt once per session per unique request
+    return { token: "..." };
+  },
+  onPermissionRequest: async (kind, details) => true,
+});
+
+const orchestrator = new RefreshOrchestrator({
+  engine,
+  getContext: () => ({ queries: /* map of id -> Query */, tables: /* optional */ }),
+  concurrency: 2,
+});
+
+// Register queries that can be refreshed.
+for (const query of queries) orchestrator.registerQuery(query);
+
+// Optional: subscribe to queued/started/progress/completed/error/cancelled events.
+const unsubscribe = orchestrator.onEvent((evt) => {
+  // evt includes { sessionId, phase: "dependency" | "target" }
+});
+
+const handle = orchestrator.refreshAll(); // refresh all registered queries
+await handle.promise;
+unsubscribe();
+```
+
 ### Query Folding
 
 Push operations to the data source when possible:
