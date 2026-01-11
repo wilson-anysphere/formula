@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 
 import { PanelIds } from "./panelRegistry.js";
 import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
+import { QueryEditorPanelContainer } from "./query-editor/QueryEditorPanelContainer.js";
 import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
@@ -85,6 +86,20 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           getActiveSheetId={options.getActiveSheetId}
           workbookId={options.workbookId}
           createChart={options.createChart}
+        />,
+      );
+      return;
+    }
+
+    if (panelId === PanelIds.QUERY_EDITOR) {
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(
+        panelId,
+        body,
+        <QueryEditorPanelContainer
+          getDocumentController={options.getDocumentController}
+          getActiveSheetId={options.getActiveSheetId}
+          workbookId={options.workbookId}
         />,
       );
       return;

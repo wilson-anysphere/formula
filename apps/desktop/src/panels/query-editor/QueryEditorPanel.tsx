@@ -66,7 +66,9 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
     const evt: any = props.refreshEvent;
     if (!evt) return null;
     const jobQueryId = evt?.job?.queryId;
+    const applyQueryId = evt?.queryId;
     if (typeof jobQueryId === "string" && jobQueryId !== props.query.id) return null;
+    if (typeof jobQueryId !== "string" && typeof applyQueryId === "string" && applyQueryId !== props.query.id) return null;
     switch (evt.type) {
       case "queued":
         return "Refresh queued…";
@@ -80,6 +82,16 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
         return "Refresh cancelled";
       case "error":
         return `Refresh failed: ${evt?.error?.message ?? String(evt?.error ?? "Unknown error")}`;
+      case "apply:started":
+        return "Applying results to sheet…";
+      case "apply:progress":
+        return `Applying results… (${evt?.rowsWritten ?? 0} rows)`;
+      case "apply:completed":
+        return "Results applied";
+      case "apply:cancelled":
+        return "Apply cancelled";
+      case "apply:error":
+        return `Apply failed: ${evt?.error?.message ?? String(evt?.error ?? "Unknown error")}`;
       default:
         return null;
     }
