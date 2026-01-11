@@ -53,6 +53,24 @@ test.describe("grid scrolling + virtualization", () => {
     expect(scrollAfter).toBeGreaterThan(scrollBefore);
   });
 
+  test("ArrowRight navigation auto-scrolls to keep the active cell visible", async ({ page }) => {
+    await page.goto("/");
+    const grid = page.locator("#grid");
+
+    await grid.click({ position: { x: 60, y: 40 } });
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().x);
+    expect(scrollBefore).toBe(0);
+
+    for (let i = 0; i < 50; i += 1) {
+      await page.keyboard.press("ArrowRight");
+    }
+
+    await expect(page.getByTestId("active-cell")).toHaveText("AY1");
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().x);
+    expect(scrollAfter).toBeGreaterThan(scrollBefore);
+  });
+
   test("name box Go To scrolls and updates selection", async ({ page }) => {
     await page.goto("/");
 
