@@ -59,6 +59,23 @@ test("Typing =XLO suggests XLOOKUP(", async () => {
   );
 });
 
+test("Typing =_xlfn.XLO suggests =_xlfn.XLOOKUP(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.XLO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=_xlfn.XLOOKUP("),
+    `Expected an _xlfn.XLOOKUP suggestion, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 

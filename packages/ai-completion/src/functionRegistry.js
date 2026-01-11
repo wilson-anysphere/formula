@@ -49,12 +49,18 @@ export class FunctionRegistry {
 
     for (const fn of catalogFunctions) {
       this.register(fn);
+      const xlfnAlias = toXlfnAlias(fn);
+      if (xlfnAlias) this.register(xlfnAlias);
     }
 
     // Signature/arg-type hints are intentionally curated until the catalog
     // carries richer metadata. Curated entries override catalog name-only
     // entries.
-    for (const fn of CURATED_FUNCTIONS) this.register(fn);
+    for (const fn of CURATED_FUNCTIONS) {
+      this.register(fn);
+      const xlfnAlias = toXlfnAlias(fn);
+      if (xlfnAlias) this.register(xlfnAlias);
+    }
   }
 
   /**
@@ -258,4 +264,18 @@ function lowerBound(arr, target) {
     else hi = mid;
   }
   return lo;
+}
+
+/**
+ * Excel stores some "newer" functions in formula text with an `_xlfn.` prefix.
+ * For completion/hinting we treat these as aliases of the unprefixed function.
+ *
+ * @param {FunctionSpec} spec
+ * @returns {FunctionSpec | null}
+ */
+function toXlfnAlias(spec) {
+  const baseName = spec?.name?.toUpperCase?.();
+  if (!baseName || typeof baseName !== "string") return null;
+  if (baseName.startsWith("_XLFN.")) return null;
+  return { ...spec, name: `_XLFN.${baseName}` };
 }
