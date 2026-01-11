@@ -18,9 +18,10 @@ export class ScriptRuntime {
 
   /**
    * @param {string} code
+   * @param {{ permissions?: any }=} options
    * @returns {Promise<ScriptRunResult>}
    */
-  async run(code) {
+  async run(code, options) {
     const activeSheetName = this.workbook.getActiveSheet().name;
     const selection = this.workbook.getSelection();
 
@@ -31,6 +32,7 @@ export class ScriptRuntime {
       workerData: {
         activeSheetName,
         selection,
+        permissions: options?.permissions,
       },
     });
 

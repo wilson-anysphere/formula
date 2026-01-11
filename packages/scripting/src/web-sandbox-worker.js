@@ -1,34 +1,26 @@
 /* eslint-disable no-console */
-const { parentPort, workerData } = require("node:worker_threads");
-const vm = require("node:vm");
-const util = require("node:util");
-let ts = null;
-try {
-  // The TypeScript compiler is a devDependency in the monorepo; when running in
-  // minimal environments (like CI/unit tests without `pnpm install`) it may be
-  // absent. In that case we still allow scripts that are valid JavaScript to run
-  // by skipping transpilation.
-  // eslint-disable-next-line global-require
-  ts = require("typescript");
-} catch {
-  ts = null;
-}
+import ts from "typescript";
 
-if (!parentPort) {
-  throw new Error("sandbox-worker must be run as a worker thread");
-}
-
-const originalFetch = globalThis.fetch;
-const OriginalWebSocket = globalThis.WebSocket;
+// This file runs in a module WebWorker context (no Node APIs).
+//
+// Responsibilities:
+// - Compile TypeScript user code to JavaScript inside the worker
+// - Provide a minimal `ctx` object matching the Node scripting runtime
+// - Forward workbook operations to the host via RPC
+// - Capture console output in a structured form
+// - Enforce a minimal network permission model (fetch/WebSocket)
 
 let nextRpcId = 1;
 const pendingRpc = new Map();
+
+const originalFetch = self.fetch?.bind(self);
+const OriginalWebSocket = self.WebSocket;
 
 function rpc(method, params) {
   const id = nextRpcId++;
   return new Promise((resolve, reject) => {
     pendingRpc.set(id, { resolve, reject });
-    parentPort.postMessage({ type: "rpc", id, method, params });
+    self.postMessage({ type: "rpc", id, method, params });
   });
 }
 
@@ -42,11 +34,25 @@ function serializeError(err) {
   return { message: "Unknown error" };
 }
 
+function formatConsoleArgs(args) {
+  return args
+    .map((arg) => {
+      if (typeof arg === "string") return arg;
+      if (arg instanceof Error) return arg.stack ?? arg.message;
+      try {
+        return JSON.stringify(arg);
+      } catch {
+        return String(arg);
+      }
+    })
+    .join(" ");
+}
+
 function postConsole(level, args) {
-  parentPort.postMessage({
+  self.postMessage({
     type: "console",
     level,
-    message: util.format(...args),
+    message: formatConsoleArgs(args),
   });
 }
 
@@ -61,52 +67,54 @@ function applyNetworkSandbox(permissions) {
   const mode = permissions?.network ?? "none";
 
   if (mode === "none") {
-    return {
-      fetch: async () => {
-        throw new Error("Network access is not permitted");
-      },
-      WebSocket: class BlockedWebSocket {
-        constructor() {
-          throw new Error("Network access is not permitted");
-        }
-      },
+    self.fetch = async () => {
+      throw new Error("Network access is not permitted");
     };
+
+    self.WebSocket = class BlockedWebSocket {
+      constructor() {
+        throw new Error("Network access is not permitted");
+      }
+    };
+    return;
   }
 
   if (mode === "allowlist") {
     const allowlist = new Set(permissions?.networkAllowlist ?? []);
-    return {
-      fetch: async (input, init) => {
-        if (!originalFetch) {
-          throw new Error("fetch is not available in this environment");
+    self.fetch = async (input, init) => {
+      if (!originalFetch) {
+        throw new Error("fetch is not available in this environment");
+      }
+      const url = typeof input === "string" ? input : input?.url;
+      const hostname = new URL(url, self.location?.href ?? "https://localhost").hostname;
+      if (!allowlist.has(hostname)) {
+        throw new Error(`Network access to ${hostname} is not permitted`);
+      }
+      return originalFetch(input, init);
+    };
+
+    self.WebSocket = class AllowlistWebSocket {
+      constructor(url, protocols) {
+        if (!OriginalWebSocket) {
+          throw new Error("WebSocket is not available in this environment");
         }
-        const url = typeof input === "string" ? input : input?.url;
-        const hostname = new URL(url, "https://localhost").hostname;
+        const hostname = new URL(url, self.location?.href ?? "https://localhost").hostname;
         if (!allowlist.has(hostname)) {
           throw new Error(`Network access to ${hostname} is not permitted`);
         }
-        return originalFetch(input, init);
-      },
-      WebSocket: class AllowlistWebSocket {
-        constructor(url, protocols) {
-          if (!OriginalWebSocket) {
-            throw new Error("WebSocket is not available in this environment");
-          }
-          const hostname = new URL(url, "https://localhost").hostname;
-          if (!allowlist.has(hostname)) {
-            throw new Error(`Network access to ${hostname} is not permitted`);
-          }
-          return new OriginalWebSocket(url, protocols);
-        }
-      },
+        return new OriginalWebSocket(url, protocols);
+      }
     };
+    return;
   }
 
   // full access
-  return {
-    fetch: originalFetch,
-    WebSocket: OriginalWebSocket,
-  };
+  if (originalFetch) {
+    self.fetch = originalFetch;
+  }
+  if (OriginalWebSocket) {
+    self.WebSocket = OriginalWebSocket;
+  }
 }
 
 function createRangeProxy(sheetName, address) {
@@ -138,8 +146,12 @@ function createWorkbookProxy() {
 }
 
 function compileTypeScript(tsSource) {
-  const wrapped = `async function __formulaUserMain(ctx) {\n${tsSource}\n}\n__formulaUserMain(ctx)`;
-  if (!ts) return wrapped;
+  // Wrap user code in an async entrypoint so scripts can freely use top-level
+  // `await` (relative to the script body).
+  //
+  // Note: the host awaits the returned promise. Do not call the function in the
+  // emitted source; instead return it from the runner so we can `await` it.
+  const wrapped = `async function __formulaUserMain(ctx) {\n${tsSource}\n}\n`;
   const result = ts.transpileModule(wrapped, {
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
@@ -163,48 +175,43 @@ function compileTypeScript(tsSource) {
   return result.outputText;
 }
 
-async function runUserScript(tsSource) {
-  const jsSource = compileTypeScript(tsSource);
+async function runUserScript({ code, activeSheetName, selection, permissions }) {
+  applyNetworkSandbox(permissions ?? {});
+
+  const jsSource = `${compileTypeScript(code)}\n//# sourceURL=user-script.js\nreturn __formulaUserMain(ctx);`;
 
   const ctx = {
     workbook: createWorkbookProxy(),
-    activeSheet: createSheetProxy(workerData.activeSheetName),
-    selection: createRangeProxy(workerData.selection.sheetName, workerData.selection.address),
+    activeSheet: createSheetProxy(activeSheetName),
+    selection: createRangeProxy(selection.sheetName, selection.address),
     ui: {
       log: (...args) => safeConsole.log(...args),
     },
   };
 
-  const networkSandbox = applyNetworkSandbox(workerData.permissions ?? {});
+  const runner = new Function(
+    "ctx",
+    "console",
+    "setTimeout",
+    "clearTimeout",
+    "setInterval",
+    "clearInterval",
+    `"use strict";\n${jsSource}`,
+  );
 
-  const sandbox = {
-    ctx,
-    console: safeConsole,
-    setTimeout,
-    clearTimeout,
-    setInterval,
-    clearInterval,
-    fetch: networkSandbox.fetch,
-    WebSocket: networkSandbox.WebSocket,
-  };
-  sandbox.globalThis = sandbox;
-
-  const context = vm.createContext(sandbox, {
-    codeGeneration: { strings: false, wasm: false },
-  });
-
-  const script = new vm.Script(jsSource, { filename: "user-script.js" });
-  const result = script.runInContext(context);
+  const result = runner(ctx, safeConsole, setTimeout, clearTimeout, setInterval, clearInterval);
   await result;
 }
 
-parentPort.on("message", async (message) => {
+self.onmessage = async (event) => {
+  const message = event.data;
+
   if (message && message.type === "run") {
     try {
-      await runUserScript(message.code);
-      parentPort.postMessage({ type: "result" });
+      await runUserScript(message);
+      self.postMessage({ type: "result" });
     } catch (err) {
-      parentPort.postMessage({ type: "error", error: serializeError(err) });
+      self.postMessage({ type: "error", error: serializeError(err) });
     }
     return;
   }
@@ -228,4 +235,4 @@ parentPort.on("message", async (message) => {
       pending.reject(error);
     }
   }
-});
+};

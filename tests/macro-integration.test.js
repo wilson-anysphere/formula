@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MacroRecorder, generateTypeScriptMacro } from "../apps/desktop/src/macro-recorder/index.js";
-import { ScriptRuntime, Workbook } from "../packages/scripting/src/index.js";
+import { ScriptRuntime, Workbook } from "@formula/scripting/node";
 
 test("macro recorder generates runnable TypeScript that replays simple edits", async () => {
   const workbook = new Workbook();
@@ -35,4 +35,3 @@ test("macro recorder generates runnable TypeScript that replays simple edits", a
   assert.deepEqual(freshSheet.getRange("A1").getFormat(), { bold: true });
   assert.deepEqual(freshWorkbook.getSelection(), { sheetName: "Sheet1", address: "A2" });
 });
-

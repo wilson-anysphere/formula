@@ -9,10 +9,10 @@
  * shell can provide it and call `mountScriptEditorPanel`.
  */
 
-import { FORMULA_API_DTS, ScriptRuntime } from "../../../../packages/scripting/src/index.js";
+import { FORMULA_API_DTS, ScriptRuntime } from "@formula/scripting/web";
 
 /**
- * @typedef {import("../../../../packages/scripting/src/workbook.js").Workbook} Workbook
+ * @typedef {import("@formula/scripting").Workbook} Workbook
  */
 
 /**

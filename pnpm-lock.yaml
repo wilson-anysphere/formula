@@ -15,6 +15,9 @@ importers:
         specifier: ^13.6.27
         version: 13.6.29
     devDependencies:
+      '@formula/scripting':
+        specifier: workspace:*
+        version: link:packages/scripting
       '@types/node':
         specifier: ^22.13.4
         version: 22.19.5
@@ -42,6 +45,9 @@ importers:
       '@formula/data-io':
         specifier: workspace:*
         version: link:../../packages/data-io
+      '@formula/scripting':
+        specifier: workspace:*
+        version: link:../../packages/scripting
       '@formula/text-layout':
         specifier: workspace:*
         version: link:../../packages/text-layout
@@ -182,6 +188,12 @@ importers:
       esbuild:
         specifier: ^0.27.2
         version: 0.27.2
+
+  packages/scripting:
+    dependencies:
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
 
   packages/security: {}
 
