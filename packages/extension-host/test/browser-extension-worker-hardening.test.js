@@ -126,6 +126,17 @@ if (!nativeFetch) {
 
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input?.url ?? String(input);
+  if (url.endsWith("/redirect-outside.mjs")) {
+    return {
+      ok: true,
+      status: 200,
+      redirected: true,
+      url: "https://evil.invalid/evil.mjs",
+      async arrayBuffer() {
+        return new ArrayBuffer(0);
+      }
+    };
+  }
   if (url.startsWith("file://")) {
     const data = await readFile(fileURLToPath(url));
     return new Response(data, { status: 200 });
@@ -413,6 +424,34 @@ test("extension-worker: rejects modules that exceed maxModuleBytes", async () =>
   }
 });
 
+test("extension-worker: rejects module graphs that exceed maxTotalBytes", async () => {
+  const dir = await createTempDir("formula-ext-worker-maxtotalbytes-");
+  try {
+    /** @type {Record<string, string>} */
+    const files = {
+      "main.mjs": `import "./mod1.mjs";\nexport async function activate() {}\n`
+    };
+    const bigComment = "a".repeat(240 * 1024);
+
+    // main + 22 deps ≈ 5.2MB+ (per-module below 256KB).
+    for (let i = 1; i <= 22; i++) {
+      const next = i === 22 ? "" : `import "./mod${i + 1}.mjs";\n`;
+      files[`mod${i}.mjs`] = `/*${bigComment}*/\n${next}export const value = ${i};\n`;
+    }
+
+    await writeFiles(dir, files);
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /graph too large/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("extension-worker: does not treat obj.import(...) as dynamic import", async () => {
   const dir = await createTempDir("formula-ext-worker-import-prop-");
   try {
@@ -423,6 +462,25 @@ test("extension-worker: does not treat obj.import(...) as dynamic import", async
     const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
 
     await activateExtensionWorker({ mainUrl, extensionPath });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: rejects modules that redirect outside the extension base URL", async () => {
+  const dir = await createTempDir("formula-ext-worker-redirect-outside-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `import "./redirect-outside.mjs";\nexport async function activate() {}\n`,
+      "redirect-outside.mjs": `export const x = 1;\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /redirected outside the extension base URL/i
+    );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
