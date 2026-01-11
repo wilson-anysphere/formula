@@ -35,7 +35,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
   } else if (v >= params.max) {
     bin_i = i32(params.bin_count) - 1;
   } else {
-    bin_i = i32((v - params.min) * params.inv_bin_width);
+    let scaled = (v - params.min) * params.inv_bin_width;
+    // Guard extreme range configurations like min=-Infinity where
+    // (v - min) * inv_bin_width can become NaN (Infinity * 0).
+    if (isNan(scaled)) {
+      bin_i = 0;
+    } else {
+      bin_i = i32(scaled);
+    }
   }
   if (bin_i < 0) {
     bin_i = 0;

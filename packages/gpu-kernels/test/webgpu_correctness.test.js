@@ -65,6 +65,13 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
   }
 
   {
+    const values = new Float32Array([-100, 0, 0.5, 1.0, 2.0]);
+    const cpuBins = await cpu.histogram(values, { min: Number.NEGATIVE_INFINITY, max: 1, bins: 2 });
+    const gpuBins = await gpu.histogram(values, { min: Number.NEGATIVE_INFINITY, max: 1, bins: 2 }, { precision: "f32" });
+    assert.deepEqual(Array.from(gpuBins), Array.from(cpuBins));
+  }
+
+  {
     const rng = makeRng(246);
     const n = 200_000;
     const values = new Float32Array(n);
@@ -168,6 +175,13 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
       values[2] = Number.NEGATIVE_INFINITY;
       const cpuBins = await cpu.histogram(values, { min: 0, max: 1, bins: 16 });
       const gpuBins = await gpu.histogram(values, { min: 0, max: 1, bins: 16 }, { precision: "f64", allowFp32FallbackForF64: false });
+      assert.deepEqual(Array.from(gpuBins), Array.from(cpuBins));
+    }
+
+    {
+      const values = new Float64Array([-100, 0, 0.5, 1.0, 2.0]);
+      const cpuBins = await cpu.histogram(values, { min: Number.NEGATIVE_INFINITY, max: 1, bins: 2 });
+      const gpuBins = await gpu.histogram(values, { min: Number.NEGATIVE_INFINITY, max: 1, bins: 2 }, { precision: "f64", allowFp32FallbackForF64: false });
       assert.deepEqual(Array.from(gpuBins), Array.from(cpuBins));
     }
 
