@@ -140,6 +140,15 @@ High-level flow:
 3. Send a batch to the org’s configured `endpointUrl` using `services/api/src/siem/sender.ts`.
 4. Persist cursor + backoff state in `org_siem_export_state` (`services/api/migrations/0003_siem_export_state.sql`).
 
+## Client-side delivery helpers (desktop / offline-first)
+
+This repo also includes a standalone JavaScript SIEM delivery library intended for **clients** (desktop / offline-first), not the cloud API runtime:
+
+- `packages/security/siem/exporter.js` – `SiemExporter` (batching + retry + HTTP delivery).
+- `packages/security/siem/offlineQueue.js` – `OfflineAuditQueue` (persist redacted events to Node FS or IndexedDB and flush later via `flushToExporter(exporter)`).
+
+These helpers operate on canonical `AuditEvent` objects from `@formula/audit-core` and are separate from the server-side SIEM worker in `services/api/src/siem/*`.
+
 ## Not implemented (design notes)
 
 A legacy Node HTTP server previously documented endpoints for audit ingestion and SSE streaming. Those endpoints are **not** part of the current Fastify API.
