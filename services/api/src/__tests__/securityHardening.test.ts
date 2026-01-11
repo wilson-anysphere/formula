@@ -89,9 +89,11 @@ describe("security hardening", () => {
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["server"]).toBeUndefined();
+    expect(res.headers["x-dns-prefetch-control"]).toBe("off");
     expect(res.headers["x-content-type-options"]).toBe("nosniff");
     expect(res.headers["x-frame-options"]).toBe("DENY");
     expect(res.headers["referrer-policy"]).toBe("no-referrer");
+    expect(res.headers["x-permitted-cross-domain-policies"]).toBe("none");
     expect(res.headers["content-security-policy"]).toContain("default-src 'none'");
     expect(res.headers["permissions-policy"]).toContain("camera=()");
     expect(res.headers["cache-control"]).toBe("no-store");
@@ -100,6 +102,8 @@ describe("security hardening", () => {
     const resSecure = await secureApp.inject({ method: "GET", url: "/health" });
     expect(resSecure.statusCode).toBe(200);
     expect(resSecure.headers["server"]).toBeUndefined();
+    expect(resSecure.headers["x-dns-prefetch-control"]).toBe("off");
+    expect(resSecure.headers["x-permitted-cross-domain-policies"]).toBe("none");
     expect(resSecure.headers["content-security-policy"]).toContain("default-src 'none'");
     expect(resSecure.headers["cache-control"]).toBe("no-store");
     expect(resSecure.headers["strict-transport-security"]).toContain("max-age=");

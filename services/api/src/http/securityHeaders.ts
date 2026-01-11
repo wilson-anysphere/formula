@@ -8,9 +8,13 @@ export function registerSecurityHeaders(app: FastifyInstance): void {
     if (reply.hasHeader("server")) reply.removeHeader("server");
 
     // Only set headers when missing so individual endpoints can deliberately override them.
+    if (!reply.hasHeader("x-dns-prefetch-control")) reply.header("x-dns-prefetch-control", "off");
     if (!reply.hasHeader("x-content-type-options")) reply.header("x-content-type-options", "nosniff");
     if (!reply.hasHeader("x-frame-options")) reply.header("x-frame-options", "DENY");
     if (!reply.hasHeader("referrer-policy")) reply.header("referrer-policy", "no-referrer");
+    if (!reply.hasHeader("x-permitted-cross-domain-policies")) {
+      reply.header("x-permitted-cross-domain-policies", "none");
+    }
     if (!reply.hasHeader("content-security-policy")) {
       // Baseline CSP for API-style responses. Endpoints that intentionally serve HTML can override.
       reply.header("content-security-policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
