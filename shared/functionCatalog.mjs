@@ -99,6 +99,16 @@ export default {
       ]
     },
     {
+      "name": "AVERAGEA",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "AVERAGEIF",
       "min_args": 2,
       "max_args": 3,
@@ -996,6 +1006,16 @@ export default {
       ]
     },
     {
+      "name": "MAXA",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "MEDIAN",
       "min_args": 1,
       "max_args": 255,
@@ -1019,6 +1039,16 @@ export default {
     },
     {
       "name": "MIN",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "MINA",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
@@ -1225,6 +1255,17 @@ export default {
       "volatility": "non_volatile",
       "return_type": "bool",
       "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "PEARSON",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
         "any"
       ]
     },

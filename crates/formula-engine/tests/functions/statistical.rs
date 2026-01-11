@@ -115,6 +115,12 @@ fn correl_matches_perfect_positive_relationship() {
 }
 
 #[test]
+fn pearson_is_alias_of_correl() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=PEARSON({1,2,3},{1,2,3})"), 1.0);
+}
+
+#[test]
 fn var_s_ignores_text_and_logicals_in_references() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);
@@ -149,4 +155,23 @@ fn vara_and_stdevpa_include_text_and_blanks() {
 fn vara_treats_text_values_as_zero_even_when_numeric() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval(r#"=VARA("2",2)"#), 2.0);
+}
+
+#[test]
+fn averagea_maxa_and_mina_include_text_and_blanks() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", Value::Text("x".to_string()));
+    sheet.set("A3", true);
+    sheet.set("A4", Value::Blank);
+
+    assert_number(&sheet.eval("=AVERAGEA(A1:A4)"), 0.5);
+    assert_number(&sheet.eval("=MAXA(A1:A4)"), 1.0);
+    assert_number(&sheet.eval("=MINA(A1:A4)"), 0.0);
+}
+
+#[test]
+fn averagea_treats_text_args_as_zero() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval(r#"=AVERAGEA("2",2)"#), 1.0);
 }

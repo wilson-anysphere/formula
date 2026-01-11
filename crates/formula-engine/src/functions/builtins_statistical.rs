@@ -219,6 +219,84 @@ fn collect_numbers_a(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Result
     Ok(out)
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "AVERAGEA",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: averagea_fn,
+    }
+}
+
+fn averagea_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers_a(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    if values.is_empty() {
+        return Value::Error(ErrorKind::Div0);
+    }
+    let sum: f64 = values.iter().sum();
+    Value::Number(sum / (values.len() as f64))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "MAXA",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: maxa_fn,
+    }
+}
+
+fn maxa_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers_a(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut best: Option<f64> = None;
+    for n in values {
+        best = Some(best.map_or(n, |b| b.max(n)));
+    }
+    Value::Number(best.unwrap_or(0.0))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "MINA",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: mina_fn,
+    }
+}
+
+fn mina_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers_a(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut best: Option<f64> = None;
+    for n in values {
+        best = Some(best.map_or(n, |b| b.min(n)));
+    }
+    Value::Number(best.unwrap_or(0.0))
+}
+
 fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<Option<f64>>, ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => match v {
@@ -978,6 +1056,20 @@ fn quartile_exc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 inventory::submit! {
     FunctionSpec {
         name: "CORREL",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: correl_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "PEARSON",
         min_args: 2,
         max_args: 2,
         volatility: Volatility::NonVolatile,

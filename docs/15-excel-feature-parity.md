@@ -249,7 +249,7 @@ This document tracks every Excel feature and our implementation status. Features
 |----------|--------|-------|
 | AVEDEV | ⬜ | |
 | AVERAGE | ✅ | P0 |
-| AVERAGEA | ⬜ | |
+| AVERAGEA | ✅ | |
 | AVERAGEIF | ✅ | P0 |
 | AVERAGEIFS | ✅ | P0 |
 | BETA.DIST | ⬜ | |
@@ -306,11 +306,11 @@ This document tracks every Excel feature and our implementation status. Features
 | LOGNORM.DIST | ⬜ | |
 | LOGNORM.INV | ⬜ | |
 | MAX | ✅ | P0 |
-| MAXA | ⬜ | |
+| MAXA | ✅ | |
 | MAXIFS | ⬜ | P0 |
 | MEDIAN | ✅ | P0 |
 | MIN | ✅ | P0 |
-| MINA | ⬜ | |
+| MINA | ✅ | |
 | MINIFS | ⬜ | P0 |
 | MODE.MULT | ✅ | Array function |
 | MODE.SNGL | ✅ | |
@@ -319,7 +319,7 @@ This document tracks every Excel feature and our implementation status. Features
 | NORM.INV | ⬜ | |
 | NORM.S.DIST | ⬜ | |
 | NORM.S.INV | ⬜ | |
-| PEARSON | ⬜ | |
+| PEARSON | ✅ | |
 | PERCENTILE.EXC | ✅ | |
 | PERCENTILE.INC | ✅ | |
 | PERCENTRANK.EXC | ⬜ | |
