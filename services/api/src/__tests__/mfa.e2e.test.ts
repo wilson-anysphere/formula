@@ -191,11 +191,33 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     });
     expect(confirm.statusCode).toBe(200);
 
+    const regenMissing = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/recovery-codes/regenerate",
+      headers: { cookie }
+    });
+    expect(regenMissing.statusCode).toBe(400);
+    expect((regenMissing.json() as any).error).toBe("invalid_request");
+
+    const validCode = authenticator.generate(secret);
+    const lastDigit = validCode.slice(-1);
+    const wrongDigit = ((Number.parseInt(lastDigit, 10) + 1) % 10).toString();
+    const wrongCode = validCode.slice(0, -1) + wrongDigit;
+
+    const regenWrong = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/recovery-codes/regenerate",
+      headers: { cookie },
+      payload: { code: wrongCode }
+    });
+    expect(regenWrong.statusCode).toBe(400);
+    expect((regenWrong.json() as any).error).toBe("invalid_code");
+
     const regen = await app.inject({
       method: "POST",
       url: "/auth/mfa/recovery-codes/regenerate",
       headers: { cookie },
-      payload: { code: authenticator.generate(secret) }
+      payload: { code: validCode }
     });
     expect(regen.statusCode).toBe(200);
     const codes = (regen.json() as any).codes as string[];
@@ -235,6 +257,100 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     });
     expect(reuse.statusCode).toBe(401);
     expect((reuse.json() as any).error).toBe("mfa_required");
+  });
+
+  it("requires a current MFA challenge to reset or disable TOTP when already enabled", async () => {
+    const email = "mfa-reset@example.com";
+    const password = "password1234";
+
+    const reg = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email, password, name: "MFA Reset", orgName: "Org" }
+    });
+    expect(reg.statusCode).toBe(200);
+    const cookie = extractCookie(reg.headers["set-cookie"]);
+    const userId = (reg.json() as any).user.id as string;
+
+    const setup = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/setup",
+      headers: { cookie }
+    });
+    expect(setup.statusCode).toBe(200);
+    const secret = (setup.json() as any).secret as string;
+
+    const confirm = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/confirm",
+      headers: { cookie },
+      payload: { code: authenticator.generate(secret) }
+    });
+    expect(confirm.statusCode).toBe(200);
+
+    const regen = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/recovery-codes/regenerate",
+      headers: { cookie },
+      payload: { code: authenticator.generate(secret) }
+    });
+    expect(regen.statusCode).toBe(200);
+    const recoveryCodes = (regen.json() as any).codes as string[];
+    expect(recoveryCodes).toHaveLength(10);
+
+    const resetWithoutChallenge = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/setup",
+      headers: { cookie }
+    });
+    expect(resetWithoutChallenge.statusCode).toBe(403);
+    expect((resetWithoutChallenge.json() as any).error).toBe("mfa_required");
+
+    const recoveryCode = recoveryCodes[0]!;
+    const resetWithRecovery = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/setup",
+      headers: { cookie },
+      payload: { recoveryCode }
+    });
+    expect(resetWithRecovery.statusCode).toBe(200);
+    const newSecret = (resetWithRecovery.json() as any).secret as string;
+    expect(newSecret).toBeTypeOf("string");
+
+    const afterReset = await db.query("SELECT mfa_totp_enabled FROM users WHERE id = $1", [userId]);
+    expect(afterReset.rows[0].mfa_totp_enabled).toBe(false);
+
+    const remainingCodes = await db.query(
+      "SELECT COUNT(*)::int AS c, COALESCE(SUM(CASE WHEN used_at IS NULL THEN 1 ELSE 0 END), 0)::int AS unused FROM user_mfa_recovery_codes WHERE user_id = $1",
+      [userId]
+    );
+    expect(Number(remainingCodes.rows[0].c)).toBe(1);
+    expect(Number(remainingCodes.rows[0].unused)).toBe(0);
+
+    const reenable = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/confirm",
+      headers: { cookie },
+      payload: { code: authenticator.generate(newSecret) }
+    });
+    expect(reenable.statusCode).toBe(200);
+
+    const regen2 = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/recovery-codes/regenerate",
+      headers: { cookie },
+      payload: { code: authenticator.generate(newSecret) }
+    });
+    expect(regen2.statusCode).toBe(200);
+    const recovery2 = (regen2.json() as any).codes as string[];
+    const disableWithRecovery = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/disable",
+      headers: { cookie },
+      payload: { recoveryCode: recovery2[0]! }
+    });
+    expect(disableWithRecovery.statusCode).toBe(200);
+    expect((disableWithRecovery.json() as any).ok).toBe(true);
   });
 
   it("enforces org require_mfa on sensitive org settings endpoints", async () => {
