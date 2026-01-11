@@ -73,7 +73,11 @@ pub use pivots::{
     cache_records::{pivot_cache_datetime_to_naive_date, PivotCacheRecordsReader, PivotCacheValue},
     graph::{PivotTableInstance, XlsxPivotGraph},
     pivot_charts::PivotChartPart,
-    slicers::{PivotSlicerParts, SlicerDefinition, TimelineDefinition},
+    slicers::{
+        slicer_selection_to_row_filter, slicer_selection_to_row_filter_with_resolver,
+        timeline_selection_to_row_filter, PivotSlicerParts, SlicerDefinition, SlicerSelectionState,
+        TimelineDefinition, TimelineSelectionState,
+    },
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
     PivotCacheSourceType, PivotTableDataField, PivotTableDefinition, PivotTableField,
     PivotTablePart, PreservedPivotParts, XlsxPivots,

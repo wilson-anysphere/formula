@@ -2,10 +2,92 @@ use crate::openxml::{
     local_name, parse_relationships, resolve_relationship_target, resolve_target,
 };
 use crate::package::{XlsxError, XlsxPackage};
+use chrono::NaiveDate;
+use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
+use formula_model::pivots::slicers::{RowFilter, SlicerSelection, TimelineSelection};
+use formula_model::pivots::ScalarValue;
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::Cursor;
+
+/// Best-effort slicer selection state extracted from `xl/slicerCaches/slicerCache*.xml`.
+///
+/// When Excel does not persist explicit selection state, slicers behave as "All selected".
+/// We represent that as `selected_items: None` (even if `available_items` is known).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SlicerSelectionState {
+    /// Item keys in the order they appear in the cache.
+    pub available_items: Vec<String>,
+    /// Explicitly selected items. `None` means "All selected".
+    pub selected_items: Option<HashSet<String>>,
+}
+
+/// Best-effort timeline selection state extracted from timeline parts/caches.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TimelineSelectionState {
+    /// Inclusive start date for the selection, formatted as `YYYY-MM-DD`.
+    pub start: Option<String>,
+    /// Inclusive end date for the selection, formatted as `YYYY-MM-DD`.
+    pub end: Option<String>,
+}
+
+/// Convert a parsed slicer selection into a model-level row filter.
+///
+/// This function is intentionally conservative: item keys are treated as text unless
+/// the caller provides a resolver via [`slicer_selection_to_row_filter_with_resolver`].
+pub fn slicer_selection_to_row_filter(
+    field: impl Into<String>,
+    selection: &SlicerSelectionState,
+) -> RowFilter {
+    slicer_selection_to_row_filter_with_resolver(field, selection, |_| None)
+}
+
+/// Convert a parsed slicer selection into a model-level row filter, using `resolve` to map
+/// slicer item keys to typed [`ScalarValue`]s.
+///
+/// This is useful when slicer cache items are stored as indices (`x`) into a pivot cache
+/// shared-items table; callers can resolve those indices to typed values when available.
+pub fn slicer_selection_to_row_filter_with_resolver<F>(
+    field: impl Into<String>,
+    selection: &SlicerSelectionState,
+    mut resolve: F,
+) -> RowFilter
+where
+    F: FnMut(&str) -> Option<ScalarValue>,
+{
+    let selection = match &selection.selected_items {
+        None => SlicerSelection::All,
+        Some(items) => {
+            let mut selected = HashSet::with_capacity(items.len());
+            for item in items {
+                selected.insert(resolve(item).unwrap_or_else(|| ScalarValue::from(item.as_str())));
+            }
+            SlicerSelection::Items(selected)
+        }
+    };
+
+    RowFilter::Slicer {
+        field: field.into(),
+        selection,
+    }
+}
+
+/// Convert a parsed timeline selection into a model-level row filter.
+///
+/// If the ISO date strings cannot be parsed, the corresponding endpoint is left unset.
+pub fn timeline_selection_to_row_filter(
+    field: impl Into<String>,
+    selection: &TimelineSelectionState,
+) -> RowFilter {
+    let start = selection.start.as_deref().and_then(parse_iso_ymd);
+    let end = selection.end.as_deref().and_then(parse_iso_ymd);
+
+    RowFilter::Timeline {
+        field: field.into(),
+        selection: TimelineSelection { start, end },
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlicerDefinition {
@@ -17,6 +99,7 @@ pub struct SlicerDefinition {
     pub source_name: Option<String>,
     pub connected_pivot_tables: Vec<String>,
     pub placed_on_drawings: Vec<String>,
+    pub selection: SlicerSelectionState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,6 +114,7 @@ pub struct TimelineDefinition {
     pub level: Option<u32>,
     pub connected_pivot_tables: Vec<String>,
     pub placed_on_drawings: Vec<String>,
+    pub selection: TimelineSelectionState,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -121,6 +205,12 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .map(|drawings| drawings.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
+        let selection = cache_part
+            .as_deref()
+            .and_then(|cache_part| package.part(cache_part))
+            .and_then(|bytes| parse_slicer_cache_selection(bytes).ok())
+            .unwrap_or_default();
+
         slicers.push(SlicerDefinition {
             part_name: part_name.clone(),
             name: parsed.name,
@@ -130,6 +220,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             source_name,
             connected_pivot_tables,
             placed_on_drawings,
+            selection,
         });
     }
 
@@ -164,6 +255,22 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .map(|drawings| drawings.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
+        let mut selection = parse_timeline_selection(xml).unwrap_or_default();
+        if (selection.start.is_none() || selection.end.is_none()) && cache_part.is_some() {
+            if let Some(cache_part) = cache_part.as_deref() {
+                if let Some(bytes) = package.part(cache_part) {
+                    if let Ok(cache_selection) = parse_timeline_selection(bytes) {
+                        if selection.start.is_none() {
+                            selection.start = cache_selection.start;
+                        }
+                        if selection.end.is_none() {
+                            selection.end = cache_selection.end;
+                        }
+                    }
+                }
+            }
+        }
+
         timelines.push(TimelineDefinition {
             part_name: part_name.clone(),
             name: parsed.name,
@@ -175,10 +282,240 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             level,
             connected_pivot_tables,
             placed_on_drawings,
+            selection,
         });
     }
 
     Ok(PivotSlicerParts { slicers, timelines })
+}
+
+fn parse_iso_ymd(value: &str) -> Option<NaiveDate> {
+    let trimmed = value.trim();
+    let ymd = trimmed.get(..10).unwrap_or(trimmed);
+    NaiveDate::parse_from_str(ymd, "%Y-%m-%d").ok()
+}
+
+fn parse_excel_bool(value: &str) -> Option<bool> {
+    let trimmed = value.trim();
+    if trimmed == "1" {
+        return Some(true);
+    }
+    if trimmed == "0" {
+        return Some(false);
+    }
+    if trimmed.eq_ignore_ascii_case("true") {
+        return Some(true);
+    }
+    if trimmed.eq_ignore_ascii_case("false") {
+        return Some(false);
+    }
+    None
+}
+
+fn parse_slicer_cache_selection(xml: &[u8]) -> Result<SlicerSelectionState, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut available_items = Vec::new();
+    let mut seen_items: HashSet<String> = HashSet::new();
+    let mut selected_items: HashSet<String> = HashSet::new();
+    let mut saw_selection_attr = false;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(start) => {
+                let element_name = start.name();
+                let tag = local_name(element_name.as_ref());
+                if tag.eq_ignore_ascii_case(b"slicerCacheItem") {
+                    let (key, selected, saw_attr) = parse_slicer_cache_item(&start)?;
+                    if key.is_empty() {
+                        continue;
+                    }
+                    if saw_attr {
+                        saw_selection_attr = true;
+                    }
+                    if seen_items.insert(key.clone()) {
+                        available_items.push(key.clone());
+                    }
+                    if selected {
+                        selected_items.insert(key);
+                    }
+                }
+            }
+            Event::Empty(start) => {
+                let element_name = start.name();
+                let tag = local_name(element_name.as_ref());
+                if tag.eq_ignore_ascii_case(b"slicerCacheItem") {
+                    let (key, selected, saw_attr) = parse_slicer_cache_item(&start)?;
+                    if key.is_empty() {
+                        continue;
+                    }
+                    if saw_attr {
+                        saw_selection_attr = true;
+                    }
+                    if seen_items.insert(key.clone()) {
+                        available_items.push(key.clone());
+                    }
+                    if selected {
+                        selected_items.insert(key);
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let selected_items = if available_items.is_empty() || !saw_selection_attr {
+        None
+    } else if selected_items.len() == available_items.len() {
+        None
+    } else {
+        Some(selected_items)
+    };
+
+    Ok(SlicerSelectionState {
+        available_items,
+        selected_items,
+    })
+}
+
+fn parse_slicer_cache_item(
+    start: &quick_xml::events::BytesStart<'_>,
+) -> Result<(String, bool, bool), XlsxError> {
+    let mut key = None;
+    let mut index_key = None;
+    let mut selected = None;
+
+    for attr in start.attributes().with_checks(false) {
+        let attr = attr?;
+        let attr_key = local_name(attr.key.as_ref());
+        let value = attr.unescape_value()?.into_owned();
+
+        if attr_key.eq_ignore_ascii_case(b"n")
+            || attr_key.eq_ignore_ascii_case(b"name")
+            || attr_key.eq_ignore_ascii_case(b"caption")
+            || attr_key.eq_ignore_ascii_case(b"uniqueName")
+            || attr_key.eq_ignore_ascii_case(b"v")
+        {
+            if key.is_none() && !value.is_empty() {
+                key = Some(value);
+            }
+        } else if attr_key.eq_ignore_ascii_case(b"x") && !value.is_empty() {
+            index_key = Some(value);
+        } else if attr_key.eq_ignore_ascii_case(b"s") || attr_key.eq_ignore_ascii_case(b"selected")
+        {
+            selected = parse_excel_bool(&value);
+        }
+    }
+
+    let key = key.or(index_key).unwrap_or_default();
+    let saw_selection_attr = selected.is_some();
+    let selected = selected.unwrap_or(true);
+
+    Ok((key, selected, saw_selection_attr))
+}
+
+fn parse_timeline_selection(xml: &[u8]) -> Result<TimelineSelectionState, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut selection = TimelineSelectionState::default();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(start) | Event::Empty(start) => {
+                let element_name = start.name();
+                let tag = local_name(element_name.as_ref());
+                let is_start_el =
+                    tag.eq_ignore_ascii_case(b"start") || tag.eq_ignore_ascii_case(b"startDate");
+                let is_end_el =
+                    tag.eq_ignore_ascii_case(b"end") || tag.eq_ignore_ascii_case(b"endDate");
+
+                for attr in start.attributes().with_checks(false) {
+                    let attr = attr?;
+                    let key = local_name(attr.key.as_ref());
+                    let value = attr.unescape_value()?.into_owned();
+
+                    if selection.start.is_none()
+                        && (key.eq_ignore_ascii_case(b"start")
+                            || key.eq_ignore_ascii_case(b"startDate")
+                            || key.eq_ignore_ascii_case(b"selectionStart")
+                            || key.eq_ignore_ascii_case(b"selectionStartDate")
+                            || (is_start_el
+                                && (key.eq_ignore_ascii_case(b"val")
+                                    || key.eq_ignore_ascii_case(b"value"))))
+                    {
+                        selection.start = normalize_timeline_date(&value);
+                    }
+
+                    if selection.end.is_none()
+                        && (key.eq_ignore_ascii_case(b"end")
+                            || key.eq_ignore_ascii_case(b"endDate")
+                            || key.eq_ignore_ascii_case(b"selectionEnd")
+                            || key.eq_ignore_ascii_case(b"selectionEndDate")
+                            || (is_end_el
+                                && (key.eq_ignore_ascii_case(b"val")
+                                    || key.eq_ignore_ascii_case(b"value"))))
+                    {
+                        selection.end = normalize_timeline_date(&value);
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(selection)
+}
+
+fn normalize_timeline_date(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Common case: already ISO `YYYY-MM-DD` (or `YYYY-MM-DDTHH:MM:SS...`).
+    if trimmed.len() >= 10 {
+        let prefix = &trimmed[..10];
+        let bytes = prefix.as_bytes();
+        if bytes.len() == 10
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes[..4].iter().all(|b| b.is_ascii_digit())
+            && bytes[5..7].iter().all(|b| b.is_ascii_digit())
+            && bytes[8..10].iter().all(|b| b.is_ascii_digit())
+        {
+            return Some(prefix.to_string());
+        }
+    }
+
+    // Another common representation: `YYYYMMDD`.
+    if trimmed.len() == 8 && trimmed.as_bytes().iter().all(|b| b.is_ascii_digit()) {
+        return Some(format!(
+            "{}-{}-{}",
+            &trimmed[..4],
+            &trimmed[4..6],
+            &trimmed[6..8]
+        ));
+    }
+
+    // Fallback: interpret as an Excel serial date (1900 system, Lotus bug enabled).
+    if let Ok(serial) = trimmed.parse::<i32>() {
+        if let Ok(date) = serial_to_ymd(serial, ExcelDateSystem::EXCEL_1900) {
+            return Some(format!(
+                "{:04}-{:02}-{:02}",
+                date.year, date.month, date.day
+            ));
+        }
+    }
+
+    None
 }
 
 #[derive(Debug)]
