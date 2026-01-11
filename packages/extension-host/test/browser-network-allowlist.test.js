@@ -3,58 +3,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-function createWorkerCtor(scenarios) {
-  return class FakeWorker {
-    constructor(_url, _options) {
-      this._listeners = new Map();
-      this._terminated = false;
-      this._scenario = scenarios.shift() ?? {};
-    }
-
-    addEventListener(type, listener) {
-      const key = String(type);
-      if (!this._listeners.has(key)) this._listeners.set(key, new Set());
-      this._listeners.get(key).add(listener);
-    }
-
-    removeEventListener(type, listener) {
-      const set = this._listeners.get(String(type));
-      if (!set) return;
-      set.delete(listener);
-      if (set.size === 0) this._listeners.delete(String(type));
-    }
-
-    postMessage(message) {
-      if (this._terminated) return;
-      try {
-        this._scenario.onPostMessage?.(message, this);
-      } catch (err) {
-        this._emit("error", { message: String(err?.message ?? err) });
-      }
-    }
-
-    terminate() {
-      this._terminated = true;
-    }
-
-    emitMessage(message) {
-      if (this._terminated) return;
-      this._emit("message", { data: message });
-    }
-
-    _emit(type, event) {
-      const set = this._listeners.get(String(type));
-      if (!set) return;
-      for (const listener of [...set]) {
-        try {
-          listener(event);
-        } catch {
-          // ignore
-        }
-      }
-    }
-  };
-}
+const { installFakeWorker } = require("./helpers/fake-browser-worker");
 
 async function importBrowserHost() {
   const moduleUrl = pathToFileURL(path.resolve(__dirname, "../src/browser/index.mjs")).href;
@@ -100,9 +49,6 @@ test("BrowserExtensionHost: network allowlist blocks non-allowlisted hosts", asy
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-
   const prevFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     const u = new URL(String(url));
@@ -113,9 +59,10 @@ test("BrowserExtensionHost: network allowlist blocks non-allowlisted hosts", asy
   };
 
   t.after(async () => {
-    globalThis.Worker = PrevWorker;
     globalThis.fetch = prevFetch;
   });
+
+  installFakeWorker(t, scenarios);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
@@ -196,16 +143,14 @@ test("BrowserExtensionHost: revokePermissions forces network to be re-prompted",
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-
   const prevFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("ok", { status: 200 });
 
   t.after(() => {
-    globalThis.Worker = PrevWorker;
     globalThis.fetch = prevFetch;
   });
+
+  installFakeWorker(t, scenarios);
 
   const extensionId = "test.revoke";
   let networkPrompts = 0;
@@ -283,4 +228,3 @@ test("BrowserExtensionHost: revokePermissions forces network to be re-prompted",
   assert.match(String(err?.message ?? err), /Permission denied/i);
   assert.equal(networkPrompts, 2);
 });
-

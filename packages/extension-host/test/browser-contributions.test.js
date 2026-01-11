@@ -3,34 +3,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-function createWorkerCtor() {
-  return class FakeWorker {
-    constructor(_url, _options) {
-      this._listeners = new Map();
-      this._terminated = false;
-    }
-
-    addEventListener(type, listener) {
-      const key = String(type);
-      if (!this._listeners.has(key)) this._listeners.set(key, new Set());
-      this._listeners.get(key).add(listener);
-    }
-
-    removeEventListener(type, listener) {
-      const set = this._listeners.get(String(type));
-      if (!set) return;
-      set.delete(listener);
-    }
-
-    postMessage() {
-      // ignore
-    }
-
-    terminate() {
-      this._terminated = true;
-    }
-  };
-}
+const { installFakeWorker } = require("./helpers/fake-browser-worker");
 
 async function importBrowserHost() {
   const moduleUrl = pathToFileURL(path.resolve(__dirname, "../src/browser/index.mjs")).href;
@@ -40,11 +13,7 @@ async function importBrowserHost() {
 test("BrowserExtensionHost: exposes manifest contributions for UI integration", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor();
-  t.after(() => {
-    globalThis.Worker = PrevWorker;
-  });
+  installFakeWorker(t, []);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
@@ -141,4 +110,3 @@ test("BrowserExtensionHost: exposes manifest contributions for UI integration", 
     { extensionId, id: "test.connector", name: "Test Connector", icon: null }
   ]);
 });
-
