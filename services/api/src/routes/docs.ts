@@ -427,6 +427,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const docId = (request.params as { docId: string }).docId;
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const hold = await app.db.query(
       `
@@ -966,6 +969,10 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const visibility = linkRow.visibility as ShareLinkVisibility;
     const linkRole = linkRow.role as ShareLinkRole;
 
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
+
     const ipAllowlist = (linkRow as any).ip_allowlist as unknown;
     const allowExternalSharing =
       (linkRow as any).allow_external_sharing == null ? true : Boolean((linkRow as any).allow_external_sharing);
@@ -1210,6 +1217,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const docId = (request.params as { docId: string }).docId;
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const rows = await app.db.query(
       `
@@ -1265,6 +1275,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const res = await app.db.query("SELECT policy FROM document_dlp_policies WHERE document_id = $1", [docId]);
     if (res.rowCount !== 1) return reply.code(404).send({ error: "dlp_policy_not_found" });
@@ -1329,6 +1342,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const res = await app.db.query(
       `
@@ -1453,6 +1469,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const parsed = ResolveClassificationBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });

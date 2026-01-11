@@ -541,4 +541,86 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     expect((allowed.json() as any).ok).toBe(true);
     expect((allowed.json() as any).id).toBeTypeOf("string");
   });
+
+  it("enforces org require_mfa on share-link redemption", async () => {
+    const ownerReg = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "share-redeem-owner@example.com", password: "password1234", name: "Owner", orgName: "Org" }
+    });
+    expect(ownerReg.statusCode).toBe(200);
+    const ownerCookie = extractCookie(ownerReg.headers["set-cookie"]);
+    const ownerBody = ownerReg.json() as any;
+    const orgId = ownerBody.organization.id as string;
+
+    const memberReg = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "share-redeem-member@example.com", password: "password1234", name: "Member", orgName: "Other" }
+    });
+    expect(memberReg.statusCode).toBe(200);
+    const memberCookie = extractCookie(memberReg.headers["set-cookie"]);
+
+    const createdDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie: ownerCookie },
+      payload: { orgId, title: "Share redeem doc" }
+    });
+    expect(createdDoc.statusCode).toBe(200);
+    const docId = (createdDoc.json() as any).document.id as string;
+
+    const invite = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/invite`,
+      headers: { cookie: ownerCookie },
+      payload: { email: "share-redeem-member@example.com", role: "viewer" }
+    });
+    expect(invite.statusCode).toBe(200);
+
+    const link = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/share-links`,
+      headers: { cookie: ownerCookie },
+      payload: {}
+    });
+    expect(link.statusCode).toBe(200);
+    const token = (link.json() as any).shareLink.token as string;
+    expect(token).toBeTypeOf("string");
+
+    await db.query("UPDATE org_settings SET require_mfa = true WHERE org_id = $1", [orgId]);
+
+    const blocked = await app.inject({
+      method: "POST",
+      url: `/share-links/${token}/redeem`,
+      headers: { cookie: memberCookie }
+    });
+    expect(blocked.statusCode).toBe(403);
+    expect((blocked.json() as any).error).toBe("mfa_required");
+
+    const setup = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/setup",
+      headers: { cookie: memberCookie }
+    });
+    expect(setup.statusCode).toBe(200);
+    const secret = (setup.json() as any).secret as string;
+
+    const confirm = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/confirm",
+      headers: { cookie: memberCookie },
+      payload: { code: authenticator.generate(secret) }
+    });
+    expect(confirm.statusCode).toBe(200);
+
+    const allowed = await app.inject({
+      method: "POST",
+      url: `/share-links/${token}/redeem`,
+      headers: { cookie: memberCookie }
+    });
+    expect(allowed.statusCode).toBe(200);
+    expect((allowed.json() as any).ok).toBe(true);
+    expect((allowed.json() as any).documentId).toBe(docId);
+  });
 });
