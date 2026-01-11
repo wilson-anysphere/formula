@@ -191,6 +191,7 @@ pub struct Workbook {
     pub macro_fingerprint: Option<String>,
     pub preserved_drawing_parts: Option<PreservedDrawingParts>,
     pub preserved_pivot_parts: Option<PreservedPivotParts>,
+    pub theme_palette: Option<formula_xlsx::theme::ThemePalette>,
     pub sheets: Vec<Sheet>,
     pub print_settings: WorkbookPrintSettings,
     pub(crate) original_print_settings: WorkbookPrintSettings,
@@ -213,6 +214,7 @@ impl Workbook {
             macro_fingerprint: None,
             preserved_drawing_parts: None,
             preserved_pivot_parts: None,
+            theme_palette: None,
             sheets: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
             original_print_settings: WorkbookPrintSettings::default(),
@@ -317,7 +319,6 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         );
         let document = load_from_bytes(origin_xlsx_bytes.as_ref())
             .with_context(|| format!("parse xlsx {:?}", path))?;
-
         let print_settings = read_workbook_print_settings(origin_xlsx_bytes.as_ref())
             .ok()
             .unwrap_or_default();
@@ -330,6 +331,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             macro_fingerprint: None,
             preserved_drawing_parts: None,
             preserved_pivot_parts: None,
+            theme_palette: None,
             sheets: Vec::new(),
             print_settings: print_settings.clone(),
             original_print_settings: print_settings,
@@ -356,6 +358,9 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
                 if !preserved.is_empty() {
                     out.preserved_pivot_parts = Some(preserved);
                 }
+            }
+            if let Ok(palette) = pkg.theme_palette() {
+                out.theme_palette = palette;
             }
         }
 
@@ -385,6 +390,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
+        theme_palette: None,
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -542,6 +548,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
+        theme_palette: None,
         sheets: vec![sheet],
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -565,6 +572,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
+        theme_palette: None,
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),

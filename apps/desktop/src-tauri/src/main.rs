@@ -45,6 +45,7 @@ fn main() {
             commands::open_workbook,
             commands::new_workbook,
             commands::save_workbook,
+            commands::get_workbook_theme_palette,
             commands::get_cell,
             commands::set_cell,
             commands::get_range,

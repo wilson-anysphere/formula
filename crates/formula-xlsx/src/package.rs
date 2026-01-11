@@ -14,6 +14,7 @@ use crate::sheet_metadata::{
     WorkbookSheetInfo,
 };
 use crate::RecalcPolicy;
+use crate::theme::{parse_theme_palette, ThemePalette};
 use formula_model::TabColor;
 
 #[derive(Debug, Error)]
@@ -110,6 +111,14 @@ impl XlsxPackage {
 
     pub fn vba_project_bin(&self) -> Option<&[u8]> {
         self.part("xl/vbaProject.bin")
+    }
+
+    /// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present).
+    pub fn theme_palette(&self) -> Result<Option<ThemePalette>, XlsxError> {
+        let Some(theme_xml) = self.part("xl/theme/theme1.xml") else {
+            return Ok(None);
+        };
+        Ok(Some(parse_theme_palette(theme_xml)?))
     }
 
     pub fn write_to_bytes(&self) -> Result<Vec<u8>, XlsxError> {

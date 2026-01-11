@@ -125,6 +125,47 @@ pub struct SheetUsedRange {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkbookThemePalette {
+    pub dk1: String,
+    pub lt1: String,
+    pub dk2: String,
+    pub lt2: String,
+    pub accent1: String,
+    pub accent2: String,
+    pub accent3: String,
+    pub accent4: String,
+    pub accent5: String,
+    pub accent6: String,
+    pub hlink: String,
+    pub followed_hlink: String,
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn rgb_hex(argb: u32) -> String {
+    format!("#{:06X}", argb & 0x00FF_FFFF)
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn workbook_theme_palette(workbook: &crate::file_io::Workbook) -> Option<WorkbookThemePalette> {
+    let palette = workbook.theme_palette.as_ref()?;
+    Some(WorkbookThemePalette {
+        dk1: rgb_hex(palette.dk1),
+        lt1: rgb_hex(palette.lt1),
+        dk2: rgb_hex(palette.dk2),
+        lt2: rgb_hex(palette.lt2),
+        accent1: rgb_hex(palette.accent1),
+        accent2: rgb_hex(palette.accent2),
+        accent3: rgb_hex(palette.accent3),
+        accent4: rgb_hex(palette.accent4),
+        accent5: rgb_hex(palette.accent5),
+        accent6: rgb_hex(palette.accent6),
+        hlink: rgb_hex(palette.hlink),
+        followed_hlink: rgb_hex(palette.followed_hlink),
+    })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RangeCellEdit {
     pub value: Option<JsonValue>,
     pub formula: Option<String>,
@@ -298,6 +339,16 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
             })
             .collect(),
     })
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn get_workbook_theme_palette(
+    state: State<'_, SharedAppState>,
+) -> Result<Option<WorkbookThemePalette>, String> {
+    let state = state.inner().lock().unwrap();
+    let workbook = state.get_workbook().map_err(app_error)?;
+    Ok(workbook_theme_palette(workbook))
 }
 
 #[cfg(feature = "desktop")]
@@ -1347,4 +1398,47 @@ pub async fn fire_selection_change(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file_io::read_xlsx_blocking;
+    use std::path::Path;
+
+    #[test]
+    fn workbook_theme_palette_is_exposed_for_rt_simple_fixture() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsx/tests/fixtures/rt_simple.xlsx"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+        let palette = workbook_theme_palette(&workbook).expect("palette should be present");
+
+        for value in [
+            palette.dk1,
+            palette.lt1,
+            palette.dk2,
+            palette.lt2,
+            palette.accent1,
+            palette.accent2,
+            palette.accent3,
+            palette.accent4,
+            palette.accent5,
+            palette.accent6,
+            palette.hlink,
+            palette.followed_hlink,
+        ] {
+            assert!(
+                value.len() == 7
+                    && value.starts_with('#')
+                    && value
+                        .chars()
+                        .skip(1)
+                        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase()),
+                "expected hex color like '#RRGGBB', got {value}"
+            );
+        }
+    }
 }

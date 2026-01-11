@@ -17,6 +17,22 @@ function flatten(range2d) {
   return out;
 }
 
+function defaultSeriesColors() {
+  return [
+    "var(--chart-series-1)",
+    "var(--chart-series-2)",
+    "var(--chart-series-3)",
+    "var(--chart-series-4)",
+  ];
+}
+
+function resolveSeriesColors(theme) {
+  if (theme && Array.isArray(theme.seriesColors) && theme.seriesColors.length > 0) {
+    return theme.seriesColors;
+  }
+  return defaultSeriesColors();
+}
+
 export function createMatrixRangeProvider(sheets) {
   return {
     getRange(rangeRef) {
@@ -69,7 +85,7 @@ export function placeholderSvg({ width, height, label }) {
   ].join("");
 }
 
-function renderBarLineSvg({ width, height, title, kind, series }) {
+function renderBarLineSvg({ width, height, title, kind, series, seriesColors }) {
   const margin = { left: 36, right: 10, top: 22, bottom: 24 };
   const plotW = Math.max(1, width - margin.left - margin.right);
   const plotH = Math.max(1, height - margin.top - margin.bottom);
@@ -102,12 +118,7 @@ function renderBarLineSvg({ width, height, title, kind, series }) {
   const seriesCount = Math.max(1, series.length);
   const groupW = plotW / catCount;
 
-  const colors = [
-    "var(--chart-series-1)",
-    "var(--chart-series-2)",
-    "var(--chart-series-3)",
-    "var(--chart-series-4)",
-  ];
+  const colors = Array.isArray(seriesColors) && seriesColors.length > 0 ? seriesColors : defaultSeriesColors();
 
   if (kind === "bar") {
     const barW = Math.max(1, (groupW * 0.8) / seriesCount);
@@ -156,7 +167,7 @@ function renderBarLineSvg({ width, height, title, kind, series }) {
   return svg.join("");
 }
 
-function renderPieSvg({ width, height, title, series }) {
+function renderPieSvg({ width, height, title, series, seriesColors }) {
   const values = series[0]?.values?.map((v) => (typeof v === "number" ? v : Number(v))).filter(Number.isFinite) ?? [];
   const labelsRaw = series[0]?.categories?.map((v) => String(v ?? "")) ?? [];
   const labels = labelsRaw.length ? labelsRaw : values.map((_, i) => String(i + 1));
@@ -169,12 +180,7 @@ function renderPieSvg({ width, height, title, series }) {
   const cx = width / 2;
   const cy = height / 2 + 6;
   const r = Math.min(width, height) * 0.35;
-  const colors = [
-    "var(--chart-series-1)",
-    "var(--chart-series-2)",
-    "var(--chart-series-3)",
-    "var(--chart-series-4)",
-  ];
+  const colors = Array.isArray(seriesColors) && seriesColors.length > 0 ? seriesColors : defaultSeriesColors();
 
   let angle = -Math.PI / 2;
   const svg = [];
@@ -219,19 +225,22 @@ function renderPieSvg({ width, height, title, series }) {
   return svg.join("");
 }
 
-function renderScatterSvg({ width, height, title, series }) {
+function renderScatterSvg({ width, height, title, series, seriesColors }) {
   const margin = { left: 36, right: 10, top: 22, bottom: 24 };
   const plotW = Math.max(1, width - margin.left - margin.right);
   const plotH = Math.max(1, height - margin.top - margin.bottom);
 
-  const points = [];
-  for (const ser of series) {
+  const perSeries = series.map((ser) => {
     const xs = ser.xValues?.map((v) => (typeof v === "number" ? v : Number(v))) ?? [];
     const ys = ser.yValues?.map((v) => (typeof v === "number" ? v : Number(v))) ?? [];
+    const points = [];
     for (let i = 0; i < Math.min(xs.length, ys.length); i += 1) {
       if (Number.isFinite(xs[i]) && Number.isFinite(ys[i])) points.push({ x: xs[i], y: ys[i] });
     }
-  }
+    return points;
+  });
+
+  const points = perSeries.flat();
 
   if (points.length === 0) {
     return placeholderSvg({ width, height, label: "Empty scatter chart" });
@@ -263,8 +272,12 @@ function renderScatterSvg({ width, height, title, series }) {
   svg.push(`<line x1="${fmt(originX)}" y1="${fmt(originY)}" x2="${fmt(originX + plotW)}" y2="${fmt(originY)}" stroke="var(--chart-axis)"/>`);
   svg.push(`<line x1="${fmt(originX)}" y1="${fmt(margin.top)}" x2="${fmt(originX)}" y2="${fmt(originY)}" stroke="var(--chart-axis)"/>`);
 
-  for (const p of points) {
-    svg.push(`<circle cx="${fmt(scaleX(p.x))}" cy="${fmt(scaleY(p.y))}" r="3" fill="var(--chart-series-1)"/>`);
+  const colors = Array.isArray(seriesColors) && seriesColors.length > 0 ? seriesColors : defaultSeriesColors();
+  for (let si = 0; si < perSeries.length; si += 1) {
+    const color = colors[si % colors.length] ?? colors[0];
+    for (const p of perSeries[si]) {
+      svg.push(`<circle cx="${fmt(scaleX(p.x))}" cy="${fmt(scaleY(p.y))}" r="3" fill="${color}"/>`);
+    }
   }
 
   svg.push(`</svg>`);
@@ -274,6 +287,7 @@ function renderScatterSvg({ width, height, title, series }) {
 export function renderChartSvg(chart, provider, opts) {
   const width = opts?.width ?? 320;
   const height = opts?.height ?? 200;
+  const seriesColors = resolveSeriesColors(opts?.theme);
 
   if (!chart || !chart.chartType || !chart.chartType.kind) {
     return placeholderSvg({ width, height, label: "Missing chart" });
@@ -283,15 +297,15 @@ export function renderChartSvg(chart, provider, opts) {
 
   switch (chart.chartType.kind) {
     case "bar":
-      return renderBarLineSvg({ width, height, title: chart.title, kind: "bar", series });
+      return renderBarLineSvg({ width, height, title: chart.title, kind: "bar", series, seriesColors });
     case "line":
-      return renderBarLineSvg({ width, height, title: chart.title, kind: "line", series });
+      return renderBarLineSvg({ width, height, title: chart.title, kind: "line", series, seriesColors });
     case "area":
-      return renderBarLineSvg({ width, height, title: chart.title, kind: "area", series });
+      return renderBarLineSvg({ width, height, title: chart.title, kind: "area", series, seriesColors });
     case "pie":
-      return renderPieSvg({ width, height, title: chart.title, series });
+      return renderPieSvg({ width, height, title: chart.title, series, seriesColors });
     case "scatter":
-      return renderScatterSvg({ width, height, title: chart.title, series });
+      return renderScatterSvg({ width, height, title: chart.title, series, seriesColors });
     case "unknown":
     default:
       return placeholderSvg({

@@ -125,3 +125,28 @@ test("renders placeholder for unsupported chart types", () => {
   const svg = renderChartSvg(chart, { getRange: () => [] }, { width: 320, height: 200 });
   assert.match(svg, /Unsupported chart/);
 });
+
+test("uses a provided theme series palette when rendering", () => {
+  const provider = createMatrixRangeProvider({
+    Sheet1: [
+      ["Category", "Value"],
+      ["A", 2],
+      ["B", 4],
+      ["C", 3],
+      ["D", 5],
+    ],
+  });
+
+  const chart = {
+    chartType: { kind: "bar" },
+    title: "Example Chart",
+    series: [{ categories: "Sheet1!$A$2:$A$5", values: "Sheet1!$B$2:$B$5" }],
+  };
+
+  const svg = renderChartSvg(chart, provider, {
+    width: 320,
+    height: 200,
+    theme: { seriesColors: ["#FF0000"] },
+  });
+  assert.match(svg, /fill="#FF0000"/);
+});
