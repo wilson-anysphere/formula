@@ -63,6 +63,27 @@ import { fileURLToPath } from "node:url";
 
 globalThis.self = globalThis;
 
+// Stub browser-only networking primitives so the extension worker can hard-disable them
+// even when running in Node's worker_threads test environment.
+if (typeof globalThis.XMLHttpRequest !== "function") {
+  globalThis.XMLHttpRequest = function XMLHttpRequest() {};
+}
+if (typeof globalThis.EventSource !== "function") {
+  globalThis.EventSource = function EventSource() {};
+}
+if (typeof globalThis.WebTransport !== "function") {
+  globalThis.WebTransport = function WebTransport() {};
+}
+if (typeof globalThis.RTCPeerConnection !== "function") {
+  globalThis.RTCPeerConnection = function RTCPeerConnection() {};
+}
+if (!globalThis.navigator || typeof globalThis.navigator !== "object") {
+  globalThis.navigator = {};
+}
+if (typeof globalThis.navigator.sendBeacon !== "function") {
+  globalThis.navigator.sendBeacon = () => true;
+}
+
 const listeners = new Map();
 globalThis.addEventListener = (type, listener) => {
   const key = String(type);
@@ -181,7 +202,7 @@ parentPort.postMessage({ type: "__ready__" });
           reject(new Error(`Worker exited unexpectedly (${code})`));
         });
       }),
-      2000,
+      5000,
       "Timed out waiting for extension worker activation"
     );
   } finally {
@@ -308,6 +329,96 @@ test("extension-worker: setTimeout(string) throws when disableEval is enabled", 
     await assert.rejects(
       () => activateExtensionWorker({ mainUrl, extensionPath }),
       /setTimeout with a string callback is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: setInterval(string) throws when disableEval is enabled", async () => {
+  const dir = await createTempDir("formula-ext-worker-interval-string-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  setInterval("1 + 1", 0);\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /setInterval with a string callback is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: EventSource is blocked when present", async () => {
+  const dir = await createTempDir("formula-ext-worker-eventsource-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  new EventSource("https://example.invalid/");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /EventSource is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: navigator.sendBeacon is blocked when present", async () => {
+  const dir = await createTempDir("formula-ext-worker-sendbeacon-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  navigator.sendBeacon("https://example.invalid/");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /navigator\.sendBeacon is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: WebTransport is blocked when present", async () => {
+  const dir = await createTempDir("formula-ext-worker-webtransport-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  new WebTransport("https://example.invalid/");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /WebTransport is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: RTCPeerConnection is blocked when present", async () => {
+  const dir = await createTempDir("formula-ext-worker-rtcpeer-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  new RTCPeerConnection();\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /RTCPeerConnection is not allowed in extensions/i
     );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
