@@ -138,8 +138,13 @@ export class ChartStore {
 
     const hasHeader = rowCount > 1 && isMostlyStrings(headerRow);
     const dataStartRow = hasHeader ? parsed.startRow + 1 : parsed.startRow;
-    const seriesName =
-      hasHeader && colCount >= 2 && headerRow[1] != null && headerRow[1] !== "" ? String(headerRow[1]) : undefined;
+    const seriesNameForOffset = (offset: number): string | undefined => {
+      if (!hasHeader) return undefined;
+      const raw = headerRow[offset];
+      if (raw == null) return undefined;
+      const name = String(raw).trim();
+      return name ? name : undefined;
+    };
 
     const series: ChartSeriesDef[] = [];
     if (spec.chart_type === "scatter") {
@@ -148,20 +153,37 @@ export class ChartStore {
       }
 
       series.push({
-        ...(seriesName ? { name: seriesName } : {}),
+        ...(seriesNameForOffset(1) ? { name: seriesNameForOffset(1) } : {}),
         xValues: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol),
         yValues: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol + 1, parsed.endRow, parsed.startCol + 1)
       });
-    } else {
+    } else if (spec.chart_type === "pie") {
       if (colCount >= 2) {
         series.push({
-          ...(seriesName ? { name: seriesName } : {}),
+          ...(seriesNameForOffset(1) ? { name: seriesNameForOffset(1) } : {}),
           categories: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol),
           values: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol + 1, parsed.endRow, parsed.startCol + 1)
         });
       } else {
         series.push({
-          ...(seriesName ? { name: seriesName } : {}),
+          ...(seriesNameForOffset(0) ? { name: seriesNameForOffset(0) } : {}),
+          values: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol)
+        });
+      }
+    } else {
+      if (colCount >= 2) {
+        const categories = formatAbsRange(dataSheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol);
+        for (let offset = 1; offset < colCount; offset += 1) {
+          const col = parsed.startCol + offset;
+          series.push({
+            ...(seriesNameForOffset(offset) ? { name: seriesNameForOffset(offset) } : {}),
+            categories,
+            values: formatAbsRange(dataSheetId, dataStartRow, col, parsed.endRow, col)
+          });
+        }
+      } else {
+        series.push({
+          ...(seriesNameForOffset(0) ? { name: seriesNameForOffset(0) } : {}),
           values: formatAbsRange(dataSheetId, dataStartRow, parsed.startCol, parsed.endRow, parsed.startCol)
         });
       }
