@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 }
@@ -7,12 +9,11 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
 test.describe("clipboard shortcuts (copy/cut/paste)", () => {
   test("Ctrl/Cmd+C copies selection and Ctrl/Cmd+V pastes starting at active cell", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.goto("/");
+    await gotoDesktop(page);
 
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
     // Seed A1 = Hello, A2 = World.
-    await page.waitForFunction(() => (window as any).__formulaApp);
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
       const doc = app.getDocument();
@@ -87,13 +88,12 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
 
   test("copy/paste shifts relative references inside formulas (Excel-style)", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.goto("/");
+    await gotoDesktop(page);
 
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
     // Seed a simple scenario where shifting is observable:
     // B1 = A1 + 1, and A2 has a different value so pasting down should change the result.
-    await page.waitForFunction(() => (window as any).__formulaApp);
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
       const doc = app.getDocument();
@@ -125,11 +125,10 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
 
   test("copy/paste preserves internal styleId for DocumentController formats", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.goto("/");
+    await gotoDesktop(page);
 
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
-    await page.waitForFunction(() => (window as any).__formulaApp);
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
       const doc = app.getDocument();

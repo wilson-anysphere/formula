@@ -1,13 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 }
 
 test.describe("grid scrolling + virtualization", () => {
   test("wheel scroll down reaches far rows and clicking selects correct cell", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     // Seed A200 (0-based row 199) with a sentinel string.
     await page.evaluate(() => {
@@ -36,8 +37,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("ArrowDown navigation auto-scrolls to keep the active cell visible", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
     const grid = page.locator("#grid");
 
     // Focus A1 (account for headers).
@@ -56,8 +56,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("ArrowRight navigation auto-scrolls to keep the active cell visible", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
     const grid = page.locator("#grid");
 
     await grid.click({ position: { x: 60, y: 40 } });
@@ -75,8 +74,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("name box Go To scrolls and updates selection", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     const address = page.getByTestId("formula-address");
     await address.click();
@@ -89,8 +87,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("name box Go To range scrolls and selects the full range", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     const address = page.getByTestId("formula-address");
     await address.click();
@@ -111,8 +108,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("wheel scroll right reaches far columns and clicking selects correct cell", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
@@ -136,8 +132,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("scrollbar track click scrolls without changing the selection", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
     const grid = page.locator("#grid");
 
     // Focus A1.
@@ -160,8 +155,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("horizontal scrollbar track click scrolls without changing the selection", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
     const grid = page.locator("#grid");
 
     await grid.click({ position: { x: 60, y: 40 } });
@@ -182,8 +176,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("scrollbar thumb drag scrolls without changing the selection", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
     const grid = page.locator("#grid");
 
     await grid.click({ position: { x: 60, y: 40 } });
@@ -208,8 +201,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("horizontal scrollbar thumb drag scrolls without changing the selection", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
     const grid = page.locator("#grid");
 
     await grid.click({ position: { x: 60, y: 40 } });
@@ -234,8 +226,7 @@ test.describe("grid scrolling + virtualization", () => {
   });
 
   test("charts remain anchored to sheet coordinates while scrolling", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     const before = await page.evaluate(() => {
       const app = (window as any).__formulaApp;

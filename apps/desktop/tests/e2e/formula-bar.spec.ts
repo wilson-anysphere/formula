@@ -64,8 +64,7 @@ test.describe("formula bar editing + range insertion", () => {
   });
 
   test("picking a range on another sheet inserts a sheet-qualified reference and commits to the original edit cell", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     // Lazily create Sheet2 and seed A1.
     await page.evaluate(() => {
@@ -114,8 +113,7 @@ test.describe("formula bar editing + range insertion", () => {
   });
 
   test("canceling after switching sheets restores the original edit location without applying edits", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     // Lazily create Sheet2 and seed A1.
     await page.evaluate(() => {

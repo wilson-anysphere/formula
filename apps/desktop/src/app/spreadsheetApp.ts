@@ -3916,14 +3916,20 @@ export class SpreadsheetApp {
   }
 
   private getCellComputedValue(cell: CellCoord): SpreadsheetValue {
-    const cacheKey = this.computedKey(this.sheetId, cellToA1(cell));
-    if (this.computedValues.has(cacheKey)) {
+    const address = cellToA1(cell);
+    const cacheKey = this.computedKey(this.sheetId, address);
+
+    // The WASM engine currently cannot resolve sheet-qualified references (e.g. `Sheet2!A1`),
+    // so when multiple sheets exist we fall back to the in-process evaluator for *all* formulas
+    // to keep dependent values consistent.
+    const useEngineCache = this.document.getSheetIds().length <= 1;
+    if (useEngineCache && this.computedValues.has(cacheKey)) {
       return this.computedValues.get(cacheKey) ?? null;
     }
 
     const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
-    return this.computeCellValue(this.sheetId, cell, memo, stack);
+    return this.computeCellValue(this.sheetId, cell, memo, stack, { useEngineCache });
   }
 
   private computedKey(sheetId: string, address: string): string {
@@ -3987,11 +3993,12 @@ export class SpreadsheetApp {
     sheetId: string,
     cell: CellCoord,
     memo: Map<string, SpreadsheetValue>,
-    stack: Set<string>
+    stack: Set<string>,
+    options: { useEngineCache: boolean }
   ): SpreadsheetValue {
     const address = cellToA1(cell);
     const computedKey = this.computedKey(sheetId, address);
-    if (this.computedValues.has(computedKey)) {
+    if (options.useEngineCache && this.computedValues.has(computedKey)) {
       return this.computedValues.get(computedKey) ?? null;
     }
     const cached = memo.get(computedKey);
@@ -4021,14 +4028,14 @@ export class SpreadsheetApp {
             if (!resolved) return "#REF!";
             targetSheet = resolved;
             targetAddress = addr.trim();
-          }
-        }
-        const coord = parseA1(targetAddress);
-        return this.computeCellValue(targetSheet, coord, memo, stack);
-      }, {
-        ai: this.aiCellFunctions,
-        cellAddress: `${sheetId}!${address}`,
-      });
+           }
+         }
+         const coord = parseA1(targetAddress);
+         return this.computeCellValue(targetSheet, coord, memo, stack, options);
+       }, {
+         ai: this.aiCellFunctions,
+         cellAddress: `${sheetId}!${address}`,
+       });
     } else if (state?.value != null) {
       value = isRichTextValue(state.value) ? state.value.text : (state.value as SpreadsheetValue);
     } else {

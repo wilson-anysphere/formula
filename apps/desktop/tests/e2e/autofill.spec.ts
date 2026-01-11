@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 }
@@ -13,8 +15,7 @@ async function dragFromTo(page: import("@playwright/test").Page, from: { x: numb
 
 test.describe("grid autofill (fill handle)", () => {
   test("fills series + shifts formulas", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
