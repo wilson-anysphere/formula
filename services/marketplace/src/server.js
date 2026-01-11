@@ -334,24 +334,30 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
 
         const id = segments[2];
         const version = segments[4];
-        const pkg = await store.getPackage(id, version);
-        if (!pkg) {
+        const pkgMeta = await store.getPackage(id, version, { includeBytes: false, incrementDownloadCount: false });
+        if (!pkgMeta) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Not found" });
         }
 
-        const etag = `"${pkg.sha256}"`;
+        const etag = `"${pkgMeta.sha256}"`;
         if (etagMatches(req.headers["if-none-match"], etag)) {
           statusCode = 304;
           res.writeHead(304, {
             ETag: etag,
-            "X-Package-Signature": pkg.signatureBase64,
-            "X-Package-Sha256": pkg.sha256,
-            "X-Package-Format-Version": String(pkg.formatVersion ?? 1),
-            "X-Publisher": pkg.publisher,
+            "X-Package-Signature": pkgMeta.signatureBase64,
+            "X-Package-Sha256": pkgMeta.sha256,
+            "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
+            "X-Publisher": pkgMeta.publisher,
           });
           res.end();
           return;
+        }
+
+        const pkg = await store.getPackage(id, version);
+        if (!pkg) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Not found" });
         }
 
         statusCode = 200;

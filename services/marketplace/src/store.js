@@ -1147,7 +1147,7 @@ class MarketplaceStore {
     });
   }
 
-  async getPackage(id, version) {
+  async getPackage(id, version, { includeBytes = true, incrementDownloadCount = true } = {}) {
     const meta = await this.db.withRead((db) => {
       const stmt = db.prepare(
         `SELECT e.publisher, e.blocked, e.malicious,
@@ -1182,22 +1182,26 @@ class MarketplaceStore {
 
     /** @type {Buffer | null} */
     let bytes = null;
-    if (meta.packagePath) {
-      const fullPath = resolvePackagePath(this.dataDir, meta.packagePath);
-      try {
-        bytes = await fs.readFile(fullPath);
-      } catch {
-        bytes = null;
+    if (includeBytes) {
+      if (meta.packagePath) {
+        const fullPath = resolvePackagePath(this.dataDir, meta.packagePath);
+        try {
+          bytes = await fs.readFile(fullPath);
+        } catch {
+          bytes = null;
+        }
+      } else {
+        bytes = Buffer.from(meta.packageBytes);
       }
-    } else {
-      bytes = Buffer.from(meta.packageBytes);
+
+      if (!bytes || bytes.length === 0) return null;
     }
 
-    if (!bytes || bytes.length === 0) return null;
-
-    await this.db.withTransaction((db) => {
-      db.run(`UPDATE extensions SET download_count = download_count + 1 WHERE id = ?`, [id]);
-    });
+    if (incrementDownloadCount) {
+      await this.db.withTransaction((db) => {
+        db.run(`UPDATE extensions SET download_count = download_count + 1 WHERE id = ?`, [id]);
+      });
+    }
 
     return {
       bytes,
