@@ -153,3 +153,50 @@ test("buildWorkbookContext: structured Restricted classifications fully redact r
   assert.equal(auditEvents.length, 1);
   assert.equal(auditEvents[0].decision.decision, "redact");
 });
+
+test("buildWorkbookContext: structured Restricted classifications can block when policy requires", async () => {
+  const workbook = makeSensitiveWorkbook();
+  workbook.sheets[0].cells[1][0].v = "TopSecret";
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const auditEvents = [];
+
+  await assert.rejects(
+    () =>
+      cm.buildWorkbookContext({
+        workbook,
+        query: "TopSecret",
+        dlp: {
+          documentId: workbook.id,
+          policy: makePolicy({ maxAllowed: "Confidential", redactDisallowed: false }),
+          classificationRecords: [
+            {
+              selector: {
+                scope: "range",
+                documentId: workbook.id,
+                sheetId: "Contacts",
+                range: { start: { row: 0, col: 0 }, end: { row: 1, col: 2 } },
+              },
+              classification: { level: "Restricted", labels: [] },
+            },
+          ],
+          auditLogger: { log: (e) => auditEvents.push(e) },
+        },
+      }),
+    (err) => {
+      assert.ok(err instanceof DlpViolationError);
+      return true;
+    }
+  );
+
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0].type, "ai.workbook_context");
+  assert.equal(auditEvents[0].decision.decision, "block");
+});
