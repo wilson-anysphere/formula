@@ -235,6 +235,7 @@ export class InlineEditController {
           },
           tool_executor: abortableToolExecutor as any,
           messages,
+          signal,
           audit: {
             audit_store: auditStore,
             session_id: sessionId,
