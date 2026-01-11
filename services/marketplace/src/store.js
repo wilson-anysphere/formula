@@ -1546,7 +1546,7 @@ class MarketplaceStore {
     });
 
     try {
-      await this.scanExtensionVersion(id, version, { packageBytes });
+      await this.scanExtensionVersion(id, version, { packageBytes, actor: "system", ip });
     } catch {
     }
 
@@ -1665,11 +1665,11 @@ class MarketplaceStore {
       audit.free();
     });
 
-    await this.scanExtensionVersion(extensionId, version);
+    await this.scanExtensionVersion(extensionId, version, { actor, ip });
     return this.getPackageScan(extensionId, version);
   }
 
-  async scanExtensionVersion(extensionId, version, { packageBytes = null } = {}) {
+  async scanExtensionVersion(extensionId, version, { packageBytes = null, actor = "system", ip = null } = {}) {
     const meta = await this.db.withRead((db) => {
       const stmt = db.prepare(
         `SELECT sha256, package_bytes, package_path
@@ -1756,6 +1756,14 @@ class MarketplaceStore {
       findings: mergedFindings,
     });
 
+    const findingIds = mergedFindings.map((f) => String(f.id || "")).filter(Boolean);
+    const auditDetails = {
+      status,
+      findingsCount: mergedFindings.length,
+      findingIds: findingIds.slice(0, 50),
+      truncated: findingIds.length > 50,
+    };
+
     await this.db.withTransaction((db) => {
       if (Array.isArray(scanData.fileRecords) && scanData.fileRecords.length > 0) {
         db.run(
@@ -1782,6 +1790,22 @@ class MarketplaceStore {
       // Scan results can change which versions are safe to advertise/serve. Bump the extension's
       // updated_at so client caches (ETag) revalidate and see the new provenance state.
       db.run(`UPDATE extensions SET updated_at = ? WHERE id = ?`, [scannedAt, extensionId]);
+
+      const audit = db.prepare(
+        `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      audit.run([
+        randomId(),
+        actor,
+        "package_scan.completed",
+        extensionId,
+        version,
+        ip,
+        safeJsonStringify(auditDetails),
+        scannedAt,
+      ]);
+      audit.free();
     });
 
     return { extensionId, version, status, scannedAt, findings: mergedFindings };

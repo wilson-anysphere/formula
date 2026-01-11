@@ -87,6 +87,11 @@ test("publishing triggers a package scan record", async (t) => {
     assert.equal(publishAudit.extensionId, published.id);
     assert.equal(publishAudit.version, published.version);
 
+    const scanAudit = auditEntries.find((entry) => entry.action === "package_scan.completed");
+    assert.ok(scanAudit, "scan completion should be recorded in audit log");
+    assert.equal(scanAudit.extensionId, published.id);
+    assert.equal(scanAudit.version, published.version);
+
     const scans = await store.listPackageScans({ status: "passed", limit: 50 });
     assert.ok(scans.some((s) => s.extensionId === published.id && s.version === published.version));
   } finally {
