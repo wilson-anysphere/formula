@@ -19,7 +19,7 @@ const DEFAULT_CLOCK_SKEW_MS = 60_000;
  * @property {string | undefined} [authorizationEndpoint] Authorization endpoint for auth-code flows.
  * @property {string | undefined} [redirectUri] Redirect URI for auth-code flows.
  * @property {string | undefined} [deviceAuthorizationEndpoint] Device authorization endpoint (RFC 8628).
- * @property {string[] | undefined} [defaultScopes]
+ * @property {string[] | string | undefined} [defaultScopes]
  * @property {Record<string, string> | undefined} [authorizationParams]
  */
 
@@ -41,7 +41,7 @@ const DEFAULT_CLOCK_SKEW_MS = 60_000;
 /**
  * @typedef {{
  *   providerId: string;
- *   scopes?: string[];
+ *   scopes?: string[] | string;
  *   signal?: AbortSignal;
  *   now?: (() => number);
  *   forceRefresh?: boolean;
@@ -292,7 +292,7 @@ export class OAuth2Manager {
    *   code: string;
    *   redirectUri?: string;
    *   codeVerifier?: string;
-   *   scopes?: string[];
+   *   scopes?: string[] | string;
    *   signal?: AbortSignal;
    *   now?: (() => number);
    * }} options
@@ -392,7 +392,7 @@ export class OAuth2Manager {
    *
    * @param {{
    *   providerId: string;
-   *   scopes?: string[];
+   *   scopes?: string[] | string;
    *   broker: OAuth2Broker;
    *   signal?: AbortSignal;
    *   now?: (() => number);
@@ -467,7 +467,7 @@ export class OAuth2Manager {
    *
    * @param {{
    *   providerId: string;
-   *   scopes?: string[];
+   *   scopes?: string[] | string;
    *   broker: OAuth2Broker;
    *   signal?: AbortSignal;
    *   now?: (() => number);
@@ -548,7 +548,7 @@ export class OAuth2Manager {
   /**
    * Clear cached + persisted tokens for a provider+scopes set.
    *
-   * @param {{ providerId: string; scopes?: string[] }} options
+   * @param {{ providerId: string; scopes?: string[] | string }} options
    */
   async clearTokens(options) {
     const provider = this.getProvider(options.providerId);
