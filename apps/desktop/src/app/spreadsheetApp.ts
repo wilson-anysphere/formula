@@ -537,6 +537,12 @@ export class SpreadsheetApp {
     this.hScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "x"), {
       passive: false
     });
+    this.vScrollbarTrack.addEventListener("pointerdown", (e) => this.onScrollbarTrackPointerDown(e, "y"), {
+      passive: false
+    });
+    this.hScrollbarTrack.addEventListener("pointerdown", (e) => this.onScrollbarTrackPointerDown(e, "x"), {
+      passive: false
+    });
 
     if (typeof window !== "undefined") {
       this.windowKeyDownListener = (e) => this.onWindowKeyDown(e);
@@ -1876,6 +1882,32 @@ export class SpreadsheetApp {
     this.scrollbarDrag = { axis, pointerId: e.pointerId, grabOffset, thumbTravel, trackStart, maxScroll };
 
     (thumb as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  private onScrollbarTrackPointerDown(e: PointerEvent, axis: "x" | "y"): void {
+    // Clicking the track should scroll, but should not start a selection drag.
+    e.preventDefault();
+    e.stopPropagation();
+
+    const thumb = axis === "y" ? this.vScrollbarThumb : this.hScrollbarThumb;
+    const track = axis === "y" ? this.vScrollbarTrack : this.hScrollbarTrack;
+    const trackRect = track.getBoundingClientRect();
+    const thumbRect = thumb.getBoundingClientRect();
+
+    const trackSize = axis === "y" ? trackRect.height : trackRect.width;
+    const thumbSize = axis === "y" ? thumbRect.height : thumbRect.width;
+    const thumbTravel = Math.max(0, trackSize - thumbSize);
+    if (thumbTravel === 0) return;
+
+    const pointerPos = axis === "y" ? e.clientY - trackRect.top : e.clientX - trackRect.left;
+    const targetOffset = pointerPos - thumbSize / 2;
+    const clamped = Math.min(Math.max(0, targetOffset), thumbTravel);
+
+    const maxScroll = axis === "y" ? this.maxScrollY() : this.maxScrollX();
+    const nextScroll = (clamped / thumbTravel) * maxScroll;
+
+    const changed = axis === "y" ? this.setScroll(this.scrollX, nextScroll) : this.setScroll(nextScroll, this.scrollY);
+    if (changed) this.refresh("scroll");
   }
 
   private onScrollbarThumbPointerMove(e: PointerEvent): void {
