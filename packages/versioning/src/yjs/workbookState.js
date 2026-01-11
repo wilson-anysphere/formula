@@ -8,6 +8,7 @@ import { parseSpreadsheetCellKey, sheetStateFromYjsDoc } from "./sheetState.js";
  * @typedef {{
  *   sheets: SheetMeta[];
  *   sheetOrder: string[];
+ *   metadata: Map<string, any>;
  *   namedRanges: Map<string, any>;
  *   comments: Map<string, CommentSummary>;
  *   cellsBySheet: Map<string, { cells: Map<string, any> }>;
@@ -160,6 +161,19 @@ export function workbookStateFromYjsDoc(doc) {
   }
 
   /** @type {Map<string, any>} */
+  const metadata = new Map();
+  if (doc.share.has("metadata")) {
+    try {
+      const metadataMap = doc.getMap("metadata");
+      for (const key of Array.from(metadataMap.keys()).sort()) {
+        metadata.set(key, yjsValueToJson(metadataMap.get(key)));
+      }
+    } catch {
+      // Ignore: unsupported root type.
+    }
+  }
+
+  /** @type {Map<string, any>} */
   const namedRanges = new Map();
   if (doc.share.has("namedRanges")) {
     try {
@@ -251,7 +265,7 @@ export function workbookStateFromYjsDoc(doc) {
     }
   }
 
-  return { sheets, sheetOrder, namedRanges, comments, cellsBySheet };
+  return { sheets, sheetOrder, metadata, namedRanges, comments, cellsBySheet };
 }
 
 /**

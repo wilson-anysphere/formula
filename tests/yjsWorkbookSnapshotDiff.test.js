@@ -11,6 +11,7 @@ test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
   const sheets = doc.getArray("sheets");
   const cells = doc.getMap("cells");
   const comments = doc.getMap("comments");
+  const metadata = doc.getMap("metadata");
   const namedRanges = doc.getMap("namedRanges");
 
   const sheet1 = new Y.Map();
@@ -34,6 +35,9 @@ test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
     comments.set("c1", comment);
 
     namedRanges.set("NR1", { sheetId: "sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } });
+
+    metadata.set("title", "Budget");
+    metadata.set("owner", "u1");
   });
 
   const beforeSnapshot = Y.encodeStateAsUpdate(doc);
@@ -66,6 +70,11 @@ test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
     // Named ranges.
     namedRanges.set("NR2", { sheetId: "sheet1", rect: { r0: 1, c0: 1, r1: 2, c1: 2 } });
     namedRanges.set("NR1", { sheetId: "sheet1", rect: { r0: 0, c0: 0, r1: 3, c1: 3 } });
+
+    // Workbook metadata.
+    metadata.set("title", "Budget (edited)");
+    metadata.delete("owner");
+    metadata.set("theme", { name: "dark" });
   });
 
   const afterSnapshot = Y.encodeStateAsUpdate(doc);
@@ -110,6 +119,11 @@ test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
   assert.deepEqual(diff.namedRanges.removed, []);
   assert.equal(diff.namedRanges.modified.length, 1);
   assert.equal(diff.namedRanges.modified[0].key, "NR1");
+
+  assert.deepEqual(diff.metadata.added.map((r) => r.key), ["theme"]);
+  assert.deepEqual(diff.metadata.removed.map((r) => r.key), ["owner"]);
+  assert.equal(diff.metadata.modified.length, 1);
+  assert.equal(diff.metadata.modified[0].key, "title");
 });
 
 test("diffYjsWorkbookSnapshots supports comments stored as a Y.Array", () => {
