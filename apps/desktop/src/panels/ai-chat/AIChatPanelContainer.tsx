@@ -208,6 +208,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
   const [agentEvents, setAgentEvents] = useState<AgentProgressEvent[]>([]);
   const [agentResult, setAgentResult] = useState<AgentTaskResult | null>(null);
   const [agentRunning, setAgentRunning] = useState(false);
+  const agentStepsRootRef = useRef<HTMLDivElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const cancelAgent = useCallback(() => {
@@ -219,6 +220,15 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
   useEffect(() => {
     return () => cancelAgent();
   }, [cancelAgent]);
+
+  useEffect(() => {
+    const root = agentStepsRootRef.current;
+    if (!root) return;
+    // Auto-scroll while running, but don't yank the user if they've intentionally scrolled up.
+    const distanceFromBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
+    const nearBottom = distanceFromBottom < 60;
+    if (agentRunning && nearBottom) root.scrollTop = root.scrollHeight;
+  }, [agentRunning, agentEvents.length]);
 
   const runAgent = useCallback(async () => {
     if (agentRunning) return;
@@ -342,7 +352,10 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
               />
               Continue running if I deny an approval (agent will re-plan)
             </label>
-            <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, minHeight: 0, flex: 1, overflow: "auto" }}>
+            <div
+              ref={agentStepsRootRef}
+              style={{ borderTop: "1px solid var(--border)", paddingTop: 10, minHeight: 0, flex: 1, overflow: "auto" }}
+            >
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Steps</div>
               {agentEvents.length === 0 ? (
                 <div style={{ fontSize: 12, opacity: 0.8 }}>No steps yet.</div>
