@@ -952,7 +952,9 @@ export class ToolExecutor {
       action: DLP_ACTION.AI_CLOUD_PROCESSING,
       decision: dlp.decision,
       selectionClassification: dlp.selectionClassification,
-      redactedCellCount
+      redactedCellCount,
+      // Alias for downstream consumers expecting the spec wording.
+      redacted_counts: redactedCellCount
     });
   }
 
