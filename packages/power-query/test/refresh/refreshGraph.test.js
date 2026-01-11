@@ -110,6 +110,37 @@ test("RefreshOrchestrator: merge dependency ordering (B merge depends on A)", as
   await handle.promise;
 });
 
+test("RefreshOrchestrator: events include sessionId + dependency/target phase", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+
+  /** @type {{ queryId: string; sessionId: string; phase: string }[]} */
+  const started = [];
+  orchestrator.onEvent((evt) => {
+    if (evt.type === "started") {
+      started.push({ queryId: evt.job.queryId, sessionId: evt.sessionId, phase: evt.phase });
+    }
+  });
+
+  const handle = orchestrator.refreshAll(["B"]);
+
+  assert.equal(engine.calls.length, 1);
+  engine.calls[0].deferred.resolve(makeResult("A"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(engine.calls.length, 2);
+  engine.calls[1].deferred.resolve(makeResult("B"));
+  await handle.promise;
+
+  const byQuery = Object.fromEntries(started.map((e) => [e.queryId, e]));
+  assert.equal(byQuery["A"]?.phase, "dependency");
+  assert.equal(byQuery["B"]?.phase, "target");
+  assert.equal(byQuery["A"]?.sessionId, handle.sessionId);
+  assert.equal(byQuery["B"]?.sessionId, handle.sessionId);
+});
+
 test("RefreshOrchestrator: append dependency ordering (B append depends on A)", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
@@ -153,6 +184,27 @@ test("RefreshOrchestrator: runs independent queries concurrently", async () => {
 
   for (const call of engine.calls) call.deferred.resolve(makeResult(call.queryId));
   await handle.promise;
+});
+
+test("RefreshOrchestrator: shared dependency executes once when not explicitly targeted", async () => {
+  let reads = 0;
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        reads += 1;
+        return "Value\n1\n";
+      },
+    },
+  });
+
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "csv", path: "file.csv" }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+  orchestrator.registerQuery(makeQuery("C", { type: "query", queryId: "A" }));
+
+  const results = await orchestrator.refreshAll(["B", "C"]).promise;
+  assert.equal(reads, 1);
+  assert.deepEqual(new Set(Object.keys(results)), new Set(["B", "C"]));
 });
 
 test("RefreshOrchestrator: refreshAll() with no queryIds refreshes all registered queries", async () => {
