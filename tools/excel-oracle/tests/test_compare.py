@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+class ComparePartialDatasetsTests(unittest.TestCase):
+    def test_missing_expected_does_not_crash_and_emits_report(self) -> None:
+        compare_py = Path(__file__).resolve().parents[1] / "compare.py"
+        self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+            actual_path = tmp_path / "actual.json"
+            report_path = tmp_path / "report.json"
+
+            cases_payload = {
+                "schemaVersion": 1,
+                "cases": [
+                    {"id": "case-a", "formula": "=1+1", "inputs": []},
+                    {"id": "case-b", "formula": "=2+2", "inputs": []},
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [{"caseId": "case-a", "result": {"t": "n", "v": 2}}],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            actual_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "engine", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 2},
+                "results": [
+                    {"caseId": "case-a", "result": {"t": "n", "v": 2}},
+                    {"caseId": "case-b", "result": {"t": "n", "v": 4}},
+                ],
+            }
+            actual_path.write_text(
+                json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(compare_py),
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    "--max-mismatch-rate",
+                    "1.0",
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            if proc.returncode != 0:
+                self.fail(f"compare.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}")
+
+            self.assertTrue(report_path.is_file(), "compare.py did not write a report JSON")
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report.get("expectedSource"), expected_payload["source"])
+            self.assertEqual(report.get("actualSource"), actual_payload["source"])
+            self.assertEqual(report["summary"]["reasonCounts"]["missing-expected"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
+

@@ -188,6 +188,7 @@ def main() -> int:
         raise SystemExit(f"Unsupported actual schemaVersion: {actual.get('schemaVersion')}")
 
     expected_source = expected.get("source", {})
+    actual_source = actual.get("source")
     if isinstance(expected_source, dict) and expected_source.get("kind") != "excel":
         raise SystemExit(
             "Expected dataset must be produced by real Excel (source.kind == 'excel'). "
@@ -350,9 +351,9 @@ def main() -> int:
     missing_functions: dict[str, int] = {}
     actual_error_kinds: dict[str, int] = {}
     for m in mismatches:
-        actual = m.get("actual")
-        if isinstance(actual, dict) and actual.get("t") == "e":
-            code = actual.get("v")
+        mismatch_actual = m.get("actual")
+        if isinstance(mismatch_actual, dict) and mismatch_actual.get("t") == "e":
+            code = mismatch_actual.get("v")
             if isinstance(code, str):
                 actual_error_kinds[code] = actual_error_kinds.get(code, 0) + 1
                 if code == "#NAME?":
@@ -385,7 +386,7 @@ def main() -> int:
             "casesSha256": cases_sha,
         },
         "expectedSource": expected.get("source"),
-        "actualSource": actual.get("source"),
+        "actualSource": actual_source,
         "mismatches": mismatches,
     }
 
