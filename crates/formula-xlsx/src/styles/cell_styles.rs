@@ -571,7 +571,10 @@ fn parse_xf(
     } else if let Some(code) = builtin_num_fmt_code(num_fmt_id) {
         Some(code.to_string())
     } else {
-        Some(format!("__builtin_numFmtId:{num_fmt_id}"))
+        Some(format!(
+            "{}{num_fmt_id}",
+            formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX
+        ))
     };
 
     Style {
@@ -956,7 +959,7 @@ fn builtin_num_fmt_id_for_code(code: &str) -> Option<u16> {
 }
 
 fn parse_builtin_placeholder(code: &str) -> Option<u16> {
-    let rest = code.strip_prefix("__builtin_numFmtId:")?;
+    let rest = code.strip_prefix(formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?;
     rest.parse::<u16>().ok()
 }
 

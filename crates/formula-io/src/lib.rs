@@ -186,7 +186,11 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
             .get(xf_idx as u32)
             .expect("xf index within wb.styles().len()");
         let number_format = match info.number_format.as_deref() {
-            Some(fmt) if fmt.starts_with("__builtin_numFmtId:") => Some(fmt.to_string()),
+            Some(fmt)
+                if fmt.starts_with(formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX) =>
+            {
+                Some(fmt.to_string())
+            }
             Some(fmt) => {
                 if let Some(builtin) = formula_format::builtin_format_code(info.num_fmt_id) {
                     // Guard against (rare) custom formats that reuse a built-in id.
@@ -195,7 +199,11 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
                         if canonical == Some(info.num_fmt_id) {
                             Some(builtin.to_string())
                         } else {
-                            Some(format!("__builtin_numFmtId:{}", info.num_fmt_id))
+                            Some(format!(
+                                "{}{}",
+                                formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX,
+                                info.num_fmt_id
+                            ))
                         }
                     } else {
                         Some(fmt.to_string())
@@ -208,7 +216,11 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
                 // If we don't know the code but the id is in the reserved built-in range,
                 // preserve it for round-trip.
                 if info.num_fmt_id != 0 && info.num_fmt_id < 164 {
-                    Some(format!("__builtin_numFmtId:{}", info.num_fmt_id))
+                    Some(format!(
+                        "{}{}",
+                        formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX,
+                        info.num_fmt_id
+                    ))
                 } else {
                     None
                 }

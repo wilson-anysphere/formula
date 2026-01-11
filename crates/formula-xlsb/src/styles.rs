@@ -87,7 +87,10 @@ impl Styles {
                     // those ids without providing an explicit format code. Preserve the id for
                     // round-trip even if we don't know the code yet.
                     if num_fmt_id < 164 {
-                        Some(format!("__builtin_numFmtId:{num_fmt_id}"))
+                        Some(format!(
+                            "{}{num_fmt_id}",
+                            formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX
+                        ))
                     } else {
                         None
                     }
@@ -98,7 +101,9 @@ impl Styles {
                 let is_date_time = match number_format.as_deref() {
                     // `__builtin_numFmtId:<id>` is an internal placeholder, not a real format code.
                     // Use the numeric id range heuristic instead of scanning it as text.
-                    Some(fmt) if fmt.starts_with("__builtin_numFmtId:") => {
+                    Some(fmt)
+                        if fmt.starts_with(formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX) =>
+                    {
                         is_reserved_datetime_format_id(num_fmt_id)
                     }
                     Some(fmt) => looks_like_datetime(fmt),

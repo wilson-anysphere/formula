@@ -30,6 +30,14 @@ pub use crate::builtin::builtin_format_id;
 pub use crate::datetime::DateSystem;
 pub use crate::parse::{locale_for_lcid, FormatCode, ParseError};
 
+/// Prefix used for placeholder format codes that indicate an Excel built-in number
+/// format ID without embedding a concrete format string.
+///
+/// Some importers (notably `formula-xlsx` and `formula-xlsb`) use these
+/// placeholders to preserve `numFmtId` values that were present in the source
+/// file but did not include an explicit format code.
+pub const BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX: &str = "__builtin_numFmtId:";
+
 pub use locale::{format_number, get_locale, NumberLocale, DE_DE, EN_US};
 
 /// A locale definition used for formatting separators.
@@ -187,8 +195,11 @@ pub fn format_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
     }
 }
 
-fn resolve_builtin_placeholder_format_code(code: &str, locale: Locale) -> Option<std::borrow::Cow<'static, str>> {
-    let rest = code.strip_prefix("__builtin_numFmtId:")?;
+fn resolve_builtin_placeholder_format_code(
+    code: &str,
+    locale: Locale,
+) -> Option<std::borrow::Cow<'static, str>> {
+    let rest = code.strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?;
     let id = rest.parse::<u16>().ok()?;
     Some(crate::builtin_format_code_with_locale(id, locale).unwrap_or_else(|| "General".into()))
 }
