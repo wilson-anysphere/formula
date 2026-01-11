@@ -84,17 +84,23 @@ export class FileSystemCacheStore {
       `${path.basename(finalPath)}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     );
 
-    await fs.writeFile(tmpPath, data, encoding);
-
     try {
-      await fs.rename(tmpPath, finalPath);
-    } catch (err) {
-      // On Windows, rename does not reliably overwrite existing files.
-      if (err && typeof err === "object" && "code" in err && (err.code === "EEXIST" || err.code === "EPERM")) {
-        await fs.rm(finalPath, { force: true });
+      await fs.writeFile(tmpPath, data, encoding);
+
+      try {
         await fs.rename(tmpPath, finalPath);
-        return;
+      } catch (err) {
+        // On Windows, rename does not reliably overwrite existing files.
+        if (err && typeof err === "object" && "code" in err && (err.code === "EEXIST" || err.code === "EPERM")) {
+          await fs.rm(finalPath, { force: true });
+          await fs.rename(tmpPath, finalPath);
+          return;
+        }
+        throw err;
       }
+    } catch (err) {
+      // Best-effort cleanup if we fail mid-write.
+      await fs.rm(tmpPath, { force: true }).catch(() => {});
       throw err;
     }
   }
