@@ -397,6 +397,13 @@ Cache stores:
 
 Note: Node-only helpers are also available from the `../packages/power-query/src/node.js` entrypoint (for example `EncryptedFileSystemCacheStore`).
 
+Maintenance:
+
+- `CacheManager.get()` evicts expired entries opportunistically on access.
+- For long-lived persistent stores (IndexedDB / filesystem), hosts may also call
+  `cache.pruneExpired()` periodically to proactively reclaim space. This is
+  best-effort and never throws.
+
 Example (in-memory caching):
 
 ```js
