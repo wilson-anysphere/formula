@@ -393,9 +393,15 @@ Cache stores:
 - `MemoryCacheStore`: in-memory (fastest; non-persistent)
 - `IndexedDBCacheStore`: browser persistence (stores `Uint8Array` IPC bytes via structured clone)
 - `FileSystemCacheStore`: Node persistence (`<hash>.json` + `<hash>.bin` for Arrow IPC bytes)
+- `EncryptedCacheStore`: wrapper that encrypts cached values at rest using a host-provided AES-256-GCM provider (supports wrapping IndexedDB or filesystem stores; keeps ciphertext as `Uint8Array` without base64)
 - `EncryptedFileSystemCacheStore`: Node persistence with encryption-at-rest (AES-256-GCM) and the same `.bin` blob strategy for Arrow IPC bytes
 
-Note: Node-only helpers are also available from the `../packages/power-query/src/node.js` entrypoint (for example `EncryptedFileSystemCacheStore`).
+Provider helpers:
+
+- `createWebCryptoCacheProvider({ keyVersion, keyBytes })`: create an AES-256-GCM provider backed by `crypto.subtle` (browser / WebView contexts)
+- `createNodeCryptoCacheProvider({ keyVersion, keyBytes })`: create an AES-256-GCM provider backed by `node:crypto` (Node contexts; exported from `../packages/power-query/src/node.js`)
+
+Note: Node-only helpers are available from the `../packages/power-query/src/node.js` entrypoint (for example `EncryptedFileSystemCacheStore` and `createNodeCryptoCacheProvider`).
 
 Maintenance:
 
