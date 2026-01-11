@@ -14,7 +14,7 @@ use crate::object_model::{
     VbaRangeRef,
 };
 use crate::sandbox::{Permission, PermissionChecker, VbaSandboxPolicy};
-use crate::value::{VbaArray, VbaValue};
+use crate::value::{VbaArray, VbaArrayRef, VbaValue};
 
 #[derive(Debug, Error)]
 pub enum VbaError {
@@ -96,6 +96,17 @@ impl VbaRuntime {
     pub fn fire_workbook_open(&self, spreadsheet: &mut dyn Spreadsheet) -> Result<(), VbaError> {
         if self.program.get("workbook_open").is_some() {
             self.execute(spreadsheet, "Workbook_Open", &[])?;
+        }
+        Ok(())
+    }
+
+    /// Convenience: execute `Workbook_BeforeClose` if present.
+    pub fn fire_workbook_before_close(
+        &self,
+        spreadsheet: &mut dyn Spreadsheet,
+    ) -> Result<(), VbaError> {
+        if self.program.get("workbook_beforeclose").is_some() {
+            self.execute(spreadsheet, "Workbook_BeforeClose", &[])?;
         }
         Ok(())
     }
@@ -1128,26 +1139,8 @@ impl<'a> Executor<'a> {
         let member_lc = member.to_ascii_lowercase();
         match &mut *obj.borrow_mut() {
             VbaObject::Range(range) => match member_lc.as_str() {
-                "value" | "value2" => {
-                    for r in range.start_row..=range.end_row {
-                        for c in range.start_col..=range.end_col {
-                            self.tick()?;
-                            self.sheet.clear_cell_contents(range.sheet, r, c)?;
-                            self.sheet.set_cell_value(range.sheet, r, c, value.clone())?;
-                        }
-                    }
-                    Ok(())
-                }
-                "formula" => {
-                    let formula = self.coerce_to_string(&mut Frame::dummy(), value)?;
-                    for r in range.start_row..=range.end_row {
-                        for c in range.start_col..=range.end_col {
-                            self.tick()?;
-                            self.sheet.set_cell_formula(range.sheet, r, c, formula.clone())?;
-                        }
-                    }
-                    Ok(())
-                }
+                "value" | "value2" => self.set_range_value(*range, value),
+                "formula" => self.set_range_formula(*range, value),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Range member `{member}`"
                 ))),
@@ -1279,18 +1272,7 @@ impl<'a> Executor<'a> {
         if let Expr::Var(name) = callee {
             let name_lc = name.to_ascii_lowercase();
             if let Some(VbaValue::Array(arr)) = frame.locals.get(&name_lc).cloned() {
-                let idx_expr = args
-                    .first()
-                    .ok_or_else(|| VbaError::Runtime("Array index missing".to_string()))?;
-                let idx = self
-                    .eval_expr(frame, &idx_expr.expr)?
-                    .to_f64()
-                    .unwrap_or(0.0) as i32;
-                return Ok(arr
-                    .borrow()
-                    .get(idx)
-                    .cloned()
-                    .unwrap_or(VbaValue::Empty));
+                return self.index_array_value(frame, VbaValue::Array(arr), args);
             }
             return self.call_global(frame, name, args);
         }
@@ -1306,18 +1288,7 @@ impl<'a> Executor<'a> {
         // Default member call for objects / array indexing.
         let callee_val = self.eval_expr(frame, callee)?;
         if let VbaValue::Array(arr) = callee_val {
-            let idx_expr = args
-                .first()
-                .ok_or_else(|| VbaError::Runtime("Array index missing".to_string()))?;
-            let idx = self
-                .eval_expr(frame, &idx_expr.expr)?
-                .to_f64()
-                .unwrap_or(0.0) as i32;
-            return Ok(arr
-                .borrow()
-                .get(idx)
-                .cloned()
-                .unwrap_or(VbaValue::Empty));
+            return self.index_array_value(frame, VbaValue::Array(arr), args);
         }
 
         if let VbaValue::Object(obj) = callee_val {
@@ -2120,14 +2091,8 @@ impl<'a> Executor<'a> {
                 ))),
             },
             VbaObject::Range(range) => match member_lc.as_str() {
-                "value" | "value2" => self
-                    .sheet
-                    .get_cell_value(range.sheet, range.start_row, range.start_col),
-                "formula" => Ok(self
-                    .sheet
-                    .get_cell_formula(range.sheet, range.start_row, range.start_col)?
-                    .map(VbaValue::String)
-                    .unwrap_or(VbaValue::Empty)),
+                "value" | "value2" => self.get_range_value(*range),
+                "formula" => self.get_range_formula(*range),
                 "text" => Ok(self
                     .sheet
                     .get_cell_value(range.sheet, range.start_row, range.start_col)?
@@ -2356,6 +2321,355 @@ impl<'a> Executor<'a> {
             }
         }
 
+        Ok(())
+    }
+
+    fn index_array_value(
+        &mut self,
+        frame: &mut Frame,
+        mut value: VbaValue,
+        args: &[crate::ast::CallArg],
+    ) -> Result<VbaValue, VbaError> {
+        if args.is_empty() {
+            return Err(VbaError::Runtime("Array index missing".to_string()));
+        }
+
+        for arg in args {
+            let idx = self
+                .eval_expr(frame, &arg.expr)?
+                .to_f64()
+                .unwrap_or(0.0) as i32;
+            let VbaValue::Array(arr) = value else {
+                return Ok(VbaValue::Empty);
+            };
+            value = arr
+                .borrow()
+                .get(idx)
+                .cloned()
+                .unwrap_or(VbaValue::Empty);
+        }
+        Ok(value)
+    }
+
+    fn get_range_value(&mut self, range: VbaRangeRef) -> Result<VbaValue, VbaError> {
+        if range.start_row == range.end_row && range.start_col == range.end_col {
+            return self
+                .sheet
+                .get_cell_value(range.sheet, range.start_row, range.start_col);
+        }
+
+        let rows = range.end_row.saturating_sub(range.start_row) + 1;
+        let cols = range.end_col.saturating_sub(range.start_col) + 1;
+
+        let mut outer = Vec::with_capacity(rows as usize);
+        for r_off in 0..rows {
+            let mut inner = Vec::with_capacity(cols as usize);
+            for c_off in 0..cols {
+                let value = self.sheet.get_cell_value(
+                    range.sheet,
+                    range.start_row + r_off,
+                    range.start_col + c_off,
+                )?;
+                inner.push(value);
+            }
+            outer.push(VbaValue::Array(std::rc::Rc::new(RefCell::new(VbaArray::new(
+                1, inner,
+            )))));
+        }
+        Ok(VbaValue::Array(std::rc::Rc::new(RefCell::new(VbaArray::new(
+            1, outer,
+        )))))
+    }
+
+    fn get_range_formula(&mut self, range: VbaRangeRef) -> Result<VbaValue, VbaError> {
+        if range.start_row == range.end_row && range.start_col == range.end_col {
+            return Ok(self
+                .sheet
+                .get_cell_formula(range.sheet, range.start_row, range.start_col)?
+                .map(VbaValue::String)
+                .unwrap_or(VbaValue::Empty));
+        }
+
+        let rows = range.end_row.saturating_sub(range.start_row) + 1;
+        let cols = range.end_col.saturating_sub(range.start_col) + 1;
+
+        let mut outer = Vec::with_capacity(rows as usize);
+        for r_off in 0..rows {
+            let mut inner = Vec::with_capacity(cols as usize);
+            for c_off in 0..cols {
+                let value = self
+                    .sheet
+                    .get_cell_formula(
+                        range.sheet,
+                        range.start_row + r_off,
+                        range.start_col + c_off,
+                    )?
+                    .map(VbaValue::String)
+                    .unwrap_or(VbaValue::Empty);
+                inner.push(value);
+            }
+            outer.push(VbaValue::Array(std::rc::Rc::new(RefCell::new(VbaArray::new(
+                1, inner,
+            )))));
+        }
+        Ok(VbaValue::Array(std::rc::Rc::new(RefCell::new(VbaArray::new(
+            1, outer,
+        )))))
+    }
+
+    fn set_range_value(&mut self, range: VbaRangeRef, value: VbaValue) -> Result<(), VbaError> {
+        let rows = range.end_row.saturating_sub(range.start_row) + 1;
+        let cols = range.end_col.saturating_sub(range.start_col) + 1;
+        if rows == 1 && cols == 1 {
+            self.tick()?;
+            return self
+                .sheet
+                .set_cell_value(range.sheet, range.start_row, range.start_col, value);
+        }
+
+        match value {
+            VbaValue::Array(arr) => self.set_range_value_from_array(range, arr),
+            scalar => {
+                for r in range.start_row..=range.end_row {
+                    for c in range.start_col..=range.end_col {
+                        self.tick()?;
+                        self.sheet
+                            .set_cell_value(range.sheet, r, c, scalar.clone())?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn set_range_formula(&mut self, range: VbaRangeRef, value: VbaValue) -> Result<(), VbaError> {
+        let rows = range.end_row.saturating_sub(range.start_row) + 1;
+        let cols = range.end_col.saturating_sub(range.start_col) + 1;
+        if rows == 1 && cols == 1 {
+            self.tick()?;
+            return self.sheet.set_cell_formula(
+                range.sheet,
+                range.start_row,
+                range.start_col,
+                value.to_string_lossy(),
+            );
+        }
+
+        match value {
+            VbaValue::Array(arr) => self.set_range_formula_from_array(range, arr),
+            scalar => {
+                let formula = scalar.to_string_lossy();
+                for r in range.start_row..=range.end_row {
+                    for c in range.start_col..=range.end_col {
+                        self.tick()?;
+                        self.sheet
+                            .set_cell_formula(range.sheet, r, c, formula.clone())?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn set_range_value_from_array(
+        &mut self,
+        range: VbaRangeRef,
+        arr: VbaArrayRef,
+    ) -> Result<(), VbaError> {
+        let rows = range.end_row.saturating_sub(range.start_row) + 1;
+        let cols = range.end_col.saturating_sub(range.start_col) + 1;
+        let rows_usize = rows as usize;
+        let cols_usize = cols as usize;
+
+        // 2D array-of-arrays (rows x cols).
+        {
+            let outer = arr.borrow();
+            if outer.values.len() == rows_usize
+                && outer.values.iter().all(|v| matches!(v, VbaValue::Array(_)))
+            {
+                for (r_idx, row_val) in outer.values.iter().enumerate() {
+                    let VbaValue::Array(inner) = row_val else {
+                        continue;
+                    };
+                    let inner = inner.borrow();
+                    if inner.values.len() != cols_usize {
+                        return Err(VbaError::Runtime(format!(
+                            "Array size mismatch: expected {cols_usize} values in row, got {}",
+                            inner.values.len()
+                        )));
+                    }
+
+                    for (c_idx, cell_val) in inner.values.iter().enumerate() {
+                        self.tick()?;
+                        self.sheet.set_cell_value(
+                            range.sheet,
+                            range.start_row + r_idx as u32,
+                            range.start_col + c_idx as u32,
+                            cell_val.clone(),
+                        )?;
+                    }
+                }
+                return Ok(());
+            }
+        }
+
+        // Flat array.
+        let total = rows_usize.saturating_mul(cols_usize);
+        let expected = if rows_usize == 1 {
+            cols_usize
+        } else if cols_usize == 1 {
+            rows_usize
+        } else {
+            total
+        };
+        let outer = arr.borrow();
+        if outer.values.len() != expected {
+            return Err(VbaError::Runtime(format!(
+                "Array size mismatch: expected {expected} values for range, got {}",
+                outer.values.len()
+            )));
+        }
+        let flat = outer.values.as_slice();
+
+        if rows_usize == 1 && cols_usize >= 1 {
+            for (c_idx, cell_val) in flat.iter().enumerate().take(cols_usize) {
+                self.tick()?;
+                self.sheet.set_cell_value(
+                    range.sheet,
+                    range.start_row,
+                    range.start_col + c_idx as u32,
+                    cell_val.clone(),
+                )?;
+            }
+            return Ok(());
+        }
+
+        if cols_usize == 1 && rows_usize >= 1 {
+            for (r_idx, cell_val) in flat.iter().enumerate().take(rows_usize) {
+                self.tick()?;
+                self.sheet.set_cell_value(
+                    range.sheet,
+                    range.start_row + r_idx as u32,
+                    range.start_col,
+                    cell_val.clone(),
+                )?;
+            }
+            return Ok(());
+        }
+
+        for r_idx in 0..rows_usize {
+            for c_idx in 0..cols_usize {
+                let idx = r_idx * cols_usize + c_idx;
+                self.tick()?;
+                self.sheet.set_cell_value(
+                    range.sheet,
+                    range.start_row + r_idx as u32,
+                    range.start_col + c_idx as u32,
+                    flat[idx].clone(),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn set_range_formula_from_array(
+        &mut self,
+        range: VbaRangeRef,
+        arr: VbaArrayRef,
+    ) -> Result<(), VbaError> {
+        let rows = range.end_row.saturating_sub(range.start_row) + 1;
+        let cols = range.end_col.saturating_sub(range.start_col) + 1;
+        let rows_usize = rows as usize;
+        let cols_usize = cols as usize;
+
+        // 2D array-of-arrays (rows x cols).
+        {
+            let outer = arr.borrow();
+            if outer.values.len() == rows_usize
+                && outer.values.iter().all(|v| matches!(v, VbaValue::Array(_)))
+            {
+                for (r_idx, row_val) in outer.values.iter().enumerate() {
+                    let VbaValue::Array(inner) = row_val else {
+                        continue;
+                    };
+                    let inner = inner.borrow();
+                    if inner.values.len() != cols_usize {
+                        return Err(VbaError::Runtime(format!(
+                            "Array size mismatch: expected {cols_usize} formulas in row, got {}",
+                            inner.values.len()
+                        )));
+                    }
+
+                    for (c_idx, cell_val) in inner.values.iter().enumerate() {
+                        self.tick()?;
+                        self.sheet.set_cell_formula(
+                            range.sheet,
+                            range.start_row + r_idx as u32,
+                            range.start_col + c_idx as u32,
+                            cell_val.to_string_lossy(),
+                        )?;
+                    }
+                }
+                return Ok(());
+            }
+        }
+
+        // Flat array.
+        let total = rows_usize.saturating_mul(cols_usize);
+        let expected = if rows_usize == 1 {
+            cols_usize
+        } else if cols_usize == 1 {
+            rows_usize
+        } else {
+            total
+        };
+        let outer = arr.borrow();
+        if outer.values.len() != expected {
+            return Err(VbaError::Runtime(format!(
+                "Array size mismatch: expected {expected} formulas for range, got {}",
+                outer.values.len()
+            )));
+        }
+        let flat = outer.values.as_slice();
+
+        if rows_usize == 1 && cols_usize >= 1 {
+            for (c_idx, cell_val) in flat.iter().enumerate().take(cols_usize) {
+                self.tick()?;
+                self.sheet.set_cell_formula(
+                    range.sheet,
+                    range.start_row,
+                    range.start_col + c_idx as u32,
+                    cell_val.to_string_lossy(),
+                )?;
+            }
+            return Ok(());
+        }
+
+        if cols_usize == 1 && rows_usize >= 1 {
+            for (r_idx, cell_val) in flat.iter().enumerate().take(rows_usize) {
+                self.tick()?;
+                self.sheet.set_cell_formula(
+                    range.sheet,
+                    range.start_row + r_idx as u32,
+                    range.start_col,
+                    cell_val.to_string_lossy(),
+                )?;
+            }
+            return Ok(());
+        }
+
+        for r_idx in 0..rows_usize {
+            for c_idx in 0..cols_usize {
+                let idx = r_idx * cols_usize + c_idx;
+                self.tick()?;
+                self.sheet.set_cell_formula(
+                    range.sheet,
+                    range.start_row + r_idx as u32,
+                    range.start_col + c_idx as u32,
+                    flat[idx].to_string_lossy(),
+                )?;
+            }
+        }
         Ok(())
     }
 }

@@ -25,8 +25,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, shortcut, _event| {
-                    match shortcut.to_string().as_str() {
+                .with_handler(
+                    |app, shortcut, _event| match shortcut.to_string().as_str() {
                         "CmdOrCtrl+Shift+O" => {
                             let _ = app.emit("shortcut-quick-open", ());
                         }
@@ -34,8 +34,8 @@ fn main() {
                             let _ = app.emit("shortcut-command-palette", ());
                         }
                         _ => {}
-                    }
-                })
+                    },
+                )
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -60,6 +60,10 @@ fn main() {
             commands::get_macro_security_status,
             commands::set_macro_trust,
             commands::run_macro,
+            commands::fire_workbook_open,
+            commands::fire_workbook_before_close,
+            commands::fire_worksheet_change,
+            commands::fire_selection_change,
         ])
         .setup(|app| {
             tray::init(app)?;
@@ -89,8 +93,10 @@ fn main() {
             }
             tauri::WindowEvent::DragDrop(drag_drop) => {
                 if let tauri::DragDropEvent::Drop { paths, .. } = drag_drop {
-                    let payload: Vec<String> =
-                        paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+                    let payload: Vec<String> = paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect();
                     let _ = window.emit("file-dropped", payload);
                 }
             }

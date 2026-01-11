@@ -143,15 +143,11 @@ fn app_error(err: AppStateError) -> String {
 #[cfg(feature = "desktop")]
 fn coerce_save_path_to_xlsx(path: &str) -> String {
     let mut buf = PathBuf::from(path);
-    if buf
-        .extension()
-        .and_then(|s| s.to_str())
-        .is_some_and(|ext| {
-            ext.eq_ignore_ascii_case("xls")
-                || ext.eq_ignore_ascii_case("xlsb")
-                || ext.eq_ignore_ascii_case("csv")
-        })
-    {
+    if buf.extension().and_then(|s| s.to_str()).is_some_and(|ext| {
+        ext.eq_ignore_ascii_case("xls")
+            || ext.eq_ignore_ascii_case("xlsb")
+            || ext.eq_ignore_ascii_case("csv")
+    }) {
         buf.set_extension("xlsx");
         return buf.to_string_lossy().to_string();
     }
@@ -621,21 +617,7 @@ pub fn export_sheet_range_pdf(
     Ok(STANDARD.encode(pdf_bytes))
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct MacroInfo {
-    pub id: String,
-    pub name: String,
-    pub language: String,
-    pub module: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum MacroPermission {
-    FilesystemRead,
-    FilesystemWrite,
-    Network,
-}
+pub use crate::macros::{MacroInfo, MacroPermission, MacroPermissionRequest};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -689,6 +671,7 @@ pub struct MacroRunResult {
     pub output: Vec<String>,
     pub updates: Vec<CellUpdate>,
     pub error: Option<MacroError>,
+    pub permission_request: Option<MacroPermissionRequest>,
 }
 
 #[cfg(feature = "desktop")]
@@ -767,6 +750,54 @@ fn build_macro_security_status(
     })
 }
 
+#[cfg(feature = "desktop")]
+fn enforce_macro_trust(
+    workbook: &mut Workbook,
+    workbook_id: Option<&str>,
+    trust_store: &crate::macro_trust::MacroTrustStore,
+) -> Result<Option<MacroBlockedError>, String> {
+    let status = build_macro_security_status(workbook, workbook_id, trust_store)?;
+    if !status.has_macros {
+        return Ok(None);
+    }
+
+    let is_signed = matches!(
+        status.signature.as_ref().map(|s| s.status),
+        Some(MacroSignatureStatus::SignedUnverified)
+    );
+    let allowed = match status.trust {
+        MacroTrustDecision::TrustedAlways | MacroTrustDecision::TrustedOnce => true,
+        MacroTrustDecision::TrustedSignedOnly => is_signed,
+        MacroTrustDecision::Blocked => false,
+    };
+
+    if allowed {
+        return Ok(None);
+    }
+
+    let reason = match status.trust {
+        MacroTrustDecision::TrustedSignedOnly => MacroBlockedReason::SignatureRequired,
+        _ => MacroBlockedReason::NotTrusted,
+    };
+
+    Ok(Some(MacroBlockedError { reason, status }))
+}
+
+#[cfg(feature = "desktop")]
+fn macro_blocked_result(blocked: MacroBlockedError) -> MacroRunResult {
+    MacroRunResult {
+        ok: false,
+        output: Vec::new(),
+        updates: Vec::new(),
+        error: Some(MacroError {
+            message: "Macros are blocked by Trust Center policy.".to_string(),
+            code: Some("macro_blocked".to_string()),
+            blocked: Some(blocked),
+        }),
+        permission_request: None,
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct VbaReferenceSummary {
     pub name: Option<String>,
@@ -841,25 +872,6 @@ pub async fn set_macro_trust(
     .await
     .map_err(|e| e.to_string())?
 }
-
-#[cfg(feature = "desktop")]
-fn build_vba_program(state: &AppState) -> Result<formula_vba_runtime::VbaProgram, String> {
-    let workbook = state.get_workbook().map_err(app_error)?;
-    let Some(vba_bin) = workbook.vba_project_bin.as_ref() else {
-        return Ok(formula_vba_runtime::VbaProgram::new());
-    };
-
-    let project = formula_vba::VBAProject::parse(vba_bin).map_err(|e| e.to_string())?;
-    let combined = project
-        .modules
-        .iter()
-        .map(|m| m.code.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    formula_vba_runtime::parse_program(&combined).map_err(|e| e.to_string())
-}
-
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_vba_project(
@@ -867,13 +879,10 @@ pub fn get_vba_project(
     state: State<'_, SharedAppState>,
 ) -> Result<Option<VbaProjectSummary>, String> {
     let _ = workbook_id;
-    let state = state.inner().lock().unwrap();
-    let workbook = state.get_workbook().map_err(app_error)?;
-    let Some(vba_bin) = workbook.vba_project_bin.as_ref() else {
+    let mut state = state.inner().lock().unwrap();
+    let Some(project) = state.vba_project().map_err(|e| e.to_string())? else {
         return Ok(None);
     };
-
-    let project = formula_vba::VBAProject::parse(vba_bin).map_err(|e| e.to_string())?;
     Ok(Some(VbaProjectSummary {
         name: project.name,
         constants: project.constants,
@@ -908,271 +917,9 @@ pub fn list_macros(
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<MacroInfo>, String> {
     let _ = workbook_id;
-    let state = state.inner().lock().unwrap();
-    let program = build_vba_program(&state)?;
 
-    let mut macros = program
-        .procedures
-        .values()
-        .map(|proc| MacroInfo {
-            id: proc.name.clone(),
-            name: proc.name.clone(),
-            language: "vba".to_string(),
-            module: None,
-        })
-        .collect::<Vec<_>>();
-    macros.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(macros)
-}
-
-#[cfg(feature = "desktop")]
-struct AppStateSpreadsheet<'a> {
-    state: &'a mut AppState,
-    active_sheet: usize,
-    active_cell: (u32, u32),
-    output: Vec<String>,
-    updates: Vec<CellUpdateData>,
-}
-
-#[cfg(feature = "desktop")]
-impl<'a> AppStateSpreadsheet<'a> {
-    fn new(state: &'a mut AppState) -> Result<Self, formula_vba_runtime::VbaError> {
-        let workbook = state
-            .get_workbook()
-            .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        let active_sheet = if workbook.sheets.is_empty() { 0 } else { 0 };
-        Ok(Self {
-            state,
-            active_sheet,
-            active_cell: (1, 1),
-            output: Vec::new(),
-            updates: Vec::new(),
-        })
-    }
-
-    fn sheet_id(&self, sheet: usize) -> Result<String, formula_vba_runtime::VbaError> {
-        let workbook = self
-            .state
-            .get_workbook()
-            .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        workbook
-            .sheets
-            .get(sheet)
-            .map(|s| s.id.clone())
-            .ok_or_else(|| {
-                formula_vba_runtime::VbaError::Runtime(format!("Unknown sheet index: {sheet}"))
-            })
-    }
-
-    fn cell_scalar_to_vba(value: crate::state::CellScalar) -> formula_vba_runtime::VbaValue {
-        match value {
-            crate::state::CellScalar::Empty => formula_vba_runtime::VbaValue::Empty,
-            crate::state::CellScalar::Number(n) => formula_vba_runtime::VbaValue::Double(n),
-            crate::state::CellScalar::Text(s) => formula_vba_runtime::VbaValue::String(s),
-            crate::state::CellScalar::Bool(b) => formula_vba_runtime::VbaValue::Boolean(b),
-            crate::state::CellScalar::Error(e) => formula_vba_runtime::VbaValue::String(e),
-        }
-    }
-
-    fn vba_value_to_json(
-        value: &formula_vba_runtime::VbaValue,
-    ) -> Result<Option<JsonValue>, formula_vba_runtime::VbaError> {
-        Ok(match value {
-            formula_vba_runtime::VbaValue::Empty | formula_vba_runtime::VbaValue::Null => None,
-            formula_vba_runtime::VbaValue::Boolean(b) => Some(JsonValue::from(*b)),
-            formula_vba_runtime::VbaValue::Double(n) => Some(JsonValue::from(*n)),
-            formula_vba_runtime::VbaValue::Date(n) => Some(JsonValue::from(*n)),
-            formula_vba_runtime::VbaValue::String(s) => Some(JsonValue::from(s.clone())),
-            other => {
-                return Err(formula_vba_runtime::VbaError::Runtime(format!(
-                    "Unsupported VBA value for cell assignment: {other:?}"
-                )))
-            }
-        })
-    }
-
-    fn take_output(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.output)
-    }
-
-    fn take_updates(&mut self) -> Vec<CellUpdateData> {
-        std::mem::take(&mut self.updates)
-    }
-}
-
-#[cfg(feature = "desktop")]
-impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
-    fn sheet_count(&self) -> usize {
-        self.state
-            .get_workbook()
-            .ok()
-            .map(|w| w.sheets.len())
-            .unwrap_or(0)
-    }
-
-    fn sheet_name(&self, sheet: usize) -> Option<&str> {
-        self.state
-            .get_workbook()
-            .ok()
-            .and_then(|w| w.sheets.get(sheet))
-            .map(|s| s.name.as_str())
-    }
-
-    fn sheet_index(&self, name: &str) -> Option<usize> {
-        self.state.get_workbook().ok().and_then(|w| {
-            w.sheets
-                .iter()
-                .position(|s| s.name.eq_ignore_ascii_case(name))
-        })
-    }
-
-    fn active_sheet(&self) -> usize {
-        self.active_sheet
-    }
-
-    fn set_active_sheet(&mut self, sheet: usize) -> Result<(), formula_vba_runtime::VbaError> {
-        if sheet >= self.sheet_count() {
-            return Err(formula_vba_runtime::VbaError::Runtime(format!(
-                "Sheet index out of range: {sheet}"
-            )));
-        }
-        self.active_sheet = sheet;
-        Ok(())
-    }
-
-    fn active_cell(&self) -> (u32, u32) {
-        self.active_cell
-    }
-
-    fn set_active_cell(&mut self, row: u32, col: u32) -> Result<(), formula_vba_runtime::VbaError> {
-        if row == 0 || col == 0 {
-            return Err(formula_vba_runtime::VbaError::Runtime(
-                "ActiveCell is 1-based".to_string(),
-            ));
-        }
-        self.active_cell = (row, col);
-        Ok(())
-    }
-
-    fn get_cell_value(
-        &self,
-        sheet: usize,
-        row: u32,
-        col: u32,
-    ) -> Result<formula_vba_runtime::VbaValue, formula_vba_runtime::VbaError> {
-        let sheet_id = self.sheet_id(sheet)?;
-        if row == 0 || col == 0 {
-            return Err(formula_vba_runtime::VbaError::Runtime(
-                "Row/col are 1-based".to_string(),
-            ));
-        }
-        let cell = self
-            .state
-            .get_cell(&sheet_id, (row - 1) as usize, (col - 1) as usize)
-            .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        Ok(Self::cell_scalar_to_vba(cell.value))
-    }
-
-    fn set_cell_value(
-        &mut self,
-        sheet: usize,
-        row: u32,
-        col: u32,
-        value: formula_vba_runtime::VbaValue,
-    ) -> Result<(), formula_vba_runtime::VbaError> {
-        let sheet_id = self.sheet_id(sheet)?;
-        if row == 0 || col == 0 {
-            return Err(formula_vba_runtime::VbaError::Runtime(
-                "Row/col are 1-based".to_string(),
-            ));
-        }
-
-        let json = Self::vba_value_to_json(&value)?;
-        let updates = self
-            .state
-            .set_cell(
-                &sheet_id,
-                (row - 1) as usize,
-                (col - 1) as usize,
-                json,
-                None,
-            )
-            .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        self.updates.extend(updates);
-        Ok(())
-    }
-
-    fn get_cell_formula(
-        &self,
-        sheet: usize,
-        row: u32,
-        col: u32,
-    ) -> Result<Option<String>, formula_vba_runtime::VbaError> {
-        let sheet_id = self.sheet_id(sheet)?;
-        if row == 0 || col == 0 {
-            return Err(formula_vba_runtime::VbaError::Runtime(
-                "Row/col are 1-based".to_string(),
-            ));
-        }
-        let cell = self
-            .state
-            .get_cell(&sheet_id, (row - 1) as usize, (col - 1) as usize)
-            .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        Ok(cell.formula)
-    }
-
-    fn set_cell_formula(
-        &mut self,
-        sheet: usize,
-        row: u32,
-        col: u32,
-        formula: String,
-    ) -> Result<(), formula_vba_runtime::VbaError> {
-        let sheet_id = self.sheet_id(sheet)?;
-        if row == 0 || col == 0 {
-            return Err(formula_vba_runtime::VbaError::Runtime(
-                "Row/col are 1-based".to_string(),
-            ));
-        }
-
-        let updates = self
-            .state
-            .set_cell(
-                &sheet_id,
-                (row - 1) as usize,
-                (col - 1) as usize,
-                None,
-                Some(formula),
-            )
-            .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        self.updates.extend(updates);
-        Ok(())
-    }
-
-    fn clear_cell_contents(
-        &mut self,
-        sheet: usize,
-        row: u32,
-        col: u32,
-    ) -> Result<(), formula_vba_runtime::VbaError> {
-        let sheet_id = self.sheet_id(sheet)?;
-        if row == 0 || col == 0 {
-            return Err(formula_vba_runtime::VbaError::Runtime(
-                "Row/col are 1-based".to_string(),
-            ));
-        }
-
-        let updates = self
-            .state
-            .set_cell(&sheet_id, (row - 1) as usize, (col - 1) as usize, None, None)
-            .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        self.updates.extend(updates);
-        Ok(())
-    }
-
-    fn log(&mut self, message: String) {
-        self.output.push(message);
-    }
+    let mut state = state.inner().lock().unwrap();
+    state.list_macros().map_err(|e| e.to_string())
 }
 
 #[cfg(feature = "desktop")]
@@ -1185,94 +932,202 @@ pub async fn run_macro(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
-    use std::time::Duration;
-
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
-        let trust_store = trust_shared.lock().unwrap();
-
-        let workbook_id = workbook_id_str.as_deref();
-        let workbook = state.get_workbook_mut().map_err(app_error)?;
-        let status = build_macro_security_status(workbook, workbook_id, &trust_store)?;
-        drop(trust_store);
-
-        if status.has_macros {
-            let is_signed = matches!(
-                status.signature.as_ref().map(|s| s.status),
-                Some(MacroSignatureStatus::SignedUnverified)
-            );
-            let allowed = match status.trust {
-                MacroTrustDecision::TrustedAlways | MacroTrustDecision::TrustedOnce => true,
-                MacroTrustDecision::TrustedSignedOnly => is_signed,
-                MacroTrustDecision::Blocked => false,
-            };
-
-            if !allowed {
-                let reason = match status.trust {
-                    MacroTrustDecision::TrustedSignedOnly => MacroBlockedReason::SignatureRequired,
-                    _ => MacroBlockedReason::NotTrusted,
-                };
-                return Ok(MacroRunResult {
-                    ok: false,
-                    output: Vec::new(),
-                    updates: Vec::new(),
-                    error: Some(MacroError {
-                        message: "Macros are blocked by Trust Center policy.".to_string(),
-                        code: Some("macro_blocked".to_string()),
-                        blocked: Some(MacroBlockedError { reason, status }),
-                    }),
-                });
-            }
+        let blocked = {
+            let trust_store = trust_shared.lock().unwrap();
+            let workbook_id = workbook_id_str.as_deref();
+            let workbook = state.get_workbook_mut().map_err(app_error)?;
+            enforce_macro_trust(workbook, workbook_id, &trust_store)?
+        };
+        if let Some(blocked) = blocked {
+            return Ok(macro_blocked_result(blocked));
         }
 
-        let program = build_vba_program(&state)?;
+        let options = crate::macros::MacroExecutionOptions {
+            permissions: permissions.unwrap_or_default(),
+            timeout_ms,
+        };
+        let outcome = state
+            .run_macro(&macro_id, options)
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(macro_result_from_outcome(outcome))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-        let mut policy = formula_vba_runtime::VbaSandboxPolicy::default();
-        if let Some(timeout_ms) = timeout_ms {
-            policy.max_execution_time = Duration::from_millis(timeout_ms);
-        }
-        if let Some(perms) = permissions {
-            for perm in perms {
-                match perm {
-                    MacroPermission::FilesystemRead => policy.allow_filesystem_read = true,
-                    MacroPermission::FilesystemWrite => policy.allow_filesystem_write = true,
-                    MacroPermission::Network => policy.allow_network = true,
-                }
-            }
-        }
-
-        let runtime = formula_vba_runtime::VbaRuntime::new(program).with_sandbox_policy(policy);
-        let mut sheet = AppStateSpreadsheet::new(&mut state).map_err(|err| err.to_string())?;
-
-        let exec = runtime.execute(&mut sheet, &macro_id, &[]);
-        let output = sheet.take_output();
-        let updates = sheet
-            .take_updates()
+#[cfg(feature = "desktop")]
+fn macro_result_from_outcome(outcome: crate::macros::MacroExecutionOutcome) -> MacroRunResult {
+    MacroRunResult {
+        ok: outcome.ok,
+        output: outcome.output,
+        updates: outcome
+            .updates
             .into_iter()
             .map(cell_update_from_state)
-            .collect::<Vec<_>>();
+            .collect(),
+        error: outcome.error.map(|message| MacroError {
+            message,
+            code: None,
+            blocked: None,
+        }),
+        permission_request: outcome.permission_request,
+    }
+}
 
-        Ok::<_, String>(match exec {
-            Ok(_) => MacroRunResult {
-                ok: true,
-                output,
-                updates,
-                error: None,
-            },
-            Err(err) => MacroRunResult {
-                ok: false,
-                output,
-                updates,
-                error: Some(MacroError {
-                    message: err.to_string(),
-                    code: None,
-                    blocked: None,
-                }),
-            },
-        })
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn fire_workbook_open(
+    workbook_id: Option<String>,
+    permissions: Option<Vec<MacroPermission>>,
+    timeout_ms: Option<u64>,
+    state: State<'_, SharedAppState>,
+    trust: State<'_, SharedMacroTrustStore>,
+) -> Result<MacroRunResult, String> {
+    let workbook_id_str = workbook_id.clone();
+    let shared = state.inner().clone();
+    let trust_shared = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let blocked = {
+            let trust_store = trust_shared.lock().unwrap();
+            let workbook_id = workbook_id_str.as_deref();
+            let workbook = state.get_workbook_mut().map_err(app_error)?;
+            enforce_macro_trust(workbook, workbook_id, &trust_store)?
+        };
+        if let Some(blocked) = blocked {
+            return Ok(macro_blocked_result(blocked));
+        }
+        let options = crate::macros::MacroExecutionOptions {
+            permissions: permissions.unwrap_or_default(),
+            timeout_ms,
+        };
+        let outcome = state
+            .fire_workbook_open(options)
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(macro_result_from_outcome(outcome))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn fire_workbook_before_close(
+    workbook_id: Option<String>,
+    permissions: Option<Vec<MacroPermission>>,
+    timeout_ms: Option<u64>,
+    state: State<'_, SharedAppState>,
+    trust: State<'_, SharedMacroTrustStore>,
+) -> Result<MacroRunResult, String> {
+    let workbook_id_str = workbook_id.clone();
+    let shared = state.inner().clone();
+    let trust_shared = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let blocked = {
+            let trust_store = trust_shared.lock().unwrap();
+            let workbook_id = workbook_id_str.as_deref();
+            let workbook = state.get_workbook_mut().map_err(app_error)?;
+            enforce_macro_trust(workbook, workbook_id, &trust_store)?
+        };
+        if let Some(blocked) = blocked {
+            return Ok(macro_blocked_result(blocked));
+        }
+        let options = crate::macros::MacroExecutionOptions {
+            permissions: permissions.unwrap_or_default(),
+            timeout_ms,
+        };
+        let outcome = state
+            .fire_workbook_before_close(options)
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(macro_result_from_outcome(outcome))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn fire_worksheet_change(
+    workbook_id: Option<String>,
+    sheet_id: String,
+    start_row: usize,
+    start_col: usize,
+    end_row: usize,
+    end_col: usize,
+    permissions: Option<Vec<MacroPermission>>,
+    timeout_ms: Option<u64>,
+    state: State<'_, SharedAppState>,
+    trust: State<'_, SharedMacroTrustStore>,
+) -> Result<MacroRunResult, String> {
+    let workbook_id_str = workbook_id.clone();
+    let shared = state.inner().clone();
+    let trust_shared = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let blocked = {
+            let trust_store = trust_shared.lock().unwrap();
+            let workbook_id = workbook_id_str.as_deref();
+            let workbook = state.get_workbook_mut().map_err(app_error)?;
+            enforce_macro_trust(workbook, workbook_id, &trust_store)?
+        };
+        if let Some(blocked) = blocked {
+            return Ok(macro_blocked_result(blocked));
+        }
+        let options = crate::macros::MacroExecutionOptions {
+            permissions: permissions.unwrap_or_default(),
+            timeout_ms,
+        };
+        let outcome = state
+            .fire_worksheet_change(&sheet_id, start_row, start_col, end_row, end_col, options)
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(macro_result_from_outcome(outcome))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn fire_selection_change(
+    workbook_id: Option<String>,
+    sheet_id: String,
+    start_row: usize,
+    start_col: usize,
+    end_row: usize,
+    end_col: usize,
+    permissions: Option<Vec<MacroPermission>>,
+    timeout_ms: Option<u64>,
+    state: State<'_, SharedAppState>,
+    trust: State<'_, SharedMacroTrustStore>,
+) -> Result<MacroRunResult, String> {
+    let workbook_id_str = workbook_id.clone();
+    let shared = state.inner().clone();
+    let trust_shared = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let blocked = {
+            let trust_store = trust_shared.lock().unwrap();
+            let workbook_id = workbook_id_str.as_deref();
+            let workbook = state.get_workbook_mut().map_err(app_error)?;
+            enforce_macro_trust(workbook, workbook_id, &trust_store)?
+        };
+        if let Some(blocked) = blocked {
+            return Ok(macro_blocked_result(blocked));
+        }
+        let options = crate::macros::MacroExecutionOptions {
+            permissions: permissions.unwrap_or_default(),
+            timeout_ms,
+        };
+        let outcome = state
+            .fire_selection_change(&sheet_id, start_row, start_col, end_row, end_col, options)
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(macro_result_from_outcome(outcome))
     })
     .await
     .map_err(|e| e.to_string())?

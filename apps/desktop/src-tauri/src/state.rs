@@ -1,4 +1,8 @@
 use crate::file_io::Workbook;
+use crate::macros::{
+    execute_invocation, MacroExecutionOptions, MacroExecutionOutcome, MacroHost, MacroHostError,
+    MacroInfo, MacroInvocation,
+};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
@@ -177,6 +181,7 @@ pub struct AppState {
     undo_stack: Vec<UndoEntry>,
     redo_stack: Vec<UndoEntry>,
     scenario_manager: ScenarioManager,
+    macro_host: MacroHost,
 }
 
 impl Default for AppState {
@@ -194,6 +199,7 @@ impl AppState {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             scenario_manager: ScenarioManager::new(),
+            macro_host: MacroHost::default(),
         }
     }
 
@@ -225,6 +231,7 @@ impl AppState {
         self.workbook = Some(workbook);
         self.engine = FormulaEngine::new();
         self.scenario_manager = ScenarioManager::new();
+        self.macro_host.invalidate();
 
         // Best effort: rebuild and calculate. Unsupported formulas become #NAME? via the engine.
         let _ = self.rebuild_engine_from_workbook();
@@ -973,6 +980,168 @@ impl AppState {
         self.undo_stack.push(entry);
         self.dirty = true;
         Ok(updates)
+    }
+
+    pub fn vba_project(&mut self) -> Result<Option<formula_vba::VBAProject>, MacroHostError> {
+        let workbook = self
+            .workbook
+            .as_ref()
+            .ok_or(MacroHostError::NoWorkbookLoaded)?;
+        self.macro_host.project(workbook)
+    }
+
+    pub fn list_macros(&mut self) -> Result<Vec<MacroInfo>, MacroHostError> {
+        let workbook = self
+            .workbook
+            .as_ref()
+            .ok_or(MacroHostError::NoWorkbookLoaded)?;
+        self.macro_host.list_macros(workbook)
+    }
+
+    pub fn run_macro(
+        &mut self,
+        macro_id: &str,
+        options: MacroExecutionOptions,
+    ) -> Result<MacroExecutionOutcome, MacroHostError> {
+        let (program, ctx, origin_path) = {
+            let workbook = self
+                .workbook
+                .as_ref()
+                .ok_or(MacroHostError::NoWorkbookLoaded)?;
+            let program = self
+                .macro_host
+                .program(workbook)?
+                .ok_or_else(|| MacroHostError::Runtime("no VBA macros in workbook".to_string()))?;
+            let ctx = self.macro_host.runtime_context();
+            let origin_path = workbook.origin_path.clone();
+            (program, ctx, origin_path)
+        };
+
+        let (result, new_ctx) = execute_invocation(
+            self,
+            program,
+            ctx,
+            origin_path,
+            MacroInvocation::Procedure {
+                macro_id: macro_id.to_string(),
+            },
+            options,
+        )?;
+        self.macro_host.set_runtime_context(new_ctx);
+        Ok(result)
+    }
+
+    pub fn fire_workbook_open(
+        &mut self,
+        options: MacroExecutionOptions,
+    ) -> Result<MacroExecutionOutcome, MacroHostError> {
+        self.fire_macro_event(MacroInvocation::WorkbookOpen, options)
+    }
+
+    pub fn fire_workbook_before_close(
+        &mut self,
+        options: MacroExecutionOptions,
+    ) -> Result<MacroExecutionOutcome, MacroHostError> {
+        self.fire_macro_event(MacroInvocation::WorkbookBeforeClose, options)
+    }
+
+    pub fn fire_worksheet_change(
+        &mut self,
+        sheet_id: &str,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+        options: MacroExecutionOptions,
+    ) -> Result<MacroExecutionOutcome, MacroHostError> {
+        let target = self.range_for_event(sheet_id, start_row, start_col, end_row, end_col)?;
+        self.fire_macro_event(MacroInvocation::WorksheetChange { target }, options)
+    }
+
+    pub fn fire_selection_change(
+        &mut self,
+        sheet_id: &str,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+        options: MacroExecutionOptions,
+    ) -> Result<MacroExecutionOutcome, MacroHostError> {
+        let target = self.range_for_event(sheet_id, start_row, start_col, end_row, end_col)?;
+        self.fire_macro_event(MacroInvocation::SelectionChange { target }, options)
+    }
+
+    fn fire_macro_event(
+        &mut self,
+        invocation: MacroInvocation,
+        options: MacroExecutionOptions,
+    ) -> Result<MacroExecutionOutcome, MacroHostError> {
+        let (program, ctx, origin_path) = {
+            let workbook = self
+                .workbook
+                .as_ref()
+                .ok_or(MacroHostError::NoWorkbookLoaded)?;
+            let program = self.macro_host.program(workbook)?;
+            let ctx = self.macro_host.runtime_context();
+            let origin_path = workbook.origin_path.clone();
+            (program, ctx, origin_path)
+        };
+
+        let Some(program) = program else {
+            return Ok(MacroExecutionOutcome {
+                ok: true,
+                output: Vec::new(),
+                updates: Vec::new(),
+                error: None,
+                permission_request: None,
+            });
+        };
+
+        let (result, new_ctx) =
+            execute_invocation(self, program, ctx, origin_path, invocation, options)?;
+        self.macro_host.set_runtime_context(new_ctx);
+        Ok(result)
+    }
+
+    fn range_for_event(
+        &self,
+        sheet_id: &str,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+    ) -> Result<formula_vba_runtime::VbaRangeRef, MacroHostError> {
+        if start_row > end_row || start_col > end_col {
+            return Err(MacroHostError::Runtime(format!(
+                "invalid range: start ({start_row},{start_col}) end ({end_row},{end_col})"
+            )));
+        }
+        let workbook = self
+            .workbook
+            .as_ref()
+            .ok_or(MacroHostError::NoWorkbookLoaded)?;
+        let sheet_index = workbook
+            .sheets
+            .iter()
+            .position(|s| s.id == sheet_id)
+            .ok_or_else(|| MacroHostError::Runtime(format!("unknown sheet id: {sheet_id}")))?;
+
+        let start_row = u32::try_from(start_row.saturating_add(1))
+            .map_err(|_| MacroHostError::Runtime("row index out of range".to_string()))?;
+        let start_col = u32::try_from(start_col.saturating_add(1))
+            .map_err(|_| MacroHostError::Runtime("col index out of range".to_string()))?;
+        let end_row = u32::try_from(end_row.saturating_add(1))
+            .map_err(|_| MacroHostError::Runtime("row index out of range".to_string()))?;
+        let end_col = u32::try_from(end_col.saturating_add(1))
+            .map_err(|_| MacroHostError::Runtime("col index out of range".to_string()))?;
+
+        Ok(formula_vba_runtime::VbaRangeRef {
+            sheet: sheet_index,
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        })
     }
 
     fn snapshot_cell(

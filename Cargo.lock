@@ -1442,6 +1442,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "calamine 0.26.1",
+ "cfb 0.10.0",
  "directories",
  "formula-columnar",
  "formula-engine",

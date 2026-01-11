@@ -27,6 +27,7 @@ pub trait Spreadsheet {
     fn set_active_cell(&mut self, row: u32, col: u32) -> Result<(), VbaError>;
 
     fn get_cell_value(&self, sheet: usize, row: u32, col: u32) -> Result<VbaValue, VbaError>;
+    /// Set the literal value for a cell and clear any existing formula.
     fn set_cell_value(
         &mut self,
         sheet: usize,
@@ -42,6 +43,7 @@ pub trait Spreadsheet {
         col: u32,
     ) -> Result<Option<String>, VbaError>;
 
+    /// Set a formula for a cell and clear any existing literal value.
     fn set_cell_formula(
         &mut self,
         sheet: usize,
@@ -313,6 +315,7 @@ impl Spreadsheet for InMemoryWorkbook {
             .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
         let cell = sh.cells.entry((row, col)).or_default();
         cell.value = value;
+        cell.formula = None;
         Ok(())
     }
 
@@ -341,7 +344,12 @@ impl Spreadsheet for InMemoryWorkbook {
             .get_mut(sheet)
             .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
         let cell = sh.cells.entry((row, col)).or_default();
-        cell.formula = Some(formula);
+        cell.value = VbaValue::Empty;
+        cell.formula = if formula.trim().is_empty() {
+            None
+        } else {
+            Some(formula)
+        };
         Ok(())
     }
 

@@ -160,6 +160,31 @@ fn collection_object_minimal_support() {
 }
 
 #[test]
+fn range_value_returns_2d_array_and_supports_multi_index() {
+    let code = r#"
+Sub RangeValue2D()
+    Range("A1").Value = 1
+    Range("B1").Value = 2
+    Range("A2").Value = 3
+    Range("B2").Value = 4
+
+    Dim v
+    v = Range("A1:B2").Value
+    Cells(1, 3).Value = v(1, 1)
+    Cells(1, 4).Value = v(2, 2)
+End Sub
+"#;
+    let program = parse_program(code).expect("parse program");
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "RangeValue2D", &[]).unwrap();
+
+    assert_eq!(wb.get_value_a1("Sheet1", "C1").unwrap(), VbaValue::Double(1.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "D1").unwrap(), VbaValue::Double(4.0));
+}
+
+#[test]
 fn sandbox_enforces_step_limit() {
     let code = include_str!("fixtures/simple.bas");
     let program = parse_program(code).expect("fixture VBA should parse");
