@@ -633,7 +633,33 @@ export class CanvasGridRenderer {
 
   getCellRect(row: number, col: number): Rect | null {
     const viewport = this.scroll.getViewportState();
-    return this.cellRectInViewport(row, col, viewport, { clampToViewport: false });
+    const merged = this.getMergedRangeForCell(row, col);
+    if (!merged) return this.cellRectInViewport(row, col, viewport, { clampToViewport: false });
+
+    // Merged regions that cross frozen boundaries cannot be represented as a single viewport-space
+    // rect because frozen and scrollable quadrants use different coordinate spaces. Fall back to the
+    // anchor cell rect in those cases.
+    const crossesFrozenCols = merged.startCol < viewport.frozenCols && merged.endCol > viewport.frozenCols;
+    const crossesFrozenRows = merged.startRow < viewport.frozenRows && merged.endRow > viewport.frozenRows;
+    if (crossesFrozenCols || crossesFrozenRows) {
+      return this.cellRectInViewport(merged.startRow, merged.startCol, viewport, { clampToViewport: false });
+    }
+
+    const rowAxis = this.scroll.rows;
+    const colAxis = this.scroll.cols;
+
+    const colX = colAxis.positionOf(merged.startCol);
+    const rowY = rowAxis.positionOf(merged.startRow);
+    const width = colAxis.positionOf(merged.endCol) - colX;
+    const height = rowAxis.positionOf(merged.endRow) - rowY;
+
+    const scrollCols = merged.startCol >= viewport.frozenCols;
+    const scrollRows = merged.startRow >= viewport.frozenRows;
+
+    const x = scrollCols ? colX - viewport.scrollX : colX;
+    const y = scrollRows ? rowY - viewport.scrollY : rowY;
+
+    return { x, y, width, height };
   }
 
   getViewportState(): GridViewportState {

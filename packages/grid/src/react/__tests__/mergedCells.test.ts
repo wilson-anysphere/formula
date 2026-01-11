@@ -190,4 +190,25 @@ describe("merged cells + overflow", () => {
     // Point (15,5) is inside row 0, col 1, which is part of the merged range.
     expect(renderer.pickCellAt(15, 5)).toEqual({ row: 0, col: 0 });
   });
+
+  it("getCellRect returns merged bounds for merged cells", () => {
+    const merged: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 2 };
+    const provider = createMergedProvider({ rowCount: 3, colCount: 3, merged });
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    ctxByCanvas.set(gridCanvas, createMock2dContext({ canvas: gridCanvas }));
+    ctxByCanvas.set(contentCanvas, createMock2dContext({ canvas: contentCanvas }));
+    ctxByCanvas.set(selectionCanvas, createMock2dContext({ canvas: selectionCanvas }));
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 3, colCount: 3, defaultRowHeight: 10, defaultColWidth: 10 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 100, 1);
+
+    expect(renderer.getCellRect(0, 0)).toEqual({ x: 0, y: 0, width: 20, height: 20 });
+    // Interior merged cells should report the same merged bounds.
+    expect(renderer.getCellRect(1, 1)).toEqual({ x: 0, y: 0, width: 20, height: 20 });
+  });
 });
