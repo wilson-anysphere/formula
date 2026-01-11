@@ -570,4 +570,12 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
 //
 // These are typically stored by Excel as `_xlfn.` functions and encoded in BIFF as
 // user-defined function calls (`iftab = 255`) with an accompanying name token.
-const FUTURE_UDF_FUNCTIONS: [&str; 5] = ["CONCAT", "IFNA", "SEQUENCE", "XLOOKUP", "XMATCH"];
+const FUTURE_UDF_FUNCTIONS: [&str; 7] = [
+    "CONCAT",
+    "IFNA",
+    "NUMBERVALUE",
+    "SEQUENCE",
+    "TEXTJOIN",
+    "XLOOKUP",
+    "XMATCH",
+];
