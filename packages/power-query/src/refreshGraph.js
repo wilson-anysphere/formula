@@ -406,6 +406,7 @@ export class RefreshOrchestrator {
 
     let done = false;
     let aborted = false;
+    let abortStarted = false;
     /** @type {unknown | null} */
     let terminalError = null;
 
@@ -419,6 +420,52 @@ export class RefreshOrchestrator {
     });
 
     let remainingJobs = closure.size;
+    /** @type {Set<string>} */
+    const terminalIds = new Set();
+
+    /**
+     * @param {string} queryId
+     */
+    const markTerminal = (queryId) => {
+      if (terminalIds.has(queryId)) return;
+      terminalIds.add(queryId);
+      remainingJobs -= 1;
+    };
+
+    const cancelUnscheduled = () => {
+      const now = new Date();
+      for (const id of closure) {
+        if (scheduled.has(id)) continue;
+        if (terminalIds.has(id)) continue;
+
+        const job = { id: `${sessionId}:cancel_${id}`, queryId: id, reason, queuedAt: now, completedAt: now };
+        const phase = targetSet.has(id) ? "target" : "dependency";
+        this.emitter.emit(
+          "event",
+          /** @type {RefreshGraphEvent} */ ({
+            type: "cancelled",
+            sessionId,
+            phase,
+            job,
+          }),
+        );
+        markTerminal(id);
+      }
+    };
+
+    /**
+     * Ensure the session is aborted and all unscheduled queries are treated as cancelled.
+     *
+     * @param {unknown} error
+     */
+    const ensureAbort = (error) => {
+      if (!terminalError) terminalError = error;
+      aborted = true;
+      if (abortStarted) return;
+      abortStarted = true;
+      manager.dispose();
+      cancelUnscheduled();
+    };
 
     const finalize = () => {
       if (done) return;
@@ -428,8 +475,6 @@ export class RefreshOrchestrator {
       manager.dispose();
       if (terminalError) {
         reject(terminalError);
-      } else if (aborted) {
-        reject(abortError("Aborted"));
       } else {
         resolve(targetResults);
       }
@@ -459,7 +504,7 @@ export class RefreshOrchestrator {
         queryResults[evt.job.queryId] = evt.result;
         if (targetSet.has(evt.job.queryId)) targetResults[evt.job.queryId] = evt.result;
 
-        remainingJobs -= 1;
+        markTerminal(evt.job.queryId);
         for (const dependent of dependents.get(evt.job.queryId) ?? []) {
           remainingDeps.set(dependent, (remainingDeps.get(dependent) ?? 0) - 1);
           if ((remainingDeps.get(dependent) ?? 0) === 0) schedule(dependent);
@@ -470,21 +515,15 @@ export class RefreshOrchestrator {
       }
 
       if (evt.type === "error") {
-        if (!terminalError) terminalError = evt.error;
-        aborted = true;
-        remainingJobs -= 1;
-        manager.dispose();
+        markTerminal(evt.job.queryId);
+        ensureAbort(evt.error);
         finalize();
         return;
       }
 
       if (evt.type === "cancelled") {
-        if (!terminalError) {
-          aborted = true;
-          terminalError = abortError("Aborted");
-          manager.dispose();
-        }
-        remainingJobs -= 1;
+        markTerminal(evt.job.queryId);
+        ensureAbort(abortError("Aborted"));
         finalize();
       }
     });
@@ -507,10 +546,8 @@ export class RefreshOrchestrator {
       promise,
       cancel: () => {
         if (done) return;
-        aborted = true;
-        terminalError = abortError("Aborted");
-        // Disposing the underlying manager will abort in-flight queries and remove queued ones.
-        manager.dispose();
+        ensureAbort(abortError("Aborted"));
+        finalize();
       },
     };
   }
