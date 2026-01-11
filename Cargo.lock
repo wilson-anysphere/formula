@@ -1718,7 +1718,6 @@ dependencies = [
  "hex",
  "keyring",
  "rand_core 0.6.4",
- "rust_xlsxwriter 0.79.4",
  "serde",
  "serde_json",
  "sha2",
@@ -1926,7 +1925,7 @@ dependencies = [
  "pretty_assertions",
  "quick-xml 0.37.5",
  "roxmltree",
- "rust_xlsxwriter 0.64.2",
+ "rust_xlsxwriter",
  "serde",
  "serde_json",
  "tempfile",
@@ -4807,15 +4806,6 @@ dependencies = [
  "lazy_static",
  "regex",
  "zip 0.6.6",
-]
-
-[[package]]
-name = "rust_xlsxwriter"
-version = "0.79.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c743cb9f2a4524676020e26ee5f298445a82d882b09956811b1e78ca7e42b440"
-dependencies = [
- "zip 2.4.2",
 ]
 
 [[package]]

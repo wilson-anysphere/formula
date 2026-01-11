@@ -18,7 +18,6 @@ use formula_xlsx::{
     patch_xlsx_streaming_workbook_cell_patches, CellPatch as XlsxCellPatch, PreservedPivotParts,
     WorkbookCellPatches, XlsxPackage,
 };
-use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Cursor};
 use std::path::Path;
@@ -1009,56 +1008,12 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         return Ok(bytes);
     }
 
-    let mut out = XlsxWorkbook::new();
-
-    for sheet in &workbook.sheets {
-        let worksheet = out.add_worksheet();
-        worksheet
-            .set_name(&sheet.name)
-            .map_err(|e| anyhow::anyhow!(format!("sheet name error: {e:?}")))?;
-
-        for ((row, col), cell) in sheet.cells_iter() {
-            if let Some(formula) = &cell.formula {
-                worksheet
-                    .write_formula(row as u32, col as u16, formula.as_str())
-                    .map_err(|e| anyhow::anyhow!(xlsx_err(e)))?;
-                continue;
-            }
-
-            // Persist the underlying inputs for literal cells (not the formatted display value).
-            // This matters for things like XLSB date cells: we keep the numeric serial in
-            // `input_value`, but may display it as a formatted string via `computed_value`.
-            let value = cell.input_value.as_ref().unwrap_or(&cell.computed_value);
-            match value {
-                CellScalar::Empty => {}
-                CellScalar::Number(n) => {
-                    worksheet
-                        .write_number(row as u32, col as u16, *n)
-                        .map_err(|e| anyhow::anyhow!(xlsx_err(e)))?;
-                }
-                CellScalar::Text(s) => {
-                    worksheet
-                        .write_string(row as u32, col as u16, s)
-                        .map_err(|e| anyhow::anyhow!(xlsx_err(e)))?;
-                }
-                CellScalar::Bool(b) => {
-                    worksheet
-                        .write_boolean(row as u32, col as u16, *b)
-                        .map_err(|e| anyhow::anyhow!(xlsx_err(e)))?;
-                }
-                CellScalar::Error(e) => {
-                    worksheet
-                        .write_string(row as u32, col as u16, e)
-                        .map_err(|e| anyhow::anyhow!(xlsx_err(e)))?;
-                }
-            }
-        }
-    }
-
-    let mut bytes = out
-        .save_to_buffer()
-        .map_err(|e| anyhow::anyhow!(xlsx_err(e)))
+    let model = app_workbook_to_formula_model(workbook).context("convert workbook to model")?;
+    let mut cursor = Cursor::new(Vec::new());
+    formula_xlsx::write_workbook_to_writer(&model, &mut cursor)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
         .with_context(|| "serialize workbook to buffer")?;
+    let mut bytes = cursor.into_inner();
     let wants_vba =
         workbook.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
@@ -1468,8 +1423,168 @@ fn scalar_to_model_value(value: &CellScalar) -> formula_model::CellValue {
     }
 }
 
-fn xlsx_err(err: XlsxError) -> String {
-    format!("{err:?}")
+fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_model::Workbook> {
+    let mut out = formula_model::Workbook::new();
+    out.date_system = workbook.date_system;
+
+    let mut sheet_id_by_app_id: HashMap<String, WorksheetId> = HashMap::new();
+    let mut sheet_id_by_name: HashMap<String, WorksheetId> = HashMap::new();
+    for sheet in &workbook.sheets {
+        let sheet_id = out
+            .add_sheet(sheet.name.clone())
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
+            .with_context(|| format!("add sheet {}", sheet.name))?;
+        sheet_id_by_app_id.insert(sheet.id.clone(), sheet_id);
+        sheet_id_by_name.insert(sheet.name.clone(), sheet_id);
+    }
+
+    for sheet in &workbook.sheets {
+        let model_sheet_id = sheet_id_by_app_id
+            .get(&sheet.id)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("missing sheet id for {}", sheet.id))?;
+        let model_sheet = out
+            .sheet_mut(model_sheet_id)
+            .ok_or_else(|| anyhow::anyhow!("sheet missing from model: {}", sheet.id))?;
+
+        if let Some(columnar) = sheet.columnar.as_deref() {
+            for row in 0..columnar.row_count() {
+                let row_u32 = u32::try_from(row)
+                    .map_err(|_| anyhow::anyhow!("columnar row out of bounds: {row}"))?;
+                for col in 0..columnar.column_count() {
+                    let col_u32 = u32::try_from(col)
+                        .map_err(|_| anyhow::anyhow!("columnar col out of bounds: {col}"))?;
+                    let Some(cell_ref) = formula_model::CellRef::try_new(row_u32, col_u32) else {
+                        continue;
+                    };
+
+                    let col_type = columnar
+                        .schema()
+                        .get(col)
+                        .map(|c| c.column_type)
+                        .unwrap_or(ColumnarType::String);
+                    let scalar = columnar_to_scalar(columnar.get_cell(row, col), col_type);
+                    if matches!(scalar, CellScalar::Empty) {
+                        continue;
+                    }
+                    model_sheet.set_value(cell_ref, scalar_to_model_value(&scalar));
+                }
+            }
+        }
+
+        for ((row, col), cell) in sheet.cells_iter() {
+            let row_u32 = u32::try_from(row).map_err(|_| anyhow::anyhow!("row out of bounds: {row}"))?;
+            let col_u32 = u32::try_from(col).map_err(|_| anyhow::anyhow!("col out of bounds: {col}"))?;
+            let Some(cell_ref) = formula_model::CellRef::try_new(row_u32, col_u32) else {
+                continue;
+            };
+
+            let (formula, scalar) = match cell.formula.as_ref() {
+                Some(formula) => (Some(formula.clone()), cell.computed_value.clone()),
+                None => (
+                    None,
+                    cell.input_value
+                        .clone()
+                        .unwrap_or_else(|| cell.computed_value.clone()),
+                ),
+            };
+
+            let mut model_cell = formula_model::Cell::new(scalar_to_model_value(&scalar));
+            model_cell.formula = formula;
+            model_sheet.set_cell(cell_ref, model_cell);
+        }
+    }
+
+    for defined in &workbook.defined_names {
+        let scope = match defined.sheet_id.as_deref() {
+            None => formula_model::DefinedNameScope::Workbook,
+            Some(sheet_key) => {
+                let sheet_id = sheet_id_by_app_id
+                    .get(sheet_key)
+                    .or_else(|| sheet_id_by_name.get(sheet_key))
+                    .copied()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "defined name {} references unknown sheet {}",
+                            defined.name,
+                            sheet_key
+                        )
+                    })?;
+                formula_model::DefinedNameScope::Sheet(sheet_id)
+            }
+        };
+
+        out.create_defined_name(
+            scope,
+            defined.name.clone(),
+            defined.refers_to.clone(),
+            None,
+            defined.hidden,
+            None,
+        )
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .with_context(|| format!("create defined name {}", defined.name))?;
+    }
+
+    let mut next_table_id: u32 = 1;
+    for table in &workbook.tables {
+        let sheet_id = sheet_id_by_app_id
+            .get(&table.sheet_id)
+            .or_else(|| sheet_id_by_name.get(&table.sheet_id))
+            .copied()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "table {} references unknown sheet {}",
+                    table.name,
+                    table.sheet_id
+                )
+            })?;
+
+        let start_row = u32::try_from(table.start_row)
+            .map_err(|_| anyhow::anyhow!("table start_row out of bounds: {}", table.start_row))?;
+        let start_col = u32::try_from(table.start_col)
+            .map_err(|_| anyhow::anyhow!("table start_col out of bounds: {}", table.start_col))?;
+        let end_row = u32::try_from(table.end_row)
+            .map_err(|_| anyhow::anyhow!("table end_row out of bounds: {}", table.end_row))?;
+        let end_col = u32::try_from(table.end_col)
+            .map_err(|_| anyhow::anyhow!("table end_col out of bounds: {}", table.end_col))?;
+
+        let columns = table
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(idx, name)| formula_model::TableColumn {
+                id: (idx + 1) as u32,
+                name: name.clone(),
+                formula: None,
+                totals_formula: None,
+            })
+            .collect();
+
+        let model_table = formula_model::Table {
+            id: next_table_id,
+            name: table.name.clone(),
+            display_name: table.name.clone(),
+            range: formula_model::Range::new(
+                formula_model::CellRef::new(start_row, start_col),
+                formula_model::CellRef::new(end_row, end_col),
+            ),
+            header_row_count: 1,
+            totals_row_count: 0,
+            columns,
+            style: None,
+            auto_filter: None,
+            relationship_id: None,
+            part_path: None,
+        };
+        next_table_id = next_table_id.wrapping_add(1);
+
+        out.add_table(sheet_id, model_table)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
+            .with_context(|| format!("add table {}", table.name))?;
+    }
+
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -1478,7 +1593,6 @@ mod tests {
     use crate::state::AppState;
     use formula_format::{format_value, FormatOptions, Value as FormatValue};
     use formula_xlsb::biff12_varint;
-    use rust_xlsxwriter::{Chart, ChartType};
     use std::collections::BTreeSet;
     use std::io::Read;
     use xlsx_diff::{diff_workbooks, Severity, WorkbookArchive};
@@ -2101,51 +2215,32 @@ mod tests {
 
     #[test]
     fn preserves_chart_parts_when_saving_xlsx() {
-        let tmp = tempfile::tempdir().expect("temp dir");
-        let src_path = tmp.path().join("chart-src.xlsx");
-        let dst_path = tmp.path().join("chart-dst.xlsx");
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/charts/basic-chart.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read chart fixture bytes");
+        let original_pkg =
+            XlsxPackage::from_bytes(&original_bytes).expect("parse chart fixture package");
 
-        // Create a workbook with a simple chart.
-        let mut workbook = XlsxWorkbook::new();
-        let worksheet = workbook.add_worksheet();
-
-        worksheet.write_string(0, 0, "Category").unwrap();
-        worksheet.write_string(0, 1, "Value").unwrap();
-        worksheet.write_string(1, 0, "A").unwrap();
-        worksheet.write_number(1, 1, 2).unwrap();
-        worksheet.write_string(2, 0, "B").unwrap();
-        worksheet.write_number(2, 1, 4).unwrap();
-        worksheet.write_string(3, 0, "C").unwrap();
-        worksheet.write_number(3, 1, 3).unwrap();
-
-        let mut chart = Chart::new(ChartType::Column);
-        chart.title().set_name("Example Chart");
-
-        let series = chart.add_series();
-        series
-            .set_categories("Sheet1!$A$2:$A$4")
-            .set_values("Sheet1!$B$2:$B$4");
-
-        worksheet.insert_chart(1, 3, &chart).unwrap();
-
-        let bytes = workbook.save_to_buffer().expect("save workbook");
-        std::fs::write(&src_path, &bytes).expect("write source workbook");
-
-        // Load via the app IO path and save again.
-        let loaded = read_xlsx_blocking(&src_path).expect("read workbook");
+        let mut loaded = read_xlsx_blocking(fixture_path).expect("read workbook");
         assert!(
             loaded.preserved_drawing_parts.is_some(),
             "expected chart parts to be captured for preservation"
         );
 
+        // Clear origin bytes so we exercise the regeneration path + `apply_preserved_drawing_parts`.
+        loaded.origin_xlsx_bytes = None;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let dst_path = tmp.path().join("chart-dst.xlsx");
         let _ = write_xlsx_blocking(&dst_path, &loaded).expect("write workbook");
 
         let roundtrip_bytes = std::fs::read(&dst_path).expect("read written workbook");
-        let src_pkg = XlsxPackage::from_bytes(&bytes).expect("parse src pkg");
         let dst_pkg = XlsxPackage::from_bytes(&roundtrip_bytes).expect("parse dst pkg");
 
         // Drawing + chart parts should match byte-for-byte.
-        for (name, part_bytes) in src_pkg.parts() {
+        for (name, part_bytes) in original_pkg.parts() {
             if name.starts_with("xl/drawings/")
                 || name.starts_with("xl/charts/")
                 || name.starts_with("xl/media/")
@@ -2159,7 +2254,7 @@ mod tests {
         }
 
         // Verify the chart is still discoverable in the saved workbook.
-        let src_charts = src_pkg.extract_charts().expect("extract src charts");
+        let src_charts = original_pkg.extract_charts().expect("extract src charts");
         let dst_charts = dst_pkg.extract_charts().expect("extract dst charts");
         assert_eq!(src_charts.len(), 1);
         assert_eq!(dst_charts.len(), 1);
@@ -2185,7 +2280,7 @@ mod tests {
 
         // `read_xlsx_blocking` stores the original XLSX bytes, which means `write_xlsx_blocking`
         // will typically patch the existing package in-place. Clear it here so we exercise the
-        // rust_xlsxwriter regeneration path + `apply_preserved_pivot_parts`.
+        // regeneration path + `apply_preserved_pivot_parts`.
         workbook.origin_xlsx_bytes = None;
 
         let tmp = tempfile::tempdir().expect("temp dir");
@@ -2660,6 +2755,116 @@ mod tests {
         assert_eq!(
             t.columns,
             vec!["Amount".to_string(), "Category".to_string()]
+        );
+    }
+
+    #[test]
+    fn regeneration_roundtrip_preserves_defined_names_and_tables() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+
+        {
+            let sheet = workbook.sheet_mut(&sheet1_id).expect("Sheet1 exists");
+            sheet.set_cell(
+                0,
+                0,
+                Cell::from_literal(Some(CellScalar::Text("Amount".to_string()))),
+            );
+            sheet.set_cell(
+                0,
+                1,
+                Cell::from_literal(Some(CellScalar::Text("Category".to_string()))),
+            );
+            sheet.set_cell(1, 0, Cell::from_literal(Some(CellScalar::Number(10.0))));
+            sheet.set_cell(
+                1,
+                1,
+                Cell::from_literal(Some(CellScalar::Text("Food".to_string()))),
+            );
+            sheet.set_cell(2, 0, Cell::from_literal(Some(CellScalar::Number(5.0))));
+            sheet.set_cell(
+                2,
+                1,
+                Cell::from_literal(Some(CellScalar::Text("Other".to_string()))),
+            );
+
+            let mut formula_cell = Cell::from_formula("=SUM(A2:A3)".to_string());
+            formula_cell.computed_value = CellScalar::Number(15.0);
+            sheet.set_cell(0, 3, formula_cell);
+        }
+
+        workbook.defined_names.push(DefinedName {
+            name: "MyRange".to_string(),
+            refers_to: "Sheet1!$A$2:$A$3".to_string(),
+            sheet_id: None,
+            hidden: false,
+        });
+        workbook.defined_names.push(DefinedName {
+            name: "LocalName".to_string(),
+            refers_to: "Sheet2!$A$1".to_string(),
+            sheet_id: Some(sheet2_id.clone()),
+            hidden: false,
+        });
+
+        workbook.tables.push(Table {
+            name: "Table1".to_string(),
+            sheet_id: sheet1_id.clone(),
+            start_row: 0,
+            start_col: 0,
+            end_row: 2,
+            end_col: 1,
+            columns: vec!["Amount".to_string(), "Category".to_string()],
+        });
+
+        assert!(
+            workbook.origin_xlsx_bytes.is_none(),
+            "expected regeneration path"
+        );
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("regen.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written = read_xlsx_blocking(&out_path).expect("read workbook back");
+
+        let my_range = written
+            .defined_names
+            .iter()
+            .find(|n| n.name == "MyRange")
+            .expect("MyRange defined name exists");
+        assert_eq!(my_range.refers_to, "Sheet1!$A$2:$A$3");
+        assert!(my_range.sheet_id.is_none());
+
+        let local_name = written
+            .defined_names
+            .iter()
+            .find(|n| n.name == "LocalName")
+            .expect("LocalName defined name exists");
+        assert_eq!(local_name.refers_to, "Sheet2!$A$1");
+        assert_eq!(local_name.sheet_id.as_deref(), Some("Sheet2"));
+
+        assert_eq!(written.tables.len(), 1);
+        let table = &written.tables[0];
+        assert_eq!(table.name, "Table1");
+        assert_eq!(table.sheet_id, "Sheet1");
+        assert_eq!(table.start_row, 0);
+        assert_eq!(table.start_col, 0);
+        assert_eq!(table.end_row, 2);
+        assert_eq!(table.end_col, 1);
+        assert_eq!(
+            table.columns,
+            vec!["Amount".to_string(), "Category".to_string()]
+        );
+
+        assert_eq!(
+            written.sheets[0].get_cell(0, 3).formula.as_deref(),
+            Some("=SUM(A2:A3)")
+        );
+        assert_eq!(
+            written.sheets[0].get_cell(0, 3).computed_value,
+            CellScalar::Number(15.0)
         );
     }
 
