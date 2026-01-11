@@ -66,7 +66,8 @@ test.describe("tauri workbook integration", () => {
             return () => {
               delete listeners[name];
             };
-          }
+          },
+          emit: async () => {},
         },
         window: {
           getCurrentWebviewWindow: () => ({

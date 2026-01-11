@@ -90,6 +90,7 @@ test.describe("macros panel", () => {
               delete listeners[name];
             };
           },
+          emit: async () => {},
         },
         window: {
           getCurrentWebviewWindow: () => ({
