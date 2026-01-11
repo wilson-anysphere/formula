@@ -5,6 +5,9 @@ import { workbookStateFromDocumentSnapshot } from "./workbookState.js";
 
 /**
  * @typedef {{ id: string, name: string | null }} SheetMeta
+ * @typedef {{ id: string, name: string | null, afterIndex: number }} AddedSheet
+ * @typedef {{ id: string, name: string | null, beforeIndex: number }} RemovedSheet
+ * @typedef {{ id: string, beforeIndex: number, afterIndex: number }} MovedSheet
  * @typedef {{ row: number, col: number }} CellRef
  * @typedef {{ oldLocation: CellRef, newLocation: CellRef, value: any, formula?: string | null }} MoveChange
  * @typedef {{ cell: CellRef }} CellChange
@@ -24,9 +27,10 @@ import { workbookStateFromDocumentSnapshot } from "./workbookState.js";
  * }} SheetDiffEntry
  *
  * @typedef {{
- *   added: SheetMeta[];
- *   removed: SheetMeta[];
+ *   added: AddedSheet[];
+ *   removed: RemovedSheet[];
  *   renamed: { id: string, beforeName: string | null, afterName: string | null }[];
+ *   moved: MovedSheet[];
  * }} SheetsDiff
  *
  * @typedef {{
@@ -57,6 +61,41 @@ function compareStrings(a, b) {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;
+}
+
+/**
+ * @param {number[]} arr
+ * @returns {number[]}
+ */
+function longestIncreasingSubsequenceIndices(arr) {
+  /** @type {number[]} */
+  const tails = [];
+  /** @type {number[]} */
+  const prev = new Array(arr.length).fill(-1);
+
+  for (let i = 0; i < arr.length; i++) {
+    const x = arr[i];
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (arr[tails[mid]] < x) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0) prev[i] = tails[lo - 1];
+    if (lo === tails.length) tails.push(i);
+    else tails[lo] = i;
+  }
+
+  /** @type {number[]} */
+  const out = [];
+  let k = tails.length ? tails[tails.length - 1] : -1;
+  while (k >= 0) {
+    out.push(k);
+    k = prev[k];
+  }
+  out.reverse();
+  return out;
 }
 
 /**
@@ -104,12 +143,34 @@ export function diffDocumentWorkbookSnapshots(opts) {
   const afterSheetsById = new Map(after.sheets.map((s) => [s.id, s]));
 
   /** @type {SheetsDiff} */
-  const sheets = { added: [], removed: [], renamed: [] };
-  for (const [id, sheet] of afterSheetsById) {
-    if (!beforeSheetsById.has(id)) sheets.added.push(sheet);
+  const sheets = { added: [], removed: [], renamed: [], moved: [] };
+
+  const beforeOrder = Array.isArray(before.sheetOrder) && before.sheetOrder.length ? before.sheetOrder : before.sheets.map((s) => s.id);
+  const afterOrder = Array.isArray(after.sheetOrder) && after.sheetOrder.length ? after.sheetOrder : after.sheets.map((s) => s.id);
+
+  /** @type {Map<string, number>} */
+  const beforeIndex = new Map();
+  beforeOrder.forEach((id, idx) => {
+    if (!beforeIndex.has(id)) beforeIndex.set(id, idx);
+  });
+  /** @type {Map<string, number>} */
+  const afterIndex = new Map();
+  afterOrder.forEach((id, idx) => {
+    if (!afterIndex.has(id)) afterIndex.set(id, idx);
+  });
+
+  for (const [id, idx] of afterIndex) {
+    if (!beforeSheetsById.has(id)) {
+      const sheet = afterSheetsById.get(id) ?? { id, name: null };
+      sheets.added.push({ id, name: sheet.name ?? null, afterIndex: idx });
+    }
   }
-  for (const [id, sheet] of beforeSheetsById) {
-    if (!afterSheetsById.has(id)) sheets.removed.push(sheet);
+
+  for (const [id, idx] of beforeIndex) {
+    if (!afterSheetsById.has(id)) {
+      const sheet = beforeSheetsById.get(id) ?? { id, name: null };
+      sheets.removed.push({ id, name: sheet.name ?? null, beforeIndex: idx });
+    }
   }
   for (const [id, afterSheet] of afterSheetsById) {
     const beforeSheet = beforeSheetsById.get(id);
@@ -118,9 +179,30 @@ export function diffDocumentWorkbookSnapshots(opts) {
       sheets.renamed.push({ id, beforeName: beforeSheet.name ?? null, afterName: afterSheet.name ?? null });
     }
   }
+
+  // Sheet reorder detection (minimal set): LIS over common sheet IDs.
+  const afterIds = new Set(afterOrder);
+  const beforeIds = new Set(beforeOrder);
+  const beforeCommon = beforeOrder.filter((id) => afterIds.has(id));
+  const afterCommon = afterOrder.filter((id) => beforeIds.has(id));
+  /** @type {Map<string, number>} */
+  const afterCommonIndex = new Map();
+  afterCommon.forEach((id, idx) => afterCommonIndex.set(id, idx));
+  const seq = beforeCommon.map((id) => afterCommonIndex.get(id) ?? -1);
+  const lisIdx = new Set(longestIncreasingSubsequenceIndices(seq));
+  for (let i = 0; i < beforeCommon.length; i++) {
+    if (lisIdx.has(i)) continue;
+    const id = beforeCommon[i];
+    const bi = beforeIndex.get(id);
+    const ai = afterIndex.get(id);
+    if (bi == null || ai == null) continue;
+    sheets.moved.push({ id, beforeIndex: bi, afterIndex: ai });
+  }
+
   sheets.added.sort((a, b) => compareStrings(a.id, b.id));
   sheets.removed.sort((a, b) => compareStrings(a.id, b.id));
   sheets.renamed.sort((a, b) => compareStrings(a.id, b.id));
+  sheets.moved.sort((a, b) => compareStrings(a.id, b.id));
 
   const sheetIds = new Set([...before.cellsBySheet.keys(), ...after.cellsBySheet.keys()]);
   /** @type {SheetDiffEntry[]} */
@@ -178,4 +260,3 @@ export function diffDocumentWorkbookSnapshots(opts) {
 
   return { sheets, cellsBySheet, comments, namedRanges };
 }
-

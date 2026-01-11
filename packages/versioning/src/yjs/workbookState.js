@@ -7,6 +7,7 @@ import { parseSpreadsheetCellKey, sheetStateFromYjsDoc } from "./sheetState.js";
  *
  * @typedef {{
  *   sheets: SheetMeta[];
+ *   sheetOrder: string[];
  *   namedRanges: Map<string, any>;
  *   comments: Map<string, CommentSummary>;
  *   cellsBySheet: Map<string, { cells: Map<string, any> }>;
@@ -105,11 +106,14 @@ export function workbookStateFromYjsDoc(doc) {
   const sheetsArray = doc.getArray("sheets");
   /** @type {SheetMeta[]} */
   const sheets = [];
+  /** @type {string[]} */
+  const sheetOrder = [];
   for (const entry of sheetsArray.toArray()) {
     const id = coerceString(readYMapOrObject(entry, "id"));
     if (!id) continue;
     const name = coerceString(readYMapOrObject(entry, "name"));
     sheets.push({ id, name });
+    sheetOrder.push(id);
   }
   sheets.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
@@ -177,7 +181,7 @@ export function workbookStateFromYjsDoc(doc) {
     }
   }
 
-  return { sheets, namedRanges, comments, cellsBySheet };
+  return { sheets, sheetOrder, namedRanges, comments, cellsBySheet };
 }
 
 /**

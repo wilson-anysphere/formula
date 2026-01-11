@@ -8,6 +8,7 @@ const decoder = new TextDecoder();
  *
  * @typedef {{
  *   sheets: SheetMeta[];
+ *   sheetOrder: string[];
  *   namedRanges: Map<string, any>;
  *   comments: Map<string, CommentSummary>;
  *   cellsBySheet: Map<string, { cells: Map<string, any> }>;
@@ -70,6 +71,8 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
 
   /** @type {SheetMeta[]} */
   const sheets = [];
+  /** @type {string[]} */
+  const sheetOrder = [];
   /** @type {Map<string, { cells: Map<string, any> }>} */
   const cellsBySheet = new Map();
 
@@ -78,6 +81,7 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
     if (!id) continue;
     const name = coerceString(sheet?.name);
     sheets.push({ id, name });
+    sheetOrder.push(id);
 
     /** @type {Map<string, any>} */
     const cells = new Map();
@@ -135,6 +139,5 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
     }
   }
 
-  return { sheets, namedRanges, comments, cellsBySheet };
+  return { sheets, sheetOrder, namedRanges, comments, cellsBySheet };
 }
-

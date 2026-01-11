@@ -72,8 +72,9 @@ test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
   const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
 
   assert.deepEqual(diff.sheets.renamed, [{ id: "sheet1", beforeName: "Sheet1", afterName: "Renamed" }]);
-  assert.deepEqual(diff.sheets.added, [{ id: "sheet3", name: "Sheet3" }]);
-  assert.deepEqual(diff.sheets.removed, [{ id: "sheet2", name: "Sheet2" }]);
+  assert.deepEqual(diff.sheets.added, [{ id: "sheet3", name: "Sheet3", afterIndex: 1 }]);
+  assert.deepEqual(diff.sheets.removed, [{ id: "sheet2", name: "Sheet2", beforeIndex: 1 }]);
+  assert.deepEqual(diff.sheets.moved, []);
 
   assert.deepEqual(
     diff.cellsBySheet.map((entry) => entry.sheetId),
