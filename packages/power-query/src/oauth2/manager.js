@@ -259,7 +259,9 @@ export class OAuth2Manager {
     const accessToken = refreshed.access_token;
     const expiresInSeconds = parsePositiveInt(refreshed.expires_in);
     const expiresAtMs = expiresInSeconds != null ? params.now() + expiresInSeconds * 1000 : null;
-    const nextRefreshToken = refreshed.refresh_token ?? cached.refreshToken;
+    const rotatedRefreshToken =
+      typeof refreshed.refresh_token === "string" && refreshed.refresh_token.length > 0 ? refreshed.refresh_token : null;
+    const nextRefreshToken = rotatedRefreshToken ?? cached.refreshToken;
 
     cached.accessToken = accessToken;
     cached.expiresAtMs = expiresAtMs;
@@ -362,7 +364,7 @@ export class OAuth2Manager {
     const accessToken = token.access_token;
     const expiresInSeconds = parsePositiveInt(token.expires_in);
     const expiresAtMs = expiresInSeconds != null ? params.now() + expiresInSeconds * 1000 : null;
-    const refreshToken = token.refresh_token ?? null;
+    const refreshToken = typeof token.refresh_token === "string" && token.refresh_token.length > 0 ? token.refresh_token : null;
 
     const cacheKey = OAuth2Manager.keyString(params.storeKey);
     this.cache.set(cacheKey, { accessToken, expiresAtMs, refreshToken, scopes: params.scopes });
@@ -508,7 +510,7 @@ export class OAuth2Manager {
     const accessToken = token.access_token;
     const tokenExpiresIn = parsePositiveInt(token.expires_in);
     const accessExpiresAtMs = tokenExpiresIn != null ? now() + tokenExpiresIn * 1000 : null;
-    const refreshToken = token.refresh_token ?? null;
+    const refreshToken = typeof token.refresh_token === "string" && token.refresh_token.length > 0 ? token.refresh_token : null;
 
     const storeKey = { providerId: provider.id, scopesHash: normalized.scopesHash };
     const cacheKey = OAuth2Manager.keyString(storeKey);
