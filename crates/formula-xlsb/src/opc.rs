@@ -382,7 +382,7 @@ impl XlsbWorkbook {
             }
 
             // Drop calcChain when any worksheet was edited.
-            if edited && name.eq_ignore_ascii_case("xl/calcChain.bin") {
+            if edited && name.trim_start_matches('/').eq_ignore_ascii_case("xl/calcChain.bin") {
                 if overrides.contains_key(&name) {
                     used_overrides.insert(name);
                 }

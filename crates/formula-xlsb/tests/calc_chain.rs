@@ -14,7 +14,7 @@ fn insert_before_closing_tag(mut xml: String, closing_tag: &str, insert: &str) -
     xml
 }
 
-fn build_fixture_with_calc_chain(base_bytes: &[u8]) -> Vec<u8> {
+fn build_fixture_with_calc_chain_custom(base_bytes: &[u8], calc_chain_part: &str) -> Vec<u8> {
     let mut zip = ZipArchive::new(Cursor::new(base_bytes)).expect("open base zip");
     let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
@@ -28,13 +28,22 @@ fn build_fixture_with_calc_chain(base_bytes: &[u8]) -> Vec<u8> {
         parts.insert(file.name().to_string(), buf);
     }
 
-    parts.insert("xl/calcChain.bin".to_string(), b"dummy".to_vec());
+    let calc_chain_part = calc_chain_part.trim_start_matches('/');
+    let content_types_part_name = format!("/{calc_chain_part}");
+    let workbook_rels_target = calc_chain_part
+        .strip_prefix("xl/")
+        .unwrap_or(calc_chain_part);
+
+    parts.insert(calc_chain_part.to_string(), b"dummy".to_vec());
 
     let content_types = String::from_utf8(parts["[Content_Types].xml"].clone()).expect("utf8 ct");
+    let content_types_insert = format!(
+        "  <Override PartName=\"{content_types_part_name}\" ContentType=\"application/vnd.ms-excel.calcChain\"/>\n"
+    );
     let content_types = insert_before_closing_tag(
         content_types,
         "</Types>",
-        "  <Override PartName=\"/xl/calcChain.bin\" ContentType=\"application/vnd.ms-excel.calcChain\"/>\n",
+        &content_types_insert,
     );
     parts.insert(
         "[Content_Types].xml".to_string(),
@@ -43,10 +52,13 @@ fn build_fixture_with_calc_chain(base_bytes: &[u8]) -> Vec<u8> {
 
     let workbook_rels =
         String::from_utf8(parts["xl/_rels/workbook.bin.rels"].clone()).expect("utf8 rels");
+    let workbook_rels_insert = format!(
+        "  <Relationship Id=\"rId4\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain\" Target=\"{workbook_rels_target}\"/>\n"
+    );
     let workbook_rels = insert_before_closing_tag(
         workbook_rels,
         "</Relationships>",
-        "  <Relationship Id=\"rId4\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain\" Target=\"calcChain.bin\"/>\n",
+        &workbook_rels_insert,
     );
     parts.insert(
         "xl/_rels/workbook.bin.rels".to_string(),
@@ -66,6 +78,10 @@ fn build_fixture_with_calc_chain(base_bytes: &[u8]) -> Vec<u8> {
     }
 
     zip_out.finish().expect("finish zip").into_inner()
+}
+
+fn build_fixture_with_calc_chain(base_bytes: &[u8]) -> Vec<u8> {
+    build_fixture_with_calc_chain_custom(base_bytes, "xl/calcChain.bin")
 }
 
 fn read_record_id(buf: &[u8]) -> Option<(u32, usize)> {
@@ -225,6 +241,73 @@ fn edited_save_removes_calc_chain_and_references() {
         .find(|c| (c.row, c.col) == (0, 1))
         .expect("B1 exists");
     assert_eq!(b1.value, CellValue::Number(43.5));
+}
+
+#[test]
+fn edited_save_removes_calc_chain_with_weird_casing() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let base_bytes = std::fs::read(fixture_path).expect("read fixture");
+    let with_calc_chain = build_fixture_with_calc_chain_custom(&base_bytes, "xl/CalcChain.bin");
+
+    let dir = tempdir().expect("tempdir");
+    let input_path = dir.path().join("with_calc_chain.xlsb");
+    let output_path = dir.path().join("edited.xlsb");
+    std::fs::write(&input_path, with_calc_chain).expect("write input");
+
+    let wb = XlsbWorkbook::open_with_options(&input_path, OpenOptions::default()).expect("open");
+
+    // Override the worksheet part with a tiny, structure-preserving edit.
+    let mut zip_in =
+        ZipArchive::new(File::open(&input_path).expect("open input zip")).expect("read input zip");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let mut sheet_bytes = Vec::new();
+    zip_in
+        .by_name(&sheet_part)
+        .expect("read sheet part")
+        .read_to_end(&mut sheet_bytes)
+        .expect("read sheet bytes");
+    let edited_sheet = tweak_first_float_cell(&sheet_bytes);
+
+    let mut overrides = HashMap::new();
+    overrides.insert(sheet_part, edited_sheet);
+
+    wb.save_with_part_overrides(&output_path, &overrides)
+        .expect("save with part overrides");
+
+    let mut zip_out = ZipArchive::new(File::open(&output_path).expect("open output zip"))
+        .expect("read output zip");
+
+    let has_calc_chain = zip_out
+        .file_names()
+        .any(|name| name.to_ascii_lowercase() == "xl/calcchain.bin");
+    assert!(
+        !has_calc_chain,
+        "calcChain part should be removed regardless of casing"
+    );
+
+    let mut ct_bytes = Vec::new();
+    zip_out
+        .by_name("[Content_Types].xml")
+        .expect("read content types")
+        .read_to_end(&mut ct_bytes)
+        .expect("read ct bytes");
+    let ct = String::from_utf8(ct_bytes).expect("utf8 ct");
+    assert!(
+        !ct.to_ascii_lowercase().contains("calcchain"),
+        "[Content_Types].xml should not reference calcChain after edit (case-insensitive)"
+    );
+
+    let mut rels_bytes = Vec::new();
+    zip_out
+        .by_name("xl/_rels/workbook.bin.rels")
+        .expect("read workbook rels")
+        .read_to_end(&mut rels_bytes)
+        .expect("read rels bytes");
+    let rels = String::from_utf8(rels_bytes).expect("utf8 rels");
+    assert!(
+        !rels.to_ascii_lowercase().contains("calcchain"),
+        "workbook.bin.rels should not reference calcChain after edit (case-insensitive)"
+    );
 }
 
 #[test]
