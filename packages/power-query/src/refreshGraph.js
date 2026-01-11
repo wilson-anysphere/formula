@@ -436,6 +436,28 @@ export class RefreshOrchestrator {
     let remainingJobs = closure.size;
     /** @type {Set<string>} */
     const terminalIds = new Set();
+    /** @type {Map<string, number>} */
+    const remainingDependents = new Map();
+    for (const id of closure) {
+      remainingDependents.set(id, dependents.get(id)?.size ?? 0);
+    }
+
+    /**
+     * Drop a cached dependency result once nothing in the remaining refresh
+     * graph can reference it anymore.
+     *
+     * This helps keep memory bounded when refreshing long dependency chains.
+     *
+     * @param {string} queryId
+     */
+    const releaseIfUnused = (queryId) => {
+      if (targetSet.has(queryId)) return;
+      if ((remainingDependents.get(queryId) ?? 0) !== 0) return;
+      // Only affects orchestrator-provided dedupe; safe to delete once all direct
+      // dependents have reached a terminal state.
+      // @ts-ignore - runtime delete
+      delete queryResults[queryId];
+    };
 
     /**
      * @param {string} queryId
@@ -444,6 +466,11 @@ export class RefreshOrchestrator {
       if (terminalIds.has(queryId)) return;
       terminalIds.add(queryId);
       remainingJobs -= 1;
+
+      for (const dep of graph.get(queryId) ?? []) {
+        remainingDependents.set(dep, (remainingDependents.get(dep) ?? 0) - 1);
+        releaseIfUnused(dep);
+      }
     };
 
     /**
@@ -560,6 +587,7 @@ export class RefreshOrchestrator {
       if (evt.type === "completed") {
         queryResults[evt.job.queryId] = evt.result;
         if (targetSet.has(evt.job.queryId)) targetResults[evt.job.queryId] = evt.result;
+        releaseIfUnused(evt.job.queryId);
 
         markTerminal(evt.job.queryId);
         for (const dependent of dependents.get(evt.job.queryId) ?? []) {
