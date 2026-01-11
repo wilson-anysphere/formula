@@ -13,8 +13,12 @@ export function normalizeFormulaTextOpt(formula: string): string | null {
 }
 
 export function isFormulaInput(value: unknown): value is string {
-  // We intentionally treat leading whitespace before '=' as "formula input"
-  // because the engine-side protocol uses a leading '=' to disambiguate formula
-  // strings from literal text scalars.
-  return typeof value === "string" && value.trimStart().startsWith("=");
+  if (typeof value !== "string") return false;
+  // We intentionally treat leading whitespace before '=' as formula input because
+  // the engine protocol uses a leading '=' to disambiguate formulas from literal
+  // text. However, a bare "=" / "=   " is treated as literal text (not a
+  // formula), matching the WASM engine's detection rules.
+  const trimmed = value.trimStart();
+  if (!trimmed.startsWith("=")) return false;
+  return trimmed.slice(1).trim() !== "";
 }

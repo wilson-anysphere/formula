@@ -426,7 +426,7 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
-  it("rejects sheet-scoped recalculate calls for missing sheets", async () => {
+  it("does not error when recalculate is called with an unknown sheet name", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
 
@@ -438,13 +438,15 @@ describe("EngineWorker null clear semantics", () => {
 
     try {
       await engine.newWorkbook();
-      await expect(engine.recalculate("MissingSheet")).rejects.toThrow(/missing sheet/i);
+      // The WASM workbook API accepts an optional sheet argument but does not scope/filter
+      // recalculation by sheet. Unknown sheets should be ignored (not treated as an error).
+      await expect(engine.recalculate("MissingSheet")).resolves.toEqual([]);
     } finally {
       engine.terminate();
     }
   });
 
-  it("filters recalc changes by sheet name (case-insensitive)", async () => {
+  it("does not filter recalc changes by sheet name (case-insensitive)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
 
@@ -466,19 +468,24 @@ describe("EngineWorker null clear semantics", () => {
       expect((await engine.getCell("A2", "Sheet1")).value).toBe(2);
       expect((await engine.getCell("A2", "Sheet2")).value).toBe(6);
 
+      // Dirty both sheets, then request a sheet-scoped recalc. The returned changes should still
+      // include all sheets so the client-side cache remains coherent.
+      await engine.setCell("A1", 2, "Sheet1");
       await engine.setCell("A1", 4, "Sheet2");
       const changes = await engine.recalculate("sHeEt2");
 
-      expect(changes).toEqual([{ sheet: "Sheet2", address: "A2", value: 8 }]);
+      expect(changes).toEqual([
+        { sheet: "Sheet1", address: "A2", value: 4 },
+        { sheet: "Sheet2", address: "A2", value: 8 }
+      ]);
       expect((await engine.getCell("A2", "Sheet2")).value).toBe(8);
-      // Sheet1 should not have been included in the delta list.
-      expect((await engine.getCell("A2", "Sheet1")).value).toBe(2);
+      expect((await engine.getCell("A2", "Sheet1")).value).toBe(4);
     } finally {
       engine.terminate();
     }
   });
 
-  it("sheet-scoped recalc still updates cross-sheet dependents in the engine", async () => {
+  it("sheet-scoped recalc still updates cross-sheet dependents and returns their deltas", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
 
@@ -497,8 +504,8 @@ describe("EngineWorker null clear semantics", () => {
 
       await engine.setCell("A1", 2, "Sheet1");
       const changes = await engine.recalculate("Sheet1");
-      // The sheet-scoped delta list is filtered, but the engine still recalculates Sheet2.
-      expect(changes).toEqual([]);
+      // The engine should still surface the dependent sheet's delta (no filtering by sheet arg).
+      expect(changes).toEqual([{ sheet: "Sheet2", address: "A1", value: 4 }]);
       expect((await engine.getCell("A1", "Sheet2")).value).toBe(4);
     } finally {
       engine.terminate();
