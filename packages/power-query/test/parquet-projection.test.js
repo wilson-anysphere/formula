@@ -180,6 +180,38 @@ test("computeParquetProjectionColumns supports replaceErrorValues", () => {
   assert.deepEqual(new Set(cols), new Set(["a", "b"]));
 });
 
+test("computeParquetProjectionColumns supports splitColumn with an explicit schema", () => {
+  const steps = [
+    { id: "s_split", name: "Split", operation: { type: "splitColumn", column: "id", delimiter: "-", newColumns: ["left", "right"] } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["left"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["id"]));
+});
+
+test("computeParquetProjectionColumns supports transformColumnNames after schema is known", () => {
+  const steps = [
+    { id: "s_select1", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+    { id: "s_names", name: "Names", operation: { type: "transformColumnNames", transform: "upper" } },
+    { id: "s_select2", name: "Select2", operation: { type: "selectColumns", columns: ["A"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a"]));
+});
+
+test("computeParquetProjectionColumns refuses transformColumnNames before schema is known", () => {
+  const steps = [
+    { id: "s_names", name: "Names", operation: { type: "transformColumnNames", transform: "upper" } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["A"] } },
+  ];
+
+  assert.equal(computeParquetProjectionColumns(steps), null);
+});
+
 test("computeParquetProjectionColumns maps renamed columns through replaceValues", () => {
   const steps = [
     { id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "a", newName: "A" } },
@@ -282,6 +314,20 @@ test("computeParquetRowLimit refuses to push down for merge/append", () => {
   );
   assert.equal(
     computeParquetRowLimit([{ id: "s_append", name: "Append", operation: { type: "append", queries: ["q2"] } }], 100),
+    null,
+  );
+});
+
+test("computeParquetRowLimit pushes down through splitColumn when newColumns are provided", () => {
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_split", name: "Split", operation: { type: "splitColumn", column: "id", delimiter: "-", newColumns: ["a", "b"] } }], 100),
+    100,
+  );
+});
+
+test("computeParquetRowLimit refuses to push down through splitColumn when schema is data-dependent", () => {
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_split", name: "Split", operation: { type: "splitColumn", column: "id", delimiter: "-" } }], 100),
     null,
   );
 });

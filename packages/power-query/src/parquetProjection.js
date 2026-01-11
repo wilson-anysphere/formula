@@ -8,6 +8,7 @@
  */
 
 import { collectExprColumnRefs, parseFormula } from "./expr/index.js";
+import { makeUniqueColumnNames } from "./table.js";
 
 /**
  * @typedef {import("./model.js").QueryStep} QueryStep
@@ -27,12 +28,14 @@ const SUPPORTED_OPS = new Set([
   "addColumn",
   "transformColumns",
   "renameColumn",
+  "transformColumnNames",
   "take",
   "skip",
   "removeRows",
   "reorderColumns",
   "addIndexColumn",
   "combineColumns",
+  "splitColumn",
   "replaceErrorValues",
   "fillDown",
   "replaceValues",
@@ -137,6 +140,13 @@ export function computeParquetProjectionColumns(steps) {
         }
         break;
       }
+      case "splitColumn": {
+        if (!Array.isArray(op.newColumns) || op.newColumns.length === 0) {
+          return null;
+        }
+        requireColumn(op.column);
+        break;
+      }
       case "filterRows": {
         const cols = new Set();
         collectPredicateColumns(op.predicate, cols);
@@ -182,6 +192,9 @@ export function computeParquetProjectionColumns(steps) {
         break;
       case "combineColumns":
         op.columns.forEach(requireColumn);
+        break;
+      case "transformColumnNames":
+        if (!schema) return null;
         break;
       case "replaceErrorValues":
         op.replacements.forEach((r) => requireColumn(r.column));
@@ -233,6 +246,25 @@ export function computeParquetProjectionColumns(steps) {
         }
         break;
       }
+      case "splitColumn": {
+        if (!Array.isArray(op.newColumns) || op.newColumns.length === 0) {
+          return null;
+        }
+
+        const names = op.newColumns.slice();
+        const sourceName = getSourceName(op.column);
+        mapping.delete(op.column);
+        mapping.set(names[0], sourceName);
+        for (const name of names.slice(1)) {
+          mapping.set(name, null);
+        }
+        if (schema) {
+          schema.delete(op.column);
+          schema.add(names[0]);
+          for (const name of names.slice(1)) schema.add(name);
+        }
+        break;
+      }
       case "reorderColumns": {
         if (!schema) break;
         const missingField = op.missingField ?? "error";
@@ -267,6 +299,31 @@ export function computeParquetProjectionColumns(steps) {
         mapping.set(op.name, null);
         schema?.add(op.name);
         break;
+      case "transformColumnNames": {
+        if (!schema) return null;
+        const previous = Array.from(schema);
+        const sources = previous.map((name) => getSourceName(name));
+        const rawNames = previous.map((name) => {
+          switch (op.transform) {
+            case "upper":
+              return name.toUpperCase();
+            case "lower":
+              return name.toLowerCase();
+            case "trim":
+              return name.trim();
+            default:
+              return name;
+          }
+        });
+        const unique = makeUniqueColumnNames(rawNames);
+        mapping.clear();
+        schema = new Set();
+        for (let i = 0; i < unique.length; i++) {
+          mapping.set(unique[i], sources[i] ?? null);
+          schema.add(unique[i]);
+        }
+        break;
+      }
       case "combineColumns": {
         for (const name of op.columns) {
           mapping.delete(name);
@@ -294,7 +351,6 @@ const LIMIT_UNSAFE_OPS = new Set([
   "append",
   "pivot",
   "unpivot",
-  "splitColumn",
 ]);
 
 /**
@@ -316,6 +372,13 @@ export function computeParquetRowLimit(steps, limit) {
   // N source rows to produce the first N output rows (e.g. filter/sort/group/pivot).
   for (const step of steps) {
     const op = step.operation;
+    if (op.type === "splitColumn") {
+      // SplitColumn without an explicit `newColumns` list can grow the schema based on
+      // rows beyond the requested prefix. Avoid pushing down limits in that case so
+      // preview execution remains consistent with full execution.
+      if (!Array.isArray(op.newColumns) || op.newColumns.length === 0) return null;
+      continue;
+    }
     if (LIMIT_UNSAFE_OPS.has(op.type)) return null;
   }
 

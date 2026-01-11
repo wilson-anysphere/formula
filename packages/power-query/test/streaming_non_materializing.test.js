@@ -226,6 +226,44 @@ test("executeQueryStreaming(..., materialize:false) streams skip/reorder/combine
   assert.deepEqual(streamed, expected);
 });
 
+test("executeQueryStreaming(..., materialize:false) streams splitColumn when newColumns are provided", async () => {
+  const csvText = ["id,value", "a-b,1", "c-d,2"].join("\n") + "\n";
+
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("readText should not be called in streaming mode");
+      },
+      readTextStream: async function* () {
+        yield csvText;
+      },
+    },
+  });
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readText: async () => csvText,
+    },
+  });
+
+  const query = {
+    id: "q_stream_split",
+    name: "Stream split",
+    source: { type: "csv", path: "/tmp/split.csv", options: { hasHeaders: true } },
+    steps: [
+      { id: "s_split", name: "Split", operation: { type: "splitColumn", column: "id", delimiter: "-", newColumns: ["left", "right"] } },
+      { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["right", "value"] } },
+    ],
+  };
+
+  const batches = [];
+  await engineStreaming.executeQueryStreaming(query, {}, { batchSize: 10, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
+
 test("executeQueryStreaming(..., materialize:false) resolves table sources via tableAdapter when context.tables is missing", async () => {
   const engine = new QueryEngine({
     tableAdapter: {

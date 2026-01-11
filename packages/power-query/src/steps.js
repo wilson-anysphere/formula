@@ -1256,12 +1256,16 @@ export const STREAMABLE_OPERATION_TYPES = new Set([
   "combineColumns",
   "transformColumnNames",
   "replaceErrorValues",
+  "splitColumn",
 ]);
 
 /**
  * @param {QueryOperation} operation
  */
 export function isStreamableOperation(operation) {
+  if (operation.type === "splitColumn") {
+    return Array.isArray(operation.newColumns) && operation.newColumns.length > 0;
+  }
   return STREAMABLE_OPERATION_TYPES.has(operation.type);
 }
 
@@ -1674,6 +1678,45 @@ export function compileStreamingPipeline(operations, inputColumns) {
             const next = row.slice();
             for (const entry of replacements) {
               if (next[entry.idx] instanceof Error) next[entry.idx] = entry.value;
+            }
+            return next;
+          }),
+          done: false,
+        }));
+        break;
+      }
+      case "splitColumn": {
+        if (!Array.isArray(op.newColumns) || op.newColumns.length === 0) {
+          throw new Error("Streaming splitColumn requires an explicit newColumns list");
+        }
+
+        const idx = getColumnIndex(op.column);
+        const names = op.newColumns.slice();
+
+        columns = columns
+          .map((col, i) => (i === idx ? { ...col, name: names[0], type: "string" } : col))
+          .concat(names.slice(1).map((name) => ({ name, type: "string" })));
+
+        const seenNames = new Set();
+        for (const col of columns) {
+          if (seenNames.has(col.name)) {
+            throw new Error(`Duplicate column name '${col.name}'`);
+          }
+          seenNames.add(col.name);
+        }
+        columnIndex = buildIndex(columns);
+
+        const expectedParts = names.length;
+        transforms.push((rows) => ({
+          rows: rows.map((row) => {
+            const parts = valueToString(row?.[idx]).split(op.delimiter);
+            if (parts.length > expectedParts) {
+              throw new Error(`Split produced ${parts.length} columns but only ${expectedParts} names were provided`);
+            }
+            const next = row.slice();
+            next[idx] = parts[0] ?? "";
+            for (let i = 1; i < expectedParts; i++) {
+              next.push(parts[i] ?? null);
             }
             return next;
           }),
