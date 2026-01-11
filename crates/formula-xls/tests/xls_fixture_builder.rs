@@ -133,6 +133,25 @@ pub fn build_continued_format_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that uses an unknown/reserved built-in `numFmtId` value without
+/// providing an explicit `FORMAT` record.
+///
+/// The importer should preserve the `numFmtId` via a placeholder number format string like
+/// `__builtin_numFmtId:60`.
+pub fn build_unknown_builtin_numfmtid_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_unknown_builtin_numfmtid_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
     // -- Globals -----------------------------------------------------------------
     let mut globals = Vec::<u8>::new();
@@ -455,6 +474,46 @@ fn build_continued_format_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_unknown_builtin_numfmtid_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, 0x0809, &bof(0x0005)); // BOF: workbook globals
+    push_record(&mut globals, 0x0042, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, 0x003D, &window1()); // WINDOW1
+    push_record(&mut globals, 0x0031, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, 0x00E0, &xf_record(0, 0, true));
+    }
+
+    // Unknown/reserved built-in numFmtId (not in OOXML 0-49 table).
+    const UNKNOWN_NUM_FMT_ID: u16 = 60;
+    let xf_unknown = 16u16;
+    push_record(&mut globals, 0x00E0, &xf_record(0, UNKNOWN_NUM_FMT_ID, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "UnknownBuiltinFmt");
+    push_record(&mut globals, 0x0085, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, 0x000A, &[]); // EOF globals
+
+    let sheet_offset = globals.len();
+    let sheet = build_unknown_builtin_numfmtid_sheet_stream(xf_unknown);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_merged_formatted_blank_sheet_stream(xf_percent: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -588,6 +647,29 @@ fn build_continued_format_sheet_stream(xf: u16) -> Vec<u8> {
 
     // A1: number cell with the continued custom format.
     push_record(&mut sheet, 0x0203, &number_cell(0, 0, xf, 45123.0));
+
+    push_record(&mut sheet, 0x000A, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_unknown_builtin_numfmtid_sheet_stream(xf: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, 0x0809, &bof(0x0010)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, 0x0200, &dims);
+
+    push_record(&mut sheet, 0x023E, &window2()); // WINDOW2
+
+    // A1: number cell with unknown built-in numFmtId.
+    push_record(&mut sheet, 0x0203, &number_cell(0, 0, xf, 1234.0));
 
     push_record(&mut sheet, 0x000A, &[]); // EOF worksheet
     sheet

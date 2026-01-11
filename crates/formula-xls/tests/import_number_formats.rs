@@ -177,6 +177,28 @@ fn imports_continued_format_records() {
 }
 
 #[test]
+fn preserves_unknown_builtin_numfmtid_as_placeholder() {
+    let bytes = xls_fixture_builder::build_unknown_builtin_numfmtid_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("UnknownBuiltinFmt")
+        .expect("UnknownBuiltinFmt missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let cell = sheet.cell(a1).expect("A1 missing");
+    assert_ne!(cell.style_id, 0);
+
+    let fmt = result
+        .workbook
+        .styles
+        .get(cell.style_id)
+        .and_then(|s| s.number_format.as_deref());
+    assert_eq!(fmt, Some("__builtin_numFmtId:60"));
+}
+
+#[test]
 fn chooses_deterministic_style_when_merged_anchor_is_missing() {
     let bytes = xls_fixture_builder::build_merged_non_anchor_conflicting_blank_formats_fixture_xls();
     let result = import_fixture(&bytes);
