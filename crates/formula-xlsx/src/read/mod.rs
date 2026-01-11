@@ -568,12 +568,37 @@ fn interpret_cell_value(
                 Some(raw),
             )
         }
-        Some(_) | None => {
+        Some("n") | None => {
             if let Some(raw) = v_text.clone() {
-                let value = raw.parse::<f64>().map(CellValue::Number).unwrap_or(CellValue::String(raw.clone()));
-                (value, Some(CellValueKind::Number), Some(raw))
+                if let Ok(n) = raw.parse::<f64>() {
+                    (CellValue::Number(n), Some(CellValueKind::Number), Some(raw))
+                } else {
+                    // A missing/number cell type with a non-numeric payload is invalid SpreadsheetML.
+                    // Preserve as a plain string so we don't accidentally emit a numeric cell on write.
+                    (
+                        CellValue::String(raw.clone()),
+                        Some(CellValueKind::Str),
+                        Some(raw),
+                    )
+                }
             } else {
                 (CellValue::Empty, None, None)
+            }
+        }
+        Some(other) => {
+            // Preserve unknown/less-common `t=` values (e.g. `t="d"` for ISO-8601 date text).
+            if let Some(raw) = v_text.clone() {
+                (
+                    CellValue::String(raw.clone()),
+                    Some(CellValueKind::Other { t: other.to_string() }),
+                    Some(raw),
+                )
+            } else {
+                (
+                    CellValue::Empty,
+                    Some(CellValueKind::Other { t: other.to_string() }),
+                    None,
+                )
             }
         }
     }

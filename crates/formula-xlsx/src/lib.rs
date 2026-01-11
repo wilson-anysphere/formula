@@ -133,6 +133,13 @@ pub enum CellValueKind {
     Bool,
     Error,
     Str,
+    /// Cell value types that Formula does not interpret but should preserve on round-trip.
+    ///
+    /// SpreadsheetML `c` elements use a `t=` attribute to describe how to interpret the `<v>`
+    /// payload. Excel emits additional values beyond the common `s/b/e/str/inlineStr` set (for
+    /// example `t="d"` for ISO-8601 dates). When we don't understand the type, we keep the `t`
+    /// string and the raw `<v>` text so we can rewrite `sheetData` without corrupting the file.
+    Other { t: String },
 }
 
 #[derive(Debug, Clone, Default)]

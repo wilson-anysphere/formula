@@ -1189,16 +1189,20 @@ fn render_sheet_data(
         }
 
         let meta = doc.meta.cell_meta.get(&(sheet_meta.worksheet_id, cell_ref));
+        let raw_value = meta.and_then(|m| m.raw_value.as_deref());
         let value_kind = effective_value_kind(meta, cell);
 
         if !matches!(cell.value, CellValue::Empty) {
-            match value_kind {
+            match &value_kind {
                 CellValueKind::SharedString { .. } => out.push_str(r#" t="s""#),
                 CellValueKind::InlineString => out.push_str(r#" t="inlineStr""#),
                 CellValueKind::Bool => out.push_str(r#" t="b""#),
                 CellValueKind::Error => out.push_str(r#" t="e""#),
                 CellValueKind::Str => out.push_str(r#" t="str""#),
                 CellValueKind::Number => {}
+                CellValueKind::Other { t } => {
+                    out.push_str(&format!(r#" t="{}""#, escape_attr(t)));
+                }
             }
         }
 
@@ -1259,6 +1263,13 @@ fn render_sheet_data(
 
         match &cell.value {
             CellValue::Empty => {}
+            _ if matches!(value_kind, CellValueKind::Other { .. }) => {
+                if let Some(raw) = raw_value {
+                    out.push_str("<v>");
+                    out.push_str(&escape_text(raw));
+                    out.push_str("</v>");
+                }
+            }
             CellValue::Number(n) => {
                 out.push_str("<v>");
                 out.push_str(&escape_text(&raw_or_number(meta, *n)));
@@ -1274,7 +1285,7 @@ fn render_sheet_data(
                 out.push_str(&escape_text(&raw_or_error(meta, *err)));
                 out.push_str("</v>");
             }
-            value @ CellValue::String(s) => match value_kind {
+            value @ CellValue::String(s) => match &value_kind {
                 CellValueKind::SharedString { .. } => {
                     let idx = shared_string_index(doc, meta, value, shared_lookup);
                     out.push_str("<v>");
@@ -1343,11 +1354,21 @@ fn infer_value_kind(cell: &formula_model::Cell) -> CellValueKind {
 }
 
 fn effective_value_kind(meta: Option<&crate::CellMeta>, cell: &formula_model::Cell) -> CellValueKind {
-    if let Some(kind) = meta.and_then(|m| m.value_kind.clone()) {
-        if value_kind_compatible(&kind, &cell.value) {
-            return kind;
+    if let Some(meta) = meta {
+        if let Some(kind) = meta.value_kind.clone() {
+            // Cells with less-common or unknown `t=` attributes require the original `<v>` payload
+            // to round-trip safely. If we don't have it, fall back to the inferred kind so we emit
+            // a valid SpreadsheetML representation.
+            if matches!(kind, CellValueKind::Other { .. }) {
+                if meta.raw_value.is_some() {
+                    return kind;
+                }
+            } else if value_kind_compatible(&kind, &cell.value) {
+                return kind;
+            }
         }
     }
+
     infer_value_kind(cell)
 }
 
