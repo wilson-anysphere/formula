@@ -205,6 +205,7 @@ export class OpenAIClient {
           temperature: request.temperature,
           max_tokens: request.maxTokens,
           stream: true,
+          stream_options: { include_usage: true },
         }),
         signal: controller.signal,
       });
@@ -225,12 +226,24 @@ export class OpenAIClient {
           if (args) yield { type: "tool_call_delta", id: call.id, delta: args };
           yield { type: "tool_call_end", id: call.id };
         }
-        yield { type: "done" };
+        const usage = full.usage
+          ? {
+              promptTokens: full.usage.promptTokens,
+              completionTokens: full.usage.completionTokens,
+              totalTokens:
+                full.usage.promptTokens != null && full.usage.completionTokens != null
+                  ? full.usage.promptTokens + full.usage.completionTokens
+                  : undefined,
+            }
+          : undefined;
+        yield usage ? { type: "done", usage } : { type: "done" };
         return;
       }
 
       const decoder = new TextDecoder();
       let buffer = "";
+      /** @type {{ promptTokens?: number, completionTokens?: number, totalTokens?: number } | null} */
+      let usage = null;
       /** @type {Map<number, { id?: string, name?: string, started: boolean }>} */
       const toolCallsByIndex = new Map();
       /** @type {Set<string>} */
@@ -263,11 +276,18 @@ export class OpenAIClient {
 
           if (data === "[DONE]") {
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
-            yield { type: "done" };
+            yield usage ? { type: "done", usage } : { type: "done" };
             return;
           }
 
           const json = JSON.parse(data);
+          if (json.usage && typeof json.usage === "object") {
+            usage = {
+              promptTokens: json.usage.prompt_tokens,
+              completionTokens: json.usage.completion_tokens,
+              totalTokens: json.usage.total_tokens,
+            };
+          }
           const choice = json.choices?.[0];
           const delta = choice?.delta;
 
@@ -313,7 +333,7 @@ export class OpenAIClient {
       }
 
       for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
-      yield { type: "done" };
+      yield usage ? { type: "done", usage } : { type: "done" };
     } finally {
       clearTimeout(timeout);
       removeRequestAbortListener?.();

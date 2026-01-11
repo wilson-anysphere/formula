@@ -18,7 +18,7 @@ export type ChatStreamEvent =
   | { type: "tool_call_start"; id: string; name: string }
   | { type: "tool_call_delta"; id: string; delta: string }
   | { type: "tool_call_end"; id: string }
-  | { type: "done" };
+  | { type: "done"; usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number } };
 
 export type LLMMessage =
   | {

@@ -51,7 +51,8 @@
  *   type: "tool_call_end",
  *   id: string
  * } | {
- *   type: "done"
+ *   type: "done",
+ *   usage?: { promptTokens?: number, completionTokens?: number, totalTokens?: number }
  * }} ChatStreamEvent
  *
  * @typedef {{

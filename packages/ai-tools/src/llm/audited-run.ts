@@ -131,8 +131,22 @@ export async function runChatWithToolsAuditedVerified(
     streamChat: params.client.streamChat
       ? async function* streamChat(request: any) {
           const started = nowMs();
+          let recordedUsage = false;
           try {
             for await (const event of params.client.streamChat!(request)) {
+              if (!recordedUsage && event && typeof event === "object" && event.type === "done" && event.usage) {
+                const prompt = Number(event.usage.promptTokens ?? 0);
+                const completion = Number(event.usage.completionTokens ?? 0);
+                const total = Number(event.usage.totalTokens ?? prompt + completion);
+                if (Number.isFinite(prompt) || Number.isFinite(completion)) {
+                  recorder.recordTokenUsage({
+                    prompt_tokens: Number.isFinite(prompt) ? prompt : 0,
+                    completion_tokens: Number.isFinite(completion) ? completion : 0,
+                    total_tokens: Number.isFinite(total) ? total : undefined
+                  });
+                }
+                recordedUsage = true;
+              }
               yield event;
             }
           } finally {

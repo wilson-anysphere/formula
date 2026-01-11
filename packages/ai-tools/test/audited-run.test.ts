@@ -82,6 +82,39 @@ describe("runChatWithToolsAudited", () => {
     expect(entries[0]!.user_feedback).toBe("accepted");
   });
 
+  it("records token usage from streaming done events", async () => {
+    const auditStore = new MemoryAIAuditStore();
+
+    const client = {
+      async chat() {
+        throw new Error("chat() should not be used when streamChat is available");
+      },
+      async *streamChat() {
+        yield { type: "text", delta: "hello" };
+        yield { type: "done", usage: { promptTokens: 7, completionTokens: 4, totalTokens: 11 } };
+      }
+    };
+
+    const result = await runChatWithToolsAudited({
+      client: client as any,
+      tool_executor: { tools: [], execute: async () => ({ ok: true }) },
+      messages: [{ role: "user", content: "hi" }],
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-stream-usage-1",
+        mode: "chat",
+        input: { prompt: "hi" },
+        model: "unit-test-model"
+      }
+    });
+
+    expect(result.final).toBe("hello");
+
+    const entries = await auditStore.listEntries({ session_id: "session-stream-usage-1" });
+    expect(entries.length).toBe(1);
+    expect(entries[0]!.token_usage).toEqual({ prompt_tokens: 7, completion_tokens: 4, total_tokens: 11 });
+  });
+
   it("redacts fetch_external_data secrets in audit tool call parameters", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const toolExecutor = new SpreadsheetLLMToolExecutor(workbook, {
