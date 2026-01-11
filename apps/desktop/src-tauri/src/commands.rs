@@ -1,6 +1,6 @@
+use formula_engine::pivot::PivotConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use formula_engine::pivot::PivotConfig;
 
 use crate::macro_trust::MacroTrustDecision;
 
@@ -239,8 +239,8 @@ use crate::file_io::{read_csv, read_xlsx, write_xlsx};
 use crate::state::{AppState, AppStateError, CellUpdateData, SharedAppState};
 #[cfg(feature = "desktop")]
 use crate::{
-    macro_trust::{compute_macro_fingerprint, SharedMacroTrustStore},
     file_io::Workbook,
+    macro_trust::{compute_macro_fingerprint, SharedMacroTrustStore},
 };
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
@@ -618,7 +618,11 @@ pub fn get_sheet_used_range(
     let mut max_col = 0usize;
     let mut has_any = false;
 
-    for ((row, col), _cell) in sheet.cells_iter() {
+    for ((row, col), cell) in sheet.cells_iter() {
+        // Ignore format-only cells (the UI considers used range based on value/formula).
+        if cell.formula.is_none() && cell.input_value.is_none() {
+            continue;
+        }
         has_any = true;
         min_row = min_row.min(row);
         min_col = min_col.min(col);
@@ -728,7 +732,9 @@ pub async fn refresh_pivot_table(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn list_pivot_tables(state: State<'_, SharedAppState>) -> Result<Vec<PivotTableSummary>, String> {
+pub fn list_pivot_tables(
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<PivotTableSummary>, String> {
     let state = state.inner().lock().unwrap();
     Ok(state
         .list_pivot_tables()
@@ -1097,6 +1103,74 @@ pub struct MacroRunResult {
     pub permission_request: Option<MacroPermissionRequest>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PythonFilesystemPermission {
+    None,
+    Read,
+    Readwrite,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PythonNetworkPermission {
+    None,
+    Allowlist,
+    Full,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PythonPermissions {
+    pub filesystem: PythonFilesystemPermission,
+    pub network: PythonNetworkPermission,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network_allowlist: Option<Vec<String>>,
+}
+
+impl Default for PythonPermissions {
+    fn default() -> Self {
+        Self {
+            filesystem: PythonFilesystemPermission::None,
+            network: PythonNetworkPermission::None,
+            network_allowlist: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PythonSelection {
+    pub sheet_id: String,
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PythonRunContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_sheet_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<PythonSelection>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PythonError {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stack: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PythonRunResult {
+    pub ok: bool,
+    pub stdout: String,
+    pub stderr: String,
+    pub updates: Vec<CellUpdate>,
+    pub error: Option<PythonError>,
+}
+
 #[cfg(feature = "desktop")]
 fn workbook_identity_for_trust(workbook: &Workbook, workbook_id: Option<&str>) -> String {
     workbook
@@ -1109,7 +1183,10 @@ fn workbook_identity_for_trust(workbook: &Workbook, workbook_id: Option<&str>) -
 }
 
 #[cfg(feature = "desktop")]
-fn compute_workbook_fingerprint(workbook: &mut Workbook, workbook_id: Option<&str>) -> Option<String> {
+fn compute_workbook_fingerprint(
+    workbook: &mut Workbook,
+    workbook_id: Option<&str>,
+) -> Option<String> {
     if workbook.vba_project_bin.is_none() {
         return None;
     }
@@ -1381,6 +1458,34 @@ pub async fn run_macro(
             .run_macro(&macro_id, options)
             .map_err(|e| e.to_string())?;
         Ok::<_, String>(macro_result_from_outcome(outcome))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn run_python_script(
+    workbook_id: Option<String>,
+    code: String,
+    permissions: Option<PythonPermissions>,
+    timeout_ms: Option<u64>,
+    max_memory_bytes: Option<u64>,
+    context: Option<PythonRunContext>,
+    state: State<'_, SharedAppState>,
+) -> Result<PythonRunResult, String> {
+    let _ = workbook_id;
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        crate::python::run_python_script(
+            &mut state,
+            &code,
+            permissions,
+            timeout_ms,
+            max_memory_bytes,
+            context,
+        )
     })
     .await
     .map_err(|e| e.to_string())?

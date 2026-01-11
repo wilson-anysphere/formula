@@ -178,10 +178,7 @@ pub struct CellRect {
 
 impl CellRect {
     fn contains(&self, row: usize, col: usize) -> bool {
-        row >= self.start_row
-            && row <= self.end_row
-            && col >= self.start_col
-            && col <= self.end_col
+        row >= self.start_row && row <= self.end_row && col >= self.start_col && col <= self.end_col
     }
 
     fn union(&self, other: &CellRect) -> CellRect {
@@ -302,6 +299,131 @@ impl AppState {
                 })
                 .collect(),
         })
+    }
+
+    pub fn create_sheet(&mut self, name: String) -> Result<String, AppStateError> {
+        let workbook = self.get_workbook_mut()?;
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(AppStateError::WhatIf(
+                "sheet name cannot be empty".to_string(),
+            ));
+        }
+        if workbook
+            .sheets
+            .iter()
+            .any(|sheet| sheet.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Err(AppStateError::WhatIf(format!(
+                "sheet name already exists: {trimmed}"
+            )));
+        }
+
+        let base_id = trimmed.to_string();
+        let mut candidate = base_id.clone();
+        let mut counter = 1usize;
+        while workbook.sheets.iter().any(|s| s.id == candidate) {
+            counter += 1;
+            candidate = format!("{base_id}-{counter}");
+        }
+
+        workbook.sheets.push(crate::file_io::Sheet::new(
+            candidate.clone(),
+            trimmed.to_string(),
+        ));
+        self.engine.ensure_sheet(trimmed);
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(candidate)
+    }
+
+    pub fn rename_sheet(&mut self, sheet_id: &str, name: String) -> Result<(), AppStateError> {
+        let workbook = self.get_workbook_mut()?;
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(AppStateError::WhatIf(
+                "sheet name cannot be empty".to_string(),
+            ));
+        }
+        if workbook.sheets.iter().any(|sheet| {
+            sheet.id != sheet_id && sheet.name.eq_ignore_ascii_case(trimmed)
+        }) {
+            return Err(AppStateError::WhatIf(format!(
+                "sheet name already exists: {trimmed}"
+            )));
+        }
+
+        let (old_name, new_name) = {
+            let sheet = workbook
+                .sheet_mut(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+
+            let old_name = sheet.name.clone();
+            if old_name == trimmed {
+                return Ok(());
+            }
+
+            sheet.name = trimmed.to_string();
+            (old_name, sheet.name.clone())
+        };
+
+        // Preserve print settings keyed by sheet name.
+        for settings in &mut workbook.print_settings.sheets {
+            if settings.sheet_name.eq_ignore_ascii_case(&old_name) {
+                settings.sheet_name = new_name.clone();
+            }
+        }
+
+        // The formula engine indexes sheets by name and does not support renames in-place.
+        // Rebuild to ensure subsequent evaluations resolve the updated sheet name.
+        self.rebuild_engine_from_workbook()?;
+        self.engine.recalculate();
+        let _ = self.refresh_computed_values()?;
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
+    }
+
+    pub fn set_range_number_format(
+        &mut self,
+        sheet_id: &str,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+        number_format: Option<String>,
+    ) -> Result<(), AppStateError> {
+        if start_row > end_row || start_col > end_col {
+            return Err(AppStateError::InvalidRange {
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            });
+        }
+
+        let workbook = self.get_workbook_mut()?;
+        let sheet = workbook
+            .sheet_mut(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+
+        for row in start_row..=end_row {
+            for col in start_col..=end_col {
+                let mut cell = sheet
+                    .cells
+                    .get(&(row, col))
+                    .cloned()
+                    .unwrap_or_else(Cell::empty);
+                cell.number_format = number_format.clone();
+                sheet.set_cell(row, col, cell);
+            }
+        }
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
     }
 
     pub fn load_workbook(&mut self, mut workbook: Workbook) -> WorkbookInfoData {
@@ -542,11 +664,7 @@ impl AppState {
         }
 
         self.apply_snapshots(&[after_cell.clone()])?;
-        let mut updates = self.recalculate_with_pivots(vec![(
-            sheet_id.to_string(),
-            row,
-            col,
-        )])?;
+        let mut updates = self.recalculate_with_pivots(vec![(sheet_id.to_string(), row, col)])?;
 
         if !updates
             .iter()
@@ -693,7 +811,8 @@ impl AppState {
         destination: PivotDestination,
         config: PivotConfig,
     ) -> Result<(String, Vec<CellUpdateData>), AppStateError> {
-        if source_range.start_row > source_range.end_row || source_range.start_col > source_range.end_col
+        if source_range.start_row > source_range.end_row
+            || source_range.start_col > source_range.end_col
         {
             return Err(AppStateError::InvalidRange {
                 start_row: source_range.start_row,
@@ -708,10 +827,7 @@ impl AppState {
         }
 
         // Validate sheet ids early so we don't register unusable pivots.
-        let workbook = self
-            .workbook
-            .as_ref()
-            .expect("checked is_some above");
+        let workbook = self.workbook.as_ref().expect("checked is_some above");
         if workbook.sheet(&source_sheet_id).is_none() {
             return Err(AppStateError::UnknownSheet(source_sheet_id));
         }
@@ -745,7 +861,10 @@ impl AppState {
         Ok((pivot_id, updates))
     }
 
-    pub fn refresh_pivot_table(&mut self, pivot_id: &str) -> Result<Vec<CellUpdateData>, AppStateError> {
+    pub fn refresh_pivot_table(
+        &mut self,
+        pivot_id: &str,
+    ) -> Result<Vec<CellUpdateData>, AppStateError> {
         let idx = self
             .pivots
             .pivots
@@ -759,7 +878,8 @@ impl AppState {
             .ok_or(AppStateError::NoWorkbookLoaded)?;
         let engine = &mut self.engine;
 
-        let pivot_updates = refresh_pivot_registration(workbook, engine, &mut self.pivots.pivots[idx])?;
+        let pivot_updates =
+            refresh_pivot_registration(workbook, engine, &mut self.pivots.pivots[idx])?;
 
         if !pivot_updates.is_empty() {
             self.dirty = true;
@@ -1637,8 +1757,12 @@ impl AppState {
             .ok_or(AppStateError::NoWorkbookLoaded)?;
         self.engine = FormulaEngine::new();
         self.engine.set_date_system(match workbook.date_system {
-            formula_model::DateSystem::Excel1900 => formula_engine::date::ExcelDateSystem::EXCEL_1900,
-            formula_model::DateSystem::Excel1904 => formula_engine::date::ExcelDateSystem::Excel1904,
+            formula_model::DateSystem::Excel1900 => {
+                formula_engine::date::ExcelDateSystem::EXCEL_1900
+            }
+            formula_model::DateSystem::Excel1904 => {
+                formula_engine::date::ExcelDateSystem::Excel1904
+            }
         });
         for sheet in &workbook.sheets {
             self.engine.ensure_sheet(&sheet.name);
@@ -1818,9 +1942,10 @@ fn refresh_pivot_registration(
             .collect::<Vec<_>>()
     };
 
-    let cache = PivotCache::from_range(&source_values).map_err(|e| AppStateError::Pivot(e.to_string()))?;
-    let result =
-        PivotEngine::calculate(&cache, &pivot.config).map_err(|e| AppStateError::Pivot(e.to_string()))?;
+    let cache =
+        PivotCache::from_range(&source_values).map_err(|e| AppStateError::Pivot(e.to_string()))?;
+    let result = PivotEngine::calculate(&cache, &pivot.config)
+        .map_err(|e| AppStateError::Pivot(e.to_string()))?;
 
     let grid = normalize_pivot_grid(result.data);
     let row_count = grid.len();
@@ -1879,7 +2004,8 @@ fn refresh_pivot_registration(
                 let desired_opt = pivot_value_to_scalar_opt(&pv);
 
                 let existing = sheet.get_cell(row, col);
-                let changed = existing.formula.is_some() || existing.computed_value != desired_scalar;
+                let changed =
+                    existing.formula.is_some() || existing.computed_value != desired_scalar;
                 if !changed {
                     continue;
                 }
@@ -1914,7 +2040,8 @@ fn refresh_pivot_registration(
 fn format_scalar_for_display(value: CellScalar, number_format: Option<&str>) -> CellScalar {
     match (value, number_format) {
         (CellScalar::Number(n), Some(fmt)) => {
-            let formatted = format_value(FormatValue::Number(n), Some(fmt), &FormatOptions::default());
+            let formatted =
+                format_value(FormatValue::Number(n), Some(fmt), &FormatOptions::default());
             CellScalar::Text(formatted.text)
         }
         (other, _) => other,
@@ -2662,10 +2789,11 @@ mod tests {
             .unwrap()
             .set_columnar_table(Arc::new(table));
 
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 1, Cell::from_formula("=SUM(A1:A3)".to_string()));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_formula("=SUM(A1:A3)".to_string()),
+        );
 
         let mut state = AppState::new();
         state.load_workbook(workbook);
@@ -3155,13 +3283,7 @@ mod tests {
 
         // Collapse West into East; pivot should now have only 3 rows (header, East, Grand Total).
         state
-            .set_cell(
-                &data_sheet_id,
-                2,
-                0,
-                Some(JsonValue::from("East")),
-                None,
-            )
+            .set_cell(&data_sheet_id, 2, 0, Some(JsonValue::from("East")), None)
             .unwrap();
 
         assert_eq!(

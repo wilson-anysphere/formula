@@ -15,12 +15,13 @@ use tauri::{Emitter, Manager};
 
 fn main() {
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
-    let macro_trust: SharedMacroTrustStore =
-        Arc::new(Mutex::new(MacroTrustStore::load_default().unwrap_or_else(|_| {
+    let macro_trust: SharedMacroTrustStore = Arc::new(Mutex::new(
+        MacroTrustStore::load_default().unwrap_or_else(|_| {
             // Backend startup should not fail if the trust store is unreadable; fall back
             // to an ephemeral store (macros will remain blocked by default).
             MacroTrustStore::new_ephemeral()
-        })));
+        }),
+    ));
 
     tauri::Builder::default()
         .plugin(
@@ -72,6 +73,7 @@ fn main() {
             commands::get_macro_security_status,
             commands::set_macro_trust,
             commands::run_macro,
+            commands::run_python_script,
             commands::fire_workbook_open,
             commands::fire_workbook_before_close,
             commands::fire_worksheet_change,

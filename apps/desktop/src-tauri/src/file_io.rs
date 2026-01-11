@@ -69,8 +69,15 @@ impl Sheet {
     }
 
     pub fn get_cell(&self, row: usize, col: usize) -> Cell {
-        if let Some(cell) = self.cells.get(&(row, col)) {
-            return cell.clone();
+        let overlay = self.cells.get(&(row, col));
+        if let Some(cell) = overlay {
+            // For columnar-backed sheets, allow format-only overlay cells without clobbering the
+            // underlying table value (format edits shouldn't materialize the full dataset into
+            // the sparse overlay).
+            let is_format_only = cell.formula.is_none() && cell.input_value.is_none();
+            if !(is_format_only && cell.number_format.is_some() && self.columnar.is_some()) {
+                return cell.clone();
+            }
         }
 
         if let Some(table) = &self.columnar {
@@ -82,11 +89,21 @@ impl Sheet {
                     .unwrap_or(ColumnarType::String);
                 let value = table.get_cell(row, col);
                 let scalar = columnar_to_scalar(value, col_type);
-                return match scalar {
+                let mut base = match scalar {
                     CellScalar::Empty => Cell::empty(),
                     other => Cell::from_literal(Some(other)),
                 };
+                if let Some(cell) = overlay {
+                    if cell.number_format.is_some() {
+                        base.number_format = cell.number_format.clone();
+                    }
+                }
+                return base;
             }
+        }
+
+        if let Some(cell) = overlay {
+            return cell.clone();
         }
 
         Cell::empty()
@@ -94,7 +111,7 @@ impl Sheet {
 
     pub fn set_cell(&mut self, row: usize, col: usize, cell: Cell) {
         self.dirty_cells.insert((row, col));
-        if cell.formula.is_none() && cell.input_value.is_none() {
+        if cell.formula.is_none() && cell.input_value.is_none() && cell.number_format.is_none() {
             self.cells.remove(&(row, col));
         } else {
             self.cells.insert((row, col), cell);
@@ -167,6 +184,12 @@ impl Sheet {
         // Overlay sparse edits/formulas.
         for ((row, col), cell) in &self.cells {
             if *row < start_row || *row > end_row || *col < start_col || *col > end_col {
+                continue;
+            }
+            let is_format_only = cell.formula.is_none() && cell.input_value.is_none();
+            if is_format_only && cell.number_format.is_some() && self.columnar.is_some() {
+                // Preserve the underlying columnar value and apply only the format.
+                out[row - start_row][col - start_col].number_format = cell.number_format.clone();
                 continue;
             }
             out[row - start_row][col - start_col] = cell.clone();
@@ -672,13 +695,17 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
     // If formula-xlsb can detect a formula record but can't decode its RGCE token stream yet,
     // it surfaces the formula without any text. In that case we keep the cached value, but also
     // track the cell so we can fall back to Calamine's formula text extraction.
-    let mut missing_formulas: Vec<(usize, String, Vec<(usize, usize, CellScalar, Option<String>)>)> =
-        Vec::new();
+    let mut missing_formulas: Vec<(
+        usize,
+        String,
+        Vec<(usize, usize, CellScalar, Option<String>)>,
+    )> = Vec::new();
 
     for (idx, sheet_meta) in wb.sheet_metas().iter().enumerate() {
         let mut sheet = Sheet::new(sheet_meta.name.clone(), sheet_meta.name.clone());
         let styles = wb.styles();
-        let mut undecoded_formula_cells: Vec<(usize, usize, CellScalar, Option<String>)> = Vec::new();
+        let mut undecoded_formula_cells: Vec<(usize, usize, CellScalar, Option<String>)> =
+            Vec::new();
 
         wb.for_each_cell(idx, |cell| {
             let row = cell.row as usize;
@@ -728,7 +755,11 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         .with_context(|| format!("read xlsb sheet {}", sheet_meta.name))?;
 
         if !undecoded_formula_cells.is_empty() {
-            missing_formulas.push((out.sheets.len(), sheet_meta.name.clone(), undecoded_formula_cells));
+            missing_formulas.push((
+                out.sheets.len(),
+                sheet_meta.name.clone(),
+                undecoded_formula_cells,
+            ));
         }
         out.sheets.push(sheet);
     }
@@ -913,8 +944,12 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
         if !patches.is_empty() && !wants_drop_vba {
             let mut cursor = Cursor::new(Vec::new());
-            patch_xlsx_streaming_workbook_cell_patches(Cursor::new(origin_bytes), &mut cursor, &patches)
-                .context("apply worksheet cell patches (streaming)")?;
+            patch_xlsx_streaming_workbook_cell_patches(
+                Cursor::new(origin_bytes),
+                &mut cursor,
+                &patches,
+            )
+            .context("apply worksheet cell patches (streaming)")?;
             let mut bytes = cursor.into_inner();
             if print_settings_changed {
                 bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
@@ -935,7 +970,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         if wants_drop_vba {
-            pkg.remove_vba_project().context("remove VBA parts for .xlsx")?;
+            pkg.remove_vba_project()
+                .context("remove VBA parts for .xlsx")?;
         }
 
         if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
@@ -955,7 +991,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         let bytes = Arc::<[u8]>::from(bytes);
-        std::fs::write(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+        std::fs::write(path, bytes.as_ref())
+            .with_context(|| format!("write workbook {:?}", path))?;
         return Ok(bytes);
     }
 
@@ -1048,7 +1085,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     } else if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
         && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
     {
-        let mut pkg = XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
+        let mut pkg =
+            XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
         pkg.set_workbook_date_system(xlsx_date_system)
             .context("set workbook date system")?;
         bytes = pkg
@@ -1119,7 +1157,8 @@ mod tests {
         let original_pkg = XlsxPackage::from_bytes(original).expect("parse original package");
         let written_pkg = XlsxPackage::from_bytes(written).expect("parse written package");
 
-        let original_names: HashSet<String> = original_pkg.part_names().map(str::to_owned).collect();
+        let original_names: HashSet<String> =
+            original_pkg.part_names().map(str::to_owned).collect();
         let written_names: HashSet<String> = written_pkg.part_names().map(str::to_owned).collect();
         assert_eq!(
             original_names, written_names,
@@ -1482,7 +1521,11 @@ mod tests {
         write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
 
         let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
-        assert_eq!(report.count(Severity::Critical), 0, "unexpected diffs: {report:?}");
+        assert_eq!(
+            report.count(Severity::Critical),
+            0,
+            "unexpected diffs: {report:?}"
+        );
     }
 
     #[test]
@@ -1499,7 +1542,11 @@ mod tests {
         write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
 
         let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
-        assert_eq!(report.count(Severity::Critical), 0, "unexpected diffs: {report:?}");
+        assert_eq!(
+            report.count(Severity::Critical),
+            0,
+            "unexpected diffs: {report:?}"
+        );
     }
 
     #[test]
@@ -1509,7 +1556,8 @@ mod tests {
             "/../../../fixtures/xlsx/basic/comments.xlsx"
         ));
         let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
-        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
+        let original_pkg =
+            XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
         let original_sheet_xml =
             std::str::from_utf8(original_pkg.part("xl/worksheets/sheet1.xml").unwrap())
                 .expect("original sheet1.xml utf8");
@@ -1518,13 +1566,15 @@ mod tests {
             "expected fixture sheet1.xml to contain legacyDrawing for comments"
         );
 
-        let mut workbook = read_xlsx_blocking(fixture_path).expect("read comments fixture workbook");
+        let mut workbook =
+            read_xlsx_blocking(fixture_path).expect("read comments fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(123.0))),
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
@@ -1587,7 +1637,11 @@ mod tests {
         write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
 
         let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
-        assert_eq!(report.count(Severity::Critical), 0, "unexpected diffs: {report:?}");
+        assert_eq!(
+            report.count(Severity::Critical),
+            0,
+            "unexpected diffs: {report:?}"
+        );
     }
 
     #[test]
@@ -1600,10 +1654,11 @@ mod tests {
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read pivot fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(123.0))),
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
@@ -1651,7 +1706,8 @@ mod tests {
             "/../../../fixtures/xlsx/basic/image.xlsx"
         ));
         let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
-        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
+        let original_pkg =
+            XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
         let original_sheet_xml =
             std::str::from_utf8(original_pkg.part("xl/worksheets/sheet1.xml").unwrap())
                 .expect("original sheet1.xml utf8");
@@ -1663,10 +1719,11 @@ mod tests {
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read image fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(42.0))));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            1,
+            1,
+            Cell::from_literal(Some(CellScalar::Number(42.0))),
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
@@ -1703,7 +1760,8 @@ mod tests {
             "/../../../fixtures/xlsx/hyperlinks/hyperlinks.xlsx"
         ));
         let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
-        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
+        let original_pkg =
+            XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
         let original_sheet_xml =
             std::str::from_utf8(original_pkg.part("xl/worksheets/sheet1.xml").unwrap())
                 .expect("original sheet1.xml utf8");
@@ -1716,10 +1774,11 @@ mod tests {
             read_xlsx_blocking(fixture_path).expect("read hyperlinks fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 1, Cell::from_literal(Some(CellScalar::Number(7.0))));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Number(7.0))),
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
@@ -1851,10 +1910,11 @@ mod tests {
             read_xlsx_blocking(fixture_path).expect("read defined-names fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 2, Cell::from_literal(Some(CellScalar::Number(99.0))));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            2,
+            Cell::from_literal(Some(CellScalar::Number(99.0))),
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
@@ -1886,10 +1946,11 @@ mod tests {
             read_xlsx_blocking(fixture_path).expect("read external-link fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 1, Cell::from_literal(Some(CellScalar::Number(5.0))));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Number(5.0))),
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
@@ -1919,10 +1980,11 @@ mod tests {
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(123.0))),
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
@@ -1982,10 +2044,11 @@ mod tests {
 
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
         let sheet_id = workbook.sheets[0].id.clone();
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(7.0))));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(7.0))),
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsm");
@@ -2045,8 +2108,8 @@ mod tests {
             "expected workbook content type to be converted back to .xlsx"
         );
 
-        let rels = std::str::from_utf8(written_pkg.part("xl/_rels/workbook.xml.rels").unwrap())
-            .unwrap();
+        let rels =
+            std::str::from_utf8(written_pkg.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
         assert!(
             !rels.contains("relationships/vbaProject"),
             "expected workbook.xml.rels to drop the vbaProject relationship"
@@ -2149,8 +2212,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
-        let written_bytes = write_xlsx_blocking(&out_path, state.get_workbook().unwrap())
-            .expect("write workbook");
+        let written_bytes =
+            write_xlsx_blocking(&out_path, state.get_workbook().unwrap()).expect("write workbook");
 
         let doc =
             formula_xlsx::load_from_bytes(written_bytes.as_ref()).expect("load saved workbook from bytes");
@@ -2190,8 +2253,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("reverted.xlsx");
-        let _ = write_xlsx_blocking(&out_path, state.get_workbook().unwrap())
-            .expect("write workbook");
+        let _ =
+            write_xlsx_blocking(&out_path, state.get_workbook().unwrap()).expect("write workbook");
 
         assert_no_critical_diffs(fixture_path, &out_path);
     }
@@ -2206,7 +2269,8 @@ mod tests {
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read print-settings workbook");
         assert_eq!(workbook.print_settings.sheets.len(), 1);
 
-        workbook.print_settings.sheets[0].page_setup.orientation = formula_xlsx::print::Orientation::Portrait;
+        workbook.print_settings.sheets[0].page_setup.orientation =
+            formula_xlsx::print::Orientation::Portrait;
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("print-settings-updated.xlsx");
@@ -2218,16 +2282,22 @@ mod tests {
             "expected print settings change to rewrite the workbook"
         );
 
-        let settings = read_workbook_print_settings(&written_bytes).expect("read workbook print settings");
+        let settings =
+            read_workbook_print_settings(&written_bytes).expect("read workbook print settings");
         assert_eq!(settings.sheets.len(), 1);
         assert_eq!(
             settings.sheets[0].page_setup.orientation,
             formula_xlsx::print::Orientation::Portrait
         );
 
-        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
+        let original_pkg =
+            XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
         let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
-        for part in ["[Content_Types].xml", "_rels/.rels", "xl/_rels/workbook.xml.rels"] {
+        for part in [
+            "[Content_Types].xml",
+            "_rels/.rels",
+            "xl/_rels/workbook.xml.rels",
+        ] {
             assert_eq!(
                 original_pkg.part(part),
                 written_pkg.part(part),
@@ -2256,7 +2326,8 @@ mod tests {
         let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read print-settings workbook");
 
-        workbook.print_settings.sheets[0].page_setup.orientation = formula_xlsx::print::Orientation::Portrait;
+        workbook.print_settings.sheets[0].page_setup.orientation =
+            formula_xlsx::print::Orientation::Portrait;
         // Restore baseline to ensure we don't churn the workbook when the user reverts changes.
         workbook.print_settings = workbook.original_print_settings.clone();
 

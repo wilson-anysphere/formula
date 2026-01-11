@@ -378,13 +378,16 @@ if (
         import("./panels/python/pythonPanelMount.js")
           .then(({ mountPythonPanel }) => {
             if (disposed) return;
-            const mounted = mountPythonPanel({
-              doc: app.getDocument(),
-              container,
-              getActiveSheetId: () => app.getCurrentSheetId(),
-              getSelection: () => {
-                const ranges = app.getSelectionRanges();
-                const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+             const mounted = mountPythonPanel({
+               doc: app.getDocument(),
+               container,
+               workbookId,
+               invoke: queuedInvoke ?? undefined,
+               drainBackendSync,
+               getActiveSheetId: () => app.getCurrentSheetId(),
+               getSelection: () => {
+                 const ranges = app.getSelectionRanges();
+                 const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
                 return {
                   sheet_id: app.getCurrentSheetId(),
                   start_row: first.startRow,

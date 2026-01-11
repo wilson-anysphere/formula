@@ -1,78 +1,80 @@
 import { PyodideRuntime } from "@formula/python-runtime";
 import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
+import { applyMacroCellUpdates } from "../../macros/applyUpdates";
 
 const PYODIDE_INDEX_URL = globalThis.__pyodideIndexURL || "/pyodide/v0.25.1/full/";
+const DEFAULT_NATIVE_PERMISSIONS = { filesystem: "none", network: "none" };
+const DEFAULT_TIMEOUT_MS = 5_000;
+const DEFAULT_MAX_MEMORY_BYTES = 256 * 1024 * 1024;
+
+/**
+ * @param {any[] | undefined} raw
+ */
+function normalizeUpdates(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const out = [];
+  for (const u of raw) {
+    if (!u || typeof u !== "object") continue;
+    const sheetId = String(u.sheet_id ?? "").trim();
+    const row = Number(u.row);
+    const col = Number(u.col);
+    if (!sheetId) continue;
+    if (!Number.isInteger(row) || row < 0) continue;
+    if (!Number.isInteger(col) || col < 0) continue;
+
+    out.push({
+      sheetId,
+      row,
+      col,
+      value: u.value ?? null,
+      formula: typeof u.formula === "string" ? u.formula : null,
+      displayValue: String(u.display_value ?? ""),
+    });
+  }
+  return out;
+}
+
+function getTauriInvoke(explicit) {
+  if (typeof explicit === "function") return explicit;
+  return globalThis.__TAURI__?.core?.invoke;
+}
 
 /**
  * @param {{
  *   doc: import("../../document/documentController.js").DocumentController,
  *   container: HTMLElement,
+ *   workbookId?: string,
+ *   invoke?: (cmd: string, args?: any) => Promise<any>,
+ *   drainBackendSync?: () => Promise<void>,
  *   getActiveSheetId?: () => string,
  *   getSelection?: () => { sheet_id: string, start_row: number, start_col: number, end_row: number, end_col: number },
  *   setSelection?: (selection: { sheet_id: string, start_row: number, start_col: number, end_row: number, end_col: number }) => void,
  * }} params
  * @returns {{ dispose: () => void }}
  */
-export function mountPythonPanel({ doc, container, getActiveSheetId, getSelection, setSelection }) {
-  class PanelBridge extends DocumentControllerBridge {
-    constructor(doc, options) {
-      super(doc, options);
-      this._getActiveSheetId = options.getActiveSheetId;
-      this._getSelection = options.getSelection;
-      this._setSelection = options.setSelection;
-    }
-
-    get_active_sheet_id() {
-      const sheetId = this._getActiveSheetId?.();
-      if (sheetId) {
-        this.activeSheetId = sheetId;
-        this.sheetIds.add(sheetId);
-        if (this.selection) this.selection.sheet_id = sheetId;
-      }
-      return this.activeSheetId;
-    }
-
-    get_selection() {
-      const selection = this._getSelection?.();
-      if (selection && selection.sheet_id) {
-        this.activeSheetId = selection.sheet_id;
-        this.sheetIds.add(selection.sheet_id);
-        this.selection = { ...selection };
-      }
-      return { ...this.selection };
-    }
-
-    set_selection({ selection }) {
-      if (selection && selection.sheet_id) {
-        try {
-          this._setSelection?.(selection);
-        } catch {
-          // ignore
-        }
-      }
-      return super.set_selection({ selection });
-    }
-  }
-
-  const bridge = new PanelBridge(doc, {
-    activeSheetId: getActiveSheetId?.() ?? "Sheet1",
-    getActiveSheetId,
-    getSelection,
-    setSelection,
-  });
-
-  const runtime = new PyodideRuntime({
-    api: bridge,
-    indexURL: PYODIDE_INDEX_URL,
-    rpcTimeoutMs: 5_000,
-  });
-
+export function mountPythonPanel({
+  doc,
+  container,
+  workbookId,
+  invoke,
+  drainBackendSync,
+  getActiveSheetId,
+  getSelection,
+  setSelection,
+}) {
   const isolation = {
     crossOriginIsolated: globalThis.crossOriginIsolated === true,
     sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
   };
 
   let initPromise = null;
+  /** @type {PyodideRuntime | null} */
+  let pyodideRuntime = null;
+  /** @type {any | null} */
+  let pyodideBridge = null;
+
+  const tauriInvoke = getTauriInvoke(invoke);
+  const nativeAvailable = typeof tauriInvoke === "function";
 
   container.innerHTML = "";
 
@@ -81,6 +83,23 @@ export function mountPythonPanel({ doc, container, getActiveSheetId, getSelectio
   toolbar.style.gap = "8px";
   toolbar.style.padding = "8px";
   toolbar.style.borderBottom = "1px solid var(--panel-border)";
+
+  const runtimeSelect = document.createElement("select");
+  runtimeSelect.dataset.testid = "python-panel-runtime";
+  runtimeSelect.style.maxWidth = "240px";
+  runtimeSelect.title = "Python runtime";
+  const pyodideOption = document.createElement("option");
+  pyodideOption.value = "pyodide";
+  pyodideOption.textContent = "Pyodide (Web)";
+  runtimeSelect.appendChild(pyodideOption);
+  if (nativeAvailable) {
+    const nativeOption = document.createElement("option");
+    nativeOption.value = "native";
+    nativeOption.textContent = "Native Python (Desktop)";
+    runtimeSelect.appendChild(nativeOption);
+  }
+  runtimeSelect.value = nativeAvailable ? "native" : "pyodide";
+  toolbar.appendChild(runtimeSelect);
 
   const runButton = document.createElement("button");
   runButton.type = "button";
@@ -93,9 +112,6 @@ export function mountPythonPanel({ doc, container, getActiveSheetId, getSelectio
   isolationLabel.style.marginLeft = "auto";
   isolationLabel.style.fontSize = "12px";
   isolationLabel.style.color = "var(--text-secondary)";
-  isolationLabel.textContent = isolation.sharedArrayBuffer
-    ? "SharedArrayBuffer enabled"
-    : "SharedArrayBuffer unavailable (crossOriginIsolated required)";
   toolbar.appendChild(isolationLabel);
 
   const editorHost = document.createElement("div");
@@ -141,17 +157,98 @@ export function mountPythonPanel({ doc, container, getActiveSheetId, getSelectio
     consoleHost.textContent = text;
   };
 
-  if (!isolation.sharedArrayBuffer || !isolation.crossOriginIsolated) {
-    setOutput(
-      "SharedArrayBuffer is required for the Pyodide formula bridge.\n\n" +
-        "In browsers/webviews this requires a cross-origin isolated context (COOP/COEP).\n" +
-        "Formula's Vite dev server config enables this automatically; other hosts must do the same.",
-    );
+  const updateRuntimeStatus = () => {
+    if (runtimeSelect.value === "native") {
+      isolationLabel.textContent = nativeAvailable ? "Using system Python via Tauri" : "Native runtime unavailable";
+      return;
+    }
+    isolationLabel.textContent = isolation.sharedArrayBuffer
+      ? "SharedArrayBuffer enabled"
+      : "SharedArrayBuffer unavailable (crossOriginIsolated required)";
+  };
+
+  updateRuntimeStatus();
+
+  runtimeSelect.addEventListener("change", () => {
+    updateRuntimeStatus();
+    if (runtimeSelect.value === "pyodide" && (!isolation.sharedArrayBuffer || !isolation.crossOriginIsolated)) {
+      setOutput(
+        "SharedArrayBuffer is required for the Pyodide formula bridge.\n\n" +
+          "In browsers/webviews this requires a cross-origin isolated context (COOP/COEP).\n" +
+          "Formula's Vite dev server config enables this automatically; other hosts must do the same.",
+      );
+    } else {
+      setOutput("");
+    }
+  });
+
+  if (runtimeSelect.value === "pyodide" && (!isolation.sharedArrayBuffer || !isolation.crossOriginIsolated)) {
+    runtimeSelect.dispatchEvent(new Event("change"));
+  }
+
+  class PanelBridge extends DocumentControllerBridge {
+    constructor(doc, options) {
+      super(doc, options);
+      this._getActiveSheetId = options.getActiveSheetId;
+      this._getSelection = options.getSelection;
+      this._setSelection = options.setSelection;
+    }
+
+    get_active_sheet_id() {
+      const sheetId = this._getActiveSheetId?.();
+      if (sheetId) {
+        this.activeSheetId = sheetId;
+        this.sheetIds.add(sheetId);
+        if (this.selection) this.selection.sheet_id = sheetId;
+      }
+      return this.activeSheetId;
+    }
+
+    get_selection() {
+      const selection = this._getSelection?.();
+      if (selection && selection.sheet_id) {
+        this.activeSheetId = selection.sheet_id;
+        this.sheetIds.add(selection.sheet_id);
+        this.selection = { ...selection };
+      }
+      return { ...this.selection };
+    }
+
+    set_selection({ selection }) {
+      if (selection && selection.sheet_id) {
+        try {
+          this._setSelection?.(selection);
+        } catch {
+          // ignore
+        }
+      }
+      return super.set_selection({ selection });
+    }
   }
 
   async function ensureInitialized() {
+    if (pyodideRuntime) {
+      if (initPromise) return await initPromise;
+      initPromise = pyodideRuntime.initialize().catch((err) => {
+        initPromise = null;
+        throw err;
+      });
+      return await initPromise;
+    }
     if (initPromise) return await initPromise;
-    initPromise = runtime.initialize().catch((err) => {
+    pyodideBridge = new PanelBridge(doc, {
+      activeSheetId: getActiveSheetId?.() ?? "Sheet1",
+      getActiveSheetId,
+      getSelection,
+      setSelection,
+    });
+    pyodideRuntime = new PyodideRuntime({
+      api: pyodideBridge,
+      indexURL: PYODIDE_INDEX_URL,
+      rpcTimeoutMs: 5_000,
+    });
+    if (initPromise) return await initPromise;
+    initPromise = pyodideRuntime.initialize().catch((err) => {
       initPromise = null;
       throw err;
     });
@@ -163,19 +260,69 @@ export function mountPythonPanel({ doc, container, getActiveSheetId, getSelectio
     setOutput("");
 
     try {
-      bridge.activeSheetId = getActiveSheetId?.() ?? bridge.activeSheetId;
-      bridge.sheetIds.add(bridge.activeSheetId);
-      if (bridge.selection) bridge.selection.sheet_id = bridge.activeSheetId;
+      if (runtimeSelect.value === "native") {
+        if (!nativeAvailable) {
+          throw new Error("Native Python runtime is not available (Tauri invoke missing)");
+        }
+
+        // Allow microtask-batched backend edits to enqueue, then flush so the backend workbook
+        // state matches the grid before running the script (same pattern as macros).
+        await new Promise((resolve) => queueMicrotask(resolve));
+        await drainBackendSync?.();
+
+        const ctx = {
+          active_sheet_id: getActiveSheetId?.() ?? undefined,
+          selection: getSelection?.() ?? undefined,
+        };
+
+        const result = await tauriInvoke("run_python_script", {
+          workbook_id: workbookId ?? null,
+          code: editor.value,
+          permissions: DEFAULT_NATIVE_PERMISSIONS,
+          timeout_ms: DEFAULT_TIMEOUT_MS,
+          max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
+          context: ctx,
+        });
+
+        const updates = normalizeUpdates(result?.updates);
+        if (updates.length > 0) {
+          doc.beginBatch({ label: "Run Python" });
+          let committed = false;
+          try {
+            applyMacroCellUpdates(doc, updates);
+            committed = true;
+          } finally {
+            if (committed) doc.endBatch();
+            else doc.cancelBatch();
+          }
+        }
+
+        const stdout = typeof result?.stdout === "string" ? result.stdout : "";
+        const stderr = typeof result?.stderr === "string" ? result.stderr : "";
+        const errMessage = result?.error?.message ? String(result.error.message) : "";
+        const errStack = result?.error?.stack ? String(result.error.stack) : "";
+        const header = errMessage ? `${errMessage}${errStack ? `\n\n${errStack}` : ""}` : "";
+        const output = [
+          header ? `--- error ---\n${header}` : null,
+          stdout ? `--- stdout ---\n${stdout}` : null,
+          stderr ? `--- stderr ---\n${stderr}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+
+        setOutput(output || "(no output)");
+        return;
+      }
 
       await ensureInitialized();
-      const result = await runtime.execute(editor.value);
+      pyodideBridge.activeSheetId = getActiveSheetId?.() ?? pyodideBridge.activeSheetId;
+      pyodideBridge.sheetIds.add(pyodideBridge.activeSheetId);
+      if (pyodideBridge.selection) pyodideBridge.selection.sheet_id = pyodideBridge.activeSheetId;
+      const result = await pyodideRuntime.execute(editor.value);
 
       const stdout = typeof result.stdout === "string" ? result.stdout : "";
       const stderr = typeof result.stderr === "string" ? result.stderr : "";
-      const output = [
-        stdout ? `--- stdout ---\n${stdout}` : null,
-        stderr ? `--- stderr ---\n${stderr}` : null,
-      ]
+      const output = [stdout ? `--- stdout ---\n${stdout}` : null, stderr ? `--- stderr ---\n${stderr}` : null]
         .filter(Boolean)
         .join("\n\n");
 
@@ -195,7 +342,7 @@ export function mountPythonPanel({ doc, container, getActiveSheetId, getSelectio
 
   return {
     dispose: () => {
-      runtime.destroy();
+      pyodideRuntime?.destroy();
       container.innerHTML = "";
     },
   };
