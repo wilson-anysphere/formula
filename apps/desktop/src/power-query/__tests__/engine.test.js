@@ -613,3 +613,19 @@ test("database cache keys vary by connection identity and credentialId", async (
   const key3 = await engine.getCacheKey(baseQuery, {}, {});
   assert.notEqual(key1, key3);
 });
+
+test("sqlite connections with relative paths are treated as non-cacheable", async () => {
+  const engine = createDesktopQueryEngine({
+    fileAdapter: { readText: async () => "", readBinary: async () => new Uint8Array() },
+  });
+
+  const query = {
+    id: "q_db_rel",
+    name: "DB Rel",
+    source: { type: "database", connection: { kind: "sqlite", path: "relative.db" }, query: "SELECT 1" },
+    steps: [],
+  };
+
+  const key = await engine.getCacheKey(query, {}, {});
+  assert.equal(key, null);
+});

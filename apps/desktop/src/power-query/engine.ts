@@ -581,7 +581,13 @@ function parseConnectionIdentity(connection: unknown): unknown {
     if (inMemory) return "sqlite::memory:";
     const path = (connection as any).path;
     if (typeof path !== "string" || path.length === 0) return null;
-    return normalizeFilePath(path);
+    const normalized = normalizeFilePath(path);
+    const isAbsolute = normalized.startsWith("/") || /^[a-z]:\//.test(normalized);
+    // Only use absolute paths as stable identities. Relative SQLite paths are
+    // ambiguous (depend on the process working directory) and can lead to cache
+    // collisions or permission-prompt reuse across distinct databases.
+    if (!isAbsolute) return null;
+    return normalized;
   }
 
   if (kind === "postgres") {
