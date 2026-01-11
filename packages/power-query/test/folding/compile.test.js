@@ -31,7 +31,7 @@ test("compile: folds selectColumns/filterRows/groupBy into a parameterized SQL p
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT t."Region", COALESCE(SUM(CASE WHEN TRIM(CAST(t."Sales" AS TEXT)) = \'\' THEN NULL WHEN TRIM(CAST(t."Sales" AS TEXT)) ~ \'^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$\' THEN CAST(TRIM(CAST(t."Sales" AS TEXT)) AS DOUBLE PRECISION) ELSE NULL END), 0) AS "Total Sales" FROM (SELECT * FROM (SELECT t."Region", t."Sales" FROM (SELECT * FROM sales) AS t) AS t WHERE (t."Region" = ?)) AS t GROUP BY t."Region"',
+    sql: 'SELECT t."Region", COALESCE(SUM(CASE WHEN TRIM(CAST(t."Sales" AS TEXT)) = \'\' THEN NULL WHEN TRIM(CAST(t."Sales" AS TEXT)) ~ \'^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$\' THEN (CASE WHEN isfinite(CAST(TRIM(CAST(t."Sales" AS TEXT)) AS DOUBLE PRECISION)) THEN CAST(TRIM(CAST(t."Sales" AS TEXT)) AS DOUBLE PRECISION) ELSE NULL END) ELSE NULL END), 0) AS "Total Sales" FROM (SELECT * FROM (SELECT t."Region", t."Sales" FROM (SELECT * FROM sales) AS t) AS t WHERE (t."Region" = ?)) AS t GROUP BY t."Region"',
     params: ["East"],
   });
 });
@@ -139,7 +139,7 @@ test("compile: folds changeType via CAST when output columns are known", () => {
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT CASE WHEN TRIM(CAST(t."Value" AS TEXT)) = \'\' THEN NULL WHEN TRIM(CAST(t."Value" AS TEXT)) ~ \'^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$\' THEN CAST(TRIM(CAST(t."Value" AS TEXT)) AS DOUBLE PRECISION) ELSE NULL END AS "Value" FROM (SELECT * FROM raw) AS t',
+    sql: 'SELECT CASE WHEN TRIM(CAST(t."Value" AS TEXT)) = \'\' THEN NULL WHEN TRIM(CAST(t."Value" AS TEXT)) ~ \'^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$\' THEN (CASE WHEN isfinite(CAST(TRIM(CAST(t."Value" AS TEXT)) AS DOUBLE PRECISION)) THEN CAST(TRIM(CAST(t."Value" AS TEXT)) AS DOUBLE PRECISION) ELSE NULL END) ELSE NULL END AS "Value" FROM (SELECT * FROM raw) AS t',
     params: [],
   });
 });

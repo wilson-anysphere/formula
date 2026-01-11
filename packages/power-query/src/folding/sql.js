@@ -707,12 +707,13 @@ function safeCastNumberToSql(dialect, colRef) {
   // operator (e.g. SQLite) fall back to local execution.
   const trimmed = `TRIM(${dialect.castText(colRef)})`;
   const pattern = "'^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$'";
+  const casted = `CAST(${trimmed} AS ${sqlType})`;
 
   switch (dialect.name) {
     case "postgres":
-      return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} ~ ${pattern} THEN CAST(${trimmed} AS ${sqlType}) ELSE NULL END`;
+      return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} ~ ${pattern} THEN (CASE WHEN isfinite(${casted}) THEN ${casted} ELSE NULL END) ELSE NULL END`;
     case "mysql":
-      return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} REGEXP ${pattern} THEN CAST(${trimmed} AS ${sqlType}) ELSE NULL END`;
+      return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} REGEXP ${pattern} THEN (CASE WHEN ABS(${casted}) <= 1.7976931348623157e308 THEN ${casted} ELSE NULL END) ELSE NULL END`;
     case "sqlite":
       return null;
     default: {

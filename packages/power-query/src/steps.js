@@ -210,6 +210,8 @@ function sortRows(table, sortBy) {
   return new DataTable(table.columns, decorated.map((d) => d.row));
 }
 
+const NUMBER_TEXT_RE = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+
 /**
  * @param {unknown} value
  * @returns {number | null}
@@ -219,8 +221,9 @@ function toNumberOrNull(value) {
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (trimmed === "") return null;
+    if (!NUMBER_TEXT_RE.test(trimmed)) return null;
     const num = Number(trimmed);
-    if (Number.isFinite(num)) return num;
+    return Number.isFinite(num) ? num : null;
   }
   return null;
 }
