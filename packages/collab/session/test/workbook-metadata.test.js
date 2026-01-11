@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
@@ -119,6 +120,48 @@ test("CollabSession workbook metadata: sheets + namedRanges sync and local undo 
   disconnect();
   docA.destroy();
   docB.destroy();
+});
+
+test("CollabSession SheetManager.moveSheet works with sheets created by a different Yjs instance (CJS applyUpdate)", () => {
+  const require = createRequire(import.meta.url);
+  // eslint-disable-next-line import/no-named-as-default-member
+  const Ycjs = require("yjs");
+
+  const remote = new Ycjs.Doc();
+  const sheets = remote.getArray("sheets");
+  remote.transact(() => {
+    const sheet1 = new Ycjs.Map();
+    sheet1.set("id", "Sheet1");
+    sheet1.set("name", "Sheet1");
+
+    const sheet2 = new Ycjs.Map();
+    sheet2.set("id", "Sheet2");
+    sheet2.set("name", "Sheet2");
+
+    sheets.push([sheet1, sheet2]);
+  });
+
+  const update = Ycjs.encodeStateAsUpdate(remote);
+  const doc = new Y.Doc();
+
+  // Apply update via the CJS build to simulate y-websocket applying updates.
+  Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
+
+  const session = createCollabSession({ doc, undo: {} });
+  const sheetsMgr = createSheetManagerForSession(session);
+
+  assert.deepEqual(snapshotSheets(session).map((s) => s.id), ["Sheet1", "Sheet2"]);
+
+  sheetsMgr.moveSheet("Sheet1", 1);
+  session.undo?.stopCapturing();
+  assert.deepEqual(snapshotSheets(session).map((s) => s.id), ["Sheet2", "Sheet1"]);
+
+  session.undo?.undo();
+  assert.deepEqual(snapshotSheets(session).map((s) => s.id), ["Sheet1", "Sheet2"]);
+
+  session.destroy();
+  doc.destroy();
+  remote.destroy();
 });
 
 test("CollabSession schema normalizes duplicate sheet ids when docs merge (in-memory)", () => {

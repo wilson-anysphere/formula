@@ -158,26 +158,29 @@ function coerceString(value: unknown): string | null {
   return String(value);
 }
 
-function cloneYjsValue(value: any): any {
+type DocTypeConstructors = {
+  MapCtor: new () => any;
+  ArrayCtor: new () => any;
+  TextCtor: new () => any;
+};
+
+function cloneYjsValueWithCtors(value: any, ctors: DocTypeConstructors): any {
   if (value?.constructor?.name === "YMap" && typeof value.forEach === "function") {
-    const Ctor = value.constructor as any;
-    const out = new Ctor();
+    const out = new ctors.MapCtor();
     value.forEach((v: any, k: string) => {
-      out.set(k, cloneYjsValue(v));
+      out.set(k, cloneYjsValueWithCtors(v, ctors));
     });
     return out;
   }
   if (value?.constructor?.name === "YArray" && typeof value.toArray === "function") {
-    const Ctor = value.constructor as any;
-    const out = new Ctor();
+    const out = new ctors.ArrayCtor();
     for (const item of value.toArray()) {
-      out.push([cloneYjsValue(item)]);
+      out.push([cloneYjsValueWithCtors(item, ctors)]);
     }
     return out;
   }
   if (value?.constructor?.name === "YText" && typeof value.toDelta === "function") {
-    const Ctor = value.constructor as any;
-    const out = new Ctor();
+    const out = new ctors.TextCtor();
     out.applyDelta(structuredClone(value.toDelta()));
     return out;
   }
@@ -187,15 +190,36 @@ function cloneYjsValue(value: any): any {
   return value;
 }
 
+function findAvailableRootName(doc: Y.Doc, base: string): string {
+  if (!doc.share.has(base)) return base;
+  for (let i = 1; i < 1000; i += 1) {
+    const name = `${base}_${i}`;
+    if (!doc.share.has(name)) return name;
+  }
+  return `${base}_${Date.now()}`;
+}
+
+function getDocTextConstructor(doc: any): new () => any {
+  const name = findAvailableRootName(doc, "__workbook_tmp_text");
+  const tmp = doc.getText(name);
+  const ctor = tmp.constructor as new () => any;
+  doc.share.delete(name);
+  return ctor;
+}
+
 export class SheetManager {
   readonly sheets: Y.Array<Y.Map<unknown>>;
   private readonly transact: WorkbookTransact;
   private readonly YMapCtor: { new (): Y.Map<unknown> };
+  private readonly YArrayCtor: { new (): Y.Array<any> };
+  private readonly YTextCtor: { new (): Y.Text };
 
   constructor(opts: { doc: Y.Doc; transact?: WorkbookTransact }) {
     this.sheets = opts.doc.getArray<Y.Map<unknown>>("sheets");
     this.transact = opts.transact ?? defaultTransact(opts.doc);
     this.YMapCtor = opts.doc.getMap("cells").constructor as unknown as { new (): Y.Map<unknown> };
+    this.YArrayCtor = this.sheets.constructor as unknown as { new (): Y.Array<any> };
+    this.YTextCtor = getDocTextConstructor(opts.doc) as unknown as { new (): Y.Text };
   }
 
   list(): Array<{ id: string; name: string | null }> {
@@ -270,7 +294,11 @@ export class SheetManager {
       const sheet = this.sheets.get(fromIndex);
       if (!sheet) throw new Error(`Sheet missing at index ${fromIndex}: ${id}`);
 
-      const sheetClone = cloneYjsValue(sheet);
+      const sheetClone = cloneYjsValueWithCtors(sheet, {
+        MapCtor: this.YMapCtor,
+        ArrayCtor: this.YArrayCtor,
+        TextCtor: this.YTextCtor,
+      });
       this.sheets.delete(fromIndex, 1);
       this.sheets.insert(targetIndex, [sheetClone]);
     });
