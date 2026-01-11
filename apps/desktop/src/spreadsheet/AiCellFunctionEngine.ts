@@ -37,6 +37,9 @@ const MAX_RANGE_PREVIEW_VALUES = 30;
 const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
 
+const ERROR_CODE_REGEX =
+  /^#(?:DIV\/0!|N\/A|NAME\?|NULL!|NUM!|REF!|SPILL!|VALUE!|CALC!|GETTING_DATA|DLP!|AI!)$/;
+
 export interface AiCellFunctionEngineOptions {
   llmClient?: LLMClient;
   model?: string;
@@ -1115,7 +1118,7 @@ function firstErrorCodeInValue(value: CellValue): string | null {
 }
 
 function isErrorCode(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("#");
+  return typeof value === "string" && ERROR_CODE_REGEX.test(value);
 }
 
 function isProvenanceCellValue(value: unknown): value is ProvenanceCellValue {

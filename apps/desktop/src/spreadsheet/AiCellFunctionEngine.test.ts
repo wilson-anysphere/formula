@@ -441,6 +441,33 @@ describe("AiCellFunctionEngine", () => {
     expect(llmClient.chat).not.toHaveBeenCalled();
   });
 
+  it("does not treat arbitrary #prefixed strings as spreadsheet errors", async () => {
+    const workbookId = "hash-text-workbook";
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const pending = evaluateFormula('=AI("summarize", A1)', (ref) => (ref === "A1" ? "#hashtag" : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    expect(llmClient.chat).toHaveBeenCalledTimes(1);
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("#hashtag");
+  });
+
   it("budgeting compacts large ranges in the prompt", async () => {
     const workbookId = "budget-workbook";
     const llmClient = {

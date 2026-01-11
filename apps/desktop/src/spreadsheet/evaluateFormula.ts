@@ -59,8 +59,11 @@ export interface EvaluateFormulaOptions {
   aiRangeSampleLimit?: number;
 }
 
+const ERROR_CODE_REGEX =
+  /^#(?:DIV\/0!|N\/A|NAME\?|NULL!|NUM!|REF!|SPILL!|VALUE!|CALC!|GETTING_DATA|DLP!|AI!)$/;
+
 function isErrorCode(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("#");
+  return typeof value === "string" && ERROR_CODE_REGEX.test(value);
 }
 
 function isProvenanceCellValue(value: unknown): value is ProvenanceCellValue {
