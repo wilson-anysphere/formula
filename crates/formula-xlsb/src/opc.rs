@@ -306,8 +306,8 @@ impl XlsbWorkbook {
 
     /// Save the workbook with an updated numeric cell value.
     ///
-    /// This is a convenience wrapper around the streaming worksheet patcher
-    /// ([`patch_sheet_bin`]) plus the part override writer
+    /// This is a convenience wrapper around the in-memory worksheet patcher ([`patch_sheet_bin`])
+    /// plus the part override writer
     /// ([`XlsbWorkbook::save_with_part_overrides`]).
     ///
     /// Note: this may insert missing `BrtRow` / cell records inside `BrtSheetData` if the target
@@ -334,6 +334,9 @@ impl XlsbWorkbook {
     }
 
     /// Save the workbook with a set of edits for a single worksheet.
+    ///
+    /// This loads `xl/worksheets/sheetN.bin` into memory. For very large worksheets, consider
+    /// [`XlsbWorkbook::save_with_cell_edits_streaming`].
     pub fn save_with_cell_edits(
         &self,
         dest: impl AsRef<Path>,
