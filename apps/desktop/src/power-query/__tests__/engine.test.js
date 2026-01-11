@@ -835,6 +835,55 @@ test("sqlite database cache entries are invalidated when the db file mtime chang
   }
 });
 
+test("odbc sqlite database cache entries are invalidated when the db file mtime changes", async () => {
+  let mtimeMs = 1_000;
+  let queryCount = 0;
+
+  const engine = createDesktopQueryEngine({
+    fileAdapter: {
+      readText: async () => "",
+      readBinary: async () => new Uint8Array(),
+      stat: async () => ({ mtimeMs }),
+    },
+  });
+
+  const originalTauri = globalThis.__TAURI__;
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd) => {
+        if (cmd === "sql_query") {
+          queryCount += 1;
+          return { columns: ["A"], types: { A: "number" }, rows: [[1]] };
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const query = {
+      id: "q_odbc_sqlite_cache_mtime",
+      name: "ODBC SQLite Cache mtime",
+      source: {
+        type: "database",
+        connection: { kind: "odbc", connectionString: "Driver=SQLite3;Database=/tmp/test.db" },
+        query: "SELECT 1 AS A",
+      },
+      steps: [],
+    };
+
+    await engine.executeQuery(query, {}, {});
+    await engine.executeQuery(query, {}, {});
+    assert.equal(queryCount, 1, "expected second execution to reuse cached result");
+
+    mtimeMs = 2_000;
+    await engine.executeQuery(query, {}, {});
+    assert.equal(queryCount, 2, "expected cache to invalidate when odbc sqlite db mtime changes");
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});
+
 test("sql_get_schema resolves credential handles before invoking Tauri", async () => {
   const originalTauri = globalThis.__TAURI__;
 

@@ -1154,18 +1154,39 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     if (!fileAdapter.stat) return {};
     const connection = request?.connection;
     if (!connection || typeof connection !== "object" || Array.isArray(connection)) return {};
-    if (connection.kind !== "sqlite") return {};
 
-    const inMemory = connection.inMemory ?? connection.in_memory;
-    if (inMemory) return {};
+    /** @type {string | null} */
+    let sqlitePath = null;
+    let sqliteInMemory = false;
 
-    const path = typeof connection.path === "string" ? connection.path : "";
-    if (!path) return {};
-    const normalized = normalizeFilePath(path);
+    if (connection.kind === "sqlite") {
+      const inMemory = connection.inMemory ?? connection.in_memory;
+      if (inMemory) return {};
+
+      const path = typeof connection.path === "string" ? connection.path : "";
+      if (!path) return {};
+      sqlitePath = path;
+    } else if (connection.kind === "odbc") {
+      const connectionString = typeof connection.connectionString === "string" ? connection.connectionString : "";
+      if (!connectionString) return {};
+      const props = parseOdbcConnectionString(connectionString);
+      const driver = String(props.driver ?? props.drv ?? "").toLowerCase();
+      if (!driver.includes("sqlite")) return {};
+
+      const path = String(props.database ?? props.dbq ?? props.datasource ?? "");
+      if (!path) return {};
+      sqliteInMemory = path.trim().toLowerCase() === ":memory:" || path.trim().toLowerCase() === "memory";
+      if (sqliteInMemory) return {};
+      sqlitePath = path;
+    } else {
+      return {};
+    }
+
+    const normalized = normalizeFilePath(sqlitePath);
     const isAbsolute = normalized.startsWith("/") || /^[a-z]:\//.test(normalized);
     if (!isAbsolute) return {};
 
-    const result = await fileAdapter.stat(path);
+    const result = await fileAdapter.stat(sqlitePath);
     if (signal?.aborted) throw abortError();
     const mtimeMs = result?.mtimeMs;
     if (typeof mtimeMs !== "number" || !Number.isFinite(mtimeMs)) return {};

@@ -159,6 +159,41 @@ fn odbc_first<'a>(props: &'a HashMap<String, String>, keys: &[&str]) -> Option<&
     None
 }
 
+fn parse_host_port(input: &str) -> (String, Option<u16>) {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return (String::new(), None);
+    }
+
+    if let Some((host, port_str)) = trimmed.rsplit_once(',') {
+        if let Ok(port) = port_str.trim().parse::<u16>() {
+            return (host.trim().trim_start_matches('[').trim_end_matches(']').to_string(), Some(port));
+        }
+    }
+
+    if let Some((host, port_str)) = trimmed.rsplit_once(':') {
+        let host_trimmed = host.trim();
+        let port_trimmed = port_str.trim();
+        if host_trimmed.starts_with('[') && host_trimmed.ends_with(']') {
+            if let Ok(port) = port_trimmed.parse::<u16>() {
+                return (
+                    host_trimmed
+                        .trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .to_string(),
+                    Some(port),
+                );
+            }
+        } else if !host_trimmed.contains(':') {
+            if let Ok(port) = port_trimmed.parse::<u16>() {
+                return (host_trimmed.to_string(), Some(port));
+            }
+        }
+    }
+
+    (trimmed.trim_start_matches('[').trim_end_matches(']').to_string(), None)
+}
+
 fn sqlite_type_to_data_type(type_name: &str) -> SqlDataType {
     let normalized = type_name.trim().to_ascii_lowercase();
     if normalized.contains("int") || normalized.contains("real") || normalized.contains("floa") || normalized.contains("doub") || normalized.contains("num") {
@@ -621,13 +656,21 @@ pub async fn sql_query(
                 opts = opts.create_if_missing(false);
                 query_sqlite(&opts, &sql, &params).await
             } else if driver_lower.contains("postgres") {
-                let host = odbc_first(&props, &["server", "host", "hostname", "servername", "address"])
+                let server_raw = odbc_first(&props, &["server", "host", "hostname", "servername", "address"])
                     .map(|s| s.to_string())
                     .ok_or_else(|| anyhow!("odbc postgres connection string requires a `Server` (or `Host`) field"))?;
                 let database = odbc_first(&props, &["database", "db", "dbname"])
                     .map(|s| s.to_string())
                     .ok_or_else(|| anyhow!("odbc postgres connection string requires a `Database` field"))?;
-                let port = odbc_first(&props, &["port"]).and_then(|s| s.trim().parse::<u16>().ok());
+                let mut port = odbc_first(&props, &["port"]).and_then(|s| s.trim().parse::<u16>().ok());
+                let (host, embedded_port) = if port.is_none() {
+                    parse_host_port(&server_raw)
+                } else {
+                    (server_raw, None)
+                };
+                if port.is_none() {
+                    port = embedded_port;
+                }
                 let user = credential_username(credentials.as_ref())
                     .or_else(|| odbc_first(&props, &["uid", "user", "username", "userid"]).map(|s| s.to_string()));
                 let password = credential_password(credentials.as_ref()).or_else(|| {
@@ -760,13 +803,21 @@ pub async fn sql_get_schema(
                 opts = opts.create_if_missing(false);
                 sqlite_schema(&opts, &sql).await
             } else if driver_lower.contains("postgres") {
-                let host = odbc_first(&props, &["server", "host", "hostname", "servername", "address"])
+                let server_raw = odbc_first(&props, &["server", "host", "hostname", "servername", "address"])
                     .map(|s| s.to_string())
                     .ok_or_else(|| anyhow!("odbc postgres connection string requires a `Server` (or `Host`) field"))?;
                 let database = odbc_first(&props, &["database", "db", "dbname"])
                     .map(|s| s.to_string())
                     .ok_or_else(|| anyhow!("odbc postgres connection string requires a `Database` field"))?;
-                let port = odbc_first(&props, &["port"]).and_then(|s| s.trim().parse::<u16>().ok());
+                let mut port = odbc_first(&props, &["port"]).and_then(|s| s.trim().parse::<u16>().ok());
+                let (host, embedded_port) = if port.is_none() {
+                    parse_host_port(&server_raw)
+                } else {
+                    (server_raw, None)
+                };
+                if port.is_none() {
+                    port = embedded_port;
+                }
                 let user = credential_username(credentials.as_ref())
                     .or_else(|| odbc_first(&props, &["uid", "user", "username", "userid"]).map(|s| s.to_string()));
                 let password = credential_password(credentials.as_ref()).or_else(|| {
