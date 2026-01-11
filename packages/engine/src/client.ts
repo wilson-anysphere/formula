@@ -15,8 +15,11 @@ export interface EngineClient {
    * Load a workbook from raw `.xlsx` bytes.
    *
    * The underlying `ArrayBuffer` may be transferred to a Worker thread to avoid
-   * an extra structured-clone copy. This detaches `bytes.buffer` on the calling
-   * side; callers that need to retain the original buffer should pass a copy.
+   * an extra structured-clone copy. When the buffer is transferred it becomes
+   * detached on the calling side.
+   *
+   * If `bytes` is a view into a larger buffer (e.g. a `subarray()`), the engine
+   * may first copy it to a compact buffer so only the view range is transferred.
    */
   loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void>;
   toJson(): Promise<string>;
