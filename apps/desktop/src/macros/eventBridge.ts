@@ -31,6 +31,15 @@ export type SelectionRect = {
   startCol: number;
   endRow: number;
   endCol: number;
+  /**
+   * Optional "active" cell within the selection.
+   *
+   * Excel's `ActiveCell` is not always the top-left corner of `Selection`
+   * (e.g. reverse drag, shift-extended selections). When available, we pass this
+   * separately so event macros see the correct `ActiveCell`.
+   */
+  activeRow?: number;
+  activeCol?: number;
 };
 
 function selectionKey(selection: SelectionRect): string {
@@ -436,12 +445,14 @@ export class MacroEventBridge {
   }
 
   private async setMacroUiContext(selection: SelectionRect): Promise<void> {
+    const activeRow = selection.activeRow ?? selection.startRow;
+    const activeCol = selection.activeCol ?? selection.startCol;
     try {
       await this.invoke("set_macro_ui_context", {
         workbook_id: this.workbookId,
         sheet_id: selection.sheetId,
-        active_row: selection.startRow,
-        active_col: selection.startCol,
+        active_row: activeRow,
+        active_col: activeCol,
         selection: {
           start_row: selection.startRow,
           start_col: selection.startCol,

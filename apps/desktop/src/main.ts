@@ -74,13 +74,29 @@ let macroEventBridge: MacroEventBridge | null = null;
 
 function currentSelectionRect(): SelectionRect {
   const sheetId = app.getCurrentSheetId();
+  const active = app.getActiveCell();
   const ranges = app.getSelectionRanges();
   const first = ranges[0];
   if (first) {
-    return { sheetId, startRow: first.startRow, startCol: first.startCol, endRow: first.endRow, endCol: first.endCol };
+    return {
+      sheetId,
+      startRow: first.startRow,
+      startCol: first.startCol,
+      endRow: first.endRow,
+      endCol: first.endCol,
+      activeRow: active.row,
+      activeCol: active.col,
+    };
   }
-  const active = app.getActiveCell();
-  return { sheetId, startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
+  return {
+    sheetId,
+    startRow: active.row,
+    startCol: active.col,
+    endRow: active.row,
+    endCol: active.col,
+    activeRow: active.row,
+    activeCol: active.col,
+  };
 }
 
 let suppressSelectionEventMacros = false;
