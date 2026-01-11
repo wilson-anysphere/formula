@@ -94,8 +94,11 @@ fn xmatch_supports_wildcards_and_escapes() {
 
     sheet.set("B1", "*");
     sheet.set("B2", "?");
-    assert_eq!(sheet.eval("=XMATCH(\"~*\", B1:B2, 2)"), Value::Number(1.0));
-    assert_eq!(sheet.eval("=XMATCH(\"~?\", B1:B2, 2)"), Value::Number(2.0));
+    sheet.set("B3", "~a");
+    assert_eq!(sheet.eval("=XMATCH(\"~*\", B1:B3, 2)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=XMATCH(\"~?\", B1:B3, 2)"), Value::Number(2.0));
+    // `~` only escapes `*`, `?`, or `~`; otherwise it should be treated literally.
+    assert_eq!(sheet.eval("=XMATCH(\"~a\", B1:B3, 2)"), Value::Number(3.0));
 }
 
 #[test]

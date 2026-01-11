@@ -360,6 +360,9 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Some(v) => v,
                 None => return Value::Error(ErrorKind::Value),
             };
+            // Record that the lookup_array reference was dereferenced so dynamic reference
+            // arguments (OFFSET/INDIRECT) participate in dependency tracing.
+            ctx.record_reference(r);
             let sheet_id = r.sheet_id;
             let start = r.start;
 
@@ -541,6 +544,9 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Some(v) => v,
                 None => return Value::Error(ErrorKind::Value),
             };
+            // Record that the lookup_array reference was dereferenced so dynamic reference
+            // arguments (OFFSET/INDIRECT) participate in dependency tracing.
+            ctx.record_reference(r);
             XlookupLookupArray::Reference {
                 shape,
                 reference: r,
@@ -636,6 +642,11 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(_) => return Value::Error(ErrorKind::Value),
     };
+
+    if let XlookupReturnArray::Reference(r) = &return_array {
+        // Record dereference for dynamic dependency tracing (e.g. XLOOKUP with OFFSET return_array).
+        ctx.record_reference(*r);
+    }
 
     match lookup_shape {
         XlookupVectorShape::Vertical => {

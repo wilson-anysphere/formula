@@ -23,17 +23,19 @@ impl WildcardPattern {
     }
 }
 
-pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
-    WildcardPattern::new(pattern).matches(text)
-}
-
 fn tokenize_pattern(pattern: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = pattern.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             '~' => {
-                if let Some(next) = chars.next() {
+                let Some(&next) = chars.peek() else {
+                    tokens.push(Token::Literal('~'));
+                    continue;
+                };
+
+                if matches!(next, '*' | '?' | '~') {
+                    let _ = chars.next();
                     tokens.push(Token::Literal(next.to_ascii_uppercase()));
                 } else {
                     tokens.push(Token::Literal('~'));
