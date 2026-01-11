@@ -8,13 +8,12 @@ import type { DocumentController } from "../document/documentController.js";
 // the module without relying on bundler-specific `.js`→`.ts` mapping.
 import { applyTableToDocument, type QuerySheetDestination } from "./applyToDocument.ts";
 import { enqueueApplyForDocument } from "./applyQueue.ts";
-import type { DesktopPowerQueryEvent } from "./refresh.ts";
+import type { DesktopPowerQueryEvent, DesktopPowerQueryRefreshReason } from "./refresh.ts";
+export type { DesktopPowerQueryRefreshReason } from "./refresh.ts";
 
 // `packages/power-query` is authored in JS; in the desktop layer we treat refresh graph
 // events as an opaque payload and primarily use their `type` + `job` fields.
 type RefreshGraphEvent = any;
-
-export type DesktopPowerQueryRefreshReason = "manual" | "interval" | "on-open" | "cron";
 
 export type DesktopPowerQueryRefreshAllOptions = {
   engine: QueryEngine;
