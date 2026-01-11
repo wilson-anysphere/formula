@@ -65,95 +65,102 @@ describe("API e2e: auth + RBAC + sync token", () => {
         url: "/auth/register",
         payload: {
           email: "alice@example.com",
-        password: "password1234",
-        name: "Alice",
-        orgName: "Acme"
-      }
-    });
-    expect(aliceRegister.statusCode).toBe(200);
-    const aliceCookie = extractCookie(aliceRegister.headers["set-cookie"]);
-    const aliceBody = aliceRegister.json() as any;
-    const orgId = aliceBody.organization.id as string;
+          password: "password1234",
+          name: "Alice",
+          orgName: "Acme"
+        }
+      });
+      expect(aliceRegister.statusCode).toBe(200);
+      const aliceCookie = extractCookie(aliceRegister.headers["set-cookie"]);
+      const aliceBody = aliceRegister.json() as any;
+      const orgId = aliceBody.organization.id as string;
 
-    const bobRegister = await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email: "bob@example.com",
-        password: "password1234",
-        name: "Bob"
-      }
-    });
-    expect(bobRegister.statusCode).toBe(200);
-    const bobId = (bobRegister.json() as any).user.id as string;
-    const bobCookie = extractCookie(bobRegister.headers["set-cookie"]);
+      const bobRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "bob@example.com",
+          password: "password1234",
+          name: "Bob"
+        }
+      });
+      expect(bobRegister.statusCode).toBe(200);
+      const bobId = (bobRegister.json() as any).user.id as string;
+      const bobCookie = extractCookie(bobRegister.headers["set-cookie"]);
 
-    const createDoc = await app.inject({
-      method: "POST",
-      url: "/docs",
-      headers: { cookie: aliceCookie },
-      payload: { orgId, title: "Q1 Plan" }
-    });
-    expect(createDoc.statusCode).toBe(200);
-    const docId = (createDoc.json() as any).document.id as string;
+      const createDoc = await app.inject({
+        method: "POST",
+        url: "/docs",
+        headers: { cookie: aliceCookie },
+        payload: { orgId, title: "Q1 Plan" }
+      });
+      expect(createDoc.statusCode).toBe(200);
+      const docId = (createDoc.json() as any).document.id as string;
 
-    const inviteBob = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/invite`,
-      headers: { cookie: aliceCookie },
-      payload: { email: "bob@example.com", role: "editor" }
-    });
-    expect(inviteBob.statusCode).toBe(200);
+      const inviteBob = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/invite`,
+        headers: { cookie: aliceCookie },
+        payload: { email: "bob@example.com", role: "editor" }
+      });
+      expect(inviteBob.statusCode).toBe(200);
 
-    const syncTokenRes = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/sync-token`,
-      headers: { cookie: bobCookie }
-    });
-    expect(syncTokenRes.statusCode).toBe(200);
-    const syncToken = (syncTokenRes.json() as any).token as string;
-    expect(syncToken).toBeTypeOf("string");
+      const syncTokenRes = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/sync-token`,
+        headers: { cookie: bobCookie }
+      });
+      expect(syncTokenRes.statusCode).toBe(200);
+      const syncToken = (syncTokenRes.json() as any).token as string;
+      expect(syncToken).toBeTypeOf("string");
 
-    const decoded = jwt.verify(syncToken, config.syncTokenSecret, {
-      audience: "formula-sync"
-    }) as any;
-    expect(decoded).toMatchObject({ sub: bobId, docId, orgId, role: "editor" });
-
-    const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-api-e2e-"));
-    const syncServerConfig: SyncServerConfig = {
-      host: "127.0.0.1",
-      port: 0,
-      trustProxy: false,
-      gc: true,
-      dataDir,
-      persistence: { backend: "file", compactAfterUpdates: 50 },
-      auth: {
-        mode: "jwt-hs256",
-        secret: config.syncTokenSecret,
+      const decoded = jwt.verify(syncToken, config.syncTokenSecret, {
         audience: "formula-sync"
-      },
-      limits: {
-        maxConnections: 100,
-        maxConnectionsPerIp: 100,
-        maxConnAttemptsPerWindow: 500,
-        connAttemptWindowMs: 60_000,
-        maxMessagesPerWindow: 5_000,
-        messageWindowMs: 10_000
-      },
-      logLevel: "silent"
-    };
+      }) as any;
+      expect(decoded).toMatchObject({ sub: bobId, docId, orgId, role: "editor" });
 
-    const syncServer = createSyncServer(syncServerConfig, createLogger("silent"));
-    const { port: syncPort } = await syncServer.start();
+      const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-api-e2e-"));
+      const syncServerConfig: SyncServerConfig = {
+        host: "127.0.0.1",
+        port: 0,
+        trustProxy: false,
+        gc: true,
+        dataDir,
+        persistence: { backend: "file", compactAfterUpdates: 50, encryption: { mode: "off" } },
+        auth: {
+          mode: "jwt-hs256",
+          secret: config.syncTokenSecret,
+          audience: "formula-sync"
+        },
+        limits: {
+          maxConnections: 100,
+          maxConnectionsPerIp: 100,
+          maxConnAttemptsPerWindow: 500,
+          connAttemptWindowMs: 60_000,
+          maxMessagesPerWindow: 5_000,
+          messageWindowMs: 10_000
+        },
+        logLevel: "silent"
+      };
+
+      const syncServer = createSyncServer(syncServerConfig, createLogger("silent"));
+      const { port: syncPort } = await syncServer.start();
 
       const ws = new WebSocket(`ws://127.0.0.1:${syncPort}/${docId}?token=${encodeURIComponent(syncToken)}`);
       try {
-        const openPromise = new Promise<void>((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
           ws.once("open", () => resolve());
           ws.once("error", reject);
         });
-        const firstMessagePromise = new Promise<WebSocket.RawData>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error("Timed out waiting for sync server message")), 5_000);
+
+        // `y-websocket` servers don't proactively send a sync frame on connect; the
+        // client initiates by sending SyncStep1. Send the minimal valid state
+        // vector (length=1, value=0) to trigger a server response.
+        ws.send(Buffer.from([0, 0, 1, 0]));
+
+        const firstMessage = await new Promise<WebSocket.RawData>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("Timed out waiting for sync server message")), 10_000);
+          timeout.unref?.();
           ws.once("message", (data) => {
             clearTimeout(timeout);
             resolve(data);
@@ -164,21 +171,20 @@ describe("API e2e: auth + RBAC + sync token", () => {
           });
         });
 
-        // y-websocket sends an initial binary sync message on connect. It's enough
-        // for this test to assert that the connection is accepted and we receive
-        // at least one sync frame.
-        const [, firstMessage] = await Promise.all([openPromise, firstMessagePromise]);
-      const firstMessageBytes = Buffer.isBuffer(firstMessage)
-        ? firstMessage
-        : firstMessage instanceof ArrayBuffer
-          ? Buffer.from(firstMessage)
-          : Array.isArray(firstMessage)
-            ? Buffer.concat(firstMessage)
-            : Buffer.from(firstMessage as any);
-      expect(firstMessageBytes.byteLength).toBeGreaterThan(0);
-    } finally {
-      ws.close();
+        const firstMessageBytes = Buffer.isBuffer(firstMessage)
+          ? firstMessage
+          : firstMessage instanceof ArrayBuffer
+            ? Buffer.from(firstMessage)
+            : Array.isArray(firstMessage)
+              ? Buffer.concat(firstMessage)
+              : Buffer.from(firstMessage as any);
+        expect(firstMessageBytes.byteLength).toBeGreaterThan(0);
+      } finally {
+        ws.close();
         await syncServer.stop();
+        // Give the sync server a moment to flush file persistence writes after the
+        // last client disconnects (y-websocket does not await writeState()).
+        await new Promise((resolve) => setTimeout(resolve, 250));
         await rm(dataDir, { recursive: true, force: true });
       }
     },

@@ -1,5 +1,5 @@
 import type { AIAuditStore } from "./store.js";
-import type { AIAuditEntry, AIMode, TokenUsage, ToolCallLog, UserFeedback } from "./types.js";
+import type { AIAuditEntry, AIMode, TokenUsage, ToolCallLog, UserFeedback, AIVerificationResult } from "./types.js";
 
 export interface AIAuditRecorderOptions {
   store: AIAuditStore;
@@ -99,6 +99,10 @@ export class AIAuditRecorder {
     this.entry.user_feedback = feedback;
   }
 
+  setVerification(verification: AIVerificationResult): void {
+    this.entry.verification = verification;
+  }
+
   async finalize(): Promise<void> {
     if (this.entry.latency_ms === undefined) {
       this.entry.latency_ms = nowMs() - this.startedAtMs;
@@ -123,4 +127,3 @@ function createAuditId(): string {
   }
   return `audit_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
-

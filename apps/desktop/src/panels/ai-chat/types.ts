@@ -6,11 +6,20 @@ export type Attachment =
 
 export type ChatRole = "user" | "assistant" | "tool";
 
+export interface ChatVerification {
+  needs_tools: boolean;
+  used_tools: boolean;
+  verified: boolean;
+  confidence: number;
+  warnings: string[];
+}
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
   attachments?: Attachment[];
+  verification?: ChatVerification;
   pending?: boolean;
   requiresApproval?: boolean;
 }

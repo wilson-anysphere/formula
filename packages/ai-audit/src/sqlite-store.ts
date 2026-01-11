@@ -1,5 +1,5 @@
 import initSqlJs from "sql.js";
-import type { AIAuditEntry, AuditListFilters, TokenUsage, ToolCallLog, UserFeedback } from "./types.js";
+import type { AIAuditEntry, AuditListFilters, TokenUsage, ToolCallLog, UserFeedback, AIVerificationResult } from "./types.js";
 import type { AIAuditStore } from "./store.js";
 import type { SqliteBinaryStorage } from "./storage.js";
 import { InMemoryBinaryStorage } from "./storage.js";
@@ -45,8 +45,9 @@ export class SqliteAIAuditStore implements AIAuditStore {
         total_tokens,
         latency_ms,
         tool_calls_json,
+        verification_json,
         user_feedback
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
     );
 
     stmt.run([
@@ -62,6 +63,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
       tokenUsage?.total_tokens ?? null,
       entry.latency_ms ?? null,
       JSON.stringify(entry.tool_calls ?? []),
+      entry.verification ? JSON.stringify(entry.verification) : null,
       entry.user_feedback ?? null
     ]);
     stmt.free();
@@ -109,12 +111,16 @@ export class SqliteAIAuditStore implements AIAuditStore {
         total_tokens INTEGER,
         latency_ms INTEGER,
         tool_calls_json TEXT NOT NULL,
+        verification_json TEXT,
         user_feedback TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_ai_audit_log_session ON ai_audit_log(session_id);
       CREATE INDEX IF NOT EXISTS idx_ai_audit_log_timestamp ON ai_audit_log(timestamp_ms);
     `);
+
+    // Migrate databases created before verification was tracked.
+    ensureColumnExists(this.db, "ai_audit_log", "verification_json", "TEXT");
   }
 
   private async persist(): Promise<void> {
@@ -146,6 +152,7 @@ function normalizeTokenUsage(usage: TokenUsage | undefined): TokenUsage | undefi
 
 function deserializeRow(row: any): AIAuditEntry {
   const token_usage = deserializeTokenUsage(row);
+  const verification = deserializeVerification(row.verification_json);
   return {
     id: String(row.id),
     timestamp_ms: Number(row.timestamp_ms),
@@ -157,6 +164,7 @@ function deserializeRow(row: any): AIAuditEntry {
     token_usage,
     latency_ms: row.latency_ms === null || row.latency_ms === undefined ? undefined : Number(row.latency_ms),
     tool_calls: deserializeToolCalls(row.tool_calls_json),
+    verification,
     user_feedback: row.user_feedback ? (row.user_feedback as UserFeedback) : undefined
   };
 }
@@ -176,10 +184,36 @@ function deserializeToolCalls(encoded: string): ToolCallLog[] {
   return parsed as ToolCallLog[];
 }
 
+function deserializeVerification(encoded: unknown): AIVerificationResult | undefined {
+  if (encoded === null || encoded === undefined || encoded === "") return undefined;
+  if (typeof encoded !== "string") return undefined;
+  const parsed = safeJsonParse(encoded);
+  if (!parsed || typeof parsed !== "object") return undefined;
+  return parsed as AIVerificationResult;
+}
+
 function safeJsonParse(value: string): unknown {
   try {
     return JSON.parse(value);
   } catch {
     return null;
   }
+}
+
+function ensureColumnExists(db: SqlJsDatabase, table: string, column: string, type: string): void {
+  if (tableHasColumn(db, table, column)) return;
+  db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type};`);
+}
+
+function tableHasColumn(db: SqlJsDatabase, table: string, column: string): boolean {
+  const stmt = db.prepare(`PRAGMA table_info(${table});`);
+  while (stmt.step()) {
+    const row = stmt.getAsObject() as any;
+    if (row?.name === column) {
+      stmt.free();
+      return true;
+    }
+  }
+  stmt.free();
+  return false;
 }

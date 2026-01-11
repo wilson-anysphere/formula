@@ -4,6 +4,7 @@ import type { AIAuditStore, AIMode, TokenUsage } from "@formula/ai-audit";
 import { runChatWithTools } from "../../../llm/src/toolCalling.js";
 
 import type { LLMToolCall } from "./integration.js";
+import { classifyQueryNeedsTools, verifyToolUsage, type VerificationResult } from "./verification.js";
 
 export interface AuditedRunOptions {
   audit_store: AIAuditStore;
@@ -34,6 +35,16 @@ export interface AuditedRunParams {
   model?: string;
   temperature?: number;
   max_tokens?: number;
+  /**
+   * When enabled, if the query is classified as needing data tools but the model
+   * produced an answer without using any tools, the run is retried once with a
+   * stricter system instruction to "use tools; do not guess".
+   */
+  strict_tool_verification?: boolean;
+  /**
+   * Optional attachment context used by the verifier (range/table/chart/formula references).
+   */
+  attachments?: unknown[] | null;
 }
 
 /**
@@ -43,6 +54,13 @@ export interface AuditedRunParams {
  * to `packages/ai-audit` without duplicating orchestration logic across UI surfaces.
  */
 export async function runChatWithToolsAudited(params: AuditedRunParams): Promise<{ messages: any[]; final: string }> {
+  const result = await runChatWithToolsAuditedVerified(params);
+  return { messages: result.messages, final: result.final };
+}
+
+export async function runChatWithToolsAuditedVerified(
+  params: AuditedRunParams
+): Promise<{ messages: any[]; final: string; verification: VerificationResult }> {
   const recorder = new AIAuditRecorder({
     store: params.audit.audit_store,
     session_id: params.audit.session_id,
@@ -64,41 +82,60 @@ export async function runChatWithToolsAudited(params: AuditedRunParams): Promise
   };
 
   try {
-    const result = await runChatWithTools({
-      client: auditedClient as any,
-      toolExecutor: params.tool_executor as any,
-      messages: params.messages as any,
-      maxIterations: params.max_iterations,
-      model: params.model ?? params.audit.model,
-      temperature: params.temperature,
-      maxTokens: params.max_tokens,
-      onToolCall: (call: any, meta: any) => {
-        recorder.recordToolCall({
-          id: call.id,
-          name: call.name,
-          parameters: call.arguments,
-          requires_approval: Boolean(meta?.requiresApproval)
-        });
-        params.on_tool_call?.(call, meta);
-      },
-      onToolResult: (call: any, toolResult: any) => {
-        recorder.recordToolResult(call.id, {
-          ok: typeof toolResult?.ok === "boolean" ? toolResult.ok : undefined,
-          duration_ms: extractToolDuration(toolResult),
-          result: toolResult,
-          error: toolResult?.error?.message ? String(toolResult.error.message) : undefined
-        });
-        params.on_tool_result?.(call, toolResult);
-      },
-      requireApproval: async (call: any) => {
-        const approved = await (params.require_approval ?? (async () => true))(call);
-        recorder.recordToolApproval(call.id, approved);
-        return approved;
-      }
+    const userText = extractLastUserText(params.messages);
+    const needsTools = classifyQueryNeedsTools({ userText, attachments: params.attachments });
+
+    const runOnce = async (messages: any[]) =>
+      runChatWithTools({
+        client: auditedClient as any,
+        toolExecutor: params.tool_executor as any,
+        messages: messages as any,
+        maxIterations: params.max_iterations,
+        model: params.model ?? params.audit.model,
+        temperature: params.temperature,
+        maxTokens: params.max_tokens,
+        onToolCall: (call: any, meta: any) => {
+          recorder.recordToolCall({
+            id: call.id,
+            name: call.name,
+            parameters: call.arguments,
+            requires_approval: Boolean(meta?.requiresApproval)
+          });
+          params.on_tool_call?.(call, meta);
+        },
+        onToolResult: (call: any, toolResult: any) => {
+          recorder.recordToolResult(call.id, {
+            ok: typeof toolResult?.ok === "boolean" ? toolResult.ok : undefined,
+            duration_ms: extractToolDuration(toolResult),
+            result: toolResult,
+            error: toolResult?.error?.message ? String(toolResult.error.message) : undefined
+          });
+          params.on_tool_result?.(call, toolResult);
+        },
+        requireApproval: async (call: any) => {
+          const approved = await (params.require_approval ?? (async () => true))(call);
+          recorder.recordToolApproval(call.id, approved);
+          return approved;
+        }
+      });
+
+    let result = await runOnce(params.messages);
+    const usedToolsInitially = recorder.entry.tool_calls.length > 0;
+
+    if (params.strict_tool_verification && needsTools && !usedToolsInitially) {
+      const strictMessages = appendStrictToolInstruction(params.messages);
+      result = await runOnce(strictMessages);
+    }
+
+    const verification = verifyToolUsage({
+      needsTools,
+      toolCalls: recorder.entry.tool_calls.map((call) => ({ name: call.name, ok: call.ok }))
     });
 
+    recorder.setVerification(verification);
+
     recorder.setUserFeedback("accepted");
-    return result;
+    return { ...result, verification };
   } catch (error) {
     recorder.setUserFeedback("rejected");
     throw error;
@@ -128,4 +165,31 @@ function extractToolDuration(result: any): number | undefined {
 function nowMs(): number {
   if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
   return Date.now();
+}
+
+function extractLastUserText(messages: any[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg && typeof msg === "object" && msg.role === "user" && typeof msg.content === "string") {
+      return msg.content;
+    }
+  }
+  return "";
+}
+
+function appendStrictToolInstruction(messages: any[]): any[] {
+  const strictSystemMessage = {
+    role: "system",
+    content: "You MUST use tools to read/compute before answering; do not guess."
+  };
+  let insertionIndex = 0;
+  while (insertionIndex < messages.length) {
+    const msg = messages[insertionIndex];
+    if (msg && typeof msg === "object" && msg.role === "system") {
+      insertionIndex++;
+      continue;
+    }
+    break;
+  }
+  return [...messages.slice(0, insertionIndex), strictSystemMessage, ...messages.slice(insertionIndex)];
 }

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, ChatMessage } from "./types.js";
 import type { LLMClient, LLMMessage, ToolCall, ToolExecutor } from "../../../../../packages/llm/src/types.js";
 import { runChatWithTools } from "../../../../../packages/llm/src/toolCalling.js";
+import { classifyQueryNeedsTools, verifyToolUsage } from "../../../../../packages/ai-tools/src/llm/verification.js";
 import { t, tWithVars } from "../../i18n/index.js";
 
 function formatAttachmentsForPrompt(attachments: Attachment[]) {
@@ -81,6 +82,9 @@ export function AIChatPanel(props: AIChatPanelProps) {
     if (!text) return;
     setSending(true);
 
+    const needsTools = classifyQueryNeedsTools({ userText: text, attachments });
+    const executedToolCalls: Array<{ name: string; ok?: boolean }> = [];
+
     const userMsg: ChatMessage = {
       id: messageId(),
       role: "user",
@@ -116,6 +120,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
       };
 
       const onToolResult = (call: ToolCall, result: unknown) => {
+        executedToolCalls.push({ name: call.name, ok: typeof (result as any)?.ok === "boolean" ? (result as any).ok : undefined });
         setMessages((prev) => [
           ...prev,
           {
@@ -147,14 +152,17 @@ export function AIChatPanel(props: AIChatPanelProps) {
       });
       setLlmHistory(result.messages);
 
+      const verification = verifyToolUsage({ needsTools, toolCalls: executedToolCalls });
+
       setMessages((prev) => {
         const next = prev.slice();
         const lastAssistant = [...next].reverse().find((m) => m.role === "assistant" && m.pending);
         if (lastAssistant) {
           lastAssistant.content = result.final;
           lastAssistant.pending = false;
+          lastAssistant.verification = verification;
         } else {
-          next.push({ id: messageId(), role: "assistant", content: result.final });
+          next.push({ id: messageId(), role: "assistant", content: result.final, verification });
         }
         return next;
       });
@@ -193,6 +201,20 @@ export function AIChatPanel(props: AIChatPanelProps) {
               {m.pending ? t("chat.meta.thinking") : ""}
               {m.requiresApproval ? t("chat.meta.requiresApproval") : ""}
             </div>
+            {m.role === "assistant" && m.verification && !m.verification.verified ? (
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: "6px 8px",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  background: "rgba(255, 193, 7, 0.12)",
+                  fontSize: 12,
+                }}
+              >
+                {t("chat.meta.unverifiedAnswer")}
+              </div>
+            ) : null}
             <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
             {m.attachments?.length ? (
               <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>

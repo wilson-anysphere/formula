@@ -160,11 +160,28 @@ export class FormulaBarModel {
 
     const suggestionText = this.#aiSuggestion;
     const start = Math.min(this.#cursorStart, this.#cursorEnd);
-    const ghost = this.aiGhostText();
-    this.#draft = suggestionText;
-    const newCursor = ghost ? start + ghost.length : suggestionText.length;
-    this.#cursorStart = newCursor;
-    this.#cursorEnd = newCursor;
+    const end = Math.max(this.#cursorStart, this.#cursorEnd);
+
+    const prefix = this.#draft.slice(0, start);
+    const suffix = this.#draft.slice(end);
+
+    // The completion engine typically supplies the full suggested text, but some
+    // surfaces may pass only the "ghost" tail (text to insert at the caret).
+    const looksLikeFullReplacement =
+      suggestionText.startsWith(prefix) && (suffix.length === 0 || suggestionText.endsWith(suffix));
+
+    if (looksLikeFullReplacement) {
+      const ghost = this.aiGhostText();
+      this.#draft = suggestionText;
+      const newCursor = ghost ? start + ghost.length : suggestionText.length - suffix.length;
+      this.#cursorStart = newCursor;
+      this.#cursorEnd = newCursor;
+    } else {
+      this.#draft = this.#draft.slice(0, start) + suggestionText + this.#draft.slice(end);
+      const newCursor = start + suggestionText.length;
+      this.#cursorStart = newCursor;
+      this.#cursorEnd = newCursor;
+    }
     this.#aiSuggestion = null;
     this.#rangeInsertion = null;
     this.#updateHoverFromCursor();

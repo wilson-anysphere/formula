@@ -19,6 +19,14 @@ export interface ToolCallLog {
 
 export type UserFeedback = "accepted" | "rejected" | "modified";
 
+export interface AIVerificationResult {
+  needs_tools: boolean;
+  used_tools: boolean;
+  verified: boolean;
+  confidence: number;
+  warnings: string[];
+}
+
 export interface AIAuditEntry {
   id: string;
   timestamp_ms: number;
@@ -33,6 +41,8 @@ export interface AIAuditEntry {
   latency_ms?: number;
 
   tool_calls: ToolCallLog[];
+
+  verification?: AIVerificationResult;
 
   user_feedback?: UserFeedback;
 }

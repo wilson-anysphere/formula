@@ -28,6 +28,13 @@ describe("SqliteAIAuditStore", () => {
           duration_ms: 7
         }
       ],
+      verification: {
+        needs_tools: true,
+        used_tools: true,
+        verified: false,
+        confidence: 0.25,
+        warnings: ["No data tools were used; answer may be a guess."]
+      },
       user_feedback: "accepted"
     };
 
@@ -42,6 +49,7 @@ describe("SqliteAIAuditStore", () => {
     expect(entries[0]!.token_usage?.total_tokens).toBe(15);
     expect(entries[0]!.tool_calls[0]?.name).toBe("write_cell");
     expect(entries[0]!.tool_calls[0]?.approved).toBe(true);
+    expect(entries[0]!.verification).toEqual(entry.verification);
     expect(entries[0]!.user_feedback).toBe("accepted");
   });
 });
