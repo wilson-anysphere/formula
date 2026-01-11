@@ -23,6 +23,22 @@ For details, see:
 
 ## Development
 
+### Built-in function catalog (tab completion + hints)
+
+The set of built-in Excel-like functions is owned by the Rust formula engine (`crates/formula-engine`)
+via an inventory-backed registry (`FunctionSpec`). JavaScript/TypeScript features like tab-completion
+and formula-bar signature hints consume a **generated** catalog committed into the repo:
+
+- `shared/functionCatalog.json` (canonical artifact)
+- `shared/functionCatalog.mjs` (ESM wrapper for runtime import compatibility)
+- `shared/functionCatalog.mjs.d.ts` (TypeScript typings for the wrapper)
+
+To regenerate after adding/removing Rust functions (requires a Rust toolchain):
+
+```bash
+pnpm generate:function-catalog
+```
+
 ### Rust/WASM engine (formula-wasm)
 
 The JS `@formula/engine` package loads the Rust engine via `wasm-bindgen` artifacts generated from `crates/formula-wasm`.
