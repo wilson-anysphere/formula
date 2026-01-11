@@ -859,3 +859,67 @@ test("DesktopPowerQueryRefreshOrchestrator cancel() aborts execution and apply",
 
   orchestrator.dispose();
 });
+
+test("DesktopPowerQueryRefreshOrchestrator dispose cancels in-flight sessions", async () => {
+  const largeTable = DataTable.fromGrid(
+    [["A"], ...Array.from({ length: 50 }, (_, idx) => [idx + 1])],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const engine = new ScriptedEngine({
+    q_long: { waitForAbort: true, table: DataTable.fromGrid([["Long"], ["nope"]], { hasHeaders: true, inferTypes: true }) },
+    q_apply: { table: largeTable },
+  });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const orchestrator = new DesktopPowerQueryRefreshOrchestrator({ engine, document: doc, concurrency: 2, batchSize: 1 });
+
+  orchestrator.registerQuery({
+    id: "q_long",
+    name: "Long",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 3 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  orchestrator.registerQuery({
+    id: "q_apply",
+    name: "Apply",
+    source: { type: "range", range: { values: [["Y"], [2]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  const handle = orchestrator.refreshAll(["q_apply", "q_long"]);
+
+  const done = new Promise((resolve) => {
+    /** @type {Set<string>} */
+    const cancelled = new Set();
+    let requested = false;
+    const unsub = orchestrator.onEvent((evt) => {
+      if (evt.type === "apply:progress" && evt.queryId === "q_apply" && !requested) {
+        requested = true;
+        orchestrator.dispose();
+      }
+      if (evt.type === "apply:cancelled" && (evt.queryId === "q_apply" || evt.queryId === "q_long")) {
+        cancelled.add(evt.queryId);
+        if (cancelled.size === 2) {
+          unsub();
+          resolve(cancelled);
+        }
+      }
+    });
+  });
+
+  await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
+  await done;
+
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, null);
+  assert.equal(doc.getUsedRange("Sheet1"), null);
+  assert.equal(doc.batchDepth, 0);
+
+  assert.ok(engine.calls.includes("q_long"));
+  assert.ok(engine.aborted.includes("q_long"));
+});
