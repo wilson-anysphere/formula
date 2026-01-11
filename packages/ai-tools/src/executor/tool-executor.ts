@@ -150,7 +150,9 @@ export class ToolExecutor {
     this.options = {
       default_sheet: options.default_sheet ?? "Sheet1",
       allow_external_data: options.allow_external_data ?? false,
-      allowed_external_hosts: options.allowed_external_hosts ?? [],
+      allowed_external_hosts: (options.allowed_external_hosts ?? [])
+        .map((host) => String(host).trim().toLowerCase())
+        .filter((host) => host.length > 0),
       max_external_bytes: options.max_external_bytes ?? 1_000_000,
       dlp: options.dlp
     };
