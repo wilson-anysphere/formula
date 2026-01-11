@@ -50,6 +50,8 @@ describe("AI chat panel", () => {
 
     expect(body.textContent).toContain("AI chat setup");
 
-    renderer.cleanup([]);
+    act(() => {
+      renderer.cleanup([]);
+    });
   });
 });

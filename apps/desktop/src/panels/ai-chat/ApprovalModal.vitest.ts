@@ -41,7 +41,9 @@ describe("ApprovalModal", () => {
     expect(host.textContent).toContain("write_cell");
     expect(host.textContent).toContain("Sheet1!A1");
 
-    root.unmount();
+    act(() => {
+      root.unmount();
+    });
     host.remove();
   });
 });
