@@ -1330,6 +1330,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         if (range) onRangeSelectionEndRef.current?.(range);
       }
 
+      selectionCanvas.style.cursor = "default";
+
       try {
         selectionCanvas.releasePointerCapture?.(event.pointerId);
       } catch {
@@ -1338,11 +1340,28 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     };
 
     const onPointerHover = (event: PointerEvent) => {
-      if (!enableResizeRef.current) return;
       if (resizePointerIdRef.current !== null || selectionPointerIdRef.current !== null) return;
+      const renderer = rendererRef.current;
+      if (!renderer) return;
       const point = getViewportPoint(event);
-      const hit = getResizeHit(point.x, point.y);
-      selectionCanvas.style.cursor = hit?.kind === "col" ? "col-resize" : hit?.kind === "row" ? "row-resize" : "default";
+
+      if (enableResizeRef.current) {
+        const hit = getResizeHit(point.x, point.y);
+        if (hit) {
+          selectionCanvas.style.cursor = hit.kind === "col" ? "col-resize" : "row-resize";
+          return;
+        }
+      }
+
+      if (interactionModeRef.current === "default") {
+        const handleRect = renderer.getFillHandleRect();
+        if (handleRect && hitTestRect(point, handleRect)) {
+          selectionCanvas.style.cursor = "crosshair";
+          return;
+        }
+      }
+
+      selectionCanvas.style.cursor = "default";
     };
 
     const onPointerLeave = () => {
