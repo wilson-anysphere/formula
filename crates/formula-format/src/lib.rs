@@ -40,6 +40,15 @@ pub const BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX: &str = "__builtin_numFmtId:";
 
 pub use locale::{format_number, get_locale, NumberLocale, DE_DE, EN_US};
 
+fn resolve_builtin_placeholder(code: &str) -> Option<&'static str> {
+    let id = code
+        .strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?
+        .trim()
+        .parse::<u16>()
+        .ok()?;
+    builtin_format_code(id)
+}
+
 /// A locale definition used for formatting separators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Locale {
@@ -199,8 +208,22 @@ fn resolve_builtin_placeholder_format_code(
     code: &str,
     locale: Locale,
 ) -> Option<std::borrow::Cow<'static, str>> {
-    let rest = code.strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?;
-    let id = rest.parse::<u16>().ok()?;
+    let Some(rest) = code.strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX) else {
+        return None;
+    };
+
+    let id = match rest.trim().parse::<u16>() {
+        Ok(id) => id,
+        Err(_) => return Some("General".into()),
+    };
+
+    // For the canonical en-US built-in mapping, resolve the placeholder to the
+    // exact `builtin_format_code(id)` string.
+    if locale == Locale::en_us() {
+        if let Some(resolved) = resolve_builtin_placeholder(code) {
+            return Some(resolved.into());
+        }
+    }
 
     // If the ID is one of the standard OOXML built-ins (0–49), we can resolve it directly.
     if let Some(resolved) = crate::builtin_format_code_with_locale(id, locale) {
