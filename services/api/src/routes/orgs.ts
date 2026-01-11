@@ -168,6 +168,9 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgMember(request, reply, orgId);
     if (!member) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const org = await app.db.query("SELECT id, name FROM organizations WHERE id = $1", [orgId]);
     const settings = await app.db.query("SELECT * FROM org_settings WHERE org_id = $1", [orgId]);
@@ -405,6 +408,9 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const member = await requireOrgMember(request, reply, orgId);
       if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const res = await app.db.query("SELECT policy FROM org_dlp_policies WHERE org_id = $1", [orgId]);
       if (res.rowCount !== 1) return reply.code(404).send({ error: "dlp_policy_not_found" });
