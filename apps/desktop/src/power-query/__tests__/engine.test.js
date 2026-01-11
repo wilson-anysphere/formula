@@ -55,6 +55,52 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
   }
 });
 
+test("createDesktopQueryEngine exposes chunked file reads for streaming (readBinaryStream/openFile)", async () => {
+  const originalTauri = globalThis.__TAURI__;
+
+  /** @type {{ cmd: string, args: any }[]} */
+  const calls = [];
+
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd === "stat_file") {
+          return { mtimeMs: 123, sizeBytes: 3 };
+        }
+        if (cmd === "read_binary_file_range") {
+          // Return bytes [1, 2, 3] as base64, then EOF.
+          const offset = Number(args?.offset ?? 0);
+          if (offset === 0) return "AQID";
+          if (offset === 1) return "AgM=";
+          return "";
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const engine = createDesktopQueryEngine();
+
+    // readBinaryStream
+    const streamed = [];
+    for await (const chunk of engine.fileAdapter.readBinaryStream("/tmp/test.bin")) {
+      streamed.push(...chunk);
+    }
+    assert.deepEqual(streamed, [1, 2, 3]);
+    assert.ok(calls.some((c) => c.cmd === "read_binary_file_range"));
+
+    // openFile -> slice -> arrayBuffer
+    const blob = await engine.fileAdapter.openFile("/tmp/test.bin");
+    assert.equal(blob.size, 3);
+    const buf = await blob.slice(1, 3).arrayBuffer();
+    assert.deepEqual(Array.from(new Uint8Array(buf)), [2, 3]);
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});
+
 test("createDesktopQueryEngine uses file mtimes to validate cache entries", async () => {
   const originalTauri = globalThis.__TAURI__;
 

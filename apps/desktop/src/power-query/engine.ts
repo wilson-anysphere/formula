@@ -37,6 +37,8 @@ export type DesktopQueryEngineOptions = {
   fileAdapter?: {
     readText: (path: string) => Promise<string>;
     readBinary: (path: string) => Promise<Uint8Array>;
+    readBinaryStream?: (path: string, options?: { signal?: AbortSignal }) => AsyncIterable<Uint8Array>;
+    openFile?: (path: string, options?: { signal?: AbortSignal }) => Promise<Blob>;
     /**
      * Optional stat adapter used for cache validation (mtime-based).
      */
@@ -194,6 +196,39 @@ function normalizeBinaryPayload(payload: unknown): Uint8Array {
   throw new Error("Unexpected binary payload returned from filesystem API");
 }
 
+function normalizeFileSize(payload: unknown): number {
+  if (payload == null) {
+    throw new Error("Unexpected stat payload returned from filesystem API");
+  }
+  if (typeof payload === "number") {
+    if (!Number.isFinite(payload) || payload < 0) {
+      throw new Error("Unexpected file size returned from filesystem API");
+    }
+    return payload;
+  }
+  if (typeof payload === "string") {
+    const numeric = Number(payload);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      return numeric;
+    }
+  }
+  if (payload && typeof payload === "object") {
+    const obj = payload as any;
+    const candidate =
+      obj.sizeBytes ??
+      obj.size_bytes ??
+      obj.size ??
+      obj.length ??
+      obj.len ??
+      obj.fileSize ??
+      obj.file_size ??
+      obj.bytes ??
+      null;
+    if (candidate != null) return normalizeFileSize(candidate);
+  }
+  throw new Error("Unexpected stat payload returned from filesystem API (missing file size)");
+}
+
 function normalizeMtimeMs(payload: unknown): number {
   if (payload == null) {
     throw new Error("Unexpected stat payload returned from filesystem API");
@@ -256,9 +291,20 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
   const statFile = fs?.stat ?? fs?.metadata;
 
   if (typeof readTextFile === "function" && typeof readFile === "function") {
+    const openFile = async (path: string): Promise<Blob> => {
+      // Best-effort: the FS plugin does not currently expose a streamable file handle, so fall back
+      // to an in-memory Blob.
+      const bytes = normalizeBinaryPayload(await readFile(path));
+      return new Blob([bytes]);
+    };
+
     return {
       readText: async (path) => readTextFile(path),
       readBinary: async (path) => normalizeBinaryPayload(await readFile(path)),
+      readBinaryStream: async function* (path) {
+        yield normalizeBinaryPayload(await readFile(path));
+      },
+      openFile,
       stat:
         typeof statFile === "function"
           ? async (path) => ({ mtimeMs: normalizeMtimeMs(await statFile(path)) })
@@ -272,6 +318,77 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
   return {
     readText: async (path) => String(await invoke("read_text_file", { path })),
     readBinary: async (path) => normalizeBinaryPayload(await invoke("read_binary_file", { path })),
+    readBinaryStream: async function* (path, options = {}) {
+      const signal = options.signal;
+      const chunkSize = 1024 * 1024; // 1MiB
+      let offset = 0;
+
+      while (true) {
+        if (signal?.aborted) {
+          const err = new Error("Aborted");
+          (err as any).name = "AbortError";
+          throw err;
+        }
+        const payload = await invoke("read_binary_file_range", { path, offset, length: chunkSize });
+        const bytes = normalizeBinaryPayload(payload);
+        if (bytes.length === 0) break;
+        yield bytes;
+        offset += bytes.length;
+        if (bytes.length < chunkSize) break;
+      }
+    },
+    openFile: async (path, options = {}) => {
+      const signal = options.signal;
+      if (signal?.aborted) {
+        const err = new Error("Aborted");
+        (err as any).name = "AbortError";
+        throw err;
+      }
+
+      const statPayload = await invoke("stat_file", { path });
+      const fileSize = normalizeFileSize(statPayload);
+      if (signal?.aborted) {
+        const err = new Error("Aborted");
+        (err as any).name = "AbortError";
+        throw err;
+      }
+
+      class TauriFileBlob {
+        path: string;
+        invoke: TauriInvoke;
+        start: number;
+        end: number;
+        size: number;
+        type: string;
+
+        constructor(path: string, invoke: TauriInvoke, start: number, end: number) {
+          this.path = path;
+          this.invoke = invoke;
+          this.start = start;
+          this.end = end;
+          this.size = Math.max(0, end - start);
+          this.type = "";
+          // Best-effort compatibility with code that checks for Blob-ish objects.
+          (this as any)[Symbol.toStringTag] = "Blob";
+        }
+
+        slice(start = 0, end = this.size): TauriFileBlob {
+          const sliceStart = Math.max(0, Math.min(this.size, start));
+          const sliceEnd = Math.max(sliceStart, Math.min(this.size, end));
+          return new TauriFileBlob(this.path, this.invoke, this.start + sliceStart, this.start + sliceEnd);
+        }
+
+        async arrayBuffer(): Promise<ArrayBuffer> {
+          const length = this.size;
+          if (length <= 0) return new ArrayBuffer(0);
+          const payload = await this.invoke("read_binary_file_range", { path: this.path, offset: this.start, length });
+          const bytes = normalizeBinaryPayload(payload);
+          return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        }
+      }
+
+      return new TauriFileBlob(path, invoke, 0, fileSize) as unknown as Blob;
+    },
     stat: async (path) => ({ mtimeMs: normalizeMtimeMs(await invoke("stat_file", { path })) }),
   };
 }
@@ -553,6 +670,8 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
       fileAdapter: {
         readText: fileAdapter.readText,
         readBinary: fileAdapter.readBinary,
+        readBinaryStream: fileAdapter.readBinaryStream,
+        openFile: fileAdapter.openFile,
         stat: fileAdapter.stat,
       },
       tableAdapter,

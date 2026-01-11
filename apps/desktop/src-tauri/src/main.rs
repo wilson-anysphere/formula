@@ -47,6 +47,7 @@ fn main() {
              commands::new_workbook,
              commands::read_text_file,
              commands::read_binary_file,
+             commands::read_binary_file_range,
              commands::stat_file,
              commands::power_query_credential_get,
              commands::power_query_credential_set,

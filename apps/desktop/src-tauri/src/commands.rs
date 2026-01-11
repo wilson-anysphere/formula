@@ -399,6 +399,7 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
 #[serde(rename_all = "camelCase")]
 pub struct FileStat {
     pub mtime_ms: u64,
+    pub size_bytes: u64,
 }
 
 /// Stat a local file and return its modification time in milliseconds since the Unix epoch.
@@ -418,6 +419,7 @@ pub async fn stat_file(path: String) -> Result<FileStat, String> {
             .map_err(|e| e.to_string())?;
         Ok::<_, String>(FileStat {
             mtime_ms: duration.as_millis() as u64,
+            size_bytes: metadata.len(),
         })
     })
     .await
@@ -438,6 +440,37 @@ pub async fn read_binary_file(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
 
     Ok(STANDARD.encode(bytes))
+}
+
+/// Read a byte range from a local file and return the contents as base64.
+///
+/// This enables streaming reads for large local sources (e.g. CSV/Parquet) without first
+/// materializing the full file into memory.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn read_binary_file_range(path: String, offset: u64, length: u64) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use std::io::{Read, Seek, SeekFrom};
+
+    tauri::async_runtime::spawn_blocking(move || {
+        if length == 0 {
+            return Ok::<_, String>(String::new());
+        }
+
+        let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|e| e.to_string())?;
+
+        let len = usize::try_from(length)
+            .map_err(|_| "Requested length exceeds platform limits".to_string())?;
+        let mut buf = vec![0u8; len];
+        let read = file.read(&mut buf).map_err(|e| e.to_string())?;
+        buf.truncate(read);
+
+        Ok::<_, String>(STANDARD.encode(buf))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Power Query: retrieve a persisted credential entry by scope key.
