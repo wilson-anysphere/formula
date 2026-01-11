@@ -59,6 +59,16 @@ function trackCancellation(id: number): void {
   cancelledRequests.add(id);
 }
 
+function freeWorkbook(instance: WasmWorkbookInstance | null): void {
+  // wasm-bindgen classes expose an eager `free()` API. Prefer it so `newWorkbook`
+  // / `loadFromJson` don't rely on GC timing to release WASM allocations.
+  try {
+    (instance as any)?.free?.();
+  } catch {
+    // Ignore failures; worst case the object is left for GC/finalization.
+  }
+}
+
 let wasmModulePromise: Promise<WasmModule> | null = null;
 let wasmModulePromiseUrl: string | null = null;
 
@@ -174,11 +184,19 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
         result = "pong";
         break;
       case "newWorkbook":
-        workbook = new mod.WasmWorkbook();
+        {
+          const next = new mod.WasmWorkbook();
+          freeWorkbook(workbook);
+          workbook = next;
+        }
         result = null;
         break;
       case "loadFromJson":
-        workbook = mod.WasmWorkbook.fromJson(params.json);
+        {
+          const next = mod.WasmWorkbook.fromJson(params.json);
+          freeWorkbook(workbook);
+          workbook = next;
+        }
         result = null;
         break;
       case "toJson":
