@@ -98,35 +98,41 @@ function parseQueryOptionsFromUrl(url) {
   const params = parsed.searchParams;
   /** @type {ODataQueryOptions} */
   const out = {};
+  for (const [rawKey, rawValue] of params.entries()) {
+    const key = rawKey.toLowerCase();
+    if (typeof rawValue !== "string") continue;
+    const value = rawValue.trim();
+    if (value === "") continue;
 
-  const selectRaw = params.get("$select");
-  if (typeof selectRaw === "string" && selectRaw.trim() !== "") {
-    out.select = selectRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  }
+    if (key === "$select") {
+      out.select = value
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      continue;
+    }
 
-  const filterRaw = params.get("$filter");
-  if (typeof filterRaw === "string" && filterRaw.trim() !== "") {
-    out.filter = filterRaw;
-  }
+    if (key === "$filter") {
+      out.filter = rawValue;
+      continue;
+    }
 
-  const orderbyRaw = params.get("$orderby");
-  if (typeof orderbyRaw === "string" && orderbyRaw.trim() !== "") {
-    out.orderby = orderbyRaw;
-  }
+    if (key === "$orderby") {
+      out.orderby = rawValue;
+      continue;
+    }
 
-  const skipRaw = params.get("$skip");
-  if (typeof skipRaw === "string" && skipRaw.trim() !== "") {
-    const parsedSkip = Number.parseInt(skipRaw, 10);
-    if (Number.isFinite(parsedSkip)) out.skip = Math.max(0, parsedSkip);
-  }
+    if (key === "$skip") {
+      const parsedSkip = Number.parseInt(value, 10);
+      if (Number.isFinite(parsedSkip)) out.skip = Math.max(0, parsedSkip);
+      continue;
+    }
 
-  const topRaw = params.get("$top");
-  if (typeof topRaw === "string" && topRaw.trim() !== "") {
-    const parsedTop = Number.parseInt(topRaw, 10);
-    if (Number.isFinite(parsedTop)) out.top = Math.max(0, parsedTop);
+    if (key === "$top") {
+      const parsedTop = Number.parseInt(value, 10);
+      if (Number.isFinite(parsedTop)) out.top = Math.max(0, parsedTop);
+      continue;
+    }
   }
 
   return out;
@@ -147,10 +153,22 @@ export function buildODataUrl(baseUrl, query) {
   const url = new URL(baseUrl);
   const normalized = query ?? {};
 
+  const KNOWN_KEYS = new Set(["$select", "$filter", "$orderby", "$skip", "$top"]);
+  const normalizeExistingKey = (key) => {
+    const lower = key.toLowerCase();
+    return KNOWN_KEYS.has(lower) ? lower : key;
+  };
+
   const existingEntries = Array.from(url.searchParams.entries());
   /** @type {Map<string, string>} */
   const existing = new Map();
-  for (const [k, v] of existingEntries) existing.set(k, v);
+  /** @type {Map<string, string>} */
+  const firstKey = new Map();
+  for (const [k, v] of existingEntries) {
+    const normalizedKey = normalizeExistingKey(k);
+    if (!firstKey.has(normalizedKey)) firstKey.set(normalizedKey, k);
+    existing.set(normalizedKey, v);
+  }
 
   // Only remove existing option keys when the caller provides overrides. This
   // keeps user-supplied query options (embedded in the base URL) intact for
@@ -170,10 +188,11 @@ export function buildODataUrl(baseUrl, query) {
   /** @type {Set<string>} */
   const seen = new Set();
   for (const [k] of existingEntries) {
-    if (seen.has(k)) continue;
-    seen.add(k);
-    const v = existing.get(k);
-    if (v != null) entries.push([k, v]);
+    const normalizedKey = normalizeExistingKey(k);
+    if (seen.has(normalizedKey)) continue;
+    seen.add(normalizedKey);
+    const v = existing.get(normalizedKey);
+    if (v != null) entries.push([firstKey.get(normalizedKey) ?? k, v]);
   }
 
   if (Array.isArray(normalized.select) && normalized.select.length > 0) {

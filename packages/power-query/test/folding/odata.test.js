@@ -191,6 +191,10 @@ test("buildODataUrl: preserves existing query options when not overridden", () =
     buildODataUrl("https://example.com/odata/Products?$top=5&foo=bar", { top: 2 }),
     "https://example.com/odata/Products?foo=bar&$top=2",
   );
+  assert.equal(
+    buildODataUrl("https://example.com/odata/Products?$TOP=5&foo=bar", { top: 2 }),
+    "https://example.com/odata/Products?foo=bar&$top=2",
+  );
 });
 
 test("OData folding: respects $top embedded in the source URL", () => {

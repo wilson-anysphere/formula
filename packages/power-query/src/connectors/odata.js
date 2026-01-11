@@ -431,8 +431,10 @@ export class ODataConnector {
     let topFromUrl = null;
     try {
       const parsed = new URL(initialUrl);
-      const raw = parsed.searchParams.get("$top");
-      if (typeof raw === "string" && raw.trim() !== "") {
+      for (const [k, v] of parsed.searchParams.entries()) {
+        if (k.toLowerCase() !== "$top") continue;
+        const raw = typeof v === "string" ? v.trim() : "";
+        if (raw === "") continue;
         const parsedTop = Number.parseInt(raw, 10);
         if (Number.isFinite(parsedTop)) topFromUrl = Math.max(0, parsedTop);
       }
