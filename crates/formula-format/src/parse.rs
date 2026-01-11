@@ -359,13 +359,141 @@ fn parse_locale_override(content: &str) -> Option<Locale> {
 }
 
 fn locale_for_lcid(lcid: u32) -> Option<Locale> {
-    // Deterministic subset covering the most common locales seen in OOXML format codes.
+    // Best-effort LCID -> Locale mapping for the most common locales seen in
+    // Excel format codes (e.g. currency tokens like `[$€-407]`).
+    //
+    // Note: `Locale` only models separators. Many LCIDs differ in other ways
+    // (currency, calendar, month names, etc). Those aspects are intentionally
+    // out of scope for this mapping.
     Some(match lcid {
-        0x0409 | 0x0809 | 0x1009 => Locale::en_us(), // en-US, en-GB, en-CA
-        0x0407 => Locale::de_de(),                  // de-DE
-        0x040c => Locale::fr_fr(),                  // fr-FR
-        0x0410 => Locale::it_it(),                  // it-IT
-        0x040a => Locale::es_es(),                  // es-ES
+        // --- English (decimal '.', thousands ',', date '/', time ':') ---
+        0x0409 | // en-US
+        0x0809 | // en-GB
+        0x0C09 | // en-AU
+        0x1009 | // en-CA
+        0x1409 | // en-NZ
+        0x1809 | // en-IE
+        0x1C09   // en-ZA
+            => Locale::en_us(),
+
+        // --- German (decimal ',', thousands '.', date '.', time ':') ---
+        0x0407 | // de-DE
+        0x0807 | // de-CH
+        0x0C07 | // de-AT
+        0x1007 | // de-LU
+        0x1407   // de-LI
+            => Locale::de_de(),
+
+        // --- French (decimal ',', thousands NBSP, date '/', time ':') ---
+        0x040C | // fr-FR
+        0x080C | // fr-BE
+        0x0C0C | // fr-CA
+        0x100C | // fr-CH
+        0x140C | // fr-LU
+        0x180C   // fr-MC
+            => Locale::fr_fr(),
+
+        // --- Italian (decimal ',', thousands '.', date '/', time ':') ---
+        0x0410 | // it-IT
+        0x0810   // it-CH
+            => Locale::it_it(),
+
+        // --- Spanish (decimal ',', thousands '.', date '/', time ':') ---
+        0x040A | // es-ES (traditional sort)
+        0x0C0A | // es-ES (modern sort)
+        0x080A | // es-MX
+        0x2C0A | // es-AR
+        0x240A   // es-CO
+            => Locale::es_es(),
+
+        // --- Portuguese (approximate with Spanish separators) ---
+        0x0416 | // pt-BR
+        0x0816   // pt-PT
+            => Locale::es_es(),
+
+        // --- Dutch (decimal ',', thousands '.', date '-', time ':') ---
+        0x0413 | // nl-NL
+        0x0813   // nl-BE
+            => Locale {
+                decimal_sep: ',',
+                thousands_sep: '.',
+                date_sep: '-',
+                time_sep: ':',
+            },
+
+        // --- Swedish (decimal ',', thousands NBSP, date '-', time ':') ---
+        0x041D | // sv-SE
+        0x081D   // sv-FI
+            => Locale {
+                decimal_sep: ',',
+                thousands_sep: '\u{00A0}',
+                date_sep: '-',
+                time_sep: ':',
+            },
+
+        // --- Japanese (map to en-US separators) ---
+        0x0411 => Locale::en_us(), // ja-JP
+
+        // --- Chinese (map to en-US separators) ---
+        0x0404 | // zh-TW
+        0x0804 | // zh-CN
+        0x0C04 | // zh-HK
+        0x1004 | // zh-SG
+        0x1404   // zh-MO
+            => Locale::en_us(),
+
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::locale_for_lcid;
+    use crate::Locale;
+
+    #[test]
+    fn lcid_maps_to_locale_separators() {
+        // English family.
+        assert_eq!(locale_for_lcid(0x0409), Some(Locale::en_us())); // en-US
+        assert_eq!(locale_for_lcid(0x0809), Some(Locale::en_us())); // en-GB
+
+        // German family.
+        assert_eq!(locale_for_lcid(0x0407), Some(Locale::de_de())); // de-DE
+        assert_eq!(locale_for_lcid(0x0C07), Some(Locale::de_de())); // de-AT
+
+        // French family.
+        assert_eq!(locale_for_lcid(0x040C), Some(Locale::fr_fr())); // fr-FR
+        assert_eq!(locale_for_lcid(0x0C0C), Some(Locale::fr_fr())); // fr-CA
+
+        // Romance languages.
+        assert_eq!(locale_for_lcid(0x0410), Some(Locale::it_it())); // it-IT
+        assert_eq!(locale_for_lcid(0x0C0A), Some(Locale::es_es())); // es-ES modern
+        assert_eq!(locale_for_lcid(0x0416), Some(Locale::es_es())); // pt-BR (approx)
+
+        // Dutch / Swedish (custom date separators).
+        assert_eq!(
+            locale_for_lcid(0x0413),
+            Some(Locale {
+                decimal_sep: ',',
+                thousands_sep: '.',
+                date_sep: '-',
+                time_sep: ':',
+            })
+        );
+        assert_eq!(
+            locale_for_lcid(0x041D),
+            Some(Locale {
+                decimal_sep: ',',
+                thousands_sep: '\u{00A0}',
+                date_sep: '-',
+                time_sep: ':',
+            })
+        );
+
+        // Asian locales mapped to en-US separators.
+        assert_eq!(locale_for_lcid(0x0411), Some(Locale::en_us())); // ja-JP
+        assert_eq!(locale_for_lcid(0x0804), Some(Locale::en_us())); // zh-CN
+
+        assert_eq!(locale_for_lcid(0x9999), None);
+    }
 }
