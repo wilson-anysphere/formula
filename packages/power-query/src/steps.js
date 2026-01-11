@@ -174,6 +174,25 @@ function distinctRows(table, columns) {
 
   if (table instanceof ArrowTableAdapter) {
     const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
+
+    if (!arrowTableFromColumns) {
+      // Arrow output construction is optional; fall back to a row-backed table.
+      const outRows = [];
+      for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+        const keyValues = indices.map((idx) => distinctKey(vectors[idx].get(rowIndex)));
+        const key = JSON.stringify(keyValues);
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const row = new Array(vectors.length);
+        for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
+          row[colIndex] = vectors[colIndex].get(rowIndex);
+        }
+        outRows.push(row);
+      }
+      return new DataTable(table.columns, outRows);
+    }
+
     /** @type {unknown[][]} */
     const outColumns = table.columns.map(() => []);
 
@@ -220,6 +239,29 @@ function removeRowsWithErrors(table, columns) {
 
   if (table instanceof ArrowTableAdapter) {
     const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
+
+    if (!arrowTableFromColumns) {
+      // Arrow output construction is optional; fall back to a row-backed table.
+      const outRows = [];
+      for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+        let hasError = false;
+        for (const idx of indices) {
+          if (isErrorValue(vectors[idx].get(rowIndex))) {
+            hasError = true;
+            break;
+          }
+        }
+        if (hasError) continue;
+
+        const row = new Array(vectors.length);
+        for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
+          row[colIndex] = vectors[colIndex].get(rowIndex);
+        }
+        outRows.push(row);
+      }
+      return new DataTable(table.columns, outRows);
+    }
+
     /** @type {unknown[][]} */
     const outColumns = table.columns.map(() => []);
 
