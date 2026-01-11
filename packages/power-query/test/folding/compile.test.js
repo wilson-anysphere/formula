@@ -180,6 +180,26 @@ test("compile: folds addColumn for a safe subset of formula expressions", () => 
   });
 });
 
+test("compile: folds addColumn with dialect-specific quoting/casts (MySQL)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_mysql",
+    name: "Add mysql",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Sales"] } },
+      { id: "s2", name: "Add", operation: { type: "addColumn", name: "Double", formula: "=[Sales] * 2" } },
+    ],
+  };
+
+  const plan = folding.compile(query, { dialect: "mysql" });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: "SELECT t.*, (t.`Sales` * CAST(? AS DOUBLE)) AS `Double` FROM (SELECT t.`Sales` FROM (SELECT * FROM sales) AS t) AS t",
+    params: [2],
+  });
+});
+
 test("compile: folds addColumn with exponent number literals", () => {
   const folding = new QueryFoldingEngine();
   const query = {
