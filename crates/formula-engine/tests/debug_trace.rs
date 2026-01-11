@@ -1,5 +1,32 @@
 use formula_engine::debug::{Span, TraceKind, TraceRef};
-use formula_engine::{Engine, NameDefinition, NameScope, Value};
+use formula_engine::eval::CellAddr;
+use formula_engine::{Engine, ExternalValueProvider, NameDefinition, NameScope, Value};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+struct TestExternalProvider {
+    values: Mutex<HashMap<(String, CellAddr), Value>>,
+}
+
+impl TestExternalProvider {
+    fn set(&self, sheet: &str, addr: CellAddr, value: impl Into<Value>) {
+        self.values
+            .lock()
+            .expect("lock poisoned")
+            .insert((sheet.to_string(), addr), value.into());
+    }
+}
+
+impl ExternalValueProvider for TestExternalProvider {
+    fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+        self.values
+            .lock()
+            .expect("lock poisoned")
+            .get(&(sheet.to_string(), addr))
+            .cloned()
+    }
+}
 
 fn slice(formula: &str, span: Span) -> &str {
     &formula[span.start..span.end]
@@ -273,5 +300,37 @@ fn debug_trace_supports_reversed_3d_sheet_range_refs() {
     assert!(
         arg.reference.is_none(),
         "3D sheet-range refs resolve to multiple sheets"
+    );
+}
+
+#[test]
+fn debug_trace_supports_external_workbook_cell_refs() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        41.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(41.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "[Book.xlsx]Sheet1!A1");
+    assert!(matches!(dbg.trace.kind, TraceKind::CellRef));
+    assert_eq!(
+        dbg.trace.reference,
+        Some(TraceRef::Cell {
+            sheet: formula_engine::functions::SheetId::External("[Book.xlsx]Sheet1".to_string()),
+            addr: CellAddr { row: 0, col: 0 }
+        })
     );
 }

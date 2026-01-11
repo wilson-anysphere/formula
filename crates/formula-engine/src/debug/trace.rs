@@ -383,7 +383,11 @@ impl<'a> Lexer<'a> {
     fn lex_ident(&mut self) -> TokenKind {
         let start = self.pos;
         while let Some(ch) = self.peek_char() {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '$' {
+            // Include `[`/`]` so we can tokenize external workbook refs like `[Book.xlsx]Sheet1!A1`
+            // without requiring quoting.
+            if ch.is_ascii_alphanumeric()
+                || matches!(ch, '_' | '.' | '$' | '[' | ']')
+            {
                 self.pos += ch.len_utf8();
             } else {
                 break;
@@ -507,7 +511,8 @@ impl<'a> Lexer<'a> {
 }
 
 fn is_ident_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '_' || ch == '$'
+    // Allow `[` for external workbook prefixes like `[Book.xlsx]Sheet1!A1`.
+    ch.is_ascii_alphabetic() || matches!(ch, '_' | '$' | '[')
 }
 
 fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
