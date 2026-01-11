@@ -15,7 +15,7 @@ function usage() {
     [
       "Usage:",
       "  pnpm extension:pack <dir> --out <file> [--private-key <pemPath>]",
-      "  pnpm extension:verify <file> --pubkey <pemPath>",
+      "  pnpm extension:verify <file> --pubkey <pemPath> [--signature <base64>]",
       "  pnpm extension:inspect <file>",
       "",
     ].join("\n"),
@@ -75,6 +75,7 @@ async function cmdPack(args) {
 async function cmdVerify(args) {
   const file = args[0] ? path.resolve(args[0]) : null;
   const pubkeyArg = readFlagOrEnv(args, "--pubkey", "npm_config_pubkey") ?? process.env.FORMULA_EXTENSION_PUBLIC_KEY;
+  const signatureArg = readFlagOrEnv(args, "--signature", "npm_config_signature") ?? process.env.FORMULA_EXTENSION_SIGNATURE;
   if (!file || !pubkeyArg) {
     usage();
     process.exit(1);
@@ -85,7 +86,29 @@ async function cmdVerify(args) {
   const formatVersion = extensionPackage.detectExtensionPackageFormatVersion(bytes);
 
   if (formatVersion === 1) {
-    throw new Error("v1 packages do not embed signatures. Verify using the detached signature from the marketplace.");
+    if (!signatureArg) {
+      throw new Error(
+        "v1 packages require a detached signature. Provide --signature <base64> (or FORMULA_EXTENSION_SIGNATURE)."
+      );
+    }
+
+    const ok = signing.verifyBytesSignature(bytes, String(signatureArg), publicKeyPem);
+    if (!ok) {
+      throw new Error("Package signature verification failed");
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          formatVersion,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
   }
 
   const verified = extensionPackage.verifyExtensionPackageV2(bytes, publicKeyPem);

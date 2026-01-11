@@ -41,5 +41,5 @@ Formula extensions are distributed as a single binary “package” blob downloa
 ## Tooling
 
 - `pnpm extension:pack <dir> --out <file> [--private-key <pem>]`
-- `pnpm extension:verify <file> --pubkey <pem>`
+- `pnpm extension:verify <file> --pubkey <pem> [--signature <base64>]` (v1 requires `--signature`)
 - `pnpm extension:inspect <file>`
