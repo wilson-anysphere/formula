@@ -1,10 +1,11 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::openxml::local_name;
-use crate::XlsxError;
+use crate::{XlsxError, XlsxPackage};
 
 /// Metadata extracted from an `xl/pivotTables/pivotTable*.xml` part.
 ///
@@ -34,9 +35,20 @@ pub struct PivotTableDefinition {
     pub compact: Option<bool>,
     /// `pivotTableDefinition@compactData` (if present).
     pub compact_data: Option<bool>,
+    /// `<pivotFields>` -> `<pivotField>` entries (in order).
+    pub pivot_fields: Vec<PivotTableField>,
+    /// `<rowFields>` -> `<field x="...">` indices (in order).
+    pub row_fields: Vec<u32>,
+    /// `<colFields>` -> `<field x="...">` indices (in order).
+    pub col_fields: Vec<u32>,
+    /// `<pageFields>` -> `<field x="...">` / `<pageField fld="...">` indices (in order).
+    pub page_fields: Vec<u32>,
+    /// `<dataFields>` -> `<dataField>` entries (in order).
+    pub data_fields: Vec<PivotTableDataField>,
 }
 
 impl PivotTableDefinition {
+    /// Parse a pivot table definition part (`xl/pivotTables/pivotTable*.xml`).
     pub fn parse(path: &str, xml: &[u8]) -> Result<Self, XlsxError> {
         let mut reader = Reader::from_reader(Cursor::new(xml));
         reader.config_mut().trim_text(true);
@@ -55,18 +67,37 @@ impl PivotTableDefinition {
             outline: None,
             compact: None,
             compact_data: None,
+            pivot_fields: Vec::new(),
+            row_fields: Vec::new(),
+            col_fields: Vec::new(),
+            page_fields: Vec::new(),
+            data_fields: Vec::new(),
         };
 
         let mut buf = Vec::new();
         let mut parsed_root = false;
+        let mut context: Option<FieldContext> = None;
 
         loop {
             match reader.read_event_into(&mut buf)? {
                 Event::Start(start) => {
                     parse_start_element(&mut def, &start, &mut parsed_root)?;
+                    handle_start_element(&mut def, &start, &mut context, true)?;
                 }
                 Event::Empty(start) => {
                     parse_start_element(&mut def, &start, &mut parsed_root)?;
+                    handle_start_element(&mut def, &start, &mut context, false)?;
+                }
+                Event::End(end) => {
+                    let name = end.name();
+                    let tag = local_name(name.as_ref());
+                    if tag.eq_ignore_ascii_case(b"rowFields")
+                        || tag.eq_ignore_ascii_case(b"colFields")
+                        || tag.eq_ignore_ascii_case(b"pageFields")
+                        || tag.eq_ignore_ascii_case(b"dataFields")
+                    {
+                        context = None;
+                    }
                 }
                 Event::Eof => break,
                 _ => {}
@@ -76,6 +107,187 @@ impl PivotTableDefinition {
 
         Ok(def)
     }
+}
+
+impl XlsxPackage {
+    /// Parse a pivot table definition part (e.g. `xl/pivotTables/pivotTable1.xml`).
+    pub fn pivot_table_definition(&self, part_name: &str) -> Result<PivotTableDefinition, XlsxError> {
+        let xml = self
+            .part(part_name)
+            .ok_or_else(|| XlsxError::MissingPart(part_name.to_string()))?;
+        PivotTableDefinition::parse(part_name, xml)
+    }
+
+    /// Parse all pivot table definition parts in the package.
+    pub fn pivot_table_definitions(&self) -> Result<Vec<PivotTableDefinition>, XlsxError> {
+        let mut paths: BTreeSet<String> = BTreeSet::new();
+        for name in self.part_names() {
+            if name.starts_with("xl/pivotTables/") && name.ends_with(".xml") {
+                paths.insert(name.to_string());
+            }
+        }
+
+        let mut out = Vec::with_capacity(paths.len());
+        for path in paths {
+            out.push(self.pivot_table_definition(&path)?);
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PivotTableField {
+    pub axis: Option<String>,
+    pub show_all: Option<bool>,
+    pub default_subtotal: Option<bool>,
+    /// Explicit subtotal flags such as `sumSubtotal`, `countSubtotal`, etc.
+    ///
+    /// Keys are stored exactly as they appear in the XML (minus any namespace prefix).
+    pub subtotals: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PivotTableDataField {
+    pub fld: Option<u32>,
+    pub name: Option<String>,
+    pub subtotal: Option<String>,
+    pub num_fmt_id: Option<u32>,
+    pub base_field: Option<u32>,
+    pub base_item: Option<u32>,
+    pub show_data_as: Option<String>,
+    pub calculated: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldContext {
+    Row,
+    Col,
+    Page,
+    Data,
+}
+
+fn handle_start_element(
+    def: &mut PivotTableDefinition,
+    start: &quick_xml::events::BytesStart<'_>,
+    context: &mut Option<FieldContext>,
+    open_container: bool,
+) -> Result<(), XlsxError> {
+    let name = start.name();
+    let tag = local_name(name.as_ref());
+
+    if open_container {
+        if tag.eq_ignore_ascii_case(b"rowFields") {
+            *context = Some(FieldContext::Row);
+            return Ok(());
+        }
+        if tag.eq_ignore_ascii_case(b"colFields") {
+            *context = Some(FieldContext::Col);
+            return Ok(());
+        }
+        if tag.eq_ignore_ascii_case(b"pageFields") {
+            *context = Some(FieldContext::Page);
+            return Ok(());
+        }
+        if tag.eq_ignore_ascii_case(b"dataFields") {
+            *context = Some(FieldContext::Data);
+            return Ok(());
+        }
+    }
+
+    if tag.eq_ignore_ascii_case(b"pivotField") {
+        let mut field = PivotTableField::default();
+        for attr in start.attributes().with_checks(false) {
+            let attr = attr?;
+            let key = local_name(attr.key.as_ref());
+            let value = attr.unescape_value()?.into_owned();
+
+            if key.eq_ignore_ascii_case(b"axis") {
+                field.axis = Some(value);
+            } else if key.eq_ignore_ascii_case(b"showAll") {
+                field.show_all = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"defaultSubtotal") {
+                field.default_subtotal = parse_bool(&value);
+            } else if key.len() >= b"Subtotal".len()
+                && key[key.len() - b"Subtotal".len()..].eq_ignore_ascii_case(b"Subtotal")
+                && !key.eq_ignore_ascii_case(b"defaultSubtotal")
+            {
+                if let Some(v) = parse_bool(&value) {
+                    field
+                        .subtotals
+                        .insert(String::from_utf8_lossy(key).to_string(), v);
+                }
+            }
+        }
+        def.pivot_fields.push(field);
+        return Ok(());
+    }
+
+    if tag.eq_ignore_ascii_case(b"field") {
+        let Some(ctx) = *context else {
+            return Ok(());
+        };
+        if ctx == FieldContext::Data {
+            return Ok(());
+        }
+        for attr in start.attributes().with_checks(false) {
+            let attr = attr?;
+            if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"x") {
+                if let Ok(v) = attr.unescape_value()?.parse::<u32>() {
+                    match ctx {
+                        FieldContext::Row => def.row_fields.push(v),
+                        FieldContext::Col => def.col_fields.push(v),
+                        FieldContext::Page => def.page_fields.push(v),
+                        FieldContext::Data => {}
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    // Some pivot tables use `<pageField fld="...">` for page fields.
+    if tag.eq_ignore_ascii_case(b"pageField") && *context == Some(FieldContext::Page) {
+        for attr in start.attributes().with_checks(false) {
+            let attr = attr?;
+            if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"fld") {
+                if let Ok(v) = attr.unescape_value()?.parse::<u32>() {
+                    def.page_fields.push(v);
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    if tag.eq_ignore_ascii_case(b"dataField") && *context == Some(FieldContext::Data) {
+        let mut field = PivotTableDataField::default();
+        for attr in start.attributes().with_checks(false) {
+            let attr = attr?;
+            let key = local_name(attr.key.as_ref());
+            let value = attr.unescape_value()?.into_owned();
+
+            if key.eq_ignore_ascii_case(b"fld") {
+                field.fld = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"name") {
+                field.name = Some(value);
+            } else if key.eq_ignore_ascii_case(b"subtotal") {
+                field.subtotal = Some(value);
+            } else if key.eq_ignore_ascii_case(b"numFmtId") {
+                field.num_fmt_id = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"baseField") {
+                field.base_field = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"baseItem") {
+                field.base_item = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"showDataAs") {
+                field.show_data_as = Some(value);
+            } else if key.eq_ignore_ascii_case(b"calculated") {
+                field.calculated = parse_bool(&value);
+            }
+        }
+        def.data_fields.push(field);
+        return Ok(());
+    }
+
+    Ok(())
 }
 
 fn parse_start_element(

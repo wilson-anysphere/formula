@@ -8,16 +8,16 @@ use crate::XlsxError;
 
 pub mod cache_definition;
 pub mod cache_records;
+pub mod graph;
 pub mod pivot_charts;
 pub mod preserve;
 pub mod slicers;
-pub mod graph;
-pub use graph::{PivotTableInstance, XlsxPivotGraph};
-pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
 pub mod table_definition;
 
+pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
+pub use graph::{PivotTableInstance, XlsxPivotGraph};
 pub use preserve::{PreservedPivotParts, RelationshipStub};
-pub use table_definition::PivotTableDefinition;
+pub use table_definition::{PivotTableDataField, PivotTableDefinition, PivotTableField};
 
 pub type PivotTablePart = PivotTableDefinition;
 
@@ -52,9 +52,15 @@ impl XlsxPivots {
         for path in entries.keys() {
             if path.starts_with("xl/pivotTables/") && path.ends_with(".xml") {
                 table_paths.insert(path.clone());
-            } else if path.starts_with("xl/pivotCache/") && path.contains("pivotCacheDefinition") && path.ends_with(".xml") {
+            } else if path.starts_with("xl/pivotCache/")
+                && path.contains("pivotCacheDefinition")
+                && path.ends_with(".xml")
+            {
                 cache_def_paths.insert(path.clone());
-            } else if path.starts_with("xl/pivotCache/") && path.contains("pivotCacheRecords") && path.ends_with(".xml") {
+            } else if path.starts_with("xl/pivotCache/")
+                && path.contains("pivotCacheRecords")
+                && path.ends_with(".xml")
+            {
                 cache_rec_paths.insert(path.clone());
             }
         }
@@ -96,7 +102,10 @@ impl XlsxPivots {
     }
 }
 
-fn parse_pivot_cache_definition_part(path: &str, xml: &[u8]) -> Result<PivotCacheDefinitionPart, XlsxError> {
+fn parse_pivot_cache_definition_part(
+    path: &str,
+    xml: &[u8],
+) -> Result<PivotCacheDefinitionPart, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
 
@@ -113,7 +122,8 @@ fn parse_pivot_cache_definition_part(path: &str, xml: &[u8]) -> Result<PivotCach
                 if tag.eq_ignore_ascii_case(b"pivotCacheDefinition") {
                     for attr in e.attributes().with_checks(false) {
                         let attr = attr?;
-                        if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"recordCount")
+                        if crate::openxml::local_name(attr.key.as_ref())
+                            .eq_ignore_ascii_case(b"recordCount")
                         {
                             if let Ok(v) = attr.unescape_value()?.parse::<u64>() {
                                 record_count = Some(v);
@@ -123,7 +133,8 @@ fn parse_pivot_cache_definition_part(path: &str, xml: &[u8]) -> Result<PivotCach
                 } else if tag.eq_ignore_ascii_case(b"cacheField") {
                     for attr in e.attributes().with_checks(false) {
                         let attr = attr?;
-                        if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"name") {
+                        if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"name")
+                        {
                             fields.push(attr.unescape_value()?.to_string());
                         }
                     }

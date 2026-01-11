@@ -1,6 +1,7 @@
 use std::io::{Cursor, Read};
 
 use formula_xlsx::load_from_bytes;
+use formula_xlsx::XlsxPackage;
 use zip::ZipArchive;
 
 const FIXTURE: &[u8] = include_bytes!("fixtures/pivot-fixture.xlsx");
@@ -32,3 +33,18 @@ fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
     buf
 }
 
+#[test]
+fn parses_pivot_table_definition_layout() {
+    let package = XlsxPackage::from_bytes(FIXTURE).expect("read package");
+    let pivot = package
+        .pivot_table_definition("xl/pivotTables/pivotTable1.xml")
+        .expect("parse pivot table definition");
+
+    assert_eq!(pivot.row_fields, vec![0]);
+    assert_eq!(pivot.data_fields.len(), 1);
+
+    let data_field = &pivot.data_fields[0];
+    assert_eq!(data_field.fld, Some(2));
+    assert_eq!(data_field.name.as_deref(), Some("Sum of Sales"));
+    assert_eq!(data_field.subtotal.as_deref(), Some("sum"));
+}
