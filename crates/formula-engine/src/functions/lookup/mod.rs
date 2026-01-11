@@ -67,6 +67,17 @@ impl TryFrom<i64> for SearchMode {
 }
 
 fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
+    // Blank coerces to the other type for comparisons (Excel semantics).
+    let (a, b) = match (a, b) {
+        (Value::Blank, Value::Number(_)) => (Value::Number(0.0), b.clone()),
+        (Value::Number(_), Value::Blank) => (a.clone(), Value::Number(0.0)),
+        (Value::Blank, Value::Bool(_)) => (Value::Bool(false), b.clone()),
+        (Value::Bool(_), Value::Blank) => (a.clone(), Value::Bool(false)),
+        (Value::Blank, Value::Text(_)) => (Value::Text(String::new()), b.clone()),
+        (Value::Text(_), Value::Blank) => (a.clone(), Value::Text(String::new())),
+        _ => (a.clone(), b.clone()),
+    };
+
     fn type_rank(v: &Value) -> u8 {
         match v {
             Value::Number(_) => 0,
@@ -82,13 +93,13 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
         }
     }
 
-    let ra = type_rank(a);
-    let rb = type_rank(b);
+    let ra = type_rank(&a);
+    let rb = type_rank(&b);
     if ra != rb {
         return ra.cmp(&rb);
     }
 
-    match (a, b) {
+    match (&a, &b) {
         (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
         (Value::Text(x), Value::Text(y)) => x.to_ascii_uppercase().cmp(&y.to_ascii_uppercase()),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
