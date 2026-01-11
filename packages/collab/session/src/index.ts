@@ -281,6 +281,7 @@ export class CollabSession {
       }
     | null;
   private readonly docIdForEncryption: string;
+  private schemaSyncHandler: ((isSynced: boolean) => void) | null = null;
   private sheetsSchemaObserver: (() => void) | null = null;
   private ensuringSchema = false;
 
@@ -335,13 +336,18 @@ export class CollabSession {
 
     if (schemaAutoInit) {
       const provider = this.provider;
+      let providerSynced = !(provider && typeof provider.on === "function");
+      if (provider && typeof provider.on === "function") {
+        providerSynced = Boolean(provider.synced);
+      }
+
       const ensureSchema = () => {
         // Avoid mutating the workbook schema while a sync provider is still in
         // the middle of initial hydration. In particular, sheets can be created
         // incrementally (e.g. map inserted before its `id` field is applied),
         // and eagerly inserting a default sheet during that window can create
         // spurious extra sheets.
-        if (provider && typeof provider.on === "function" && !provider.synced) return;
+        if (!providerSynced) return;
         if (this.ensuringSchema) return;
         this.ensuringSchema = true;
         try {
@@ -360,12 +366,15 @@ export class CollabSession {
       this.sheetsSchemaObserver = () => ensureSchema();
       this.sheets.observe(this.sheetsSchemaObserver);
 
-      if (provider && !provider.synced && typeof provider.on === "function") {
+      if (provider && typeof provider.on === "function" && !providerSynced) {
         const handler = (isSynced: boolean) => {
+          providerSynced = Boolean(isSynced);
           if (!isSynced) return;
           if (typeof provider.off === "function") provider.off("sync", handler);
+          this.schemaSyncHandler = null;
           ensureSchema();
         };
+        this.schemaSyncHandler = handler;
         provider.on("sync", handler);
         if (provider.synced) handler(true);
       } else {
@@ -455,6 +464,10 @@ export class CollabSession {
     if (this.sheetsSchemaObserver) {
       this.sheets.unobserve(this.sheetsSchemaObserver);
       this.sheetsSchemaObserver = null;
+    }
+    if (this.schemaSyncHandler && this.provider && typeof this.provider.off === "function") {
+      this.provider.off("sync", this.schemaSyncHandler);
+      this.schemaSyncHandler = null;
     }
     this.formulaConflictMonitor?.dispose();
     this.cellConflictMonitor?.dispose();

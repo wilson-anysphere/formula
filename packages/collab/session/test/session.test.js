@@ -121,3 +121,34 @@ test("CollabSession schema.defaultSheetId is used when normalizing cell keys wit
   assert.equal(wrote, true);
   assert.equal(session.cells.has("Main:0:0"), true);
 });
+
+test("CollabSession schema init waits for provider sync even if provider.synced is unset", async () => {
+  const doc = new Y.Doc();
+  /** @type {Map<string, any>} */
+  const events = new Map();
+
+  const provider = {
+    on(event, cb) {
+      events.set(event, cb);
+    },
+    off(event, cb) {
+      if (events.get(event) === cb) events.delete(event);
+    },
+    destroy() {},
+  };
+
+  const session = createCollabSession({
+    doc,
+    provider,
+  });
+
+  assert.equal(session.sheets.length, 0);
+  const sync = events.get("sync");
+  assert.equal(typeof sync, "function");
+  sync(true);
+  assert.equal(session.sheets.length, 1);
+  assert.equal(session.sheets.get(0)?.get("id"), "Sheet1");
+
+  session.destroy();
+  doc.destroy();
+});
