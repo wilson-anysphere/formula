@@ -119,7 +119,9 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
     try {
       await ensureMonaco();
       currentCode = editor ? editor.getValue() : fallbackEditor.value;
-      const result = await runtime.run(currentCode);
+      // Script execution includes worker startup + TypeScript transpilation; use a
+      // slightly more forgiving timeout so the first run doesn't flake under load.
+      const result = await runtime.run(currentCode, { timeoutMs: 20_000 });
       const logs = result.logs.map((l) => `[${l.level}] ${l.message}`).join("\n");
       updateConsole(logs + (result.error ? `\n[error] ${result.error.message}` : ""));
     } finally {

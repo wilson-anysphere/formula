@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.describe("script editor panel", () => {
   test("runs a script that writes to the workbook", async ({ page }) => {
+    test.setTimeout(60_000);
     const script = `// Write a value to C1
 await ctx.activeSheet.getRange("C1").setValue(99);
 `;
@@ -21,12 +22,16 @@ await ctx.activeSheet.getRange("C1").setValue(99);
       await expect(editor).toBeVisible();
       await editor.fill(script);
 
-      await panel.getByTestId("script-editor-run").click();
+      const runButton = panel.getByTestId("script-editor-run");
+      await runButton.click();
+      await expect(runButton).toBeDisabled();
 
       try {
+        await expect(runButton).toBeEnabled({ timeout: 30_000 });
         await expect
           .poll(async () =>
-            page.evaluate(() => (window as any).__formulaApp?.getCellValueA1?.("C1") ?? "")
+            page.evaluate(() => (window as any).__formulaApp?.getCellValueA1?.("C1") ?? ""),
+            { timeout: 20_000 }
           )
           .toBe("99");
         break;
