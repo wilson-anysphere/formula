@@ -248,6 +248,17 @@ export function QueryEditorPanelContainer(props: Props) {
       }
     }
 
+    if (typeof evt?.sessionId === "string" && evt?.type === "completed") {
+      // Keep the scheduled refresh state store in sync with dependency-aware refreshAll
+      // sessions. Otherwise interval schedules can fire again immediately after a
+      // successful graph refresh because the persisted `lastRunAtMs` remains stale.
+      const queryId = evt?.job?.queryId;
+      const completedAt = evt?.job?.completedAt;
+      if (typeof queryId === "string" && completedAt instanceof Date && !Number.isNaN(completedAt.getTime())) {
+        (refreshManager as any).manager?.recordSuccessfulRun?.(queryId, completedAt.getTime());
+      }
+    }
+
     // The per-query refresh manager and dependency-aware refresh orchestrator can
     // emit overlapping job id ranges (`refresh_1`, etc). Avoid letting graph refresh
     // events stomp the per-query refresh UI state by only tracking job ids on the
@@ -278,7 +289,7 @@ export function QueryEditorPanelContainer(props: Props) {
     ) {
       setActiveRefresh((prev) => (prev?.jobId === applyJobId ? null : prev));
     }
-  }, []);
+  }, [refreshManager]);
 
   useEffect(() => {
     return refreshManager.onEvent(handleRefreshEvent);
