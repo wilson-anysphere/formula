@@ -101,3 +101,44 @@ test("cut clears the source range and preserves the clipboard for pasting", asyn
   await expect(page.getByTestId("active-address")).toHaveText("C2");
   await expect(page.getByTestId("formula-bar-value")).toHaveText("2");
 });
+
+test("pastes HTML table payloads when plain text is missing", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
+
+  const { selectionCanvas, box, colWidth, rowHeight, a1X, a1Y } = await getGridGeometry(page);
+
+  const c1X = a1X + colWidth * 2;
+  const c1Y = a1Y;
+  const c2Y = a1Y + rowHeight;
+
+  await selectionCanvas.click({ position: { x: c1X - box.x, y: c1Y - box.y } });
+  await expect(page.getByTestId("active-address")).toHaveText("C1");
+
+  const html = "<table><tr><td>100</td></tr><tr><td>200</td></tr></table>";
+
+  await page.getByTestId("grid").evaluate(
+    (el, tableHtml) => {
+      const dt = new DataTransfer();
+      dt.setData("text/html", String(tableHtml));
+      // Explicitly omit text/plain to ensure the HTML parsing path is used.
+      const event = new ClipboardEvent("paste", { bubbles: true });
+      // Firefox ignores the `clipboardData` constructor option, so explicitly attach the payload.
+      try {
+        Object.defineProperty(event, "clipboardData", { value: dt });
+      } catch {
+        // Ignore; if we cannot override clipboardData then the test will fail, which helps catch
+        // regressions in the browser we care about.
+      }
+      el.dispatchEvent(event);
+    },
+    html
+  );
+
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("100");
+
+  await selectionCanvas.click({ position: { x: c1X - box.x, y: c2Y - box.y } });
+  await expect(page.getByTestId("active-address")).toHaveText("C2");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("200");
+});
