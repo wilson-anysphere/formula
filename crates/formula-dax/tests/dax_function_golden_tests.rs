@@ -1,0 +1,48 @@
+mod common;
+
+use common::build_model;
+use formula_dax::{DaxEngine, FilterContext, RowContext, Value};
+use pretty_assertions::assert_eq;
+
+#[test]
+fn dax_function_golden_suite() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let cases: Vec<(&str, Value)> = vec![
+        ("COUNTROWS(Orders)", 4.into()),
+        ("COUNTROWS(FILTER(Orders, Orders[Amount] > 10))", 1.into()),
+        ("COUNTROWS(ALL(Customers))", 3.into()),
+        ("COUNTROWS(VALUES(Customers[Region]))", 2.into()),
+        ("COUNTROWS(DISTINCT(Customers[Region]))", 2.into()),
+        ("COUNTROWS(SUMMARIZE(Orders, Orders[CustomerId]))", 3.into()),
+        (
+            "COUNTROWS(CALCULATETABLE(Orders, Customers[Region] = \"East\"))",
+            3.into(),
+        ),
+        ("DISTINCTCOUNT(Customers[Region])", 2.into()),
+        ("AVERAGEX(Orders, Orders[Amount])", 10.75.into()),
+        ("MINX(Orders, Orders[Amount])", 5.0.into()),
+        ("MAXX(Orders, Orders[Amount])", 20.0.into()),
+        // BLANK and type coercion (DAX treats BLANK as 0/FALSE in comparisons).
+        ("BLANK() = 0", true.into()),
+        ("BLANK() = FALSE()", true.into()),
+        ("TRUE() + 1", 2.into()),
+        ("BLANK() + 1", 1.into()),
+    ];
+
+    for (expr, expected) in cases {
+        let value = engine
+            .evaluate(
+                &model,
+                expr,
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap();
+        assert_eq!(value, expected, "expression: {expr}");
+    }
+}

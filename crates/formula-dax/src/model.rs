@@ -118,7 +118,12 @@ impl Table {
         }
     }
 
-    pub(crate) fn set_value_by_idx(&mut self, row: usize, idx: usize, value: Value) -> DaxResult<()> {
+    pub(crate) fn set_value_by_idx(
+        &mut self,
+        row: usize,
+        idx: usize,
+        value: Value,
+    ) -> DaxResult<()> {
         match &mut self.storage {
             TableStorage::InMemory(backend) => backend.set_value_by_idx(row, idx, value),
             TableStorage::Columnar(_) => Err(DaxError::Eval(format!(
@@ -479,14 +484,18 @@ impl DataModel {
 
         let mut from_index: HashMap<Value, Vec<usize>> = HashMap::new();
         for row in 0..from_table.row_count() {
-            let value = from_table.value_by_idx(row, from_idx).unwrap_or(Value::Blank);
+            let value = from_table
+                .value_by_idx(row, from_idx)
+                .unwrap_or(Value::Blank);
             from_index.entry(value).or_default().push(row);
         }
 
         if relationship.enforce_referential_integrity {
             let to_values: HashSet<Value> = to_index.keys().cloned().collect();
             for row in 0..from_table.row_count() {
-                let value = from_table.value_by_idx(row, from_idx).unwrap_or(Value::Blank);
+                let value = from_table
+                    .value_by_idx(row, from_idx)
+                    .unwrap_or(Value::Blank);
                 if value.is_blank() {
                     continue;
                 }
@@ -610,6 +619,30 @@ impl DataModel {
 
     pub(crate) fn relationships(&self) -> &[RelationshipInfo] {
         &self.relationships
+    }
+
+    pub(crate) fn find_relationship_index(
+        &self,
+        table_a: &str,
+        column_a: &str,
+        table_b: &str,
+        column_b: &str,
+    ) -> Option<usize> {
+        self.relationships
+            .iter()
+            .enumerate()
+            .find_map(|(idx, info)| {
+                let rel = &info.rel;
+                let forward = rel.from_table == table_a
+                    && rel.from_column == column_a
+                    && rel.to_table == table_b
+                    && rel.to_column == column_b;
+                let reverse = rel.from_table == table_b
+                    && rel.from_column == column_b
+                    && rel.to_table == table_a
+                    && rel.to_column == column_a;
+                (forward || reverse).then_some(idx)
+            })
     }
 
     pub(crate) fn normalize_measure_name(name: &str) -> &str {

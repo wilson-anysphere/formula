@@ -80,6 +80,7 @@ pub enum DaxError {
 pub struct FilterContext {
     column_filters: HashMap<(String, String), HashSet<Value>>,
     row_filters: HashMap<String, HashSet<usize>>,
+    active_relationship_overrides: HashSet<usize>,
 }
 
 impl FilterContext {
@@ -101,6 +102,10 @@ impl FilterContext {
             (table.to_string(), column.to_string()),
             HashSet::from([value]),
         );
+    }
+
+    fn activate_relationship(&mut self, relationship_idx: usize) {
+        self.active_relationship_overrides.insert(relationship_idx);
     }
 
     fn clear_table_filters(&mut self, table: &str) {
@@ -199,10 +204,18 @@ impl DaxEngine {
             Expr::Measure(name) => {
                 let normalized = DataModel::normalize_measure_name(name).to_string();
                 if let Some(measure) = model.measures().get(&normalized) {
+                    // In DAX, evaluating a measure inside a row context implicitly performs a
+                    // context transition (equivalent to `CALCULATE([Measure])`).
+                    let eval_filter = if row_ctx.current_table().is_some() {
+                        self.apply_context_transition(model, filter, row_ctx)?
+                    } else {
+                        filter.clone()
+                    };
+
                     return self.eval_scalar(
                         model,
                         &measure.parsed,
-                        filter,
+                        &eval_filter,
                         &RowContext::default(),
                     );
                 }
@@ -246,7 +259,7 @@ impl DaxEngine {
                 let value = self.eval_scalar(model, expr, filter, row_ctx)?;
                 match op {
                     UnaryOp::Negate => {
-                        let n = value.as_f64().unwrap_or_else(|| 0.0);
+                        let n = coerce_number(&value)?;
                         Ok(Value::from(-n))
                     }
                 }
@@ -266,8 +279,8 @@ impl DaxEngine {
     fn eval_binary(&self, op: &BinaryOp, left: Value, right: Value) -> DaxResult<Value> {
         match op {
             BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
-                let l = left.as_f64().unwrap_or(0.0);
-                let r = right.as_f64().unwrap_or(0.0);
+                let l = coerce_number(&left)?;
+                let r = coerce_number(&right)?;
                 let out = match op {
                     BinaryOp::Add => l + r,
                     BinaryOp::Subtract => l - r,
@@ -277,32 +290,12 @@ impl DaxEngine {
                 };
                 Ok(Value::from(out))
             }
-            BinaryOp::Equals => Ok(Value::Boolean(left == right)),
-            BinaryOp::NotEquals => Ok(Value::Boolean(left != right)),
-            BinaryOp::Less | BinaryOp::LessEquals | BinaryOp::Greater | BinaryOp::GreaterEquals => {
-                let out = match (left, right) {
-                    (Value::Number(l), Value::Number(r)) => match op {
-                        BinaryOp::Less => l < r,
-                        BinaryOp::LessEquals => l <= r,
-                        BinaryOp::Greater => l > r,
-                        BinaryOp::GreaterEquals => l >= r,
-                        _ => unreachable!(),
-                    },
-                    (Value::Text(l), Value::Text(r)) => match op {
-                        BinaryOp::Less => l < r,
-                        BinaryOp::LessEquals => l <= r,
-                        BinaryOp::Greater => l > r,
-                        BinaryOp::GreaterEquals => l >= r,
-                        _ => unreachable!(),
-                    },
-                    (l, r) => {
-                        return Err(DaxError::Type(format!(
-                            "cannot compare {l} and {r} with {op:?}"
-                        )))
-                    }
-                };
-                Ok(Value::Boolean(out))
-            }
+            BinaryOp::Equals
+            | BinaryOp::NotEquals
+            | BinaryOp::Less
+            | BinaryOp::LessEquals
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEquals => Ok(Value::Boolean(compare_values(op, &left, &right)?)),
             BinaryOp::And | BinaryOp::Or => {
                 let l = left.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 let r = right.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
@@ -347,7 +340,7 @@ impl DaxEngine {
                 }
                 let numerator = self.eval_scalar(model, &args[0], filter, row_ctx)?;
                 let denominator = self.eval_scalar(model, &args[1], filter, row_ctx)?;
-                let denominator = denominator.as_f64().unwrap_or(0.0);
+                let denominator = coerce_number(&denominator)?;
                 if denominator == 0.0 {
                     if args.len() == 3 {
                         self.eval_scalar(model, &args[2], filter, row_ctx)
@@ -355,7 +348,7 @@ impl DaxEngine {
                         Ok(Value::Blank)
                     }
                 } else {
-                    let numerator = numerator.as_f64().unwrap_or(0.0);
+                    let numerator = coerce_number(&numerator)?;
                     Ok(Value::from(numerator / denominator))
                 }
             }
@@ -878,8 +871,29 @@ impl DaxEngine {
         row_ctx: &RowContext,
     ) -> DaxResult<Value> {
         let (expr, filter_args) = args.split_first().expect("checked above");
-        let mut new_filter = filter.clone();
+        let new_filter = self.build_calculate_filter(model, filter, row_ctx, filter_args)?;
+        self.eval_scalar(model, expr, &new_filter, row_ctx)
+    }
 
+    fn build_calculate_filter(
+        &self,
+        model: &DataModel,
+        filter: &FilterContext,
+        row_ctx: &RowContext,
+        filter_args: &[Expr],
+    ) -> DaxResult<FilterContext> {
+        let mut new_filter = self.apply_context_transition(model, filter, row_ctx)?;
+        self.apply_calculate_filter_args(model, &mut new_filter, row_ctx, filter_args)?;
+        Ok(new_filter)
+    }
+
+    fn apply_context_transition(
+        &self,
+        model: &DataModel,
+        filter: &FilterContext,
+        row_ctx: &RowContext,
+    ) -> DaxResult<FilterContext> {
+        let mut new_filter = filter.clone();
         for (table, row) in row_ctx.tables_with_current_rows() {
             let table_ref = model
                 .table(table)
@@ -887,9 +901,7 @@ impl DaxEngine {
             let table_name = table.to_string();
 
             for (col_idx, column) in table_ref.columns().iter().enumerate() {
-                let value = table_ref
-                    .value_by_idx(row, col_idx)
-                    .unwrap_or(Value::Blank);
+                let value = table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
                 let key = (table_name.clone(), column.clone());
                 match new_filter.column_filters.get_mut(&key) {
                     Some(existing) => {
@@ -903,9 +915,29 @@ impl DaxEngine {
                 }
             }
         }
+        Ok(new_filter)
+    }
+
+    fn apply_calculate_filter_args(
+        &self,
+        model: &DataModel,
+        filter: &mut FilterContext,
+        row_ctx: &RowContext,
+        filter_args: &[Expr],
+    ) -> DaxResult<()> {
+        // Relationship modifiers affect how subsequent filters propagate, so apply them first
+        // regardless of their position in the argument list.
+        for arg in filter_args {
+            if let Expr::Call { name, args } = arg {
+                if name.eq_ignore_ascii_case("USERELATIONSHIP") {
+                    self.apply_userelationship(model, filter, args)?;
+                }
+            }
+        }
 
         for arg in filter_args {
             match arg {
+                Expr::Call { name, .. } if name.eq_ignore_ascii_case("USERELATIONSHIP") => {}
                 Expr::BinaryOp { op, left, right } => {
                     let Expr::ColumnRef { table, column } = left.as_ref() else {
                         return Err(DaxError::Eval(
@@ -913,19 +945,19 @@ impl DaxEngine {
                         ));
                     };
 
-                    let rhs = self.eval_scalar(model, right, &new_filter, row_ctx)?;
+                    let rhs = self.eval_scalar(model, right, filter, row_ctx)?;
                     let key = (table.clone(), column.clone());
 
                     match op {
                         BinaryOp::Equals => {
-                            new_filter.column_filters.insert(key, HashSet::from([rhs]));
+                            filter.column_filters.insert(key, HashSet::from([rhs]));
                         }
                         BinaryOp::NotEquals
                         | BinaryOp::Less
                         | BinaryOp::LessEquals
                         | BinaryOp::Greater
                         | BinaryOp::GreaterEquals => {
-                            let mut base_filter = new_filter.clone();
+                            let mut base_filter = filter.clone();
                             base_filter.column_filters.remove(&key);
                             let candidate_rows = resolve_table_rows(model, &base_filter, table)?;
 
@@ -941,26 +973,14 @@ impl DaxEngine {
 
                             let mut allowed = HashSet::new();
                             for row in candidate_rows {
-                                let lhs =
-                                    table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-
-                                let keep = match op {
-                                    BinaryOp::NotEquals => lhs != rhs,
-                                    BinaryOp::Less
-                                    | BinaryOp::LessEquals
-                                    | BinaryOp::Greater
-                                    | BinaryOp::GreaterEquals => {
-                                        let Some(l) = lhs.as_f64() else { continue };
-                                        let Some(r) = rhs.as_f64() else { continue };
-                                        match op {
-                                            BinaryOp::Less => l < r,
-                                            BinaryOp::LessEquals => l <= r,
-                                            BinaryOp::Greater => l > r,
-                                            BinaryOp::GreaterEquals => l >= r,
-                                            _ => unreachable!(),
-                                        }
+                                let lhs = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                let keep = match self.eval_binary(op, lhs.clone(), rhs.clone())? {
+                                    Value::Boolean(b) => b,
+                                    other => {
+                                        return Err(DaxError::Type(format!(
+                                            "expected comparison to return boolean, got {other}"
+                                        )))
                                     }
-                                    _ => unreachable!(),
                                 };
 
                                 if keep {
@@ -968,7 +988,7 @@ impl DaxEngine {
                                 }
                             }
 
-                            new_filter.column_filters.insert(key, allowed);
+                            filter.column_filters.insert(key, allowed);
                         }
                         _ => {
                             return Err(DaxError::Eval(format!(
@@ -983,10 +1003,10 @@ impl DaxEngine {
                     };
                     match inner {
                         Expr::TableName(table) => {
-                            new_filter.clear_table_filters(table);
+                            filter.clear_table_filters(table);
                         }
                         Expr::ColumnRef { table, column } => {
-                            new_filter.clear_column_filter(table, column);
+                            filter.clear_column_filter(table, column);
                         }
                         other => {
                             return Err(DaxError::Type(format!(
@@ -996,9 +1016,9 @@ impl DaxEngine {
                     }
                 }
                 Expr::Call { .. } | Expr::TableName(_) => {
-                    let table_filter = self.eval_table(model, arg, &new_filter, row_ctx)?;
-                    new_filter.clear_table_filters(&table_filter.table);
-                    new_filter.set_row_filter(
+                    let table_filter = self.eval_table(model, arg, filter, row_ctx)?;
+                    filter.clear_table_filters(&table_filter.table);
+                    filter.set_row_filter(
                         &table_filter.table,
                         table_filter.rows.into_iter().collect(),
                     );
@@ -1011,7 +1031,47 @@ impl DaxEngine {
             }
         }
 
-        self.eval_scalar(model, expr, &new_filter, row_ctx)
+        Ok(())
+    }
+
+    fn apply_userelationship(
+        &self,
+        model: &DataModel,
+        filter: &mut FilterContext,
+        args: &[Expr],
+    ) -> DaxResult<()> {
+        let [left, right] = args else {
+            return Err(DaxError::Eval("USERELATIONSHIP expects 2 arguments".into()));
+        };
+        let Expr::ColumnRef {
+            table: left_table,
+            column: left_column,
+        } = left
+        else {
+            return Err(DaxError::Type(
+                "USERELATIONSHIP expects column references".into(),
+            ));
+        };
+        let Expr::ColumnRef {
+            table: right_table,
+            column: right_column,
+        } = right
+        else {
+            return Err(DaxError::Type(
+                "USERELATIONSHIP expects column references".into(),
+            ));
+        };
+
+        let Some(rel_idx) =
+            model.find_relationship_index(left_table, left_column, right_table, right_column)
+        else {
+            return Err(DaxError::Eval(format!(
+                "no relationship found between {left_table}[{left_column}] and {right_table}[{right_column}]"
+            )));
+        };
+
+        filter.activate_relationship(rel_idx);
+        Ok(())
     }
 
     fn eval_related(
@@ -1056,8 +1116,7 @@ impl DaxEngine {
             })?;
         let key = from_table
             .value_by_idx(current_row, from_idx)
-            .ok_or_else(|| DaxError::Eval("missing key value".into()))?
-            ;
+            .ok_or_else(|| DaxError::Eval("missing key value".into()))?;
         if key.is_blank() {
             return Ok(Value::Blank);
         }
@@ -1128,12 +1187,12 @@ impl DaxEngine {
                             let table_ref = model
                                 .table(table)
                                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                            let idx = table_ref
-                                .column_idx(column)
-                                .ok_or_else(|| DaxError::UnknownColumn {
+                            let idx = table_ref.column_idx(column).ok_or_else(|| {
+                                DaxError::UnknownColumn {
                                     table: table.clone(),
                                     column: column.clone(),
-                                })?;
+                                }
+                            })?;
 
                             let mut seen = HashSet::new();
                             let mut rows = Vec::new();
@@ -1158,41 +1217,127 @@ impl DaxEngine {
                     let [arg] = args.as_slice() else {
                         return Err(DaxError::Eval("VALUES expects 1 argument".into()));
                     };
-                    let Expr::ColumnRef { table, column } = arg else {
+                    match arg {
+                        Expr::ColumnRef { table, column } => {
+                            let rows_in_ctx = resolve_table_rows(model, filter, table)?;
+                            let table_ref = model
+                                .table(table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let idx = table_ref.column_idx(column).ok_or_else(|| {
+                                DaxError::UnknownColumn {
+                                    table: table.clone(),
+                                    column: column.clone(),
+                                }
+                            })?;
+
+                            let mut seen = HashSet::new();
+                            let mut rows = Vec::new();
+                            for row in rows_in_ctx {
+                                let value =
+                                    table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                if seen.insert(value) {
+                                    rows.push(row);
+                                }
+                            }
+                            Ok(TableResult {
+                                table: table.clone(),
+                                rows,
+                            })
+                        }
+                        _ => {
+                            let base = self.eval_table(model, arg, filter, row_ctx)?;
+                            distinct_rows_by_all_columns(model, &base)
+                        }
+                    }
+                }
+                "DISTINCT" => {
+                    let [arg] = args.as_slice() else {
+                        return Err(DaxError::Eval("DISTINCT expects 1 argument".into()));
+                    };
+                    match arg {
+                        Expr::ColumnRef { table, column } => self.eval_table(
+                            model,
+                            &Expr::Call {
+                                name: "VALUES".to_string(),
+                                args: vec![Expr::ColumnRef {
+                                    table: table.clone(),
+                                    column: column.clone(),
+                                }],
+                            },
+                            filter,
+                            row_ctx,
+                        ),
+                        _ => {
+                            let base = self.eval_table(model, arg, filter, row_ctx)?;
+                            distinct_rows_by_all_columns(model, &base)
+                        }
+                    }
+                }
+                "ALLEXCEPT" => {
+                    let (table_expr, keep_cols) = args.split_first().ok_or_else(|| {
+                        DaxError::Eval("ALLEXCEPT expects at least 2 arguments".into())
+                    })?;
+                    if keep_cols.is_empty() {
+                        return Err(DaxError::Eval(
+                            "ALLEXCEPT expects at least 2 arguments".into(),
+                        ));
+                    }
+
+                    let Expr::TableName(table) = table_expr else {
                         return Err(DaxError::Type(
-                            "VALUES currently only supports a column reference".into(),
+                            "ALLEXCEPT expects a table name as the first argument".into(),
                         ));
                     };
 
-                    let rows_in_ctx = resolve_table_rows(model, filter, table)?;
-                    let table_ref = model
-                        .table(table)
-                        .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                    let idx = table_ref
-                        .column_idx(column)
-                        .ok_or_else(|| DaxError::UnknownColumn {
-                            table: table.clone(),
-                            column: column.clone(),
-                        })?;
+                    let mut keep: HashSet<&str> = HashSet::new();
+                    for expr in keep_cols {
+                        let Expr::ColumnRef {
+                            table: col_table,
+                            column,
+                        } = expr
+                        else {
+                            return Err(DaxError::Type(
+                                "ALLEXCEPT expects column references after the table name".into(),
+                            ));
+                        };
+                        if col_table != table {
+                            return Err(DaxError::Eval(format!(
+                                "ALLEXCEPT column must belong to {table}, got {col_table}[{column}]",
+                            )));
+                        }
+                        keep.insert(column.as_str());
+                    }
 
-                    let mut seen = HashSet::new();
-                    let mut rows = Vec::new();
-                    for row in rows_in_ctx {
-                        let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                        if seen.insert(value) {
-                            rows.push(row);
+                    let mut modified_filter = filter.clone();
+                    modified_filter.clear_table_filters(table);
+                    for ((t, c), values) in &filter.column_filters {
+                        if t == table && keep.contains(c.as_str()) {
+                            modified_filter
+                                .column_filters
+                                .insert((t.clone(), c.clone()), values.clone());
                         }
                     }
+
                     Ok(TableResult {
                         table: table.clone(),
-                        rows,
+                        rows: resolve_table_rows(model, &modified_filter, table)?,
                     })
                 }
+                "CALCULATETABLE" => {
+                    if args.is_empty() {
+                        return Err(DaxError::Eval(
+                            "CALCULATETABLE expects at least 1 argument".into(),
+                        ));
+                    }
+                    let (table_expr, filter_args) = args.split_first().expect("checked above");
+                    let new_filter =
+                        self.build_calculate_filter(model, filter, row_ctx, filter_args)?;
+                    self.eval_table(model, table_expr, &new_filter, row_ctx)
+                }
                 "SUMMARIZE" => {
-                    let (table_expr, group_exprs) =
-                        args.split_first().ok_or_else(|| DaxError::Eval(
-                            "SUMMARIZE expects at least 2 arguments".into(),
-                        ))?;
+                    let (table_expr, group_exprs) = args.split_first().ok_or_else(|| {
+                        DaxError::Eval("SUMMARIZE expects at least 2 arguments".into())
+                    })?;
                     if group_exprs.is_empty() {
                         return Err(DaxError::Eval(
                             "SUMMARIZE expects at least 2 arguments".into(),
@@ -1217,12 +1362,12 @@ impl DaxEngine {
                                 base.table
                             )));
                         }
-                        let idx = table_ref
-                            .column_idx(column)
-                            .ok_or_else(|| DaxError::UnknownColumn {
+                        let idx = table_ref.column_idx(column).ok_or_else(|| {
+                            DaxError::UnknownColumn {
                                 table: table.clone(),
                                 column: column.clone(),
-                            })?;
+                            }
+                        })?;
                         group_idxs.push(idx);
                     }
 
@@ -1285,8 +1430,7 @@ impl DaxEngine {
                     })?;
                     let key = to_table_ref
                         .value_by_idx(current_row, to_idx)
-                        .ok_or_else(|| DaxError::Eval("missing key".into()))?
-                        ;
+                        .ok_or_else(|| DaxError::Eval("missing key".into()))?;
 
                     if key.is_blank() {
                         return Ok(TableResult {
@@ -1299,9 +1443,9 @@ impl DaxEngine {
                     // index to fetch candidate fact rows, and only then apply the existing filter
                     // context (including relationship propagation).
                     let sets = resolve_row_sets(model, filter)?;
-                    let allowed = sets.get(target_table).ok_or_else(|| {
-                        DaxError::UnknownTable(target_table.to_string())
-                    })?;
+                    let allowed = sets
+                        .get(target_table)
+                        .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
 
                     let mut rows = Vec::new();
                     if let Some(candidates) = rel.from_index.get(&key) {
@@ -1450,11 +1594,27 @@ fn resolve_row_sets(
         sets.insert(name.clone(), allowed);
     }
 
+    let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
+    for &idx in &filter.active_relationship_overrides {
+        if let Some(rel) = model.relationships().get(idx) {
+            override_pairs.insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
+        }
+    }
+
     let mut changed = true;
     while changed {
         changed = false;
-        for relationship in model.relationships() {
-            if !relationship.rel.is_active {
+        for (idx, relationship) in model.relationships().iter().enumerate() {
+            let pair = (
+                relationship.rel.from_table.as_str(),
+                relationship.rel.to_table.as_str(),
+            );
+            let is_active = if override_pairs.contains(&pair) {
+                filter.active_relationship_overrides.contains(&idx)
+            } else {
+                relationship.rel.is_active
+            };
+            if !is_active {
                 continue;
             }
             changed |= propagate_filter(&mut sets, relationship, Direction::ToMany)?;
@@ -1558,4 +1718,69 @@ fn propagate_filter(
             Ok(changed)
         }
     }
+}
+
+fn coerce_number(value: &Value) -> DaxResult<f64> {
+    match value {
+        Value::Number(n) => Ok(n.0),
+        Value::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        Value::Blank => Ok(0.0),
+        Value::Text(_) => Err(DaxError::Type(format!("cannot coerce {value} to number"))),
+    }
+}
+
+fn compare_values(op: &BinaryOp, left: &Value, right: &Value) -> DaxResult<bool> {
+    let cmp = match (left, right) {
+        // Text comparisons (BLANK coerces to empty string).
+        (Value::Text(l), Value::Text(r)) => Some(l.as_ref().cmp(r.as_ref())),
+        (Value::Text(l), Value::Blank) => Some(l.as_ref().cmp("")),
+        (Value::Blank, Value::Text(r)) => Some("".cmp(r.as_ref())),
+        (Value::Text(_), _) | (_, Value::Text(_)) => {
+            return Err(DaxError::Type(format!(
+                "cannot compare {left} and {right} with {op:?}"
+            )))
+        }
+        // Numeric comparisons (BLANK coerces to 0, TRUE/FALSE to 1/0).
+        _ => {
+            let l = coerce_number(left)?;
+            let r = coerce_number(right)?;
+            Some(
+                l.partial_cmp(&r)
+                    .ok_or_else(|| DaxError::Eval("comparison failed".into()))?,
+            )
+        }
+    };
+
+    let cmp = cmp.expect("always set");
+    Ok(match op {
+        BinaryOp::Equals => cmp == std::cmp::Ordering::Equal,
+        BinaryOp::NotEquals => cmp != std::cmp::Ordering::Equal,
+        BinaryOp::Less => cmp == std::cmp::Ordering::Less,
+        BinaryOp::LessEquals => cmp != std::cmp::Ordering::Greater,
+        BinaryOp::Greater => cmp == std::cmp::Ordering::Greater,
+        BinaryOp::GreaterEquals => cmp != std::cmp::Ordering::Less,
+        _ => unreachable!("unexpected comparison operator {op:?}"),
+    })
+}
+
+fn distinct_rows_by_all_columns(model: &DataModel, base: &TableResult) -> DaxResult<TableResult> {
+    let table_ref = model
+        .table(&base.table)
+        .ok_or_else(|| DaxError::UnknownTable(base.table.clone()))?;
+
+    let mut seen: HashSet<Vec<Value>> = HashSet::new();
+    let mut rows = Vec::new();
+    for row in base.rows.iter().copied() {
+        let key: Vec<Value> = (0..table_ref.columns().len())
+            .map(|idx| table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
+            .collect();
+        if seen.insert(key) {
+            rows.push(row);
+        }
+    }
+
+    Ok(TableResult {
+        table: base.table.clone(),
+        rows,
+    })
 }

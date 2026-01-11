@@ -1,57 +1,16 @@
+mod common;
+
+use formula_columnar::{
+    ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions,
+};
 use formula_dax::{
     pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext,
     GroupByColumn, PivotMeasure, Relationship, RowContext, Table, Value,
 };
-use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
-fn build_model() -> DataModel {
-    let mut model = DataModel::new();
-
-    let mut customers = Table::new("Customers", vec!["CustomerId", "Name", "Region"]);
-    customers
-        .push_row(vec![1.into(), "Alice".into(), "East".into()])
-        .unwrap();
-    customers
-        .push_row(vec![2.into(), "Bob".into(), "West".into()])
-        .unwrap();
-    customers
-        .push_row(vec![3.into(), "Carol".into(), "East".into()])
-        .unwrap();
-    model.add_table(customers).unwrap();
-
-    let mut orders = Table::new("Orders", vec!["OrderId", "CustomerId", "Amount"]);
-    orders
-        .push_row(vec![100.into(), 1.into(), 10.0.into()])
-        .unwrap();
-    orders
-        .push_row(vec![101.into(), 1.into(), 20.0.into()])
-        .unwrap();
-    orders
-        .push_row(vec![102.into(), 2.into(), 5.0.into()])
-        .unwrap();
-    orders
-        .push_row(vec![103.into(), 3.into(), 8.0.into()])
-        .unwrap();
-    model.add_table(orders).unwrap();
-
-    model
-        .add_relationship(Relationship {
-            name: "Orders_Customers".into(),
-            from_table: "Orders".into(),
-            from_column: "CustomerId".into(),
-            to_table: "Customers".into(),
-            to_column: "CustomerId".into(),
-            cardinality: Cardinality::OneToMany,
-            cross_filter_direction: CrossFilterDirection::Single,
-            is_active: true,
-            enforce_referential_integrity: true,
-        })
-        .unwrap();
-
-    model
-}
+use common::{build_model, build_model_bidirectional};
 
 #[test]
 fn relationship_enforces_referential_integrity() {
@@ -278,10 +237,7 @@ fn insert_row_updates_relationship_key_index() {
 
     let orders = model.table("Orders").unwrap();
     assert_eq!(orders.row_count(), 5);
-    assert_eq!(
-        orders.value(4, "CustomerName").unwrap(),
-        Value::from("Dan")
-    );
+    assert_eq!(orders.value(4, "CustomerName").unwrap(), Value::from("Dan"));
 }
 
 #[test]
@@ -584,7 +540,9 @@ fn calculate_all_can_remove_column_filters() {
 
     let east_filter =
         FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
-    let value = model.evaluate_measure("All Region Sales", &east_filter).unwrap();
+    let value = model
+        .evaluate_measure("All Region Sales", &east_filter)
+        .unwrap();
     assert_eq!(value, 43.0.into());
 }
 
@@ -598,7 +556,14 @@ fn pivot_api_groups_and_evaluates_measures() {
     let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
     let group_by = vec![GroupByColumn::new("Customers", "Region")];
 
-    let result = pivot(&model, "Orders", &group_by, &measures, &FilterContext::empty()).unwrap();
+    let result = pivot(
+        &model,
+        "Orders",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
     assert_eq!(
         result.columns,
         vec!["Customers[Region]".to_string(), "Total Sales".to_string()]
@@ -632,13 +597,22 @@ fn large_synthetic_pivot_is_linearish() {
     model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
 
     assert_eq!(
-        model.evaluate_measure("Total", &FilterContext::empty()).unwrap(),
+        model
+            .evaluate_measure("Total", &FilterContext::empty())
+            .unwrap(),
         expected_total.into()
     );
 
     let measures = vec![PivotMeasure::new("Total", "SUM(Fact[Amount])").unwrap()];
     let group_by = vec![GroupByColumn::new("Fact", "Group")];
-    let result = pivot(&model, "Fact", &group_by, &measures, &FilterContext::empty()).unwrap();
+    let result = pivot(
+        &model,
+        "Fact",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap();
     assert_eq!(result.rows.len(), groups.len());
     assert_eq!(
         result.rows,
@@ -766,4 +740,162 @@ fn columnar_tables_support_measures_and_filter_propagation() {
         model.evaluate_measure("Total Sales", &east_filter).unwrap(),
         38.0.into()
     );
+}
+
+#[test]
+fn measure_in_row_context_performs_implicit_context_transition() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_calculated_column("Customers", "Sales via measure", "[Total Sales]")
+        .unwrap();
+
+    let customers = model.table("Customers").unwrap();
+    let values: Vec<Value> = (0..customers.row_count())
+        .map(|row| customers.value(row, "Sales via measure").unwrap())
+        .collect();
+    assert_eq!(values, vec![30.0.into(), 5.0.into(), 8.0.into()]);
+}
+
+#[test]
+fn measure_in_iterator_performs_implicit_context_transition() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "SUMX(Orders, [Total Sales])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 43.0.into());
+}
+
+#[test]
+fn allexcept_keeps_only_listed_columns() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Sales by Region",
+            "CALCULATE([Total Sales], ALLEXCEPT(Customers, Customers[Region]))",
+        )
+        .unwrap();
+
+    let mut filter = FilterContext::empty();
+    filter.set_column_equals("Customers", "Region", "East".into());
+    filter.set_column_equals("Customers", "Name", "Bob".into());
+
+    assert_eq!(
+        model.evaluate_measure("Sales by Region", &filter).unwrap(),
+        38.0.into()
+    );
+}
+
+#[test]
+fn calculatetable_can_be_used_as_table_filter_argument() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "COUNTROWS(CALCULATETABLE(Orders, Customers[Region] = \"East\"))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 3.into());
+}
+
+#[test]
+fn userelationship_activates_inactive_relationship_and_overrides_active() {
+    let mut model = DataModel::new();
+
+    let mut dates = Table::new("Date", vec!["DateKey"]);
+    dates.push_row(vec![1.into()]).unwrap();
+    dates.push_row(vec![2.into()]).unwrap();
+    model.add_table(dates).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["OrderDateKey", "ShipDateKey", "Amount"]);
+    sales
+        .push_row(vec![1.into(), 2.into(), 10.0.into()])
+        .unwrap();
+    sales
+        .push_row(vec![2.into(), 1.into(), 5.0.into()])
+        .unwrap();
+    sales
+        .push_row(vec![2.into(), 2.into(), 7.0.into()])
+        .unwrap();
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_OrderDate".into(),
+            from_table: "Sales".into(),
+            from_column: "OrderDateKey".into(),
+            to_table: "Date".into(),
+            to_column: "DateKey".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Sales_ShipDate".into(),
+            from_table: "Sales".into(),
+            from_column: "ShipDateKey".into(),
+            to_table: "Date".into(),
+            to_column: "DateKey".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Sales", "SUM(Sales[Amount])").unwrap();
+    model
+        .add_measure(
+            "Sales by ShipDate",
+            "CALCULATE([Sales], USERELATIONSHIP(Sales[ShipDateKey], Date[DateKey]))",
+        )
+        .unwrap();
+
+    let date2_filter = FilterContext::empty().with_column_equals("Date", "DateKey", 2.into());
+    assert_eq!(
+        model.evaluate_measure("Sales", &date2_filter).unwrap(),
+        12.0.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Sales by ShipDate", &date2_filter)
+            .unwrap(),
+        17.0.into()
+    );
+}
+
+#[test]
+fn bidirectional_relationship_propagates_filters_to_dimension() {
+    let model = build_model_bidirectional();
+    let filter = FilterContext::empty().with_column_equals("Orders", "Amount", 20.0.into());
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "COUNTROWS(Customers)",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, 1.into());
 }
