@@ -1,0 +1,9 @@
+{
+  "name": "@formula/search",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "scripts": {
+    "test": "node --no-warnings --test test/*.test.js"
+  }
+}

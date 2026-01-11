@@ -1,9 +1,11 @@
-# `@formula/search` (prototype)
+# `@formula/search`
 
-Prototype implementation of Excel-style **Find / Replace**, **Go To**, and **Name Box** parsing.
+Implementation of Excel-style **Find / Replace**, **Go To**, and **Name Box** parsing.
 
-This repository currently hosts mostly architecture docs; this package is a small, self-contained
-implementation to unblock UI work and encode expected behavior in tests.
+The API is designed to be:
+- **stateful** (Find Next / Find Previous sessions);
+- **cancellable** (AbortSignal);
+- **scalable** (optional per-workbook indexing to avoid O(N) scans for repeated queries).
 
 ## Features
 
@@ -13,6 +15,7 @@ implementation to unblock UI work and encode expected behavior in tests.
 - Excel wildcards: `*`, `?`, `~` escape
 - Search order: by rows / by columns
 - Replace: next / all, across selection/sheet/workbook
+- Merged cells: treated as the top-left ("master") cell, matching Excel address semantics
 - Go To parser: A1 refs, sheet-qualified refs, named ranges, minimal table structured refs
 
 ## API (high level)
@@ -21,10 +24,40 @@ implementation to unblock UI work and encode expected behavior in tests.
 const {
   findAll,
   findNext,
+  findPrev,
   replaceAll,
   replaceNext,
   parseGoTo,
+  SearchSession,
+  WorkbookSearchIndex,
 } = require("./packages/search");
+```
+
+### SearchSession (recommended)
+
+`SearchSession` caches matches and tracks the current position, so repeated `findNext` / `findPrev`
+calls stay fast (and can wrap like Excel).
+
+```js
+const index = new WorkbookSearchIndex(workbook);
+
+const session = new SearchSession(workbook, "needle", {
+  scope: "workbook",
+  currentSheetName: "Sheet1",
+  lookIn: "values",
+  valueMode: "display",
+
+  // Indexing (optional)
+  index,
+  indexStrategy: "auto", // "auto" | "always" | "never"
+
+  // Cancellation / responsiveness
+  signal: abortController.signal,
+});
+
+await session.findNext(); // => { sheetName, row, col, address, text, wrapped }
+await session.findPrev();
+await session.replaceNext("replacement");
 ```
 
 ### Search options
@@ -44,8 +77,15 @@ const {
   searchOrder: "byRows" | "byColumns",
 
   // performance / cancellation
-  yieldEvery: number,
+  // (internally yields based on elapsed time, not iteration counts)
+  timeBudgetMs: number, // default: ~10ms
+  checkEvery: number, // clock sampling frequency (default: 256)
+  scheduler: () => Promise<void>, // optional custom yield mechanism
   signal: AbortSignal,
+
+  // indexing
+  index: WorkbookSearchIndex,
+  indexStrategy: "auto" | "always" | "never",
 }
 ```
 
@@ -58,3 +98,12 @@ Replacement behavior matches a common Excel workflow:
 
 This is covered by `packages/search/test/replace.test.js`.
 
+### Merged cells
+
+To support Excel-like merged-cell semantics, a sheet adapter can optionally implement:
+
+- `getMergedRanges(): Array<{startRow,endRow,startCol,endCol}>`
+- `getMergedMasterCell(row, col): {row,col} | null`
+
+If present, selection scopes are expanded to include merged regions, and matches are always reported
+at the merged cell's top-left address.

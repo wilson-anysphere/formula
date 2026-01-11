@@ -14,6 +14,8 @@ function parseCellKey(key) {
 function isCellEmpty(cell) {
   if (cell == null) return true;
   if (cell.formula != null && cell.formula !== "") return false;
+  // The engine uses typed values (e.g. {"t":"blank"}). Treat typed blanks as empty.
+  if (cell.value && typeof cell.value === "object" && cell.value.t === "blank") return true;
   if (cell.value != null && cell.value !== "") return false;
   if (cell.display != null && cell.display !== "") return false;
   return true;
@@ -23,6 +25,7 @@ export class InMemorySheet {
   constructor(name) {
     this.name = name;
     this._cells = new Map();
+    this._mergedRanges = [];
   }
 
   getCell(row, col) {
@@ -49,8 +52,28 @@ export class InMemorySheet {
     this.setCell(row, col, { formula, value, display });
   }
 
+  /**
+   * Add a merged region. The merged cell's "master" is always its top-left
+   * corner, matching Excel's address semantics.
+   */
+  mergeCells(range) {
+    this._mergedRanges.push({ ...range });
+  }
+
+  getMergedRanges() {
+    return this._mergedRanges.slice();
+  }
+
+  getMergedMasterCell(row, col) {
+    for (const r of this._mergedRanges) {
+      if (row < r.startRow || row > r.endRow || col < r.startCol || col > r.endCol) continue;
+      return { row: r.startRow, col: r.startCol };
+    }
+    return null;
+  }
+
   getUsedRange() {
-    if (this._cells.size === 0) return null;
+    if (this._cells.size === 0 && this._mergedRanges.length === 0) return null;
 
     let minRow = Infinity;
     let minCol = Infinity;
@@ -63,6 +86,13 @@ export class InMemorySheet {
       if (col < minCol) minCol = col;
       if (row > maxRow) maxRow = row;
       if (col > maxCol) maxCol = col;
+    }
+
+    for (const r of this._mergedRanges) {
+      if (r.startRow < minRow) minRow = r.startRow;
+      if (r.startCol < minCol) minCol = r.startCol;
+      if (r.endRow > maxRow) maxRow = r.endRow;
+      if (r.endCol > maxCol) maxCol = r.endCol;
     }
 
     return { startRow: minRow, endRow: maxRow, startCol: minCol, endCol: maxCol };

@@ -1,43 +1,13 @@
 import { formatA1Address } from "./a1.js";
 import { excelWildcardToRegExp } from "./wildcards.js";
-
-function yieldToEventLoop() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function getSheetByName(workbook, sheetName) {
-  if (typeof workbook.getSheet === "function") return workbook.getSheet(sheetName);
-  const sheets = workbook.sheets ?? [];
-  const found = sheets.find((s) => s.name === sheetName);
-  if (!found) throw new Error(`Unknown sheet: ${sheetName}`);
-  return found;
-}
-
-function getUsedRange(sheet) {
-  if (typeof sheet.getUsedRange === "function") return sheet.getUsedRange();
-  return sheet.usedRange ?? null;
-}
-
-function getCellText(cell, { lookIn, valueMode }) {
-  if (!cell) return "";
-
-  if (lookIn === "formulas") {
-    if (cell.formula != null && cell.formula !== "") return String(cell.formula);
-    if (cell.value == null) return "";
-    return String(cell.value);
-  }
-
-  // values
-  if (valueMode === "raw") {
-    if (cell.value == null) return "";
-    return String(cell.value);
-  }
-
-  // display
-  if (cell.display != null) return String(cell.display);
-  if (cell.value == null) return "";
-  return String(cell.value);
-}
+import { createTimeSlicer } from "./scheduler.js";
+import {
+  buildScopeSegments,
+  expandSelectionRangesForMerges,
+  getMergedMasterCell,
+  getSheetByName,
+} from "./scope.js";
+import { getCellText } from "./text.js";
 
 function buildMatcher(query, { matchCase, matchEntireCell, useWildcards }) {
   const pattern = String(query);
@@ -48,32 +18,6 @@ function buildMatcher(query, { matchCase, matchEntireCell, useWildcards }) {
   });
 }
 
-function buildScopeSegments(workbook, { scope, currentSheetName, selectionRanges }) {
-  const segments = [];
-
-  if (scope === "workbook") {
-    for (const sheet of workbook.sheets ?? []) {
-      const range = getUsedRange(sheet);
-      if (!range) continue;
-      segments.push({ sheetName: sheet.name, ranges: [range] });
-    }
-    return segments;
-  }
-
-  const sheetName = currentSheetName;
-  if (!sheetName) throw new Error("Search scope requires currentSheetName");
-
-  if (scope === "selection") {
-    const ranges = selectionRanges ?? [];
-    return [{ sheetName, ranges }];
-  }
-
-  // sheet (default)
-  const range = getUsedRange(getSheetByName(workbook, sheetName));
-  if (!range) return [];
-  return [{ sheetName, ranges: [range] }];
-}
-
 async function* iterateCellsInScope(
   workbook,
   {
@@ -81,28 +25,32 @@ async function* iterateCellsInScope(
     currentSheetName,
     selectionRanges,
     searchOrder = "byRows",
-    yieldEvery = 10_000,
+    timeBudgetMs = 10,
+    scheduler,
+    checkEvery,
     signal,
   } = {},
 ) {
   const segments = buildScopeSegments(workbook, { scope, currentSheetName, selectionRanges });
+  if (scope === "selection") {
+    for (const seg of segments) {
+      const sheet = getSheetByName(workbook, seg.sheetName);
+      seg.ranges = expandSelectionRangesForMerges(sheet, seg.ranges);
+    }
+  }
 
-  let scanned = 0;
+  const slicer = createTimeSlicer({ signal, timeBudgetMs, scheduler, checkEvery });
 
   for (const segment of segments) {
     const sheet = getSheetByName(workbook, segment.sheetName);
 
     for (const range of segment.ranges) {
-      if (signal?.aborted) return;
-
       if (typeof sheet.iterateCells === "function") {
         for (const { row, col, cell } of sheet.iterateCells(range, { order: searchOrder })) {
-          if (signal?.aborted) return;
+          await slicer.checkpoint();
+          const master = getMergedMasterCell(sheet, row, col);
+          if (master && (master.row !== row || master.col !== col)) continue;
           yield { sheetName: segment.sheetName, row, col, cell };
-          scanned++;
-          if (yieldEvery > 0 && scanned % yieldEvery === 0) {
-            await yieldToEventLoop();
-          }
         }
         continue;
       }
@@ -117,23 +65,19 @@ async function* iterateCellsInScope(
       if (searchOrder === "byColumns") {
         for (let col = range.startCol; col <= range.endCol; col++) {
           for (let row = range.startRow; row <= range.endRow; row++) {
-            if (signal?.aborted) return;
+            await slicer.checkpoint();
+            const master = getMergedMasterCell(sheet, row, col);
+            if (master && (master.row !== row || master.col !== col)) continue;
             yield { sheetName: segment.sheetName, row, col, cell: sheet.getCell(row, col) };
-            scanned++;
-            if (yieldEvery > 0 && scanned % yieldEvery === 0) {
-              await yieldToEventLoop();
-            }
           }
         }
       } else {
         for (let row = range.startRow; row <= range.endRow; row++) {
           for (let col = range.startCol; col <= range.endCol; col++) {
-            if (signal?.aborted) return;
+            await slicer.checkpoint();
+            const master = getMergedMasterCell(sheet, row, col);
+            if (master && (master.row !== row || master.col !== col)) continue;
             yield { sheetName: segment.sheetName, row, col, cell: sheet.getCell(row, col) };
-            scanned++;
-            if (yieldEvery > 0 && scanned % yieldEvery === 0) {
-              await yieldToEventLoop();
-            }
           }
         }
       }
@@ -194,7 +138,15 @@ export async function findNext(workbook, query, options = {}, from) {
 
   const re = buildMatcher(query, { matchCase, matchEntireCell, useWildcards });
 
-  const hasFrom = from && from.sheetName != null && from.row != null && from.col != null;
+  const normalizedFrom = (() => {
+    if (!from || from.sheetName == null || from.row == null || from.col == null) return null;
+    const sheet = getSheetByName(workbook, from.sheetName);
+    const master = getMergedMasterCell(sheet, from.row, from.col);
+    if (!master) return from;
+    return { ...from, row: master.row, col: master.col };
+  })();
+
+  const hasFrom = normalizedFrom && normalizedFrom.sheetName != null;
   let passedFrom = !hasFrom;
   let fromFound = false;
   let firstMatchBeforeFrom = null;
@@ -202,7 +154,10 @@ export async function findNext(workbook, query, options = {}, from) {
 
   for await (const entry of iterateCellsInScope(workbook, options)) {
     const isFromCell =
-      hasFrom && entry.sheetName === from.sheetName && entry.row === from.row && entry.col === from.col;
+      hasFrom &&
+      entry.sheetName === normalizedFrom.sheetName &&
+      entry.row === normalizedFrom.row &&
+      entry.col === normalizedFrom.col;
     const text = getCellText(entry.cell, { lookIn, valueMode });
 
     if (hasFrom && !passedFrom) {
@@ -249,6 +204,108 @@ export async function findNext(workbook, query, options = {}, from) {
   if (!hasFrom || !wrap) return null;
   if (!fromFound) return firstMatchBeforeFrom;
   return firstMatchBeforeFrom ?? matchAtFrom;
+}
+
+/**
+ * Find the previous match before `from` (exclusive). If `wrap` is true (default),
+ * wraps to the last match after `from` when no match is found before it.
+ */
+export async function findPrev(workbook, query, options = {}, from) {
+  if (query == null || String(query) === "") return null;
+
+  const {
+    lookIn = "values",
+    valueMode = "display",
+    matchCase = false,
+    matchEntireCell = false,
+    useWildcards = true,
+    wrap = true,
+  } = options;
+
+  const re = buildMatcher(query, { matchCase, matchEntireCell, useWildcards });
+
+  const normalizedFrom = (() => {
+    if (!from || from.sheetName == null || from.row == null || from.col == null) return null;
+    const sheet = getSheetByName(workbook, from.sheetName);
+    const master = getMergedMasterCell(sheet, from.row, from.col);
+    if (!master) return from;
+    return { ...from, row: master.row, col: master.col };
+  })();
+
+  const hasFrom = normalizedFrom && normalizedFrom.sheetName != null;
+  let passedFrom = !hasFrom;
+
+  let lastMatchBeforeFrom = null;
+  let lastMatchOverall = null;
+  let matchAtFrom = null;
+
+  for await (const entry of iterateCellsInScope(workbook, options)) {
+    const isFromCell =
+      hasFrom &&
+      entry.sheetName === normalizedFrom.sheetName &&
+      entry.row === normalizedFrom.row &&
+      entry.col === normalizedFrom.col;
+    const text = getCellText(entry.cell, { lookIn, valueMode });
+
+    if (hasFrom && !passedFrom) {
+      if (isFromCell) {
+        passedFrom = true;
+        if (re.test(text)) {
+          matchAtFrom = {
+            sheetName: entry.sheetName,
+            row: entry.row,
+            col: entry.col,
+            address: `${entry.sheetName}!${formatA1Address({ row: entry.row, col: entry.col })}`,
+            text,
+          };
+          lastMatchOverall = matchAtFrom;
+        }
+        continue;
+      }
+
+      if (re.test(text)) {
+        lastMatchBeforeFrom = {
+          sheetName: entry.sheetName,
+          row: entry.row,
+          col: entry.col,
+          address: `${entry.sheetName}!${formatA1Address({ row: entry.row, col: entry.col })}`,
+          text,
+        };
+        lastMatchOverall = lastMatchBeforeFrom;
+      }
+      continue;
+    }
+
+    // After from (exclusive) or no from at all.
+    if (isFromCell) {
+      if (re.test(text)) {
+        matchAtFrom = {
+          sheetName: entry.sheetName,
+          row: entry.row,
+          col: entry.col,
+          address: `${entry.sheetName}!${formatA1Address({ row: entry.row, col: entry.col })}`,
+          text,
+        };
+        lastMatchOverall = matchAtFrom;
+      }
+      continue;
+    }
+
+    if (re.test(text)) {
+      lastMatchOverall = {
+        sheetName: entry.sheetName,
+        row: entry.row,
+        col: entry.col,
+        address: `${entry.sheetName}!${formatA1Address({ row: entry.row, col: entry.col })}`,
+        text,
+      };
+    }
+  }
+
+  if (!hasFrom) return lastMatchOverall;
+  if (lastMatchBeforeFrom) return lastMatchBeforeFrom;
+  if (!wrap) return null;
+  return lastMatchOverall ?? matchAtFrom;
 }
 
 export { getCellText };
