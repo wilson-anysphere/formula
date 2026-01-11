@@ -74,10 +74,12 @@ test("QueryEngine: caches by source + query + credentialId and still checks perm
   const first = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(first.meta.cache?.hit, false);
   assert.equal(readCount, 1);
+  assert.deepEqual(first.meta.outputSchema.columns, first.table.columns);
 
   const second = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(second.meta.cache?.hit, true);
   assert.equal(readCount, 1, "cache hit should not re-read the source");
+  assert.deepEqual(second.meta.outputSchema.columns, second.table.columns);
 
   assert.equal(permissionCount, 2, "permissions should be checked even on cache hit");
   assert.equal(credentialCount, 2, "credentials are part of the cache key and should be requested per execution");
@@ -181,6 +183,7 @@ test("QueryEngine: reads legacy v1 DataTable cache entries", async () => {
   const result = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(result.meta.cache?.hit, true);
   assert.equal(readCount, 0, "cache hit should not re-read the source");
+  assert.deepEqual(result.meta.outputSchema.columns, result.table.columns);
   assert.deepEqual(result.table.toGrid(), [
     ["Region", "Sales"],
     ["East", 100],
@@ -253,12 +256,14 @@ test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the
   assert.equal(first.meta.cache?.hit, false);
   assert.equal(readCount, 1);
   assert.ok(first.table instanceof ArrowTableAdapter);
+  assert.deepEqual(first.meta.outputSchema.columns, first.table.columns);
   const firstGrid = first.table.toGrid();
 
   const second = await engine.executeQueryWithMeta(query, {}, {});
   assert.equal(second.meta.cache?.hit, true);
   assert.equal(readCount, 1, "cache hit should not re-read the Parquet bytes");
   assert.ok(second.table instanceof ArrowTableAdapter);
+  assert.deepEqual(second.meta.outputSchema.columns, second.table.columns);
   assert.deepEqual(second.table.toGrid(), firstGrid);
 });
 
@@ -285,6 +290,7 @@ test("FileSystemCacheStore: persists Arrow cache blobs and avoids re-reading Par
     assert.equal(first.meta.cache?.hit, false);
     assert.equal(readCount, 1);
     assert.ok(first.table instanceof ArrowTableAdapter);
+    assert.deepEqual(first.meta.outputSchema.columns, first.table.columns);
     const grid = first.table.toGrid();
 
     const files = await readdir(cacheDir);
@@ -305,6 +311,7 @@ test("FileSystemCacheStore: persists Arrow cache blobs and avoids re-reading Par
     assert.equal(second.meta.cache?.hit, true);
     assert.equal(secondReadCount, 0, "cache hit should not re-read Parquet bytes");
     assert.ok(second.table instanceof ArrowTableAdapter);
+    assert.deepEqual(second.meta.outputSchema.columns, second.table.columns);
     assert.deepEqual(second.table.toGrid(), grid);
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
