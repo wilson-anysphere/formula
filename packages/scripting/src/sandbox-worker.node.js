@@ -56,7 +56,7 @@ parentPort.on("message", async (message) => {
   if (message.type !== "run") return;
   if (settled) return;
 
-  const { code, activeSheetName, selection, principal, permissions, timeoutMs = 5_000, memoryMb = 64 } = message;
+  const { code, activeSheetName, selection, principal, permissions, timeoutMs = 10_000, memoryMb = 64 } = message;
 
   try {
     const { bootstrap, ts, moduleKind, kind } = buildSandboxedScript({

@@ -67,7 +67,9 @@ export class ScriptRuntime {
     /** @type {any[]} */
     const audit = [];
 
-    const timeoutMs = options.timeoutMs ?? 5_000;
+    // Default to a slightly more forgiving timeout since script execution includes
+    // worker startup + TypeScript transpilation (which can vary depending on load).
+    const timeoutMs = options.timeoutMs ?? 10_000;
     const memoryMb = options.memoryMb ?? 64;
     const principal = options.principal ?? { type: "script", id: "anonymous" };
     const permissions =
@@ -348,4 +350,3 @@ function serializeError(err) {
   }
   return { message: "Unknown error" };
 }
-

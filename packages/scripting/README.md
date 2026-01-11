@@ -33,6 +33,13 @@ const name = await ctx.workbook.getActiveSheetName();
 ctx.ui.log("active sheet:", name);
 ```
 
+### Execution limits
+
+`ScriptRuntime.run(code, options)` supports best-effort limits:
+
+- `timeoutMs` (default: `10_000`) – overall wall-clock timeout for the run
+- `memoryMb` (default: `64`) – per-worker V8 heap limit hint (best-effort)
+
 ## Permissions (minimal)
 
 `ScriptRuntime.run(code, { permissions })` supports:
