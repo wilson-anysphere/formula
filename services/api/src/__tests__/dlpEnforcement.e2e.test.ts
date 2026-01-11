@@ -28,6 +28,15 @@ const ORG_DLP_POLICY = {
   },
 };
 
+const DOC_PERMISSIVE_DLP_POLICY = {
+  version: 1,
+  allowDocumentOverrides: true,
+  rules: {
+    // Attempts to loosen org policy (should be ignored by effective policy merge).
+    "sharing.externalLink": { maxAllowed: "Restricted" },
+  },
+};
+
 describe("API e2e: DLP enforcement on external share links", () => {
   let db: Pool;
   let config: AppConfig;
@@ -124,6 +133,14 @@ describe("API e2e: DLP enforcement on external share links", () => {
       payload: { policy: ORG_DLP_POLICY },
     });
     expect(putOrgPolicy.statusCode).toBe(200);
+
+    const putDocPolicy = await app.inject({
+      method: "PUT",
+      url: `/docs/${docId}/dlp-policy`,
+      headers: { cookie: ownerCookie },
+      payload: { policy: DOC_PERMISSIVE_DLP_POLICY },
+    });
+    expect(putDocPolicy.statusCode).toBe(200);
 
     const putRestrictedClassification = await app.inject({
       method: "PUT",

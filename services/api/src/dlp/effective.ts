@@ -1,5 +1,7 @@
 import {
   CLASSIFICATION_LEVEL,
+  classificationRank,
+  DLP_ACTION,
   DLP_DECISION,
   DLP_REASON_CODE,
   evaluatePolicy,
@@ -27,6 +29,57 @@ type EffectivePolicyResult =
   | { type: "unconfigured" }
   | { type: "invalid" }
   | { type: "configured"; policy: DlpPolicy };
+
+function minMaxAllowed(a: any, b: any): any {
+  if (a == null || b == null) return null;
+  return classificationRank(a) <= classificationRank(b) ? a : b;
+}
+
+function mergePolicies(params: { orgPolicy: DlpPolicy; documentPolicy: DlpPolicy }): DlpPolicy {
+  const { orgPolicy, documentPolicy } = params;
+
+  const merged: DlpPolicy = {
+    version: Math.max(orgPolicy.version, documentPolicy.version),
+    allowDocumentOverrides: orgPolicy.allowDocumentOverrides,
+    rules: { ...orgPolicy.rules },
+  };
+
+  for (const [action, overrideRuleRaw] of Object.entries(documentPolicy.rules || {})) {
+    const baseRuleRaw = merged.rules[action];
+    if (!baseRuleRaw) continue;
+
+    const baseRule = baseRuleRaw as any;
+    const overrideRule = overrideRuleRaw as any;
+
+    const nextRule: any = { ...baseRule, ...overrideRule };
+    nextRule.maxAllowed = minMaxAllowed(baseRule.maxAllowed ?? null, overrideRule.maxAllowed ?? null);
+
+    if (action === DLP_ACTION.AI_CLOUD_PROCESSING) {
+      const overrideAllowRestricted =
+        Object.prototype.hasOwnProperty.call(overrideRule, "allowRestrictedContent") &&
+        typeof overrideRule.allowRestrictedContent === "boolean"
+          ? overrideRule.allowRestrictedContent
+          : undefined;
+
+      const overrideRedactDisallowed =
+        Object.prototype.hasOwnProperty.call(overrideRule, "redactDisallowed") &&
+        typeof overrideRule.redactDisallowed === "boolean"
+          ? overrideRule.redactDisallowed
+          : undefined;
+
+      // Document overrides can only tighten org policy:
+      // - They may disable allowRestrictedContent / redactDisallowed.
+      // - They may not enable them if the org policy has them disabled.
+      nextRule.allowRestrictedContent = Boolean(baseRule.allowRestrictedContent) && overrideAllowRestricted !== false;
+      nextRule.redactDisallowed = Boolean(baseRule.redactDisallowed) && overrideRedactDisallowed !== false;
+    }
+
+    (merged.rules as any)[action] = nextRule;
+  }
+
+  validateDlpPolicy(merged);
+  return merged;
+}
 
 export async function getClassificationForSelectorKey(
   db: DbClient,
@@ -114,7 +167,7 @@ async function resolveEffectivePolicy(db: DbClient, orgId: string, docId: string
     return { type: "invalid" };
   }
 
-  return { type: "configured", policy: docPolicyRaw as DlpPolicy };
+  return { type: "configured", policy: mergePolicies({ orgPolicy, documentPolicy: docPolicyRaw as DlpPolicy }) };
 }
 
 export async function evaluateDocumentDlpPolicy(

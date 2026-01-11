@@ -1,6 +1,7 @@
 import {
   CLASSIFICATION_LEVEL,
   CLASSIFICATION_LEVELS,
+  classificationRank,
   DLP_ACTION,
   DLP_DECISION,
   DLP_REASON_CODE,
@@ -26,6 +27,7 @@ import type {
 export {
   CLASSIFICATION_LEVEL,
   CLASSIFICATION_LEVELS,
+  classificationRank,
   DLP_ACTION,
   DLP_DECISION,
   DLP_REASON_CODE,
