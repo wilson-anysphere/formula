@@ -2696,7 +2696,6 @@ impl BytecodeColumnCache {
                         row: row as u32,
                         col: (*col) as u32,
                     };
-
                     if let Some(v) = snapshot.values.get(&CellKey { sheet: sheet_id, addr }) {
                         match v {
                             Value::Number(n) => values[row as usize] = *n,

@@ -47,6 +47,7 @@ fn external_values_block_spills() {
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Spill));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(99.0));
     assert!(engine.spill_range("Sheet1", "C1").is_none());
 }
 
