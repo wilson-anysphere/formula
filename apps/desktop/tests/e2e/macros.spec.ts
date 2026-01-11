@@ -16,6 +16,27 @@ test.describe("macros panel", () => {
               case "list_macros":
                 return [{ id: "m1", name: "Module1.Macro1", language: "vba" }];
 
+              case "get_macro_security_status":
+                return {
+                  has_macros: true,
+                  origin_path: null,
+                  workbook_fingerprint: null,
+                  signature: null,
+                  trust: "trusted_always",
+                };
+
+              case "set_macro_trust":
+                return {
+                  has_macros: true,
+                  origin_path: null,
+                  workbook_fingerprint: null,
+                  signature: null,
+                  trust: args?.decision ?? "trusted_always",
+                };
+
+              case "set_macro_ui_context":
+                return null;
+
               case "run_macro":
                 return {
                   ok: true,

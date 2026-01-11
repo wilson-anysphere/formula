@@ -42,6 +42,12 @@ test.describe("tauri workbook integration", () => {
                 return { values, start_row: startRow, start_col: startCol };
               }
 
+              case "set_macro_ui_context":
+                return null;
+
+              case "fire_workbook_open":
+                return { ok: true, output: [], updates: [] };
+
               case "set_cell":
               case "set_range":
               case "save_workbook":
