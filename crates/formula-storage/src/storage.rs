@@ -1153,6 +1153,10 @@ impl Storage {
             "UPDATE sheets SET visibility = ?1 WHERE id = ?2",
             params![visibility.as_str(), sheet_id.to_string()],
         )?;
+        // Keep `model_sheet_json` aligned so export/import round-trips after legacy metadata edits.
+        update_sheet_model_json_tx(&tx, sheet_id, |sheet| {
+            sheet.visibility = storage_sheet_visibility_to_model(visibility.as_str());
+        })?;
         touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
         tx.commit()?;
         Ok(())
@@ -1169,6 +1173,9 @@ impl Storage {
             "UPDATE sheets SET tab_color = ?1, tab_color_json = ?2 WHERE id = ?3",
             params![tab_color, tab_color_json, sheet_id.to_string()],
         )?;
+        update_sheet_model_json_tx(&tx, sheet_id, |sheet| {
+            sheet.tab_color = tab_color.map(formula_model::TabColor::rgb);
+        })?;
         touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
         tx.commit()?;
         Ok(())
@@ -1187,6 +1194,10 @@ impl Storage {
             "UPDATE sheets SET xlsx_sheet_id = ?1, xlsx_rel_id = ?2 WHERE id = ?3",
             params![xlsx_sheet_id, xlsx_rel_id, sheet_id.to_string()],
         )?;
+        update_sheet_model_json_tx(&tx, sheet_id, |sheet| {
+            sheet.xlsx_sheet_id = xlsx_sheet_id.and_then(|v| u32::try_from(v).ok());
+            sheet.xlsx_rel_id = xlsx_rel_id.map(|s| s.to_string());
+        })?;
         touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
         tx.commit()?;
         Ok(())
@@ -2250,6 +2261,35 @@ fn delete_named_ranges_for_sheet_scope_tx(
         delete_stmt.execute(params![&workbook_id_str, name, scope])?;
     }
 
+    Ok(())
+}
+
+fn update_sheet_model_json_tx<F>(
+    tx: &Transaction<'_>,
+    sheet_id: Uuid,
+    f: F,
+) -> Result<()>
+where
+    F: FnOnce(&mut formula_model::Worksheet),
+{
+    let model_sheet_json: Option<serde_json::Value> = tx.query_row(
+        "SELECT model_sheet_json FROM sheets WHERE id = ?1",
+        params![sheet_id.to_string()],
+        |r| r.get(0),
+    )?;
+    let Some(raw) = model_sheet_json else {
+        return Ok(());
+    };
+
+    let Ok(mut sheet) = serde_json::from_value::<formula_model::Worksheet>(raw) else {
+        return Ok(());
+    };
+    f(&mut sheet);
+    let updated = worksheet_metadata_json(&sheet)?;
+    tx.execute(
+        "UPDATE sheets SET model_sheet_json = ?1 WHERE id = ?2",
+        params![updated, sheet_id.to_string()],
+    )?;
     Ok(())
 }
 
