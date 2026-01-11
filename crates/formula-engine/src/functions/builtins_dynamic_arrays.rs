@@ -1894,15 +1894,9 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
         Err(_) => return Value::Error(ErrorKind::Num),
     };
 
-    let pad_with = if let Some(expr) = args.get(2) {
-        let v = eval_scalar_arg(ctx, expr);
-        match v {
-            Value::Error(e) => return Value::Error(e),
-            Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
-            other => other,
-        }
-    } else {
-        Value::Error(ErrorKind::NA)
+    let pad_with = match eval_optional_pad_with(ctx, args.get(2)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     let mut flat = Vec::with_capacity(array.rows.saturating_mul(array.cols));

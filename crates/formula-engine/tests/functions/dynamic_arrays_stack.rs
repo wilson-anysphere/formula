@@ -121,3 +121,15 @@ fn wraprows_wrapcols_wrap_sequence_and_pad() {
     assert_eq!(sheet.get("B10"), Value::Number(4.0));
     assert_eq!(sheet.get("C10"), Value::Number(0.0));
 }
+
+#[test]
+fn wraprows_wrapcols_blank_pad_argument_defaults_to_na() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=WRAPROWS(SEQUENCE(5),2,)");
+    sheet.set_formula("A6", "=WRAPCOLS(SEQUENCE(5),2,)");
+    sheet.recalc();
+
+    // Trailing empty arg should behave like an omitted pad_with argument (default #N/A).
+    assert_eq!(sheet.get("B3"), Value::Error(ErrorKind::NA));
+    assert_eq!(sheet.get("C7"), Value::Error(ErrorKind::NA));
+}
