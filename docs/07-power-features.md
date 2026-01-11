@@ -367,6 +367,10 @@ await handle.promise;
 unsubscribe();
 ```
 
+Notes:
+- Event `job.id` values are namespaced with the refresh session (`${sessionId}:...`) so they are safe to treat as globally unique across concurrent refreshAll runs.
+- `handle.cancel()` aborts the entire session. Some hosts may also use `handle.cancelQuery(queryId)` to abort a single query branch (cancelling downstream dependents while allowing independent targets to continue).
+
 ### Query Folding
 
 Push operations to the data source when possible:
