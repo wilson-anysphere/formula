@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, expect, test } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 
 import { LocalStorageBinaryStorage } from "../src/store/binaryStorage.js";
 import { ensureTestLocalStorage } from "./testLocalStorage.js";
@@ -17,6 +17,48 @@ function getTestLocalStorage(): Storage {
   }
   return jsdomStorage;
 }
+
+class MemoryLocalStorage implements Storage {
+  #data = new Map<string, string>();
+
+  get length(): number {
+    return this.#data.size;
+  }
+
+  clear(): void {
+    this.#data.clear();
+  }
+
+  getItem(key: string): string | null {
+    return this.#data.get(key) ?? null;
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.#data.keys())[index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    this.#data.delete(key);
+  }
+
+  setItem(key: string, value: string): void {
+    this.#data.set(key, value);
+  }
+}
+
+const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+
+beforeAll(() => {
+  // Node 25 ships an experimental `localStorage` accessor that throws unless Node is
+  // started with `--localstorage-file`. Force a deterministic in-memory storage for tests.
+  Object.defineProperty(globalThis, "localStorage", { value: new MemoryLocalStorage(), configurable: true });
+});
+
+afterAll(() => {
+  if (originalLocalStorage) {
+    Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+  }
+});
 
 beforeEach(() => {
   getTestLocalStorage().clear();

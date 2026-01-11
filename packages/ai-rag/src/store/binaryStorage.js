@@ -51,11 +51,21 @@ export class LocalStorageBinaryStorage {
  * - Vitest's jsdom environment stores the real DOM window on `globalThis.jsdom.window`.
  */
 function getLocalStorageOrNull() {
+  const isStorage = (value) => value && typeof value.getItem === "function" && typeof value.setItem === "function";
+
   try {
     // Prefer Vitest's jsdom window when present.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const jsdomStorage = globalThis?.jsdom?.window?.localStorage;
-    if (jsdomStorage) return jsdomStorage;
+    if (isStorage(jsdomStorage)) return jsdomStorage;
+  } catch {
+    // ignore
+  }
+
+  try {
+    // eslint-disable-next-line no-undef
+    const windowStorage = typeof window !== "undefined" ? window.localStorage : undefined;
+    if (isStorage(windowStorage)) return windowStorage;
   } catch {
     // ignore
   }
@@ -63,9 +73,7 @@ function getLocalStorageOrNull() {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const storage = globalThis?.localStorage;
-    if (!storage) return null;
-    if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
-    return storage;
+    return isStorage(storage) ? storage : null;
   } catch {
     return null;
   }
