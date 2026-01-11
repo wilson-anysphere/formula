@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::drawings::ImageStore;
 use crate::{
-    rewrite_sheet_names_in_formula, CalcSettings, SheetVisibility, Style, StyleTable, TabColor,
-    Table, ThemePalette, WorkbookProtection, Worksheet, WorksheetId,
+    rewrite_sheet_names_in_formula, CalcSettings, DateSystem, SheetVisibility, Style, StyleTable,
+    TabColor, Table, ThemePalette, WorkbookProtection, Worksheet, WorksheetId,
 };
 
 /// Identifier for a workbook.
@@ -42,6 +42,10 @@ pub struct Workbook {
     /// Workbook calculation options.
     #[serde(default)]
     pub calc_settings: CalcSettings,
+
+    /// Excel workbook date system (1900 vs 1904) used to interpret serial dates.
+    #[serde(default)]
+    pub date_system: DateSystem,
 
     /// Workbook theme palette used to resolve `Color::Theme` references.
     #[serde(default, skip_serializing_if = "ThemePalette::is_default")]
@@ -91,9 +95,19 @@ impl Workbook {
             styles: StyleTable::new(),
             images: ImageStore::default(),
             calc_settings: CalcSettings::default(),
+            date_system: DateSystem::default(),
             theme: ThemePalette::default(),
             workbook_protection: WorkbookProtection::default(),
             next_sheet_id: 1,
+        }
+    }
+
+    /// Convenience helper for formatting cell values according to this workbook's
+    /// date system.
+    pub fn format_options(&self, locale: formula_format::Locale) -> formula_format::FormatOptions {
+        formula_format::FormatOptions {
+            locale,
+            date_system: self.date_system.into(),
         }
     }
 
@@ -241,6 +255,8 @@ impl<'de> Deserialize<'de> for Workbook {
             theme: ThemePalette,
             #[serde(default)]
             workbook_protection: WorkbookProtection,
+            #[serde(default)]
+            date_system: DateSystem,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -268,6 +284,7 @@ impl<'de> Deserialize<'de> for Workbook {
             styles: helper.styles,
             images: helper.images,
             calc_settings: helper.calc_settings,
+            date_system: helper.date_system,
             theme: helper.theme,
             workbook_protection: helper.workbook_protection,
             next_sheet_id,

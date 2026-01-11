@@ -12,6 +12,7 @@ pub mod charts;
 mod comments;
 pub mod conditional_formatting;
 mod data_validation;
+mod date_system;
 mod display;
 /// Drawing primitives (images, shapes, charts, etc.).
 pub mod drawings;
@@ -40,7 +41,8 @@ pub use comments::{
 };
 pub use conditional_formatting::*;
 pub use data_validation::*;
-pub use display::{format_cell_display, CellDisplay};
+pub use date_system::DateSystem;
+pub use display::{format_cell_display, format_cell_display_in_workbook, CellDisplay};
 pub use error::ErrorValue;
 pub use formula_rewrite::rewrite_sheet_names_in_formula;
 pub use formula_text::{display_formula_text, normalize_formula_text};
@@ -73,4 +75,4 @@ pub use worksheet::{
 /// Current serialization schema version.
 ///
 /// This is embedded into [`Workbook`] to enable forward-compatible IPC payloads.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;

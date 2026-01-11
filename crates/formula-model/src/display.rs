@@ -1,6 +1,6 @@
 use formula_format::{AlignmentHint, FormatOptions, Value as FmtValue};
 
-use crate::{CellValue, HorizontalAlignment, Style};
+use crate::{CellValue, HorizontalAlignment, Style, Workbook};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellDisplay {
@@ -52,4 +52,15 @@ pub fn format_cell_display(
         text: formatted.text,
         alignment,
     }
+}
+
+/// Format a [`CellValue`] using this workbook's date system for serial dates.
+pub fn format_cell_display_in_workbook(
+    workbook: &Workbook,
+    value: &CellValue,
+    style: Option<&Style>,
+    locale: formula_format::Locale,
+) -> CellDisplay {
+    let options = workbook.format_options(locale);
+    format_cell_display(value, style, &options)
 }
