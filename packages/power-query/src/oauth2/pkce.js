@@ -72,6 +72,13 @@ export async function createCodeVerifier(options = {}) {
   // 32 bytes => 43 chars when base64url encoded (no padding), which meets the
   // RFC 7636 minimum verifier length.
   const byteLength = options.byteLength ?? 32;
+  // RFC 7636 requires the verifier to be between 43 and 128 characters.
+  // For base64url-encoded random bytes this corresponds to a byte length of:
+  // - 32 bytes -> 43 chars (minimum)
+  // - 96 bytes -> 128 chars (maximum)
+  if (byteLength < 32 || byteLength > 96) {
+    throw new RangeError("PKCE code verifier byteLength must be between 32 and 96");
+  }
   const bytes = await randomBytes(byteLength);
   return base64UrlEncode(bytes);
 }
@@ -87,4 +94,3 @@ export async function createCodeChallenge(verifier) {
   const digest = await sha256(bytes);
   return base64UrlEncode(digest);
 }
-

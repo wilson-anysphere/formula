@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createCodeChallenge } from "../../src/oauth2/pkce.js";
+import { createCodeVerifier } from "../../src/oauth2/pkce.js";
 
 test("PKCE: code challenge matches RFC 7636 test vector", async () => {
   // RFC 7636 Appendix B
@@ -12,3 +13,10 @@ test("PKCE: code challenge matches RFC 7636 test vector", async () => {
   assert.equal(challenge, expected);
 });
 
+test("PKCE: code verifier length bounds", async () => {
+  const verifier = await createCodeVerifier();
+  assert.ok(verifier.length >= 43 && verifier.length <= 128);
+
+  await assert.rejects(() => createCodeVerifier({ byteLength: 31 }), /byteLength/);
+  await assert.rejects(() => createCodeVerifier({ byteLength: 97 }), /byteLength/);
+});

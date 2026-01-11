@@ -387,7 +387,10 @@ export class OAuth2Manager {
     const normalized = normalizeScopes(options.scopes ?? provider.defaultScopes);
     const codeVerifier = await createCodeVerifier();
     const codeChallenge = await createCodeChallenge(codeVerifier);
-    const state = await createCodeVerifier({ byteLength: 16 });
+    // OAuth2 `state` is a CSRF token; it does not need to follow PKCE verifier
+    // length constraints. Reuse the same base64url random generator by using a
+    // valid PKCE-sized nonce.
+    const state = await createCodeVerifier();
 
     const authUrl = new URL(provider.authorizationEndpoint);
     authUrl.searchParams.set("response_type", "code");
@@ -519,4 +522,3 @@ export class OAuth2Manager {
     await this.tokenStore.delete(storeKey);
   }
 }
-
