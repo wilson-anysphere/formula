@@ -90,6 +90,7 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   assert.equal(sessionB.canEditCell({ sheetId: "Sheet1", row: 0, col: 1 }), false);
   assert.equal(await sessionB.safeSetCellValue("Sheet1:0:1", "hacked-legacy"), false);
   assert.equal(sessionB.cells.has("Sheet1:0:1"), false);
+  await assert.rejects(sessionB.setCellValue("Sheet1:0:1", "hacked-legacy-direct"));
 
   // Now "grant" the key by recreating the session with a resolver.
   sessionB.destroy();

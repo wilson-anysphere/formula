@@ -878,10 +878,11 @@ export class CollabSession {
 
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
-    const existingEnc = existingCell?.get("enc");
+    const parsedMaybe = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
+    const existingEnc = existingCell?.get("enc") ?? (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
-    const parsed = needsCellAddress ? parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId }) : null;
+    const parsed = needsCellAddress ? parsedMaybe : null;
     if (needsCellAddress && !parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
@@ -959,10 +960,11 @@ export class CollabSession {
   async setCellFormula(cellKey: string, formula: string | null): Promise<void> {
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
-    const existingEnc = existingCell?.get("enc");
+    const parsedMaybe = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
+    const existingEnc = existingCell?.get("enc") ?? (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
-    const parsed = needsCellAddress ? parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId }) : null;
+    const parsed = needsCellAddress ? parsedMaybe : null;
     if (needsCellAddress && !parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
