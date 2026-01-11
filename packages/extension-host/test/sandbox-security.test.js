@@ -76,11 +76,23 @@ test("sandbox: blocks disallowed Node builtin modules (including subpaths)", asy
   const extPath = await createRequireTestExtension(dir);
   await host.loadExtension(extPath);
 
-  const denied = ["fs/promises", "http2", "dns/promises", "inspector"];
-  for (const mod of denied) {
+  const denied = [
+    { request: "fs/promises", normalized: "fs/promises" },
+    { request: "node:fs/promises", normalized: "fs/promises" },
+    { request: "http2", normalized: "http2" },
+    { request: "node:http2", normalized: "http2" },
+    { request: "dns/promises", normalized: "dns/promises" },
+    { request: "node:dns/promises", normalized: "dns/promises" },
+    { request: "inspector", normalized: "inspector" },
+    { request: "node:inspector", normalized: "inspector" },
+    { request: "inspector/promises", normalized: "inspector/promises" },
+    { request: "_http_client", normalized: "_http_client" }
+  ];
+
+  for (const { request, normalized } of denied) {
     await assert.rejects(
-      () => host.executeCommand("sandboxTest.require", mod),
-      new RegExp(`Access to Node builtin module '${escapeRegExp(mod)}'`)
+      () => host.executeCommand("sandboxTest.require", request),
+      new RegExp(`Access to Node builtin module '${escapeRegExp(normalized)}'`)
     );
   }
 });
@@ -91,10 +103,19 @@ test("sandbox: blocks require() through symlinks (even with --preserve-symlinks)
   // Gate if symlinks are not supported (e.g. some Windows CI setups).
   const outside = path.join(tmpRoot, "outside.js");
   const probeLink = path.join(tmpRoot, "probe-link.js");
+  const outsideDir = path.join(tmpRoot, "outside-dir");
+  const probeDirLink = path.join(tmpRoot, "probe-dir");
   await fs.writeFile(outside, "module.exports = 123;\n", "utf8");
+  await fs.mkdir(outsideDir);
   try {
     await fs.symlink(outside, probeLink, process.platform === "win32" ? "file" : undefined);
     await fs.unlink(probeLink);
+    await fs.symlink(outsideDir, probeDirLink, process.platform === "win32" ? "junction" : undefined);
+    try {
+      await fs.unlink(probeDirLink);
+    } catch {
+      await fs.rmdir(probeDirLink);
+    }
   } catch (error) {
     await fs.rm(tmpRoot, { recursive: true, force: true });
     const code = error && typeof error === "object" ? error.code : null;
@@ -128,6 +149,9 @@ async function main() {
   try {
     const outsidePath = path.join(root, "outside.js");
     await fs.writeFile(outsidePath, "module.exports = { ok: true };\\n", "utf8");
+    const outsideDirPath = path.join(root, "outside-dir");
+    await fs.mkdir(outsideDirPath, { recursive: true });
+    await fs.writeFile(path.join(outsideDirPath, "index.js"), "module.exports = { ok: true };\\n", "utf8");
 
     const extDir = path.join(root, "symlink-ext");
     const distDir = path.join(extDir, "dist");
@@ -135,6 +159,11 @@ async function main() {
 
     // Symlink inside the extension pointing to code outside.
     await fs.symlink(outsidePath, path.join(extDir, "linked.js"), process.platform === "win32" ? "file" : undefined);
+    await fs.symlink(
+      outsideDirPath,
+      path.join(extDir, "linked-dir"),
+      process.platform === "win32" ? "junction" : undefined
+    );
 
     await writeJson(path.join(extDir, "package.json"), {
       name: "symlink-test",
@@ -142,12 +171,16 @@ async function main() {
       version: "1.0.0",
       main: "./dist/extension.js",
       engines: { formula: "^1.0.0" },
-      activationEvents: ["onCommand:symlinkTest.escape"],
+      activationEvents: ["onCommand:symlinkTest.escapeFile", "onCommand:symlinkTest.escapeDir"],
       contributes: {
         commands: [
           {
-            command: "symlinkTest.escape",
-            title: "Symlink escape"
+            command: "symlinkTest.escapeFile",
+            title: "Symlink escape file"
+          },
+          {
+            command: "symlinkTest.escapeDir",
+            title: "Symlink escape dir"
           }
         ]
       },
@@ -158,12 +191,14 @@ async function main() {
       path.join(distDir, "extension.js"),
       \`const formula = require("formula");
 async function activate(context) {
-  context.subscriptions.push(
-    await formula.commands.registerCommand("symlinkTest.escape", () => {
-      require("../linked.js");
-      return "ok";
-    })
-  );
+  context.subscriptions.push(await formula.commands.registerCommand("symlinkTest.escapeFile", () => {
+    require("../linked.js");
+    return "ok";
+  }));
+  context.subscriptions.push(await formula.commands.registerCommand("symlinkTest.escapeDir", () => {
+    require("../linked-dir");
+    return "ok";
+  }));
 }
 module.exports = { activate };
 \`,
@@ -179,17 +214,24 @@ module.exports = { activate };
 
     try {
       await host.loadExtension(extDir);
-      await host.executeCommand("symlinkTest.escape");
-      console.error("Expected symlink require to be blocked, but it succeeded");
-      process.exitCode = 1;
-    } catch (error) {
-      const msg = String(error?.message ?? error);
-      if (/outside their extension folder/.test(msg)) {
-        process.exitCode = 0;
-      } else {
-        console.error("Unexpected error:", msg);
-        process.exitCode = 1;
+      const failures = [];
+
+      for (const cmd of ["symlinkTest.escapeFile", "symlinkTest.escapeDir"]) {
+        try {
+          await host.executeCommand(cmd);
+          console.error("Expected " + cmd + " to be blocked, but it succeeded");
+          process.exitCode = 1;
+          return;
+        } catch (error) {
+          const msg = String(error?.message ?? error);
+          if (!/outside their extension folder/.test(msg)) {
+            console.error("Unexpected error for " + cmd + ":", msg);
+            failures.push(cmd);
+          }
+        }
       }
+
+      process.exitCode = failures.length === 0 ? 0 : 1;
     } finally {
       await host.dispose().catch(() => {});
     }
