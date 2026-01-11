@@ -136,6 +136,8 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     worksheet_part: &str,
     patches: &[WorksheetCellPatch],
 ) -> Result<(), StreamingPatchError> {
+    let patch_bounds = bounds_for_patches(patches);
+
     let mut patches_by_row: BTreeMap<u32, Vec<CellPatch>> = BTreeMap::new();
     for patch in patches {
         let row_1 = patch.cell.row + 1;
@@ -161,6 +163,7 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     let mut buf = Vec::new();
     let mut in_sheet_data = false;
     let mut saw_sheet_data = false;
+    let mut patched_dimension = false;
 
     let mut row_state: Option<RowState> = None;
 
@@ -202,6 +205,33 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 write_pending_rows(&mut writer, &mut patches_by_row)?;
                 in_sheet_data = false;
                 writer.write_event(Event::End(e.to_owned()))?;
+            }
+
+            Event::Start(ref e) if e.name().as_ref() == b"dimension" => {
+                if !patched_dimension {
+                    patched_dimension = true;
+                    if let Some(bounds) = patch_bounds {
+                        let updated = updated_dimension_element(e, bounds)?;
+                        writer.write_event(Event::Start(updated))?;
+                    } else {
+                        writer.write_event(Event::Start(e.to_owned()))?;
+                    }
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                }
+            }
+            Event::Empty(ref e) if e.name().as_ref() == b"dimension" => {
+                if !patched_dimension {
+                    patched_dimension = true;
+                    if let Some(bounds) = patch_bounds {
+                        let updated = updated_dimension_element(e, bounds)?;
+                        writer.write_event(Event::Empty(updated))?;
+                    } else {
+                        writer.write_event(Event::Empty(e.to_owned()))?;
+                    }
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
             }
 
             Event::Start(ref e) if in_sheet_data && e.name().as_ref() == b"row" => {
@@ -528,4 +558,98 @@ fn cell_representation(
 
 fn needs_space_preserve(s: &str) -> bool {
     s.starts_with(char::is_whitespace) || s.ends_with(char::is_whitespace)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PatchBounds {
+    min_row_0: u32,
+    max_row_0: u32,
+    min_col_0: u32,
+    max_col_0: u32,
+}
+
+fn bounds_for_patches(patches: &[WorksheetCellPatch]) -> Option<PatchBounds> {
+    let mut iter = patches.iter();
+    let first = iter.next()?;
+    let mut min_row_0 = first.cell.row;
+    let mut max_row_0 = first.cell.row;
+    let mut min_col_0 = first.cell.col;
+    let mut max_col_0 = first.cell.col;
+
+    for patch in iter {
+        min_row_0 = min_row_0.min(patch.cell.row);
+        max_row_0 = max_row_0.max(patch.cell.row);
+        min_col_0 = min_col_0.min(patch.cell.col);
+        max_col_0 = max_col_0.max(patch.cell.col);
+    }
+
+    Some(PatchBounds {
+        min_row_0,
+        max_row_0,
+        min_col_0,
+        max_col_0,
+    })
+}
+
+fn updated_dimension_element(
+    original: &BytesStart<'_>,
+    bounds: PatchBounds,
+) -> Result<BytesStart<'static>, StreamingPatchError> {
+    let original_ref = original
+        .attributes()
+        .flatten()
+        .find(|a| a.key.as_ref() == b"ref")
+        .and_then(|a| a.unescape_value().ok())
+        .map(|v| v.into_owned());
+
+    let mut min_row_0 = bounds.min_row_0;
+    let mut max_row_0 = bounds.max_row_0;
+    let mut min_col_0 = bounds.min_col_0;
+    let mut max_col_0 = bounds.max_col_0;
+
+    if let Some(existing) = original_ref.as_deref() {
+        if let Some((start, end)) = parse_dimension_ref(existing) {
+            min_row_0 = min_row_0.min(start.row);
+            max_row_0 = max_row_0.max(end.row);
+            min_col_0 = min_col_0.min(start.col);
+            max_col_0 = max_col_0.max(end.col);
+        }
+    }
+
+    let start = CellRef::new(min_row_0, min_col_0);
+    let end = CellRef::new(max_row_0, max_col_0);
+    let updated_ref = if start == end {
+        start.to_a1()
+    } else {
+        format!("{}:{}", start.to_a1(), end.to_a1())
+    };
+
+    // Preserve attribute ordering where possible by rewriting `ref` in-place.
+    let mut out = BytesStart::new("dimension");
+    for attr in original.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"ref" {
+            out.push_attribute(("ref", updated_ref.as_str()));
+        } else {
+            out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+        }
+    }
+
+    if original
+        .attributes()
+        .flatten()
+        .all(|a| a.key.as_ref() != b"ref")
+    {
+        out.push_attribute(("ref", updated_ref.as_str()));
+    }
+
+    Ok(out.into_owned())
+}
+
+fn parse_dimension_ref(s: &str) -> Option<(CellRef, CellRef)> {
+    let mut parts = s.split(':');
+    let start = parts.next()?;
+    let start = CellRef::from_a1(start).ok()?;
+    let end = parts.next().and_then(|p| CellRef::from_a1(p).ok()).unwrap_or(start);
+    Some((start, end))
 }
