@@ -180,7 +180,9 @@ test("QueryEngine: reads legacy v1 DataTable cache entries", async () => {
     },
   });
 
-  const result = await engine.executeQueryWithMeta(query, {}, {});
+  // Legacy v1 cache entries predate source-state validation metadata. Disable validation so we can
+  // prove the engine still understands the v1 payload shape.
+  const result = await engine.executeQueryWithMeta(query, {}, { cache: { validation: "none" } });
   assert.equal(result.meta.cache?.hit, true);
   assert.equal(readCount, 0, "cache hit should not re-read the source");
   assert.deepEqual(result.meta.outputSchema.columns, result.table.columns);
@@ -313,6 +315,58 @@ test("FileSystemCacheStore: persists Arrow cache blobs and avoids re-reading Par
     assert.ok(second.table instanceof ArrowTableAdapter);
     assert.deepEqual(second.meta.outputSchema.columns, second.table.columns);
     assert.deepEqual(second.table.toGrid(), grid);
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
+test("FileSystemCacheStore: persists DataTable cache entries and preserves Date values", async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-data-"));
+
+  try {
+    const query = {
+      id: "q_range_date_fs_cache",
+      name: "Range date fs cache",
+      source: {
+        type: "range",
+        range: {
+          hasHeaders: true,
+          values: [
+            ["id", "occurredAt"],
+            [1, new Date("2024-01-01T00:00:00.000Z")],
+            [2, null],
+          ],
+        },
+      },
+      steps: [],
+    };
+
+    const firstEngine = new QueryEngine({
+      cache: new CacheManager({ store: new FileSystemCacheStore({ directory: cacheDir }) }),
+    });
+
+    const first = await firstEngine.executeQueryWithMeta(query, {}, {});
+    assert.equal(first.meta.cache?.hit, false);
+    const firstGrid = first.table.toGrid();
+    assert.ok(firstGrid[1][1] instanceof Date, "date cell should be materialized as a Date");
+
+    const files = await readdir(cacheDir);
+    assert.ok(files.some((name) => name.endsWith(".json")));
+    assert.equal(
+      files.some((name) => name.endsWith(".bin")),
+      false,
+      "DataTable cache should not create a .bin blob",
+    );
+
+    const secondEngine = new QueryEngine({
+      cache: new CacheManager({ store: new FileSystemCacheStore({ directory: cacheDir }) }),
+    });
+
+    const second = await secondEngine.executeQueryWithMeta(query, {}, {});
+    assert.equal(second.meta.cache?.hit, true);
+    const secondGrid = second.table.toGrid();
+    assert.ok(secondGrid[1][1] instanceof Date, "date cell should survive cache roundtrip");
+    assert.deepEqual(secondGrid, firstGrid);
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
   }
