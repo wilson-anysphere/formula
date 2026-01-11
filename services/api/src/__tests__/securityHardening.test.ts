@@ -372,4 +372,27 @@ describe("security hardening", () => {
     });
     expect(allowedWithTrustProxy.statusCode).toBe(200);
   });
+
+  it("rejects invalid orgId path params on org-scoped routes", async () => {
+    const register = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "invalid-orgid-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "Invalid OrgId Org"
+      }
+    });
+    expect(register.statusCode).toBe(200);
+    const cookie = extractCookie(register.headers["set-cookie"]);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/orgs/not-a-uuid",
+      headers: { cookie }
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as any).error).toBe("invalid_request");
+  });
 });

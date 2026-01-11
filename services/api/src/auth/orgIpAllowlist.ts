@@ -3,6 +3,10 @@ import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isClientIpAllowed } from "./apiKeys";
 
+function isValidOrgId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export async function enforceOrgIpAllowlistForSessionWithAllowlist(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -69,6 +73,9 @@ export async function enforceOrgIpAllowlistFromParams(
 ): Promise<void | FastifyReply> {
   const orgId = (request.params as { orgId?: unknown } | undefined)?.orgId;
   if (typeof orgId !== "string" || orgId.length === 0) return;
+  if (!isValidOrgId(orgId)) {
+    return reply.code(400).send({ error: "invalid_request" });
+  }
   const ok = await enforceOrgIpAllowlistForSession(request, reply, orgId);
   if (!ok) return reply;
 }
