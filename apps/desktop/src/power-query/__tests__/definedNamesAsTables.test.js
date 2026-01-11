@@ -125,3 +125,92 @@ test("Excel.CurrentWorkbook table source rejects non-range defined name formulas
     globalThis.__TAURI__ = originalTauri;
   }
 });
+
+test("Excel.CurrentWorkbook table source supports unqualified A1 ranges when sheet_id is provided", async () => {
+  const originalTauri = globalThis.__TAURI__;
+
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        if (cmd === "list_tables") return [];
+        if (cmd === "list_defined_names") {
+          return [{ name: "LocalRange", refers_to: "$A$1:$B$2", sheet_id: "Sheet1" }];
+        }
+        if (cmd === "get_range") {
+          assert.equal(args.sheet_id, "Sheet1");
+          assert.deepEqual(
+            { start_row: args.start_row, start_col: args.start_col, end_row: args.end_row, end_col: args.end_col },
+            { start_row: 0, start_col: 0, end_row: 1, end_col: 1 },
+          );
+          return {
+            start_row: 0,
+            start_col: 0,
+            values: [
+              [makeCell("A"), makeCell("B")],
+              [makeCell(1), makeCell(2)],
+            ],
+          };
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const engine = createDesktopQueryEngine();
+    const table = await engine.executeQuery(
+      { id: "q_local_range", name: "LocalRange", source: { type: "table", table: "LocalRange" }, steps: [] },
+      {},
+      {},
+    );
+    assert.deepEqual(table.toGrid(), [
+      ["A", "B"],
+      [1, 2],
+    ]);
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});
+
+test("Excel.CurrentWorkbook table source supports quoted sheet names in refers_to", async () => {
+  const originalTauri = globalThis.__TAURI__;
+
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        if (cmd === "list_tables") return [];
+        if (cmd === "list_defined_names") {
+          return [{ name: "QuotedRange", refers_to: "'My Sheet'!$B$2:$B$3", sheet_id: null }];
+        }
+        if (cmd === "get_range") {
+          assert.equal(args.sheet_id, "My Sheet");
+          assert.deepEqual(
+            { start_row: args.start_row, start_col: args.start_col, end_row: args.end_row, end_col: args.end_col },
+            { start_row: 1, start_col: 1, end_row: 2, end_col: 1 },
+          );
+          return {
+            start_row: 1,
+            start_col: 1,
+            values: [
+              [makeCell("Value")],
+              [makeCell(123)],
+            ],
+          };
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const engine = createDesktopQueryEngine();
+    const table = await engine.executeQuery(
+      { id: "q_quoted_range", name: "QuotedRange", source: { type: "table", table: "QuotedRange" }, steps: [] },
+      {},
+      {},
+    );
+    assert.deepEqual(table.toGrid(), [["Value"], [123]]);
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});
