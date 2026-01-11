@@ -41,6 +41,11 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     params: [{ name: "range" }],
     summary: "Counts the number of blank cells within a range.",
   },
+  COUNTIF: {
+    name: "COUNTIF",
+    params: [{ name: "range" }, { name: "criteria" }],
+    summary: "Counts the number of cells within a range that meet the given criteria.",
+  },
   AVERAGE: {
     name: "AVERAGE",
     params: [{ name: "number1" }, { name: "number2", optional: true }],
@@ -55,6 +60,11 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     name: "MIN",
     params: [{ name: "number1" }, { name: "number2", optional: true }],
     summary: "Returns the smallest value in a set of values.",
+  },
+  SUMPRODUCT: {
+    name: "SUMPRODUCT",
+    params: [{ name: "array1" }, { name: "array2" }],
+    summary: "Returns the sum of the products of corresponding array components.",
   },
   IF: {
     name: "IF",

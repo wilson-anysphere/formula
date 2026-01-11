@@ -184,6 +184,14 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "COUNTIF",
+    description: "Counts the number of cells within a range that meet the given criteria.",
+    args: [
+      { name: "range", type: "range" },
+      { name: "criteria", type: "value" },
+    ],
+  },
+  {
     name: "AVERAGE",
     description: "Returns the average (arithmetic mean) of the arguments.",
     args: [
@@ -202,6 +210,14 @@ const CURATED_FUNCTIONS = [
     description: "Returns the smallest value in a set of values.",
     args: [
       { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "SUMPRODUCT",
+    description: "Returns the sum of the products of corresponding array components.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
     ],
   },
   {
