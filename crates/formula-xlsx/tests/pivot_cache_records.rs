@@ -1,4 +1,4 @@
-use formula_xlsx::{PivotCacheValue, XlsxPackage};
+use formula_xlsx::{load_from_bytes, PivotCacheValue, XlsxPackage};
 
 use pretty_assertions::assert_eq;
 
@@ -28,3 +28,21 @@ fn parses_pivot_cache_records_fixture() {
     );
 }
 
+#[test]
+fn parses_pivot_cache_records_fixture_from_document() {
+    let doc = load_from_bytes(FIXTURE).expect("load fixture");
+    let mut reader = doc
+        .pivot_cache_records("xl/pivotCache/pivotCacheRecords1.xml")
+        .expect("pivotCacheRecords part exists");
+    let records = reader.parse_all_records();
+
+    assert_eq!(records.len(), 4);
+    assert_eq!(
+        records[0],
+        vec![
+            PivotCacheValue::String("East".to_string()),
+            PivotCacheValue::String("A".to_string()),
+            PivotCacheValue::Number(100.0),
+        ]
+    );
+}

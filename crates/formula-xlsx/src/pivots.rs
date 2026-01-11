@@ -165,7 +165,7 @@ fn parse_pivot_cache_records_part(path: &str, xml: &[u8]) -> Result<PivotCacheRe
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
-            Event::Start(e) => {
+            Event::Start(e) | Event::Empty(e) => {
                 if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"pivotCacheRecords")
                 {
                     for attr in e.attributes().with_checks(false) {

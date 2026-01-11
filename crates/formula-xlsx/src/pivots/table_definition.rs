@@ -115,6 +115,7 @@ impl PivotTableDefinition {
 impl XlsxPackage {
     /// Parse a pivot table definition part (e.g. `xl/pivotTables/pivotTable1.xml`).
     pub fn pivot_table_definition(&self, part_name: &str) -> Result<PivotTableDefinition, XlsxError> {
+        let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
         let xml = self
             .part(part_name)
             .ok_or_else(|| XlsxError::MissingPart(part_name.to_string()))?;

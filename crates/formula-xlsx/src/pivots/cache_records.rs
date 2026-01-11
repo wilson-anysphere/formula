@@ -1,7 +1,11 @@
 use chrono::NaiveDate;
+use std::collections::BTreeMap;
+
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use quick_xml::Reader;
+
+use crate::{XlsxDocument, XlsxError};
 
 /// A typed value found in a `<r>` record inside `pivotCacheRecords*.xml`.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +27,39 @@ pub enum PivotCacheValue {
     DateTime(String),
     /// `<x v="..."/>` (shared item index)
     Index(u32),
+}
+
+impl XlsxDocument {
+    /// Create a streaming reader for a pivot cache records part
+    /// (e.g. `xl/pivotCache/pivotCacheRecords1.xml`).
+    pub fn pivot_cache_records<'a>(
+        &'a self,
+        part_name: &str,
+    ) -> Result<PivotCacheRecordsReader<'a>, XlsxError> {
+        let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
+        let bytes = self
+            .parts()
+            .get(part_name)
+            .ok_or_else(|| XlsxError::MissingPart(part_name.to_string()))?;
+        Ok(PivotCacheRecordsReader::new(bytes))
+    }
+
+    /// Parse all `pivotCacheRecords*.xml` parts in the document into memory.
+    ///
+    /// Prefer [`Self::pivot_cache_records`] for large caches.
+    pub fn pivot_cache_records_all(&self) -> BTreeMap<String, Vec<Vec<PivotCacheValue>>> {
+        let mut out = BTreeMap::new();
+        for (name, bytes) in self.parts() {
+            if name.starts_with("xl/pivotCache/")
+                && name.contains("pivotCacheRecords")
+                && name.ends_with(".xml")
+            {
+                let mut reader = PivotCacheRecordsReader::new(bytes);
+                out.insert(name.to_string(), reader.parse_all_records());
+            }
+        }
+        out
+    }
 }
 
 /// Streaming reader for `xl/pivotCache/pivotCacheRecords*.xml`.
