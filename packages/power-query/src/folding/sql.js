@@ -46,6 +46,9 @@ import { POSTGRES_DIALECT, getSqlDialect } from "./dialect.js";
  *   // When known, output column ordering + names. Used for conservative folding
  *   // of operations that need an explicit projection (rename/changeType/merge).
  *   columns: string[] | null;
+ *   // Connection identity used to ensure we only fold `merge`/`append` when both
+ *   // sides originate from the same database connection.
+ *   connection: unknown;
  * }} SqlState
  */
 
@@ -81,6 +84,7 @@ export class QueryFoldingEngine {
     /** @type {Set<string>} */
     this.foldable = new Set([
       "selectColumns",
+      "removeColumns",
       "filterRows",
       "sortRows",
       "groupBy",
@@ -177,7 +181,7 @@ export class QueryFoldingEngine {
     switch (source.type) {
       case "database": {
         const columns = source.columns ? source.columns.slice() : null;
-        return { fragment: { sql: source.query, params: [] }, columns };
+        return { fragment: { sql: source.query, params: [] }, columns, connection: source.connection };
       }
       case "query": {
         const target = ctx.queries?.[source.queryId];
@@ -210,6 +214,23 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols} FROM ${from}`, params },
           columns: operation.columns.slice(),
+          connection: state.connection,
+        };
+      }
+      case "removeColumns": {
+        if (!state.columns) return null;
+        const remove = new Set(operation.columns);
+        for (const name of operation.columns) {
+          if (!state.columns.includes(name)) return null;
+        }
+
+        const remaining = state.columns.filter((name) => !remove.has(name));
+        if (remaining.length === 0) return null;
+        const cols = remaining.map((c) => `t.${quoteIdentifier(c)}`).join(", ");
+        return {
+          fragment: { sql: `SELECT ${cols} FROM ${from}`, params },
+          columns: remaining,
+          connection: state.connection,
         };
       }
       case "filterRows": {
@@ -221,16 +242,18 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT * FROM ${from} WHERE ${where}`, params },
           columns: state.columns,
+          connection: state.connection,
         };
       }
       case "sortRows": {
         if (operation.sortBy.length === 0) {
-          return { fragment: { sql: state.fragment.sql, params }, columns: state.columns };
+          return { fragment: { sql: state.fragment.sql, params }, columns: state.columns, connection: state.connection };
         }
         const orderBy = sortSpecsToSql(dialect, operation.sortBy);
         return {
           fragment: { sql: `SELECT * FROM ${from} ORDER BY ${orderBy}`, params },
           columns: state.columns,
+          connection: state.connection,
         };
       }
       case "groupBy": {
@@ -245,6 +268,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${selectList} FROM ${from}${groupByClause}`, params },
           columns,
+          connection: state.connection,
         };
       }
       case "renameColumn": {
@@ -252,7 +276,11 @@ export class QueryFoldingEngine {
         const idx = state.columns.indexOf(operation.oldName);
         if (idx === -1) return null;
         if (operation.oldName === operation.newName) {
-          return { fragment: { sql: state.fragment.sql, params }, columns: state.columns.slice() };
+          return {
+            fragment: { sql: state.fragment.sql, params },
+            columns: state.columns.slice(),
+            connection: state.connection,
+          };
         }
 
         const cols = state.columns.map((name) => {
@@ -268,11 +296,16 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols.join(", ")} FROM ${from}`, params },
           columns: nextColumns,
+          connection: state.connection,
         };
       }
       case "changeType": {
         if (operation.newType === "any") {
-          return { fragment: { sql: state.fragment.sql, params }, columns: state.columns ? state.columns.slice() : null };
+          return {
+            fragment: { sql: state.fragment.sql, params },
+            columns: state.columns ? state.columns.slice() : null,
+            connection: state.connection,
+          };
         }
         if (!state.columns) return null;
         if (!state.columns.includes(operation.column)) return null;
@@ -289,6 +322,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols.join(", ")} FROM ${from}`, params },
           columns: state.columns.slice(),
+          connection: state.connection,
         };
       }
       case "addColumn": {
@@ -307,6 +341,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT t.*, ${exprSql} AS ${quoteIdentifier(operation.name)} FROM ${from}`, params },
           columns: nextColumns,
+          connection: state.connection,
         };
       }
       case "take": {
@@ -315,6 +350,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT * FROM ${from} LIMIT ?`, params },
           columns: state.columns,
+          connection: state.connection,
         };
       }
       case "merge": {
@@ -323,6 +359,7 @@ export class QueryFoldingEngine {
         if (!rightQuery) return null;
         const rightState = this.compileQueryToSqlState(rightQuery, ctx, callStack);
         if (!rightState?.columns) return null;
+        if (state.connection !== rightState.connection) return null;
 
         if (!state.columns.includes(operation.leftKey)) return null;
         if (!rightState.columns.includes(operation.rightKey)) return null;
@@ -350,6 +387,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: mergedSql, params: [...state.fragment.params, ...rightState.fragment.params] },
           columns: [...leftCols, ...rightOut.map((c) => c.out)],
+          connection: state.connection,
         };
       }
       case "append": {
@@ -366,6 +404,7 @@ export class QueryFoldingEngine {
           if (!q) return null;
           const compiled = this.compileQueryToSqlState(q, ctx, callStack);
           if (!compiled?.columns) return null;
+          if (state.connection !== compiled.connection) return null;
           if (!columnsCompatible(baseColumns, compiled.columns)) return null;
           branches.push(compiled);
         }
@@ -378,6 +417,7 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: unionSql, params: unionParams },
           columns: baseColumns.slice(),
+          connection: state.connection,
         };
       }
       default:

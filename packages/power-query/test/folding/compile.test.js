@@ -135,18 +135,19 @@ test("compile: non-translatable addColumn formula breaks folding into a hybrid p
 
 test("compile: folds merge (join) when both sides fully fold to SQL", () => {
   const folding = new QueryFoldingEngine();
+  const connection = {};
 
   const right = {
     id: "q_right",
     name: "Targets",
-    source: { type: "database", connection: {}, query: "SELECT * FROM targets" },
+    source: { type: "database", connection, query: "SELECT * FROM targets" },
     steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
   };
 
   const left = {
     id: "q_left",
     name: "Sales",
-    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    source: { type: "database", connection, query: "SELECT * FROM sales" },
     steps: [
       { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region", "Sales"] } },
       { id: "s2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
@@ -161,20 +162,48 @@ test("compile: folds merge (join) when both sides fully fold to SQL", () => {
   });
 });
 
+test("compile: merge across different database connections breaks folding", () => {
+  const folding = new QueryFoldingEngine();
+
+  const right = {
+    id: "q_right",
+    name: "Targets",
+    source: { type: "database", connection: { name: "db2" }, query: "SELECT * FROM targets" },
+    steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left",
+    name: "Sales",
+    source: { type: "database", connection: { name: "db1" }, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Sales"] } },
+      { id: "s2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+    ],
+  };
+
+  const plan = folding.compile(left, { queries: { q_right: right } });
+  assert.equal(plan.type, "hybrid");
+  assert.deepEqual(plan.params, []);
+  assert.equal(plan.sql, 'SELECT t."Id", t."Sales" FROM (SELECT * FROM sales) AS t');
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["merge"]);
+});
+
 test("compile: folds append (UNION ALL) when schemas are compatible", () => {
   const folding = new QueryFoldingEngine();
+  const connection = {};
 
   const other = {
     id: "q_other",
     name: "Other",
-    source: { type: "database", connection: {}, query: "SELECT * FROM b" },
+    source: { type: "database", connection, query: "SELECT * FROM b" },
     steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Value", "Id"] } }],
   };
 
   const base = {
     id: "q_base",
     name: "Base",
-    source: { type: "database", connection: {}, query: "SELECT * FROM a" },
+    source: { type: "database", connection, query: "SELECT * FROM a" },
     steps: [
       { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Value"] } },
       { id: "s2", name: "Append", operation: { type: "append", queries: ["q_other"] } },
@@ -189,6 +218,31 @@ test("compile: folds append (UNION ALL) when schemas are compatible", () => {
   });
 });
 
+test("compile: append across different database connections breaks folding", () => {
+  const folding = new QueryFoldingEngine();
+
+  const other = {
+    id: "q_other",
+    name: "Other",
+    source: { type: "database", connection: { name: "db2" }, query: "SELECT * FROM b" },
+    steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Value"] } }],
+  };
+
+  const base = {
+    id: "q_base",
+    name: "Base",
+    source: { type: "database", connection: { name: "db1" }, query: "SELECT * FROM a" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Value"] } },
+      { id: "s2", name: "Append", operation: { type: "append", queries: ["q_other"] } },
+    ],
+  };
+
+  const plan = folding.compile(base, { queries: { q_other: other } });
+  assert.equal(plan.type, "hybrid");
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["append"]);
+});
+
 test("compile: folds take (LIMIT) into SQL", () => {
   const folding = new QueryFoldingEngine();
   const query = {
@@ -200,6 +254,26 @@ test("compile: folds take (LIMIT) into SQL", () => {
 
   const plan = folding.compile(query);
   assert.deepEqual(plan, { type: "sql", sql: "SELECT * FROM (SELECT * FROM sales) AS t LIMIT ?", params: [10] });
+});
+
+test("compile: folds removeColumns when projection is known", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_remove",
+    name: "Remove",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Region", "Product", "Sales"] } },
+      { id: "s2", name: "Remove", operation: { type: "removeColumns", columns: ["Product"] } },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT t."Region", t."Sales" FROM (SELECT t."Region", t."Product", t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
+    params: [],
+  });
 });
 
 test("compile: dialect-specific quoting + NULL ordering (MySQL)", () => {
@@ -242,4 +316,3 @@ test("compile: dialect-specific Date parameter formatting (MySQL)", () => {
   assert.equal(plan.sql, "SELECT * FROM (SELECT * FROM events) AS t WHERE (t.`CreatedAt` = ?)");
   assert.deepEqual(plan.params, ["2020-01-02 03:04:05"]);
 });
-
