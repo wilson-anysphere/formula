@@ -155,6 +155,62 @@ test("webgpu: f32 + f64 correctness for common kernels (if WebGPU available)", a
     assert.deepEqual(Array.from(gpuOut.sums), Array.from(cpuOut.sums));
   });
 
+  await t.test("webgpu: groupByCount matches CPU (if supported)", async (t2) => {
+    if (!diag.supportedKernels.groupByCount) return t2.skip("groupByCount unsupported by this WebGPU backend");
+
+    const rng = makeRng(11111);
+    const n = 50_000;
+    const keys = new Uint32Array(n);
+    for (let i = 0; i < n; i++) {
+      keys[i] = (rng() * 2048) | 0;
+    }
+
+    const cpuOut = await cpu.groupByCount(keys);
+    const gpuOut = await gpu.groupByCount(keys);
+    assert.deepEqual(Array.from(gpuOut.uniqueKeys), Array.from(cpuOut.uniqueKeys));
+    assert.deepEqual(Array.from(gpuOut.counts), Array.from(cpuOut.counts));
+  });
+
+  await t.test("webgpu: groupByMin/Max match CPU (if supported)", async (t2) => {
+    if (!diag.supportedKernels.groupByMin || !diag.supportedKernels.groupByMax) {
+      return t2.skip("groupByMin/groupByMax unsupported by this WebGPU backend");
+    }
+
+    const rng = makeRng(22222);
+    const n = 50_000;
+    const keys = new Uint32Array(n);
+    const vals = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      keys[i] = (rng() * 1024) | 0;
+      vals[i] = (rng() - 0.5) * 1000;
+    }
+    // Ensure some special values are present and grouped.
+    keys[0] = 7;
+    vals[0] = Number.NaN;
+    keys[1] = 7;
+    vals[1] = 123;
+    keys[2] = 9;
+    vals[2] = 0;
+    keys[3] = 9;
+    vals[3] = -0;
+
+    const cpuMin = await cpu.groupByMin(keys, vals);
+    const gpuMin = await gpu.groupByMin(keys, vals, { precision: "f32" });
+    assert.deepEqual(Array.from(gpuMin.uniqueKeys), Array.from(cpuMin.uniqueKeys));
+    assert.deepEqual(Array.from(gpuMin.counts), Array.from(cpuMin.counts));
+    for (let i = 0; i < cpuMin.mins.length; i++) {
+      assert.ok(Object.is(gpuMin.mins[i], cpuMin.mins[i]), `min i=${i} gpu=${gpuMin.mins[i]} cpu=${cpuMin.mins[i]}`);
+    }
+
+    const cpuMax = await cpu.groupByMax(keys, vals);
+    const gpuMax = await gpu.groupByMax(keys, vals, { precision: "f32" });
+    assert.deepEqual(Array.from(gpuMax.uniqueKeys), Array.from(cpuMax.uniqueKeys));
+    assert.deepEqual(Array.from(gpuMax.counts), Array.from(cpuMax.counts));
+    for (let i = 0; i < cpuMax.maxs.length; i++) {
+      assert.ok(Object.is(gpuMax.maxs[i], cpuMax.maxs[i]), `max i=${i} gpu=${gpuMax.maxs[i]} cpu=${cpuMax.maxs[i]}`);
+    }
+  });
+
   await t.test("webgpu: hashJoin matches CPU (if supported)", async (t2) => {
     if (!diag.supportedKernels.hashJoin) return t2.skip("hashJoin unsupported by this WebGPU backend");
 
