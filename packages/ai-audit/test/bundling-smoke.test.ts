@@ -41,5 +41,37 @@ describe("ai-audit browser bundling", () => {
     const outputImports = Object.values(result.metafile?.outputs ?? {}).flatMap((output) => output.imports);
     expect(outputImports.some((imp) => imp.path.startsWith("node:"))).toBe(false);
   });
-});
 
+  it("bundles the sqlite entrypoint for browser builds without Node builtins", async () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkgRoot = path.resolve(here, "..");
+
+    const outdir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-audit-sqlite-esbuild-"));
+
+    const result = await build({
+      absWorkingDir: pkgRoot,
+      bundle: true,
+      format: "esm",
+      metafile: true,
+      outdir,
+      platform: "browser",
+      write: false,
+      stdin: {
+        sourcefile: "entry.js",
+        resolveDir: pkgRoot,
+        contents: `
+          import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
+          import { LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
+          console.log(SqliteAIAuditStore, LocalStorageBinaryStorage);
+        `
+      }
+    });
+
+    const inputFiles = Object.keys(result.metafile?.inputs ?? {});
+    expect(inputFiles.some((file) => file.includes("sql.js"))).toBe(true);
+    expect(inputFiles.some((file) => file.includes("storage.node"))).toBe(false);
+
+    const outputImports = Object.values(result.metafile?.outputs ?? {}).flatMap((output) => output.imports);
+    expect(outputImports.some((imp) => imp.path.startsWith("node:"))).toBe(false);
+  });
+});

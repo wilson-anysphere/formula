@@ -41,5 +41,10 @@
     "jsdom": "^24.0.0",
     "typescript": "^5.8.2",
     "vitest": "^3.0.7"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "sql.js@1.13.0": "patches/sql.js@1.13.0.patch"
+    }
   }
 }

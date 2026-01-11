@@ -4,13 +4,18 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  sql.js@1.13.0:
+    hash: rkijxqkp5r3t4q3hj6gvc4l4cq
+    path: patches/sql.js@1.13.0.patch
+
 importers:
 
   .:
     dependencies:
       sql.js:
         specifier: ^1.13.0
-        version: 1.13.0
+        version: 1.13.0(patch_hash=rkijxqkp5r3t4q3hj6gvc4l4cq)
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
@@ -136,7 +141,7 @@ importers:
     dependencies:
       sql.js:
         specifier: ^1.13.0
-        version: 1.13.0
+        version: 1.13.0(patch_hash=rkijxqkp5r3t4q3hj6gvc4l4cq)
     devDependencies:
       esbuild:
         specifier: ^0.27.2
@@ -361,7 +366,7 @@ importers:
     dependencies:
       sql.js:
         specifier: ^1.13.0
-        version: 1.13.0
+        version: 1.13.0(patch_hash=rkijxqkp5r3t4q3hj6gvc4l4cq)
 
   services/sync:
     dependencies:
@@ -5052,7 +5057,7 @@ snapshots:
 
   split2@4.2.0: {}
 
-  sql.js@1.13.0: {}
+  sql.js@1.13.0(patch_hash=rkijxqkp5r3t4q3hj6gvc4l4cq): {}
 
   stackback@0.0.2: {}
 
