@@ -149,5 +149,19 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     expect(a1AfterRedoY).toBe("Hello");
     const b1AfterRedoY = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
     expect(b1AfterRedoY).toBe("Hello");
+
+    // Undo/redo should still work even if the grid is not focused (e.g. after clicking a toolbar button).
+    await page.getByTestId("split-vertical").click();
+    await page.keyboard.press(`${modifier}+Z`);
+    const a1AfterUndoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1AfterUndoFromToolbar).toBe("");
+    const b1AfterUndoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
+    expect(b1AfterUndoFromToolbar).toBe("");
+
+    await page.keyboard.press(`${modifier}+Shift+Z`);
+    const a1AfterRedoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1AfterRedoFromToolbar).toBe("Hello");
+    const b1AfterRedoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
+    expect(b1AfterRedoFromToolbar).toBe("Hello");
   });
 });

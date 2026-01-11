@@ -115,6 +115,7 @@ class IdleTracker {
 type EngineIntegration = {
   applyChanges?: (changes: unknown) => unknown;
   recalculate?: () => unknown;
+  syncNow?: () => unknown;
   beginBatch?: () => unknown;
   endBatch?: () => unknown;
 };
@@ -148,6 +149,20 @@ class IdleTrackingEngine {
     }
 
     // Some engines may return the changes synchronously.
+    if (result !== undefined) {
+      const applied = this.onComputedChanges(result);
+      if (isThenable(applied)) this.idle.track(applied);
+    }
+  }
+
+  syncNow(): void {
+    const result = this.inner.syncNow?.();
+    if (isThenable(result)) {
+      const tracked = Promise.resolve(result).then((changes) => this.onComputedChanges(changes));
+      this.idle.track(tracked);
+      return;
+    }
+
     if (result !== undefined) {
       const applied = this.onComputedChanges(result);
       if (isThenable(applied)) this.idle.track(applied);
@@ -277,6 +292,7 @@ export class SpreadsheetApp {
   private commentTooltip!: HTMLDivElement;
 
   private renderScheduled = false;
+  private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(
     private root: HTMLElement,
@@ -431,6 +447,11 @@ export class SpreadsheetApp {
     this.root.addEventListener("pointerleave", () => this.hideCommentTooltip());
     this.root.addEventListener("keydown", (e) => this.onKeyDown(e));
 
+    if (typeof window !== "undefined") {
+      this.windowKeyDownListener = (e) => this.onWindowKeyDown(e);
+      window.addEventListener("keydown", this.windowKeyDownListener);
+    }
+
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.root);
 
@@ -495,6 +516,10 @@ export class SpreadsheetApp {
     this.wasmEngine = null;
     this.stopCommentPersistence?.();
     this.resizeObserver.disconnect();
+    if (this.windowKeyDownListener && typeof window !== "undefined") {
+      window.removeEventListener("keydown", this.windowKeyDownListener);
+      this.windowKeyDownListener = null;
+    }
     this.root.replaceChildren();
   }
 
@@ -1230,6 +1255,35 @@ export class SpreadsheetApp {
     (this.engine as unknown as { syncNow?: () => void }).syncNow?.();
   }
 
+  private onWindowKeyDown(e: KeyboardEvent): void {
+    if (e.defaultPrevented) return;
+    this.handleUndoRedoShortcut(e);
+  }
+
+  private handleUndoRedoShortcut(e: KeyboardEvent): boolean {
+    const undo = isUndoKeyboardEvent(e);
+    const redo = !undo && isRedoKeyboardEvent(e);
+    if (!undo && !redo) return false;
+
+    // Only trigger spreadsheet undo/redo when *not* actively editing text.
+    if (this.editor.isOpen()) return false;
+    if (this.formulaBar?.isEditing()) return false;
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
+    }
+
+    e.preventDefault();
+    const did = undo ? this.document.undo() : this.document.redo();
+    if (did) {
+      this.syncEngineNow();
+      this.refresh();
+    }
+    return true;
+  }
+
   private isRowHidden(row: number): boolean {
     const entry = this.outline.rows.entry(row + 1);
     return isHidden(entry.hidden);
@@ -1548,25 +1602,7 @@ export class SpreadsheetApp {
       return;
     }
 
-    if (isUndoKeyboardEvent(e)) {
-      if (this.formulaBar?.isEditing()) return;
-      e.preventDefault();
-      if (this.document.undo()) {
-        this.syncEngineNow();
-        this.refresh();
-      }
-      return;
-    }
-
-    if (isRedoKeyboardEvent(e)) {
-      if (this.formulaBar?.isEditing()) return;
-      e.preventDefault();
-      if (this.document.redo()) {
-        this.syncEngineNow();
-        this.refresh();
-      }
-      return;
-    }
+    if (this.handleUndoRedoShortcut(e)) return;
 
     // Editing
     if (e.key === "F2") {
