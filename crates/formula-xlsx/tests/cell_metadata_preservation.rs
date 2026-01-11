@@ -216,3 +216,44 @@ fn apply_cell_patches_does_not_confuse_namespaced_s_attr_with_cell_style() {
         "expected unprefixed s attr to be written by style patch, got: {out_xml}"
     );
 }
+
+#[test]
+fn apply_cell_patches_inserts_new_cells_before_row_extlst() {
+    let row_extlst =
+        r#"<extLst><ext uri="{123}"><test xmlns="http://example.com">row</test></ext></extLst>"#;
+    let worksheet_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c>{row_extlst}</row>
+  </sheetData>
+</worksheet>"#
+    );
+
+    let bytes = build_minimal_xlsx(&worksheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("B1").unwrap(),
+        CellPatch::set_value(CellValue::Number(2.0)),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    assert!(
+        out_xml.contains(row_extlst),
+        "expected row extLst subtree to be preserved, got: {out_xml}"
+    );
+
+    let b1_pos = out_xml
+        .find(r#"r="B1""#)
+        .expect("expected patched B1 cell");
+    let ext_pos = out_xml.find("<extLst").expect("expected row extLst");
+    assert!(
+        b1_pos < ext_pos,
+        "expected inserted cells to appear before row extLst, got: {out_xml}"
+    );
+}

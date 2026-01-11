@@ -754,21 +754,32 @@ fn patch_row<R: std::io::BufRead>(
     let mut buf = Vec::new();
     let mut patch_idx = 0usize;
     let mut formula_changed = false;
+    let mut cell_depth = 0usize;
 
     loop {
         match reader.read_event_into(&mut buf)? {
+            ev if cell_depth > 0 => {
+                match &ev {
+                    Event::Start(_) => cell_depth += 1,
+                    Event::End(_) => cell_depth = cell_depth.saturating_sub(1),
+                    _ => {}
+                }
+                writer.write_event(ev.into_owned())?;
+            }
             Event::Start(e) if local_name(e.name().as_ref()) == b"c" => {
                 let cell_start = e.into_owned();
                 let Some((cell_ref, existing_t, existing_s)) =
                     parse_cell_addr_and_attrs(&cell_start)?
                 else {
                     writer.write_event(Event::Start(cell_start))?;
+                    cell_depth = 1;
                     continue;
                 };
 
                 if cell_ref.row + 1 != row_num {
                     // Defensive: mismatched cell refs are preserved unchanged.
                     writer.write_event(Event::Start(cell_start))?;
+                    cell_depth = 1;
                     continue;
                 }
 
@@ -838,6 +849,7 @@ fn patch_row<R: std::io::BufRead>(
                     formula_changed |= cell_formula_changed;
                 } else {
                     writer.write_event(Event::Start(cell_start))?;
+                    cell_depth = 1;
                 }
             }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"c" => {
@@ -892,6 +904,50 @@ fn patch_row<R: std::io::BufRead>(
                 } else {
                     writer.write_event(Event::Empty(cell_empty))?;
                 }
+            }
+            Event::Start(e) => {
+                // Non-cell element inside the row (eg extLst). Ensure any remaining cell patches are
+                // emitted before it so cells stay grouped at the start of the row.
+                if patch_idx < patches.len() && local_name(e.name().as_ref()) != b"c" {
+                    while patch_idx < patches.len() {
+                        let (col, patch) = patches[patch_idx];
+                        formula_changed |= patch_has_formula(patch);
+                        write_cell_patch(
+                            writer,
+                            row_num,
+                            col,
+                            patch,
+                            None,
+                            None,
+                            None,
+                            shared_strings,
+                            style_id_to_xf,
+                        )?;
+                        patch_idx += 1;
+                    }
+                }
+                writer.write_event(Event::Start(e.into_owned()))?;
+            }
+            Event::Empty(e) => {
+                if patch_idx < patches.len() && local_name(e.name().as_ref()) != b"c" {
+                    while patch_idx < patches.len() {
+                        let (col, patch) = patches[patch_idx];
+                        formula_changed |= patch_has_formula(patch);
+                        write_cell_patch(
+                            writer,
+                            row_num,
+                            col,
+                            patch,
+                            None,
+                            None,
+                            None,
+                            shared_strings,
+                            style_id_to_xf,
+                        )?;
+                        patch_idx += 1;
+                    }
+                }
+                writer.write_event(Event::Empty(e.into_owned()))?;
             }
             Event::End(e) if local_name(e.name().as_ref()) == b"row" => {
                 while patch_idx < patches.len() {
