@@ -24,6 +24,14 @@ test("cpu: min/max/average/count", async () => {
   assert.equal(await cpu.average(values), (3 + 1 + 2 + -1) / 4);
 });
 
+test("cpu: min/max/average propagate NaN and handle Infinity", async () => {
+  const cpu = new CpuBackend();
+  const values = new Float64Array([3, Number.POSITIVE_INFINITY, -1, Number.NEGATIVE_INFINITY, Number.NaN]);
+  assert.ok(Number.isNaN(await cpu.min(values)));
+  assert.ok(Number.isNaN(await cpu.max(values)));
+  assert.ok(Number.isNaN(await cpu.average(values)));
+});
+
 test("cpu: min/max on empty arrays", async () => {
   const cpu = new CpuBackend();
   assert.equal(await cpu.min(new Float64Array()), Number.POSITIVE_INFINITY);
