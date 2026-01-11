@@ -708,6 +708,86 @@ describe("SAML SSO", () => {
     20_000
   );
 
+  it(
+    "rejects responses containing DOCTYPE/ENTITY declarations or multiple assertions",
+    async () => {
+      const { db, config, app } = await createTestApp();
+      try {
+        const ownerRegister = await app.inject({
+          method: "POST",
+          url: "/auth/register",
+          payload: { email: "saml-owner3@example.com", password: "password1234", name: "Owner", orgName: "SSO Org 4" }
+        });
+        expect(ownerRegister.statusCode).toBe(200);
+        const orgId = (ownerRegister.json() as any).organization.id as string;
+
+        await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+          orgId,
+          JSON.stringify(["password", "saml"])
+        ]);
+
+        const cookie = extractCookie(ownerRegister.headers["set-cookie"]);
+        const putProvider = await app.inject({
+          method: "PUT",
+          url: `/orgs/${orgId}/saml-providers/test`,
+          headers: { cookie },
+          payload: {
+            idpEntryPoint: "http://idp.example.test/sso",
+            spEntityId: "http://sp.example.test/metadata",
+            idpIssuer: "https://idp.example.test/metadata",
+            idpCertPem: TEST_CERT_PEM,
+            wantAssertionsSigned: true,
+            wantResponseSigned: false,
+            attributeMapping: { email: "email", name: "name" },
+            enabled: true
+          }
+        });
+        expect(putProvider.statusCode).toBe(200);
+
+        const callbackUrl = `${config.publicBaseUrl}/auth/saml/${orgId}/test/callback`;
+
+        async function expectRejected(xml: string): Promise<void> {
+          const start = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+          const startUrl = new URL(start.headers.location as string);
+          const relayState = startUrl.searchParams.get("RelayState")!;
+
+          const samlResponse = Buffer.from(xml, "utf8").toString("base64");
+          const callback = await app.inject({
+            method: "POST",
+            url: `/auth/saml/${orgId}/test/callback`,
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: relayState }).toString()
+          });
+          expect(callback.statusCode).toBe(401);
+          expect((callback.json() as any).error).toBe("invalid_response");
+        }
+
+        await expectRejected(
+          `<?xml version="1.0"?>
+<!DOCTYPE foo [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" Destination="${callbackUrl}"></samlp:Response>`
+        );
+
+        await expectRejected(
+          `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" Destination="${callbackUrl}">
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+</samlp:Response>`
+        );
+
+        await expectRejected(
+          `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Destination="${callbackUrl}">
+  <saml:Assertion ID="_a"></saml:Assertion>
+  <saml:Assertion ID="_b"></saml:Assertion>
+</samlp:Response>`
+        );
+      } finally {
+        await app.close();
+        await db.end();
+      }
+    },
+    15_000
+  );
+
   it("enforces org require_mfa via AuthnContextClassRef", async () => {
     const { db, config, app } = await createTestApp();
     try {
