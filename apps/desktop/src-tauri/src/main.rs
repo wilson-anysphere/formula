@@ -99,16 +99,12 @@ fn main() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                let state = window.state::<SharedAppState>();
-                let state = state.lock().unwrap();
-                if state.has_unsaved_changes() {
-                    api.prevent_close();
-                    let _ = window.emit("unsaved-changes", ());
-                } else {
-                    // Keep the process alive so the tray icon stays available.
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+                // Delegate close-handling to the frontend so it can:
+                // - fire `Workbook_BeforeClose` macros
+                // - prompt for unsaved changes
+                // - decide whether to hide the window or keep it open
+                api.prevent_close();
+                let _ = window.emit("close-requested", ());
             }
             tauri::WindowEvent::DragDrop(drag_drop) => {
                 if let tauri::DragDropEvent::Drop { paths, .. } = drag_drop {

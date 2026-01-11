@@ -18,6 +18,7 @@ import {
   type MacroTrustDecision,
 } from "./macros";
 import { applyMacroCellUpdates } from "./macros/applyUpdates";
+import { MacroEventBridge, type SelectionRect } from "./macros/eventBridge";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
@@ -68,6 +69,19 @@ const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeVal
 app.getDocument().markSaved();
 app.focus();
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
+
+let macroEventBridge: MacroEventBridge | null = null;
+
+function currentSelectionRect(): SelectionRect {
+  const sheetId = app.getCurrentSheetId();
+  const ranges = app.getSelectionRanges();
+  const first = ranges[0];
+  if (first) {
+    return { sheetId, startRow: first.startRow, startCol: first.startCol, endRow: first.endRow, endCol: first.endCol };
+  }
+  const active = app.getActiveCell();
+  return { sheetId, startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
+}
 
 // --- Sheet tabs (minimal multi-sheet support) ---------------------------------
 
@@ -128,6 +142,7 @@ app.activateCell = (target: Parameters<SpreadsheetApp["activateCell"]>[0]): void
   const prevSheet = app.getCurrentSheetId();
   originalActivateCell(target);
   if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
+  macroEventBridge?.notifySelectionChanged(currentSelectionRect());
 };
 
 const originalSelectRange = app.selectRange.bind(app);
@@ -135,6 +150,7 @@ app.selectRange = (target: Parameters<SpreadsheetApp["selectRange"]>[0]): void =
   const prevSheet = app.getCurrentSheetId();
   originalSelectRange(target);
   if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
+  macroEventBridge?.notifySelectionChanged(currentSelectionRect());
 };
 
 // Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools)
@@ -424,26 +440,30 @@ if (
             } catch {
               return getMacrosBackend();
             }
-          })();
-
-          const refreshRunner = () =>
-            renderMacroRunner(runnerPanel, backend, workbookId, {
-              onApplyUpdates: async (updates) => {
-                const doc = app.getDocument();
-                doc.beginBatch({ label: "Run macro" });
-                let committed = false;
-                try {
-                  applyMacroCellUpdates(doc, updates);
-                  committed = true;
-                } finally {
-                  if (committed) doc.endBatch();
-                  else doc.cancelBatch();
-                }
-                app.refresh();
-                await app.whenIdle();
-                app.refresh();
-              },
-            });
+           })();
+ 
+           const refreshRunner = () =>
+             renderMacroRunner(runnerPanel, backend, workbookId, {
+               onApplyUpdates: async (updates) => {
+                 const doc = app.getDocument();
+                 if (macroEventBridge) {
+                   macroEventBridge.applyMacroUpdates(updates, { label: "Run macro" });
+                 } else {
+                   doc.beginBatch({ label: "Run macro" });
+                   let committed = false;
+                   try {
+                     applyMacroCellUpdates(doc, updates);
+                     committed = true;
+                   } finally {
+                     if (committed) doc.endBatch();
+                     else doc.cancelBatch();
+                   }
+                 }
+                 app.refresh();
+                 await app.whenIdle();
+                 app.refresh();
+               },
+             });
 
           const title = document.createElement("div");
           title.textContent = "Macro Recorder";
@@ -1250,6 +1270,14 @@ async function openWorkbookFromPath(path: string): Promise<void> {
       document: app.getDocument(),
       engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
     });
+
+    // Fire Workbook_Open once the workbook is loaded into the UI. This mirrors Excel's
+    // automatic event macros (subject to Trust Center and sandbox permissions).
+    if (macroEventBridge) {
+      await macroEventBridge.fireWorkbookOpen().catch((err) => {
+        console.error("Failed to fire Workbook_Open:", err);
+      });
+    }
   } catch (err) {
     // If we were unable to swap workbooks, restore syncing for the previously-active
     // workbook so edits remain persistable.
@@ -1334,6 +1362,12 @@ async function handleNewWorkbook(): Promise<void> {
       document: app.getDocument(),
       engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
     });
+
+    if (macroEventBridge) {
+      await macroEventBridge.fireWorkbookOpen().catch((err) => {
+        console.error("Failed to fire Workbook_Open:", err);
+      });
+    }
   } catch (err) {
     if (hadActiveWorkbook) {
       workbookSync = startWorkbookSync({
@@ -1352,6 +1386,18 @@ try {
     queuedInvoke = (cmd, args) => queueBackendOp(() => invoke(cmd, args));
   }
   window.addEventListener("unload", () => workbookSync?.stop());
+
+  if (invoke) {
+    const invokeForEvents = queuedInvoke ?? invoke;
+    macroEventBridge = new MacroEventBridge({
+      workbookId,
+      document: app.getDocument(),
+      invoke: invokeForEvents,
+      drainBackendSync,
+      getSelection: currentSelectionRect,
+    });
+    macroEventBridge.start();
+  }
 
   const listen = getTauriListen();
   void listen("file-dropped", async (event) => {
@@ -1387,10 +1433,24 @@ try {
     });
   });
 
-  void listen("unsaved-changes", async () => {
-    const discard = window.confirm("You have unsaved changes. Discard them?");
-    if (discard) {
+  let closeInFlight = false;
+  void listen("close-requested", async () => {
+    if (closeInFlight) return;
+    closeInFlight = true;
+    try {
+      const beforeClose = macroEventBridge ? await macroEventBridge.fireWorkbookBeforeClose() : { ran: true };
+      if (!beforeClose.ran) return;
+
+      const doc = app.getDocument();
+      if (doc.isDirty) {
+        const discard = window.confirm("You have unsaved changes. Discard them?");
+        if (!discard) return;
+      }
       await hideTauriWindow();
+    } catch (err) {
+      console.error("Failed to handle close request:", err);
+    } finally {
+      closeInFlight = false;
     }
   });
 

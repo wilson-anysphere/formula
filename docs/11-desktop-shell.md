@@ -216,22 +216,17 @@ fn main() {
             });
             
             Ok(())
-        })
-        .on_window_event(|event| match event.event() {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                // Check for unsaved changes
-                let state = event.window().state::<Mutex<AppState>>();
-                let state = state.lock().unwrap();
-                
-                if state.has_unsaved_changes() {
-                    api.prevent_close();
-                    // Show save dialog via frontend
-                    event.window().emit("unsaved-changes", ()).unwrap();
-                }
-            }
-            tauri::WindowEvent::FileDrop(event) => {
-                if let tauri::FileDropEvent::Dropped(paths) = event {
-                    for path in paths {
+         })
+         .on_window_event(|event| match event.event() {
+             tauri::WindowEvent::CloseRequested { api, .. } => {
+                // Delegate close handling to the frontend (Workbook_BeforeClose,
+                // unsaved changes prompt, hide vs keep open).
+                api.prevent_close();
+                event.window().emit("close-requested", ()).unwrap();
+             }
+             tauri::WindowEvent::FileDrop(event) => {
+                 if let tauri::FileDropEvent::Dropped(paths) = event {
+                     for path in paths {
                         event.window().emit("file-dropped", path).unwrap();
                     }
                 }
@@ -583,8 +578,8 @@ export class TauriBridge {
     });
   }
   
-  async onUnsavedChanges(callback: () => void): Promise<void> {
-    await listen("unsaved-changes", () => {
+  async onCloseRequested(callback: () => void): Promise<void> {
+    await listen("close-requested", () => {
       callback();
     });
   }
