@@ -311,14 +311,34 @@ export class FileCollabPersistence implements CollabPersistence {
       if (timer) clearTimeout(timer);
       this.compactTimers.delete(docId);
 
-      // Ensure the initialization/validation task (and any pending writes) has
-      // completed before deciding whether we can safely compact.
-      await this.flush(docId);
-      if (!persistenceEnabled) return;
-
+      // Capture the final document state immediately so callers can destroy the
+      // Y.Doc without racing the async persistence queue.
       const snapshot = Y.encodeStateAsUpdate(doc);
-      await this.compactSnapshot(docId, snapshot);
-      await this.flush(docId);
+
+      // Enqueue the final compaction immediately so callers who *don't* await
+      // `binding.destroy()` but do `await persistence.flush(docId)` still wait
+      // for the snapshot rewrite.
+      await this.enqueue(docId, async () => {
+        if (!persistenceEnabled) return;
+        await fs.mkdir(this.dir, { recursive: true });
+
+        const docHash = this.docHashForDocId(docId);
+        const filePath = this.filePathForDocId(docId);
+        const aadContext = persistenceAadContextForDocHash(docHash);
+
+        if (this.encryption.mode === "keyring") {
+          const header = encodeFileHeader(FILE_FLAG_ENCRYPTED);
+          const record = encodeEncryptedRecord(snapshot, {
+            keyRing: this.encryption.keyRing,
+            aadContext,
+          });
+          await atomicWriteFile(filePath, Buffer.concat([header, record]));
+        } else {
+          await atomicWriteFile(filePath, encodeLegacyRecord(snapshot));
+        }
+
+        this.updateCounts.set(docId, 0);
+      });
     };
 
     doc.on("destroy", () => {
