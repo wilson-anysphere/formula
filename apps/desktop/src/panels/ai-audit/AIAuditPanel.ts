@@ -1,6 +1,5 @@
-import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
-import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/local-storage-store.js";
-import type { AIAuditEntry } from "../../../../../packages/ai-audit/src/types.js";
+import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
+import type { AIAuditEntry, AIAuditStore } from "@formula/ai-audit/browser";
 
 import { createAuditLogExport, downloadAuditLogExport } from "./exportAuditLog";
 

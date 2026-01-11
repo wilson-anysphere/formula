@@ -14,6 +14,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@formula/ai-audit": "workspace:*",
     "@formula/ai-completion": "workspace:*",
     "@formula/collab-comments": "workspace:*",
     "@formula/data-io": "workspace:*",

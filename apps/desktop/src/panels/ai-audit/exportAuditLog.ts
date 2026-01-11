@@ -1,4 +1,4 @@
-import type { AIAuditEntry } from "../../../../../packages/ai-audit/src/types.js";
+import type { AIAuditEntry } from "@formula/ai-audit/browser";
 
 export interface AuditLogExport {
   blob: Blob;
@@ -32,4 +32,3 @@ export function downloadAuditLogExport(exp: AuditLogExport): void {
     URL.revokeObjectURL(url);
   }
 }
-

@@ -1,8 +1,7 @@
 import type { LLMClient, LLMMessage } from "../../../../../packages/llm/src/types.js";
 
-import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
-import type { AIAuditEntry, AuditListFilters } from "../../../../../packages/ai-audit/src/types.js";
-import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/local-storage-store.js";
+import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
+import type { AIAuditEntry, AIAuditStore, AuditListFilters } from "@formula/ai-audit/browser";
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 

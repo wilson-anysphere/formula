@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
 
-import { LocalStorageAIAuditStore } from "../../../../../../packages/ai-audit/src/local-storage-store.js";
+import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
 import { ContextManager } from "../../../../../../packages/ai-context/src/contextManager.js";
 import { HashEmbedder, InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/index.js";
 

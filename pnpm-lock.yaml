@@ -39,6 +39,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@formula/ai-audit':
+        specifier: workspace:*
+        version: link:../../packages/ai-audit
       '@formula/ai-completion':
         specifier: workspace:*
         version: link:../../packages/ai-completion

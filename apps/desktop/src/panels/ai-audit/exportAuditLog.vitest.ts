@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AIAuditEntry } from "../../../../../packages/ai-audit/src/types.js";
+import type { AIAuditEntry } from "@formula/ai-audit/browser";
 
 import { createAuditLogExport } from "./exportAuditLog";
 
@@ -28,4 +28,3 @@ describe("createAuditLogExport", () => {
     expect(JSON.parse(text)).toEqual(entries);
   });
 });
-

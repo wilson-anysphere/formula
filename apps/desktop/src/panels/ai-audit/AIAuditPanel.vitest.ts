@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/local-storage-store.js";
-import type { AIAuditEntry } from "../../../../../packages/ai-audit/src/types.js";
+import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
+import type { AIAuditEntry } from "@formula/ai-audit/browser";
 
 import { createAIAuditPanel } from "./AIAuditPanel";
 
