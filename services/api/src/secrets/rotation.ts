@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, QueryResult } from "pg";
 import {
   decryptSecretValue,
   encryptSecretValue,
@@ -38,7 +38,7 @@ export async function runSecretsRotation(
   // Cursor pagination over the primary key (name) avoids OFFSET scans and allows
   // the script to be restarted safely.
   while (true) {
-    const res =
+    const res: QueryResult<SecretRow> =
       lastName == null
         ? await db.query<SecretRow>(
             `
@@ -62,9 +62,9 @@ export async function runSecretsRotation(
 
     if (res.rowCount === 0) break;
 
-    for (const row of res.rows as any[]) {
-      const name = String(row.name);
-      const encryptedValue = String(row.encrypted_value);
+    for (const row of res.rows) {
+      const name: string = row.name;
+      const encryptedValue: string = row.encrypted_value;
       scanned += 1;
 
       lastName = name;
@@ -107,4 +107,3 @@ export async function runSecretsRotation(
 
   return { scanned, rotated, failed };
 }
-

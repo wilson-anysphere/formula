@@ -106,7 +106,7 @@ function validateHeaderName(value: string, field: string): string {
   return normalized;
 }
 
-function validateEndpointUrl(raw: string): string {
+function validateEndpointUrl(raw: string, { requireHttps = false }: { requireHttps?: boolean } = {}): string {
   let url: URL;
   try {
     url = new URL(raw);
@@ -114,7 +114,7 @@ function validateEndpointUrl(raw: string): string {
     throw new Error("endpointUrl must be a valid URL");
   }
 
-  if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+  if ((process.env.NODE_ENV === "production" || requireHttps) && url.protocol !== "https:") {
     throw new Error("endpointUrl must use https in production");
   }
 
@@ -361,9 +361,19 @@ export function registerSiemRoutes(app: FastifyInstance): void {
 
     const enabled = requestedEnabled ?? prevEnabled ?? true;
 
+    const pinningRes = await app.db.query<{ certificate_pinning_enabled: boolean }>(
+      "SELECT certificate_pinning_enabled FROM org_settings WHERE org_id = $1",
+      [orgId]
+    );
+    const certificatePinningEnabled =
+      pinningRes.rowCount === 1 ? Boolean(pinningRes.rows[0]?.certificate_pinning_enabled) : false;
+
     let endpointUrl: string;
     try {
-      endpointUrl = validateEndpointUrl(incomingConfig.endpointUrl);
+      endpointUrl = validateEndpointUrl(incomingConfig.endpointUrl, {
+        // Pinning is only meaningful for https endpoints.
+        requireHttps: Boolean(enabled) && certificatePinningEnabled
+      });
     } catch {
       return reply.code(400).send({ error: "invalid_request" });
     }
