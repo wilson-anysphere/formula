@@ -263,7 +263,7 @@ export function createSyncServer(
           keyRing: config.persistence.encryption.keyRing,
         });
       }
-
+  
       persistenceInitialized = true;
       persistenceCleanup = null;
       retentionManager = null;
@@ -276,6 +276,7 @@ export function createSyncServer(
         config.persistence.encryption,
         shouldPersist
       );
+      persistenceCleanup = () => persistence.flush();
       setPersistence(persistence);
       clearPersistedDocument = (docName: string) => persistence.clearDocument(docName);
       logger.info(

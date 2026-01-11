@@ -325,7 +325,7 @@ export class CollabSession {
     | null;
   private readonly docIdForEncryption: string;
   private schemaSyncHandler: ((isSynced: boolean) => void) | null = null;
-  private sheetsSchemaObserver: (() => void) | null = null;
+  private sheetsSchemaObserver: ((event: any, transaction: Y.Transaction) => void) | null = null;
   private ensuringSchema = false;
   private readonly offlineAutoConnectAfterLoad: boolean;
 
@@ -436,7 +436,9 @@ export class CollabSession {
       const shouldWaitForOffline = this.offline != null;
       let offlineReady = !shouldWaitForOffline;
 
-      const ensureSchema = () => {
+      let ensureDefaultSheetScheduled = false;
+
+      const ensureSchema = (transaction?: Y.Transaction) => {
         // Avoid mutating the workbook schema while a sync provider is still in
         // the middle of initial hydration. In particular, sheets can be created
         // incrementally (e.g. map inserted before its `id` field is applied),
@@ -447,12 +449,22 @@ export class CollabSession {
         if (this.ensuringSchema) return;
         this.ensuringSchema = true;
         try {
+          const isLocalTx = !transaction || this.localOrigins.has(transaction.origin);
           ensureWorkbookSchema(this.doc, {
             defaultSheetId: schemaDefaultSheetId,
             defaultSheetName: schemaDefaultSheetName,
+            createDefaultSheet: isLocalTx,
           });
         } finally {
           this.ensuringSchema = false;
+        }
+
+        if (transaction && !this.localOrigins.has(transaction.origin) && this.sheets.length === 0 && !ensureDefaultSheetScheduled) {
+          ensureDefaultSheetScheduled = true;
+          queueMicrotask(() => {
+            ensureDefaultSheetScheduled = false;
+            ensureSchema();
+          });
         }
       };
 
@@ -471,7 +483,7 @@ export class CollabSession {
       // Keep the sheets array well-formed over time (e.g. remove duplicate ids).
       // This primarily protects against concurrent schema initialization when two
       // clients join a brand new document at the same time.
-      this.sheetsSchemaObserver = () => ensureSchema();
+      this.sheetsSchemaObserver = (_event, transaction) => ensureSchema(transaction);
       this.sheets.observe(this.sheetsSchemaObserver);
 
       if (provider && typeof provider.on === "function" && !providerSynced) {

@@ -3,6 +3,11 @@ import * as Y from "yjs";
 export interface WorkbookSchemaOptions {
   defaultSheetName?: string;
   defaultSheetId?: string;
+  /**
+   * Whether to create a default sheet when the workbook has no sheets.
+   * Defaults to true.
+   */
+  createDefaultSheet?: boolean;
 }
 
 export type WorkbookSchemaRoots = {
@@ -17,16 +22,18 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
   const sheets = doc.getArray<Y.Map<unknown>>("sheets");
   const metadata = doc.getMap<unknown>("metadata");
   const namedRanges = doc.getMap<unknown>("namedRanges");
+  const YMapCtor = cells.constructor as unknown as { new (): Y.Map<unknown> };
 
   const defaultSheetId = options.defaultSheetId ?? "Sheet1";
   const defaultSheetName = options.defaultSheetName ?? defaultSheetId;
+  const createDefaultSheet = options.createDefaultSheet ?? true;
 
   // `sheets` is a Y.Array of sheet metadata maps (with at least `{ id, name }`).
   // In practice we may see duplicate sheet ids when two clients concurrently
   // initialize an empty workbook. Treat ids as unique and prune duplicates so
   // downstream sheet lookups remain deterministic.
   const shouldNormalize = (() => {
-    if (sheets.length === 0) return true;
+    if (sheets.length === 0) return createDefaultSheet;
     const seen = new Set<string>();
     for (const entry of sheets.toArray()) {
       const maybe = entry as any;
@@ -58,8 +65,8 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
         sheets.delete(deleteIndices[i], 1);
       }
 
-      if (sheets.length === 0) {
-        const sheet = new Y.Map<unknown>();
+      if (createDefaultSheet && sheets.length === 0) {
+        const sheet = new YMapCtor();
         sheet.set("id", defaultSheetId);
         sheet.set("name", defaultSheetName);
         sheets.push([sheet]);
@@ -79,19 +86,53 @@ function defaultTransact(doc: Y.Doc): WorkbookTransact {
 }
 
 function coerceString(value: unknown): string | null {
-  if (value instanceof Y.Text) return value.toString();
+  const maybe: any = value;
+  if (maybe?.constructor?.name === "YText" && typeof maybe.toString === "function") {
+    return maybe.toString();
+  }
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
 }
 
+function cloneYjsValue(value: any): any {
+  if (value?.constructor?.name === "YMap" && typeof value.forEach === "function") {
+    const Ctor = value.constructor as any;
+    const out = new Ctor();
+    value.forEach((v: any, k: string) => {
+      out.set(k, cloneYjsValue(v));
+    });
+    return out;
+  }
+  if (value?.constructor?.name === "YArray" && typeof value.toArray === "function") {
+    const Ctor = value.constructor as any;
+    const out = new Ctor();
+    for (const item of value.toArray()) {
+      out.push([cloneYjsValue(item)]);
+    }
+    return out;
+  }
+  if (value?.constructor?.name === "YText" && typeof value.toDelta === "function") {
+    const Ctor = value.constructor as any;
+    const out = new Ctor();
+    out.applyDelta(structuredClone(value.toDelta()));
+    return out;
+  }
+  if (value && typeof value === "object") {
+    return structuredClone(value);
+  }
+  return value;
+}
+
 export class SheetManager {
   readonly sheets: Y.Array<Y.Map<unknown>>;
   private readonly transact: WorkbookTransact;
+  private readonly YMapCtor: { new (): Y.Map<unknown> };
 
   constructor(opts: { doc: Y.Doc; transact?: WorkbookTransact }) {
     this.sheets = opts.doc.getArray<Y.Map<unknown>>("sheets");
     this.transact = opts.transact ?? defaultTransact(opts.doc);
+    this.YMapCtor = opts.doc.getMap("cells").constructor as unknown as { new (): Y.Map<unknown> };
   }
 
   list(): Array<{ id: string; name: string | null }> {
@@ -120,7 +161,7 @@ export class SheetManager {
         throw new Error(`Sheet already exists: ${id}`);
       }
 
-      const sheet = new Y.Map<unknown>();
+      const sheet = new this.YMapCtor();
       sheet.set("id", id);
       sheet.set("name", name);
 
@@ -166,8 +207,9 @@ export class SheetManager {
       const sheet = this.sheets.get(fromIndex);
       if (!sheet) throw new Error(`Sheet missing at index ${fromIndex}: ${id}`);
 
+      const sheetClone = cloneYjsValue(sheet);
       this.sheets.delete(fromIndex, 1);
-      this.sheets.insert(targetIndex, [sheet]);
+      this.sheets.insert(targetIndex, [sheetClone]);
     });
   }
 

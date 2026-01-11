@@ -131,9 +131,13 @@ test("CollabSession E2E encryption persists through sync-server restart (unautho
 
   await sessionC.whenSynced();
 
+  await waitForCondition(async () => {
+    const cell = await sessionC.getCell("Sheet1:0:0");
+    return cell?.encrypted === true && cell?.value === "###" && cell?.formula === null;
+  }, 10_000);
+
   const cellC = await sessionC.getCell("Sheet1:0:0");
   assert.equal(cellC?.value, "###");
   assert.equal(cellC?.formula, null);
   assert.equal(cellC?.encrypted, true);
 });
-

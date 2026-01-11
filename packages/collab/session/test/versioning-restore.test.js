@@ -146,9 +146,9 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
   await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:1"))?.value === 123, 10_000);
   await waitForCondition(async () => (await sessionB.getCell("Sheet1:2:0")) == null, 10_000);
   await waitForCondition(() => {
-    const sheets = snapshotSheets(sessionB);
-    if (sheets.length !== 2) return false;
-    if (sheets[0]?.id !== "Sheet2" || sheets[0]?.name !== "Budget") return false;
+     const sheets = snapshotSheets(sessionB);
+     if (sheets.length !== 2) return false;
+     if (sheets[0]?.id !== "Sheet2" || sheets[0]?.name !== "Budget") return false;
     if (sheets[1]?.id !== "Sheet1") return false;
     const nr = sessionB.namedRanges.get("MyRange");
     if (nr?.sheetId !== "Sheet2" || nr?.range !== "A1:B2") return false;

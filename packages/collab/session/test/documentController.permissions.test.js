@@ -37,7 +37,12 @@ function connectDocs(docA, docB) {
 async function waitForCondition(fn, timeoutMs = 2000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (fn()) return;
+    try {
+      const ok = await fn();
+      if (ok) return;
+    } catch {
+      // Ignore transient errors while waiting for async state to settle.
+    }
     await new Promise((r) => setTimeout(r, 5));
   }
   throw new Error("Timed out waiting for condition");

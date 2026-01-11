@@ -400,6 +400,20 @@ export class FilePersistence {
     await this.compactNow(docName, doc);
   }
 
+  async flush(): Promise<void> {
+    for (const timer of this.compactTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.compactTimers.clear();
+
+    while (true) {
+      const snapshot = Array.from(this.queues.entries());
+      await Promise.allSettled(snapshot.map(([, pending]) => pending));
+      const hasNewer = snapshot.some(([docName, pending]) => this.queues.get(docName) !== pending);
+      if (!hasNewer) return;
+    }
+  }
+
   async clearDocument(docName: string): Promise<void> {
     const timer = this.compactTimers.get(docName);
     if (timer) clearTimeout(timer);
