@@ -892,12 +892,13 @@ export class ToolExecutor {
     // validating each hop.
     const maxRedirects = 5;
     let currentUrl = requestedUrl;
+    let requestHeaders: Record<string, string> | undefined = params.headers ? { ...params.headers } : undefined;
     let response: Response | null = null;
 
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
       ensureExternalUrlAllowed(currentUrl, this.options.allowed_external_hosts);
       response = await fetch(currentUrl.toString(), {
-        headers: params.headers ?? undefined,
+        headers: requestHeaders ?? undefined,
         credentials: "omit",
         cache: "no-store",
         redirect: "manual"
@@ -908,7 +909,7 @@ export class ToolExecutor {
       // validate the final resolved URL.
       if (response.type === "opaqueredirect") {
         response = await fetch(currentUrl.toString(), {
-          headers: params.headers ?? undefined,
+          headers: requestHeaders ?? undefined,
           credentials: "omit",
           cache: "no-store",
           redirect: "follow"
@@ -925,7 +926,13 @@ export class ToolExecutor {
       if (!location) {
         throw toolError("runtime_error", `External fetch failed with HTTP ${response.status} (missing Location header)`);
       }
-      currentUrl = new URL(location, currentUrl);
+      const nextUrl = new URL(location, currentUrl);
+      // Avoid leaking user-supplied headers (e.g. API keys) across redirect hops to a
+      // different host.
+      if (nextUrl.host !== currentUrl.host) {
+        requestHeaders = undefined;
+      }
+      currentUrl = nextUrl;
     }
 
     if (!response) {
