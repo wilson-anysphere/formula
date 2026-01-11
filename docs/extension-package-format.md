@@ -42,7 +42,7 @@ install flow that keeps the initial code load fully verified:
    - parse the tar archive
    - validate `manifest.json`, `checksums.json`, `signature.json`
    - compute SHA-256 checksums (WebCrypto)
-   - verify the Ed25519 signature (WebCrypto when available; pure-JS fallback otherwise)
+   - verify the Ed25519 signature (WebCrypto Ed25519)
 3. Persist the verified package bytes + verification metadata in IndexedDB (keyed by `{id, version}`).
 4. Extract the entrypoint (`manifest.browser`, falling back to `module`/`main`) from the archive,
    create a `blob:` URL for that module, and load it into `BrowserExtensionHost`.
