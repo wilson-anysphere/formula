@@ -184,6 +184,19 @@ Enable:
 
 When encryption is enabled, existing legacy plaintext `.yjs` files in `SYNC_SERVER_DATA_DIR` are migrated to the encrypted, append-only format **on startup** (atomic per file).
 
+Manage KeyRing material (generate / rotate / validate):
+
+```bash
+# Generate a new keyring (write to a secret file, or inject via env)
+pnpm -C services/sync-server keyring:generate > keyring.json
+
+# Validate and inspect a keyring
+pnpm -C services/sync-server keyring:validate -- --in keyring.json
+
+# Rotate (adds a new key version; keeps old keys)
+pnpm -C services/sync-server keyring:rotate -- --in keyring.json --out keyring.json
+```
+
 Key rotation is operator-managed by replacing the KeyRing JSON (bumping `currentVersion` and adding a new key while keeping old key versions available for decryption).
 
 #### Internal admin API (purge persisted docs)
