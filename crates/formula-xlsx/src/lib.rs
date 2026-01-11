@@ -34,6 +34,7 @@ pub mod drawings;
 pub mod hyperlinks;
 pub mod outline;
 mod package;
+pub mod patch;
 mod path;
 pub mod pivots;
 pub mod print;
@@ -61,6 +62,7 @@ pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
 };
 pub use package::{XlsxError, XlsxPackage};
+pub use patch::{CellPatch, WorkbookCellPatches, WorksheetCellPatches};
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use pivots::{
     pivot_charts::PivotChartPart,

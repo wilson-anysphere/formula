@@ -3,6 +3,7 @@ use std::io::{Cursor, Read, Write};
 
 use thiserror::Error;
 
+use crate::patch::{apply_cell_patches_to_package, WorkbookCellPatches};
 use crate::pivots::XlsxPivots;
 use crate::sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
@@ -175,6 +176,16 @@ impl XlsxPackage {
         self.set_part(worksheet_part.to_string(), updated.into_bytes());
         Ok(())
     }
+
+    /// Apply a set of cell edits to the existing workbook package.
+    ///
+    /// This is a high-fidelity edit pipeline intended for "edit existing XLSX/XLSM"
+    /// scenarios (e.g. the desktop app save path). Only the affected worksheet parts
+    /// (plus `xl/sharedStrings.xml` / `xl/workbook.xml` when required) are rewritten;
+    /// every unrelated part is preserved byte-for-byte.
+    pub fn apply_cell_patches(&mut self, patches: &WorkbookCellPatches) -> Result<(), XlsxError> {
+        apply_cell_patches_to_package(self, patches)
+    }
 }
 
 fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
@@ -342,7 +353,10 @@ mod tests {
             .find(|m| m.name == "Module1")
             .expect("Module1 present");
         assert!(module.code.contains("Sub Hello"));
-        assert_eq!(module.attributes.get("VB_Name").map(String::as_str), Some("Module1"));
+        assert_eq!(
+            module.attributes.get("VB_Name").map(String::as_str),
+            Some("Module1")
+        );
     }
 
     #[test]
@@ -355,7 +369,10 @@ mod tests {
         assert_eq!(sheets[0].name, "Sheet1");
         assert_eq!(sheets[0].sheet_id, 1);
         assert_eq!(sheets[0].rel_id, "rId1");
-        assert_eq!(sheets[0].visibility, formula_model::SheetVisibility::Visible);
+        assert_eq!(
+            sheets[0].visibility,
+            formula_model::SheetVisibility::Visible
+        );
 
         let mut updated = sheets.clone();
         updated[0].name = "Renamed".to_string();
