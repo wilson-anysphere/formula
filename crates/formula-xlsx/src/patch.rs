@@ -2086,22 +2086,17 @@ fn rewrite_dimension(
 ) -> Result<BytesStart<'static>, XlsxError> {
     let (p_min_r, p_min_c, p_max_r, p_max_c) = patch_bounds;
 
-    // `<dimension>` is typically unprefixed in real-world worksheet XML.
-    let mut start = BytesStart::new("dimension");
+    // Preserve the original element name (including any prefix) so prefixed worksheets round-trip
+    // cleanly even when we update the dimension.
+    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
 
     let mut existing_ref: Option<String> = None;
-    let mut other_attrs: Vec<(Vec<u8>, String)> = Vec::new();
     for attr in e.attributes() {
         let attr = attr?;
-        if local_name(attr.key.as_ref()) == b"ref" {
+        if attr.key.as_ref() == b"ref" {
             existing_ref = Some(attr.unescape_value()?.into_owned());
-            continue;
+            break;
         }
-        other_attrs.push((attr.key.as_ref().to_vec(), attr.unescape_value()?.into_owned()));
-    }
-
-    for (k, v) in other_attrs {
-        start.push_attribute((k.as_slice(), v.as_bytes()));
     }
 
     let new_ref = existing_ref
@@ -2116,7 +2111,22 @@ fn rewrite_dimension(
         })
         .unwrap_or_else(|| format_dimension(p_min_r, p_min_c, p_max_r, p_max_c));
 
-    start.push_attribute(("ref", new_ref.as_str()));
+    // Preserve attribute ordering where possible by rewriting `ref` in-place.
+    let mut start = BytesStart::new(tag.as_str());
+    let mut wrote_ref = false;
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"ref" {
+            start.push_attribute(("ref", new_ref.as_str()));
+            wrote_ref = true;
+        } else {
+            start.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+        }
+    }
+    if !wrote_ref {
+        start.push_attribute(("ref", new_ref.as_str()));
+    }
+
     Ok(start.into_owned())
 }
 
