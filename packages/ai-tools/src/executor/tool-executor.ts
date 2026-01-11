@@ -5,6 +5,10 @@ import type { CellData, CellScalar } from "../spreadsheet/types.js";
 import type { ToolCall, ToolName, UnknownToolCall } from "../tool-schema.js";
 import { TOOL_REGISTRY, validateToolCall } from "../tool-schema.js";
 
+import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
+import { DLP_DECISION, evaluatePolicy } from "../../../security/dlp/src/policyEngine.js";
+import { effectiveCellClassification, effectiveRangeClassification } from "../../../security/dlp/src/selectors.js";
+
 export interface ToolExecutionError {
   code: "validation_error" | "not_implemented" | "permission_denied" | "runtime_error";
   message: string;
@@ -114,11 +118,31 @@ export interface ToolExecutorOptions {
   allow_external_data?: boolean;
   allowed_external_hosts?: string[];
   max_external_bytes?: number;
+  /**
+   * Optional DLP enforcement for tool results.
+   *
+   * IMPORTANT: Tool results are fed back into the LLM context as `role:"tool"`
+   * messages by `runChatWithTools`. If you use cloud LLMs, sensitive data must be
+   * blocked/redacted here (not only when building prompt context).
+   */
+  dlp?: {
+    document_id: string;
+    sheet_id?: string; // default_sheet if omitted
+    policy: any;
+    classification_records?: Array<{ selector: any; classification: any }>;
+    classification_store?: { list(documentId: string): Array<{ selector: any; classification: any }> };
+    include_restricted_content?: boolean;
+    audit_logger?: { log(event: any): void };
+  };
 }
+
+const DLP_REDACTION_PLACEHOLDER = "[REDACTED]";
+
+type ResolvedToolExecutorOptions = Required<Omit<ToolExecutorOptions, "dlp">> & { dlp?: ToolExecutorOptions["dlp"] };
 
 export class ToolExecutor {
   readonly spreadsheet: SpreadsheetApi;
-  readonly options: Required<ToolExecutorOptions>;
+  readonly options: ResolvedToolExecutorOptions;
   private readonly pivots: PivotRegistration[] = [];
 
   constructor(spreadsheet: SpreadsheetApi, options: ToolExecutorOptions = {}) {
@@ -127,7 +151,8 @@ export class ToolExecutor {
       default_sheet: options.default_sheet ?? "Sheet1",
       allow_external_data: options.allow_external_data ?? false,
       allowed_external_hosts: options.allowed_external_hosts ?? [],
-      max_external_bytes: options.max_external_bytes ?? 1_000_000
+      max_external_bytes: options.max_external_bytes ?? 1_000_000,
+      dlp: options.dlp
     };
   }
 
@@ -196,11 +221,68 @@ export class ToolExecutor {
 
   private readRange(params: any): ToolResultDataByName["read_range"] {
     const range = parseA1Range(params.range, this.options.default_sheet);
+
+    const dlp = this.evaluateDlpForRange("read_range", range);
+    if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
+      this.logToolDlpDecision({
+        tool: "read_range",
+        range,
+        dlp,
+        redactedCellCount: 0
+      });
+      throw toolError(
+        "permission_denied",
+        `DLP policy blocks reading ${formatA1Range(range)} via read_range (ai.cloudProcessing).`
+      );
+    }
+
     const cells = this.spreadsheet.readRange(range);
-    const values = cells.map((row) => row.map((cell) => (cell.formula ? null : cell.value)));
+    if (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW) {
+      const values = cells.map((row) => row.map((cell) => (cell.formula ? null : cell.value)));
+      const formulas = params.include_formulas
+        ? cells.map((row) => row.map((cell) => cell.formula ?? null))
+        : undefined;
+      if (dlp) {
+        this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount: 0 });
+      }
+      return { range: formatA1Range(range), values, ...(formulas ? { formulas } : {}) };
+    }
+
+    const cellDecisionCache = new Map<string, boolean>();
+    const isAllowedCell = (row: number, col: number) => {
+      const key = `${row},${col}`;
+      const cached = cellDecisionCache.get(key);
+      if (cached !== undefined) return cached;
+      const allowed = this.isDlpCellAllowed(dlp, row, col);
+      cellDecisionCache.set(key, allowed);
+      return allowed;
+    };
+
+    let redactedCellCount = 0;
+    const values = cells.map((row, r) =>
+      row.map((cell, c) => {
+        const rowIndex = range.startRow + r;
+        const colIndex = range.startCol + c;
+        if (!isAllowedCell(rowIndex, colIndex)) {
+          redactedCellCount++;
+          return DLP_REDACTION_PLACEHOLDER;
+        }
+        return cell.formula ? null : cell.value;
+      })
+    );
+
     const formulas = params.include_formulas
-      ? cells.map((row) => row.map((cell) => cell.formula ?? null))
+      ? cells.map((row, r) =>
+          row.map((cell, c) => {
+            const rowIndex = range.startRow + r;
+            const colIndex = range.startCol + c;
+            if (!isAllowedCell(rowIndex, colIndex)) return DLP_REDACTION_PLACEHOLDER;
+            return cell.formula ?? null;
+          })
+        )
       : undefined;
+
+    this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount });
     return { range: formatA1Range(range), values, ...(formulas ? { formulas } : {}) };
   }
 
@@ -447,6 +529,14 @@ export class ToolExecutor {
 
   private filterRange(params: any): ToolResultDataByName["filter_range"] {
     const range = parseA1Range(params.range, this.options.default_sheet);
+    const dlp = this.evaluateDlpForRange("filter_range", range);
+    if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
+      this.logToolDlpDecision({ tool: "filter_range", range, dlp, redactedCellCount: 0 });
+      throw toolError(
+        "permission_denied",
+        `DLP policy blocks filtering ${formatA1Range(range)} via filter_range (ai.cloudProcessing).`
+      );
+    }
     const hasHeader = Boolean(params.has_header);
     const rows = this.spreadsheet.readRange(range);
     const bodyOffset = hasHeader ? 1 : 0;
@@ -464,12 +554,23 @@ export class ToolExecutor {
     const matchingRows: number[] = [];
     for (let i = bodyOffset; i < rows.length; i++) {
       const row = rows[i]!;
-      const matches = criteria.every((criterion) => matchesCriterion(row[criterion.offset]!, criterion));
+      const matches = criteria.every((criterion) => {
+        const cell = row[criterion.offset]!;
+        if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+          const rowIndex = range.startRow + i;
+          const colIndex = range.startCol + criterion.offset;
+          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+            return matchesCriterion({ value: DLP_REDACTION_PLACEHOLDER }, criterion);
+          }
+        }
+        return matchesCriterion(cell, criterion);
+      });
       if (matches) {
         matchingRows.push(range.startRow + i);
       }
     }
 
+    if (dlp) this.logToolDlpDecision({ tool: "filter_range", range, dlp, redactedCellCount: 0 });
     return { range: formatA1Range(range), matching_rows: matchingRows, count: matchingRows.length };
   }
 
@@ -483,10 +584,27 @@ export class ToolExecutor {
     const range = parseA1Range(params.range, this.options.default_sheet);
     const formattedRange = formatA1Range(range);
     const method = (params.method ?? "zscore") as "zscore" | "iqr" | "isolation_forest";
+    const dlp = this.evaluateDlpForRange("detect_anomalies", range);
+    if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
+      this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount: 0 });
+      throw toolError(
+        "permission_denied",
+        `DLP policy blocks analyzing ${formattedRange} via detect_anomalies (ai.cloudProcessing).`
+      );
+    }
     const cells = this.spreadsheet.readRange(range);
     const entries: Array<{ cell: string; value: number }> = [];
+    let redactedCellCount = 0;
     for (let r = 0; r < cells.length; r++) {
       for (let c = 0; c < cells[r]!.length; c++) {
+        if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+          const rowIndex = range.startRow + r;
+          const colIndex = range.startCol + c;
+          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+            redactedCellCount++;
+            continue;
+          }
+        }
         const cell = cells[r]![c]!;
         const numeric = toNumber(cell);
         if (numeric === null) continue;
@@ -502,6 +620,7 @@ export class ToolExecutor {
         case "zscore":
         case "iqr":
         case "isolation_forest":
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
           return { range: formattedRange, method, anomalies: [] };
         default: {
           const exhaustive: never = method;
@@ -519,11 +638,15 @@ export class ToolExecutor {
             ? entries.reduce((sum, e) => sum + (e.value - mean) ** 2, 0) / (entries.length - 1)
             : 0;
         const stdev = Math.sqrt(variance);
-        if (stdev === 0) return { range: formattedRange, method, anomalies: [] };
+        if (stdev === 0) {
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
+          return { range: formattedRange, method, anomalies: [] };
+        }
         const anomalies = entries
           .map((e) => ({ ...e, score: (e.value - mean) / stdev }))
           .filter((e) => Math.abs(e.score) >= threshold)
           .map((e) => ({ cell: e.cell, value: e.value, score: e.score }));
+        if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }
       case "iqr": {
@@ -537,6 +660,7 @@ export class ToolExecutor {
         const anomalies = entries
           .filter((e) => e.value < low || e.value > high)
           .map((e) => ({ cell: e.cell, value: e.value }));
+        if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }
       case "isolation_forest": {
@@ -559,6 +683,7 @@ export class ToolExecutor {
           const anomalies = scored
             .filter((entry) => entry.score >= cutoff)
             .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
           return { range: formattedRange, method, anomalies };
         }
 
@@ -566,6 +691,7 @@ export class ToolExecutor {
         const anomalies = scored
           .slice(0, topN)
           .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
+        if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
         return { range: formattedRange, method, anomalies };
       }
       default:
@@ -575,12 +701,30 @@ export class ToolExecutor {
 
   private computeStatistics(params: any): ToolResultDataByName["compute_statistics"] {
     const range = parseA1Range(params.range, this.options.default_sheet);
+    const dlp = this.evaluateDlpForRange("compute_statistics", range);
+    if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
+      this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount: 0 });
+      throw toolError(
+        "permission_denied",
+        `DLP policy blocks analyzing ${formatA1Range(range)} via compute_statistics (ai.cloudProcessing).`
+      );
+    }
     const measures: string[] = params.measures ?? [];
     const cells = this.spreadsheet.readRange(range);
     const values: number[] = [];
-    for (const row of cells) {
-      for (const cell of row) {
-        const numeric = toNumber(cell);
+    let redactedCellCount = 0;
+    for (let r = 0; r < cells.length; r++) {
+      const row = cells[r]!;
+      for (let c = 0; c < row.length; c++) {
+        if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+          const rowIndex = range.startRow + r;
+          const colIndex = range.startCol + c;
+          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+            redactedCellCount++;
+            continue;
+          }
+        }
+        const numeric = toNumber(row[c]!);
         if (numeric === null) continue;
         values.push(numeric);
       }
@@ -644,7 +788,96 @@ export class ToolExecutor {
       }
     }
 
+    if (dlp) this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount });
     return { range: formatA1Range(range), statistics: stats };
+  }
+
+  private evaluateDlpForRange(tool: ToolName, range: ReturnType<typeof parseA1Range>): null | {
+    documentId: string;
+    sheetId: string;
+    records: Array<{ selector: any; classification: any }>;
+    includeRestrictedContent: boolean;
+    policy: any;
+    decision: any;
+    selectionClassification: any;
+    auditLogger?: { log(event: any): void };
+  } {
+    const dlp = this.options.dlp;
+    if (!dlp) return null;
+
+    const documentId = dlp.document_id;
+    const sheetId =
+      range.sheet === this.options.default_sheet ? (dlp.sheet_id ?? range.sheet) : range.sheet;
+    const records = dlp.classification_records ?? dlp.classification_store?.list(documentId) ?? [];
+    const includeRestrictedContent = dlp.include_restricted_content ?? false;
+
+    const selectionClassification = effectiveRangeClassification(
+      {
+        documentId,
+        sheetId,
+        range: {
+          start: { row: range.startRow - 1, col: range.startCol - 1 },
+          end: { row: range.endRow - 1, col: range.endCol - 1 }
+        }
+      },
+      records
+    );
+
+    const decision = evaluatePolicy({
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      classification: selectionClassification,
+      policy: dlp.policy,
+      options: { includeRestrictedContent }
+    });
+
+    return {
+      documentId,
+      sheetId,
+      records,
+      includeRestrictedContent,
+      policy: dlp.policy,
+      decision,
+      selectionClassification,
+      auditLogger: dlp.audit_logger
+    };
+  }
+
+  private isDlpCellAllowed(
+    dlp: NonNullable<ReturnType<ToolExecutor["evaluateDlpForRange"]>>,
+    row: number,
+    col: number
+  ): boolean {
+    const classification = effectiveCellClassification(
+      { documentId: dlp.documentId, sheetId: dlp.sheetId, row: row - 1, col: col - 1 },
+      dlp.records
+    );
+    const cellDecision = evaluatePolicy({
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      classification,
+      policy: dlp.policy,
+      options: { includeRestrictedContent: dlp.includeRestrictedContent }
+    });
+    return cellDecision.decision === DLP_DECISION.ALLOW;
+  }
+
+  private logToolDlpDecision(params: {
+    tool: ToolName;
+    range: ReturnType<typeof parseA1Range>;
+    dlp: NonNullable<ReturnType<ToolExecutor["evaluateDlpForRange"]>>;
+    redactedCellCount: number;
+  }): void {
+    const { tool, range, dlp, redactedCellCount } = params;
+    dlp.auditLogger?.log({
+      type: "ai.tool.dlp",
+      tool,
+      documentId: dlp.documentId,
+      sheetId: dlp.sheetId,
+      range: formatA1Range(range),
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      decision: dlp.decision,
+      selectionClassification: dlp.selectionClassification,
+      redactedCellCount
+    });
   }
 
   private async fetchExternalData(params: any): Promise<ToolResultDataByName["fetch_external_data"]> {

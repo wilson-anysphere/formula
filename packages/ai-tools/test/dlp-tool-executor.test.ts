@@ -1,0 +1,174 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { ToolExecutor } from "../src/executor/tool-executor.js";
+import { parseA1Cell } from "../src/spreadsheet/a1.js";
+import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
+
+import { DLP_ACTION } from "../../security/dlp/src/actions.js";
+import { CLASSIFICATION_SCOPE } from "../../security/dlp/src/selectors.js";
+
+describe("ToolExecutor DLP enforcement", () => {
+  it("read_range redacts restricted cells when policy allows redaction", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "ok" });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: "secret" });
+    workbook.setCell(parseA1Cell("Sheet1!C1"), { value: 123 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 0,
+              col: 1
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:C1", include_formulas: true }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([["ok", "[REDACTED]", 123]]);
+    expect(result.data?.formulas).toEqual([[null, "[REDACTED]", null]]);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "read_range",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1:C1",
+      redactedCellCount: 1
+    });
+    expect(event.decision?.decision).toBe("redact");
+  });
+
+  it("read_range blocks when policy maxAllowed is null", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "data" });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: null,
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1" }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/DLP policy blocks reading Sheet1!A1/);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "read_range",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1",
+      redactedCellCount: 0
+    });
+    expect(event.decision?.decision).toBe("block");
+  });
+
+  it("compute_statistics excludes restricted cells when redacting", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: 100 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 0,
+              col: 1
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:B1", measures: ["mean", "min", "max"] }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("compute_statistics");
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics).toEqual({ mean: 1, min: 1, max: 1 });
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "compute_statistics",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1:B1",
+      redactedCellCount: 1
+    });
+    expect(event.decision?.decision).toBe("redact");
+  });
+});
+
