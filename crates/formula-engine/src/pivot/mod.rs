@@ -26,6 +26,20 @@ pub enum PivotError {
     MissingField(String),
     #[error("pivot table must have at least one value field")]
     NoValueFields,
+    #[error("duplicate calculated field: {0}")]
+    DuplicateCalculatedField(String),
+    #[error("calculated field name conflicts with source field: {0}")]
+    CalculatedFieldNameConflictsWithSource(String),
+    #[error("calculated item field not in layout: {0}")]
+    CalculatedItemFieldNotInLayout(String),
+    #[error("invalid calculated field formula for {field}: {message}")]
+    InvalidCalculatedFieldFormula { field: String, message: String },
+    #[error("invalid calculated item formula for {field}::{item}: {message}")]
+    InvalidCalculatedItemFormula {
+        field: String,
+        item: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -408,6 +422,21 @@ pub struct FilterField {
     pub allowed: Option<HashSet<PivotKeyPart>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalculatedField {
+    pub name: String,
+    pub formula: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalculatedItem {
+    pub field: String,
+    pub name: String,
+    pub formula: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PivotConfig {
@@ -415,6 +444,10 @@ pub struct PivotConfig {
     pub column_fields: Vec<PivotField>,
     pub value_fields: Vec<ValueField>,
     pub filter_fields: Vec<FilterField>,
+    #[serde(default)]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default)]
+    pub calculated_items: Vec<CalculatedItem>,
     pub layout: Layout,
     pub subtotals: SubtotalPosition,
     pub grand_totals: GrandTotals,
@@ -427,6 +460,8 @@ impl Default for PivotConfig {
             column_fields: Vec::new(),
             value_fields: Vec::new(),
             filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals::default(),
@@ -500,6 +535,8 @@ pub struct CreatePivotTableRequest {
     pub column_fields: Vec<String>,
     pub value_fields: Vec<CreatePivotValueSpec>,
     pub filter_fields: Vec<CreatePivotFilterSpec>,
+    pub calculated_fields: Option<Vec<CalculatedField>>,
+    pub calculated_items: Option<Vec<CalculatedItem>>,
     pub layout: Option<Layout>,
     pub subtotals: Option<SubtotalPosition>,
     pub grand_totals: Option<GrandTotals>,
@@ -542,6 +579,8 @@ impl CreatePivotTableRequest {
                         .map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
                 })
                 .collect(),
+            calculated_fields: self.calculated_fields.unwrap_or_default(),
+            calculated_items: self.calculated_items.unwrap_or_default(),
             layout: self.layout.unwrap_or(Layout::Tabular),
             subtotals: self.subtotals.unwrap_or(SubtotalPosition::None),
             grand_totals: self.grand_totals.unwrap_or_default(),
@@ -1640,6 +1679,47 @@ mod tests {
     }
 
     #[test]
+    fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Region".to_string(),
+            }],
+            column_fields: vec![],
+            value_fields: vec![],
+            filter_fields: vec![],
+            calculated_fields: vec![CalculatedField {
+                name: "Profit".to_string(),
+                formula: "Sales - Cost".to_string(),
+            }],
+            calculated_items: vec![CalculatedItem {
+                field: "Region".to_string(),
+                name: "East+West".to_string(),
+                formula: "\"East\" + \"West\"".to_string(),
+            }],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals::default(),
+        };
+
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert!(json.get("calculatedFields").is_some());
+        assert!(json.get("calculatedItems").is_some());
+
+        let decoded: PivotConfig = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(decoded, cfg);
+
+        // Backward-compat: missing keys should default to empty vectors.
+        let mut json_without = json;
+        if let Some(obj) = json_without.as_object_mut() {
+            obj.remove("calculatedFields");
+            obj.remove("calculatedItems");
+        }
+        let decoded: PivotConfig = serde_json::from_value(json_without).unwrap();
+        assert!(decoded.calculated_fields.is_empty());
+        assert!(decoded.calculated_items.is_empty());
+    }
+
+    #[test]
     fn calculates_sum_by_single_row_field_with_grand_total() {
         let data = vec![
             pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
@@ -1663,6 +1743,8 @@ mod tests {
             }],
             column_fields: vec![],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -1714,6 +1796,8 @@ mod tests {
                 allowed: Some(allowed),
             }],
             column_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -1758,6 +1842,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::None,
             grand_totals: GrandTotals {
@@ -2007,6 +2093,8 @@ mod tests {
                 base_item: None,
             }],
             filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
             layout: Layout::Tabular,
             subtotals: SubtotalPosition::Bottom,
             grand_totals: GrandTotals {
