@@ -122,3 +122,21 @@ test("hashJoin: supports signed i32 keys", async () => {
   assert.deepEqual(Array.from(out.leftIndex), [0, 0, 2, 2]);
   assert.deepEqual(Array.from(out.rightIndex), [0, 1, 0, 1]);
 });
+
+test("group-by/hashJoin: supports key 0xFFFF_FFFF (u32 max) in unsigned mode", async () => {
+  const cpu = new CpuBackend();
+  const k = 0xffff_ffff;
+
+  const keys = new Uint32Array([k, 1, k, 1]);
+  const values = new Float64Array([1, 2, 3, 4]);
+  const grouped = await cpu.groupBySum(keys, values);
+  assert.deepEqual(Array.from(grouped.uniqueKeys), [1, k]);
+  assert.deepEqual(Array.from(grouped.counts), [2, 2]);
+  assert.deepEqual(Array.from(grouped.sums), [6, 4]);
+
+  const leftKeys = new Uint32Array([k, 1, k]);
+  const rightKeys = new Uint32Array([0, k, k]);
+  const joined = await cpu.hashJoin(leftKeys, rightKeys);
+  assert.deepEqual(Array.from(joined.leftIndex), [0, 0, 2, 2]);
+  assert.deepEqual(Array.from(joined.rightIndex), [1, 2, 1, 2]);
+});

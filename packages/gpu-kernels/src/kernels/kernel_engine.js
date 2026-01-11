@@ -193,7 +193,7 @@ export class KernelEngine {
     if (typeof this._gpu.supportsKernelPrecision === "function") {
       return this._gpu.supportsKernelPrecision(kernel, precision);
     }
-    return precision === "u32";
+    return false;
   }
 
   /**
