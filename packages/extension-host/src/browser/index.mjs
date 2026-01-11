@@ -221,8 +221,9 @@ class BrowserExtensionHost {
       throw new Error(`Extension already loaded: ${extensionId}`);
     }
 
-    const workerUrl = new URL("./extension-worker.mjs", import.meta.url);
-    const worker = new Worker(workerUrl, { type: "module" });
+    // Keep this inline `new Worker(new URL(...))` shape so Vite (and other bundlers)
+    // can statically analyze the worker entry during production builds.
+    const worker = new Worker(new URL("./extension-worker.mjs", import.meta.url), { type: "module" });
 
     const extension = {
       id: extensionId,
