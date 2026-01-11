@@ -352,3 +352,38 @@ fn streaming_patch_preserves_shared_string_index_when_text_unchanged(
 
     Ok(())
 }
+
+#[test]
+fn document_writer_preserves_shared_string_index_when_text_unchanged(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_duplicate_shared_strings_xlsx();
+    let mut doc = load_from_bytes(&bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    doc.set_cell_value(
+        sheet_id,
+        CellRef::from_a1("A2")?,
+        CellValue::String("Base".to_string()),
+    );
+
+    let saved = doc.save_to_vec()?;
+    let sheet_xml = zip_part(&saved, "xl/worksheets/sheet1.xml");
+    let doc_xml = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = doc_xml
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A2"))
+        .expect("A2 cell should exist");
+    assert_eq!(cell.attribute("t"), Some("s"));
+    let v = cell
+        .children()
+        .find(|n| n.has_tag_name((ns, "v")))
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(
+        v, "1",
+        "expected document writer to preserve the original shared string index when text is unchanged"
+    );
+
+    Ok(())
+}

@@ -271,6 +271,44 @@ impl XlsxDocument {
                 meta.value_kind = Some(CellValueKind::Other { t: t.clone() });
                 meta.raw_value = Some(s.clone());
             }
+            // If the cell previously referenced a specific shared string index, preserve it
+            // when the visible text is unchanged. This avoids flipping between duplicate shared
+            // string entries that may differ only in unsupported substructures (phonetic/ruby,
+            // extLst, etc.).
+            (Some(CellValueKind::SharedString { index }), CellValue::String(s))
+                if self
+                    .shared_strings
+                    .get(*index as usize)
+                    .is_some_and(|rt| rt.text.as_str() == s.as_str()) =>
+            {
+                let idx = *index;
+                let raw_matches = meta
+                    .raw_value
+                    .as_deref()
+                    .and_then(|raw| raw.trim().parse::<u32>().ok())
+                    .is_some_and(|raw| raw == idx);
+                meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                if !raw_matches {
+                    meta.raw_value = Some(idx.to_string());
+                }
+            }
+            (Some(CellValueKind::SharedString { index }), CellValue::RichText(rich))
+                if self
+                    .shared_strings
+                    .get(*index as usize)
+                    .is_some_and(|rt| rt == rich) =>
+            {
+                let idx = *index;
+                let raw_matches = meta
+                    .raw_value
+                    .as_deref()
+                    .and_then(|raw| raw.trim().parse::<u32>().ok())
+                    .is_some_and(|raw| raw == idx);
+                meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                if !raw_matches {
+                    meta.raw_value = Some(idx.to_string());
+                }
+            }
             _ => {
                 let (value_kind, raw_value) = cell_meta_from_value(&cell_record.value);
                 meta.value_kind = value_kind;
@@ -372,6 +410,40 @@ impl XlsxDocument {
                 (Some(CellValueKind::Other { t }), CellValue::String(s)) => {
                     meta.value_kind = Some(CellValueKind::Other { t: t.clone() });
                     meta.raw_value = Some(s.clone());
+                }
+                (Some(CellValueKind::SharedString { index }), CellValue::String(s))
+                    if self
+                        .shared_strings
+                        .get(*index as usize)
+                        .is_some_and(|rt| rt.text.as_str() == s.as_str()) =>
+                {
+                    let idx = *index;
+                    let raw_matches = meta
+                        .raw_value
+                        .as_deref()
+                        .and_then(|raw| raw.trim().parse::<u32>().ok())
+                        .is_some_and(|raw| raw == idx);
+                    meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                    if !raw_matches {
+                        meta.raw_value = Some(idx.to_string());
+                    }
+                }
+                (Some(CellValueKind::SharedString { index }), CellValue::RichText(rich))
+                    if self
+                        .shared_strings
+                        .get(*index as usize)
+                        .is_some_and(|rt| rt == rich) =>
+                {
+                    let idx = *index;
+                    let raw_matches = meta
+                        .raw_value
+                        .as_deref()
+                        .and_then(|raw| raw.trim().parse::<u32>().ok())
+                        .is_some_and(|raw| raw == idx);
+                    meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                    if !raw_matches {
+                        meta.raw_value = Some(idx.to_string());
+                    }
                 }
                 _ => {
                     let (value_kind, raw_value) = cell_meta_from_value(&cell_record.value);
