@@ -48,3 +48,44 @@ test("packageExtension rejects manifest main that escapes extensionDir", async (
   await assert.rejects(() => packageExtension(tmp), /resolve inside extensionDir/i);
 });
 
+test("packageExtension rejects missing manifest module entrypoints", async (t) => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "formula-publish-missing-module-"));
+  t.after(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  await writeJson(path.join(tmp, "package.json"), {
+    name: "missing-module",
+    publisher: "publisher",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    module: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" }
+  });
+
+  await fs.mkdir(path.join(tmp, "dist"), { recursive: true });
+  await fs.writeFile(path.join(tmp, "dist", "extension.js"), "module.exports = {};\n", "utf8");
+
+  await assert.rejects(() => packageExtension(tmp), /module entrypoint is missing/i);
+});
+
+test("packageExtension rejects missing manifest browser entrypoints", async (t) => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "formula-publish-missing-browser-"));
+  t.after(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  await writeJson(path.join(tmp, "package.json"), {
+    name: "missing-browser",
+    publisher: "publisher",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" }
+  });
+
+  await fs.mkdir(path.join(tmp, "dist"), { recursive: true });
+  await fs.writeFile(path.join(tmp, "dist", "extension.js"), "module.exports = {};\n", "utf8");
+
+  await assert.rejects(() => packageExtension(tmp), /browser entrypoint is missing/i);
+});

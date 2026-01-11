@@ -107,3 +107,37 @@ test("manifest validation: configuration must declare typed properties", () => {
     /contributes\.configuration\.properties\.x\.setting\.type/
   );
 });
+
+test("manifest validation: module/browser entrypoints must be strings when present", () => {
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.js",
+          module: { not: "a string" },
+          engines: { formula: "^1.0.0" }
+        },
+        { engineVersion: "1.0.0" }
+      ),
+    /module must be a string/
+  );
+
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.js",
+          browser: { not: "a string" },
+          engines: { formula: "^1.0.0" }
+        },
+        { engineVersion: "1.0.0" }
+      ),
+    /browser must be a string/
+  );
+});

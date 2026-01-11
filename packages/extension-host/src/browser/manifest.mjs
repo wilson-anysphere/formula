@@ -286,6 +286,8 @@ function validateExtensionManifest(manifest, { engineVersion }) {
   assertString(obj.version, "version");
   assertString(obj.publisher, "publisher");
   assertString(obj.main, "main");
+  assertOptionalString(obj.module, "module");
+  assertOptionalString(obj.browser, "browser");
 
   if (!isValidSemver(obj.version)) {
     throw new ManifestError(`Invalid version: ${obj.version}`);
@@ -329,4 +331,3 @@ function validateExtensionManifest(manifest, { engineVersion }) {
 }
 
 export { ManifestError, VALID_PERMISSIONS, validateExtensionManifest };
-

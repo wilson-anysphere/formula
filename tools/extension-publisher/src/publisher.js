@@ -17,6 +17,13 @@ function validateManifest(manifest) {
     }
   }
 
+  if (manifest.module !== undefined && manifest.module !== null && typeof manifest.module !== "string") {
+    throw new Error("Manifest field 'module' must be a string when present");
+  }
+  if (manifest.browser !== undefined && manifest.browser !== null && typeof manifest.browser !== "string") {
+    throw new Error("Manifest field 'browser' must be a string when present");
+  }
+
   if (!NAME_RE.test(manifest.name)) {
     throw new Error(`Invalid extension name "${manifest.name}" (expected ${NAME_RE})`);
   }
@@ -43,23 +50,33 @@ async function packageExtension(extensionDir, { privateKeyPem } = {}) {
   // Ensure the declared entrypoint exists before packaging. This prevents publishing
   // broken extensions when build output (e.g. dist/extension.js) is missing.
   const root = path.resolve(extensionDir);
-  const mainRel = String(manifest.main);
-  const mainPath = path.resolve(root, mainRel);
-  if (!mainPath.startsWith(root + path.sep)) {
-    throw new Error(`Manifest main must resolve inside extensionDir (got ${manifest.main})`);
+  async function assertEntrypoint(fieldName, relPath) {
+    const entryRel = String(relPath);
+    const entryPath = path.resolve(root, entryRel);
+    if (!entryPath.startsWith(root + path.sep)) {
+      throw new Error(`Manifest ${fieldName} must resolve inside extensionDir (got ${relPath})`);
+    }
+    try {
+      const stat = await fs.stat(entryPath);
+      if (!stat.isFile()) {
+        throw new Error(`Manifest ${fieldName} is not a file: ${relPath}`);
+      }
+    } catch (error) {
+      if (error && error.code === "ENOENT") {
+        throw new Error(
+          `Manifest ${fieldName} entrypoint is missing: ${relPath}. Did you forget to build the extension?`
+        );
+      }
+      throw error;
+    }
   }
-  try {
-    const stat = await fs.stat(mainPath);
-    if (!stat.isFile()) {
-      throw new Error(`Manifest main is not a file: ${manifest.main}`);
-    }
-  } catch (error) {
-    if (error && error.code === "ENOENT") {
-      throw new Error(
-        `Manifest main entrypoint is missing: ${manifest.main}. Did you forget to build the extension?`
-      );
-    }
-    throw error;
+
+  await assertEntrypoint("main", manifest.main);
+  if (typeof manifest.module === "string" && manifest.module.trim().length > 0) {
+    await assertEntrypoint("module", manifest.module);
+  }
+  if (typeof manifest.browser === "string" && manifest.browser.trim().length > 0) {
+    await assertEntrypoint("browser", manifest.browser);
   }
 
   const packageBytes = await createExtensionPackage(extensionDir, {
