@@ -5,10 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import "fake-indexeddb/auto";
 import { arrowTableFromColumns, arrowTableToParquet } from "../../../data-io/src/index.js";
 
 import { CacheManager } from "../../src/cache/cache.js";
 import { FileSystemCacheStore } from "../../src/cache/filesystem.js";
+import { IndexedDBCacheStore } from "../../src/cache/indexeddb.js";
 import { MemoryCacheStore } from "../../src/cache/memory.js";
 import { ArrowTableAdapter } from "../../src/arrowTable.js";
 import { HttpConnector } from "../../src/connectors/http.js";
@@ -370,6 +372,48 @@ test("FileSystemCacheStore: persists DataTable cache entries and preserves Date 
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
   }
+});
+
+test("IndexedDBCacheStore: caches Arrow-backed Parquet results without re-reading the source", async () => {
+  const dbName = `pq-cache-idb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const store = new IndexedDBCacheStore({ dbName });
+  const cache = new CacheManager({ store });
+
+  const parquetPath = path.join(__dirname, "..", "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readBinary: async (p) => {
+        readCount += 1;
+        return new Uint8Array(await readFile(p));
+      },
+    },
+  });
+
+  const query = { id: "q_parquet_idb_cache", name: "Parquet idb cache", source: { type: "parquet", path: parquetPath }, steps: [] };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(readCount, 1);
+  assert.ok(first.table instanceof ArrowTableAdapter);
+  const grid = first.table.toGrid();
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(readCount, 1, "cache hit should not re-read Parquet bytes");
+  assert.ok(second.table instanceof ArrowTableAdapter);
+  assert.deepEqual(second.table.toGrid(), grid);
+
+  const db = await store.open();
+  db.close();
+
+  await new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(dbName);
+    req.onsuccess = () => resolve(undefined);
+    req.onerror = () => reject(req.error ?? new Error("IndexedDB deleteDatabase failed"));
+    req.onblocked = () => resolve(undefined);
+  });
 });
 
 test("QueryEngine: Arrow cache roundtrip preserves date columns", async () => {
