@@ -3,7 +3,7 @@
 This repo contains a minimal-but-extensible **enterprise/cloud backend foundation**:
 
 - `services/api`: Fastify + Postgres API service (auth, orgs, docs, RBAC, audit, sync token issuance)
-- `services/sync-server`: Yjs sync server (`y-websocket`) that validates short-lived collaboration tokens (JWT)
+- `services/sync-server`: Production Yjs sync server (`y-websocket`) that validates short-lived collaboration tokens issued by the API
 
 ## Quickstart
 
@@ -37,6 +37,7 @@ API_PORT=3001 SYNC_WS_PORT=1235 POSTGRES_PORT=5433 docker-compose up --build
 The API issues short-lived JWT sync tokens via `POST /docs/:docId/sync-token`.
 
 - API signing secret: `SYNC_TOKEN_SECRET`
+- Token lifetime: `SYNC_TOKEN_TTL_SECONDS` (in seconds)
 - Sync-server verification secret: `SYNC_SERVER_JWT_SECRET` (must match `SYNC_TOKEN_SECRET`)
 - JWT audience: `SYNC_SERVER_JWT_AUDIENCE` (must match the token `aud`, default: `formula-sync`)
 
