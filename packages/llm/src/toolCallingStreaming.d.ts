@@ -1,4 +1,4 @@
-import type { ChatStreamEvent, LLMClient, LLMMessage, ToolCall, ToolExecutor } from "./toolCalling.js";
+import type { ChatStreamEvent, LLMClient, LLMMessage, ToolCall, ToolExecutor } from "./types.js";
 
 export function runChatWithToolsStreaming(params: {
   client: LLMClient;
@@ -15,4 +15,3 @@ export function runChatWithToolsStreaming(params: {
   maxTokens?: number;
   signal?: AbortSignal;
 }): Promise<{ messages: LLMMessage[]; final: string }>;
-

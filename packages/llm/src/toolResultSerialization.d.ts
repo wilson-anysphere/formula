@@ -1,4 +1,4 @@
-import type { ToolCall } from "./toolCalling.js";
+import type { ToolCall } from "./types.js";
 
 export function serializeToolResultForModel(params: {
   toolCall: ToolCall;
@@ -6,4 +6,3 @@ export function serializeToolResultForModel(params: {
   maxChars?: number;
   maxTokens?: number;
 }): string;
-
