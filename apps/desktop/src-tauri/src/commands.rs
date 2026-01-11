@@ -383,6 +383,18 @@ pub async fn save_workbook(
     Ok(())
 }
 
+/// Mark the in-memory workbook state as saved (clears the dirty flag) without writing a file.
+///
+/// This is useful when the frontend returns to the last-saved state via undo/redo and wants the
+/// close prompt to match `DocumentController.isDirty`.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn mark_saved(state: State<'_, SharedAppState>) -> Result<(), String> {
+    let mut state = state.inner().lock().unwrap();
+    state.mark_saved(None, None).map_err(app_error)?;
+    Ok(())
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_cell(

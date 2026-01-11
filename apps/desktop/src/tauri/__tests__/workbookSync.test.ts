@@ -99,4 +99,26 @@ describe("workbookSync", () => {
 
     sync.stop();
   });
+
+  it("clears the backend dirty flag when undo returns the document to a saved state", async () => {
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    document.setCellValue("Sheet1", { row: 0, col: 0 }, "hello");
+    await flushMicrotasks();
+    expect(document.isDirty).toBe(true);
+
+    expect(document.undo()).toBe(true);
+    expect(document.isDirty).toBe(false);
+
+    await flushMicrotasks(8);
+
+    const cmds = invoke.mock.calls.map((c) => c[0]);
+    expect(cmds[0]).toMatch(/set_(cell|range)/);
+    expect(cmds[1]).toMatch(/set_(cell|range)/);
+    expect(cmds[2]).toBe("mark_saved");
+
+    sync.stop();
+  });
 });

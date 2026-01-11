@@ -19,6 +19,7 @@ type CellDelta = {
 type DocumentControllerLike = {
   on(event: "change", listener: (payload: { deltas: CellDelta[]; source?: string; recalc?: boolean }) => void): () => void;
   markSaved(): void;
+  readonly isDirty: boolean;
 };
 
 type RangeCellEdit = { value: unknown | null; formula: string | null };
@@ -231,6 +232,17 @@ export function startWorkbookSync(args: {
         const batch = Array.from(pending.values());
         pending.clear();
         await sendEditsViaTauri(invoke, batch);
+      }
+
+      // If the user undoes back to the last-saved state, the DocumentController becomes clean
+      // again. The backend AppState dirty flag is a simple boolean that only resets when
+      // explicitly marked/saved, so we clear it here to keep close prompts aligned.
+      if (!args.document.isDirty) {
+        try {
+          await invoke("mark_saved", {});
+        } catch {
+          // Graceful degradation: older backends may not implement this command.
+        }
       }
     })();
 
