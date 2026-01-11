@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
-import React from "react";
+import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { act } from "react-dom/test-utils";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 import type { CellProvider } from "../../model/CellProvider";
 import { CanvasGrid, type GridApi } from "../CanvasGrid";
+
+// React 18 relies on this flag to suppress act() warnings in test runners.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 function createMockContext(): CanvasRenderingContext2D {
   const noop = () => {};

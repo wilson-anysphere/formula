@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import React from "react";
-import { act } from "react-dom/test-utils";
+import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -163,6 +162,10 @@ describe("App (web preview)", () => {
   let rectSpy: ReturnType<typeof vi.spyOn> | null = null;
 
   beforeEach(() => {
+    // React 18 relies on this flag to suppress act() warnings in test runners.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
     vi.stubGlobal(
       "ResizeObserver",
       class ResizeObserver {
