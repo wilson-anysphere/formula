@@ -242,6 +242,45 @@ jobs:
             "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
+          if ($null -ne $s.tagSummary -and $s.tagSummary.Count -gt 0) {
+            "## Tag summary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "| Tag | Passes | Mismatches | Total | Mismatch rate |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "| --- | ---: | ---: | ---: | ---: |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+            # Prefer tags that have mismatches; if all green, show the largest tags for context.
+            $rows = @($s.tagSummary | Where-Object { $_.mismatches -gt 0 })
+            if ($rows.Count -eq 0) {
+              $rows = @($s.tagSummary | Select-Object -First 20)
+            } else {
+              $rows = @($rows | Select-Object -First 30)
+            }
+
+            foreach ($row in $rows) {
+              $rate = [double]$row.mismatchRate
+              "| $($row.tag) | $($row.passes) | $($row.mismatches) | $($row.total) | $($rate.ToString('P2')) |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            }
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+          if ($null -ne $s.topMissingFunctions -and $s.topMissingFunctions.Count -gt 0) {
+            "## Top missing functions" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            foreach ($row in ($s.topMissingFunctions | Select-Object -First 20)) {
+              "* `$($row.name)`: $($row.count)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            }
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+          if ($null -ne $s.topActualErrorKinds -and $s.topActualErrorKinds.Count -gt 0) {
+            "## Top actual error kinds (in mismatches)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            foreach ($row in ($s.topActualErrorKinds | Select-Object -First 20)) {
+              "* `$($row.code)`: $($row.count)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            }
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
           if ($null -ne $report.mismatches -and $report.mismatches.Count -gt 0) {
             "## Sample mismatches" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
             "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
