@@ -204,6 +204,22 @@ test("Typing =TOD suggests TODAY() (zero-arg function inserts closing paren)", a
   );
 });
 
+test("Typing =RAN suggests RAND() (another zero-arg function)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=RAN",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=RAND()"),
+    `Expected a RAND() suggestion, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
 test("Argument value suggestions use catalog arg_types (RANDBETWEEN suggests numbers)", async () => {
   const engine = new TabCompletionEngine();
 
