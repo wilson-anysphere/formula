@@ -21,6 +21,7 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
   const keyRingSecret = "keyring-should-not-appear";
   const authToken = "auth-token-should-not-appear";
   const jwtSecret = "jwt-secret-should-not-appear";
+  const introspectionToken = "introspection-token-should-not-appear";
 
   logger.info(
     {
@@ -32,6 +33,7 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
         },
       },
       auth: { token: authToken, secret: jwtSecret },
+      introspection: { token: introspectionToken },
       internalAdminToken,
       persistence: {
         encryption: { keyBase64: encryptionKeyBase64, keyRing: { secret: keyRingSecret } },
@@ -43,6 +45,7 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
           leveldbEncryption: { key: leveldbEncryptionKey, strict: true },
         },
         auth: { token: authToken, secret: jwtSecret },
+        introspection: { token: introspectionToken },
         internalAdminToken,
       },
     },
@@ -59,6 +62,7 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
   assert.ok(!raw.includes(keyRingSecret));
   assert.ok(!raw.includes(authToken));
   assert.ok(!raw.includes(jwtSecret));
+  assert.ok(!raw.includes(introspectionToken));
 
   const parsed = JSON.parse(raw) as any;
   assert.ok(!("authorization" in (parsed.req?.headers ?? {})));
@@ -66,6 +70,7 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
   assert.ok(!("x-sync-server-admin-token" in (parsed.req?.headers ?? {})));
   assert.ok(!("token" in (parsed.auth ?? {})));
   assert.ok(!("secret" in (parsed.auth ?? {})));
+  assert.ok(!("token" in (parsed.introspection ?? {})));
   assert.ok(!("internalAdminToken" in parsed));
   assert.ok(!("keyBase64" in (parsed.persistence?.encryption ?? {})));
   assert.ok(!("keyRing" in (parsed.persistence?.encryption ?? {})));
@@ -74,5 +79,6 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
   assert.ok(!("key" in (parsed.config?.persistence?.leveldbEncryption ?? {})));
   assert.ok(!("token" in (parsed.config?.auth ?? {})));
   assert.ok(!("secret" in (parsed.config?.auth ?? {})));
+  assert.ok(!("token" in (parsed.config?.introspection ?? {})));
   assert.ok(!("internalAdminToken" in (parsed.config ?? {})));
 });

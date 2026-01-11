@@ -13,6 +13,10 @@ const REDACT_PATHS = [
   "auth.secret",
   "config.auth.secret",
 
+  // Sync token introspection (JWT session revalidation).
+  "introspection.token",
+  "config.introspection.token",
+
   // Internal/admin auth (Task 168/172).
   "req.headers.x-internal-admin-token",
   'req.headers["x-internal-admin-token"]',
