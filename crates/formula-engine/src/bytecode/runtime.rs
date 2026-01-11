@@ -91,6 +91,28 @@ fn matches_numeric_criteria(v: f64, criteria: NumericCriteria) -> bool {
     }
 }
 
+fn count_if_f64_blank_as_zero(values: &[f64], criteria: NumericCriteria) -> usize {
+    // COUNTIF treats blank cells as zero for numeric criteria. Column slices represent blanks as
+    // NaN, so normalize before comparison.
+    values
+        .iter()
+        .filter(|v| {
+            let v = if v.is_nan() { 0.0 } else { **v };
+            matches_numeric_criteria(v, criteria)
+        })
+        .count()
+}
+
+fn coerce_countif_value_to_number(v: Value) -> Option<f64> {
+    match v {
+        Value::Number(n) => Some(n),
+        Value::Bool(b) => Some(if b { 1.0 } else { 0.0 }),
+        Value::Empty => Some(0.0),
+        Value::Text(s) => parse_number_from_text(&s).ok(),
+        Value::Error(_) | Value::Array(_) | Value::Range(_) => None,
+    }
+}
+
 pub fn apply_unary(op: UnaryOp, v: Value) -> Value {
     let n = match coerce_to_number(v) {
         Ok(n) => n,
@@ -661,7 +683,7 @@ fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Ok(c) => c,
             Err(e) => return Value::Error(e),
         },
-        RangeArg::Array(a) => simd::count_if_f64(a.as_slice(), criteria),
+        RangeArg::Array(a) => count_if_f64_blank_as_zero(a.as_slice(), criteria),
     };
     Value::Number(count as f64)
 }
@@ -883,10 +905,11 @@ fn count_if_range(
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
-            count += simd::count_if_f64(slice, criteria);
+            count += count_if_f64_blank_as_zero(slice, criteria);
         } else {
             for row in range.row_start..=range.row_end {
-                if let Value::Number(v) = grid.get_value(CellCoord { row, col }) {
+                if let Some(v) = coerce_countif_value_to_number(grid.get_value(CellCoord { row, col }))
+                {
                     if matches_numeric_criteria(v, criteria) {
                         count += 1;
                     }

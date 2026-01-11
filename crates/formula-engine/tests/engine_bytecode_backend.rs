@@ -85,18 +85,21 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
     }
 
     engine
-        .set_cell_formula("Sheet1", "B1", "=SUM(A1:A1000)")
+        .set_cell_formula("Sheet1", "B1", "=SUM(A1:A1001)")
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "B2", "=COUNTIF(A1:A1000, \">500\")")
+        // Include a trailing blank in the range and ensure COUNTIF's numeric comparisons treat
+        // blanks as zero.
+        .set_cell_formula("Sheet1", "B2", "=COUNTIF(A1:A1001, \"<1\")")
         .unwrap();
 
     engine.recalculate_single_threaded();
 
-    assert_engine_matches_ast(&engine, "=SUM(A1:A1000)", "B1");
-    assert_engine_matches_ast(&engine, "=COUNTIF(A1:A1000, \">500\")", "B2");
+    assert_engine_matches_ast(&engine, "=SUM(A1:A1001)", "B1");
+    assert_engine_matches_ast(&engine, "=COUNTIF(A1:A1001, \"<1\")", "B2");
 
-    assert!(engine.bytecode_program_count() > 0);
+    // SUM + COUNTIF should both be compiled to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 2);
 }
 
 #[test]
