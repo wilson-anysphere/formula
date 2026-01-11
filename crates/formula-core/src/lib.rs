@@ -660,7 +660,32 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
         match ch {
             // Sheet prefixes are not supported in this lightweight evaluator yet.
             // Mirror the JS fallback behavior by treating them as invalid references.
-            '!' | '\'' => return Err(ERROR_REF),
+            '!' => return Err(ERROR_REF),
+            '\'' => {
+                // Only treat `'Sheet Name'!A1`-style prefixes as #REF!. Any other
+                // stray `'` should behave like an unknown token and map to
+                // #VALUE! (matching the current JS evaluator).
+                let mut lookahead = chars.clone();
+                lookahead.next();
+                let mut saw_closing = false;
+                while let Some(next) = lookahead.next() {
+                    if next == '\'' {
+                        saw_closing = true;
+                        break;
+                    }
+                }
+                if !saw_closing {
+                    return Err(ERROR_VALUE);
+                }
+                if lookahead.next() != Some('!') {
+                    return Err(ERROR_VALUE);
+                }
+                match lookahead.peek().copied() {
+                    Some('$') => return Err(ERROR_REF),
+                    Some(next) if next.is_ascii_alphabetic() => return Err(ERROR_REF),
+                    _ => return Err(ERROR_VALUE),
+                }
+            }
             '"' => {
                 chars.next();
                 let mut buf = String::new();
@@ -1207,6 +1232,15 @@ mod tests {
 
         wb.recalculate(None).unwrap();
         assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_REF));
+    }
+
+    #[test]
+    fn stray_apostrophe_returns_value_error() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("='A1"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_VALUE));
     }
 
     #[test]
