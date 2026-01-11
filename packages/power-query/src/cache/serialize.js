@@ -26,12 +26,48 @@ import { DataTable } from "../table.js";
 const TYPE_KEY = "__pq_type";
 
 /**
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function bytesToBase64(bytes) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  // eslint-disable-next-line no-undef
+  return btoa(binary);
+}
+
+/**
+ * @param {string} encoded
+ * @returns {Uint8Array}
+ */
+function base64ToBytes(encoded) {
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(encoded, "base64"));
+  }
+  // eslint-disable-next-line no-undef
+  const binary = atob(encoded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
+}
+
+/**
  * @param {unknown} value
  * @returns {unknown}
  */
 function serializeCell(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return { [TYPE_KEY]: "date", value: value.toISOString() };
+  }
+  if (value instanceof Uint8Array) {
+    return { [TYPE_KEY]: "bytes", value: bytesToBase64(value) };
   }
   if (typeof value === "number" && !Number.isFinite(value)) {
     // JSON does not support NaN/Infinity; tag them so roundtrips preserve values.
@@ -54,6 +90,14 @@ function deserializeCell(value) {
     if (value[TYPE_KEY] === "date" && typeof value.value === "string") {
       const parsed = new Date(value.value);
       if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    // @ts-ignore - runtime
+    if (value[TYPE_KEY] === "bytes" && typeof value.value === "string") {
+      try {
+        return base64ToBytes(value.value);
+      } catch {
+        return value;
+      }
     }
     // @ts-ignore - runtime
     if (value[TYPE_KEY] === "number" && typeof value.value === "string") {

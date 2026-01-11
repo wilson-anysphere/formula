@@ -585,6 +585,49 @@ test("FileSystemCacheStore: DataTable cache preserves BigInt and non-finite numb
   }
 });
 
+test("FileSystemCacheStore: DataTable cache preserves Uint8Array values", async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-data-bytes-"));
+
+  try {
+    const query = {
+      id: "q_range_bytes_fs_cache",
+      name: "Range bytes fs cache",
+      source: {
+        type: "range",
+        range: {
+          hasHeaders: true,
+          values: [
+            ["id", "bytes"],
+            [1, new Uint8Array([1, 2, 3])],
+            [2, null],
+          ],
+        },
+      },
+      steps: [],
+    };
+
+    const firstEngine = new QueryEngine({
+      cache: new CacheManager({ store: new FileSystemCacheStore({ directory: cacheDir }) }),
+    });
+    const first = await firstEngine.executeQueryWithMeta(query, {}, {});
+    assert.equal(first.meta.cache?.hit, false);
+    const firstGrid = first.table.toGrid();
+    assert.ok(firstGrid[1][1] instanceof Uint8Array);
+    assert.deepEqual(firstGrid[1][1], new Uint8Array([1, 2, 3]));
+
+    const secondEngine = new QueryEngine({
+      cache: new CacheManager({ store: new FileSystemCacheStore({ directory: cacheDir }) }),
+    });
+    const second = await secondEngine.executeQueryWithMeta(query, {}, {});
+    assert.equal(second.meta.cache?.hit, true);
+    const secondGrid = second.table.toGrid();
+    assert.ok(secondGrid[1][1] instanceof Uint8Array);
+    assert.deepEqual(secondGrid, firstGrid);
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
 test("IndexedDBCacheStore: caches Arrow-backed Parquet results without re-reading the source", async () => {
   const dbName = `pq-cache-idb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const store1 = new IndexedDBCacheStore({ dbName });
