@@ -557,6 +557,7 @@ fn normalize_engine_value(value: &EngineValue) -> NormalizedValue {
         EngineValue::Bool(b) => NormalizedValue::Bool(*b),
         EngineValue::Text(s) => NormalizedValue::Text(s.clone()),
         EngineValue::Error(e) => NormalizedValue::Error(e.as_code().to_string()),
+        EngineValue::Array(_) | EngineValue::Spill { .. } => NormalizedValue::Blank,
     }
 }
 
