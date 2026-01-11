@@ -357,6 +357,29 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     });
     expect(regen2.statusCode).toBe(200);
     const recovery2 = (regen2.json() as any).codes as string[];
+
+    const disableWithoutChallenge = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/disable",
+      headers: { cookie }
+    });
+    expect(disableWithoutChallenge.statusCode).toBe(403);
+    expect((disableWithoutChallenge.json() as any).error).toBe("mfa_required");
+
+    const validDisableCode = authenticator.generate(newSecret);
+    const lastDisableDigit = validDisableCode.slice(-1);
+    const wrongDisableDigit = ((Number.parseInt(lastDisableDigit, 10) + 1) % 10).toString();
+    const wrongDisableCode = validDisableCode.slice(0, -1) + wrongDisableDigit;
+
+    const disableWithWrongCode = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/disable",
+      headers: { cookie },
+      payload: { code: wrongDisableCode }
+    });
+    expect(disableWithWrongCode.statusCode).toBe(400);
+    expect((disableWithWrongCode.json() as any).error).toBe("invalid_code");
+
     const disableWithRecovery = await app.inject({
       method: "POST",
       url: "/auth/mfa/totp/disable",
