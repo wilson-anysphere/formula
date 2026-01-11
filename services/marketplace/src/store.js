@@ -852,34 +852,48 @@ class MarketplaceStore {
 
     // Allow publisher signing key rotation: verify against any non-revoked key for the publisher,
     // and persist which key succeeded so old versions remain verifiable after rotation.
+    //
+    // Important: if the publisher has *no* keys recorded in publisher_keys (e.g. upgraded from an
+    // older schema), we fall back to publishers.public_key_pem as the single known active key.
+    // However, if keys exist but are all revoked, we must *not* resurrect the legacy key.
     let publisherKeys = await this.getPublisherKeys(publisher, { includeRevoked: false });
-    if (publisherKeys.length === 0 && publisherRecord.publicKeyPem) {
-      const fallbackPem = normalizePublicKeyPem(publisherRecord.publicKeyPem);
-      if (fallbackPem) {
-        const keyId = publisherKeyIdFromPublicKeyPem(fallbackPem);
-        await this.db.withTransaction((db) => {
-          db.run(
-            `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
-             VALUES (?, ?, ?, ?, 0, NULL, 1)
-             ON CONFLICT(id) DO UPDATE SET
-               public_key_pem = excluded.public_key_pem`,
-            [keyId, publisher, fallbackPem, now]
-          );
-          db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE publisher = ? AND id != ?`, [publisher, keyId]);
+    if (publisherKeys.length === 0) {
+      const allKeys = await this.getPublisherKeys(publisher, { includeRevoked: true });
+      if (allKeys.length > 0) {
+        throw new Error("Package signature verification failed (all publisher signing keys are revoked)");
+      }
 
-          db.run(
-            `UPDATE extension_versions
-             SET signing_key_id = ?, signing_public_key_pem = ?
-             WHERE signing_key_id IS NULL
-               AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
-            [keyId, fallbackPem, publisher]
-          );
-        });
-        publisherKeys = await this.getPublisherKeys(publisher, { includeRevoked: false });
+      if (publisherRecord.publicKeyPem) {
+        const fallbackPem = normalizePublicKeyPem(publisherRecord.publicKeyPem);
+        if (fallbackPem) {
+          const keyId = publisherKeyIdFromPublicKeyPem(fallbackPem);
+          await this.db.withTransaction((db) => {
+            db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE publisher = ?`, [publisher]);
+            db.run(
+              `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
+               VALUES (?, ?, ?, ?, 0, NULL, 1)
+               ON CONFLICT(id) DO UPDATE SET
+                 public_key_pem = excluded.public_key_pem,
+                 revoked = 0,
+                 revoked_at = NULL,
+                 is_primary = 1`,
+              [keyId, publisher, fallbackPem, now]
+            );
+
+            db.run(
+              `UPDATE extension_versions
+               SET signing_key_id = ?, signing_public_key_pem = ?
+               WHERE signing_key_id IS NULL
+                 AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
+              [keyId, fallbackPem, publisher]
+            );
+          });
+          publisherKeys = await this.getPublisherKeys(publisher, { includeRevoked: false });
+        }
       }
     }
     if (publisherKeys.length === 0) {
-      throw new Error("Publisher has no signing keys");
+      throw new Error("Package signature verification failed (publisher has no signing keys)");
     }
 
     const MAX_COMPRESSED_BYTES = 10 * 1024 * 1024;
