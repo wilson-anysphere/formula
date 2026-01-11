@@ -89,6 +89,12 @@ Defaults:
 
 Persistence is stored under `SYNC_SERVER_DATA_DIR` (defaults to `./.sync-server-data/`).
 
+The sync server is **single-writer per data directory**. On startup it creates an exclusive lock file:
+
+- `${SYNC_SERVER_DATA_DIR}/.sync-server.lock`
+
+If the lock file already exists, the server will refuse to start to avoid on-disk corruption. If the server crashes and leaves a stale lock file behind, delete it manually after confirming no other `sync-server` process is using that directory. (You can disable locking with `SYNC_SERVER_DISABLE_DATA_DIR_LOCK=true`, but this is not recommended outside of testing.)
+
 You can switch persistence backends:
 
 - `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb` (default)

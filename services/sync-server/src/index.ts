@@ -1,5 +1,7 @@
 import "dotenv/config";
 
+import { writeSync } from "node:fs";
+
 import { createLogger } from "./logger.js";
 import { loadConfigFromEnv } from "./config.js";
 import { createSyncServer } from "./server.js";
@@ -18,7 +20,19 @@ if (config.auth.mode === "opaque" && config.auth.token === "dev-token") {
 
 const server = createSyncServer(config, logger);
 
-await server.start();
+try {
+  await server.start();
+} catch (err) {
+  const message = err instanceof Error ? err.message : String(err);
+  // Ensure the startup error is visible even if LOG_LEVEL=silent.
+  writeSync(2, `sync-server failed to start: ${message}\n`);
+  try {
+    logger.error({ err }, "startup_failed");
+  } catch {
+    // ignore
+  }
+  process.exit(1);
+}
 
 let shuttingDown = false;
 

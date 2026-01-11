@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import jwt from "jsonwebtoken";
 import WebSocket from "ws";
@@ -16,6 +18,24 @@ import {
   waitForCondition,
   waitForProviderSync,
 } from "./test-helpers.ts";
+
+async function waitForProcessExit(
+  child: ReturnType<typeof spawn>,
+  timeoutMs: number
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("Timed out waiting for process exit"));
+    }, timeoutMs);
+    timeout.unref();
+
+    child.once("exit", (code, signal) => {
+      clearTimeout(timeout);
+      resolve({ code, signal });
+    });
+  });
+}
 
 const TEST_KEYRING_JSON = JSON.stringify({
   currentVersion: 1,
@@ -852,4 +872,75 @@ test("sanitizes awareness identity and blocks clientID spoofing", async (t) => {
   );
 
   assert.equal(await textCollisionClose, 1008);
+});
+
+test("refuses to start a second server using the same data directory", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-lock-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port1 = await getAvailablePort();
+  const port2 = await getAvailablePort();
+
+  const serviceDir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    ".."
+  );
+  const entry = path.join(serviceDir, "src", "index.ts");
+
+  const server1 = await startSyncServer({
+    port: port1,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+  t.after(async () => {
+    await server1.stop();
+  });
+
+  let stdout2 = "";
+  let stderr2 = "";
+  const server2 = spawn(process.execPath, ["--import", "tsx", entry], {
+    cwd: serviceDir,
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      LOG_LEVEL: "silent",
+      SYNC_SERVER_HOST: "127.0.0.1",
+      SYNC_SERVER_PORT: String(port2),
+      SYNC_SERVER_DATA_DIR: dataDir,
+      SYNC_SERVER_AUTH_TOKEN: "test-token",
+      SYNC_SERVER_JWT_SECRET: "",
+      SYNC_SERVER_JWT_AUDIENCE: "",
+      SYNC_SERVER_JWT_ISSUER: "",
+      SYNC_SERVER_PERSISTENCE_BACKEND: "file",
+      SYNC_SERVER_PERSIST_COMPACT_AFTER_UPDATES: "10",
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  server2.stdout?.on("data", (d) => {
+    stdout2 += d.toString();
+    stdout2 = stdout2.slice(-10_000);
+  });
+  server2.stderr?.on("data", (d) => {
+    stderr2 += d.toString();
+    stderr2 = stderr2.slice(-10_000);
+  });
+
+  const exit2 = await waitForProcessExit(server2, 10_000);
+  assert.notEqual(exit2.code, 0);
+
+  const combinedLogs = `${stdout2}\n${stderr2}`.toLowerCase();
+  assert.ok(
+    combinedLogs.includes(".sync-server.lock") ||
+      combinedLogs.includes("data directory lock") ||
+      combinedLogs.includes("acquire") ||
+      combinedLogs.includes("lock"),
+    `expected lock acquisition error in logs.\nstdout:\n${stdout2}\nstderr:\n${stderr2}`
+  );
 });

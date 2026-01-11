@@ -22,6 +22,7 @@ export type SyncServerConfig = {
   gc: boolean;
 
   dataDir: string;
+  disableDataDirLock: boolean;
   persistence: {
     backend: "leveldb" | "file";
     compactAfterUpdates: number;
@@ -115,6 +116,11 @@ export function loadConfigFromEnv(): SyncServerConfig {
     process.env.SYNC_SERVER_DATA_DIR ??
     path.resolve(process.cwd(), ".sync-server-data");
 
+  const disableDataDirLock = envBool(
+    process.env.SYNC_SERVER_DISABLE_DATA_DIR_LOCK,
+    false
+  );
+
   const backendEnv = process.env.SYNC_SERVER_PERSISTENCE_BACKEND ?? "leveldb";
   const backend =
     backendEnv === "file" || backendEnv === "leveldb" ? backendEnv : "leveldb";
@@ -175,6 +181,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
     trustProxy,
     gc,
     dataDir,
+    disableDataDirLock,
     persistence: { backend, compactAfterUpdates, encryption },
     auth,
     internalAdminToken,

@@ -20,6 +20,7 @@ import {
   extractToken,
   type AuthContext,
 } from "./auth.js";
+import { acquireDataDirLock, type DataDirLockHandle } from "./dataDirLock.js";
 import { ConnectionTracker, TokenBucketRateLimiter } from "./limits.js";
 import {
   FilePersistence,
@@ -82,7 +83,7 @@ export type SyncServerHandle = {
 
 type LeveldbPersistence = LeveldbPersistenceLike & {
   getYDoc: (docName: string) => Promise<any>;
-  storeUpdate: (docName: string, update: Uint8Array) => Promise<unknown>;
+  storeUpdate: (docName: string, update: Uint8Array) => Promise<void>;
   flushDocument: (docName: string) => Promise<void>;
   destroy: () => Promise<void>;
 };
@@ -169,6 +170,7 @@ export function createSyncServer(
     tombstoneGraceTimers.set(docName, graceTimer);
   };
 
+  let dataDirLock: DataDirLockHandle | null = null;
   let persistenceInitialized = false;
   let persistenceCleanup: (() => Promise<void>) | null = null;
   let persistenceBackend: "file" | "leveldb" | null = null;
@@ -763,7 +765,28 @@ export function createSyncServer(
 
   const handle: SyncServerHandle = {
     async start() {
-      await initPersistence();
+      if (!config.disableDataDirLock && !dataDirLock) {
+        dataDirLock = await acquireDataDirLock(config.dataDir);
+        logger.info({ lockPath: dataDirLock.lockPath }, "data_dir_lock_acquired");
+      } else if (config.disableDataDirLock) {
+        logger.warn(
+          { dir: config.dataDir },
+          "data_dir_lock_disabled_unsafe_for_multi_process"
+        );
+      }
+
+      try {
+        await initPersistence();
+      } catch (err) {
+        if (dataDirLock) {
+          try {
+            await dataDirLock.release();
+          } finally {
+            dataDirLock = null;
+          }
+        }
+        throw err;
+      }
       await new Promise<void>((resolve) => {
         server.listen(config.port, config.host, () => resolve());
       });
@@ -797,6 +820,16 @@ export function createSyncServer(
       if (persistenceCleanup) {
         await persistenceCleanup();
         persistenceCleanup = null;
+      }
+
+      if (dataDirLock) {
+        try {
+          await dataDirLock.release();
+        } catch (err) {
+          logger.warn({ err }, "data_dir_lock_release_failed");
+        } finally {
+          dataDirLock = null;
+        }
       }
     },
 
