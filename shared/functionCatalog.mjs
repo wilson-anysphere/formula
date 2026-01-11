@@ -1689,7 +1689,27 @@ export default {
       ]
     },
     {
+      "name": "STDEVA",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "STDEVP",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "STDEVPA",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
@@ -1998,7 +2018,27 @@ export default {
       ]
     },
     {
+      "name": "VARA",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "VARP",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "VARPA",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",

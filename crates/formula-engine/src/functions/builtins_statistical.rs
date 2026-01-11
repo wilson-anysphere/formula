@@ -118,6 +118,111 @@ fn collect_numbers(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Result<V
     Ok(out)
 }
 
+fn push_numbers_a_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), ErrorKind> {
+    match value {
+        Value::Error(e) => Err(e),
+        Value::Number(n) => {
+            out.push(n);
+            Ok(())
+        }
+        Value::Bool(b) => {
+            out.push(if b { 1.0 } else { 0.0 });
+            Ok(())
+        }
+        Value::Blank | Value::Text(_) => {
+            out.push(0.0);
+            Ok(())
+        }
+        Value::Array(arr) => {
+            for v in arr.iter() {
+                match v {
+                    Value::Error(e) => return Err(*e),
+                    Value::Number(n) => out.push(*n),
+                    Value::Bool(b) => out.push(if *b { 1.0 } else { 0.0 }),
+                    Value::Blank | Value::Text(_) => out.push(0.0),
+                    Value::Array(_)
+                    | Value::Lambda(_)
+                    | Value::Spill { .. }
+                    | Value::Reference(_)
+                    | Value::ReferenceUnion(_) => out.push(0.0),
+                }
+            }
+            Ok(())
+        }
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
+            Err(ErrorKind::Value)
+        }
+    }
+}
+
+fn push_numbers_a_from_reference(
+    ctx: &dyn FunctionContext,
+    out: &mut Vec<f64>,
+    reference: crate::functions::Reference,
+) -> Result<(), ErrorKind> {
+    let sheet_id = reference.sheet_id;
+    for addr in ctx.iter_reference_cells(reference) {
+        let v = ctx.get_cell_value(sheet_id, addr);
+        match v {
+            Value::Error(e) => return Err(e),
+            Value::Number(n) => out.push(n),
+            Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
+            Value::Blank | Value::Text(_) => out.push(0.0),
+            Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. }
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_) => out.push(0.0),
+        }
+    }
+    Ok(())
+}
+
+fn push_numbers_a_from_reference_union(
+    ctx: &dyn FunctionContext,
+    out: &mut Vec<f64>,
+    ranges: Vec<crate::functions::Reference>,
+) -> Result<(), ErrorKind> {
+    let mut seen = HashSet::new();
+    for reference in ranges {
+        let sheet_id = reference.sheet_id;
+        for addr in ctx.iter_reference_cells(reference) {
+            if !seen.insert((sheet_id, addr)) {
+                continue;
+            }
+            let v = ctx.get_cell_value(sheet_id, addr);
+            match v {
+                Value::Error(e) => return Err(e),
+                Value::Number(n) => out.push(n),
+                Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
+                Value::Blank | Value::Text(_) => out.push(0.0),
+                Value::Array(_)
+                | Value::Lambda(_)
+                | Value::Spill { .. }
+                | Value::Reference(_)
+                | Value::ReferenceUnion(_) => out.push(0.0),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn push_numbers_a_from_arg(ctx: &dyn FunctionContext, out: &mut Vec<f64>, arg: ArgValue) -> Result<(), ErrorKind> {
+    match arg {
+        ArgValue::Scalar(v) => push_numbers_a_from_scalar(out, v),
+        ArgValue::Reference(r) => push_numbers_a_from_reference(ctx, out, r),
+        ArgValue::ReferenceUnion(ranges) => push_numbers_a_from_reference_union(ctx, out, ranges),
+    }
+}
+
+fn collect_numbers_a(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Result<Vec<f64>, ErrorKind> {
+    let mut out = Vec::new();
+    for expr in args {
+        push_numbers_a_from_arg(ctx, &mut out, ctx.eval_arg(expr))?;
+    }
+    Ok(out)
+}
+
 fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<Option<f64>>, ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => match v {
@@ -253,8 +358,33 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "STDEVA",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: stdeva_fn,
+    }
+}
+
 fn stdev_s_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::stdev_s(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn stdeva_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers_a(ctx, args) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -292,8 +422,33 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "STDEVPA",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: stdevpa_fn,
+    }
+}
+
 fn stdev_p_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::stdev_p(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn stdevpa_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers_a(ctx, args) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -331,8 +486,33 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "VARA",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: vara_fn,
+    }
+}
+
 fn var_s_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::var_s(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn vara_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers_a(ctx, args) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -370,8 +550,33 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "VARPA",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: varpa_fn,
+    }
+}
+
 fn var_p_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::var_p(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn varpa_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers_a(ctx, args) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };

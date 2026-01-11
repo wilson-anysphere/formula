@@ -341,8 +341,8 @@ This document tracks every Excel feature and our implementation status. Features
 | STANDARDIZE | ⬜ | |
 | STDEV.P | ✅ | |
 | STDEV.S | ✅ | |
-| STDEVA | ⬜ | |
-| STDEVPA | ⬜ | |
+| STDEVA | ✅ | |
+| STDEVPA | ✅ | |
 | STEYX | ⬜ | |
 | T.DIST | ⬜ | |
 | T.DIST.2T | ⬜ | |
@@ -354,8 +354,8 @@ This document tracks every Excel feature and our implementation status. Features
 | TRIMMEAN | ⬜ | |
 | VAR.P | ✅ | |
 | VAR.S | ✅ | |
-| VARA | ⬜ | |
-| VARPA | ⬜ | |
+| VARA | ✅ | |
+| VARPA | ✅ | |
 | WEIBULL.DIST | ⬜ | |
 | Z.TEST | ⬜ | |
 

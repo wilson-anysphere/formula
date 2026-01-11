@@ -126,4 +126,27 @@ fn var_s_ignores_text_and_logicals_in_references() {
 
     // As direct scalar arguments, numeric text/bools are coerced.
     assert_number(&sheet.eval(r#"=VAR.S(1,"2",TRUE)"#), 1.0 / 3.0);
+
+    // The `*A` variants treat text/bools as 0/1 and include them in the sample size.
+    assert_number(&sheet.eval("=VARA(A1:A3)"), 1.0 / 3.0);
+}
+
+#[test]
+fn vara_and_stdevpa_include_text_and_blanks() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", true);
+    sheet.set("A3", Value::Text("x".to_string()));
+    sheet.set("A4", Value::Blank);
+
+    assert_number(&sheet.eval("=VARA(A1:A4)"), 1.0 / 3.0);
+    assert_number(&sheet.eval("=VARPA(A1:A4)"), 0.25);
+    assert_number(&sheet.eval("=STDEVA(A1:A4)"), (1.0_f64 / 3.0).sqrt());
+    assert_number(&sheet.eval("=STDEVPA(A1:A4)"), 0.5);
+}
+
+#[test]
+fn vara_treats_text_values_as_zero_even_when_numeric() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval(r#"=VARA("2",2)"#), 2.0);
 }
