@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,7 @@ test("install + run marketplace extension in browser (no CSP violations)", async
   const keys = generateEd25519KeyPair();
   const extensionDir = path.join(repoRoot, "extensions", "sample-hello");
   const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+  const pkgSha256 = crypto.createHash("sha256").update(pkgBytes).digest("hex");
 
   const cspViolations: string[] = [];
   const consoleErrors: string[] = [];
@@ -82,6 +84,7 @@ test("install + run marketplace extension in browser (no CSP violations)", async
       status: 200,
       headers: {
         "Content-Type": "application/vnd.formula.extension-package",
+        "X-Package-Sha256": pkgSha256,
         "X-Package-Format-Version": "2",
         "X-Publisher": "formula"
       },
