@@ -719,7 +719,7 @@ export class WebGpuBackend {
     const padded = nextPowerOfTwo(n);
     const data = canRunF64 ? new Float64Array(padded) : new Float32Array(padded);
     data.set(typed);
-    if (padded !== n) data.fill(Number.POSITIVE_INFINITY, n);
+    if (padded !== n) data.fill(Number.NaN, n);
 
     const dataBuf = this._createStorageBufferFromArray(data, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
 

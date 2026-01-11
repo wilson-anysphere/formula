@@ -14,6 +14,28 @@ struct Params {
 @group(0) @binding(0) var<storage, read_write> data: array<Scalar>;
 @group(0) @binding(1) var<uniform> params: Params;
 
+fn cmp(a: Scalar, b: Scalar) -> i32 {
+  let a_nan = isNan(a);
+  let b_nan = isNan(b);
+  if (a_nan && b_nan) {
+    return 0;
+  }
+  if (a_nan) {
+    // Match TypedArray sorting: NaN compares greater than any number.
+    return 1;
+  }
+  if (b_nan) {
+    return -1;
+  }
+  if (a < b) {
+    return -1;
+  }
+  if (a > b) {
+    return 1;
+  }
+  return 0;
+}
+
 @compute @workgroup_size(WG_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
   let stride = nwg.x * WG_SIZE;
@@ -32,12 +54,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
   let b = data[ixj];
 
   if (ascending) {
-    if (a > b) {
+    if (cmp(a, b) > 0) {
       data[i] = b;
       data[ixj] = a;
     }
   } else {
-    if (a < b) {
+    if (cmp(a, b) < 0) {
       data[i] = b;
       data[ixj] = a;
     }

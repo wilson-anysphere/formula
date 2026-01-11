@@ -49,8 +49,8 @@ test("cpu: sort", async () => {
 
 test("cpu: histogram", async () => {
   const cpu = new CpuBackend();
-  const values = new Float64Array([0, 0.49, 0.5, 0.99, 1.0, Number.NaN]);
+  const values = new Float64Array([0, 0.49, 0.5, 0.99, 1.0, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]);
   const bins = await cpu.histogram(values, { min: 0, max: 1, bins: 2 });
   // With clamping, 1.0 falls in last bin.
-  assert.deepEqual(Array.from(bins), [2, 3]);
+  assert.deepEqual(Array.from(bins), [3, 4]);
 });

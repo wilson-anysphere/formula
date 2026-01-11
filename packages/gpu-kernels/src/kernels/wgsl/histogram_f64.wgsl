@@ -32,7 +32,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
     return;
   }
 
-  var bin_i = i32((v - params.min) * params.inv_bin_width);
+  var bin_i: i32;
+  if (v <= params.min) {
+    bin_i = 0;
+  } else if (v >= params.max) {
+    bin_i = i32(params.bin_count) - 1;
+  } else {
+    bin_i = i32((v - params.min) * params.inv_bin_width);
+  }
   if (bin_i < 0) {
     bin_i = 0;
   }
