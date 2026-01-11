@@ -172,44 +172,38 @@ impl Workbook {
     }
 }
 
-/// Expanded dependency view used for UX/auditing.
+/// A node returned from auditing/introspection APIs (precedents/dependents).
 ///
-/// This intentionally stores **cell-level** precedents (ranges are expanded),
-/// matching Excel's precedent/dependent tracing UX and making it easy to explain
-/// why a cell is dirty.
-#[derive(Debug, Default)]
-struct AuditGraph {
-    precedents: HashMap<CellKey, HashSet<CellKey>>,
-    dependents: HashMap<CellKey, HashSet<CellKey>>,
-    volatile_cells: HashSet<CellKey>,
+/// This can represent either a single cell or a rectangular range reference without
+/// expanding it into per-cell nodes (which is prohibitive for `A:A`, `1:1`, etc).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrecedentNode {
+    Cell {
+        sheet: SheetId,
+        addr: CellAddr,
+    },
+    Range {
+        sheet: SheetId,
+        start: CellAddr,
+        end: CellAddr,
+    },
+    /// Dynamic array spill footprint for a spilled formula (origin -> footprint).
+    ///
+    /// Dynamic array evaluation is not implemented yet, but the auditing API reserves a
+    /// node type so the UI can represent spill relationships without expanding every
+    /// cell in the footprint.
+    SpillRange {
+        sheet: SheetId,
+        origin: CellAddr,
+        start: CellAddr,
+        end: CellAddr,
+    },
 }
 
-impl AuditGraph {
-    fn set_precedents(&mut self, cell: CellKey, new_precedents: HashSet<CellKey>) {
-        if let Some(old) = self.precedents.remove(&cell) {
-            for p in old {
-                if let Some(deps) = self.dependents.get_mut(&p) {
-                    deps.remove(&cell);
-                    if deps.is_empty() {
-                        self.dependents.remove(&p);
-                    }
-                }
-            }
-        }
-
-        for p in &new_precedents {
-            self.dependents.entry(*p).or_default().insert(cell);
-        }
-
-        if !new_precedents.is_empty() {
-            self.precedents.insert(cell, new_precedents);
-        }
-    }
-
-    fn clear_cell(&mut self, cell: CellKey) {
-        self.set_precedents(cell, HashSet::new());
-        self.volatile_cells.remove(&cell);
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirtyReason {
+    Cell(CellKey),
+    ViaRange { from: CellKey, range: PrecedentNode },
 }
 
 #[derive(Debug, Clone)]
@@ -241,10 +235,8 @@ pub struct Engine {
     cell_name_refs: HashMap<CellKey, HashSet<String>>,
     /// Optimized dependency graph used for incremental recalculation ordering.
     calc_graph: CalcGraph,
-    /// Expanded dependency graph used for auditing/introspection (precedents/dependents queries).
-    graph: AuditGraph,
     dirty: HashSet<CellKey>,
-    dirty_reasons: HashMap<CellKey, CellKey>,
+    dirty_reasons: HashMap<CellKey, DirtyReason>,
     calc_settings: CalcSettings,
     circular_references: HashSet<CellKey>,
     spills: SpillState,
@@ -265,7 +257,6 @@ impl Engine {
             name_dependents: HashMap::new(),
             cell_name_refs: HashMap::new(),
             calc_graph: CalcGraph::new(),
-            graph: AuditGraph::default(),
             dirty: HashSet::new(),
             dirty_reasons: HashMap::new(),
             // Default to manual calculation to preserve historical engine behavior; callers can
@@ -320,14 +311,16 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         let cell_id = cell_id_from_key(key);
 
         self.clear_spill_for_cell(key);
         self.clear_blocked_spill_for_origin(key);
 
         // Replace any existing formula and dependencies.
-        self.graph.clear_cell(key);
         self.calc_graph.remove_cell(cell_id);
         self.clear_cell_name_refs(key);
         self.dirty.remove(&key);
@@ -358,8 +351,12 @@ impl Engine {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         self.workbook.set_tables(sheet_id, tables);
 
-        let tables_by_sheet: Vec<Vec<Table>> =
-            self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+        let tables_by_sheet: Vec<Vec<Table>> = self
+            .workbook
+            .sheets
+            .iter()
+            .map(|s| s.tables.clone())
+            .collect();
 
         // Structured reference resolution can change which cells a formula depends on, so refresh
         // dependencies for all formulas.
@@ -380,14 +377,8 @@ impl Engine {
 
         for (key, ast) in formulas {
             let cell_id = cell_id_from_key(key);
-            let (precedents, names, volatile, thread_safe) =
-                analyze_expr(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
-            self.graph.set_precedents(key, precedents);
-            if volatile {
-                self.graph.volatile_cells.insert(key);
-            } else {
-                self.graph.volatile_cells.remove(&key);
-            }
+            let (names, volatile, thread_safe) =
+                analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook);
             self.set_cell_name_refs(key, names);
 
             let calc_precedents =
@@ -500,7 +491,10 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         let cell_id = cell_id_from_key(key);
         self.clear_spill_for_cell(key);
         self.clear_blocked_spill_for_origin(key);
@@ -510,18 +504,10 @@ impl Engine {
         let compiled = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet);
         let tables_by_sheet: Vec<Vec<Table>> =
             self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
- 
-        // Expanded precedents for auditing, plus volatility/thread-safety flags.
-        let (precedents, names, volatile, thread_safe) =
-            analyze_expr(&compiled, key, &tables_by_sheet, &self.workbook, &self.spills);
-        self.graph.set_precedents(key, precedents);
-        if volatile {
-            self.graph.volatile_cells.insert(key);
-        } else {
-            self.graph.volatile_cells.remove(&key);
-        }
+        let (names, volatile, thread_safe) =
+            analyze_expr_flags(&compiled, key, &tables_by_sheet, &self.workbook);
         self.set_cell_name_refs(key, names);
- 
+
         // Optimized precedents for calculation ordering (range nodes are not expanded).
         let calc_precedents =
             analyze_calc_precedents(&compiled, key, &tables_by_sheet, &self.workbook, &self.spills);
@@ -688,18 +674,21 @@ impl Engine {
 
     /// Returns the spill origin for a cell if it is an array-spill origin or belongs
     /// to a spilled range.
-    pub fn spill_origin(&self, sheet: &str, addr: &str) -> Option<(SheetId, CellAddr)> {
-        let sheet_id = self.workbook.sheet_id(sheet)?;
-        let addr = parse_a1(addr).ok()?;
-        let key = CellKey { sheet: sheet_id, addr };
-        let origin = self.spill_origin_key(key)?;
-        Some((origin.sheet, origin.addr))
-    }
+        pub fn spill_origin(&self, sheet: &str, addr: &str) -> Option<(SheetId, CellAddr)> {
+            let sheet_id = self.workbook.sheet_id(sheet)?;
+            let addr = parse_a1(addr).ok()?;
+            let key = CellKey { sheet: sheet_id, addr };
+            let origin = self.spill_origin_key(key)?;
+            Some((origin.sheet, origin.addr))
+        }
 
     pub fn get_cell_formula(&self, sheet: &str, addr: &str) -> Option<&str> {
         let sheet_id = self.workbook.sheet_id(sheet)?;
         let addr = parse_a1(addr).ok()?;
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         self.workbook.get_cell(key)?.formula.as_deref()
     }
 
@@ -871,7 +860,12 @@ impl Engine {
                 let start_col = range.end.col.saturating_add(1);
                 let edit = RangeMapEdit {
                     sheet,
-                    moved_region: GridRange::new(range.start.row, start_col, range.end.row, u32::MAX),
+                    moved_region: GridRange::new(
+                        range.start.row,
+                        start_col,
+                        range.end.row,
+                        u32::MAX,
+                    ),
                     delta_row: 0,
                     delta_col: -(width as i32),
                     deleted_region: Some(GridRange::new(
@@ -900,7 +894,12 @@ impl Engine {
                 let start_row = range.end.row.saturating_add(1);
                 let edit = RangeMapEdit {
                     sheet,
-                    moved_region: GridRange::new(start_row, range.start.col, u32::MAX, range.end.col),
+                    moved_region: GridRange::new(
+                        start_row,
+                        range.start.col,
+                        u32::MAX,
+                        range.end.col,
+                    ),
                     delta_row: -(height as i32),
                     delta_col: 0,
                     deleted_region: Some(GridRange::new(
@@ -941,7 +940,12 @@ impl Engine {
                 move_range(&mut self.workbook.sheets[sheet_id], src, dst_top_left);
                 let edit = RangeMapEdit {
                     sheet: sheet.clone(),
-                    moved_region: GridRange::new(src.start.row, src.start.col, src.end.row, src.end.col),
+                    moved_region: GridRange::new(
+                        src.start.row,
+                        src.start.col,
+                        src.end.row,
+                        src.end.col,
+                    ),
                     delta_row: dst.start.row as i32 - src.start.row as i32,
                     delta_col: dst.start.col as i32 - src.start.col as i32,
                     deleted_region: None,
@@ -951,7 +955,11 @@ impl Engine {
                     &sheet_names,
                     &edit,
                 ));
-                moved_ranges.push(MovedRange { sheet, from: src, to: dst });
+                moved_ranges.push(MovedRange {
+                    sheet,
+                    from: src,
+                    to: dst,
+                });
             }
             EditOp::CopyRange {
                 sheet,
@@ -1166,21 +1174,18 @@ impl Engine {
 
         self.circular_references.clear();
 
-        let mut impacted: Vec<CellKey> = impacted_ids
-            .into_iter()
-            .map(cell_key_from_id)
-            .collect();
+        let mut impacted: Vec<CellKey> = impacted_ids.into_iter().map(cell_key_from_id).collect();
         impacted.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
 
         let impacted_set: HashSet<CellKey> = impacted.iter().copied().collect();
         let mut edges: HashMap<CellKey, Vec<CellKey>> = HashMap::new();
         for &cell in &impacted {
-            let Some(deps) = self.graph.dependents.get(&cell) else {
-                continue;
-            };
-            let mut out: Vec<CellKey> = deps
-                .iter()
-                .copied()
+            let cell_id = cell_id_from_key(cell);
+            let mut out: Vec<CellKey> = self
+                .calc_graph
+                .dependents_of(cell_id)
+                .into_iter()
+                .map(|edge| cell_key_from_id(edge.dependent))
                 .filter(|d| impacted_set.contains(d))
                 .collect();
             if out.is_empty() {
@@ -1460,7 +1465,8 @@ impl Engine {
             self.calc_graph.mark_dirty(origin_id);
 
             if self.dirty.insert(origin) {
-                self.dirty_reasons.insert(origin, cell);
+                self.dirty_reasons
+                    .insert(origin, DirtyReason::Cell(cell));
             }
             self.mark_dirty_dependents_with_reasons(origin);
         }
@@ -1697,14 +1703,8 @@ impl Engine {
 
             let cell_id = cell_id_from_key(key);
 
-            let (precedents, names, volatile, thread_safe) =
-                analyze_expr(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
-            self.graph.set_precedents(key, precedents);
-            if volatile {
-                self.graph.volatile_cells.insert(key);
-            } else {
-                self.graph.volatile_cells.remove(&key);
-            }
+            let (names, volatile, thread_safe) =
+                analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook);
             self.set_cell_name_refs(key, names);
 
             let calc_precedents =
@@ -1739,7 +1739,6 @@ impl Engine {
             }
         }
 
-        self.graph = AuditGraph::default();
         self.calc_graph = CalcGraph::new();
         self.name_dependents.clear();
         self.cell_name_refs.clear();
@@ -1762,33 +1761,43 @@ impl Engine {
         let Ok(addr) = parse_a1(addr) else {
             return false;
         };
-        self.dirty.contains(&CellKey { sheet: sheet_id, addr })
+        self.dirty.contains(&CellKey {
+            sheet: sheet_id,
+            addr,
+        })
     }
 
-    /// Direct precedents (cells referenced by the formula in `cell`).
-    pub fn precedents(
-        &self,
-        sheet: &str,
-        addr: &str,
-    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+    /// Direct precedents (cells and ranges referenced by the formula in `cell`).
+    pub fn precedents(&self, sheet: &str, addr: &str) -> Result<Vec<PrecedentNode>, EngineError> {
         self.precedents_impl(sheet, addr, false)
     }
 
-    /// Transitive precedents (all cells that can influence `cell`).
+    /// Transitive precedents (all precedents that can influence `cell`).
     pub fn precedents_transitive(
         &self,
         sheet: &str,
         addr: &str,
-    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+    ) -> Result<Vec<PrecedentNode>, EngineError> {
         self.precedents_impl(sheet, addr, true)
     }
 
-    /// Direct dependents (cells whose formulas reference `cell`).
-    pub fn dependents(
+    /// Returns a cell-level view of `precedents`, expanding any ranges until `limit` cells have been
+    /// produced.
+    ///
+    /// This is intended for UI tracing/highlighting. The returned list is deterministically ordered
+    /// by `(sheet, row, col)`.
+    pub fn precedents_expanded(
         &self,
         sheet: &str,
         addr: &str,
+        limit: usize,
     ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+        let nodes = self.precedents(sheet, addr)?;
+        Ok(expand_nodes_to_cells(&nodes, limit))
+    }
+
+    /// Direct dependents (cells whose formulas reference `cell`).
+    pub fn dependents(&self, sheet: &str, addr: &str) -> Result<Vec<PrecedentNode>, EngineError> {
         self.dependents_impl(sheet, addr, false)
     }
 
@@ -1797,39 +1806,69 @@ impl Engine {
         &self,
         sheet: &str,
         addr: &str,
-    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+    ) -> Result<Vec<PrecedentNode>, EngineError> {
         self.dependents_impl(sheet, addr, true)
+    }
+
+    /// Returns a cell-level view of `dependents`, expanding any range nodes until `limit` cells have
+    /// been produced.
+    #[must_use]
+    pub fn dependents_expanded(
+        &self,
+        sheet: &str,
+        addr: &str,
+        limit: usize,
+    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+        let nodes = self.dependents(sheet, addr)?;
+        Ok(expand_nodes_to_cells(&nodes, limit))
     }
 
     /// Returns a dependency path explaining why `cell` is currently dirty.
     ///
-    /// The returned vector is ordered from the root cause (usually an edited
-    /// input cell) to the provided `cell`.
-    pub fn dirty_dependency_path(
-        &self,
-        sheet: &str,
-        addr: &str,
-    ) -> Option<Vec<(SheetId, CellAddr)>> {
+    /// The returned vector is ordered from the root cause (usually an edited input cell) to the
+    /// provided `cell`.
+    pub fn dirty_dependency_path(&self, sheet: &str, addr: &str) -> Option<Vec<PrecedentNode>> {
         let sheet_id = self.workbook.sheet_id(sheet)?;
         let addr = parse_a1(addr).ok()?;
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         if !self.dirty.contains(&key) {
             return None;
         }
 
-        let mut path = vec![key];
+        let mut path = vec![PrecedentNode::Cell {
+            sheet: key.sheet,
+            addr: key.addr,
+        }];
         let mut current = key;
         let mut guard = 0usize;
-        while let Some(prev) = self.dirty_reasons.get(&current).copied() {
-            path.push(prev);
-            current = prev;
+        while let Some(reason) = self.dirty_reasons.get(&current).copied() {
+            match reason {
+                DirtyReason::Cell(prev) => {
+                    path.push(PrecedentNode::Cell {
+                        sheet: prev.sheet,
+                        addr: prev.addr,
+                    });
+                    current = prev;
+                }
+                DirtyReason::ViaRange { from, range } => {
+                    path.push(range);
+                    path.push(PrecedentNode::Cell {
+                        sheet: from.sheet,
+                        addr: from.addr,
+                    });
+                    current = from;
+                }
+            }
             guard += 1;
             if guard > 10_000 {
                 break;
             }
         }
         path.reverse();
-        Some(path.into_iter().map(|k| (k.sheet, k.addr)).collect())
+        Some(path)
     }
 
     /// Deterministically evaluates a cell's formula while capturing a per-node trace.
@@ -1841,12 +1880,15 @@ impl Engine {
         addr: &str,
     ) -> Result<crate::debug::DebugEvaluation, EngineError> {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
-            return Err(EngineError::Parse(FormulaParseError::UnexpectedToken(format!(
-                "unknown sheet '{sheet}'"
-            ))));
+            return Err(EngineError::Parse(FormulaParseError::UnexpectedToken(
+                format!("unknown sheet '{sheet}'"),
+            )));
         };
         let addr = parse_a1(addr)?;
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
         let cell = self.workbook.get_cell(key);
         let Some(formula) = cell.and_then(|c| c.formula.as_deref()) else {
             return Err(EngineError::Parse(FormulaParseError::UnexpectedToken(
@@ -1892,22 +1934,28 @@ impl Engine {
         sheet: &str,
         addr: &str,
         transitive: bool,
-    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+    ) -> Result<Vec<PrecedentNode>, EngineError> {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
             return Ok(Vec::new());
         };
         let addr = parse_a1(addr)?;
-        let key = CellKey { sheet: sheet_id, addr };
-        let nodes = if transitive {
-            collect_transitive(&self.graph.precedents, key)
-        } else {
-            self.graph
-                .precedents
-                .get(&key)
-                .map(|s| sorted_cell_keys(s))
-                .unwrap_or_default()
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
         };
-        Ok(nodes.into_iter().map(|k| (k.sheet, k.addr)).collect())
+        if transitive {
+            return Ok(self.precedents_transitive_nodes(key));
+        }
+
+        let cell_id = cell_id_from_key(key);
+        let mut out: Vec<PrecedentNode> = self
+            .calc_graph
+            .precedents_of(cell_id)
+            .into_iter()
+            .map(precedent_to_node)
+            .collect();
+        sort_and_dedup_nodes(&mut out);
+        Ok(out)
     }
 
     fn dependents_impl(
@@ -1915,22 +1963,34 @@ impl Engine {
         sheet: &str,
         addr: &str,
         transitive: bool,
-    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+    ) -> Result<Vec<PrecedentNode>, EngineError> {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
             return Ok(Vec::new());
         };
         let addr = parse_a1(addr)?;
-        let key = CellKey { sheet: sheet_id, addr };
-        let nodes = if transitive {
-            collect_transitive(&self.graph.dependents, key)
-        } else {
-            self.graph
-                .dependents
-                .get(&key)
-                .map(|s| sorted_cell_keys(s))
-                .unwrap_or_default()
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
         };
-        Ok(nodes.into_iter().map(|k| (k.sheet, k.addr)).collect())
+        if transitive {
+            return Ok(self.dependents_transitive_nodes(key));
+        }
+
+        let cell_id = cell_id_from_key(key);
+        let mut out: Vec<PrecedentNode> = self
+            .calc_graph
+            .dependents_of(cell_id)
+            .into_iter()
+            .map(|edge| PrecedentNode::Cell {
+                sheet: sheet_id_from_graph(edge.dependent.sheet_id),
+                addr: CellAddr {
+                    row: edge.dependent.cell.row,
+                    col: edge.dependent.cell.col,
+                },
+            })
+            .collect();
+        sort_and_dedup_nodes(&mut out);
+        Ok(out)
     }
 
     fn mark_dirty_including_self_with_reasons(&mut self, from: CellKey) {
@@ -1940,24 +2000,125 @@ impl Engine {
     }
 
     fn mark_dirty_dependents_with_reasons(&mut self, from: CellKey) {
-        let mut queue: VecDeque<(CellKey, CellKey)> = VecDeque::new();
-        if let Some(deps) = self.graph.dependents.get(&from) {
-            for dep in sorted_cell_keys(deps) {
-                queue.push_back((from, dep));
-            }
+        let mut queue: VecDeque<(DirtyReason, CellKey)> = VecDeque::new();
+
+        let from_id = cell_id_from_key(from);
+        for edge in self.calc_graph.dependents_of(from_id) {
+            let dep = cell_key_from_id(edge.dependent);
+            let reason = match edge.kind {
+                crate::graph::DependentEdgeKind::DirectCell => DirtyReason::Cell(from),
+                crate::graph::DependentEdgeKind::Range(range) => DirtyReason::ViaRange {
+                    from,
+                    range: sheet_range_to_node(range),
+                },
+            };
+            queue.push_back((reason, dep));
         }
 
-        while let Some((cause, cell)) = queue.pop_front() {
+        while let Some((reason, cell)) = queue.pop_front() {
             if !self.dirty.insert(cell) {
                 continue;
             }
-            self.dirty_reasons.entry(cell).or_insert(cause);
-            if let Some(deps) = self.graph.dependents.get(&cell) {
-                for dep in sorted_cell_keys(deps) {
-                    queue.push_back((cell, dep));
+            self.dirty_reasons.entry(cell).or_insert(reason);
+
+            let cell_id = cell_id_from_key(cell);
+            for edge in self.calc_graph.dependents_of(cell_id) {
+                let dep = cell_key_from_id(edge.dependent);
+                let next_reason = match edge.kind {
+                    crate::graph::DependentEdgeKind::DirectCell => DirtyReason::Cell(cell),
+                    crate::graph::DependentEdgeKind::Range(range) => DirtyReason::ViaRange {
+                        from: cell,
+                        range: sheet_range_to_node(range),
+                    },
+                };
+                queue.push_back((next_reason, dep));
+            }
+        }
+    }
+
+    fn dependents_transitive_nodes(&self, start: CellKey) -> Vec<PrecedentNode> {
+        let mut visited: HashSet<CellKey> = HashSet::new();
+        let mut out: Vec<CellKey> = Vec::new();
+        let mut queue: VecDeque<CellKey> = VecDeque::new();
+
+        visited.insert(start);
+        queue.push_back(start);
+
+        while let Some(cell) = queue.pop_front() {
+            let cell_id = cell_id_from_key(cell);
+            for edge in self.calc_graph.dependents_of(cell_id) {
+                let dep = cell_key_from_id(edge.dependent);
+                if visited.insert(dep) {
+                    out.push(dep);
+                    queue.push_back(dep);
                 }
             }
         }
+
+        out.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+        out.into_iter()
+            .map(|k| PrecedentNode::Cell {
+                sheet: k.sheet,
+                addr: k.addr,
+            })
+            .collect()
+    }
+
+    fn precedents_transitive_nodes(&self, start: CellKey) -> Vec<PrecedentNode> {
+        let start_node = PrecedentNode::Cell {
+            sheet: start.sheet,
+            addr: start.addr,
+        };
+
+        let mut visited: HashSet<PrecedentNode> = HashSet::new();
+        let mut out: Vec<PrecedentNode> = Vec::new();
+        let mut queue: VecDeque<PrecedentNode> = VecDeque::new();
+
+        visited.insert(start_node);
+        queue.push_back(start_node);
+
+        while let Some(node) = queue.pop_front() {
+            let neighbors: Vec<PrecedentNode> = match node {
+                PrecedentNode::Cell { sheet, addr } => {
+                    let key = CellKey { sheet, addr };
+                    let cell_id = cell_id_from_key(key);
+                    self.calc_graph
+                        .precedents_of(cell_id)
+                        .into_iter()
+                        .map(precedent_to_node)
+                        .collect()
+                }
+                PrecedentNode::Range { sheet, start, end } => {
+                    let range = Range::new(cell_ref_from_addr(start), cell_ref_from_addr(end));
+                    let sheet_range = SheetRange::new(sheet_id_for_graph(sheet), range);
+                    self.calc_graph
+                        .formula_cells_in_range(sheet_range)
+                        .into_iter()
+                        .map(|id| {
+                            let key = cell_key_from_id(id);
+                            PrecedentNode::Cell {
+                                sheet: key.sheet,
+                                addr: key.addr,
+                            }
+                        })
+                        .collect()
+                }
+                PrecedentNode::SpillRange { sheet, origin, .. } => vec![PrecedentNode::Cell {
+                    sheet,
+                    addr: origin,
+                }],
+            };
+
+            for n in neighbors {
+                if visited.insert(n) {
+                    out.push(n);
+                    queue.push_back(n);
+                }
+            }
+        }
+
+        sort_and_dedup_nodes(&mut out);
+        out
     }
 
     fn sync_dirty_from_calc_graph(&mut self) {
@@ -1982,7 +2143,10 @@ fn cell_ref_from_addr(addr: CellAddr) -> CellRef {
 }
 
 fn cell_addr_from_cell_ref(cell: CellRef) -> CellAddr {
-    CellAddr { row: cell.row, col: cell.col }
+    CellAddr {
+        row: cell.row,
+        col: cell.col,
+    }
 }
 
 fn cell_addr_to_a1(addr: CellAddr) -> String {
@@ -2214,7 +2378,10 @@ fn copy_range(
 
     let mut extracted: Vec<(CellRef, Option<Cell>)> = Vec::new();
     for cell in src.iter() {
-        extracted.push((cell, sheet.cells.get(&cell_addr_from_cell_ref(cell)).cloned()));
+        extracted.push((
+            cell,
+            sheet.cells.get(&cell_addr_from_cell_ref(cell)).cloned(),
+        ));
     }
 
     for cell in dst.iter() {
@@ -2299,9 +2466,13 @@ fn rewrite_all_formulas_structural(
 ) -> Vec<FormulaRewrite> {
     let mut rewrites = Vec::new();
     for (sheet_id, sheet) in workbook.sheets.iter_mut().enumerate() {
-        let Some(ctx_sheet) = sheet_names.get(&sheet_id) else { continue };
+        let Some(ctx_sheet) = sheet_names.get(&sheet_id) else {
+            continue;
+        };
         for (addr, cell) in sheet.cells.iter_mut() {
-            let Some(formula) = &cell.formula else { continue };
+            let Some(formula) = &cell.formula else {
+                continue;
+            };
             let (new_formula, changed) =
                 rewrite_formula_for_structural_edit(formula, ctx_sheet, &edit);
             if changed {
@@ -2325,9 +2496,13 @@ fn rewrite_all_formulas_range_map(
 ) -> Vec<FormulaRewrite> {
     let mut rewrites = Vec::new();
     for (sheet_id, sheet) in workbook.sheets.iter_mut().enumerate() {
-        let Some(ctx_sheet) = sheet_names.get(&sheet_id) else { continue };
+        let Some(ctx_sheet) = sheet_names.get(&sheet_id) else {
+            continue;
+        };
         for (addr, cell) in sheet.cells.iter_mut() {
-            let Some(formula) = &cell.formula else { continue };
+            let Some(formula) = &cell.formula else {
+                continue;
+            };
             let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, edit);
             if changed {
                 rewrites.push(FormulaRewrite {
@@ -2390,31 +2565,206 @@ fn cell_snapshot(cell: &Cell) -> CellSnapshot {
     }
 }
 
-fn sorted_cell_keys(set: &HashSet<CellKey>) -> Vec<CellKey> {
-    let mut out: Vec<CellKey> = set.iter().copied().collect();
-    out.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
-    out
+fn sheet_id_from_graph(sheet: u32) -> SheetId {
+    usize::try_from(sheet).expect("sheet id exceeds usize")
 }
 
-fn collect_transitive(map: &HashMap<CellKey, HashSet<CellKey>>, start: CellKey) -> Vec<CellKey> {
-    let mut visited: HashSet<CellKey> = HashSet::new();
-    let mut out: Vec<CellKey> = Vec::new();
-    let mut queue = VecDeque::new();
+fn sheet_range_to_node(range: SheetRange) -> PrecedentNode {
+    PrecedentNode::Range {
+        sheet: sheet_id_from_graph(range.sheet_id),
+        start: CellAddr {
+            row: range.range.start.row,
+            col: range.range.start.col,
+        },
+        end: CellAddr {
+            row: range.range.end.row,
+            col: range.range.end.col,
+        },
+    }
+}
 
-    visited.insert(start);
-    queue.push_back(start);
+fn precedent_to_node(precedent: Precedent) -> PrecedentNode {
+    match precedent {
+        Precedent::Cell(cell) => PrecedentNode::Cell {
+            sheet: sheet_id_from_graph(cell.sheet_id),
+            addr: CellAddr {
+                row: cell.cell.row,
+                col: cell.cell.col,
+            },
+        },
+        Precedent::Range(range) => sheet_range_to_node(range),
+    }
+}
 
-    while let Some(cell) = queue.pop_front() {
-        let neighbors = map.get(&cell).map(sorted_cell_keys).unwrap_or_default();
-        for n in neighbors {
-            if visited.insert(n) {
-                out.push(n);
-                queue.push_back(n);
+fn precedent_node_sort_key(node: PrecedentNode) -> (u8, SheetId, u32, u32, u32, u32, u32, u32) {
+    match node {
+        PrecedentNode::Cell { sheet, addr } => (0, sheet, addr.row, addr.col, 0, 0, 0, 0),
+        PrecedentNode::Range { sheet, start, end } => {
+            (1, sheet, start.row, start.col, end.row, end.col, 0, 0)
+        }
+        PrecedentNode::SpillRange {
+            sheet,
+            origin,
+            start,
+            end,
+        } => (
+            2, sheet, origin.row, origin.col, start.row, start.col, end.row, end.col,
+        ),
+    }
+}
+
+fn sort_and_dedup_nodes(nodes: &mut Vec<PrecedentNode>) {
+    nodes.sort_by_key(|n| precedent_node_sort_key(*n));
+    nodes.dedup();
+}
+
+fn normalize_range(start: CellAddr, end: CellAddr) -> (CellAddr, CellAddr) {
+    let start_row = start.row.min(end.row);
+    let end_row = start.row.max(end.row);
+    let start_col = start.col.min(end.col);
+    let end_col = start.col.max(end.col);
+    (
+        CellAddr {
+            row: start_row,
+            col: start_col,
+        },
+        CellAddr {
+            row: end_row,
+            col: end_col,
+        },
+    )
+}
+
+fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId, CellAddr)> {
+    #[derive(Debug, Clone)]
+    enum Stream {
+        Single {
+            sheet: SheetId,
+            addr: CellAddr,
+            done: bool,
+        },
+        Range {
+            sheet: SheetId,
+            start: CellAddr,
+            end: CellAddr,
+            cur: CellAddr,
+            done: bool,
+        },
+    }
+
+    impl Stream {
+        fn from_node(node: PrecedentNode) -> Self {
+            match node {
+                PrecedentNode::Cell { sheet, addr } => Stream::Single {
+                    sheet,
+                    addr,
+                    done: false,
+                },
+                PrecedentNode::Range { sheet, start, end } => {
+                    let (start, end) = normalize_range(start, end);
+                    Stream::Range {
+                        sheet,
+                        start,
+                        end,
+                        cur: start,
+                        done: false,
+                    }
+                }
+                PrecedentNode::SpillRange {
+                    sheet, start, end, ..
+                } => {
+                    let (start, end) = normalize_range(start, end);
+                    Stream::Range {
+                        sheet,
+                        start,
+                        end,
+                        cur: start,
+                        done: false,
+                    }
+                }
+            }
+        }
+
+        fn peek(&self) -> Option<(SheetId, CellAddr)> {
+            match self {
+                Stream::Single { sheet, addr, done } => (!*done).then_some((*sheet, *addr)),
+                Stream::Range {
+                    sheet, cur, done, ..
+                } => (!*done).then_some((*sheet, *cur)),
+            }
+        }
+
+        fn advance(&mut self) {
+            match self {
+                Stream::Single { done, .. } => *done = true,
+                Stream::Range {
+                    start,
+                    end,
+                    cur,
+                    done,
+                    ..
+                } => {
+                    if *done {
+                        return;
+                    }
+                    if cur.row == end.row && cur.col == end.col {
+                        *done = true;
+                        return;
+                    }
+                    if cur.col < end.col {
+                        cur.col += 1;
+                    } else {
+                        cur.col = start.col;
+                        cur.row += 1;
+                        if cur.row > end.row {
+                            *done = true;
+                        }
+                    }
+                }
             }
         }
     }
 
-    out.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+    if limit == 0 || nodes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut nodes: Vec<PrecedentNode> = nodes.to_vec();
+    sort_and_dedup_nodes(&mut nodes);
+
+    let mut streams: Vec<Stream> = nodes.into_iter().map(Stream::from_node).collect();
+    let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<(SheetId, u32, u32, usize)>> =
+        std::collections::BinaryHeap::new();
+
+    for (idx, stream) in streams.iter().enumerate() {
+        if let Some((sheet, addr)) = stream.peek() {
+            heap.push(std::cmp::Reverse((sheet, addr.row, addr.col, idx)));
+        }
+    }
+
+    let mut seen: HashSet<CellKey> = HashSet::new();
+    let mut out: Vec<(SheetId, CellAddr)> = Vec::new();
+    out.reserve(limit.min(1024));
+
+    while out.len() < limit {
+        let Some(std::cmp::Reverse((sheet, row, col, idx))) = heap.pop() else {
+            break;
+        };
+
+        let addr = CellAddr { row, col };
+        if seen.insert(CellKey { sheet, addr }) {
+            out.push((sheet, addr));
+        }
+
+        let stream = streams
+            .get_mut(idx)
+            .expect("heap indices are valid stream indices");
+        stream.advance();
+        if let Some((sheet, addr)) = stream.peek() {
+            heap.push(std::cmp::Reverse((sheet, addr.row, addr.col, idx)));
+        }
+    }
+
     out
 }
 
@@ -2441,7 +2791,13 @@ impl Snapshot {
         let mut values = HashMap::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
-                values.insert(CellKey { sheet: sheet_id, addr: *addr }, cell.value.clone());
+                values.insert(
+                    CellKey {
+                        sheet: sheet_id,
+                        addr: *addr,
+                    },
+                    cell.value.clone(),
+                );
             }
         }
 
@@ -2537,7 +2893,13 @@ impl crate::eval::ValueResolver for Snapshot {
         ctx: crate::eval::EvalContext,
         sref: &crate::structured_refs::StructuredRef,
     ) -> Option<(usize, CellAddr, CellAddr)> {
-        crate::structured_refs::resolve_structured_ref(&self.tables, ctx.current_sheet, ctx.current_cell, sref).ok()
+        crate::structured_refs::resolve_structured_ref(
+            &self.tables,
+            ctx.current_sheet,
+            ctx.current_cell,
+            sref,
+        )
+        .ok()
     }
 
     fn resolve_name(&self, sheet_id: usize, name: &str) -> Option<crate::eval::ResolvedName> {
@@ -2858,130 +3220,38 @@ fn bytecode_expr_is_eligible_inner(
     }
 }
 
-fn analyze_expr(
+fn analyze_expr_flags(
     expr: &CompiledExpr,
     current_cell: CellKey,
-    tables_by_sheet: &[Vec<Table>],
+    _tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
-    spills: &SpillState,
-) -> (HashSet<CellKey>, HashSet<String>, bool, bool) {
-    let mut precedents = HashSet::new();
+) -> (HashSet<String>, bool, bool) {
     let mut names = HashSet::new();
     let mut volatile = false;
     let mut thread_safe = true;
     let mut visiting_names = HashSet::new();
-    walk_expr(
+    walk_expr_flags(
         expr,
         current_cell,
-        tables_by_sheet,
         workbook,
-        spills,
-        &mut precedents,
         &mut names,
         &mut volatile,
         &mut thread_safe,
         &mut visiting_names,
     );
-    (precedents, names, volatile, thread_safe)
+    (names, volatile, thread_safe)
 }
 
-const MAX_AUDIT_RANGE_EXPANSION_CELLS: u64 = 10_000;
-
-fn walk_expr(
+fn walk_expr_flags(
     expr: &CompiledExpr,
     current_cell: CellKey,
-    tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
-    spills: &SpillState,
-    precedents: &mut HashSet<CellKey>,
     names: &mut HashSet<String>,
     volatile: &mut bool,
     thread_safe: &mut bool,
     visiting_names: &mut HashSet<(SheetId, String)>,
 ) {
     match expr {
-        Expr::CellRef(r) => {
-            if let Some(sheet) = resolve_sheet(&r.sheet, current_cell.sheet) {
-                precedents.insert(CellKey { sheet, addr: r.addr });
-            }
-        }
-        Expr::RangeRef(RangeRef { sheet, start, end }) => {
-            if let Some(sheet) = resolve_sheet(sheet, current_cell.sheet) {
-                let (r1, r2) = if start.row <= end.row {
-                    (start.row, end.row)
-                } else {
-                    (end.row, start.row)
-                };
-                let (c1, c2) = if start.col <= end.col {
-                    (start.col, end.col)
-                } else {
-                    (end.col, start.col)
-                };
-
-                let height = (r2 - r1 + 1) as u64;
-                let width = (c2 - c1 + 1) as u64;
-                let cell_count = height.saturating_mul(width);
-
-                if cell_count <= MAX_AUDIT_RANGE_EXPANSION_CELLS {
-                    for row in r1..=r2 {
-                        for col in c1..=c2 {
-                            precedents.insert(CellKey {
-                                sheet,
-                                addr: CellAddr { row, col },
-                            });
-                        }
-                    }
-                } else if let Some(sheet_cells) = workbook.sheets.get(sheet) {
-                    // Avoid catastrophic expansion for full row/col references (e.g. `A:A`).
-                    // For auditing, include only cells that currently exist in the sparse workbook.
-                    for addr in sheet_cells.cells.keys() {
-                        if addr.row >= r1 && addr.row <= r2 && addr.col >= c1 && addr.col <= c2 {
-                            precedents.insert(CellKey { sheet, addr: *addr });
-                        }
-                    }
-                }
-            }
-        }
-        Expr::StructuredRef(sref) => {
-            if let Ok((sheet_id, start, end)) = crate::structured_refs::resolve_structured_ref(
-                tables_by_sheet,
-                current_cell.sheet,
-                current_cell.addr,
-                sref,
-            ) {
-                let (r1, r2) = if start.row <= end.row {
-                    (start.row, end.row)
-                } else {
-                    (end.row, start.row)
-                };
-                let (c1, c2) = if start.col <= end.col {
-                    (start.col, end.col)
-                } else {
-                    (end.col, start.col)
-                };
-
-                let height = (r2 - r1 + 1) as u64;
-                let width = (c2 - c1 + 1) as u64;
-                let cell_count = height.saturating_mul(width);
-
-                if cell_count <= MAX_AUDIT_RANGE_EXPANSION_CELLS {
-                    for row in r1..=r2 {
-                        for col in c1..=c2 {
-                            precedents.insert(CellKey {
-                                sheet: sheet_id,
-                                addr: CellAddr { row, col },
-                            });
-                        }
-                    }
-                } else if let Some(sheet_cells) = workbook.sheets.get(sheet_id) {
-                    for addr in sheet_cells.cells.keys() {
-                        if addr.row >= r1 && addr.row <= r2 && addr.col >= c1 && addr.col <= c2 {
-                            precedents.insert(CellKey { sheet: sheet_id, addr: *addr });
-                        }
-                    }
-                }
-            }
-        }
         Expr::NameRef(nref) => {
             let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
                 return;
@@ -2990,25 +3260,25 @@ fn walk_expr(
             if name_key.is_empty() {
                 return;
             }
+
             names.insert(name_key.clone());
+
             let visit_key = (sheet, name_key.clone());
             if !visiting_names.insert(visit_key.clone()) {
                 // Cycle in the name definition graph. Stop expanding to avoid infinite recursion;
                 // evaluation will surface `#NAME?` via the runtime recursion guard.
                 return;
             }
+
             if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
                 if let Some(expr) = def.compiled.as_ref() {
-                    walk_expr(
+                    walk_expr_flags(
                         expr,
                         CellKey {
                             sheet,
                             addr: current_cell.addr,
                         },
-                        tables_by_sheet,
                         workbook,
-                        spills,
-                        precedents,
                         names,
                         volatile,
                         thread_safe,
@@ -3016,64 +3286,15 @@ fn walk_expr(
                     );
                 }
             }
+
             visiting_names.remove(&visit_key);
         }
-        Expr::SpillRange(inner) => {
-            walk_expr(
-                inner,
-                current_cell,
-                tables_by_sheet,
-                workbook,
-                spills,
-                precedents,
-                names,
-                volatile,
-                thread_safe,
-                visiting_names,
-            );
-
-            if let Some(target) = spill_range_target_cell(inner, current_cell) {
-                let (origin, end) = spill_range_bounds(target, spills);
-                add_cell_rect(origin.sheet, origin.addr, end, workbook, precedents);
-            }
+        Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => {
+            walk_expr_flags(expr, current_cell, workbook, names, volatile, thread_safe, visiting_names)
         }
-        Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => walk_expr(
-            expr,
-            current_cell,
-            tables_by_sheet,
-            workbook,
-            spills,
-            precedents,
-            names,
-            volatile,
-            thread_safe,
-            visiting_names,
-        ),
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
-            walk_expr(
-                left,
-                current_cell,
-                tables_by_sheet,
-                workbook,
-                spills,
-                precedents,
-                names,
-                volatile,
-                thread_safe,
-                visiting_names,
-            );
-            walk_expr(
-                right,
-                current_cell,
-                tables_by_sheet,
-                workbook,
-                spills,
-                precedents,
-                names,
-                volatile,
-                thread_safe,
-                visiting_names,
-            );
+            walk_expr_flags(left, current_cell, workbook, names, volatile, thread_safe, visiting_names);
+            walk_expr_flags(right, current_cell, workbook, names, volatile, thread_safe, visiting_names);
         }
         Expr::FunctionCall { name, args, .. } => {
             if let Some(spec) = crate::functions::lookup_function(name) {
@@ -3088,35 +3309,16 @@ fn walk_expr(
                 *thread_safe = false;
             }
             for a in args {
-                walk_expr(
-                    a,
-                    current_cell,
-                    tables_by_sheet,
-                    workbook,
-                    spills,
-                    precedents,
-                    names,
-                    volatile,
-                    thread_safe,
-                    visiting_names,
-                );
+                walk_expr_flags(a, current_cell, workbook, names, volatile, thread_safe, visiting_names);
             }
         }
-        Expr::ImplicitIntersection(inner) => {
-            walk_expr(
-                inner,
-                current_cell,
-                tables_by_sheet,
-                workbook,
-                spills,
-                precedents,
-                names,
-                volatile,
-                thread_safe,
-                visiting_names,
-            )
+        Expr::ImplicitIntersection(inner) | Expr::SpillRange(inner) => {
+            walk_expr_flags(inner, current_cell, workbook, names, volatile, thread_safe, visiting_names)
         }
-        Expr::Number(_)
+        Expr::CellRef(_)
+        | Expr::RangeRef(_)
+        | Expr::StructuredRef(_)
+        | Expr::Number(_)
         | Expr::Text(_)
         | Expr::Bool(_)
         | Expr::Blank
@@ -3170,42 +3372,6 @@ fn spill_range_bounds(cell: CellKey, spills: &SpillState) -> (CellKey, CellAddr)
         .map(|spill| spill.end)
         .unwrap_or(origin.addr);
     (origin, end)
-}
-
-fn add_cell_rect(
-    sheet: SheetId,
-    start: CellAddr,
-    end: CellAddr,
-    workbook: &Workbook,
-    precedents: &mut HashSet<CellKey>,
-) {
-    let (r1, r2) = if start.row <= end.row {
-        (start.row, end.row)
-    } else {
-        (end.row, start.row)
-    };
-    let (c1, c2) = if start.col <= end.col {
-        (start.col, end.col)
-    } else {
-        (end.col, start.col)
-    };
-    let cell_count = ((r2 - r1 + 1) as u64).saturating_mul((c2 - c1 + 1) as u64);
-    if cell_count <= MAX_AUDIT_RANGE_EXPANSION_CELLS {
-        for row in r1..=r2 {
-            for col in c1..=c2 {
-                precedents.insert(CellKey {
-                    sheet,
-                    addr: CellAddr { row, col },
-                });
-            }
-        }
-    } else if let Some(sheet_cells) = workbook.sheets.get(sheet) {
-        for addr in sheet_cells.cells.keys() {
-            if addr.row >= r1 && addr.row <= r2 && addr.col >= c1 && addr.col <= c2 {
-                precedents.insert(CellKey { sheet, addr: *addr });
-            }
-        }
-    }
 }
 
 fn walk_calc_expr(

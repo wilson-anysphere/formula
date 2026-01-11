@@ -3,6 +3,7 @@ use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, RangeRef, SheetReference, UnaryOp,
 };
 use crate::value::ErrorKind;
+use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -62,6 +63,13 @@ impl Parser {
 struct ParserImpl {
     tokens: Vec<Token>,
     pos: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefStart {
+    Cell(CellAddr),
+    Col(u32),
+    Row(u32),
 }
 
 impl ParserImpl {
@@ -168,9 +176,7 @@ impl ParserImpl {
             }
             Token::At => {
                 self.next();
-                Ok(Expr::ImplicitIntersection(Box::new(
-                    self.parse_unary()?,
-                )))
+                Ok(Expr::ImplicitIntersection(Box::new(self.parse_unary()?)))
             }
             _ => self.parse_power(),
         }
@@ -180,7 +186,12 @@ impl ParserImpl {
         let mut expr = match self.peek().clone() {
             Token::Number(n) => {
                 self.next();
-                Ok(Expr::Number(n))
+                if *self.peek() == Token::Colon {
+                    let row = row_index_from_number(n)?;
+                    self.parse_cell_or_range(SheetReference::Current, RefStart::Row(row))
+                } else {
+                    Ok(Expr::Number(n))
+                }
             }
             Token::String(s) => {
                 self.next();
@@ -192,11 +203,12 @@ impl ParserImpl {
             }
             Token::StructuredRef(text) => {
                 self.next();
-                let (sref, end) = crate::structured_refs::parse_structured_ref(&text, 0).ok_or_else(|| {
-                    FormulaParseError::UnexpectedToken(format!(
-                        "invalid structured reference: {text}"
-                    ))
-                })?;
+                let (sref, end) = crate::structured_refs::parse_structured_ref(&text, 0)
+                    .ok_or_else(|| {
+                        FormulaParseError::UnexpectedToken(format!(
+                            "invalid structured reference: {text}"
+                        ))
+                    })?;
                 if end != text.len() {
                     return Err(FormulaParseError::UnexpectedToken(format!(
                         "invalid structured reference: {text}"
@@ -215,13 +227,37 @@ impl ParserImpl {
                     match id.to_ascii_uppercase().as_str() {
                         "TRUE" => Ok(Expr::Bool(true)),
                         "FALSE" => Ok(Expr::Bool(false)),
-                        _ => match try_parse_cell_addr(&id) {
-                            Ok(addr) => self.parse_cell_or_range(SheetReference::Current, addr),
-                            Err(_) => Ok(Expr::NameRef(NameRef {
-                                sheet: SheetReference::Current,
-                                name: id,
-                            })),
-                        },
+                        _ => {
+                            if *self.peek() == Token::Colon {
+                                // Range start: allow column references like `A:A`.
+                                if let Ok(addr) = try_parse_cell_addr(&id) {
+                                    self.parse_cell_or_range(
+                                        SheetReference::Current,
+                                        RefStart::Cell(addr),
+                                    )
+                                } else if let Some(col) = try_parse_col_ref(&id) {
+                                    self.parse_cell_or_range(
+                                        SheetReference::Current,
+                                        RefStart::Col(col),
+                                    )
+                                } else {
+                                    Err(FormulaParseError::InvalidAddress(
+                                        AddressParseError::InvalidA1(id),
+                                    ))
+                                }
+                            } else {
+                                match try_parse_cell_addr(&id) {
+                                    Ok(addr) => self.parse_cell_or_range(
+                                        SheetReference::Current,
+                                        RefStart::Cell(addr),
+                                    ),
+                                    Err(_) => Ok(Expr::NameRef(NameRef {
+                                        sheet: SheetReference::Current,
+                                        name: id,
+                                    })),
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -304,9 +340,28 @@ impl ParserImpl {
             return Ok(Expr::Error(ErrorKind::Ref));
         }
 
-        let addr_token = self.next();
-        let addr_str = match addr_token {
-            Token::Ident(s) => s,
+        let start = match self.next() {
+            Token::Ident(s) => {
+                if let Ok(addr) = parse_a1(&s) {
+                    RefStart::Cell(addr)
+                } else if *self.peek() == Token::Colon {
+                    let col = try_parse_col_ref(&s).ok_or_else(|| {
+                        FormulaParseError::InvalidAddress(AddressParseError::InvalidA1(s))
+                    })?;
+                    RefStart::Col(col)
+                } else {
+                    return Ok(Expr::NameRef(NameRef { sheet, name: s }));
+                }
+            }
+            Token::Number(n) => {
+                if *self.peek() != Token::Colon {
+                    return Err(FormulaParseError::Expected {
+                        expected: "cell address".to_string(),
+                        got: format!("{n}"),
+                    });
+                }
+                RefStart::Row(row_index_from_number(n)?)
+            }
             other => {
                 return Err(FormulaParseError::Expected {
                     expected: "cell address".to_string(),
@@ -314,37 +369,85 @@ impl ParserImpl {
                 })
             }
         };
-        match try_parse_cell_addr(&addr_str) {
-            Ok(addr) => self.parse_cell_or_range(sheet, addr),
-            Err(_) => Ok(Expr::NameRef(NameRef { sheet, name: addr_str })),
-        }
+        self.parse_cell_or_range(sheet, start)
     }
 
     fn parse_cell_or_range(
         &mut self,
         sheet: SheetReference<String>,
-        start: CellAddr,
+        start: RefStart,
     ) -> Result<ParsedExpr, FormulaParseError> {
         if *self.peek() == Token::Colon {
             self.next();
             let end_token = self.next();
-            let end_str = match end_token {
-                Token::Ident(s) => s,
-                other => {
+            let end = match (start, end_token) {
+                (RefStart::Cell(_), Token::Ident(s)) => RefStart::Cell(parse_a1(&s)?),
+                (RefStart::Col(_), Token::Ident(s)) => {
+                    RefStart::Col(try_parse_col_ref(&s).ok_or_else(|| {
+                        FormulaParseError::Expected {
+                            expected: "column reference".to_string(),
+                            got: format!("{s:?}"),
+                        }
+                    })?)
+                }
+                (RefStart::Row(_), Token::Number(n)) => RefStart::Row(row_index_from_number(n)?),
+                (RefStart::Cell(_), other) => {
                     return Err(FormulaParseError::Expected {
                         expected: "cell address".to_string(),
                         got: format!("{other:?}"),
                     })
                 }
+                (RefStart::Col(_), other) => {
+                    return Err(FormulaParseError::Expected {
+                        expected: "column reference".to_string(),
+                        got: format!("{other:?}"),
+                    })
+                }
+                (RefStart::Row(_), other) => {
+                    return Err(FormulaParseError::Expected {
+                        expected: "row reference".to_string(),
+                        got: format!("{other:?}"),
+                    })
+                }
             };
-            let end = parse_a1(&end_str)?;
-            Ok(Expr::RangeRef(RangeRef {
-                sheet,
-                start,
-                end,
-            }))
+
+            let (start, end) = match (start, end) {
+                (RefStart::Cell(a), RefStart::Cell(b)) => (a, b),
+                (RefStart::Col(a), RefStart::Col(b)) => {
+                    let max_row = EXCEL_MAX_ROWS.saturating_sub(1);
+                    (
+                        CellAddr { row: 0, col: a },
+                        CellAddr {
+                            row: max_row,
+                            col: b,
+                        },
+                    )
+                }
+                (RefStart::Row(a), RefStart::Row(b)) => {
+                    let max_col = EXCEL_MAX_COLS.saturating_sub(1);
+                    (
+                        CellAddr { row: a, col: 0 },
+                        CellAddr {
+                            row: b,
+                            col: max_col,
+                        },
+                    )
+                }
+                _ => {
+                    return Err(FormulaParseError::UnexpectedToken(
+                        "mixed row/col/cell range".to_string(),
+                    ))
+                }
+            };
+
+            Ok(Expr::RangeRef(RangeRef { sheet, start, end }))
         } else {
-            Ok(Expr::CellRef(CellRef { sheet, addr: start }))
+            match start {
+                RefStart::Cell(addr) => Ok(Expr::CellRef(CellRef { sheet, addr })),
+                RefStart::Col(_) | RefStart::Row(_) => Err(FormulaParseError::UnexpectedToken(
+                    "expected cell address".to_string(),
+                )),
+            }
         }
     }
 
@@ -377,6 +480,39 @@ impl ParserImpl {
 
 fn try_parse_cell_addr(id: &str) -> Result<CellAddr, AddressParseError> {
     parse_a1(id)
+}
+
+fn try_parse_col_ref(id: &str) -> Option<u32> {
+    let filtered: String = id.chars().filter(|&ch| ch != '$').collect();
+    if filtered.is_empty() || !filtered.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        return None;
+    }
+
+    let mut col: u32 = 0;
+    for ch in filtered.chars() {
+        let up = ch.to_ascii_uppercase();
+        let digit = (up as u8).wrapping_sub(b'A').wrapping_add(1) as u32;
+        col = col.checked_mul(26)?.checked_add(digit)?;
+    }
+    if col == 0 || col > EXCEL_MAX_COLS {
+        return None;
+    }
+    Some(col - 1)
+}
+
+fn row_index_from_number(n: f64) -> Result<u32, FormulaParseError> {
+    if !n.is_finite() || n.fract() != 0.0 {
+        return Err(FormulaParseError::UnexpectedToken(format!(
+            "invalid row reference: {n}"
+        )));
+    }
+    let row_1_based = n as i64;
+    if row_1_based <= 0 || row_1_based > i64::from(EXCEL_MAX_ROWS) {
+        return Err(FormulaParseError::UnexpectedToken(format!(
+            "row out of range: {n}"
+        )));
+    }
+    Ok((row_1_based as u32) - 1)
 }
 
 struct Lexer<'a> {
@@ -532,7 +668,9 @@ impl<'a> Lexer<'a> {
                 ']' => {
                     depth -= 1;
                     if depth == 0 {
-                        return Ok(Token::StructuredRef(self.input[start..self.pos].to_string()));
+                        return Ok(Token::StructuredRef(
+                            self.input[start..self.pos].to_string(),
+                        ));
                     }
                 }
                 _ => {}

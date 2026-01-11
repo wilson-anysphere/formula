@@ -13,9 +13,10 @@
 //! small benchmark harness via [`run_benchmarks`] so CI can detect regressions in the core
 //! parsing/evaluation/recalc paths as the engine evolves.
 
-pub mod calc_settings;
 pub mod bytecode;
+pub mod calc_settings;
 pub mod date;
+pub mod debug;
 pub mod display;
 pub mod editing;
 pub mod error;
@@ -27,26 +28,29 @@ pub mod locale;
 pub mod pivot;
 pub mod simd;
 pub mod solver;
-pub mod what_if;
-pub mod value;
-pub mod debug;
 pub mod sort_filter;
+pub mod value;
+pub mod what_if;
 
-pub mod structured_refs;
 mod engine;
 mod perf;
+pub mod structured_refs;
 
 mod ast;
 pub mod parser;
 
 pub use ast::*;
 pub use crate::error::{ExcelError, ExcelResult};
-pub use editing::{CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange};
-pub use engine::{Engine, EngineError, ExternalValueProvider, NameDefinition, NameScope, RecalcMode};
-pub use perf::{run_benchmarks, BenchmarkResult};
+pub use editing::{
+    CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
+};
+pub use engine::{
+    Engine, EngineError, ExternalValueProvider, NameDefinition, NameScope, PrecedentNode, RecalcMode,
+};
 pub use parser::{
     lex, parse_formula_partial, FunctionContext, ParseContext, PartialParse, Token, TokenKind,
 };
+pub use perf::{run_benchmarks, BenchmarkResult};
 pub use value::{ErrorKind, Value};
 
 /// Parse a formula into an [`Ast`].

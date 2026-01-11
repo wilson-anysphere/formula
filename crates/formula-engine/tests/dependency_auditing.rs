@@ -1,34 +1,61 @@
 use formula_engine::eval::CellAddr;
-use formula_engine::{Engine, Value};
+use formula_engine::{Engine, PrecedentNode, Value};
+use formula_model::EXCEL_MAX_ROWS;
 
 #[test]
 fn precedents_and_dependents_queries_work() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
-    engine
-        .set_cell_formula("Sheet1", "A2", "=A1*2")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "A3", "=A2+1")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A2", "=A1*2").unwrap();
+    engine.set_cell_formula("Sheet1", "A3", "=A2+1").unwrap();
     engine.recalculate();
 
     let p_a3_direct = engine.precedents("Sheet1", "A3").unwrap();
-    assert_eq!(p_a3_direct, vec![(0, CellAddr { row: 1, col: 0 })]);
+    assert_eq!(
+        p_a3_direct,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 1, col: 0 }
+        }]
+    );
 
     let p_a3_trans = engine.precedents_transitive("Sheet1", "A3").unwrap();
     assert_eq!(
         p_a3_trans,
-        vec![(0, CellAddr { row: 0, col: 0 }), (0, CellAddr { row: 1, col: 0 })]
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 }
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 0 }
+            }
+        ]
     );
 
     let d_a1_direct = engine.dependents("Sheet1", "A1").unwrap();
-    assert_eq!(d_a1_direct, vec![(0, CellAddr { row: 1, col: 0 })]);
+    assert_eq!(
+        d_a1_direct,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 1, col: 0 }
+        }]
+    );
 
     let d_a1_trans = engine.dependents_transitive("Sheet1", "A1").unwrap();
     assert_eq!(
         d_a1_trans,
-        vec![(0, CellAddr { row: 1, col: 0 }), (0, CellAddr { row: 2, col: 0 })]
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 0 }
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 2, col: 0 }
+            }
+        ]
     );
 }
 
@@ -36,12 +63,8 @@ fn precedents_and_dependents_queries_work() {
 fn dirty_dependency_path_explains_why_cell_is_dirty() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
-    engine
-        .set_cell_formula("Sheet1", "A2", "=A1*2")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "A3", "=A2+1")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A2", "=A1*2").unwrap();
+    engine.set_cell_formula("Sheet1", "A3", "=A2+1").unwrap();
     engine.recalculate();
 
     engine.set_cell_value("Sheet1", "A1", 20.0).unwrap();
@@ -53,9 +76,18 @@ fn dirty_dependency_path_explains_why_cell_is_dirty() {
     assert_eq!(
         path,
         vec![
-            (0, CellAddr { row: 0, col: 0 }),
-            (0, CellAddr { row: 1, col: 0 }),
-            (0, CellAddr { row: 2, col: 0 })
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 }
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 0 }
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 2, col: 0 }
+            }
         ]
     );
 
@@ -66,3 +98,112 @@ fn dirty_dependency_path_explains_why_cell_is_dirty() {
     assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(41.0));
 }
 
+#[test]
+fn full_column_precedent_is_compact_and_expansion_is_deterministic() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(A:A)")
+        .unwrap();
+
+    let max_row = EXCEL_MAX_ROWS - 1;
+
+    let precedents = engine.precedents("Sheet1", "B1").unwrap();
+    assert_eq!(
+        precedents,
+        vec![PrecedentNode::Range {
+            sheet: 0,
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr {
+                row: max_row,
+                col: 0
+            }
+        }]
+    );
+
+    // Expanded queries should be capped and ordered deterministically.
+    let expanded_1 = engine.precedents_expanded("Sheet1", "B1", 3).unwrap();
+    let expanded_2 = engine.precedents_expanded("Sheet1", "B1", 3).unwrap();
+    assert_eq!(expanded_1, expanded_2);
+    assert_eq!(
+        expanded_1,
+        vec![
+            (0, CellAddr { row: 0, col: 0 }),
+            (0, CellAddr { row: 1, col: 0 }),
+            (0, CellAddr { row: 2, col: 0 })
+        ]
+    );
+
+    // Reverse lookup via the range-node index should work without per-cell expansion.
+    let dependents = engine.dependents("Sheet1", "A123").unwrap();
+    assert_eq!(
+        dependents,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 1 }
+        }]
+    );
+}
+
+#[test]
+fn expanded_precedents_merge_multiple_ranges_in_sheet_order() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUM(A:A)+SUM(B:B)")
+        .unwrap();
+
+    let expanded = engine.precedents_expanded("Sheet1", "C1", 6).unwrap();
+    assert_eq!(
+        expanded,
+        vec![
+            (0, CellAddr { row: 0, col: 0 }), // A1
+            (0, CellAddr { row: 0, col: 1 }), // B1
+            (0, CellAddr { row: 1, col: 0 }), // A2
+            (0, CellAddr { row: 1, col: 1 }), // B2
+            (0, CellAddr { row: 2, col: 0 }), // A3
+            (0, CellAddr { row: 2, col: 1 })  // B3
+        ]
+    );
+}
+
+#[test]
+fn dirty_dependency_path_includes_range_node_for_range_dependencies() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A2", 10.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(A:A)")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=B1+1").unwrap();
+    engine.recalculate();
+
+    engine.set_cell_value("Sheet1", "A2", 20.0).unwrap();
+    assert!(engine.is_dirty("Sheet1", "B1"));
+    assert!(engine.is_dirty("Sheet1", "C1"));
+
+    let max_row = EXCEL_MAX_ROWS - 1;
+    let path = engine.dirty_dependency_path("Sheet1", "C1").unwrap();
+    assert_eq!(
+        path,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 0 }
+            },
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr {
+                    row: max_row,
+                    col: 0
+                }
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 1 }
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 2 }
+            }
+        ]
+    );
+}

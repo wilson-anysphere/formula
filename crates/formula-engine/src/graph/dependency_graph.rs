@@ -45,6 +45,23 @@ pub enum Precedent {
     Range(SheetRange),
 }
 
+/// Metadata describing *how* a dependent cell references a precedent cell.
+///
+/// This is primarily intended for auditing UX (e.g. "B1 depends on A2 via `A:A`").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependentEdgeKind {
+    /// The dependent directly referenced the precedent cell (e.g. `=A1`).
+    DirectCell,
+    /// The dependent referenced a range that contains the precedent cell (e.g. `=SUM(A:A)`).
+    Range(SheetRange),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DependentEdge {
+    pub dependent: CellId,
+    pub kind: DependentEdgeKind,
+}
+
 /// Dependency metadata for a single cell.
 #[derive(Debug, Clone, Default)]
 pub struct CellDeps {
@@ -277,6 +294,104 @@ impl DependencyGraph {
 
         self.calc_chain_valid = false;
         self.volatile_closure_valid = false;
+    }
+
+    /// Returns the direct precedents for a formula cell, including range nodes.
+    ///
+    /// Non-formula cells return an empty list.
+    #[must_use]
+    pub fn precedents_of(&self, cell: CellId) -> Vec<Precedent> {
+        let Some(node) = self.cells.get(&cell) else {
+            return Vec::new();
+        };
+
+        let mut out: Vec<Precedent> = Vec::with_capacity(
+            node.precedent_cells
+                .len()
+                .saturating_add(node.precedent_ranges.len()),
+        );
+        out.extend(node.precedent_cells.iter().copied().map(Precedent::Cell));
+        out.extend(
+            node.precedent_ranges
+                .iter()
+                .filter_map(|id| self.range_nodes.get(id).map(|n| Precedent::Range(n.range))),
+        );
+
+        out.sort_by_key(|p| match p {
+            Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
+            Precedent::Range(r) => {
+                let start = r.range.start;
+                let end = r.range.end;
+                (1u8, r.sheet_id, start.row, start.col, end.row, end.col)
+            }
+        });
+        out
+    }
+
+    /// Returns all direct dependent formula cells for `cell`.
+    ///
+    /// This includes:
+    /// - direct cell references (e.g. `=A1`)
+    /// - range references that contain `cell` (e.g. `=SUM(A:A)` depends on `A1`)
+    ///
+    /// The returned list is deduplicated and sorted deterministically.
+    #[must_use]
+    pub fn dependents_of(&self, cell: CellId) -> Vec<DependentEdge> {
+        let mut best: HashMap<CellId, DependentEdgeKind> = HashMap::new();
+
+        if let Some(dependents) = self.cell_dependents.get(&cell) {
+            for &dep in dependents {
+                best.insert(dep, DependentEdgeKind::DirectCell);
+            }
+        }
+
+        for range_id in self.range_nodes_containing_cell(cell) {
+            let Some(range_node) = self.range_nodes.get(&range_id) else {
+                continue;
+            };
+            let range_kind = DependentEdgeKind::Range(range_node.range);
+            for &dep in &range_node.dependents {
+                best.entry(dep)
+                    .and_modify(|existing| {
+                        if dependent_kind_sort_key(*existing) > dependent_kind_sort_key(range_kind)
+                        {
+                            *existing = range_kind;
+                        }
+                    })
+                    .or_insert(range_kind);
+            }
+        }
+
+        let mut out: Vec<DependentEdge> = best
+            .into_iter()
+            .map(|(dependent, kind)| DependentEdge { dependent, kind })
+            .collect();
+        out.sort_by_key(|edge| {
+            (
+                edge.dependent.sheet_id,
+                edge.dependent.cell.row,
+                edge.dependent.cell.col,
+                dependent_kind_sort_key(edge.kind),
+            )
+        });
+        out
+    }
+
+    /// Returns all formula cells in `range`, sorted deterministically.
+    #[must_use]
+    pub fn formula_cells_in_range(&self, range: SheetRange) -> Vec<CellId> {
+        let Some(tree) = self.cell_index.get(&range.sheet_id) else {
+            return Vec::new();
+        };
+
+        let (min, max) = range.envelope_i64();
+        let env = AABB::from_corners(min, max);
+        let mut out: Vec<CellId> = tree
+            .locate_in_envelope_intersecting(&env)
+            .map(|entry| entry.cell)
+            .collect();
+        out.sort_by_key(|cell| (cell.sheet_id, cell.cell.row, cell.cell.col));
+        out
     }
 
     /// Removes a formula cell from the graph.
@@ -963,6 +1078,17 @@ impl DependencyGraph {
             if let Some(range_node) = self.range_nodes.get_mut(&range_id) {
                 range_node.member_formula_cells = range_node.member_formula_cells.saturating_sub(1);
             }
+        }
+    }
+}
+
+fn dependent_kind_sort_key(kind: DependentEdgeKind) -> (u8, u32, u32, u32, u32, u32) {
+    match kind {
+        DependentEdgeKind::DirectCell => (0, 0, 0, 0, 0, 0),
+        DependentEdgeKind::Range(range) => {
+            let start = range.range.start;
+            let end = range.range.end;
+            (1, range.sheet_id, start.row, start.col, end.row, end.col)
         }
     }
 }
