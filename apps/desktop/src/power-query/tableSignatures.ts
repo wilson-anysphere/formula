@@ -243,17 +243,13 @@ export class TableSignatureRegistry {
    * the table changed.
    */
   applyCellDeltas(deltas: Array<{ sheetId: string; row: number; col: number }>, options?: { source?: string }): void {
+    if (this.#tablesByName.size === 0) return;
+
     // `applyState` can generate huge delta lists; avoid double-scanning by tracking
     // which tables we've already bumped for this batch.
     const bumped = new Set<string>();
 
     for (const delta of deltas) {
-      // Ignore format-only changes so table signatures reflect the cell values/formulas
-      // Power Query reads (not cosmetic formatting edits).
-      const before = (delta as any)?.before;
-      const after = (delta as any)?.after;
-      if (before && after && cellContentsEqual(before, after)) continue;
-
       const sheetId = typeof (delta as any)?.sheetId === "string" ? String((delta as any).sheetId) : "";
       if (!sheetId) continue;
       const row = Number((delta as any).row);
@@ -262,6 +258,12 @@ export class TableSignatureRegistry {
 
       const candidates = this.#tablesBySheetId.get(sheetId);
       if (!candidates || candidates.length === 0) continue;
+
+      // Ignore format-only changes so table signatures reflect the cell values/formulas
+      // Power Query reads (not cosmetic formatting edits).
+      const before = (delta as any)?.before;
+      const after = (delta as any)?.after;
+      if (before && after && cellContentsEqual(before, after)) continue;
 
       for (const entry of candidates) {
         if (bumped.has(entry.name)) continue;
