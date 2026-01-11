@@ -1,8 +1,10 @@
 use std::fs::File;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 use formula_xlsb::{biff12_varint, CellEdit, CellValue, XlsbWorkbook};
+use zip::write::FileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
@@ -147,6 +149,58 @@ fn build_fixture_bytes_with_inline_string() -> Vec<u8> {
     builder.set_cell_sst(0, 0, 0); // A1 = "Hello" via SST
     builder.set_cell_inline_string(0, 1, "Hello"); // B1 = "Hello" inline
     builder.build_bytes()
+}
+
+fn build_single_sst_fixture_bytes() -> Vec<u8> {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.set_cell_sst(0, 0, 0); // A1 = "Hello" via SST
+    builder.build_bytes()
+}
+
+fn with_corrupt_sst_unique_count(input: &[u8], bad_unique_count: u32) -> Vec<u8> {
+    let mut zip = ZipArchive::new(Cursor::new(input)).expect("open xlsb zip");
+
+    let mut parts: Vec<(String, Vec<u8>)> = Vec::new();
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).expect("zip entry");
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().to_string();
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        entry.read_to_end(&mut bytes).expect("read zip entry");
+        parts.push((name, bytes));
+    }
+
+    for (name, bytes) in &mut parts {
+        if name == "xl/sharedStrings.bin" {
+            let mut cursor = Cursor::new(bytes.as_slice());
+            let id = biff12_varint::read_record_id(&mut cursor)
+                .expect("read record id")
+                .expect("record id");
+            let len = biff12_varint::read_record_len(&mut cursor)
+                .expect("read record len")
+                .expect("record len");
+            assert_eq!(id, 0x019F, "expected BrtSST header record");
+            assert!(
+                len >= 8,
+                "expected BrtSST payload to contain [totalCount][uniqueCount]"
+            );
+            let payload_start = cursor.position() as usize;
+            bytes[payload_start + 4..payload_start + 8]
+                .copy_from_slice(&bad_unique_count.to_le_bytes());
+            break;
+        }
+    }
+
+    let mut out = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
+    let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+    for (name, bytes) in parts {
+        out.start_file(name, options).expect("start file");
+        out.write_all(&bytes).expect("write bytes");
+    }
+    out.finish().expect("finish zip").into_inner()
 }
 
 #[test]
@@ -357,6 +411,40 @@ fn streaming_shared_string_noop_inline_string_does_not_touch_shared_strings() {
     let sheet_bin = read_zip_part(&out_path, "xl/worksheets/sheet1.bin");
     let (id, _payload) = find_cell_record(&sheet_bin, 0, 1).expect("find B1 record");
     assert_eq!(id, 0x0006, "expected BrtCellSt/CELL_ST record id");
+}
+
+#[test]
+fn streaming_shared_strings_repairs_unique_count_when_header_is_incorrect() {
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+
+    // Construct a workbook whose sharedStrings.bin has an invalid uniqueCount in the BrtSST
+    // header. Our writer should emit a consistent uniqueCount after appending a new BrtSI.
+    let bytes = build_single_sst_fixture_bytes();
+    let bytes = with_corrupt_sst_unique_count(&bytes, 100);
+    std::fs::write(&input_path, &bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let out_path = tmpdir.path().join("out.xlsb");
+
+    wb.save_with_cell_edits_streaming_shared_strings(
+        &out_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("New".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_streaming_shared_strings");
+
+    let shared_strings_bin = read_zip_part(&out_path, "xl/sharedStrings.bin");
+    let stats = read_shared_strings_stats(&shared_strings_bin);
+    assert_eq!(stats.si_count, 2, "expected 2 BrtSI records after append");
+    assert_eq!(stats.unique_count, Some(2));
 }
 
 #[test]

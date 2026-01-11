@@ -164,7 +164,7 @@ impl SharedStringsWriter {
             .base_si_count
             .checked_add(self.appended_plain.len() as u32)
             .ok_or(Error::UnexpectedEof)?;
-        self.sst_unique_count = self.sst_unique_count.max(expected_unique_count);
+        self.sst_unique_count = expected_unique_count;
 
         Ok(idx)
     }
@@ -191,6 +191,12 @@ impl SharedStringsWriter {
             )));
         }
         self.sst_total_count = updated as u32;
+
+        // Ensure `uniqueCount` stays consistent with the number of `BrtSI` records we will write.
+        self.sst_unique_count = self
+            .base_si_count
+            .checked_add(self.appended_plain.len() as u32)
+            .ok_or(Error::UnexpectedEof)?;
         Ok(())
     }
 
