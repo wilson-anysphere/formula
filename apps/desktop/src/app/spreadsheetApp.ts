@@ -1429,10 +1429,7 @@ export class SpreadsheetApp {
       e.preventDefault();
       if (this.document.undo()) {
         this.syncEngineNow();
-        this.renderGrid();
-        this.renderCharts();
-        this.renderSelection();
-        this.updateStatus();
+        this.refresh();
       }
       return;
     }
@@ -1442,10 +1439,7 @@ export class SpreadsheetApp {
       e.preventDefault();
       if (this.document.redo()) {
         this.syncEngineNow();
-        this.renderGrid();
-        this.renderCharts();
-        this.renderSelection();
-        this.updateStatus();
+        this.refresh();
       }
       return;
     }

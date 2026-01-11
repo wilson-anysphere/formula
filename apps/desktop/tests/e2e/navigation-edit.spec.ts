@@ -99,16 +99,26 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     expect(recalcAfterDelete).toBeGreaterThan(recalcBeforeDelete);
   });
 
-  test("Ctrl/Cmd+Z undo + Ctrl/Cmd+Shift+Z redo update the document", async ({ page }) => {
+  test("Ctrl/Cmd+Z undo + Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y redo update cells", async ({ page }) => {
     await page.goto("/");
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
     // Clear any seeded value so undo returns to an empty cell.
     await page.keyboard.press("Delete");
 
-    // Edit A1.
+    // Create a dependent formula in B1 so we can verify recomputation after undo/redo.
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
     await page.keyboard.press("F2");
     const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await editor.fill("=A1");
+    await page.keyboard.press("Enter"); // commit, moves to B2
+
+    // Edit A1.
+    await page.keyboard.press("ArrowUp"); // back to B1
+    await page.keyboard.press("ArrowLeft"); // A1
+    await page.keyboard.press("F2");
     await expect(editor).toBeVisible();
     await editor.fill("Hello");
     await page.keyboard.press("Enter");
@@ -118,9 +128,26 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await page.keyboard.press(`${modifier}+Z`);
     const a1AfterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1AfterUndo).toBe("");
+    const b1AfterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
+    expect(b1AfterUndo).toBe("");
 
     await page.keyboard.press(`${modifier}+Shift+Z`);
     const a1AfterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1AfterRedo).toBe("Hello");
+    const b1AfterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
+    expect(b1AfterRedo).toBe("Hello");
+
+    // Redo should also work via Ctrl/Cmd+Y.
+    await page.keyboard.press(`${modifier}+Z`);
+    const a1AfterUndo2 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1AfterUndo2).toBe("");
+    const b1AfterUndo2 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
+    expect(b1AfterUndo2).toBe("");
+
+    await page.keyboard.press(`${modifier}+Y`);
+    const a1AfterRedoY = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1AfterRedoY).toBe("Hello");
+    const b1AfterRedoY = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
+    expect(b1AfterRedoY).toBe("Hello");
   });
 });
