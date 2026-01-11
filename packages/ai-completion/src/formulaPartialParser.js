@@ -38,6 +38,8 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
   const openParens = [];
   let inString = false;
   let inSheetQuote = false;
+  let bracketDepth = 0;
+  let braceDepth = 0;
   for (let i = 0; i < prefix.length; i++) {
     const ch = prefix[i];
     if (inString) {
@@ -66,10 +68,27 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
       inString = true;
       continue;
     }
-    if (ch === "'") {
+    if (ch === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (ch === "{") {
+      braceDepth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (ch === "'" && bracketDepth === 0 && braceDepth === 0) {
       inSheetQuote = true;
       continue;
     }
+    if (bracketDepth !== 0) continue;
     if (ch === "(") {
       openParens.push(i);
     } else if (ch === ")") {
@@ -173,7 +192,7 @@ function getArgContext(input, openParenIndex, cursorPosition) {
       inString = true;
       continue;
     }
-    if (ch === "'") {
+    if (ch === "'" && bracketDepth === 0 && braceDepth === 0) {
       inSheetQuote = true;
       continue;
     }
@@ -193,8 +212,8 @@ function getArgContext(input, openParenIndex, cursorPosition) {
       braceDepth = Math.max(0, braceDepth - 1);
       continue;
     }
-    if (ch === "(") depth++;
-    else if (ch === ")") depth = Math.max(baseDepth, depth - 1);
+    if (ch === "(" && bracketDepth === 0) depth++;
+    else if (ch === ")" && bracketDepth === 0) depth = Math.max(baseDepth, depth - 1);
     else if (ch === "," && depth === baseDepth && bracketDepth === 0 && braceDepth === 0) {
       argIndex++;
       lastCommaIndex = i;

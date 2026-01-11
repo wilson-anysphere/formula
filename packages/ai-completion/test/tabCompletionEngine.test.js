@@ -300,6 +300,24 @@ test("parsePartialFormula ignores commas inside structured refs and array consta
   assert.equal(arrayParsed.currentArg?.text, "A");
 });
 
+test("parsePartialFormula ignores apostrophes and parentheses inside structured refs", () => {
+  const registry = new FunctionRegistry();
+
+  const parenInColumnName = "=SUM(Table1[Amount (USD]";
+  const parenParsed = parsePartialFormula(parenInColumnName, parenInColumnName.length, registry);
+  assert.equal(parenParsed.inFunctionCall, true);
+  assert.equal(parenParsed.functionName, "SUM");
+  assert.equal(parenParsed.argIndex, 0);
+  assert.equal(parenParsed.currentArg?.text, "Table1[Amount (USD]");
+
+  const apostropheInColumnName = "=SUM(Table1[Bob's]";
+  const apostropheParsed = parsePartialFormula(apostropheInColumnName, apostropheInColumnName.length, registry);
+  assert.equal(apostropheParsed.inFunctionCall, true);
+  assert.equal(apostropheParsed.functionName, "SUM");
+  assert.equal(apostropheParsed.argIndex, 0);
+  assert.equal(apostropheParsed.currentArg?.text, "Table1[Bob's]");
+});
+
 test("TabCompletionEngine cache busts when schemaProvider cache key changes", async () => {
   let callCount = 0;
   let schemaKey = "v1";
