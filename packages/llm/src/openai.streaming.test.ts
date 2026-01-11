@@ -170,4 +170,71 @@ describe("OpenAIClient.streamChat", () => {
       { type: "done" },
     ]);
   });
+
+  it("diffs tool call arguments when a backend repeatedly streams the full string", async () => {
+    const chunks = [
+      `data: ${JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_1",
+                  type: "function",
+                  function: { name: "getData", arguments: '{"range":"' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  // id may be omitted on subsequent chunks
+                  function: { arguments: '{"range":"A1"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      })}\n\n`,
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+      "data: [DONE]\n\n",
+    ];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(readableStreamFromChunks(chunks), { status: 200 });
+      }) as any,
+    );
+
+    const client = new OpenAIClient({
+      apiKey: "test",
+      baseUrl: "https://example.com",
+      timeoutMs: 1_000,
+      model: "gpt-test",
+    });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "tool_call_start", id: "call_1", name: "getData" },
+      { type: "tool_call_delta", id: "call_1", delta: '{"range":"' },
+      { type: "tool_call_delta", id: "call_1", delta: 'A1"}' },
+      { type: "tool_call_end", id: "call_1" },
+      { type: "done" },
+    ]);
+  });
 });

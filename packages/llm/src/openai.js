@@ -268,12 +268,16 @@ export class OpenAIClient {
       let usage = null;
       /**
        * OpenAI identifies tool calls by a stable `index` and sometimes omits the
-       * `id` field on early chunks. Buffer argument fragments by index until we
-       * learn the stable `id` + `name`, then emit `tool_call_start` followed by
-       * the buffered `tool_call_delta` fragments.
-       *
-       * @type {Map<number, { id?: string, name?: string, started: boolean, pendingArgs: string }>}
-       */
+        * `id` field on early chunks. Buffer argument fragments by index until we
+        * learn the stable `id` + `name`, then emit `tool_call_start` followed by
+        * the buffered `tool_call_delta` fragments.
+        *
+        * Some OpenAI-compatible backends incorrectly stream the full arguments
+        * string repeatedly (instead of deltas). Track the reconstructed argument
+        * string so we can diff and only emit the incremental suffix.
+        *
+        * @type {Map<number, { id?: string, name?: string, started: boolean, pendingArgs: string, args: string }>}
+        */
       const toolCallsByIndex = new Map();
       /** @type {Set<string>} */
       const openToolCallIds = new Set();
@@ -331,7 +335,7 @@ export class OpenAIClient {
               const index = callDelta?.index;
               if (typeof index !== "number") continue;
 
-              const state = toolCallsByIndex.get(index) ?? { started: false, pendingArgs: "" };
+              const state = toolCallsByIndex.get(index) ?? { started: false, pendingArgs: "", args: "" };
               const idFromDelta = typeof callDelta?.id === "string" ? callDelta.id : null;
               const nameFromDelta = typeof callDelta?.function?.name === "string" ? callDelta.function.name : null;
               const argsFragment =
@@ -351,10 +355,22 @@ export class OpenAIClient {
               }
 
               if (argsFragment) {
-                if (state.id && state.started) {
-                  yield { type: "tool_call_delta", id: state.id, delta: argsFragment };
+                // Best-effort diffing: tolerate backends that repeatedly send the
+                // full argument string instead of deltas.
+                let deltaArgs = argsFragment;
+                if (typeof state.args === "string" && argsFragment.startsWith(state.args)) {
+                  deltaArgs = argsFragment.slice(state.args.length);
+                  state.args = argsFragment;
                 } else {
-                  state.pendingArgs += argsFragment;
+                  state.args = (state.args ?? "") + argsFragment;
+                }
+
+                if (deltaArgs) {
+                  if (state.id && state.started) {
+                    yield { type: "tool_call_delta", id: state.id, delta: deltaArgs };
+                  } else {
+                    state.pendingArgs += deltaArgs;
+                  }
                 }
               }
 
