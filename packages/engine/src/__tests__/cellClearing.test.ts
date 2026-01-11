@@ -259,6 +259,33 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("clears spill output cells when a spill shrinks", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A2", 2);
+      await engine.setCell("A1", "=SEQUENCE(1,A2)");
+      await engine.recalculate();
+      expect((await engine.getCell("B1")).value).toBe(2);
+
+      // Shrink the spill width from 2 cells to 1; B1 should be returned as a delta back to blank.
+      await engine.setCell("A2", 1);
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([{ sheet: "Sheet1", address: "B1", value: null }]);
+      expect((await engine.getCell("B1")).value).toBeNull();
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("filters recalc changes by sheet name (case-insensitive)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
