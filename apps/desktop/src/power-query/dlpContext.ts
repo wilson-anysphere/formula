@@ -87,6 +87,16 @@ function loadEffectivePolicy(params: { documentId: string; orgId?: string; stora
   }
 }
 
+function hasDlpConfig(params: { storage: StorageLike; documentId: string; orgId?: string }): boolean {
+  const policyStore = new LocalPolicyStore({ storage: params.storage });
+  const orgId = params.orgId ?? loadActiveOrgId(params.storage);
+  const storedOrg = policyStore.getOrgPolicy(orgId);
+  const storedDoc = policyStore.getDocumentPolicy(params.documentId);
+  const classificationStore = new LocalClassificationStore({ storage: params.storage });
+  const records = classificationStore.list(params.documentId);
+  return Boolean(storedOrg || storedDoc || records.length > 0);
+}
+
 /**
  * Best-effort helper to wire desktop Power Query executions into the local DLP policy engine.
  *
@@ -100,6 +110,7 @@ export function maybeGetPowerQueryDlpContext(params: {
   orgId?: string;
 }): DesktopQueryEngineOptions["dlp"] | null {
   const storage = getLocalStorageOrNull() ?? createMemoryStorage();
+  if (!hasDlpConfig({ storage, documentId: params.documentId, orgId: params.orgId })) return null;
   const policy = () => loadEffectivePolicy({ documentId: params.documentId, orgId: params.orgId, storage });
   const classificationStore = new LocalClassificationStore({ storage });
 
